@@ -274,41 +274,119 @@
         </n-form-item>
 
         <!-- Schedule (create mode only) -->
-        <n-form-item v-if="mode === 'create'" :label="t('createTask.schedule')">
-          <div class="schedule-section">
-            <n-radio-group v-model:value="scheduleType">
-              <n-radio value="now">{{ t('createTask.executeNow') }}</n-radio>
-              <n-radio value="scheduled">{{ t('createTask.scheduleAt') }}</n-radio>
-            </n-radio-group>
-            <div class="schedule-row" :class="{ 'schedule-row--hidden': scheduleType !== 'scheduled' }">
-              <n-date-picker
-                v-model:value="scheduledAt"
-                type="datetime"
-                clearable
-                style="width: 200px; flex-shrink: 0"
-                :is-date-disabled="isScheduleDateDisabled"
-              />
-              <n-button
-                size="small"
-                secondary
-                :loading="scheduledTasksLoading"
-                @click="openHeatmapDrawer"
-              >
-                <template #icon><n-icon :component="CalendarOutline" /></template>
-                {{ t('createTask.viewScheduleHeatmap') }}
-              </n-button>
+        <n-form-item v-if="mode === 'create'" class="schedule-form-item">
+          <template #label>
+            <div class="execution-field-label">
+              <span>{{ t('createTask.schedule') }}</span>
+              <span class="execution-field-label__hint">{{ t('createTask.scheduleHint') }}</span>
             </div>
+          </template>
+          <div class="schedule-section">
+            <div class="schedule-mode-selector" role="radiogroup" :aria-label="t('createTask.schedule')">
+              <button
+                type="button"
+                class="schedule-mode-card"
+                :class="{ 'schedule-mode-card--active': scheduleType === 'now' }"
+                role="radio"
+                :aria-checked="scheduleType === 'now'"
+                @click="selectScheduleType('now')"
+              >
+                <span class="schedule-mode-card__icon">
+                  <n-icon :component="FlashOutline" size="17" />
+                </span>
+                <span class="schedule-mode-card__copy">
+                  <span class="schedule-mode-card__title">{{ t('createTask.executeNow') }}</span>
+                  <span class="schedule-mode-card__description">{{ t('createTask.executeNowDesc') }}</span>
+                </span>
+                <n-icon
+                  v-if="scheduleType === 'now'"
+                  :component="CheckmarkCircleOutline"
+                  size="16"
+                  class="schedule-mode-card__check"
+                />
+              </button>
+              <button
+                type="button"
+                class="schedule-mode-card"
+                :class="{ 'schedule-mode-card--active': scheduleType === 'scheduled' }"
+                role="radio"
+                :aria-checked="scheduleType === 'scheduled'"
+                @click="selectScheduleType('scheduled')"
+              >
+                <span class="schedule-mode-card__icon">
+                  <n-icon :component="TimeOutline" size="17" />
+                </span>
+                <span class="schedule-mode-card__copy">
+                  <span class="schedule-mode-card__title">{{ t('createTask.scheduleAt') }}</span>
+                  <span class="schedule-mode-card__description">{{ t('createTask.scheduleAtDesc') }}</span>
+                </span>
+                <n-icon
+                  v-if="scheduleType === 'scheduled'"
+                  :component="CheckmarkCircleOutline"
+                  size="16"
+                  class="schedule-mode-card__check"
+                />
+              </button>
+            </div>
+            <Transition name="schedule-detail">
+              <div v-if="scheduleType === 'scheduled'" class="schedule-detail-panel">
+                <n-date-picker
+                  v-model:value="scheduledAt"
+                  class="schedule-detail-panel__picker"
+                  type="datetime"
+                  clearable
+                  :placeholder="t('createTask.selectDateTime')"
+                  :is-date-disabled="isScheduleDateDisabled"
+                />
+                <n-button
+                  class="schedule-detail-panel__heatmap"
+                  size="small"
+                  secondary
+                  :loading="scheduledTasksLoading"
+                  @click="openHeatmapDrawer"
+                >
+                  <template #icon><n-icon :component="CalendarOutline" /></template>
+                  {{ t('createTask.viewScheduleHeatmap') }}
+                </n-button>
+              </div>
+            </Transition>
           </div>
         </n-form-item>
 
         <!-- AI Provider -->
-        <n-form-item :label="t('config.providers.providerLabel')">
-          <n-select
-            v-model:value="selectedProviderId"
-            :options="providerOptions"
-            clearable
-            :placeholder="t('config.providers.systemDefault')"
-          />
+        <n-form-item class="provider-form-item">
+          <template #label>
+            <div class="execution-field-label">
+              <span>{{ t('config.providers.providerLabel') }}</span>
+              <span class="execution-field-label__hint">{{ t('createTask.providerHint') }}</span>
+            </div>
+          </template>
+          <div class="provider-control" :class="{ 'provider-control--empty': !effectiveProvider }">
+            <span class="provider-control__icon">
+              <n-icon :component="HardwareChipOutline" size="18" />
+            </span>
+            <div class="provider-control__body">
+              <n-select
+                v-model:value="selectedProviderId"
+                class="provider-control__select"
+                :options="providerOptions"
+                clearable
+                :placeholder="t('config.providers.systemDefault')"
+              />
+              <div v-if="effectiveProvider" class="provider-control__summary">
+                <span class="provider-control__status">
+                  {{ selectedProviderId === null
+                    ? t('createTask.providerUsesDefault')
+                    : t('createTask.providerUsesSelected') }}
+                </span>
+                <span aria-hidden="true">·</span>
+                <span class="provider-control__model">{{ effectiveProvider.name }} / {{ effectiveProvider.model }}</span>
+              </div>
+              <div v-else class="provider-control__summary provider-control__summary--warning">
+                {{ t('config.providers.noEnabledProvider') }}
+              </div>
+            </div>
+          </div>
         </n-form-item>
       </n-form>
 
@@ -389,7 +467,10 @@ import {
   CodeSlashOutline,
   BulbOutline,
   CheckmarkCircleOutline,
-  OptionsOutline
+  OptionsOutline,
+  FlashOutline,
+  TimeOutline,
+  HardwareChipOutline
 } from '@vicons/ionicons5'
 import VariableEditor from './VariableEditor.vue'
 import HeatmapChart from './HeatmapChart.vue'
@@ -522,6 +603,12 @@ const providerOptions = computed(() =>
     disabled: p.is_disabled,
   }))
 )
+const effectiveProvider = computed(() => {
+  if (selectedProviderId.value !== null) {
+    return selectableProviders.value.find(provider => provider.id === selectedProviderId.value) ?? null
+  }
+  return selectableProviders.value.find(provider => provider.is_default && !provider.is_disabled) ?? null
+})
 const currentAvailablePlaceholders = computed(() => {
   if (!runInstructionDefaults.value || !taskMode.value) return []
   return runInstructionDefaults.value[taskMode.value].available_placeholders
@@ -687,6 +774,10 @@ async function openHeatmapDrawer() {
 function handleHeatmapCellClick(startMs: number) {
   scheduledAt.value = startMs
   showHeatmapDrawer.value = false
+}
+
+function selectScheduleType(type: 'now' | 'scheduled') {
+  scheduleType.value = type
 }
 
 function selectTaskMode(mode: 'execute' | 'plan') {
@@ -1255,30 +1346,245 @@ onUnmounted(() => {
 .priority-card__label { font-weight: 600; font-size: 13px; }
 .priority-card__desc { font-size: 11px; color: var(--n-text-color-3); }
 
+/* Execution fields */
+.execution-field-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.execution-field-label__hint {
+  color: var(--n-text-color-3);
+  font-size: 12px;
+  font-weight: 400;
+}
+
 /* Schedule section */
 .schedule-section {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   width: 100%;
 }
 
-.schedule-row {
+.schedule-mode-selector {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+}
+
+.schedule-mode-card {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  min-height: 66px;
+  padding: 10px 32px 10px 11px;
+  border: 1px solid var(--n-border-color);
+  border-radius: 9px;
+  background: var(--n-color);
+  color: var(--n-text-color);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease, transform 0.15s ease;
+}
+
+.schedule-mode-card--active {
+  border-color: var(--n-primary-color);
+  background: color-mix(in srgb, var(--n-primary-color) 6%, transparent);
+}
+
+.schedule-mode-card:focus-visible {
+  outline: 2px solid var(--n-primary-color);
+  outline-offset: 2px;
+}
+
+.schedule-mode-card__icon,
+.provider-control__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: rgba(128, 128, 128, 0.09);
+  color: var(--n-text-color-3);
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.schedule-mode-card--active .schedule-mode-card__icon {
+  background: color-mix(in srgb, var(--n-primary-color) 12%, transparent);
+  color: var(--n-primary-color);
+}
+
+.schedule-mode-card__copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.schedule-mode-card__title {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.schedule-mode-card__description {
+  color: var(--n-text-color-3);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.schedule-mode-card__check {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  color: var(--n-primary-color);
+}
+
+.schedule-detail-panel {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
-  overflow: hidden;
-  max-height: 40px;
-  opacity: 1;
-  transition: max-height 0.2s ease, opacity 0.2s ease, margin 0.2s ease;
+  padding: 10px;
+  border: 1px solid var(--n-border-color);
+  border-radius: 9px;
+  background: rgba(128, 128, 128, 0.035);
 }
 
-.schedule-row--hidden {
-  max-height: 0;
+.schedule-detail-panel__picker {
+  flex: 1;
+  min-width: 0;
+}
+
+.schedule-detail-panel__heatmap {
+  flex-shrink: 0;
+}
+
+.schedule-detail-enter-active,
+.schedule-detail-leave-active {
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.schedule-detail-enter-from,
+.schedule-detail-leave-to {
   opacity: 0;
-  margin: 0;
-  pointer-events: none;
+  transform: translateY(-4px);
+}
+
+/* Provider section */
+.provider-control {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--n-border-color);
+  border-radius: 9px;
+  background: rgba(128, 128, 128, 0.035);
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.provider-control:focus-within {
+  border-color: var(--n-primary-color);
+  background: color-mix(in srgb, var(--n-primary-color) 4%, transparent);
+}
+
+.provider-control--empty {
+  border-color: rgba(240, 160, 32, 0.55);
+}
+
+.provider-control__icon {
+  margin-top: 1px;
+}
+
+.provider-control:focus-within .provider-control__icon {
+  background: color-mix(in srgb, var(--n-primary-color) 12%, transparent);
+  color: var(--n-primary-color);
+}
+
+.provider-control__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.provider-control__select {
+  width: 100%;
+}
+
+.provider-control__summary {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  margin-top: 6px;
+  color: var(--n-text-color-3);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.provider-control__status {
+  color: var(--n-primary-color);
+  white-space: nowrap;
+}
+
+.provider-control__model {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-control__summary--warning {
+  color: #f0a020;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .schedule-mode-card:not(.schedule-mode-card--active):hover,
+  .provider-control:hover {
+    border-color: var(--n-primary-color);
+  }
+
+  .schedule-mode-card:not(.schedule-mode-card--active):hover {
+    transform: translateY(-1px);
+  }
+}
+
+@media (max-width: 520px) {
+  .schedule-mode-selector {
+    grid-template-columns: 1fr;
+  }
+
+  .schedule-detail-panel {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .schedule-detail-panel__heatmap {
+    width: 100%;
+  }
+
+  .execution-field-label {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 1px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .schedule-mode-card,
+  .schedule-mode-card__icon,
+  .provider-control,
+  .provider-control__icon,
+  .schedule-detail-enter-active,
+  .schedule-detail-leave-active {
+    transition: none;
+  }
 }
 
 /* Template picker drawer */

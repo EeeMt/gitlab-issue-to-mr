@@ -428,8 +428,10 @@ vi.mock('@vicons/ionicons5', () => {
     CreateOutline: icon('CreateOutline'),
     DocumentTextOutline: icon('DocumentTextOutline'),
     FolderOpenOutline: icon('FolderOpenOutline'),
+    FlashOutline: icon('FlashOutline'),
     GitBranchOutline: icon('GitBranchOutline'),
     GitPullRequest: icon('GitPullRequest'),
+    HardwareChipOutline: icon('HardwareChipOutline'),
     InformationCircleOutline: icon('InformationCircleOutline'),
     OptionsOutline: icon('OptionsOutline'),
     PersonOutline: icon('PersonOutline'),
@@ -1708,9 +1710,16 @@ describe('IssueView', () => {
       await wrapper.find('[data-testid="issue-toggle-create-task"]').trigger('click')
       await nextTick()
 
-      // Schedule radio and heatmap button should be present in drawer
-      const text = wrapper.text()
-      expect(text).toContain('createTask.viewScheduleHeatmap')
+      const scheduleCards = wrapper.findAll('.schedule-mode-card')
+      expect(scheduleCards).toHaveLength(2)
+      expect(scheduleCards[0].attributes('aria-checked')).toBe('true')
+
+      await scheduleCards[1].trigger('click')
+      await nextTick()
+
+      expect(scheduleCards[1].attributes('aria-checked')).toBe('true')
+      expect(wrapper.find('.schedule-detail-panel').exists()).toBe(true)
+      expect(wrapper.text()).toContain('createTask.viewScheduleHeatmap')
     })
 
     it('renders priority cards in create task drawer', async () => {
@@ -1732,6 +1741,9 @@ describe('IssueView', () => {
       wrapper = await mountComponent()
 
       await wrapper.find('[data-testid="issue-toggle-create-task"]').trigger('click')
+      await nextTick()
+
+      await wrapper.findAll('.schedule-mode-card')[1].trigger('click')
       await nextTick()
 
       // The isScheduleDateDisabled function is tested indirectly through the component

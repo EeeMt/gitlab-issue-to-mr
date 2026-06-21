@@ -250,7 +250,10 @@ vi.mock('@vicons/ionicons5', () => {
     CheckmarkCircleOutline: icon('CheckmarkCircleOutline'),
     DocumentTextOutline: icon('DocumentTextOutline'),
     InformationCircleOutline: icon('InformationCircleOutline'),
+    FlashOutline: icon('FlashOutline'),
+    HardwareChipOutline: icon('HardwareChipOutline'),
     OptionsOutline: icon('OptionsOutline'),
+    TimeOutline: icon('TimeOutline'),
     WarningOutline: icon('WarningOutline'),
   }
 })
@@ -406,6 +409,23 @@ describe('TaskFormDrawer', () => {
       expect(mockApi.createTask).not.toHaveBeenCalled()
     })
 
+    it('uses accessible cards to switch the schedule mode and reveal its controls', async () => {
+      await mountDrawer()
+      await openDrawer()
+
+      const scheduleCards = wrapper.findAll('.schedule-mode-card')
+      expect(scheduleCards).toHaveLength(2)
+      expect(scheduleCards[0].attributes('aria-checked')).toBe('true')
+      expect(wrapper.find('.schedule-detail-panel').exists()).toBe(false)
+
+      await scheduleCards[1].trigger('click')
+      await nextTick()
+
+      expect(wrapper.vm.scheduleType).toBe('scheduled')
+      expect(scheduleCards[1].attributes('aria-checked')).toBe('true')
+      expect(wrapper.find('.schedule-detail-panel').exists()).toBe(true)
+    })
+
     it('warns when scheduled time is in the past', async () => {
       await mountDrawer()
       await openDrawer()
@@ -461,6 +481,37 @@ describe('TaskFormDrawer', () => {
       expect(wrapper.vm.providerOptions).toEqual([
         { label: 'Default Provider (model-a) ★', value: 7, disabled: false },
       ])
+    })
+
+    it('shows the effective default provider and updates the summary after selection', async () => {
+      mockApi.getProviders.mockResolvedValue([
+        { id: 7, name: 'Default Provider', model: 'model-a', is_default: true, is_disabled: false },
+        { id: 8, name: 'Fast Provider', model: 'model-b', is_default: false, is_disabled: false },
+      ])
+      await mountDrawer()
+      await openDrawer()
+
+      expect(wrapper.find('.provider-control__summary').text()).toContain('createTask.providerUsesDefault')
+      expect(wrapper.find('.provider-control__summary').text()).toContain('Default Provider / model-a')
+
+      wrapper.vm.selectedProviderId = 8
+      await nextTick()
+
+      expect(wrapper.find('.provider-control__summary').text()).toContain('createTask.providerUsesSelected')
+      expect(wrapper.find('.provider-control__summary').text()).toContain('Fast Provider / model-b')
+    })
+
+    it('shows warning summary when no enabled provider exists', async () => {
+      mockApi.getProviders.mockResolvedValue([
+        { id: 7, name: 'Default Provider', model: 'model-a', is_default: true, is_disabled: true },
+      ])
+      await mountDrawer()
+      await openDrawer()
+
+      const summary = wrapper.find('.provider-control__summary')
+      expect(summary.exists()).toBe(true)
+      expect(summary.classes()).toContain('provider-control__summary--warning')
+      expect(summary.text()).toContain('config.providers.noEnabledProvider')
     })
 
     it('warns when no enabled provider is available', async () => {
