@@ -108,7 +108,13 @@ class Issue(Base):
     )
 
     # Relationships
-    tasks: Mapped[list["Task"]] = relationship("Task", back_populates="issue", order_by="Task.created_at")
+    tasks: Mapped[list["Task"]] = relationship(
+        "Task",
+        back_populates="issue",
+        order_by="Task.created_at",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     __table_args__ = (
         Index("ix_issues_status_created", "status", "created_at"),
@@ -149,8 +155,8 @@ class Task(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
     # Parent issue
-    issue_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("issues.id", ondelete="SET NULL"), nullable=True, index=True
+    issue_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("issues.id", ondelete="CASCADE"), nullable=False, index=True
     )
     project_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
 
@@ -241,7 +247,7 @@ class Task(Base):
     raw_logs_finalized_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Relationships
-    issue: Mapped[Optional["Issue"]] = relationship("Issue", back_populates="tasks")
+    issue: Mapped["Issue"] = relationship("Issue", back_populates="tasks")
     retry_source: Mapped[Optional["Task"]] = relationship(
         "Task", remote_side="Task.id", foreign_keys=[retry_source_task_id]
     )

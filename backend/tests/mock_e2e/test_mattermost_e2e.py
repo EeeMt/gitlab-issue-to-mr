@@ -1761,33 +1761,3 @@ class TestNotifyDeliverySummary:
         deliveries = await _get_deliveries(notify_session, task.id)
         assert len(deliveries) == 1
         assert deliveries[0].status == "success"
-
-    async def test_dm_succeeds_when_task_has_no_issue(self, notify_sf, notify_session):
-        """DM notification works when the task has no issue (issue_id is None)."""
-        task = Task(
-            project_id=10,
-            issue_id=None,
-            user_prompt="test prompt",
-            status=TaskStatus.COMPLETED,
-            initiator_username="bob",
-        )
-        notify_session.add(task)
-        await notify_session.commit()
-        await notify_session.refresh(task)
-
-        await _seed_profile(notify_session, target_type="initiator_dm",
-                            events=["task_completed"])
-        await _seed_user_mapping(notify_session, gitlab_username="bob",
-                                 mattermost_user_id="mm-bob-2")
-
-        mock_client = AsyncMock()
-        mock_client.create_direct_channel.return_value = {"id": "dm-chan-y"}
-
-        with _patches(notify_sf, mock_client):
-            await notify_task_event(task, MATTERMOST_EVENT_TASK_COMPLETED)
-
-        mock_client.create_direct_channel.assert_awaited_once_with("mm-bob-2")
-        mock_client.create_post.assert_awaited_once()
-        deliveries = await _get_deliveries(notify_session, task.id)
-        assert len(deliveries) == 1
-        assert deliveries[0].status == "success"

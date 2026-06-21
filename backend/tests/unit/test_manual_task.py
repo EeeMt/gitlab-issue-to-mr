@@ -189,15 +189,6 @@ class TestTaskModel:
         )
         assert task.issue_id == 42
 
-    def test_task_nullable_fields(self):
-        """Test that optional fields are nullable."""
-        task = Task(
-            project_id=1,
-            user_prompt="Test prompt",
-            issue_id=None,
-        )
-        assert task.issue_id is None
-
     def test_task_with_all_fields(self):
         """Test task with all fields populated."""
         task = Task(

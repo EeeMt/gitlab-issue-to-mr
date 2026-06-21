@@ -203,7 +203,7 @@ export interface IssueListResponse {
 // Task types
 export interface Task {
   id: number
-  issue_id: number | null
+  issue_id: number
   project_id: number
   project_name?: string | null
   project_path_with_namespace?: string | null

@@ -328,7 +328,7 @@ describe('TaskProcessPanel raw pane wiring', () => {
       props: {
         task: {
           id: 1,
-          issue_id: null,
+          issue_id: 1,
           project_id: 1,
           user_prompt: 'Prompt',
           status: 'completed',
@@ -373,7 +373,7 @@ describe('TaskProcessPanel raw pane wiring', () => {
       props: {
         task: {
           id: 1,
-          issue_id: null,
+          issue_id: 1,
           project_id: 1,
           user_prompt: 'Prompt',
           status: 'completed',
