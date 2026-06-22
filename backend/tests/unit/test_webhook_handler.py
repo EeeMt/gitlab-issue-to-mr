@@ -179,6 +179,7 @@ class TestWebhookReceiver(unittest.IsolatedAsyncioTestCase):
         mock_issue.status = "in_review"
         mock_issue.project_id = 42
         mock_issue.merge_request_iid = 7
+        mock_issue.branch_name = None
 
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = [mock_issue]
@@ -352,12 +353,14 @@ class TestWebhookReceiver(unittest.IsolatedAsyncioTestCase):
         issue1.status = "in_review"
         issue1.project_id = 42
         issue1.merge_request_iid = 7
+        issue1.branch_name = None
 
         issue2 = MagicMock()
         issue2.id = 20
         issue2.status = "open"
         issue2.project_id = 42
         issue2.merge_request_iid = 7
+        issue2.branch_name = None
 
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = [issue1, issue2]

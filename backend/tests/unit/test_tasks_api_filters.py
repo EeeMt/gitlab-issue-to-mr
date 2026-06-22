@@ -68,7 +68,7 @@ async def test_list_tasks_serializes_initiator_fields():
     access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
     with patch(
-        "app.core.projects.build_project_lookup",
+        "app.api.tasks.build_project_lookup",
         new=AsyncMock(
             return_value={
                 101: {
