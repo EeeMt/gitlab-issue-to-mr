@@ -35,6 +35,7 @@ async def test_create_task_persists_manual_initiator_metadata():
     db = MagicMock()
     db.add = MagicMock()
     db.commit = AsyncMock()
+    db.flush = AsyncMock()
     db.get = AsyncMock(return_value=mock_issue)
 
     async def refresh(task):
@@ -86,6 +87,9 @@ async def test_retry_task_persists_manual_initiator_metadata():
     db = MagicMock()
     db.add = MagicMock()
     db.commit = AsyncMock()
+    db.flush = AsyncMock()
+    db.rollback = AsyncMock()
+    db.get = AsyncMock(return_value=MagicMock(is_disabled=False))
 
     original_result = MagicMock()
     original_result.scalar_one_or_none.return_value = None
@@ -112,6 +116,8 @@ async def test_retry_task_persists_manual_initiator_metadata():
     with patch("app.api.tasks.get_task_with_access_check", new=AsyncMock(return_value=original_task)), \
          patch("app.api.tasks.notify_task_retried", new=AsyncMock()), \
          patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})), \
+         patch("app.api.tasks.render_and_store_task_prompt"), \
+         patch("app.api.tasks.select_run_instruction_template", return_value="template"), \
          patch(
              "app.api.tasks.get_usage_quota_service",
              return_value=MagicMock(raise_if_over_limit=AsyncMock()),

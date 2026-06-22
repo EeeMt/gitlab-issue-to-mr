@@ -10,6 +10,11 @@ def pytest_configure(config):
         message="urllib3 v2 only supports OpenSSL",
         category=Warning,
     )
+    warnings.filterwarnings(
+        "ignore",
+        message=r"Using `httpx` with `starlette.testclient` is deprecated",
+        category=Warning,
+    )
 
     # ── Compat shim ──────────────────────────────────────────────────────
     # webhook.py still references Task columns that were promoted to the

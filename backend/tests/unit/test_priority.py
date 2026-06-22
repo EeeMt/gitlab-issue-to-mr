@@ -11,6 +11,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+# Speed up tests by neutralizing asyncio.sleep in worker code
+_patcher_sleep = patch('asyncio.sleep', new_callable=AsyncMock)
+_patcher_sleep.start()
+
 # Mock config before importing worker
 mock_settings = MagicMock()
 mock_settings.gitlab_url = "http://gitlab.example.com"
@@ -31,6 +35,7 @@ mock_settings.maven_cache_host_path = ""
 mock_settings.maven_settings_host_path = ""
 mock_settings.worker_network = ""
 mock_settings.worker_extra_volumes = ""
+mock_settings.worker_workspace_host_path = "/tmp/test-codify-workspace"
 
 with patch('app.core.worker.get_settings', return_value=mock_settings):
     from app.core.worker import WorkerExecutor
@@ -128,6 +133,7 @@ def test_create_initial_mr():
         project_id=123,
         issue_id=456,
         user_prompt="Add user authentication feature",
+        rendered_prompt="Add user authentication feature",
         priority=2,
         status=TaskStatus.PENDING,
     )
@@ -139,8 +145,9 @@ def test_create_initial_mr():
     async def run_test():
         with patch.object(worker, "_stream_logs_to_db", AsyncMock(return_value=(0, "Success", 1, False))):
             with patch('app.core.worker.notify_task_event', new_callable=AsyncMock):
-                result = await worker.execute_task(mock_db, task.id)
-                return result
+                with patch('app.core.worker_task_lifecycle.materialize_task_prompt'):
+                    result = await worker.execute_task(mock_db, task.id)
+                    return result
 
     asyncio.run(run_test())
 
@@ -185,6 +192,7 @@ def test_initial_mr_description_links_issue():
         project_id=123,
         issue_id=456,
         user_prompt="Add user authentication feature",
+        rendered_prompt="Add user authentication feature",
         priority=2,
         status=TaskStatus.PENDING,
     )
@@ -226,6 +234,7 @@ def test_mr_iid_passed_to_container():
         project_id=123,
         issue_id=456,
         user_prompt="Fix login bug",
+        rendered_prompt="Fix login bug",
         priority=2,
         status=TaskStatus.PENDING,
     )
@@ -236,7 +245,8 @@ def test_mr_iid_passed_to_container():
     async def run_test():
         with patch.object(worker, "_stream_logs_to_db", AsyncMock(return_value=(0, "Success", 1, False))):
             with patch('app.core.worker.notify_task_event', new_callable=AsyncMock):
-                await worker.execute_task(mock_db, task.id)
+                with patch('app.core.worker_task_lifecycle.materialize_task_prompt'):
+                    await worker.execute_task(mock_db, task.id)
 
     asyncio.run(run_test())
 
@@ -280,6 +290,7 @@ def test_mr_creation_failure_handled():
         project_id=123,
         issue_id=456,
         user_prompt="Test feature",
+        rendered_prompt="Test feature",
         priority=2,
         status=TaskStatus.PENDING,
     )
@@ -290,8 +301,9 @@ def test_mr_creation_failure_handled():
     async def run_test():
         with patch.object(worker, "_stream_logs_to_db", AsyncMock(return_value=(0, "Success", 1, False))):
             with patch('app.core.worker.notify_task_event', new_callable=AsyncMock):
-                result = await worker.execute_task(mock_db, task.id)
-                return result
+                with patch('app.core.worker_task_lifecycle.materialize_task_prompt'):
+                    result = await worker.execute_task(mock_db, task.id)
+                    return result
 
     asyncio.run(run_test())
 
@@ -342,6 +354,7 @@ def test_draft_removed_on_completion():
         project_id=123,
         issue_id=456,
         user_prompt="Complete feature",
+        rendered_prompt="Complete feature",
         priority=2,
         status=TaskStatus.PENDING,
     )
@@ -356,7 +369,8 @@ def test_draft_removed_on_completion():
             AsyncMock(return_value=(0, "Success", 1, False)),
         ):
             with patch('app.core.worker.notify_task_event', new_callable=AsyncMock):
-                await worker.execute_task(mock_db, task.id)
+                with patch('app.core.worker_task_lifecycle.materialize_task_prompt'):
+                    await worker.execute_task(mock_db, task.id)
 
     asyncio.run(run_test())
 

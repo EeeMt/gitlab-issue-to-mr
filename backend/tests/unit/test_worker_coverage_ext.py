@@ -499,6 +499,13 @@ class TestSendNotificationsExceptions(unittest.TestCase):
 class TestExecuteTaskNotifyStartedException(unittest.TestCase):
     """Test execute_task catches _notify_task_started exception — lines 898-899."""
 
+    def setUp(self):
+        self._sleep_patcher = patch('asyncio.sleep', new_callable=AsyncMock)
+        self._sleep_patcher.start()
+
+    def tearDown(self):
+        self._sleep_patcher.stop()
+
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
     def test_notify_started_exception_does_not_abort(self, mock_notify, mock_get_settings):
@@ -568,6 +575,13 @@ class TestResumeTaskContainerNotFound(unittest.TestCase):
 
 class TestResumeTaskSuccess(unittest.TestCase):
     """Test resume_task success flow — lines 1083-1125."""
+
+    def setUp(self):
+        self._sleep_patcher = patch('asyncio.sleep', new_callable=AsyncMock)
+        self._sleep_patcher.start()
+
+    def tearDown(self):
+        self._sleep_patcher.stop()
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
@@ -688,6 +702,13 @@ class TestResumeTaskSuccess(unittest.TestCase):
 class TestResumeTaskFailure(unittest.TestCase):
     """Test resume_task failure flow — lines 1100-1107."""
 
+    def setUp(self):
+        self._sleep_patcher = patch('asyncio.sleep', new_callable=AsyncMock)
+        self._sleep_patcher.start()
+
+    def tearDown(self):
+        self._sleep_patcher.stop()
+
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
     def test_resume_failure_no_retry(self, mock_notify, mock_get_settings):
@@ -787,6 +808,13 @@ class TestResumeTaskFailure(unittest.TestCase):
 
 class TestResumeTaskException(unittest.TestCase):
     """Test resume_task exception handler — lines 1127-1148."""
+
+    def setUp(self):
+        self._sleep_patcher = patch('asyncio.sleep', new_callable=AsyncMock)
+        self._sleep_patcher.start()
+
+    def tearDown(self):
+        self._sleep_patcher.stop()
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
@@ -932,6 +960,13 @@ class TestResumeTaskException(unittest.TestCase):
 class TestExecuteTaskDraftRemovalException(unittest.TestCase):
     """Test execute_task catches _remove_mr_draft_status exception — lines 962-963."""
 
+    def setUp(self):
+        self._sleep_patcher = patch('asyncio.sleep', new_callable=AsyncMock)
+        self._sleep_patcher.start()
+
+    def tearDown(self):
+        self._sleep_patcher.stop()
+
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
     def test_draft_removal_exception_does_not_abort(self, mock_notify, mock_get_settings):
@@ -962,6 +997,13 @@ class TestExecuteTaskDraftRemovalException(unittest.TestCase):
 class TestExecuteTaskContainerRemovalException(unittest.TestCase):
     """Test execute_task catches container removal exception — lines 1007-1008."""
 
+    def setUp(self):
+        self._sleep_patcher = patch('asyncio.sleep', new_callable=AsyncMock)
+        self._sleep_patcher.start()
+
+    def tearDown(self):
+        self._sleep_patcher.stop()
+
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
     def test_container_removal_exception_does_not_raise(self, mock_notify, mock_get_settings):
@@ -990,6 +1032,13 @@ class TestExecuteTaskContainerRemovalException(unittest.TestCase):
 
 class TestExecuteTaskExceptionNotificationFailures(unittest.TestCase):
     """Test execute_task exception handler notification failures — lines 1031-1036."""
+
+    def setUp(self):
+        self._sleep_patcher = patch('asyncio.sleep', new_callable=AsyncMock)
+        self._sleep_patcher.start()
+
+    def tearDown(self):
+        self._sleep_patcher.stop()
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)

@@ -45,6 +45,14 @@ async def test_scheduler_service_lifecycle() -> None:
     async def fake_stop_scheduler() -> None:
         scheduler_stop_event.set()
 
+    async def fake_ci_collector(**kwargs) -> None:
+        await kwargs.get("stop_event", asyncio.Event()).wait()
+
+    mock_db_session = AsyncMock()
+    mock_session_ctx = AsyncMock()
+    mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_db_session)
+    mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
+
     with patch("app.scheduler_service.init_db", new_callable=AsyncMock) as init_db_mock, patch(
         "app.scheduler_service.close_db", new_callable=AsyncMock
     ) as close_db_mock, patch(
@@ -55,7 +63,15 @@ async def test_scheduler_service_lifecycle() -> None:
         "app.scheduler_service.stop_scheduler", side_effect=fake_stop_scheduler
     ) as stop_scheduler_mock, patch(
         "app.scheduler_service.asyncio.Event", return_value=external_stop_event
-        ):
+    ), patch(
+        "app.scheduler_service.run_migrations"
+    ), patch(
+        "app.scheduler_service.AsyncSessionLocal", return_value=mock_session_ctx
+    ), patch(
+        "app.scheduler_service.backfill_active_task_prompts", new_callable=AsyncMock, return_value=0
+    ), patch(
+        "app.scheduler_service.start_ci_failure_collector", side_effect=fake_ci_collector
+    ):
         await scheduler_service.run_scheduler_service()
 
         init_db_mock.assert_awaited_once()
