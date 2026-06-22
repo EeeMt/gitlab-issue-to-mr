@@ -82,9 +82,9 @@ async def test_preview_rejects_unknown_placeholder() -> None:
         user_prompt="Implement auth",
         run_instruction_template="{{unknown}}",
     )
-    with patch(
-        "app.core.task_helpers.get_effective_settings",
-        return_value=SimpleNamespace(oidc_enabled=False),
+    with (
+        patch("app.core.task_helpers.get_effective_settings", return_value=SimpleNamespace(oidc_enabled=False)),
+        patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
     ):
         with pytest.raises(HTTPException) as exc_info:
             await preview_run_instruction_template(request, db, None, _scope())

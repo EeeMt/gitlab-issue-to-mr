@@ -321,7 +321,8 @@ class TestRescheduleTask:
         db.execute.return_value = MagicMock(scalar_one_or_none=lambda: task)
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
-        with patch("app.core.projects.get_project_metadata", new=AsyncMock(return_value={})):
+        with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+
             result = await reschedule_task(
                 task_id=1,
                 request=request,

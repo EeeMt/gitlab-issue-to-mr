@@ -213,13 +213,18 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
         async with self.Session() as session:
             _, run = await self._seed_issue_and_run(session, enabled=True)
 
-            await process_ci_failure_run(
-                session,
-                run.id,
-                gitlab_client=FakeGitLabClient(jobs=jobs, traces=traces),
-                settings=self._settings(),
-                collector_id="test",
-            )
+            with patch(
+                "app.core.ci_failure_collector.get_project_metadata",
+                new_callable=AsyncMock,
+                return_value={"project_name": "test-project", "project_path_with_namespace": "group/test-project"},
+            ):
+                await process_ci_failure_run(
+                    session,
+                    run.id,
+                    gitlab_client=FakeGitLabClient(jobs=jobs, traces=traces),
+                    settings=self._settings(),
+                    collector_id="test",
+                )
 
             refreshed = await session.get(CIFailureRun, run.id)
             self.assertEqual(refreshed.status, "task_created")
@@ -311,13 +316,18 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
             )
             await session.commit()
 
-            await process_ci_failure_run(
-                session,
-                run.id,
-                gitlab_client=FakeGitLabClient(jobs=jobs, traces=traces),
-                settings=self._settings(ci_auto_repair_max_attempts=2),
-                collector_id="test",
-            )
+            with patch(
+                "app.core.ci_failure_collector.get_project_metadata",
+                new_callable=AsyncMock,
+                return_value={"project_name": "test-project", "project_path_with_namespace": "group/test-project"},
+            ):
+                await process_ci_failure_run(
+                    session,
+                    run.id,
+                    gitlab_client=FakeGitLabClient(jobs=jobs, traces=traces),
+                    settings=self._settings(ci_auto_repair_max_attempts=2),
+                    collector_id="test",
+                )
 
             refreshed = await session.get(CIFailureRun, run.id)
             self.assertEqual(refreshed.status, "task_created")
@@ -432,13 +442,18 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
             session.add(run)
             await session.commit()
 
-            await process_ci_failure_run(
-                session,
-                run.id,
-                gitlab_client=FakeGitLabClient(mr={}, jobs=jobs, traces={30001: "build failed\n"}),
-                settings=self._settings(),
-                collector_id="test",
-            )
+            with patch(
+                "app.core.ci_failure_collector.get_project_metadata",
+                new_callable=AsyncMock,
+                return_value={"project_name": "test-project", "project_path_with_namespace": "group/test-project"},
+            ):
+                await process_ci_failure_run(
+                    session,
+                    run.id,
+                    gitlab_client=FakeGitLabClient(mr={}, jobs=jobs, traces={30001: "build failed\n"}),
+                    settings=self._settings(),
+                    collector_id="test",
+                )
 
             refreshed = await session.get(CIFailureRun, run.id)
             self.assertEqual(refreshed.issue_id, 2)

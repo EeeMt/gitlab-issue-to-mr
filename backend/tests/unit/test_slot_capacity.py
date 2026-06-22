@@ -505,6 +505,7 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
         mock_db = MagicMock()
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
+        mock_db.flush = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
         mock_db.get = AsyncMock(return_value=mock_issue)
 
@@ -543,6 +544,7 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
         mock_db = MagicMock()
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
+        mock_db.flush = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
         mock_db.get = AsyncMock(return_value=mock_issue)
 
@@ -580,6 +582,7 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
         mock_db = MagicMock()
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
+        mock_db.flush = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
         mock_db.get = AsyncMock(return_value=mock_issue)
 
@@ -613,6 +616,7 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
         mock_db = MagicMock()
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
+        mock_db.flush = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
         mock_db.get = AsyncMock(return_value=mock_issue)
 
@@ -658,6 +662,7 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry])
         mock_db.commit = AsyncMock()
+        mock_db.flush = AsyncMock()
         mock_db.refresh = AsyncMock()
 
         client, app = _make_app_client_with_db(mock_db)
@@ -706,7 +711,9 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
         mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue])
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
+        mock_db.flush = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
+        mock_db.get = AsyncMock(return_value=MagicMock(is_disabled=False))
 
         client, app = _make_app_client_with_db(mock_db)
 
@@ -715,9 +722,11 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
         with patch("app.api.task_operations.notify_task_retried", new=AsyncMock()):
             with patch("app.core.task_helpers._require_task_operator", return_value=None):
                 with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
-                    response = client.post("/api/tasks/81/retry", json={
-                        "scheduled_datetime": future_dt
-                    })
+                    with patch("app.api.tasks.render_and_store_task_prompt"):
+                        with patch("app.api.tasks.select_run_instruction_template", return_value="template"):
+                            response = client.post("/api/tasks/81/retry", json={
+                                "scheduled_datetime": future_dt
+                            })
 
         app.dependency_overrides.clear()
 
@@ -751,7 +760,9 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
         mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue])
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
+        mock_db.flush = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
+        mock_db.get = AsyncMock(return_value=MagicMock(is_disabled=False))
 
         client, app = _make_app_client_with_db(mock_db)
 
@@ -759,7 +770,9 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
             with patch("app.api.task_operations.notify_task_retried", new=AsyncMock()):
                 with patch("app.core.task_helpers._require_task_operator", return_value=None):
                     with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
-                        response = client.post("/api/tasks/82/retry")
+                        with patch("app.api.tasks.render_and_store_task_prompt"):
+                            with patch("app.api.tasks.select_run_instruction_template", return_value="template"):
+                                response = client.post("/api/tasks/82/retry")
             mock_check.assert_not_called()
 
         app.dependency_overrides.clear()
@@ -783,6 +796,7 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry])
         mock_db.commit = AsyncMock()
+        mock_db.flush = AsyncMock()
         mock_db.refresh = AsyncMock()
 
         client, app = _make_app_client_with_db(mock_db)
@@ -829,6 +843,7 @@ class RescheduleTaskSlotCapacityTests(unittest.TestCase):
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(return_value=mock_result)
         mock_db.commit = AsyncMock()
+        mock_db.flush = AsyncMock()
         mock_db.refresh = AsyncMock()
 
         client, app = _make_app_client_with_db(mock_db)
@@ -861,6 +876,7 @@ class RescheduleTaskSlotCapacityTests(unittest.TestCase):
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(return_value=mock_result)
         mock_db.commit = AsyncMock()
+        mock_db.flush = AsyncMock()
         mock_db.refresh = AsyncMock()
 
         client, app = _make_app_client_with_db(mock_db)
@@ -869,7 +885,7 @@ class RescheduleTaskSlotCapacityTests(unittest.TestCase):
 
         with patch("app.api.task_operations.notify_task_rescheduled", new=AsyncMock()):
             with patch("app.core.task_helpers._require_task_operator", return_value=None):
-                with patch("app.core.projects.get_project_metadata", new_callable=AsyncMock, return_value={}):
+                with patch("app.api.tasks.get_project_metadata", new_callable=AsyncMock, return_value={}):
                     response = client.patch("/api/tasks/91/schedule", json={
                         "scheduled_datetime": future_dt
                     })
@@ -893,6 +909,7 @@ class RescheduleTaskSlotCapacityTests(unittest.TestCase):
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(return_value=mock_result)
         mock_db.commit = AsyncMock()
+        mock_db.flush = AsyncMock()
         mock_db.refresh = AsyncMock()
 
         client, app = _make_app_client_with_db(mock_db)
@@ -901,7 +918,7 @@ class RescheduleTaskSlotCapacityTests(unittest.TestCase):
 
         with patch("app.api.task_operations.notify_task_rescheduled", new=AsyncMock()):
             with patch("app.core.task_helpers._require_task_operator", return_value=None):
-                with patch("app.core.projects.get_project_metadata", new_callable=AsyncMock, return_value={}):
+                with patch("app.api.tasks.get_project_metadata", new_callable=AsyncMock, return_value={}):
                     client.patch("/api/tasks/92/schedule", json={
                         "scheduled_datetime": future_dt
                     })
@@ -928,6 +945,7 @@ class RescheduleTaskSlotCapacityTests(unittest.TestCase):
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(return_value=mock_result)
         mock_db.commit = AsyncMock()
+        mock_db.flush = AsyncMock()
         mock_db.refresh = AsyncMock()
 
         client, app = _make_app_client_with_db(mock_db)
@@ -936,7 +954,7 @@ class RescheduleTaskSlotCapacityTests(unittest.TestCase):
 
         with patch("app.api.task_operations.notify_task_rescheduled", new=AsyncMock()):
             with patch("app.core.task_helpers._require_task_operator", return_value=None):
-                with patch("app.core.projects.get_project_metadata", new_callable=AsyncMock, return_value={}):
+                with patch("app.api.tasks.get_project_metadata", new_callable=AsyncMock, return_value={}):
                     response = client.patch("/api/tasks/93/schedule", json={
                         "scheduled_datetime": future_dt
                     })

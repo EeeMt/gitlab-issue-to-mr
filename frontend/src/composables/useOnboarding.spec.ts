@@ -39,13 +39,13 @@ describe('useOnboarding', () => {
   })
 
   it('fails open when storage throws', () => {
-    const getItemSpy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+    const getItemSpy = vi.spyOn(localStorage, 'getItem').mockImplementation(() => {
       throw new Error('getItem failed')
     })
-    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    const setItemSpy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
       throw new Error('setItem failed')
     })
-    const removeItemSpy = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
+    const removeItemSpy = vi.spyOn(localStorage, 'removeItem').mockImplementation(() => {
       throw new Error('removeItem failed')
     })
 

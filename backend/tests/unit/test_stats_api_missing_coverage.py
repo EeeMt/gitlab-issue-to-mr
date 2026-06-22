@@ -12,7 +12,7 @@ import sys
 import unittest
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -128,14 +128,15 @@ class TestGetAnalyticsEmptyInitiatorUsername(unittest.IsolatedAsyncioTestCase):
         mock_user = User(id=1, username="admin", platform_role="platform_admin")
         scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
-        result = await get_analytics(
-            days=7,
-            project_id=None,
-            initiator_username="  ",
-            db=mock_db,
-            _current_user=mock_user,
-            access_scope=scope,
-        )
+        with patch("app.api.stats.build_project_lookup", new=AsyncMock(return_value={})):
+            result = await get_analytics(
+                days=7,
+                project_id=None,
+                initiator_username="  ",
+                db=mock_db,
+                _current_user=mock_user,
+                access_scope=scope,
+            )
 
         self.assertIsInstance(result, dict)
         self.assertIn("summary", result)

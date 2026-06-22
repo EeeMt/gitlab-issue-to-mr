@@ -498,11 +498,16 @@ class TestNotifyTaskEventAdditional(unittest.IsolatedAsyncioTestCase):
 
         # The reload session returns the reloaded task; the profile session returns profiles
         reload_session = MagicMock()
-        reload_session.execute = AsyncMock(
-            return_value=SimpleNamespace(
-                scalar_one_or_none=lambda: reloaded_task
-            )
-        )
+        reload_call_count = 0
+
+        async def _reload_execute(*args, **kwargs):
+            nonlocal reload_call_count
+            reload_call_count += 1
+            # First call: Task reload; second call: Issue query (no issue)
+            result_task = reloaded_task if reload_call_count == 1 else None
+            return SimpleNamespace(scalar_one_or_none=lambda: result_task)
+
+        reload_session.execute = _reload_execute
         reload_session.expunge = MagicMock()
 
         profile_session = MagicMock()
