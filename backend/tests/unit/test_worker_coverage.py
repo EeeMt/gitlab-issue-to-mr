@@ -73,6 +73,8 @@ def _make_worker(mock_gitlab=None, mock_docker=None):
     """Build a WorkerExecutor with mock clients."""
     mock_gitlab = mock_gitlab or MagicMock()
     mock_docker = mock_docker or MagicMock()
+    # Return valid bytes from read_file_from_container to avoid retry sleeps
+    mock_docker.read_file_from_container.return_value = b"console log content"
     return WorkerExecutor(docker_client=mock_docker, gitlab_client=mock_gitlab)
 
 
@@ -1817,6 +1819,13 @@ class TestSendFailureAlert(unittest.TestCase):
 
 class TestExecuteTask(unittest.TestCase):
     """Tests for execute_task — lines 837-1009."""
+
+    def setUp(self):
+        self._sleep_patcher = patch('asyncio.sleep', new_callable=AsyncMock)
+        self._sleep_patcher.start()
+
+    def tearDown(self):
+        self._sleep_patcher.stop()
 
     @patch('app.core.worker.get_settings')
     def test_task_not_found(self, mock_get_settings):
