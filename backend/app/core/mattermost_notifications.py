@@ -344,7 +344,7 @@ def _build_attachment_fields(
         MATTERMOST_FIELD_PROJECT: ("项目", f"#{task.project_id}", True),
         MATTERMOST_FIELD_ISSUE: (
             "Issue",
-            f"#{task.issue_id}",
+            f"#{task.issue_id}" if task.issue_id is not None else "-",
             True,
         ),
         MATTERMOST_FIELD_MERGE_REQUEST: (

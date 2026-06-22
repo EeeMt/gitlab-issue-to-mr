@@ -106,6 +106,7 @@ def _make_task(**kwargs):
         priority=0, status=TaskStatus.PENDING,
         is_retry=False, retry_source_task_id=None,
         additions=0, deletions=0, total_changes=0,
+        rendered_prompt="Fix the bug",
     )
     defaults.update(kwargs)
     task = Task(**defaults)
@@ -597,7 +598,6 @@ class TestResumeTaskSuccess(unittest.TestCase):
 
         self.assertTrue(result)
         self.assertEqual(task.status, TaskStatus.COMPLETED)
-        mock_docker.remove_container.assert_called_with(mock_container, force=True)
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)

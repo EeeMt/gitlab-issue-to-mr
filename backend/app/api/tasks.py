@@ -1140,7 +1140,8 @@ async def cancel_task(
     logger.info(f"Task {task_id} cancelled via API")
 
     # Auto-update issue status if no active tasks remain
-    await maybe_update_issue_status(db, task.issue_id)
+    if task.issue_id is not None:
+        await maybe_update_issue_status(db, task.issue_id)
 
     return {"status": "success", "message": f"Task {task_id} cancelled"}
 
@@ -1181,7 +1182,8 @@ async def override_task_status(
     await db.commit()
     await db.refresh(task)
 
-    await maybe_update_issue_status(db, task.issue_id)
+    if task.issue_id is not None:
+        await maybe_update_issue_status(db, task.issue_id)
 
     logger.info(f"Task {task_id} status manually overridden to {new_status.value}")
     return {"status": "success", "message": f"Task {task_id} status overridden to {new_status.value}"}

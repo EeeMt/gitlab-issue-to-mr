@@ -593,13 +593,14 @@ class SchedulerCrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_worker_container_pattern_matching(self) -> None:
         """Worker containers should match the naming pattern."""
-        from app.scheduler import WORKER_CONTAINER_PATTERN
+        from app.scheduler import _get_container_pattern
 
-        self.assertTrue(WORKER_CONTAINER_PATTERN.match("codify-1-issue10"))
-        self.assertTrue(WORKER_CONTAINER_PATTERN.match("codify-123-issue789"))
-        self.assertFalse(WORKER_CONTAINER_PATTERN.match("codify-backend"))
-        self.assertFalse(WORKER_CONTAINER_PATTERN.match("codify-postgres"))
-        self.assertFalse(WORKER_CONTAINER_PATTERN.match("random-container"))
+        pattern = _get_container_pattern()
+        self.assertTrue(pattern.match("codify-1-issue10"))
+        self.assertTrue(pattern.match("codify-123-issue789"))
+        self.assertFalse(pattern.match("codify-backend"))
+        self.assertFalse(pattern.match("codify-postgres"))
+        self.assertFalse(pattern.match("random-container"))
 
 
 # ---------------------------------------------------------------------------
