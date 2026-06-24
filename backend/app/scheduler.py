@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 _SESSION_CLEANUP_INTERVAL_SECONDS = 3600
 _WORKSPACE_CLEANUP_INTERVAL_SECONDS = 21600
 _LOCK_CLEANUP_INTERVAL_SECONDS = 300
+_TERMINAL_WORKER_STUCK_SECONDS = 120
 
 # Thread pool for running worker tasks (to avoid blocking the event loop)
 _worker_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="worker-")
@@ -59,6 +60,8 @@ class Scheduler:
         self.running = False
         self._running_tasks: set[int] = set()  # task_ids currently running
         self._running_issues: set[int] = set()  # issue_ids with running tasks
+        self._worker_tasks: dict[int, asyncio.Task] = {}  # scheduler task handles by task_id
+        self._terminal_worker_seen_at: dict[int, float] = {}
         self._active_worker_threads: int = 0   # thread pool tasks in-flight (submitted but not done)
         self._last_session_cleanup_at = 0.0
         self._last_workspace_cleanup_at = 0.0
@@ -98,10 +101,9 @@ class Scheduler:
             await self._maybe_cleanup_workspaces(db)
             await self._maybe_cleanup_issue_locks(db)
 
-            # Reconcile in-memory tracking sets against DB to recover from stuck worker threads.
-            # This handles the case where a worker thread blocks indefinitely (e.g., on a
-            # GitLab API call) and never reaches its finally block to clear _running_issues /
-            # _running_tasks — causing the scheduler to incorrectly block new tasks.
+            # Reconcile in-memory tracking sets against DB and local worker handles.
+            # A task can be terminal in DB while its worker coroutine is still doing
+            # post-run cleanup, so status alone is not enough to declare it stale.
             await self._reconcile_running_state(db)
 
             # Transition eligible PENDING tasks → QUEUED
@@ -135,29 +137,46 @@ class Scheduler:
 
         When a worker thread blocks indefinitely (e.g., on a GitLab API call with no
         timeout), its finally block never executes, so _running_tasks and _running_issues
-        are never cleared even though the DB task has moved out of RUNNING (e.g., was
-        cancelled by the user).  This method corrects that drift every cycle.
+        are never cleared even after the DB task has moved out of RUNNING. This method
+        keeps normal post-run cleanup active by checking the local asyncio task handle,
+        and corrects real drift every cycle.
         """
         if not self._running_tasks and not self._running_issues:
             return
 
         if self._running_tasks:
             result = await db.execute(
-                select(Task.id, Task.issue_id).where(
+                select(Task.id, Task.issue_id, Task.status).where(
                     Task.id.in_(list(self._running_tasks)),
-                    Task.status == TaskStatus.RUNNING,
                 )
             )
             rows = result.fetchall()
-            active_task_ids = {row[0] for row in rows}
-            active_issue_ids = {row[1] for row in rows}
+            active_task_ids: set[int] = set()
+            active_issue_ids: set[int] = set()
+            for row in rows:
+                task_id = row[0]
+                issue_id = row[1]
+                status = row[2] if len(row) > 2 else TaskStatus.RUNNING
+                status_value = getattr(status, "value", status)
+                if status_value == TaskStatus.RUNNING.value:
+                    self._terminal_worker_seen_at.pop(task_id, None)
+                    active_task_ids.add(task_id)
+                    if issue_id is not None:
+                        active_issue_ids.add(issue_id)
+                    continue
+
+                if self._worker_handle_is_active(task_id, status):
+                    active_task_ids.add(task_id)
+                    if issue_id is not None:
+                        active_issue_ids.add(issue_id)
 
             stale_tasks = self._running_tasks - active_task_ids
             for task_id in stale_tasks:
                 self._running_tasks.discard(task_id)
+                self._forget_worker_handle_if_finished(task_id)
                 logger.warning(
                     "Reconciled stale _running_tasks entry for task %s "
-                    "(no longer RUNNING in DB — worker thread may be stuck)",
+                    "(no longer RUNNING in DB and worker handle is inactive or stuck)",
                     task_id,
                 )
 
@@ -166,7 +185,7 @@ class Scheduler:
                 self._running_issues.discard(issue_id)
                 logger.warning(
                     "Reconciled stale _running_issues entry for issue %s "
-                    "(no RUNNING task found in DB — worker thread may be stuck)",
+                    "(no RUNNING task or active worker handle within stuck threshold found)",
                     issue_id,
                 )
 
@@ -184,9 +203,49 @@ class Scheduler:
                 self._running_issues.discard(issue_id)
                 logger.warning(
                     "Reconciled stale _running_issues entry for issue %s "
-                    "(no RUNNING task found in DB — worker thread may be stuck)",
+                    "(no RUNNING task found in DB)",
                     issue_id,
                 )
+
+    def _worker_handle_is_active(self, task_id: int, status) -> bool:
+        """Return True while the local worker coroutine is still doing cleanup."""
+        status_value = getattr(status, "value", status)
+        if status_value == TaskStatus.CANCELLED.value:
+            return False
+
+        worker_task = self._worker_tasks.get(task_id)
+        if worker_task is None or worker_task.done():
+            return False
+
+        now = time.monotonic()
+        first_seen = self._terminal_worker_seen_at.setdefault(task_id, now)
+        elapsed = now - first_seen
+        if elapsed < _TERMINAL_WORKER_STUCK_SECONDS:
+            logger.debug(
+                "Task %s is %s in DB but worker coroutine is still active "
+                "(post-run cleanup, %.0fs)",
+                task_id,
+                status,
+                elapsed,
+            )
+            return True
+
+        logger.warning(
+            "Task %s worker coroutine still active %.0fs after DB status became %s; "
+            "reconciling as stale",
+            task_id,
+            elapsed,
+            status,
+        )
+        return False
+
+    def _forget_worker_handle_if_finished(self, task_id: int) -> None:
+        """Drop completed handles, but keep active stuck handles observable."""
+        worker_task = self._worker_tasks.get(task_id)
+        if worker_task is not None and not worker_task.done():
+            return
+        self._worker_tasks.pop(task_id, None)
+        self._terminal_worker_seen_at.pop(task_id, None)
 
     async def _maybe_cleanup_sessions(self, db: AsyncSession) -> None:
         """Periodically delete long-stale dashboard sessions."""
@@ -366,7 +425,7 @@ class Scheduler:
             await self._transition_issue_to_in_progress(db, issue_id)
 
             # Execute via worker in a thread pool WITHOUT waiting
-            asyncio.create_task(self._run_task_background(task_id))
+            self._worker_tasks[task_id] = asyncio.create_task(self._run_task_background(task_id))
             logger.info("Task %s submitted to thread pool", task_id)
 
         except Exception as e:
@@ -429,6 +488,8 @@ class Scheduler:
         finally:
             self._active_worker_threads -= 1
             # Clean up tracking
+            self._worker_tasks.pop(task_id, None)
+            self._terminal_worker_seen_at.pop(task_id, None)
             self._running_tasks.discard(task_id)
             try:
                 async with AsyncSessionLocal() as db:
@@ -515,7 +576,7 @@ class Scheduler:
                             self._running_tasks.add(task_id)
                             self._running_issues.add(task.issue_id)
                             resumed_task_ids.add(task_id)
-                            asyncio.create_task(
+                            self._worker_tasks[task_id] = asyncio.create_task(
                                 self._resume_task_background(task_id, container.name)
                             )
                         else:
@@ -590,6 +651,8 @@ class Scheduler:
             logger.exception(f"Resumed task {task_id} failed with exception: {e}")
         finally:
             self._active_worker_threads -= 1
+            self._worker_tasks.pop(task_id, None)
+            self._terminal_worker_seen_at.pop(task_id, None)
             self._running_tasks.discard(task_id)
             try:
                 async with AsyncSessionLocal() as db:

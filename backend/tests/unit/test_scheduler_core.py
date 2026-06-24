@@ -1072,6 +1072,110 @@ class SchedulerReconcileRunningStateTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(2, scheduler._running_tasks)
         self.assertNotIn(20, scheduler._running_issues)
 
+    async def test_terminal_task_with_active_worker_handle_is_kept(self):
+        """A terminal DB status is not stale while the worker handle is still active."""
+        from app.models import TaskStatus
+
+        scheduler = self._make_scheduler()
+        scheduler._running_tasks.add(2)
+        scheduler._running_issues.add(20)
+        worker_handle = MagicMock()
+        worker_handle.done.return_value = False
+        scheduler._worker_tasks[2] = worker_handle
+
+        mock_result = MagicMock()
+        mock_result.fetchall.return_value = [
+            (2, 20, TaskStatus.COMPLETED),
+        ]
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        with (
+            patch("app.scheduler.time.monotonic", return_value=100.0),
+            patch("app.scheduler.logger.warning") as mock_warning,
+        ):
+            await scheduler._reconcile_running_state(mock_db)
+
+        self.assertIn(2, scheduler._running_tasks)
+        self.assertIn(20, scheduler._running_issues)
+        self.assertEqual(scheduler._terminal_worker_seen_at[2], 100.0)
+        mock_warning.assert_not_called()
+
+    async def test_cancelled_task_with_active_worker_handle_releases_slots(self):
+        """Cancelled tasks release scheduling slots even if their worker handle is active."""
+        from app.models import TaskStatus
+
+        scheduler = self._make_scheduler()
+        scheduler._running_tasks.add(2)
+        scheduler._running_issues.add(20)
+        worker_handle = MagicMock()
+        worker_handle.done.return_value = False
+        scheduler._worker_tasks[2] = worker_handle
+
+        mock_result = MagicMock()
+        mock_result.fetchall.return_value = [
+            (2, 20, TaskStatus.CANCELLED),
+        ]
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        await scheduler._reconcile_running_state(mock_db)
+
+        self.assertNotIn(2, scheduler._running_tasks)
+        self.assertNotIn(20, scheduler._running_issues)
+        self.assertIs(scheduler._worker_tasks[2], worker_handle)
+
+    async def test_terminal_task_with_finished_worker_handle_is_reconciled_as_stale(self):
+        """A terminal task with a finished worker handle is cleaned up."""
+        from app.models import TaskStatus
+
+        scheduler = self._make_scheduler()
+        scheduler._running_tasks.add(2)
+        scheduler._running_issues.add(20)
+        worker_handle = MagicMock()
+        worker_handle.done.return_value = True
+        scheduler._worker_tasks[2] = worker_handle
+
+        mock_result = MagicMock()
+        mock_result.fetchall.return_value = [
+            (2, 20, TaskStatus.COMPLETED),
+        ]
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        await scheduler._reconcile_running_state(mock_db)
+
+        self.assertNotIn(2, scheduler._running_tasks)
+        self.assertNotIn(20, scheduler._running_issues)
+        self.assertNotIn(2, scheduler._worker_tasks)
+
+    async def test_terminal_task_with_stuck_worker_handle_is_reconciled_as_stale(self):
+        """A stuck terminal task releases scheduling slots but keeps the live handle."""
+        from app.models import TaskStatus
+
+        scheduler = self._make_scheduler()
+        scheduler._running_tasks.add(2)
+        scheduler._running_issues.add(20)
+        scheduler._terminal_worker_seen_at[2] = 100.0
+        worker_handle = MagicMock()
+        worker_handle.done.return_value = False
+        scheduler._worker_tasks[2] = worker_handle
+
+        mock_result = MagicMock()
+        mock_result.fetchall.return_value = [
+            (2, 20, TaskStatus.COMPLETED),
+        ]
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        with patch("app.scheduler.time.monotonic", return_value=221.0):
+            await scheduler._reconcile_running_state(mock_db)
+
+        self.assertNotIn(2, scheduler._running_tasks)
+        self.assertNotIn(20, scheduler._running_issues)
+        self.assertIs(scheduler._worker_tasks[2], worker_handle)
+        self.assertEqual(scheduler._terminal_worker_seen_at[2], 100.0)
+
     async def test_multi_task_issue_one_stale_preserves_issue(self):
         """If one task for an issue is stale but another is still RUNNING, the issue slot is kept."""
         scheduler = self._make_scheduler()
