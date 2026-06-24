@@ -43,11 +43,79 @@ from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.core.worker import WorkerExecutor
+from app.core.worker_task_lifecycle import _stop_artifact_poller
 from app.models import Task, TaskStatus
 
 # ---------------------------------------------------------------------------
 # Shared helpers (same patterns as existing test_worker_coverage.py)
 # ---------------------------------------------------------------------------
+
+
+class TestArtifactPollerShutdown(IsolatedAsyncioTestCase):
+    """Tests for bounded artifact poller shutdown."""
+
+    async def test_stop_artifact_poller_waits_for_graceful_exit(self):
+        stop_event = asyncio.Event()
+
+        async def poller():
+            await stop_event.wait()
+
+        poll_task = asyncio.create_task(poller())
+
+        with patch("app.core.worker_task_lifecycle.logger.warning") as mock_warning:
+            await _stop_artifact_poller(
+                task_id=947,
+                stop_event=stop_event,
+                poll_task=poll_task,
+                timeout=0.1,
+            )
+
+        self.assertTrue(stop_event.is_set())
+        self.assertTrue(poll_task.done())
+        self.assertFalse(poll_task.cancelled())
+        mock_warning.assert_not_called()
+
+    async def test_stop_artifact_poller_cancels_stuck_poller(self):
+        stop_event = asyncio.Event()
+        never_released = asyncio.Event()
+        poll_task = asyncio.create_task(never_released.wait())
+
+        with patch("app.core.worker_task_lifecycle.logger.warning") as mock_warning:
+            await _stop_artifact_poller(
+                task_id=947,
+                stop_event=stop_event,
+                poll_task=poll_task,
+                timeout=0.01,
+            )
+
+        self.assertTrue(stop_event.is_set())
+        self.assertTrue(poll_task.cancelled())
+        mock_warning.assert_called_once()
+
+    async def test_stop_artifact_poller_logs_error_after_cancel(self):
+        stop_event = asyncio.Event()
+
+        async def poller():
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError as exc:
+                raise RuntimeError("poller cleanup failed") from exc
+
+        poll_task = asyncio.create_task(poller())
+
+        with patch("app.core.worker_task_lifecycle.logger.warning") as mock_warning:
+            await _stop_artifact_poller(
+                task_id=947,
+                stop_event=stop_event,
+                poll_task=poll_task,
+                timeout=0.01,
+            )
+
+        self.assertTrue(stop_event.is_set())
+        self.assertTrue(poll_task.done())
+        self.assertFalse(poll_task.cancelled())
+        self.assertEqual(mock_warning.call_count, 2)
+
 
 def _make_settings(**overrides):
     """Return a mock settings object with sensible defaults."""

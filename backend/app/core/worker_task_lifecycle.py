@@ -33,6 +33,40 @@ _CONTAINER_METADATA_PATH = "/tmp/codify-runtime/task-metadata.json"
 _CONTAINER_DELIVERY_SUMMARY_PATH = "/tmp/codify-runtime/delivery-summary.md"
 _CONTAINER_DELIVERY_SUMMARY_VALIDATION_PATH = "/tmp/codify-runtime/delivery-summary-validation.json"
 _CONTAINER_CONSOLE_LOG_PATH = "/tmp/codify-runtime/console.log"
+_ARTIFACT_POLLER_STOP_TIMEOUT_SECONDS = 3.0
+
+
+async def _stop_artifact_poller(
+    *,
+    task_id: int,
+    stop_event: asyncio.Event,
+    poll_task: asyncio.Task,
+    resume_prefix: str = "",
+    timeout: float = _ARTIFACT_POLLER_STOP_TIMEOUT_SECONDS,
+) -> None:
+    """Stop the live artifact poller without letting it block task finalization."""
+    stop_event.set()
+    done, _pending = await asyncio.wait({poll_task}, timeout=timeout)
+    if poll_task in done:
+        try:
+            await poll_task
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[Task {task_id}] Artifact poller stopped with error{resume_prefix}: {exc}")
+        return
+
+    logger.warning(
+        f"[Task {task_id}] Artifact poller did not stop within {timeout:.0f}s; "
+        f"cancelling{resume_prefix}"
+    )
+    poll_task.cancel()
+    try:
+        await poll_task
+    except asyncio.CancelledError:
+        pass
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"[Task {task_id}] Artifact poller cancel finished with error{resume_prefix}: {exc}")
 
 
 def _build_delivery_summary_preview(text: str, limit: int = 120) -> tuple[str, bool]:
@@ -664,8 +698,12 @@ async def monitor_container_run(
             settings.task_timeout,
         )
     finally:
-        stop_event.set()
-        await poll_task
+        await _stop_artifact_poller(
+            task_id=task.id,
+            stop_event=stop_event,
+            poll_task=poll_task,
+            resume_prefix=resume_prefix,
+        )
 
     logger.info(
         f"[Task {task.id}] Log stream finished{resume_prefix}: "
