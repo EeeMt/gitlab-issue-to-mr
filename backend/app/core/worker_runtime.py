@@ -31,6 +31,16 @@ _TASK_PROMPT_FILENAME = "task-prompt.md"
 _TASK_PROMPT_CONTAINER_PATH = f"{_RUNTIME_CONTAINER_PATH}/{_TASK_PROMPT_FILENAME}"
 
 
+def _legacy_session_storage_path(issue: Issue | None) -> str | None:
+    if issue is None:
+        return None
+    raw_path = getattr(issue, "session_storage_path", None)
+    if not isinstance(raw_path, str):
+        return None
+    path = raw_path.strip()
+    return path or None
+
+
 async def resolve_provider(db: AsyncSession, task: Task) -> AIProvider:
     """Resolve the AI provider for a task."""
     if task.provider_id:
@@ -290,9 +300,9 @@ def build_container_volumes(
         volumes[workspace_paths.claude_path] = {"bind": _CLAUDE_CONTAINER_PATH, "mode": "rw"}
         volumes[workspace_paths.runtime_path] = {"bind": _RUNTIME_CONTAINER_PATH, "mode": "rw"}
         volumes[workspace_paths.shared_path] = {"bind": _SHARED_CONTAINER_PATH, "mode": "rw"}
-    elif issue and issue.session_storage_path:
-        os.makedirs(issue.session_storage_path, exist_ok=True)
-        volumes[issue.session_storage_path] = {
+    elif session_storage_path := _legacy_session_storage_path(issue):
+        os.makedirs(session_storage_path, exist_ok=True)
+        volumes[session_storage_path] = {
             "bind": _CLAUDE_CONTAINER_PATH,
             "mode": "rw",
         }

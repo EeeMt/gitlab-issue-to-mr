@@ -18,9 +18,17 @@ class IssueWorkspacePaths:
     shared_path: str
 
 
+def configured_workspace_root(settings: Any) -> str | None:
+    raw_root = getattr(settings, "worker_workspace_host_path", "")
+    if not isinstance(raw_root, str):
+        return None
+    root = raw_root.strip()
+    return root or None
+
+
 def build_issue_workspace_paths(settings: Any, issue: Any, task: Any) -> IssueWorkspacePaths | None:
-    root = (getattr(settings, "worker_workspace_host_path", "") or "").strip()
-    if not root:
+    root = configured_workspace_root(settings)
+    if root is None:
         return None
 
     issue_root = os.path.join(

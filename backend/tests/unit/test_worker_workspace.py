@@ -1,6 +1,7 @@
 import os
 import time
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 from app.core.worker_workspace import (
     build_issue_workspace_paths,
@@ -25,6 +26,14 @@ def test_build_issue_workspace_paths():
 
 def test_build_issue_workspace_paths_disabled_when_root_empty():
     settings = SimpleNamespace(worker_workspace_host_path="")
+    issue = SimpleNamespace(id=456, project_id=123)
+    task = SimpleNamespace(id=789)
+
+    assert build_issue_workspace_paths(settings, issue, task) is None
+
+
+def test_build_issue_workspace_paths_disabled_when_root_is_not_string():
+    settings = SimpleNamespace(worker_workspace_host_path=MagicMock())
     issue = SimpleNamespace(id=456, project_id=123)
     task = SimpleNamespace(id=789)
 

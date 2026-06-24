@@ -20,6 +20,7 @@ from app.core.gitlab_client import get_gitlab_client
 from app.core.projects import get_project_metadata
 from app.core.task_prompt import render_and_store_task_prompt, select_run_instruction_template
 from app.core.utcnow import utcnow
+from app.core.worker_workspace import configured_workspace_root
 from app.database import AsyncSessionLocal
 from app.models import (
     AIProvider,
@@ -162,8 +163,8 @@ def _safe_job_log_name(job: dict[str, Any]) -> str:
 
 
 def _bundle_root(settings: Any, run_id: int) -> Path:
-    root = (getattr(settings, "worker_workspace_host_path", "") or "").strip()
-    if not root:
+    root = configured_workspace_root(settings)
+    if root is None:
         raise RuntimeError("worker_workspace_host_path is required for CI failure bundles")
     return Path(root) / "ci-failures" / str(run_id)
 

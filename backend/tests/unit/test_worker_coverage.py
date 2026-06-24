@@ -1029,13 +1029,26 @@ class TestBuildContainerVolumes(unittest.TestCase):
         settings = _make_settings(worker_workspace_host_path="")
         worker = _make_worker()
         issue = MagicMock(project_id=123, id=456)
+        issue.session_storage_path = None
         task = MagicMock(id=789)
 
         volumes = worker._build_container_volumes(settings, issue, task=task)
 
+        self.assertEqual(volumes, {})
         self.assertNotIn("/workspace", [v["bind"] for v in volumes.values()])
         self.assertNotIn("/tmp/codify-runtime", [v["bind"] for v in volumes.values()])
         self.assertNotIn("/opt/codify-issue-shared", [v["bind"] for v in volumes.values()])
+
+    def test_legacy_session_storage_mount_skips_non_string_path(self):
+        settings = _make_settings(worker_workspace_host_path="")
+        worker = _make_worker()
+        issue = MagicMock(project_id=123, id=456)
+        issue.session_storage_path = MagicMock()
+        task = MagicMock(id=789)
+
+        volumes = worker._build_container_volumes(settings, issue, task=task)
+
+        self.assertEqual(volumes, {})
 
     def test_legacy_session_storage_mount_used_when_workspace_disabled(self):
         settings = _make_settings(worker_workspace_host_path="")
