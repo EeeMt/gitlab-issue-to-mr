@@ -83,6 +83,13 @@ def _value(obj: Any, key: str, default: Any = None) -> Any:
     return getattr(obj, key, default)
 
 
+def _int_value(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _sort_key(job: dict[str, Any]) -> tuple[str, str, int]:
     return (
         str(job.get("started_at") or ""),
@@ -369,7 +376,6 @@ async def process_ci_failure_run(
         )
 
         mr_source_branch = _value(mr_details, "source_branch")
-        mr_head_sha = _value(mr_details, "sha") or _value(mr_details, "head_sha")
         matched_by_ref = not run.merge_request_iid and run.pipeline_ref and run.pipeline_ref == issue.branch_name
         if not issue.branch_name or (not matched_by_ref and not run.merge_request_iid) or (mr_source_branch and mr_source_branch != issue.branch_name):
             await _ignore_run(
@@ -381,14 +387,27 @@ async def process_ci_failure_run(
                 details={"issue_branch": issue.branch_name, "mr_source_branch": mr_source_branch},
             )
             return run
-        if mr_head_sha and mr_head_sha != run.pipeline_sha:
+
+        latest_pipeline = _value(mr_details, "current_pipeline")
+        if latest_pipeline is None and run.merge_request_iid is not None:
+            latest_pipeline = gitlab_client.get_merge_request_latest_pipeline(
+                run.project_id,
+                run.merge_request_iid,
+            )
+        latest_pipeline_id = _int_value(_value(latest_pipeline, "id"))
+        if latest_pipeline_id is not None and latest_pipeline_id != run.pipeline_id:
             await _ignore_run(
                 db,
                 run,
                 reason="stale_pipeline",
                 step="pipeline_freshness_checked",
-                message="Failed pipeline SHA is no longer the MR head SHA",
-                details={"pipeline_sha": run.pipeline_sha, "mr_head_sha": mr_head_sha},
+                message="Failed pipeline is no longer the latest MR pipeline",
+                details={
+                    "pipeline_id": run.pipeline_id,
+                    "latest_pipeline_id": latest_pipeline_id,
+                    "pipeline_sha": run.pipeline_sha,
+                    "latest_pipeline_sha": _value(latest_pipeline, "sha"),
+                },
             )
             return run
         await append_ci_failure_log(
@@ -396,7 +415,15 @@ async def process_ci_failure_run(
             run,
             step="pipeline_freshness_checked",
             status="succeeded",
-            details={"head_sha_matches": True},
+            details={
+                "latest_pipeline_matches": latest_pipeline_id == run.pipeline_id
+                if latest_pipeline_id is not None
+                else None,
+                "pipeline_id": run.pipeline_id,
+                "latest_pipeline_id": latest_pipeline_id,
+                "pipeline_sha": run.pipeline_sha,
+                "latest_pipeline_sha": _value(latest_pipeline, "sha"),
+            },
         )
 
         jobs = list(gitlab_client.get_pipeline_jobs(run.project_id, run.pipeline_id))

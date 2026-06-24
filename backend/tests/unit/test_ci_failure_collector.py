@@ -9,21 +9,39 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from app.models import Base, CIFailureJob, CIFailureRun, CIFailureRunLog, Issue, Task, TaskStatus
+from app.models import (
+    Base,
+    CIFailureJob,
+    CIFailureRun,
+    CIFailureRunLog,
+    Issue,
+    Task,
+    TaskStatus,
+)
+
+_UNSET = object()
 
 
 class FakeGitLabClient:
-    def __init__(self, *, mr=None, jobs=None, traces=None):
+    def __init__(self, *, mr=None, latest_pipeline=_UNSET, jobs=None, traces=None):
         self.mr = mr or {
             "source_branch": "codify/issue-1",
             "target_branch": "main",
             "sha": "abc123",
         }
+        self.latest_pipeline = (
+            {"id": 678, "sha": "abc123"}
+            if latest_pipeline is _UNSET
+            else latest_pipeline
+        )
         self.jobs = jobs or []
         self.traces = traces or {}
 
     def get_merge_request_details(self, project_id, mr_iid):
         return self.mr
+
+    def get_merge_request_latest_pipeline(self, project_id, mr_iid):
+        return self.latest_pipeline
 
     def get_pipeline_jobs(self, project_id, pipeline_id):
         return self.jobs
@@ -256,6 +274,85 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
 
             steps = [(log.step, log.status) for log in (await session.execute(select(CIFailureRunLog))).scalars().all()]
             self.assertIn(("repair_task_created", "succeeded"), steps)
+
+    async def test_merged_results_pipeline_allows_sha_mismatch_when_pipeline_is_current(self):
+        from app.core.ci_failure_collector import process_ci_failure_run
+
+        jobs, traces = self._code_failure_jobs()
+        async with self.Session() as session:
+            _, run = await self._seed_issue_and_run(session, enabled=True, sha="merged-result-sha")
+
+            with patch(
+                "app.core.ci_failure_collector.get_project_metadata",
+                new_callable=AsyncMock,
+                return_value={"project_name": "test-project", "project_path_with_namespace": "group/test-project"},
+            ):
+                await process_ci_failure_run(
+                    session,
+                    run.id,
+                    gitlab_client=FakeGitLabClient(
+                        mr={
+                            "source_branch": "codify/issue-1",
+                            "target_branch": "main",
+                            "sha": "source-head-sha",
+                        },
+                        latest_pipeline={"id": 678, "sha": "merged-result-sha"},
+                        jobs=jobs,
+                        traces=traces,
+                    ),
+                    settings=self._settings(),
+                    collector_id="test",
+                )
+
+            refreshed = await session.get(CIFailureRun, run.id)
+            self.assertEqual(refreshed.status, "task_created")
+            self.assertIsNotNone(refreshed.repair_task_id)
+
+            log = (
+                await session.execute(
+                    select(CIFailureRunLog).where(
+                        CIFailureRunLog.step == "pipeline_freshness_checked"
+                    )
+                )
+            ).scalars().first()
+            self.assertEqual(log.status, "succeeded")
+            self.assertTrue(log.details["latest_pipeline_matches"])
+
+    async def test_stale_pipeline_is_ignored_when_mr_latest_pipeline_changed(self):
+        from app.core.ci_failure_collector import process_ci_failure_run
+
+        async with self.Session() as session:
+            _, run = await self._seed_issue_and_run(session, enabled=True, sha="old-merged-result-sha")
+
+            await process_ci_failure_run(
+                session,
+                run.id,
+                gitlab_client=FakeGitLabClient(
+                    mr={
+                        "source_branch": "codify/issue-1",
+                        "target_branch": "main",
+                        "sha": "source-head-sha",
+                    },
+                    latest_pipeline={"id": 679, "sha": "new-merged-result-sha"},
+                ),
+                settings=self._settings(),
+                collector_id="test",
+            )
+
+            refreshed = await session.get(CIFailureRun, run.id)
+            self.assertEqual(refreshed.status, "ignored")
+            self.assertEqual(refreshed.ignored_reason, "stale_pipeline")
+
+            log = (
+                await session.execute(
+                    select(CIFailureRunLog).where(
+                        CIFailureRunLog.step == "pipeline_freshness_checked"
+                    )
+                )
+            ).scalars().first()
+            self.assertEqual(log.status, "skipped")
+            self.assertEqual(log.details["pipeline_id"], 678)
+            self.assertEqual(log.details["latest_pipeline_id"], 679)
 
     async def test_max_attempts_reached_blocks_without_manual_execute_reset(self):
         from app.core.ci_failure_collector import process_ci_failure_run

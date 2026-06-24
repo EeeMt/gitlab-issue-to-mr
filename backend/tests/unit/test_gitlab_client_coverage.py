@@ -372,6 +372,78 @@ class TestGetMrByIid(unittest.TestCase):
 
 
 # ===================================================================
+# get_merge_request_details / get_merge_request_latest_pipeline
+# ===================================================================
+
+class TestMergeRequestPipelineDetails(unittest.TestCase):
+    """Tests for MR pipeline details used by CI auto-repair freshness gates."""
+
+    def test_details_include_current_pipeline_from_mr_response(self):
+        client = _make_client()
+        mock_mr = MagicMock()
+        mock_mr.source_branch = "feature"
+        mock_mr.target_branch = "main"
+        mock_mr.sha = "source-head"
+        mock_mr.diff_refs = {}
+        mock_mr.pipeline = {
+            "id": "99",
+            "sha": "merged-result",
+            "web_url": "http://gitlab.example.com/group/project/-/pipelines/99",
+        }
+        mock_mr.head_pipeline = None
+        mock_mr.web_url = "http://gitlab.example.com/group/project/-/merge_requests/5"
+        mock_mr.state = "opened"
+        mock_project = MagicMock()
+        mock_project.mergerequests.get.return_value = mock_mr
+        client.gl.projects.get.return_value = mock_project
+
+        result = client.get_merge_request_details(42, 5)
+
+        self.assertEqual(result["source_branch"], "feature")
+        self.assertEqual(result["current_pipeline"]["id"], 99)
+        self.assertEqual(result["current_pipeline"]["sha"], "merged-result")
+
+    def test_latest_pipeline_prefers_pipeline_from_mr_response(self):
+        client = _make_client()
+        mock_mr = MagicMock()
+        mock_mr.pipeline = {"id": 102, "sha": "latest"}
+        mock_mr.head_pipeline = None
+        mock_project = MagicMock()
+        mock_project.mergerequests.get.return_value = mock_mr
+        client.gl.projects.get.return_value = mock_project
+
+        result = client.get_merge_request_latest_pipeline(42, 5)
+
+        self.assertEqual(result["id"], 102)
+        self.assertEqual(result["sha"], "latest")
+        client.gl.http_list.assert_not_called()
+
+    def test_latest_pipeline_falls_back_to_mr_pipeline_list(self):
+        client = _make_client()
+        mock_mr = MagicMock()
+        mock_mr.pipeline = None
+        mock_mr.head_pipeline = None
+        mock_project = MagicMock()
+        mock_project.mergerequests.get.return_value = mock_mr
+        client.gl.projects.get.return_value = mock_project
+        client.gl.http_list.return_value = [
+            {"id": 100, "sha": "old"},
+            {"id": "103", "sha": "new"},
+            {"id": 101, "sha": "middle"},
+        ]
+
+        result = client.get_merge_request_latest_pipeline(42, 5)
+
+        self.assertEqual(result["id"], 103)
+        self.assertEqual(result["sha"], "new")
+        client.gl.http_list.assert_called_once_with(
+            "/projects/42/merge_requests/5/pipelines",
+            per_page=100,
+            get_all=True,
+        )
+
+
+# ===================================================================
 # get_merge_request_stats
 # ===================================================================
 

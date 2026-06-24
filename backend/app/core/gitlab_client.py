@@ -99,6 +99,31 @@ class GitLabClient:
     def _normalize_hook_url(url: str) -> str:
         return url.strip().rstrip("/")
 
+    @staticmethod
+    def _pipeline_details(payload: Any) -> dict[str, Any] | None:
+        if isinstance(payload, dict):
+            raw = payload
+        else:
+            attrs = getattr(payload, "_attrs", None)
+            if not isinstance(attrs, dict):
+                return None
+            raw = attrs
+
+        raw_id = raw.get("id")
+        try:
+            pipeline_id = int(raw_id)
+        except (TypeError, ValueError):
+            return None
+
+        return {
+            "id": pipeline_id,
+            "sha": raw.get("sha"),
+            "ref": raw.get("ref"),
+            "status": raw.get("status"),
+            "source": raw.get("source"),
+            "web_url": raw.get("web_url"),
+        }
+
     def get_project(self, project_id: int) -> Project:
         """Get a project by ID.
 
@@ -554,19 +579,60 @@ class GitLabClient:
         }
 
     def get_merge_request_details(self, project_id: int, mr_iid: int) -> dict[str, Any] | None:
-        """Get merge request branch and head SHA details used by CI repair gates."""
+        """Get merge request branch, source SHA, and current pipeline details."""
         mr = self.get_merge_request(project_id, mr_iid)
         if not mr:
             return None
         diff_refs = getattr(mr, "diff_refs", None) or {}
         sha = getattr(mr, "sha", None) or diff_refs.get("head_sha")
+        pipeline = (
+            self._pipeline_details(getattr(mr, "pipeline", None))
+            or self._pipeline_details(getattr(mr, "head_pipeline", None))
+        )
+        if pipeline and pipeline.get("web_url"):
+            pipeline["web_url"] = self.normalize_web_url(str(pipeline["web_url"]))
         return {
             "source_branch": getattr(mr, "source_branch", None),
             "target_branch": getattr(mr, "target_branch", None),
             "sha": sha,
+            "current_pipeline": pipeline,
             "web_url": self.normalize_web_url(getattr(mr, "web_url", None)),
             "state": getattr(mr, "state", None),
         }
+
+    def get_merge_request_latest_pipeline(self, project_id: int, mr_iid: int) -> dict[str, Any] | None:
+        """Return the latest pipeline associated with one merge request."""
+        mr = self.get_merge_request(project_id, mr_iid)
+        if not mr:
+            return None
+
+        pipeline = (
+            self._pipeline_details(getattr(mr, "pipeline", None))
+            or self._pipeline_details(getattr(mr, "head_pipeline", None))
+        )
+        if pipeline:
+            if pipeline.get("web_url"):
+                pipeline["web_url"] = self.normalize_web_url(str(pipeline["web_url"]))
+            return pipeline
+
+        pipelines = [
+            pipeline for pipeline in (
+                self._pipeline_details(item)
+                for item in self.gl.http_list(
+                    f"/projects/{project_id}/merge_requests/{mr_iid}/pipelines",
+                    per_page=100,
+                    get_all=True,
+                )
+            )
+            if pipeline is not None
+        ]
+        if not pipelines:
+            return None
+
+        latest = max(pipelines, key=lambda pipeline: int(pipeline["id"]))
+        if latest.get("web_url"):
+            latest["web_url"] = self.normalize_web_url(str(latest["web_url"]))
+        return latest
 
     def get_pipeline_jobs(self, project_id: int, pipeline_id: int) -> list[dict[str, Any]]:
         """List GitLab jobs for one pipeline."""
