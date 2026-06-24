@@ -57,8 +57,6 @@ def _make_settings(**overrides):
     s.backend_url = "http://localhost:8000"
     s.dashboard_url = "http://localhost:3000"
     s.custom_ca_bundle = None
-    s.maven_cache_host_path = ""
-    s.maven_settings_host_path = ""
     s.worker_volume_mounts_parsed = []
     s.worker_workspace_host_path = "/tmp/codify-worker-tests"
     s.alert_on_failure = False
@@ -931,32 +929,29 @@ class TestBuildContainerVolumes(unittest.TestCase):
 
         self.assertEqual(volumes, {})
 
-    def test_maven_cache_volume(self):
-        """Maven cache host path creates volume mount — lines 538-542."""
-        settings = _make_settings(maven_cache_host_path="/host/.m2/repository")
+    def test_generic_volume_mounts_cover_maven_paths(self):
+        """Maven paths can be mounted through generic worker volume mounts."""
+        settings = _make_settings(
+            worker_volume_mounts_parsed=[
+                {
+                    "host_path": "/host/.m2/repository",
+                    "container_path": "/home/codify/.m2/repository",
+                    "mode": "rw",
+                },
+                {
+                    "host_path": "/host/settings.xml",
+                    "container_path": "/home/codify/.m2/settings.xml",
+                    "mode": "ro",
+                },
+            ]
+        )
         worker = _make_worker()
 
         volumes = worker._build_container_volumes(settings)
 
-        self.assertIn("/host/.m2/repository", volumes)
-        self.assertEqual(
-            volumes["/host/.m2/repository"]["bind"],
-            "/home/codify/.m2/repository",
-        )
+        self.assertEqual(volumes["/host/.m2/repository"]["bind"], "/home/codify/.m2/repository")
         self.assertEqual(volumes["/host/.m2/repository"]["mode"], "rw")
-
-    def test_maven_settings_volume(self):
-        """Maven settings host path creates volume mount — lines 543-546."""
-        settings = _make_settings(maven_settings_host_path="/host/settings.xml")
-        worker = _make_worker()
-
-        volumes = worker._build_container_volumes(settings)
-
-        self.assertIn("/host/settings.xml", volumes)
-        self.assertEqual(
-            volumes["/host/settings.xml"]["bind"],
-            "/home/codify/.m2/settings.xml",
-        )
+        self.assertEqual(volumes["/host/settings.xml"]["bind"], "/home/codify/.m2/settings.xml")
         self.assertEqual(volumes["/host/settings.xml"]["mode"], "ro")
 
     def test_generic_volume_mounts(self):

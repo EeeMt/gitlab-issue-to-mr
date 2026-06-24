@@ -708,7 +708,7 @@ tar czf offline-bundle-dev/maven-repo.tar.gz -C ~/.m2 repository/
 内网配置：
 ```env
 # .env.offline 中设置
-MAVEN_CACHE_HOST_PATH=/opt/maven-repo
+WORKER_VOLUME_MOUNTS=[{"host_path":"/opt/maven-repo","container_path":"/home/codify/.m2/repository","mode":"rw"}]
 ```
 
 ```bash
@@ -718,7 +718,8 @@ sudo tar xzf offline-bundle-dev/maven-repo.tar.gz -C /opt/maven-repo
 ```
 
 **方案 B：内网 Maven 私服**（Nexus/Artifactory）
-如果内网有 Maven 私服，配置 `MAVEN_SETTINGS_HOST_PATH` 指向自定义 `settings.xml`。
+如果内网有 Maven 私服，在 `WORKER_VOLUME_MOUNTS` 中把宿主机上的
+`settings.xml` 挂载到 `/home/codify/.m2/settings.xml`。
 
 ### 7.4 自签 CA 证书
 

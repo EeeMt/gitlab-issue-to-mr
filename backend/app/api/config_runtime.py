@@ -75,8 +75,6 @@ class RuntimeConfigSection(BaseModel):
     worker_workspace_host_path: str
     worker_workspace_retention_days: int
     worker_failed_workspace_retention_days: int
-    maven_cache_host_path: str
-    maven_settings_host_path: str
     slot_max_tasks: int
     slot_max_tasks_enforce: bool
     ci_auto_repair_max_attempts: int
@@ -117,8 +115,6 @@ class RuntimeConfigUpdate(BaseModel):
     worker_workspace_host_path: str | None = None
     worker_workspace_retention_days: int | None = None
     worker_failed_workspace_retention_days: int | None = None
-    maven_cache_host_path: str | None = None
-    maven_settings_host_path: str | None = None
     slot_max_tasks: int | None = None
     slot_max_tasks_enforce: bool | None = None
     ci_auto_repair_max_attempts: int | None = None
@@ -158,8 +154,6 @@ def _serialize_runtime_config(
         worker_workspace_host_path=settings.worker_workspace_host_path,
         worker_workspace_retention_days=settings.worker_workspace_retention_days,
         worker_failed_workspace_retention_days=settings.worker_failed_workspace_retention_days,
-        maven_cache_host_path=settings.maven_cache_host_path,
-        maven_settings_host_path=settings.maven_settings_host_path,
         slot_max_tasks=settings.slot_max_tasks,
         slot_max_tasks_enforce=settings.slot_max_tasks_enforce,
         ci_auto_repair_max_attempts=settings.ci_auto_repair_max_attempts,

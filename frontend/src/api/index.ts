@@ -593,8 +593,6 @@ export interface RuntimeConfig {
   worker_post_script: string
   worker_environment_variables: WorkerEnvironmentVariable[]
   worker_workspace_retention_days: number
-  maven_cache_host_path: string
-  maven_settings_host_path: string
   slot_max_tasks: number
   slot_max_tasks_enforce: boolean
   ci_auto_repair_max_attempts: number
@@ -735,8 +733,6 @@ export interface RuntimeConfigUpdate
   worker_pre_script?: string
   worker_post_script?: string
   worker_environment_variables?: WorkerEnvironmentVariableUpdate[]
-  maven_cache_host_path?: string
-  maven_settings_host_path?: string
 }
 
 export interface WorkerEnvironmentVariableUpdate {

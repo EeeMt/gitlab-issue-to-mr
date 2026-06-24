@@ -223,25 +223,22 @@ db.add(TaskRunArchive(
 
 ## 4. Maven 缓存挂载
 
-### 配置
+Maven 缓存和 `settings.xml` 不再有专用配置项。需要时使用通用
+`worker_volume_mounts` 覆盖相同容器路径：
 
-| 配置项 | 默认值 | 说明 |
-|--------|--------|------|
-| `maven_cache_host_path` | `""` | Maven 本地仓库宿主路径，例如 `/opt/maven-repo` |
-| `maven_settings_host_path` | `""` | Maven settings.xml 宿主路径 |
-
-### 挂载映射
-
-| 宿主机路径 | 容器内路径 | 模式 | 用途 |
-|-----------|-----------|------|------|
-| `{maven_cache_host_path}` | `/home/codify/.m2/repository` | `rw` | Maven 依赖缓存，跨任务共享 |
-| `{maven_settings_host_path}` | `/home/codify/.m2/settings.xml` | `ro` | Maven 私有仓库配置 |
-
-定义在 `worker_runtime.py:15-16`：
-
-```python
-_MAVEN_CACHE_CONTAINER_PATH = "/home/codify/.m2/repository"
-_MAVEN_SETTINGS_CONTAINER_PATH = "/home/codify/.m2/settings.xml"
+```json
+[
+  {
+    "host_path": "/opt/maven-repo",
+    "container_path": "/home/codify/.m2/repository",
+    "mode": "rw"
+  },
+  {
+    "host_path": "/opt/maven-settings.xml",
+    "container_path": "/home/codify/.m2/settings.xml",
+    "mode": "ro"
+  }
+]
 ```
 
 ---
@@ -300,12 +297,6 @@ Backend/Scheduler 容器需要以下宿主目录挂载（均在 `deploy/docker-c
 
 ```
 build_container_volumes(settings, issue, task=task)
-│
-├─ maven_cache_host_path 非空?
-│   └─ YES → volumes[host_path] = {bind: /home/codify/.m2/repository, mode: rw}
-│
-├─ maven_settings_host_path 非空?
-│   └─ YES → volumes[host_path] = {bind: /home/codify/.m2/settings.xml, mode: ro}
 │
 ├─ worker_workspace_host_path 非空 && issue && task?
 │   └─ YES → build_issue_workspace_paths()

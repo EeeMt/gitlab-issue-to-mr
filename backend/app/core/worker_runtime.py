@@ -19,8 +19,6 @@ from app.models import AIProvider, Issue, Task, User
 
 logger = logging.getLogger(__name__)
 
-_MAVEN_CACHE_CONTAINER_PATH = "/home/codify/.m2/repository"
-_MAVEN_SETTINGS_CONTAINER_PATH = "/home/codify/.m2/settings.xml"
 _WORKSPACE_CONTAINER_PATH = "/workspace"
 _RUNTIME_CONTAINER_PATH = "/tmp/codify-runtime"
 _CLAUDE_CONTAINER_PATH = "/home/codify/.claude"
@@ -257,24 +255,12 @@ def build_container_volumes(
     """Build volume mounts for the worker container.
 
     Mount order matters: parent directories must be mounted before child directories so that
-    user-specified mounts (added last) can override any subdirectory of a system mount.
-    Order: system fixed mounts → workspace mounts → user-defined worker_volume_mounts.
+    user-specified mounts (added last) can override workspace subdirectories.
+    Order: workspace mounts → user-defined worker_volume_mounts.
     """
     volumes: dict = {}
 
-    # --- System fixed mounts (first) ---
-    if settings.maven_cache_host_path:
-        volumes[settings.maven_cache_host_path] = {
-            "bind": _MAVEN_CACHE_CONTAINER_PATH,
-            "mode": "rw",
-        }
-    if settings.maven_settings_host_path:
-        volumes[settings.maven_settings_host_path] = {
-            "bind": _MAVEN_SETTINGS_CONTAINER_PATH,
-            "mode": "ro",
-        }
-
-    # --- Workspace mounts (second) ---
+    # --- Workspace mounts (first) ---
     workspace_paths = (
         build_issue_workspace_paths(settings, issue, task)
         if issue is not None and task is not None

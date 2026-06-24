@@ -178,9 +178,7 @@ const mockConfig = {
     worker_volume_mounts: '',
     worker_pre_script: '',
     worker_post_script: '',
-    worker_environment_variables: [],
-    maven_cache_host_path: '',
-    maven_settings_host_path: ''
+    worker_environment_variables: []
   },
   auth: {
     oidc_enabled: true,

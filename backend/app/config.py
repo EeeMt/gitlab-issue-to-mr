@@ -35,8 +35,6 @@ PERSISTED_CONFIG_TYPES: dict[str, type[RuntimeConfigValue]] = {
     "mattermost_bot_token": str,
     "anthropic_base_url": str,
     "anthropic_api_key": str,
-    "maven_cache_host_path": str,
-    "maven_settings_host_path": str,
     "anthropic_model": str,
     "claude_max_turns": int,
     "allow_monitor_for_users": bool,
@@ -157,8 +155,6 @@ class Settings(BaseSettings):
     worker_network: str = Field(default="bridge")  # Docker network for worker containers
     worker_container_prefix: str = Field(default="codify")  # Prefix for worker container names
     worker_skip_image_pull: bool = Field(default=False)  # Skip pull_image for local/test environments
-    maven_cache_host_path: str = Field(default="")  # Host path to .m2/repository dir; empty = disabled
-    maven_settings_host_path: str = Field(default="")  # Host path to settings.xml; empty = disabled
     # JSON array of volume mounts: [{"host_path": "/path", "container_path": "/path", "mode": "ro"}]
     worker_volume_mounts: str = Field(default="")
     worker_pre_script: str = Field(default="")

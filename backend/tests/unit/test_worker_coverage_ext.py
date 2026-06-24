@@ -132,9 +132,8 @@ def _make_settings(**overrides):
     s.backend_url = "http://localhost:8000"
     s.dashboard_url = "http://localhost:3000"
     s.custom_ca_bundle = None
-    s.maven_cache_host_path = ""
-    s.maven_settings_host_path = ""
     s.worker_volume_mounts_parsed = []
+    s.worker_workspace_host_path = "/tmp/codify-worker-tests"
     s.alert_on_failure = False
     s.alert_webhook_url = None
     s.claude_max_turns = 20

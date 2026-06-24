@@ -91,13 +91,6 @@ These limits are also configurable at runtime via the dashboard Config page.
 
 These are optional. Configure them if you want Mattermost integration available immediately after the offline deployment starts. Notification profiles themselves are managed in the dashboard and stored in PostgreSQL.
 
-### Maven optimization
-
-- `MAVEN_CACHE_HOST_PATH`
-- `MAVEN_SETTINGS_HOST_PATH`
-
-These are optional host paths mounted into worker containers to speed up Maven dependency resolution in Java projects.
-
 ### Worker container mounts
 
 - `WORKER_CA_CERT_HOST_PATH`: absolute path on the Docker host to a PEM-encoded CA cert file. When set, this certificate is automatically mounted into every spawned worker container and trusted by git, Python, Node.js, and the JDK.

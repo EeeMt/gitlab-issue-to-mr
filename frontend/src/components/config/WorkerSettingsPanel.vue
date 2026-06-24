@@ -265,36 +265,6 @@
             </n-form-item>
           </div>
 
-          <div class="config-form__section config-maven-section">
-            <div class="config-form__section-title">{{ t('config.mavenSettings') }}</div>
-            <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
-              <n-gi>
-                <n-form-item :label="t('config.mavenCachePath')">
-                  <n-input
-                    v-model:value="workerFormValue.maven_cache_host_path"
-                    :placeholder="t('config.mavenCachePathPlaceholder')"
-                    class="config-form__input"
-                  />
-                  <template #feedback>
-                    {{ t('config.mavenCachePathHint') }}
-                  </template>
-                </n-form-item>
-              </n-gi>
-              <n-gi>
-                <n-form-item :label="t('config.mavenSettingsPath')">
-                  <n-input
-                    v-model:value="workerFormValue.maven_settings_host_path"
-                    :placeholder="t('config.mavenSettingsPathPlaceholder')"
-                    class="config-form__input"
-                  />
-                  <template #feedback>
-                    {{ t('config.mavenSettingsPathHint') }}
-                  </template>
-                </n-form-item>
-              </n-gi>
-            </n-grid>
-          </div>
-
           <div class="config-card-actions">
             <n-space :size="12" wrap>
               <n-button
@@ -357,8 +327,6 @@ type WorkerFormValue = {
   worker_workspace_retention_days: number
   worker_pre_script: string
   worker_post_script: string
-  maven_cache_host_path: string
-  maven_settings_host_path: string
   default_execute_run_instruction_template: string
   default_plan_run_instruction_template: string
   ci_auto_repair_run_instruction_template: string
@@ -407,8 +375,6 @@ const workerFormValue = ref<WorkerFormValue>({
   worker_workspace_retention_days: 14,
   worker_pre_script: '',
   worker_post_script: '',
-  maven_cache_host_path: '',
-  maven_settings_host_path: '',
   default_execute_run_instruction_template: '',
   default_plan_run_instruction_template: '',
   ci_auto_repair_run_instruction_template: ''
@@ -480,8 +446,6 @@ function mapRuntimeConfigToWorkerFormValue(runtime?: Partial<RuntimeConfig>): Wo
     worker_workspace_retention_days: runtime?.worker_workspace_retention_days ?? 14,
     worker_pre_script: runtime?.worker_pre_script || '',
     worker_post_script: runtime?.worker_post_script || '',
-    maven_cache_host_path: runtime?.maven_cache_host_path || '',
-    maven_settings_host_path: runtime?.maven_settings_host_path || '',
     default_execute_run_instruction_template:
       runtime?.default_execute_run_instruction_template || '',
     default_plan_run_instruction_template:
@@ -500,8 +464,6 @@ function cloneWorkerFormValue(value: WorkerFormValue): WorkerFormValue {
     worker_workspace_retention_days: value.worker_workspace_retention_days,
     worker_pre_script: value.worker_pre_script,
     worker_post_script: value.worker_post_script,
-    maven_cache_host_path: value.maven_cache_host_path,
-    maven_settings_host_path: value.maven_settings_host_path,
     default_execute_run_instruction_template: value.default_execute_run_instruction_template,
     default_plan_run_instruction_template: value.default_plan_run_instruction_template,
     ci_auto_repair_run_instruction_template: value.ci_auto_repair_run_instruction_template
@@ -553,8 +515,6 @@ function createEmptyWorkerFormValue(): WorkerFormValue {
     worker_workspace_retention_days: 14,
     worker_pre_script: '',
     worker_post_script: '',
-    maven_cache_host_path: '',
-    maven_settings_host_path: '',
     default_execute_run_instruction_template: '',
     default_plan_run_instruction_template: '',
     ci_auto_repair_run_instruction_template: ''
@@ -581,8 +541,6 @@ async function handleSaveWorker() {
         worker_workspace_retention_days: workerFormValue.value.worker_workspace_retention_days,
         worker_pre_script: workerFormValue.value.worker_pre_script,
         worker_post_script: workerFormValue.value.worker_post_script,
-        maven_cache_host_path: workerFormValue.value.maven_cache_host_path.trim(),
-        maven_settings_host_path: workerFormValue.value.maven_settings_host_path.trim(),
         default_execute_run_instruction_template: workerFormValue.value.default_execute_run_instruction_template,
         default_plan_run_instruction_template: workerFormValue.value.default_plan_run_instruction_template,
         ci_auto_repair_run_instruction_template: workerFormValue.value.ci_auto_repair_run_instruction_template

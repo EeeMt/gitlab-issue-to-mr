@@ -8,8 +8,6 @@ function createRuntimeConfig() {
     worker_volume_mounts:
       '[{"host_path":"/host/cache","container_path":"/container/cache","mode":"rw"}]',
     worker_workspace_retention_days: 14,
-    maven_cache_host_path: '/data/.m2/repository',
-    maven_settings_host_path: '/data/.m2/settings.xml',
     worker_environment_variables: [
       {
         id: 7,
@@ -404,8 +402,6 @@ describe('WorkerSettingsPanel', () => {
         worker_workspace_retention_days: 14,
         worker_pre_script: 'echo pre',
         worker_post_script: 'echo post',
-        maven_cache_host_path: '/data/.m2/repository',
-        maven_settings_host_path: '/data/.m2/settings.xml',
         default_execute_run_instruction_template: 'Execute {{user_prompt}}',
         default_plan_run_instruction_template: 'Plan {{user_prompt}}',
         ci_auto_repair_run_instruction_template: 'Repair {{issue_title}}',
@@ -484,8 +480,6 @@ describe('WorkerSettingsPanel', () => {
           '[{"host_path":"/host/cache","container_path":"/container/cache","mode":"rw"}]',
         worker_pre_script: 'echo pre',
         worker_post_script: 'echo post',
-        maven_cache_host_path: '/data/.m2/repository',
-        maven_settings_host_path: '/data/.m2/settings.xml',
         default_execute_run_instruction_template: 'Execute {{user_prompt}}',
         default_plan_run_instruction_template: 'Plan {{user_prompt}}',
         ci_auto_repair_run_instruction_template: 'Repair {{issue_title}}',
@@ -570,8 +564,6 @@ describe('WorkerSettingsPanel', () => {
         worker_workspace_retention_days: 14,
         worker_pre_script: 'echo pre',
         worker_post_script: 'echo post',
-        maven_cache_host_path: '/data/.m2/repository',
-        maven_settings_host_path: '/data/.m2/settings.xml',
         default_execute_run_instruction_template: 'Execute {{user_prompt}}',
         default_plan_run_instruction_template: 'Plan {{user_prompt}}',
         ci_auto_repair_run_instruction_template: 'Repair {{issue_title}}',
