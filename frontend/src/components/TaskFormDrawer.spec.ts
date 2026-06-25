@@ -316,6 +316,23 @@ const mockWorkerProfiles = [
     ci_auto_repair_run_instruction_template: 'Worker repair {{issue_title}}',
     created_at: '',
     updated_at: ''
+  },
+  {
+    id: 4,
+    name: 'Python Worker',
+    description: null,
+    enabled: true,
+    is_default: false,
+    image: 'worker-python:latest',
+    volume_mounts: [],
+    environment_variables: [],
+    pre_script: '',
+    post_script: '',
+    default_execute_run_instruction_template: 'Python execute {{user_prompt}}',
+    default_plan_run_instruction_template: 'Python plan {{user_prompt}}',
+    ci_auto_repair_run_instruction_template: 'Python repair {{issue_title}}',
+    created_at: '',
+    updated_at: ''
   }
 ]
 
@@ -570,6 +587,19 @@ describe('TaskFormDrawer', () => {
           provider_id: 7
         })
       )
+    })
+
+    it('shows issue default worker when worker selection is left empty', async () => {
+      await mountDrawer({ defaultWorkerProfileId: 4 })
+      await openDrawer()
+
+      expect(wrapper.findAll('.provider-control__summary')[0].text()).toContain(
+        'Python Worker / worker-python:latest'
+      )
+
+      wrapper.vm.selectTaskMode('execute')
+
+      expect(wrapper.vm.runInstructionTemplate).toBe('Python execute {{user_prompt}}')
     })
 
     it('submits a manually edited run instruction template on create', async () => {

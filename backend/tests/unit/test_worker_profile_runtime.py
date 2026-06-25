@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.core.worker_runtime import build_container_volumes
-from app.core.worker_task_lifecycle import create_execute_container
+from app.core.worker_task_lifecycle import create_execute_container, prepare_container_inputs
 
 
 def test_build_container_volumes_uses_snapshot_mounts_last(tmp_path):
@@ -107,3 +107,47 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
     )
     worker.docker.create_container.assert_called_once()
     assert worker.docker.create_container.call_args.kwargs["image"] == "custom-worker:latest"
+
+
+@pytest.mark.asyncio
+async def test_prepare_container_inputs_uses_only_snapshot_custom_environment():
+    worker = MagicMock()
+    worker._resolve_provider = AsyncMock(return_value=SimpleNamespace(id=1, system_prompt=None))
+    worker._resolve_commit_author = AsyncMock(return_value=("Author", "author@example.com"))
+    worker._build_container_env = MagicMock(return_value={"TASK_ID": "12"})
+    task = SimpleNamespace(id=12, project_id=100)
+    issue = SimpleNamespace(id=1, target_branch="main")
+    db = MagicMock()
+
+    legacy_env_loader = AsyncMock(
+        return_value=[
+            SimpleNamespace(key="GLOBAL_ENV", value="global", is_secret=False),
+        ]
+    )
+    legacy_env_builder = MagicMock(return_value={"GLOBAL_ENV": "global"})
+    with (
+        patch(
+            "app.core.worker_task_lifecycle.list_worker_environment_variables",
+            new=legacy_env_loader,
+            create=True,
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.build_worker_environment_map",
+            new=legacy_env_builder,
+            create=True,
+        ),
+    ):
+        await prepare_container_inputs(
+            worker,
+            db,
+            task,
+            issue,
+            mr_iid=None,
+            custom_environment={"SNAPSHOT_ENV": "snapshot"},
+        )
+
+    assert worker._build_container_env.call_args.kwargs["custom_environment"] == {
+        "SNAPSHOT_ENV": "snapshot"
+    }
+    legacy_env_loader.assert_not_awaited()
+    legacy_env_builder.assert_not_called()

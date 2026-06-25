@@ -31,6 +31,7 @@ from app.core.worker_profiles import (
     list_worker_profiles as list_worker_profiles_domain,
 )
 from app.database import get_db
+from app.dependencies.auth import require_admin_user
 from app.models import WorkerProfile, WorkerProfileEnvironmentVariable
 
 router = APIRouter()
@@ -139,6 +140,7 @@ async def list_worker_profiles(db: AsyncSession = Depends(get_db)):
 async def create_worker_profile(
     request: WorkerProfileCreateRequest,
     db: AsyncSession = Depends(get_db),
+    _admin=Depends(require_admin_user),
 ):
     """Create a worker profile."""
     try:
@@ -191,6 +193,7 @@ async def update_worker_profile(
     profile_id: int,
     request: WorkerProfileUpdateRequest,
     db: AsyncSession = Depends(get_db),
+    _admin=Depends(require_admin_user),
 ):
     """Update a worker profile."""
     profile = await _load_profile_or_404(db, profile_id)
@@ -267,6 +270,7 @@ async def update_worker_profile(
 async def set_default_worker_profile_endpoint(
     profile_id: int,
     db: AsyncSession = Depends(get_db),
+    _admin=Depends(require_admin_user),
 ):
     """Set one enabled worker profile as the system default."""
     profile = await _load_profile_or_404(db, profile_id)
@@ -284,6 +288,7 @@ async def set_default_worker_profile_endpoint(
 async def disable_worker_profile(
     profile_id: int,
     db: AsyncSession = Depends(get_db),
+    _admin=Depends(require_admin_user),
 ):
     """Disable a non-default worker profile."""
     profile = await _load_profile_or_404(db, profile_id)
@@ -301,6 +306,7 @@ async def disable_worker_profile(
 async def duplicate_worker_profile(
     profile_id: int,
     db: AsyncSession = Depends(get_db),
+    _admin=Depends(require_admin_user),
 ):
     """Duplicate a worker profile, preserving encrypted secret values."""
     source = await _load_profile_or_404(db, profile_id)

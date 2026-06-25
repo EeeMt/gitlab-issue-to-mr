@@ -14,10 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.ci_failure_logs import append_ci_failure_log
 from app.core.task_log_payloads import create_payload, persist_raw_log_snapshot
 from app.core.utcnow import utcnow
-from app.core.worker_environment_variables import (
-    build_worker_environment_map,
-    list_worker_environment_variables,
-)
 from app.core.worker_profiles import load_task_worker_runtime
 from app.core.worker_runtime import (
     materialize_task_prompt,
@@ -229,12 +225,6 @@ async def prepare_container_inputs(
 ):
     target_branch = issue.target_branch if issue else None
     provider = await worker._resolve_provider(db, task)
-    custom_environment_rows = await list_worker_environment_variables(db)
-    persisted_environment = build_worker_environment_map(custom_environment_rows)
-    merged_environment = {
-        **persisted_environment,
-        **(custom_environment or {}),
-    }
     author_name, author_email = await worker._resolve_commit_author(db, task)
     environment = worker._build_container_env(
         task,
@@ -244,7 +234,7 @@ async def prepare_container_inputs(
         provider=provider,
         author_name=author_name,
         author_email=author_email,
-        custom_environment=merged_environment,
+        custom_environment=custom_environment,
     )
     return environment, target_branch
 

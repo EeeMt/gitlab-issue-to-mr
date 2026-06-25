@@ -534,6 +534,8 @@ const props = withDefaults(defineProps<{
   mode?: 'create' | 'edit'
   issueId?: number
   issueDescription?: string
+  defaultWorkerProfileId?: number | null
+  defaultProviderId?: number | null
   task?: Task
 }>(), {
   mode: 'create'
@@ -657,11 +659,17 @@ const effectiveProvider = computed(() => {
   if (selectedProviderId.value !== null) {
     return selectableProviders.value.find(provider => provider.id === selectedProviderId.value) ?? null
   }
+  if (props.defaultProviderId !== null && props.defaultProviderId !== undefined) {
+    return selectableProviders.value.find(provider => provider.id === props.defaultProviderId) ?? null
+  }
   return selectableProviders.value.find(provider => provider.is_default && !provider.is_disabled) ?? null
 })
 const effectiveWorkerProfile = computed(() => {
   if (selectedWorkerProfileId.value !== null) {
     return selectableWorkerProfiles.value.find(profile => profile.id === selectedWorkerProfileId.value) ?? null
+  }
+  if (props.defaultWorkerProfileId !== null && props.defaultWorkerProfileId !== undefined) {
+    return selectableWorkerProfiles.value.find(profile => profile.id === props.defaultWorkerProfileId) ?? null
   }
   return selectableWorkerProfiles.value.find(profile => profile.is_default && profile.enabled) ?? null
 })

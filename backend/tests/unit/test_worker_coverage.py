@@ -1966,22 +1966,13 @@ class TestExecuteTask(unittest.TestCase):
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
-    @patch('app.core.worker.build_worker_environment_map')
-    @patch('app.core.worker.list_worker_environment_variables', new_callable=AsyncMock)
-    def test_execute_task_loads_persisted_custom_environment(
+    def test_execute_task_loads_snapshot_custom_environment(
         self,
-        mock_list_worker_environment_variables,
-        mock_build_worker_environment_map,
         mock_notify,
         mock_get_settings,
     ):
-        """execute_task loads persisted worker env vars and passes them into container env building."""
+        """execute_task loads snapshot worker env vars and passes them into container env building."""
         mock_get_settings.return_value = _make_settings()
-
-        persisted_rows = [MagicMock(key="FEATURE_FLAG", value="stored", is_secret=False)]
-        custom_environment = {"FEATURE_FLAG": "enabled", "EMPTY_ALLOWED": ""}
-        mock_list_worker_environment_variables.return_value = persisted_rows
-        mock_build_worker_environment_map.return_value = custom_environment
 
         mock_gitlab = MagicMock()
         mock_gitlab.normalize_web_url.side_effect = lambda x: x
@@ -1993,6 +1984,10 @@ class TestExecuteTask(unittest.TestCase):
 
         worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
         task = _make_task(target_branch="main", merge_request_iid=None)
+        task.worker_profile_snapshot.environment_variables = [
+            {"key": "FEATURE_FLAG", "value": "enabled", "is_secret": False},
+            {"key": "EMPTY_ALLOWED", "value": "", "is_secret": False},
+        ]
         db = _make_db(task)
 
         with (
@@ -2002,11 +1997,9 @@ class TestExecuteTask(unittest.TestCase):
             result = asyncio.run(worker.execute_task(db, task.id))
 
         self.assertTrue(result)
-        mock_list_worker_environment_variables.assert_awaited_once_with(db)
-        mock_build_worker_environment_map.assert_called_once_with(persisted_rows)
         self.assertEqual(
             mock_build_container_env.call_args.kwargs["custom_environment"],
-            custom_environment,
+            {"FEATURE_FLAG": "enabled", "EMPTY_ALLOWED": ""},
         )
 
     @patch('app.core.worker.get_settings')
@@ -2065,18 +2058,13 @@ class TestExecuteTask(unittest.TestCase):
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
-    @patch('app.core.worker.list_worker_environment_variables', new_callable=AsyncMock)
-    def test_execute_task_persists_failure_for_invalid_persisted_custom_environment_key(
+    def test_execute_task_persists_failure_for_invalid_snapshot_custom_environment_key(
         self,
-        mock_list_worker_environment_variables,
         mock_notify,
         mock_get_settings,
     ):
-        """execute_task persists failure state for invalid persisted custom env keys."""
+        """execute_task persists failure state for invalid snapshot custom env keys."""
         mock_get_settings.return_value = _make_settings()
-        mock_list_worker_environment_variables.return_value = [
-            MagicMock(key="TASK_ID", value="reserved", is_secret=False)
-        ]
 
         mock_gitlab = MagicMock()
         mock_gitlab.normalize_web_url.side_effect = lambda x: x
@@ -2086,6 +2074,9 @@ class TestExecuteTask(unittest.TestCase):
         mock_docker = MagicMock()
         worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
         task = _make_task(target_branch=None, merge_request_iid=None)
+        task.worker_profile_snapshot.environment_variables = [
+            {"key": "TASK_ID", "value": "reserved", "is_secret": False},
+        ]
         db = _make_db(task)
 
         with (

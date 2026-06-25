@@ -125,9 +125,9 @@ def test_list_worker_profiles_exposes_secret_configured_not_plaintext():
     assert "encrypted-secret" not in response.text
 
 
-def test_list_worker_profiles_rejects_regular_authenticated_user():
+def test_list_worker_profiles_allows_regular_authenticated_user():
     result = MagicMock()
-    result.scalars.return_value.all.return_value = []
+    result.scalars.return_value.all.return_value = [_make_profile(id=3, name="Java Worker")]
     db = MagicMock()
     db.execute = AsyncMock(return_value=result)
     app.dependency_overrides[get_db] = lambda: db
@@ -138,6 +138,32 @@ def test_list_worker_profiles_rejects_regular_authenticated_user():
     client = TestClient(app, raise_server_exceptions=False)
     try:
         response = client.get("/api/worker-profiles")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()[0]["name"] == "Java Worker"
+
+
+def test_create_worker_profile_still_rejects_regular_authenticated_user():
+    db = MagicMock()
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[require_authenticated_user] = lambda: SimpleNamespace(id=1)
+    app.dependency_overrides[require_admin_user] = lambda: (_ for _ in ()).throw(
+        HTTPException(status_code=403, detail="Admin access required")
+    )
+    client = TestClient(app, raise_server_exceptions=False)
+    try:
+        response = client.post(
+            "/api/worker-profiles",
+            json={
+                "name": "Java Worker",
+                "image": "codify-worker-java:latest",
+                "default_execute_run_instruction_template": "Execute {{user_prompt}}",
+                "default_plan_run_instruction_template": "Plan {{user_prompt}}",
+                "ci_auto_repair_run_instruction_template": "Repair {{issue_title}}",
+            },
+        )
     finally:
         app.dependency_overrides.clear()
 

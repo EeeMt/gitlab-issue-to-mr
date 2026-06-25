@@ -1473,6 +1473,21 @@ describe('IssueView', () => {
       expect(mockMessage.success).toHaveBeenCalledWith('issue.taskCreated')
     })
 
+    it('passes issue execution defaults to the create task drawer', async () => {
+      setupDefaultMocks({
+        default_worker_profile_id: 4,
+        default_provider_id: 8,
+      })
+      wrapper = await mountComponent()
+
+      await wrapper.find('[data-testid="issue-toggle-create-task"]').trigger('click')
+      await nextTick()
+
+      const drawer = wrapper.findComponent({ name: 'TaskFormDrawer' })
+      expect(drawer.props('defaultWorkerProfileId')).toBe(4)
+      expect(drawer.props('defaultProviderId')).toBe(8)
+    })
+
     it('shows error message when createTask fails', async () => {
       setupDefaultMocks()
       mockApi.createTask.mockRejectedValue(new Error('create fail'))

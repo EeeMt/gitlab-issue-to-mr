@@ -296,6 +296,8 @@
       mode="create"
       :issue-id="issueId"
       :issue-description="issue?.description ?? undefined"
+      :default-worker-profile-id="issue?.default_worker_profile_id ?? null"
+      :default-provider-id="issue?.default_provider_id ?? null"
       data-testid="issue-create-task-drawer"
       @created="fetchIssue"
     />

@@ -462,6 +462,8 @@
     mode="create"
     :issue-id="task?.issue_id"
     :issue-description="issueDescription"
+    :default-worker-profile-id="issueDefaultWorkerProfileId"
+    :default-provider-id="issueDefaultProviderId"
     data-testid="task-view-create-task-drawer"
     @created="handleAppendTaskCreated"
   />
@@ -551,6 +553,8 @@ const activeRetryTask = ref<Task | null>(null)
 const issueTasks = ref<Task[]>([])
 const issueDescription = ref<string | undefined>(undefined)
 const issueStatus = ref<Issue['status'] | null>(null)
+const issueDefaultWorkerProfileId = ref<number | null>(null)
+const issueDefaultProviderId = ref<number | null>(null)
 const archiveMetadata = ref<{ archive_name: string; archive_size_bytes: number; created_at: string; file_exists: boolean } | null>(null)
 const archiveDownloadLoading = ref(false)
 let pollTimer: number | null = null
@@ -772,6 +776,8 @@ async function refreshIssueTasks() {
     issueTasks.value = []
     issueDescription.value = undefined
     issueStatus.value = null
+    issueDefaultWorkerProfileId.value = null
+    issueDefaultProviderId.value = null
     return
   }
   try {
@@ -779,10 +785,14 @@ async function refreshIssueTasks() {
     issueTasks.value = issueData.tasks ?? []
     issueDescription.value = issueData.description ?? undefined
     issueStatus.value = issueData.status ?? null
+    issueDefaultWorkerProfileId.value = issueData.default_worker_profile_id ?? null
+    issueDefaultProviderId.value = issueData.default_provider_id ?? null
   } catch {
     issueTasks.value = []
     issueDescription.value = undefined
     issueStatus.value = null
+    issueDefaultWorkerProfileId.value = null
+    issueDefaultProviderId.value = null
   }
 }
 

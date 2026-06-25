@@ -153,7 +153,7 @@ def _make_task(**kwargs):
     """Create a Task object with defaults and attach a mock issue."""
     from unittest.mock import MagicMock
 
-    from app.models import AIProvider
+    from app.models import AIProvider, TaskWorkerProfileSnapshot
 
     # Separate issue-level kwargs
     issue_overrides = {}
@@ -177,6 +177,21 @@ def _make_task(**kwargs):
     )
     defaults.update(kwargs)
     task = Task(**defaults)
+    if getattr(task, "worker_profile_id", None) is None:
+        task.worker_profile_id = 1
+    task.worker_profile_snapshot = TaskWorkerProfileSnapshot(
+        task_id=task.id,
+        worker_profile_id=task.worker_profile_id,
+        profile_name="Default Worker",
+        image="test-worker:latest",
+        volume_mounts=[],
+        environment_variables=[],
+        pre_script="",
+        post_script="",
+        default_execute_run_instruction_template="Execute {{user_prompt}}",
+        default_plan_run_instruction_template="Plan {{user_prompt}}",
+        ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+    )
 
     if provider is None:
         provider = AIProvider(
@@ -214,7 +229,7 @@ def _make_task(**kwargs):
 
 def _make_db(task=None):
     """Create a mock async DB session."""
-    from app.models import AIProvider, Issue
+    from app.models import AIProvider, Issue, TaskWorkerProfileSnapshot
     db = MagicMock()
 
     async def _mock_execute(statement, *args, **kwargs):
@@ -247,6 +262,10 @@ def _make_db(task=None):
             return None
         if task and model_class is Issue and hasattr(task, 'issue') and task.issue and task.issue.id == id_val:
             return task.issue
+        if task and model_class is TaskWorkerProfileSnapshot:
+            snapshot = getattr(task, "worker_profile_snapshot", None)
+            if snapshot is not None and getattr(snapshot, "task_id", None) == id_val:
+                return snapshot
         return None
     db.get = AsyncMock(side_effect=mock_get)
 
