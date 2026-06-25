@@ -187,15 +187,28 @@ def worker_custom_scripts_configured(settings: Any) -> bool:
 
 def materialize_worker_custom_scripts(settings: Any, runtime_path: str | os.PathLike[str]) -> None:
     """Write configured worker scripts into the task runtime directory."""
+    materialize_worker_custom_scripts_from_snapshot(
+        runtime_path,
+        pre_script=getattr(settings, "worker_pre_script", ""),
+        post_script=getattr(settings, "worker_post_script", ""),
+    )
+
+
+def materialize_worker_custom_scripts_from_snapshot(
+    runtime_path: str | os.PathLike[str],
+    *,
+    pre_script: str = "",
+    post_script: str = "",
+) -> None:
+    """Write task snapshot worker scripts into the task runtime directory."""
     runtime_dir = Path(runtime_path)
     runtime_dir.mkdir(parents=True, exist_ok=True)
 
     script_specs = (
-        ("worker_pre_script", runtime_dir / _WORKER_PRE_SCRIPT_FILENAME),
-        ("worker_post_script", runtime_dir / _WORKER_POST_SCRIPT_FILENAME),
+        (pre_script, runtime_dir / _WORKER_PRE_SCRIPT_FILENAME),
+        (post_script, runtime_dir / _WORKER_POST_SCRIPT_FILENAME),
     )
-    for setting_key, script_path in script_specs:
-        script_content = getattr(settings, setting_key, "")
+    for script_content, script_path in script_specs:
         if not isinstance(script_content, str) or not script_content.strip():
             script_path.unlink(missing_ok=True)
             continue
@@ -251,6 +264,7 @@ def build_container_volumes(
     issue: Issue | None = None,
     *,
     task: Task | None = None,
+    custom_mounts: list[dict] | None = None,
 ) -> dict:
     """Build volume mounts for the worker container.
 
@@ -300,7 +314,8 @@ def build_container_volumes(
         )
 
     # --- User-defined mounts (last) — may override subdirectories of any system mount above ---
-    for mount in settings.worker_volume_mounts_parsed:
+    mounts = custom_mounts if custom_mounts is not None else settings.worker_volume_mounts_parsed
+    for mount in mounts:
         host_path = mount.get("host_path")
         container_path = mount.get("container_path")
         mode = mount.get("mode", "ro")

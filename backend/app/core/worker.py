@@ -87,11 +87,17 @@ async def prepare_container_inputs(
     task: Task,
     issue: Issue | None,
     mr_iid: int | None,
+    *,
+    custom_environment: dict[str, str] | None = None,
 ):
     target_branch = issue.target_branch if issue else None
     provider = await worker._resolve_provider(db, task)
     custom_environment_rows = await list_worker_environment_variables(db)
-    custom_environment = build_worker_environment_map(custom_environment_rows)
+    persisted_environment = build_worker_environment_map(custom_environment_rows)
+    merged_environment = {
+        **persisted_environment,
+        **(custom_environment or {}),
+    }
     author_name, author_email = await worker._resolve_commit_author(db, task)
     environment = worker._build_container_env(
         task,
@@ -101,7 +107,7 @@ async def prepare_container_inputs(
         provider=provider,
         author_name=author_name,
         author_email=author_email,
-        custom_environment=custom_environment,
+        custom_environment=merged_environment,
     )
     return environment, target_branch
 
@@ -294,8 +300,17 @@ class WorkerExecutor:
         task: Task,
         issue: Issue | None,
         mr_iid: int | None,
+        *,
+        custom_environment: dict[str, str] | None = None,
     ):
-        return await prepare_container_inputs(self, db, task, issue, mr_iid)
+        return await prepare_container_inputs(
+            self,
+            db,
+            task,
+            issue,
+            mr_iid,
+            custom_environment=custom_environment,
+        )
 
     async def _parse_task_result(
         self,

@@ -18,9 +18,10 @@ from app.core.worker_environment_variables import (
     build_worker_environment_map,
     list_worker_environment_variables,
 )
+from app.core.worker_profiles import load_task_worker_runtime
 from app.core.worker_runtime import (
     materialize_task_prompt,
-    materialize_worker_custom_scripts,
+    materialize_worker_custom_scripts_from_snapshot,
     worker_custom_scripts_configured,
 )
 from app.core.worker_workspace import build_issue_workspace_paths
@@ -223,11 +224,17 @@ async def prepare_container_inputs(
     task: Task,
     issue: Issue | None,
     mr_iid: int | None,
+    *,
+    custom_environment: dict[str, str] | None = None,
 ):
     target_branch = issue.target_branch if issue else None
     provider = await worker._resolve_provider(db, task)
     custom_environment_rows = await list_worker_environment_variables(db)
-    custom_environment = build_worker_environment_map(custom_environment_rows)
+    persisted_environment = build_worker_environment_map(custom_environment_rows)
+    merged_environment = {
+        **persisted_environment,
+        **(custom_environment or {}),
+    }
     author_name, author_email = await worker._resolve_commit_author(db, task)
     environment = worker._build_container_env(
         task,
@@ -237,7 +244,7 @@ async def prepare_container_inputs(
         provider=provider,
         author_name=author_name,
         author_email=author_email,
-        custom_environment=custom_environment,
+        custom_environment=merged_environment,
     )
     return environment, target_branch
 
@@ -337,10 +344,11 @@ async def create_execute_container(
     sudo_gl: Gitlab | None,
 ):
     task_id = task.id
+    worker_runtime = await load_task_worker_runtime(db, task)
 
     if not settings.worker_skip_image_pull:
         try:
-            worker.docker.pull_image(settings.worker_image, force=False)
+            worker.docker.pull_image(worker_runtime.image, force=False)
         except Exception as e:
             logger.warning(f"Failed to pull image: {e}, using existing local image if available")
 
@@ -373,9 +381,15 @@ async def create_execute_container(
         await worker._write_previous_task_summaries_file(db, settings, issue, task)
 
     if worker_custom_scripts_configured(settings):
-        if workspace_paths is None:
-            raise RuntimeError("worker_workspace_host_path is required for worker custom scripts")
-        materialize_worker_custom_scripts(settings, workspace_paths.runtime_path)
+        logger.debug(
+            "[Task %s] Ignoring legacy global worker scripts; using task worker snapshot",
+            task_id,
+        )
+    materialize_worker_custom_scripts_from_snapshot(
+        workspace_paths.runtime_path,
+        pre_script=worker_runtime.pre_script,
+        post_script=worker_runtime.post_script,
+    )
 
     is_ci_failure_task = (
         getattr(task, "trigger_source", None) == "ci_auto_repair"
@@ -399,11 +413,22 @@ async def create_execute_container(
         )
         await db.flush()
 
-    environment, _target_branch = await worker._prepare_container_inputs(db, task, issue, mr_iid)
-    volumes = worker._build_container_volumes(settings, issue, task=task)
+    environment, _target_branch = await worker._prepare_container_inputs(
+        db,
+        task,
+        issue,
+        mr_iid,
+        custom_environment=worker_runtime.environment,
+    )
+    volumes = worker._build_container_volumes(
+        settings,
+        issue,
+        task=task,
+        custom_mounts=worker_runtime.volume_mounts,
+    )
     container_name = worker._get_container_name(task)
     container = worker.docker.create_container(
-        image=settings.worker_image,
+        image=worker_runtime.image,
         command="",
         environment=environment,
         volumes=volumes if volumes else None,

@@ -80,7 +80,7 @@ def _make_task(**kwargs):
     """Create a Task object with defaults."""
     from unittest.mock import MagicMock
 
-    from app.models import AIProvider
+    from app.models import AIProvider, TaskWorkerProfileSnapshot
 
     # Separate issue-level kwargs
     issue_overrides = {}
@@ -100,6 +100,21 @@ def _make_task(**kwargs):
     )
     defaults.update(kwargs)
     task = Task(**defaults)
+    if getattr(task, "worker_profile_id", None) is None:
+        task.worker_profile_id = 1
+    task.worker_profile_snapshot = TaskWorkerProfileSnapshot(
+        task_id=task.id,
+        worker_profile_id=task.worker_profile_id,
+        profile_name="Default Worker",
+        image="test-worker:latest",
+        volume_mounts=[],
+        environment_variables=[],
+        pre_script="",
+        post_script="",
+        default_execute_run_instruction_template="Execute {{user_prompt}}",
+        default_plan_run_instruction_template="Plan {{user_prompt}}",
+        ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+    )
 
     if provider is None:
         provider = AIProvider(
@@ -140,7 +155,7 @@ def _make_task(**kwargs):
 
 def _make_db(task=None):
     """Create a mock async DB session."""
-    from app.models import AIProvider, Issue
+    from app.models import AIProvider, Issue, TaskWorkerProfileSnapshot
     db = MagicMock()
 
     async def _mock_execute(statement, *args, **kwargs):
@@ -174,6 +189,10 @@ def _make_db(task=None):
         if task and model_cls is Issue and hasattr(task, 'issue') and task.issue is not None:
             if hasattr(task.issue, 'id') and task.issue.id == id_val:
                 return task.issue
+        if task and model_cls is TaskWorkerProfileSnapshot:
+            snapshot = getattr(task, "worker_profile_snapshot", None)
+            if snapshot is not None and getattr(snapshot, "task_id", None) == id_val:
+                return snapshot
         return None
 
     db.get = AsyncMock(side_effect=_mock_get)
@@ -2000,8 +2019,8 @@ class TestExecuteTask(unittest.TestCase):
         with tempfile.TemporaryDirectory() as workspace_root:
             mock_get_settings.return_value = _make_settings(
                 worker_workspace_host_path=workspace_root,
-                worker_pre_script="echo pre",
-                worker_post_script="echo post",
+                worker_pre_script="echo legacy-pre",
+                worker_post_script="echo legacy-post",
             )
             mock_gitlab = MagicMock()
             mock_gitlab.normalize_web_url.side_effect = lambda x: x
@@ -2013,6 +2032,8 @@ class TestExecuteTask(unittest.TestCase):
 
             worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
             task = _make_task(target_branch="main", merge_request_iid=None)
+            task.worker_profile_snapshot.pre_script = "echo snapshot-pre"
+            task.worker_profile_snapshot.post_script = "echo snapshot-post"
             db = _make_db(task)
 
             with patch.object(
@@ -2030,8 +2051,14 @@ class TestExecuteTask(unittest.TestCase):
                 / f"task-{task.id}"
             )
             self.assertTrue(result)
-            self.assertEqual((runtime_dir / "worker-pre-script.sh").read_text(), "echo pre\n")
-            self.assertEqual((runtime_dir / "worker-post-script.sh").read_text(), "echo post\n")
+            self.assertEqual(
+                (runtime_dir / "worker-pre-script.sh").read_text(),
+                "echo snapshot-pre\n",
+            )
+            self.assertEqual(
+                (runtime_dir / "worker-post-script.sh").read_text(),
+                "echo snapshot-post\n",
+            )
             container_env = mock_docker.create_container.call_args.kwargs["environment"]
             self.assertNotIn("CODIFY_WORKER_PRE_SCRIPT", container_env)
             self.assertNotIn("CODIFY_WORKER_POST_SCRIPT", container_env)
