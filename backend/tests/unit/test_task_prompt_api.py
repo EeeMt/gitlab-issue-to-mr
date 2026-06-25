@@ -18,7 +18,7 @@ from app.core.task_prompt import (
     BUILT_IN_PLAN_RUN_INSTRUCTION_TEMPLATE,
 )
 from app.dependencies.project_access import ProjectAccessScope
-from app.models import AIProvider, Issue, TaskStatus
+from app.models import AIProvider, Issue, TaskStatus, TaskWorkerProfileSnapshot
 
 
 def _scope() -> ProjectAccessScope:
@@ -104,9 +104,21 @@ async def test_create_persists_snapshot_and_rendered_prompt_before_commit() -> N
         is_disabled=False,
     )
     db = MagicMock()
-
-    async def get_model(model, _id):
-        return issue if model is Issue else provider
+    worker_profile = SimpleNamespace(id=12)
+    snapshot = TaskWorkerProfileSnapshot(
+        task_id=10,
+        worker_profile_id=12,
+        profile_name="Default Worker",
+        image="codify-worker:latest",
+        volume_mounts=[],
+        environment_variables=[],
+        pre_script="",
+        post_script="",
+        default_execute_run_instruction_template="Execute {{user_prompt}}",
+        default_plan_run_instruction_template="Plan {{user_prompt}}",
+        ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+        created_at=datetime(2026, 6, 19, 10, 0, 0),
+    )
 
     async def flush() -> None:
         task = db.add.call_args.args[0]
@@ -116,7 +128,7 @@ async def test_create_persists_snapshot_and_rendered_prompt_before_commit() -> N
         task.created_at = datetime(2026, 6, 19, 10, 0, 0)
         task.updated_at = task.created_at
 
-    db.get = AsyncMock(side_effect=get_model)
+    db.get = AsyncMock(return_value=issue)
     db.add = MagicMock()
     db.flush = AsyncMock(side_effect=flush)
     db.commit = AsyncMock()
@@ -131,6 +143,12 @@ async def test_create_persists_snapshot_and_rendered_prompt_before_commit() -> N
         patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={
             "project_path_with_namespace": "group/repo"
         })),
+        patch(
+            "app.api.tasks.resolve_worker_profile_for_issue",
+            new=AsyncMock(return_value=worker_profile),
+        ),
+        patch("app.api.tasks.resolve_provider_for_issue", new=AsyncMock(return_value=provider)),
+        patch("app.api.tasks.replace_task_worker_snapshot", new=AsyncMock(return_value=snapshot)),
         patch(
             "app.core.task_helpers.get_effective_settings",
             return_value=SimpleNamespace(
@@ -162,11 +180,23 @@ async def test_create_rejects_explicitly_blank_run_instruction_template() -> Non
         is_disabled=False,
     )
     db = MagicMock()
+    worker_profile = SimpleNamespace(id=12)
+    snapshot = TaskWorkerProfileSnapshot(
+        task_id=10,
+        worker_profile_id=12,
+        profile_name="Default Worker",
+        image="codify-worker:latest",
+        volume_mounts=[],
+        environment_variables=[],
+        pre_script="",
+        post_script="",
+        default_execute_run_instruction_template="Execute {{user_prompt}}",
+        default_plan_run_instruction_template="Plan {{user_prompt}}",
+        ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+        created_at=datetime(2026, 6, 19, 10, 0, 0),
+    )
 
-    async def get_model(model, _id):
-        return issue if model is Issue else provider
-
-    db.get = AsyncMock(side_effect=get_model)
+    db.get = AsyncMock(return_value=issue)
     db.add = MagicMock()
     db.flush = AsyncMock()
     db.commit = AsyncMock()
@@ -180,6 +210,12 @@ async def test_create_rejects_explicitly_blank_run_instruction_template() -> Non
 
     with (
         patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
+        patch(
+            "app.api.tasks.resolve_worker_profile_for_issue",
+            new=AsyncMock(return_value=worker_profile),
+        ),
+        patch("app.api.tasks.resolve_provider_for_issue", new=AsyncMock(return_value=provider)),
+        patch("app.api.tasks.replace_task_worker_snapshot", new=AsyncMock(return_value=snapshot)),
         pytest.raises(HTTPException) as exc_info,
     ):
         await create_task(request, db, None, _scope())

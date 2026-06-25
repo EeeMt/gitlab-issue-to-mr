@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.api.stats import get_analytics
 from app.api.tasks import CreateTaskRequest, create_task
 from app.dependencies.project_access import ProjectAccessScope
-from app.models import TaskStatus
+from app.models import TaskStatus, TaskWorkerProfileSnapshot
 
 
 @pytest.mark.asyncio
@@ -31,6 +31,22 @@ async def test_create_task_persists_manual_initiator_metadata():
     mock_issue.project_id = 101
     mock_issue.description = "Build analytics page"
     mock_issue.status = "open"
+    worker_profile = SimpleNamespace(id=12)
+    provider = SimpleNamespace(id=1, is_disabled=False)
+    snapshot = TaskWorkerProfileSnapshot(
+        task_id=23,
+        worker_profile_id=12,
+        profile_name="Default Worker",
+        image="codify-worker:latest",
+        volume_mounts=[],
+        environment_variables=[],
+        pre_script="",
+        post_script="",
+        default_execute_run_instruction_template="Execute {{user_prompt}}",
+        default_plan_run_instruction_template="Plan {{user_prompt}}",
+        ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+        created_at=datetime(2026, 3, 14, 12, 0, 0),
+    )
 
     db = MagicMock()
     db.add = MagicMock()
@@ -55,6 +71,12 @@ async def test_create_task_persists_manual_initiator_metadata():
     access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
     with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})), \
+         patch(
+             "app.api.tasks.resolve_worker_profile_for_issue",
+             new=AsyncMock(return_value=worker_profile),
+         ), \
+         patch("app.api.tasks.resolve_provider_for_issue", new=AsyncMock(return_value=provider)), \
+         patch("app.api.tasks.replace_task_worker_snapshot", new=AsyncMock(return_value=snapshot)), \
          patch(
              "app.api.tasks.get_usage_quota_service",
              return_value=MagicMock(raise_if_over_limit=AsyncMock()),

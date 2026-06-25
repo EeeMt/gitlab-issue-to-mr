@@ -45,9 +45,12 @@ class UpdateTaskRequest(BaseModel):
         user_prompt: New prompt text. Must be non-empty if provided.
             Cannot be null — omit the key to leave unchanged.
         priority: Task priority (0 = low, 1 = normal, 2 = high).
-        provider_id: AI provider ID. Pass ``null`` / ``None`` to clear the
-            provider (revert to system default).  Omit the key entirely to
-            leave the current value unchanged.
+        provider_id: AI provider ID. Pass ``null`` / ``None`` to restore the
+            issue default (or system default when the issue has none). Omit the
+            key entirely to leave the current value unchanged.
+        worker_profile_id: Worker profile ID. Pass ``null`` / ``None`` to restore
+            the issue default (or system default when the issue has none). Omit
+            the key entirely to leave the current value unchanged.
         require_changes: Whether the task must produce file changes.
             Cannot be null — omit the key to leave unchanged.
         task_mode: Execution mode — 'execute' (default) or 'plan'.
@@ -57,7 +60,8 @@ class UpdateTaskRequest(BaseModel):
 
     user_prompt: str | None = None
     priority: int | None = None
-    provider_id: int | None = None  # None = system default / clear
+    provider_id: int | None = None
+    worker_profile_id: int | None = None
     require_changes: bool | None = None
     task_mode: Literal["execute", "plan"] | None = None
     run_instruction_template: str | None = Field(
@@ -103,7 +107,8 @@ class CreateTaskRequest(BaseModel):
     priority: int = 0
     delay_seconds: int | None = None
     scheduled_datetime: datetime | None = None
-    provider_id: int
+    provider_id: int | None = None
+    worker_profile_id: int | None = None
     require_changes: bool | None = True
     task_mode: Literal["execute", "plan"] = "execute"
     run_instruction_template: str | None = Field(

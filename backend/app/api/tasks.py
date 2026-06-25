@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import false, func, select
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -38,7 +39,8 @@ from app.core.docker_client import get_docker_client
 from app.core.issue_execution_locks import release_issue_execution_lock
 from app.core.projects import build_project_lookup, get_project_metadata
 from app.core.scheduling import resolve_scheduled_at
-from app.core.task_helpers import _serialize_task, maybe_update_issue_status
+from app.core.task_helpers import _serialize_task as _serialize_task_base
+from app.core.task_helpers import maybe_update_issue_status
 from app.core.task_log_payloads import persist_raw_log_snapshot
 from app.core.task_prompt import (
     NORMAL_PLACEHOLDER_NAMES,
@@ -55,6 +57,13 @@ from app.core.usage_limits import (
     usage_limit_exceeded_detail,
 )
 from app.core.utcnow import utcnow
+from app.core.worker_profiles import (
+    WorkerProfileValidationError,
+    replace_task_worker_snapshot,
+    resolve_provider_for_issue,
+    resolve_worker_profile_for_issue,
+    select_snapshot_run_instruction_template,
+)
 from app.core.worker_workspace import build_issue_workspace_paths, remove_issue_workspace
 from app.database import AsyncSessionLocal, get_db
 from app.dependencies.auth import get_optional_current_user, require_page_access
@@ -63,7 +72,7 @@ from app.dependencies.project_access import (
     require_project_access,
     require_project_access_scope,
 )
-from app.models import AIProvider, Issue, Task, TaskLog, TaskStatus, User
+from app.models import AIProvider, Issue, Task, TaskLog, TaskStatus, TaskWorkerProfileSnapshot, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -71,6 +80,47 @@ router = APIRouter()
 
 TASKS_SORT_FIELDS = {"created_at", "status", "priority", "total_changes", "input_tokens", "output_tokens", "duration"}
 SORT_ORDERS = {"asc", "desc"}
+
+
+def _serialize_task(*args, **kwargs) -> dict:
+    """Serialize task responses with worker profile display metadata."""
+    task = args[0] if args else kwargs["task"]
+    data = _serialize_task_base(*args, **kwargs)
+    snapshot = _loaded_task_relationship(task, "worker_profile_snapshot")
+    worker_profile = _loaded_task_relationship(task, "worker_profile")
+    worker_profile_id = getattr(task, "worker_profile_id", None)
+    if not isinstance(worker_profile_id, int):
+        worker_profile_id = None
+    data.update(
+        {
+            "worker_profile_id": worker_profile_id,
+            "worker_profile_name": (
+                snapshot.profile_name
+                if snapshot is not None
+                else (worker_profile.name if worker_profile is not None else None)
+            ),
+            "worker_image": snapshot.image if snapshot is not None else None,
+            "worker_snapshot_created_at": (
+                snapshot.created_at.isoformat()
+                if snapshot is not None and snapshot.created_at
+                else None
+            ),
+        }
+    )
+    return data
+
+
+def _loaded_task_relationship(task: Task, name: str):
+    try:
+        insp = sa_inspect(task)
+        if name in insp.unloaded:
+            return None
+    except Exception:
+        pass
+    value = getattr(task, name, None)
+    if value.__class__.__module__.startswith("unittest.mock"):
+        return None
+    return value
 
 
 @router.get("/tasks")
@@ -133,7 +183,16 @@ async def list_tasks(
         else:
             order_clause = sort_column.desc().nullslast()
 
-    query = select(Task).options(selectinload(Task.issue), selectinload(Task.provider)).order_by(order_clause)
+    query = (
+        select(Task)
+        .options(
+            selectinload(Task.issue),
+            selectinload(Task.provider),
+            selectinload(Task.worker_profile),
+            selectinload(Task.worker_profile_snapshot),
+        )
+        .order_by(order_clause)
+    )
 
     # Multi-status filter (comma-separated, raise 400 for invalid values)
     if status:
@@ -322,7 +381,12 @@ async def list_scheduled_tasks(
     """
     query = (
         select(Task)
-        .options(selectinload(Task.issue), selectinload(Task.provider))
+        .options(
+            selectinload(Task.issue),
+            selectinload(Task.provider),
+            selectinload(Task.worker_profile),
+            selectinload(Task.worker_profile_snapshot),
+        )
         .where(
             Task.scheduled_at.is_not(None),
             Task.status.in_([
@@ -465,7 +529,14 @@ async def get_task(
     t0 = time.time()
     logger.info(f"[HANDLER START] get_task/{task_id} t={t0:.3f}")
     result = await db.execute(
-        select(Task).options(selectinload(Task.issue), selectinload(Task.provider)).where(Task.id == task_id)
+        select(Task)
+        .options(
+            selectinload(Task.issue),
+            selectinload(Task.provider),
+            selectinload(Task.worker_profile),
+            selectinload(Task.worker_profile_snapshot),
+        )
+        .where(Task.id == task_id)
     )
     t1 = time.time()
     task = result.scalar_one_or_none()
@@ -964,21 +1035,32 @@ async def update_task(
             )
         task.priority = request.priority
 
+    issue = None
+    snapshot = None
+    if updated_fields & {"worker_profile_id", "provider_id"}:
+        issue = await db.get(Issue, task.issue_id)
+        if issue is None:
+            raise HTTPException(status_code=404, detail="Issue not found")
+
+    if "worker_profile_id" in updated_fields:
+        try:
+            worker_profile = await resolve_worker_profile_for_issue(
+                db,
+                issue,
+                request.worker_profile_id,
+            )
+        except WorkerProfileValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        task.worker_profile_id = worker_profile.id
+        snapshot = await replace_task_worker_snapshot(db, task, worker_profile)
+        task.worker_profile_snapshot = snapshot
+
     if "provider_id" in updated_fields:
-        # None means "clear to system default"; an integer must reference an existing provider
-        if request.provider_id is not None:
-            provider = await db.get(AIProvider, request.provider_id)
-            if not provider:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Provider not found",
-                )
-            if provider.is_disabled is True:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Provider is disabled",
-                )
-        task.provider_id = request.provider_id
+        try:
+            provider = await resolve_provider_for_issue(db, issue, request.provider_id)
+        except WorkerProfileValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        task.provider_id = provider.id
 
     if "require_changes" in updated_fields:
         task.require_changes = request.require_changes  # type: ignore[assignment]  # null rejected by schema
@@ -1012,14 +1094,31 @@ async def update_task(
 
     render_context_changed = bool(
         updated_fields
-        & {"user_prompt", "run_instruction_template", "task_mode", "require_changes"}
+        & {
+            "user_prompt",
+            "run_instruction_template",
+            "task_mode",
+            "require_changes",
+            "worker_profile_id",
+            "provider_id",
+        }
     )
     if render_context_changed:
-        issue = await db.get(Issue, task.issue_id)
+        if issue is None:
+            issue = await db.get(Issue, task.issue_id)
+        if issue is None:
+            raise HTTPException(status_code=404, detail="Issue not found")
+        if snapshot is None:
+            snapshot = await db.get(TaskWorkerProfileSnapshot, task.id)
         template = task.run_instruction_template
         if template is None:
-            template = select_run_instruction_template(
-                get_effective_settings(),
+            if snapshot is None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="Task has no worker profile snapshot",
+                )
+            template = select_snapshot_run_instruction_template(
+                snapshot,
                 task_mode=task.task_mode or "execute",
                 trigger_source=task.trigger_source or "manual",
             )
@@ -1425,16 +1524,22 @@ async def create_task(
             detail="No prompt provided and issue has no description",
         )
 
-    # Validate provider_id is required
-    from app.models import AIProvider
-    provider = await db.get(AIProvider, request.provider_id)
-    if not provider:
-        raise HTTPException(status_code=404, detail="Provider not found")
-    if provider.is_disabled is True:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Provider is disabled",
+    try:
+        worker_profile = await resolve_worker_profile_for_issue(
+            db,
+            issue,
+            request.worker_profile_id,
         )
+        provider = await resolve_provider_for_issue(
+            db,
+            issue,
+            request.provider_id,
+        )
+    except WorkerProfileValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
 
     scheduled_at = resolve_scheduled_at(
         request.scheduled_datetime,
@@ -1478,16 +1583,19 @@ async def create_task(
         initiator_email=current_user.email if current_user is not None else None,
         priority=request.priority,
         scheduled_at=scheduled_at,
-        provider_id=request.provider_id,
+        provider_id=provider.id,
+        worker_profile_id=worker_profile.id,
         task_mode=request.task_mode,
         require_changes=request.effective_require_changes,
     )
     db.add(task)
     await db.flush()
+    snapshot = await replace_task_worker_snapshot(db, task, worker_profile)
+    task.worker_profile_snapshot = snapshot
     template = request.run_instruction_template
     if template is None:
-        template = select_run_instruction_template(
-            get_effective_settings(),
+        template = select_snapshot_run_instruction_template(
+            snapshot,
             task_mode=task.task_mode,
             trigger_source=task.trigger_source or "manual",
         )

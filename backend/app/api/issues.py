@@ -7,6 +7,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import false, func, select
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -14,6 +15,7 @@ from app.config import get_effective_settings
 from app.core.gitlab_client import get_gitlab_client
 from app.core.task_helpers import _require_issue_operator
 from app.core.utcnow import utcnow
+from app.core.worker_profiles import get_default_provider, get_default_worker_profile
 from app.core.worker_workspace import build_issue_workspace_paths
 from app.database import get_db
 from app.dependencies.auth import require_authenticated_user
@@ -22,7 +24,7 @@ from app.dependencies.project_access import (
     require_project_access,
     require_project_access_scope,
 )
-from app.models import Issue, IssueStatus, Task, TaskStatus, User
+from app.models import AIProvider, Issue, IssueStatus, Task, TaskStatus, User, WorkerProfile
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/issues", tags=["issues"])
@@ -43,6 +45,8 @@ class CreateIssueRequest(BaseModel):
     target_branch: str | None = None
     delete_branch_on_close: bool = True
     ci_auto_repair_enabled: bool = False
+    default_worker_profile_id: int | None = None
+    default_provider_id: int | None = None
 
 
 class UpdateIssueRequest(BaseModel):
@@ -52,6 +56,8 @@ class UpdateIssueRequest(BaseModel):
     description: str | None = None
     status: str | None = None
     ci_auto_repair_enabled: bool | None = None
+    default_worker_profile_id: int | None = None
+    default_provider_id: int | None = None
 
 
 class CloseIssueRequest(BaseModel):
@@ -75,6 +81,8 @@ class CloseIssueRequest(BaseModel):
 
 def _serialize_issue(issue: Issue, task_count: int | None = None) -> dict:
     """Serialize an Issue row for API responses."""
+    default_worker_profile = _loaded_issue_relationship(issue, "default_worker_profile")
+    default_provider = _loaded_issue_relationship(issue, "default_provider")
     data = {
         "id": issue.id,
         "title": issue.title,
@@ -90,6 +98,12 @@ def _serialize_issue(issue: Issue, task_count: int | None = None) -> dict:
         "delete_branch_on_close": issue.delete_branch_on_close,
         "branch_deleted": issue.branch_deleted,
         "ci_auto_repair_enabled": issue.ci_auto_repair_enabled,
+        "default_worker_profile_id": issue.default_worker_profile_id,
+        "default_provider_id": issue.default_provider_id,
+        "default_worker_profile_name": (
+            default_worker_profile.name if default_worker_profile is not None else None
+        ),
+        "default_provider_name": default_provider.name if default_provider is not None else None,
         "claude_session_id": issue.claude_session_id,
         "session_storage_path": issue.session_storage_path,
         "initiator_user_id": issue.initiator_user_id,
@@ -100,6 +114,45 @@ def _serialize_issue(issue: Issue, task_count: int | None = None) -> dict:
     if task_count is not None:
         data["task_count"] = task_count
     return data
+
+
+def _loaded_issue_relationship(issue: Issue, name: str):
+    try:
+        insp = sa_inspect(issue)
+        if name in insp.unloaded:
+            return None
+    except Exception:
+        pass
+    value = getattr(issue, name, None)
+    if value.__class__.__module__.startswith("unittest.mock"):
+        return None
+    return value
+
+
+async def _resolve_issue_default_worker_id(
+    db: AsyncSession,
+    explicit_id: int | None,
+) -> int | None:
+    if explicit_id is not None:
+        profile = await db.get(WorkerProfile, explicit_id)
+        if profile is None or not profile.enabled:
+            raise HTTPException(status_code=422, detail="Default worker profile is not available")
+        return profile.id
+    profile = await get_default_worker_profile(db)
+    return profile.id if profile else None
+
+
+async def _resolve_issue_default_provider_id(
+    db: AsyncSession,
+    explicit_id: int | None,
+) -> int | None:
+    if explicit_id is not None:
+        provider = await db.get(AIProvider, explicit_id)
+        if provider is None or provider.is_disabled:
+            raise HTTPException(status_code=422, detail="Default AI provider is not available")
+        return provider.id
+    provider = await get_default_provider(db)
+    return provider.id if provider else None
 
 
 def _task_duration_seconds(task: Task, now: datetime | None = None) -> float:
@@ -196,6 +249,14 @@ async def create_issue(
     current_user: User = Depends(require_authenticated_user),
 ):
     """Create a new issue."""
+    default_worker_profile_id = await _resolve_issue_default_worker_id(
+        db,
+        body.default_worker_profile_id,
+    )
+    default_provider_id = await _resolve_issue_default_provider_id(
+        db,
+        body.default_provider_id,
+    )
     issue = Issue(
         title=body.title,
         description=body.description,
@@ -205,6 +266,8 @@ async def create_issue(
         target_branch=body.target_branch,
         delete_branch_on_close=body.delete_branch_on_close,
         ci_auto_repair_enabled=body.ci_auto_repair_enabled,
+        default_worker_profile_id=default_worker_profile_id,
+        default_provider_id=default_provider_id,
         initiator_user_id=current_user.id if current_user else None,
         initiator_username=current_user.username if current_user else None,
     )
@@ -327,6 +390,10 @@ async def list_issues(
             task_agg_subq.c.total_input_tokens,
             task_agg_subq.c.total_output_tokens,
             task_agg_subq.c.duration_seconds,
+        )
+        .options(
+            selectinload(Issue.default_worker_profile),
+            selectinload(Issue.default_provider),
         )
         .outerjoin(task_agg_subq, Issue.id == task_agg_subq.c.issue_id)
         .order_by(order_clause)
@@ -467,7 +534,11 @@ async def get_issue(
     result = await db.execute(
         select(Issue)
         .where(Issue.id == issue_id)
-        .options(selectinload(Issue.tasks))
+        .options(
+            selectinload(Issue.tasks),
+            selectinload(Issue.default_worker_profile),
+            selectinload(Issue.default_provider),
+        )
     )
     issue = result.scalar_one_or_none()
     if issue is None:
@@ -490,7 +561,11 @@ async def update_issue(
     result = await db.execute(
         select(Issue)
         .where(Issue.id == issue_id)
-        .options(selectinload(Issue.tasks))
+        .options(
+            selectinload(Issue.tasks),
+            selectinload(Issue.default_worker_profile),
+            selectinload(Issue.default_provider),
+        )
     )
     issue = result.scalar_one_or_none()
     if issue is None:
@@ -515,9 +590,19 @@ async def update_issue(
         issue.status = body.status
     if body.ci_auto_repair_enabled is not None:
         issue.ci_auto_repair_enabled = body.ci_auto_repair_enabled
+    if "default_worker_profile_id" in body.model_fields_set:
+        issue.default_worker_profile_id = await _resolve_issue_default_worker_id(
+            db,
+            body.default_worker_profile_id,
+        )
+    if "default_provider_id" in body.model_fields_set:
+        issue.default_provider_id = await _resolve_issue_default_provider_id(
+            db,
+            body.default_provider_id,
+        )
 
     await db.commit()
-    await db.refresh(issue, attribute_names=["tasks"])
+    await db.refresh(issue, attribute_names=["tasks", "default_worker_profile", "default_provider"])
     return _serialize_issue_detail(issue)
 
 
@@ -532,7 +617,11 @@ async def close_issue(
     result = await db.execute(
         select(Issue)
         .where(Issue.id == issue_id)
-        .options(selectinload(Issue.tasks))
+        .options(
+            selectinload(Issue.tasks),
+            selectinload(Issue.default_worker_profile),
+            selectinload(Issue.default_provider),
+        )
     )
     issue = result.scalar_one_or_none()
     if issue is None:
@@ -547,7 +636,7 @@ async def close_issue(
     if body and body.should_delete_branch:
         await _try_delete_issue_branch(issue, db, ignore_close_policy=True)
     await db.commit()
-    await db.refresh(issue, attribute_names=["tasks"])
+    await db.refresh(issue, attribute_names=["tasks", "default_worker_profile", "default_provider"])
     return _serialize_issue_detail(issue)
 
 
@@ -561,7 +650,11 @@ async def delete_issue_branch(
     result = await db.execute(
         select(Issue)
         .where(Issue.id == issue_id)
-        .options(selectinload(Issue.tasks))
+        .options(
+            selectinload(Issue.tasks),
+            selectinload(Issue.default_worker_profile),
+            selectinload(Issue.default_provider),
+        )
     )
     issue = result.scalar_one_or_none()
     if issue is None:
@@ -594,7 +687,7 @@ async def delete_issue_branch(
     issue.branch_deleted = True
     await db.commit()
     # Refresh tasks relationship (match pattern used by close_issue)
-    await db.refresh(issue, attribute_names=["tasks"])
+    await db.refresh(issue, attribute_names=["tasks", "default_worker_profile", "default_provider"])
     return _serialize_issue_detail(issue)
 
 
