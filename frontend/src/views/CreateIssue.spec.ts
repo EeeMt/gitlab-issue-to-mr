@@ -13,6 +13,8 @@ const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
     getBranches: vi.fn<() => Promise<any[]>>(),
     createIssue: vi.fn<() => Promise<any>>(),
     getPromptTemplates: vi.fn<() => Promise<any[]>>(),
+    getProviders: vi.fn<() => Promise<any[]>>(),
+    getWorkerProfiles: vi.fn<() => Promise<any[]>>(),
   }
   const resetMockApi = () => {
     Object.values(mock).forEach(fn => {
@@ -44,6 +46,8 @@ vi.mock('../api', () => ({
   getBranches: mockApi.getBranches,
   createIssue: mockApi.createIssue,
   getPromptTemplates: mockApi.getPromptTemplates,
+  getProviders: mockApi.getProviders,
+  getWorkerProfiles: mockApi.getWorkerProfiles,
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -307,6 +311,30 @@ const mockTemplates = [
   createMockPromptTemplate({ id: 2, name: 'Feature', content: 'Add {{feature}}', variable_tips: { feature: 'Feature name' }, tags: ['frontend'] }),
 ]
 
+const mockProviders = [
+  { id: 7, name: 'Default Provider', model: 'model-a', is_default: true, is_disabled: false },
+]
+
+const mockWorkerProfiles = [
+  {
+    id: 3,
+    name: 'Default Worker',
+    description: null,
+    enabled: true,
+    is_default: true,
+    image: 'codify-worker:latest',
+    volume_mounts: [],
+    environment_variables: [],
+    pre_script: '',
+    post_script: '',
+    default_execute_run_instruction_template: 'Execute {{user_prompt}}',
+    default_plan_run_instruction_template: 'Plan {{user_prompt}}',
+    ci_auto_repair_run_instruction_template: 'Repair {{issue_title}}',
+    created_at: '',
+    updated_at: '',
+  },
+]
+
 const mockCreatedIssue = {
   id: 42,
   title: 'My Issue',
@@ -351,6 +379,8 @@ describe('CreateIssue', () => {
       })
     )
     ;(mockApi.getPromptTemplates as Mock).mockResolvedValue(mockTemplates)
+    ;(mockApi.getProviders as Mock).mockResolvedValue(mockProviders)
+    ;(mockApi.getWorkerProfiles as Mock).mockResolvedValue(mockWorkerProfiles)
     ;(mockApi.createIssue as Mock).mockResolvedValue(mockCreatedIssue)
     ;(mockApi.getBranches as Mock).mockResolvedValue(mockBranches)
 

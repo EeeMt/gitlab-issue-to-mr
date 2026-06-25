@@ -9,6 +9,7 @@ const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
     updateTask: vi.fn<() => Promise<any>>(),
     getPromptTemplates: vi.fn<() => Promise<any[]>>(),
     getProviders: vi.fn<() => Promise<any[]>>(),
+    getWorkerProfiles: vi.fn<() => Promise<any[]>>(),
     getScheduledTasks: vi.fn<() => Promise<any[]>>(),
     getSlotCapacity: vi.fn<() => Promise<any>>(),
     getConfig: vi.fn<() => Promise<any>>(),
@@ -46,6 +47,7 @@ vi.mock('../api', () => ({
   updateTask: mockApi.updateTask,
   getPromptTemplates: mockApi.getPromptTemplates,
   getProviders: mockApi.getProviders,
+  getWorkerProfiles: mockApi.getWorkerProfiles,
   getScheduledTasks: mockApi.getScheduledTasks,
   getSlotCapacity: mockApi.getSlotCapacity,
   getConfig: mockApi.getConfig,
@@ -297,6 +299,26 @@ const mockProviders = [
   { id: 7, name: 'Default Provider', model: 'model-a', is_default: true, is_disabled: false },
 ]
 
+const mockWorkerProfiles = [
+  {
+    id: 3,
+    name: 'Java Worker',
+    description: null,
+    enabled: true,
+    is_default: true,
+    image: 'worker-java:latest',
+    volume_mounts: [],
+    environment_variables: [],
+    pre_script: '',
+    post_script: '',
+    default_execute_run_instruction_template: 'Worker execute {{user_prompt}}',
+    default_plan_run_instruction_template: 'Worker plan {{user_prompt}}',
+    ci_auto_repair_run_instruction_template: 'Worker repair {{issue_title}}',
+    created_at: '',
+    updated_at: ''
+  }
+]
+
 describe('TaskFormDrawer', () => {
   let wrapper: VueWrapper<any>
 
@@ -306,6 +328,7 @@ describe('TaskFormDrawer', () => {
     Object.values(mockMessage).forEach(fn => fn.mockReset())
     mockApi.getPromptTemplates.mockResolvedValue(mockTemplates)
     mockApi.getProviders.mockResolvedValue(mockProviders)
+    mockApi.getWorkerProfiles.mockResolvedValue(mockWorkerProfiles)
     mockApi.getScheduledTasks.mockResolvedValue([])
     mockApi.getSlotCapacity.mockResolvedValue(null)
     mockApi.getConfig.mockResolvedValue({ runtime: { slot_max_tasks: 5, slot_max_tasks_enforce: false } })
@@ -491,14 +514,15 @@ describe('TaskFormDrawer', () => {
       await mountDrawer()
       await openDrawer()
 
-      expect(wrapper.find('.provider-control__summary').text()).toContain('createTask.providerUsesDefault')
-      expect(wrapper.find('.provider-control__summary').text()).toContain('Default Provider / model-a')
+      const providerSummary = () => wrapper.findAll('.provider-control__summary')[1]
+      expect(providerSummary().text()).toContain('createTask.providerUsesDefault')
+      expect(providerSummary().text()).toContain('Default Provider / model-a')
 
       wrapper.vm.selectedProviderId = 8
       await nextTick()
 
-      expect(wrapper.find('.provider-control__summary').text()).toContain('createTask.providerUsesSelected')
-      expect(wrapper.find('.provider-control__summary').text()).toContain('Fast Provider / model-b')
+      expect(providerSummary().text()).toContain('createTask.providerUsesSelected')
+      expect(providerSummary().text()).toContain('Fast Provider / model-b')
     })
 
     it('shows warning summary when no enabled provider exists', async () => {
@@ -508,13 +532,13 @@ describe('TaskFormDrawer', () => {
       await mountDrawer()
       await openDrawer()
 
-      const summary = wrapper.find('.provider-control__summary')
+      const summary = wrapper.findAll('.provider-control__summary')[1]
       expect(summary.exists()).toBe(true)
       expect(summary.classes()).toContain('provider-control__summary--warning')
       expect(summary.text()).toContain('config.providers.noEnabledProvider')
     })
 
-    it('warns when no enabled provider is available', async () => {
+    it('does not block creation when provider is left to issue default', async () => {
       mockApi.getProviders.mockResolvedValue([
         { id: 7, name: 'Default Provider', model: 'model-a', is_default: true, is_disabled: true },
       ])
@@ -524,8 +548,39 @@ describe('TaskFormDrawer', () => {
       wrapper.vm.taskMode = 'execute'
       await submitCreate()
 
-      expect(mockMessage.warning).toHaveBeenCalledWith('config.providers.noEnabledProvider')
-      expect(mockApi.createTask).not.toHaveBeenCalled()
+      expect(mockMessage.warning).not.toHaveBeenCalledWith('config.providers.noEnabledProvider')
+      expect(mockApi.createTask).toHaveBeenCalledWith(
+        expect.not.objectContaining({ provider_id: expect.anything() })
+      )
+    })
+
+    it('creates task with selected worker profile', async () => {
+      await mountDrawer()
+      await openDrawer()
+
+      wrapper.vm.taskMode = 'execute'
+      wrapper.vm.selectedWorkerProfileId = 3
+      wrapper.vm.selectedProviderId = 7
+      wrapper.vm.runInstructionTemplate = 'Worker execute {{user_prompt}}'
+      await submitCreate()
+
+      expect(mockApi.createTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          worker_profile_id: 3,
+          provider_id: 7
+        })
+      )
+    })
+
+    it('keeps manually edited run instruction when worker changes', async () => {
+      await mountDrawer()
+      await openDrawer()
+
+      wrapper.vm.runInstructionTemplate = 'Custom instruction'
+      wrapper.vm.runInstructionDirty = true
+      wrapper.vm.handleWorkerProfileChange(4)
+
+      expect(wrapper.vm.runInstructionTemplate).toBe('Custom instruction')
     })
 
     it('resets create state and emits close after successful creation', async () => {
@@ -992,7 +1047,7 @@ describe('TaskFormDrawer', () => {
 
       wrapper.vm.selectTaskMode('execute')
       await nextTick()
-      expect(wrapper.vm.runInstructionTemplate).toBe('Execute {{user_prompt}}')
+      expect(wrapper.vm.runInstructionTemplate).toBe('Worker execute {{user_prompt}}')
       expect(advanced.classes()).not.toContain('run-instruction-advanced--disabled')
       expect(summary.attributes('aria-disabled')).toBe('false')
       expect(wrapper.find('.run-instruction-advanced__hint').text()).toBe(
@@ -1006,7 +1061,7 @@ describe('TaskFormDrawer', () => {
       wrapper.vm.selectTaskMode('execute')
       await submitCreate()
       expect(mockApi.createTask).toHaveBeenCalledWith(
-        expect.objectContaining({ run_instruction_template: 'Execute {{user_prompt}}' })
+        expect.objectContaining({ run_instruction_template: 'Worker execute {{user_prompt}}' })
       )
       expect(wrapper.find('details.run-instruction-advanced').attributes('open')).toBeUndefined()
     })

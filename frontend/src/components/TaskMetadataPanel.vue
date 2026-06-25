@@ -88,6 +88,27 @@
         </span>
       </div>
 
+      <!-- Worker -->
+      <div v-if="task.worker_profile_name || task.worker_profile_id" class="metadata-row">
+        <span class="metadata-label">
+          <n-icon size="14" class="metadata-label-icon"><ServerOutline /></n-icon>
+          {{ t('taskView.workerProfile') }}
+        </span>
+        <span class="metadata-value">
+          {{ task.worker_profile_name || `#${task.worker_profile_id}` }}
+        </span>
+      </div>
+
+      <div v-if="task.worker_image" class="metadata-row">
+        <span class="metadata-label">
+          <n-icon size="14" class="metadata-label-icon"><ServerOutline /></n-icon>
+          {{ t('taskView.workerImage') }}
+        </span>
+        <span class="metadata-value">
+          {{ task.worker_image }}
+        </span>
+      </div>
+
       <!-- Task mode -->
       <div class="metadata-row">
         <span class="metadata-label">

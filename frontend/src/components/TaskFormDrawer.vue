@@ -357,6 +357,41 @@
         <n-form-item class="provider-form-item">
           <template #label>
             <div class="execution-field-label">
+              <span>{{ t('createTask.workerProfile') }}</span>
+              <span class="execution-field-label__hint">{{ t('createTask.workerProfileHint') }}</span>
+            </div>
+          </template>
+          <div class="provider-control" :class="{ 'provider-control--empty': !effectiveWorkerProfile }">
+            <span class="provider-control__icon">
+              <n-icon :component="HardwareChipOutline" size="18" />
+            </span>
+            <div class="provider-control__body">
+              <n-select
+                v-model:value="selectedWorkerProfileId"
+                class="provider-control__select"
+                :options="workerProfileOptions"
+                clearable
+                :placeholder="t('createTask.selectWorkerProfile')"
+                @update:value="handleWorkerProfileChange"
+              />
+              <div v-if="effectiveWorkerProfile" class="provider-control__summary">
+                <span class="provider-control__status">
+                  {{ selectedWorkerProfileId === null
+                    ? t('createTask.workerUsesDefault')
+                    : t('createTask.workerUsesSelected') }}
+                </span>
+                <span aria-hidden="true">·</span>
+                <span class="provider-control__model">
+                  {{ effectiveWorkerProfile.name }} / {{ effectiveWorkerProfile.image }}
+                </span>
+              </div>
+            </div>
+          </div>
+        </n-form-item>
+
+        <n-form-item class="provider-form-item">
+          <template #label>
+            <div class="execution-field-label">
               <span>{{ t('config.providers.providerLabel') }}</span>
               <span class="execution-field-label__hint">{{ t('createTask.providerHint') }}</span>
             </div>
@@ -477,9 +512,9 @@ import HeatmapChart from './HeatmapChart.vue'
 import RunInstructionTemplateEditor from './RunInstructionTemplateEditor.vue'
 import {
   createTask, updateTask, getPromptTemplates, getProviders, getScheduledTasks, getSlotCapacity, getConfig,
-  getRunInstructionTemplateDefaults, previewRunInstructionTemplate,
+  getRunInstructionTemplateDefaults, getWorkerProfiles, previewRunInstructionTemplate,
   type Task, type PromptTemplate, type SlotCapacityInfo, type AIProvider, type UpdateTaskRequest,
-  type RunInstructionTemplateDefaults
+  type RunInstructionTemplateDefaults, type WorkerProfile
 } from '../api'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeUtc8Compact, formatTimeUtc8 } from '../utils/datetime'
@@ -532,6 +567,7 @@ const requireChanges = ref(true)
 const taskMode = ref<'execute' | 'plan' | null>(null)
 const taskModeErrorVisible = ref(false)
 const selectedProviderId = ref<number | null>(null)
+const selectedWorkerProfileId = ref<number | null>(null)
 const scheduleType = ref<'now' | 'scheduled'>('now')
 const scheduledAt = ref<number | null>(null)
 const submitLoading = ref(false)
@@ -557,6 +593,7 @@ const promptVariableTips = ref<Record<string, string> | undefined>(undefined)
 
 // Providers state
 const providers = ref<AIProvider[]>([])
+const workerProfiles = ref<WorkerProfile[]>([])
 
 // Schedule heatmap state (create mode)
 const showHeatmapDrawer = ref(false)
@@ -603,11 +640,30 @@ const providerOptions = computed(() =>
     disabled: p.is_disabled,
   }))
 )
+const selectableWorkerProfiles = computed(() =>
+  workerProfiles.value.filter((profile) => {
+    if (profile.enabled) return true
+    return props.mode === 'edit' && profile.id === props.task?.worker_profile_id
+  })
+)
+const workerProfileOptions = computed(() =>
+  selectableWorkerProfiles.value.map(profile => ({
+    label: `${profile.name} (${profile.image})${profile.is_default ? ' ★' : ''}${!profile.enabled ? ` - ${t('config.disabled')}` : ''}`,
+    value: profile.id,
+    disabled: !profile.enabled,
+  }))
+)
 const effectiveProvider = computed(() => {
   if (selectedProviderId.value !== null) {
     return selectableProviders.value.find(provider => provider.id === selectedProviderId.value) ?? null
   }
   return selectableProviders.value.find(provider => provider.is_default && !provider.is_disabled) ?? null
+})
+const effectiveWorkerProfile = computed(() => {
+  if (selectedWorkerProfileId.value !== null) {
+    return selectableWorkerProfiles.value.find(profile => profile.id === selectedWorkerProfileId.value) ?? null
+  }
+  return selectableWorkerProfiles.value.find(profile => profile.is_default && profile.enabled) ?? null
 })
 const currentAvailablePlaceholders = computed(() => {
   if (!runInstructionDefaults.value || !taskMode.value) return []
@@ -646,7 +702,7 @@ watch(taskMode, (val) => {
   if (val !== null) {
     taskModeErrorVisible.value = false
     if (!runInstructionTemplate.value && runInstructionDefaults.value) {
-      runInstructionTemplate.value = runInstructionDefaults.value[val].content
+      runInstructionTemplate.value = getDefaultRunInstructionTemplate(val)
     }
   }
 }, { flush: 'sync' })
@@ -664,8 +720,9 @@ watch(() => props.show, (val) => {
       requireChanges.value = props.task.require_changes ?? true
       taskMode.value = (props.task.task_mode as 'execute' | 'plan') ?? 'execute'
       selectedProviderId.value = props.task.provider_id ?? null
+      selectedWorkerProfileId.value = props.task.worker_profile_id ?? null
       const snapshot = props.task.run_instruction_template
-        ?? runInstructionDefaults.value?.[taskMode.value].content
+        ?? getDefaultRunInstructionTemplate(taskMode.value)
         ?? ''
       runInstructionTemplate.value = snapshot
       initialRunInstructionTemplate.value = snapshot
@@ -675,6 +732,8 @@ watch(() => props.show, (val) => {
         prompt.value = props.issueDescription
       }
       taskMode.value = null
+      selectedProviderId.value = null
+      selectedWorkerProfileId.value = null
       runInstructionTemplate.value = ''
       initialRunInstructionTemplate.value = ''
       runInstructionDirty.value = false
@@ -695,6 +754,12 @@ async function loadProviders() {
   } catch { /* non-critical */ }
 }
 
+async function loadWorkerProfiles() {
+  try {
+    workerProfiles.value = await getWorkerProfiles()
+  } catch { /* non-critical */ }
+}
+
 async function loadTemplates() {
   promptTemplatesLoading.value = true
   try {
@@ -711,12 +776,12 @@ async function loadRunInstructionDefaults() {
     runInstructionDefaults.value = await getRunInstructionTemplateDefaults()
     if (props.show && props.mode === 'edit' && props.task && !runInstructionTemplate.value) {
       const mode = (props.task.task_mode ?? 'execute') as 'execute' | 'plan'
-      const snapshot = props.task.run_instruction_template ?? runInstructionDefaults.value[mode].content
+      const snapshot = props.task.run_instruction_template ?? getDefaultRunInstructionTemplate(mode)
       runInstructionTemplate.value = snapshot
       initialRunInstructionTemplate.value = snapshot
     }
     if (props.show && props.mode === 'create' && taskMode.value && !runInstructionTemplate.value) {
-      runInstructionTemplate.value = runInstructionDefaults.value[taskMode.value].content
+      runInstructionTemplate.value = getDefaultRunInstructionTemplate(taskMode.value)
       initialRunInstructionTemplate.value = runInstructionTemplate.value
     }
   } catch {
@@ -782,7 +847,7 @@ function selectScheduleType(type: 'now' | 'scheduled') {
 
 function selectTaskMode(mode: 'execute' | 'plan') {
   if (taskMode.value === mode) return
-  const nextDefault = runInstructionDefaults.value?.[mode].content ?? ''
+  const nextDefault = getDefaultRunInstructionTemplate(mode)
   if (runInstructionDirty.value && runInstructionTemplate.value) {
     const replace = window.confirm(t('runInstruction.modeSwitchConfirm'))
     if (replace) runInstructionTemplate.value = nextDefault
@@ -803,9 +868,30 @@ function handleRunInstructionSummaryClick(event: MouseEvent) {
 }
 
 function restoreRunInstructionDefault() {
-  if (!runInstructionDefaults.value || !taskMode.value) return
-  runInstructionTemplate.value = runInstructionDefaults.value[taskMode.value].content
+  if (!taskMode.value) return
+  runInstructionTemplate.value = getDefaultRunInstructionTemplate(taskMode.value)
   runInstructionDirty.value = true
+  invalidateRunInstructionPreview()
+}
+
+function getDefaultRunInstructionTemplate(mode: 'execute' | 'plan' | null): string {
+  if (!mode) return ''
+  const profile = effectiveWorkerProfile.value
+  if (profile) {
+    return mode === 'plan'
+      ? profile.default_plan_run_instruction_template
+      : profile.default_execute_run_instruction_template
+  }
+  return runInstructionDefaults.value?.[mode].content ?? ''
+}
+
+function handleWorkerProfileChange(profileId: number | null) {
+  selectedWorkerProfileId.value = profileId
+  if (!taskMode.value || runInstructionDirty.value) return
+  const nextTemplate = getDefaultRunInstructionTemplate(taskMode.value)
+  if (!nextTemplate) return
+  runInstructionTemplate.value = nextTemplate
+  initialRunInstructionTemplate.value = nextTemplate
   invalidateRunInstructionPreview()
 }
 
@@ -895,8 +981,8 @@ async function handleCreate() {
     message.warning(t('issue.pleaseSelectTaskMode'))
     return
   }
-  if (!runInstructionTemplate.value && runInstructionDefaults.value) {
-    runInstructionTemplate.value = runInstructionDefaults.value[taskMode.value].content
+  if (!runInstructionTemplate.value) {
+    runInstructionTemplate.value = getDefaultRunInstructionTemplate(taskMode.value)
   }
   if (!runInstructionTemplate.value.trim()) {
     message.warning(defaultsError.value || t('runInstruction.defaultsLoadFailed'))
@@ -927,17 +1013,18 @@ async function handleCreate() {
     if (scheduleType.value === 'scheduled' && scheduledAt.value) {
       req.scheduled_datetime = new Date(scheduledAt.value).toISOString()
     }
-    const pid = selectedProviderId.value ?? providers.value.find(p => p.is_default && !p.is_disabled)?.id
-    if (pid == null) {
-      message.warning(t('config.providers.noEnabledProvider'))
-      return
+    if (selectedProviderId.value !== null) {
+      req.provider_id = selectedProviderId.value
     }
-    req.provider_id = pid
+    if (selectedWorkerProfileId.value !== null) {
+      req.worker_profile_id = selectedWorkerProfileId.value
+    }
     const created = await createTask(req)
     message.success(t('issue.taskCreated'))
     prompt.value = ''
     scheduledAt.value = null
     selectedProviderId.value = null
+    selectedWorkerProfileId.value = null
     scheduleType.value = 'now'
     scheduledTasksForPreview.value = []
     emit('update:show', false)
@@ -969,6 +1056,9 @@ async function handleEdit() {
   if (priority.value !== orig.priority) payload.priority = priority.value
   if ((selectedProviderId.value ?? null) !== (orig.provider_id ?? null)) {
     payload.provider_id = selectedProviderId.value
+  }
+  if ((selectedWorkerProfileId.value ?? null) !== (orig.worker_profile_id ?? null)) {
+    payload.worker_profile_id = selectedWorkerProfileId.value
   }
   if (requireChanges.value !== orig.require_changes) payload.require_changes = requireChanges.value
     if (taskMode.value !== null && taskMode.value !== (orig.task_mode ?? 'execute')) {
@@ -1009,6 +1099,7 @@ async function handleEdit() {
 // --- Lifecycle ---
 onMounted(() => {
   void loadProviders()
+  void loadWorkerProfiles()
   void loadTemplates()
   void loadRunInstructionDefaults()
 })

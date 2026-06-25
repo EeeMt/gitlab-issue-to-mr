@@ -222,6 +222,22 @@
 
               <!-- Row 2: Delete working branch on close -->
               <div class="branch-extra-row">
+                <n-form-item :label="t('createTask.defaultWorkerProfile')">
+                  <n-select
+                    v-model:value="defaultWorkerProfileId"
+                    :options="workerProfileOptions"
+                    clearable
+                    :placeholder="t('createTask.selectWorkerProfile')"
+                  />
+                </n-form-item>
+                <n-form-item :label="t('createTask.defaultProvider')">
+                  <n-select
+                    v-model:value="defaultProviderId"
+                    :options="providerOptions"
+                    clearable
+                    :placeholder="t('config.providers.systemDefault')"
+                  />
+                </n-form-item>
                 <n-form-item :label="t('issue.deleteBranchOnClose')" path="delete_branch_on_close">
                   <n-space align="center" :size="8">
                     <n-switch v-model:value="formValue.delete_branch_on_close" />
@@ -371,11 +387,15 @@ import {
   getProjectCIAutoRepairAvailability,
   getProjects,
   getPromptTemplates,
+  getProviders,
+  getWorkerProfiles,
   type Branch,
   type CreateIssueRequest,
+  type AIProvider,
   type Project,
   type ProjectCIAutoRepairAvailability,
   type PromptTemplate,
+  type WorkerProfile,
 } from '../api'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import {
@@ -402,6 +422,10 @@ const projects = ref<Project[]>([])
 const branches = ref<Branch[]>([])
 const ciAutoRepairAvailability = ref<ProjectCIAutoRepairAvailability | null>(null)
 const promptTemplates = ref<PromptTemplate[]>([])
+const workerProfiles = ref<WorkerProfile[]>([])
+const providers = ref<AIProvider[]>([])
+const defaultWorkerProfileId = ref<number | null>(null)
+const defaultProviderId = ref<number | null>(null)
 
 // Template picker state
 const promptVariableTips = ref<Record<string, string> | undefined>(undefined)
@@ -481,6 +505,20 @@ const branchOptions = computed(() =>
   branches.value.map(b => ({
     label: b.name,
     value: b.name,
+  }))
+)
+
+const workerProfileOptions = computed(() =>
+  workerProfiles.value.map(profile => ({
+    label: `${profile.name} (${profile.image})${profile.is_default ? ' ★' : ''}`,
+    value: profile.id,
+  }))
+)
+
+const providerOptions = computed(() =>
+  providers.value.map(provider => ({
+    label: `${provider.name} (${provider.model})${provider.is_default ? ' ★' : ''}`,
+    value: provider.id,
   }))
 )
 
@@ -725,6 +763,27 @@ async function fetchPromptTemplates() {
   }
 }
 
+async function loadExecutionDefaults() {
+  const [workerResult, providerResult] = await Promise.allSettled([
+    getWorkerProfiles(),
+    getProviders(),
+  ])
+  if (workerResult.status === 'fulfilled') {
+    workerProfiles.value = Array.isArray(workerResult.value)
+      ? workerResult.value.filter(profile => profile.enabled)
+      : []
+    defaultWorkerProfileId.value =
+      workerProfiles.value.find(profile => profile.is_default)?.id ?? null
+  }
+  if (providerResult.status === 'fulfilled') {
+    providers.value = Array.isArray(providerResult.value)
+      ? providerResult.value.filter(provider => !provider.is_disabled)
+      : []
+    defaultProviderId.value =
+      providers.value.find(provider => provider.is_default)?.id ?? null
+  }
+}
+
 function applyPromptTemplate(tmpl: PromptTemplate) {
   formValue.value.description = tmpl.content
   if (tmpl.variable_tips) {
@@ -769,6 +828,10 @@ async function handleReset() {
   branches.value = []
   projectSearch.value = ''
   Object.assign(formValue.value, createInitialFormValue())
+  defaultWorkerProfileId.value =
+    workerProfiles.value.find(profile => profile.is_default)?.id ?? null
+  defaultProviderId.value =
+    providers.value.find(provider => provider.is_default)?.id ?? null
   formRef.value?.restoreValidation()
 }
 
@@ -800,6 +863,8 @@ async function handleSubmit() {
         formValue.value.create_mr && ciAutoRepairAvailable.value
           ? formValue.value.ci_auto_repair_enabled
           : false,
+      default_worker_profile_id: defaultWorkerProfileId.value,
+      default_provider_id: defaultProviderId.value,
     }
 
     const issue = await createIssue(request)
@@ -818,6 +883,7 @@ async function handleSubmit() {
 onMounted(() => {
   fetchProjects()
   fetchPromptTemplates()
+  loadExecutionDefaults()
 })
 </script>
 

@@ -26,8 +26,9 @@ const { mockApi, resetMockApi, mockMessage, mockDialog } = vi.hoisted(() => {
     getScheduledTasks: vi.fn<() => Promise<any[]>>(),
     getSlotCapacity: vi.fn<() => Promise<any>>(),
     getConfig: vi.fn<() => Promise<any>>(),
-	    getProjects: vi.fn<() => Promise<any[]>>(),
+    getProjects: vi.fn<() => Promise<any[]>>(),
     getProviders: vi.fn<() => Promise<any[]>>(),
+    getWorkerProfiles: vi.fn<() => Promise<any[]>>(),
 	    getRunInstructionTemplateDefaults: vi.fn<() => Promise<any>>(),
 	    previewRunInstructionTemplate: vi.fn<() => Promise<any>>(),
 	    getIssueCIFailures: vi.fn<() => Promise<any>>(),
@@ -83,6 +84,7 @@ vi.mock('../api', () => ({
 	  getConfig: mockApi.getConfig,
 	  getProjects: mockApi.getProjects,
 	  getProviders: mockApi.getProviders,
+	  getWorkerProfiles: mockApi.getWorkerProfiles,
 	  getRunInstructionTemplateDefaults: mockApi.getRunInstructionTemplateDefaults,
 	  previewRunInstructionTemplate: mockApi.previewRunInstructionTemplate,
 	  getIssueCIFailures: mockApi.getIssueCIFailures,
@@ -522,6 +524,26 @@ const mockProviders = [
   },
 ]
 
+const mockWorkerProfiles = [
+  {
+    id: 2,
+    name: 'Default Worker',
+    description: null,
+    enabled: true,
+    is_default: true,
+    image: 'codify-worker:latest',
+    volume_mounts: [],
+    environment_variables: [],
+    pre_script: '',
+    post_script: '',
+    default_execute_run_instruction_template: 'Execute {{user_prompt}}',
+    default_plan_run_instruction_template: 'Plan {{user_prompt}}',
+    ci_auto_repair_run_instruction_template: 'Repair {{issue_title}}',
+    created_at: '',
+    updated_at: '',
+  },
+]
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -534,6 +556,7 @@ function setupDefaultMocks(issueOverrides: Record<string, any> = {}) {
 	  mockApi.getSlotCapacity.mockResolvedValue(null)
 	  mockApi.getConfig.mockResolvedValue({ runtime: { slot_max_tasks: 5, slot_max_tasks_enforce: false } })
 	  mockApi.getProviders.mockResolvedValue(mockProviders)
+	  mockApi.getWorkerProfiles.mockResolvedValue(mockWorkerProfiles)
 	  mockApi.getRunInstructionTemplateDefaults.mockResolvedValue({
 	    execute: { content: 'Execute {{user_prompt}}', available_placeholders: ['user_prompt'] },
 	    plan: { content: 'Plan {{user_prompt}}', available_placeholders: ['user_prompt'] },

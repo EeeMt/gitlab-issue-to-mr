@@ -264,6 +264,22 @@
             </span>
           </n-space>
         </n-form-item>
+        <n-form-item :label="t('createTask.defaultWorkerProfile')">
+          <n-select
+            v-model:value="editForm.default_worker_profile_id"
+            :options="workerProfileOptions"
+            clearable
+            :placeholder="t('createTask.selectWorkerProfile')"
+          />
+        </n-form-item>
+        <n-form-item :label="t('createTask.defaultProvider')">
+          <n-select
+            v-model:value="editForm.default_provider_id"
+            :options="providerOptions"
+            clearable
+            :placeholder="t('config.providers.systemDefault')"
+          />
+        </n-form-item>
       </n-form>
       <template #action>
         <n-space justify="end">
@@ -380,7 +396,7 @@ import {
   NButton, NSpace, NCard, NTag, NSpin,
   NIcon, NInput, NDrawer, NDrawerContent,
   NRadio, NRadioGroup, NForm, NFormItem, NDatePicker, NModal, NPopconfirm, NScrollbar, NTooltip,
-  NSwitch, useMessage
+  NSelect, NSwitch, useMessage
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import {
@@ -400,7 +416,9 @@ import RescheduleDrawer from '../components/RescheduleDrawer.vue'
 import {
   getIssue, updateIssue, closeIssue, retryTask, deleteIssueBranch,
   getScheduledTasks, getConfig, getProjects, getIssueCIFailures, getIssueWebhookEvents,
-  type Issue, type Task, type Project, type CIFailureRun, type WebhookEvent
+  getProviders, getWorkerProfiles,
+  type AIProvider, type Issue, type Task, type Project, type CIFailureRun, type WebhookEvent,
+  type WorkerProfile
 } from '../api'
 import PageHeader from '../components/PageHeader.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
@@ -453,6 +471,8 @@ const closingIssue = ref(false)
 const showCloseModal = ref(false)
 let pollTimer: number | null = null
 const projects = ref<Project[]>([])
+const providers = ref<AIProvider[]>([])
+const workerProfiles = ref<WorkerProfile[]>([])
 const ciFailures = ref<CIFailureRun[]>([])
 const issueWebhookEvents = ref<WebhookEvent[]>([])
 const ciFailuresLoading = ref(false)
@@ -511,6 +531,26 @@ const projectUrl = computed(() => {
   return project?.web_url ?? null
 })
 
+const workerProfileOptions = computed(() =>
+  workerProfiles.value
+    .filter(profile => profile.enabled || profile.id === issue.value?.default_worker_profile_id)
+    .map(profile => ({
+      label: `${profile.name} (${profile.image})${profile.is_default ? ' ★' : ''}`,
+      value: profile.id,
+      disabled: !profile.enabled,
+    }))
+)
+
+const providerOptions = computed(() =>
+  providers.value
+    .filter(provider => !provider.is_disabled || provider.id === issue.value?.default_provider_id)
+    .map(provider => ({
+      label: `${provider.name} (${provider.model})${provider.is_default ? ' ★' : ''}`,
+      value: provider.id,
+      disabled: provider.is_disabled,
+    }))
+)
+
 // Create task form
 const showCreateDrawer = ref(false)
 const showRetryDrawer = ref(false)
@@ -534,6 +574,8 @@ const editForm = reactive({
   title: '',
   description: '',
   ci_auto_repair_enabled: false,
+  default_worker_profile_id: null as number | null,
+  default_provider_id: null as number | null,
 })
 
 // --- Constants ---
@@ -725,6 +767,8 @@ async function handleSaveEdit() {
       title: editForm.title,
       description: editForm.description,
       ci_auto_repair_enabled: editForm.ci_auto_repair_enabled,
+      default_worker_profile_id: editForm.default_worker_profile_id,
+      default_provider_id: editForm.default_provider_id,
     })
     showEditModal.value = false
     message.success(t('issue.updateSuccess'))
@@ -785,11 +829,27 @@ function openEditModal() {
   editForm.title = issue.value.title
   editForm.description = issue.value.description || ''
   editForm.ci_auto_repair_enabled = issue.value.ci_auto_repair_enabled
+  editForm.default_worker_profile_id = issue.value.default_worker_profile_id
+  editForm.default_provider_id = issue.value.default_provider_id
   showEditModal.value = true
+}
+
+async function loadExecutionDefaults() {
+  const [workerResult, providerResult] = await Promise.allSettled([
+    getWorkerProfiles(),
+    getProviders(),
+  ])
+  if (workerResult.status === 'fulfilled') {
+    workerProfiles.value = Array.isArray(workerResult.value) ? workerResult.value : []
+  }
+  if (providerResult.status === 'fulfilled') {
+    providers.value = Array.isArray(providerResult.value) ? providerResult.value : []
+  }
 }
 
 onMounted(() => {
   fetchIssue()
+  loadExecutionDefaults()
   getProjects().then(p => { projects.value = p }).catch((err) => {
     console.warn('Failed to load projects for issue view:', err)
   })
