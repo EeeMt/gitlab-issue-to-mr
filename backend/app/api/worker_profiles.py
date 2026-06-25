@@ -31,24 +31,23 @@ from app.core.worker_profiles import (
     list_worker_profiles as list_worker_profiles_domain,
 )
 from app.database import get_db
-from app.dependencies.auth import require_admin_user
-from app.models import User, WorkerProfile, WorkerProfileEnvironmentVariable
+from app.models import WorkerProfile, WorkerProfileEnvironmentVariable
 
 router = APIRouter()
 
 
 class WorkerProfileEnvironmentVariableRequest(BaseModel):
     id: int | None = None
-    key: str
+    key: str = Field(max_length=255)
     value: str = ""
     is_secret: bool = False
 
 
 class WorkerProfileRequestBase(BaseModel):
-    name: str | None = None
+    name: str | None = Field(default=None, max_length=100)
     description: str | None = None
     enabled: bool | None = None
-    image: str | None = None
+    image: str | None = Field(default=None, max_length=255)
     volume_mounts: list[dict[str, Any]] | None = None
     environment_variables: list[WorkerProfileEnvironmentVariableRequest] | None = None
     pre_script: str | None = None
@@ -59,8 +58,8 @@ class WorkerProfileRequestBase(BaseModel):
 
 
 class WorkerProfileCreateRequest(WorkerProfileRequestBase):
-    name: str
-    image: str
+    name: str = Field(max_length=100)
+    image: str = Field(max_length=255)
     volume_mounts: list[dict[str, Any]] = Field(default_factory=list)
     environment_variables: list[WorkerProfileEnvironmentVariableRequest] = Field(
         default_factory=list
@@ -140,7 +139,6 @@ async def list_worker_profiles(db: AsyncSession = Depends(get_db)):
 async def create_worker_profile(
     request: WorkerProfileCreateRequest,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_admin_user),
 ):
     """Create a worker profile."""
     try:
@@ -193,7 +191,6 @@ async def update_worker_profile(
     profile_id: int,
     request: WorkerProfileUpdateRequest,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_admin_user),
 ):
     """Update a worker profile."""
     profile = await _load_profile_or_404(db, profile_id)
@@ -270,7 +267,6 @@ async def update_worker_profile(
 async def set_default_worker_profile_endpoint(
     profile_id: int,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_admin_user),
 ):
     """Set one enabled worker profile as the system default."""
     profile = await _load_profile_or_404(db, profile_id)
@@ -288,7 +284,6 @@ async def set_default_worker_profile_endpoint(
 async def disable_worker_profile(
     profile_id: int,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_admin_user),
 ):
     """Disable a non-default worker profile."""
     profile = await _load_profile_or_404(db, profile_id)
@@ -306,7 +301,6 @@ async def disable_worker_profile(
 async def duplicate_worker_profile(
     profile_id: int,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_admin_user),
 ):
     """Duplicate a worker profile, preserving encrypted secret values."""
     source = await _load_profile_or_404(db, profile_id)

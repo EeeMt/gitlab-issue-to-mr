@@ -318,7 +318,7 @@ app.include_router(
     worker_profiles.router,
     prefix="/api",
     tags=["worker-profiles"],
-    dependencies=[Depends(require_authenticated_user)],
+    dependencies=[Depends(require_admin_user)],
 )
 app.include_router(
     usage_limits.router,

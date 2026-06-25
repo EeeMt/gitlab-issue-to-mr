@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -6,6 +7,7 @@ from app.core.worker_profiles import (
     WorkerProfileValidationError,
     build_worker_profile_environment_map,
     parse_worker_profile_mounts,
+    resolve_provider_for_issue,
     select_snapshot_run_instruction_template,
     serialize_profile_environment_variable_for_api,
     validate_worker_profile_mounts,
@@ -99,6 +101,32 @@ def test_serialize_secret_profile_environment_variable_hides_plaintext():
         "created_at": None,
         "updated_at": None,
     }
+
+
+def test_serialize_plain_empty_profile_environment_variable_is_configured():
+    row = SimpleNamespace(
+        id=8,
+        key="EMPTY_VALUE",
+        value="",
+        is_secret=False,
+        created_at=None,
+        updated_at=None,
+    )
+
+    assert serialize_profile_environment_variable_for_api(row)["value_configured"] is True
+
+
+@pytest.mark.asyncio
+async def test_resolve_provider_for_issue_rejects_missing_configured_provider():
+    db = SimpleNamespace()
+    db.get = AsyncMock(return_value=None)
+    default_provider = SimpleNamespace(id=1, name="Default Provider", is_disabled=False)
+    default_result = SimpleNamespace(scalar_one_or_none=lambda: default_provider)
+    db.execute = AsyncMock(return_value=default_result)
+    issue = SimpleNamespace(default_provider_id=42)
+
+    with pytest.raises(WorkerProfileValidationError, match="configured AI provider.*not found"):
+        await resolve_provider_for_issue(db, issue)
 
 
 def test_select_snapshot_run_instruction_template_uses_ci_template_for_ci_repair():

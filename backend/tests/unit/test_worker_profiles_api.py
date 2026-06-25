@@ -13,7 +13,10 @@ from app.api.worker_profiles import (
     set_default_worker_profile_endpoint,
 )
 from app.database import get_db
-from app.dependencies.auth import require_admin_user, require_authenticated_user
+from app.dependencies.auth import (
+    require_admin_user,
+    require_authenticated_user,
+)
 from app.main import app
 
 
@@ -68,7 +71,7 @@ async def test_create_worker_profile_rejects_duplicate_env_keys():
     )
 
     with pytest.raises(HTTPException) as exc:
-        await create_worker_profile(request, db=db, _current_user=SimpleNamespace(id=1))
+        await create_worker_profile(request, db=db)
     assert exc.value.status_code == 422
     assert "Duplicate worker environment variable key" in str(exc.value.detail)
 
@@ -85,7 +88,6 @@ async def test_set_default_rejects_disabled_profile():
         await set_default_worker_profile_endpoint(
             profile_id=10,
             db=db,
-            _current_user=SimpleNamespace(id=1),
         )
     assert exc.value.status_code == 422
     assert "Disabled worker profiles cannot be default" in str(exc.value.detail)
@@ -121,6 +123,63 @@ def test_list_worker_profiles_exposes_secret_configured_not_plaintext():
     assert env_item["value"] is None
     assert env_item["value_configured"] is True
     assert "encrypted-secret" not in response.text
+
+
+def test_list_worker_profiles_rejects_regular_authenticated_user():
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = []
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=result)
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[require_authenticated_user] = lambda: SimpleNamespace(id=1)
+    app.dependency_overrides[require_admin_user] = lambda: (_ for _ in ()).throw(
+        HTTPException(status_code=403, detail="Admin access required")
+    )
+    client = TestClient(app, raise_server_exceptions=False)
+    try:
+        response = client.get("/api/worker-profiles")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Admin access required"
+
+
+@pytest.mark.parametrize(
+    ("payload_patch", "expected_field"),
+    [
+        ({"name": "x" * 101}, "name"),
+        ({"image": "x" * 256}, "image"),
+        (
+            {"environment_variables": [{"key": "X" * 256, "value": "value"}]},
+            "environment_variables",
+        ),
+    ],
+)
+def test_create_worker_profile_rejects_over_length_fields(payload_patch, expected_field):
+    db = MagicMock()
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[require_authenticated_user] = lambda: SimpleNamespace(id=1)
+    app.dependency_overrides[require_admin_user] = lambda: SimpleNamespace(
+        id=1,
+        platform_role="platform_admin",
+    )
+    client = TestClient(app, raise_server_exceptions=False)
+    payload = {
+        "name": "Java Worker",
+        "image": "codify-worker-java:latest",
+        "default_execute_run_instruction_template": "Execute {{user_prompt}}",
+        "default_plan_run_instruction_template": "Plan {{user_prompt}}",
+        "ci_auto_repair_run_instruction_template": "Repair {{issue_title}}",
+    }
+    payload.update(payload_patch)
+    try:
+        response = client.post("/api/worker-profiles", json=payload)
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
+    assert expected_field in response.text
 
 
 def test_disable_default_worker_profile_returns_422():

@@ -51,6 +51,10 @@ def _profile_value(item: Any, field: str, default: Any = None) -> Any:
 
 
 def _validate_environment_key(key: str) -> str:
+    if len(key) > 255:
+        raise WorkerProfileValidationError(
+            "Worker environment variable keys must be 255 characters or fewer"
+        )
     try:
         return validate_worker_environment_variable_key(key)
     except ValueError as exc:
@@ -127,7 +131,7 @@ def serialize_profile_environment_variable_for_api(
         "key": row.key,
         "value": None if row.is_secret else row.value,
         "is_secret": row.is_secret,
-        "value_configured": row.value is not None and row.value != "",
+        "value_configured": row.value is not None,
         "created_at": row.created_at,
         "updated_at": row.updated_at,
     }
@@ -251,10 +255,21 @@ async def resolve_provider_for_issue(
     allow_system_default: bool = True,
 ) -> AIProvider:
     """Resolve explicit, issue default, then system default provider."""
-    candidate_id = explicit_provider_id or getattr(issue, "default_provider_id", None)
-    provider = await db.get(AIProvider, candidate_id) if candidate_id is not None else None
-    if provider is None and allow_system_default:
+    candidate_id = (
+        explicit_provider_id
+        if explicit_provider_id is not None
+        else getattr(issue, "default_provider_id", None)
+    )
+    if candidate_id is not None:
+        provider = await db.get(AIProvider, candidate_id)
+        if provider is None:
+            raise WorkerProfileValidationError(
+                f"configured AI provider {candidate_id} not found"
+            )
+    elif allow_system_default:
         provider = await get_default_provider(db)
+    else:
+        provider = None
     if provider is None:
         raise WorkerProfileValidationError("No enabled AI provider is configured for this issue")
     if provider.is_disabled:
