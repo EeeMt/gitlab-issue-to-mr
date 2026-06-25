@@ -178,3 +178,65 @@ async def test_update_task_worker_profile_rebuilds_snapshot_prompt_from_snapshot
     assert task.rendered_prompt == "Snapshot Implement worker profiles"
     assert response["worker_profile_id"] == 77
     assert response["worker_profile_name"] == "Java Worker"
+
+
+@pytest.mark.asyncio
+async def test_update_task_preserves_worker_metadata_after_refresh_without_snapshot_rebuild():
+    task = Task(
+        id=88,
+        issue_id=1,
+        project_id=101,
+        user_prompt="Implement worker profiles",
+        priority=1,
+        status=TaskStatus.PENDING,
+        provider_id=44,
+        worker_profile_id=33,
+        task_mode="execute",
+        require_changes=True,
+        trigger_source="manual",
+        created_at=datetime(2026, 6, 25, 9, 0, 0),
+        updated_at=datetime(2026, 6, 25, 9, 0, 0),
+    )
+    snapshot = TaskWorkerProfileSnapshot(
+        task_id=88,
+        worker_profile_id=33,
+        profile_name="Default Worker",
+        image="codify-worker:latest",
+        volume_mounts=[],
+        environment_variables=[],
+        pre_script="",
+        post_script="",
+        default_execute_run_instruction_template="Execute {{user_prompt}}",
+        default_plan_run_instruction_template="Plan {{user_prompt}}",
+        ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+        created_at=datetime(2026, 6, 25, 9, 0, 0),
+    )
+    task.worker_profile_snapshot = snapshot
+
+    async def refresh(obj, attribute_names=None):
+        if attribute_names == ["status"]:
+            return
+        obj.worker_profile_snapshot = None
+
+    db = MagicMock()
+    db.commit = AsyncMock()
+    db.rollback = AsyncMock()
+    db.refresh = AsyncMock(side_effect=refresh)
+    access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+    with (
+        patch("app.api.tasks.get_task_with_access_check", new=AsyncMock(return_value=task)),
+        patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
+    ):
+        response = await update_task(
+            88,
+            UpdateTaskRequest(priority=2),
+            db=db,
+            current_user=SimpleNamespace(id=7),
+            access_scope=access_scope,
+        )
+
+    assert task.priority == 2
+    assert response["worker_profile_id"] == 33
+    assert response["worker_profile_name"] == "Default Worker"
+    assert response["worker_image"] == "codify-worker:latest"

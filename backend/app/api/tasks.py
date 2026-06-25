@@ -1051,7 +1051,7 @@ async def update_task(
         task.priority = request.priority
 
     issue = None
-    snapshot = None
+    snapshot = _loaded_task_relationship(task, "worker_profile_snapshot")
     if updated_fields & {"worker_profile_id", "provider_id"}:
         issue = await db.get(Issue, task.issue_id)
         if issue is None:
@@ -1490,12 +1490,14 @@ async def reschedule_task(
         )
 
     previous_scheduled_at = task.scheduled_at
+    snapshot = _loaded_task_relationship(task, "worker_profile_snapshot")
     task.scheduled_at = normalized_scheduled
     # Rescheduling to a future time resets QUEUED → PENDING
     if task.status == TaskStatus.QUEUED:
         task.status = TaskStatus.PENDING
     await db.commit()
     await db.refresh(task)
+    _attach_task_worker_snapshot(task, snapshot)
 
     await notify_task_rescheduled(task, previous_scheduled_at, normalized_scheduled)
     logger.info("Task %s rescheduled to %s via API", task_id, normalized_scheduled.isoformat())
