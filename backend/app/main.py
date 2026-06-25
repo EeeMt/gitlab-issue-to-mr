@@ -220,6 +220,7 @@ from app.api import (
     tasks,
     usage_limits,
     webhook_handler,
+    worker_profiles,
 )
 
 app.include_router(auth.router, prefix="/api", tags=["auth"])
@@ -311,6 +312,12 @@ app.include_router(
     providers.router,
     prefix="/api",
     tags=["providers"],
+    dependencies=[Depends(require_authenticated_user)],
+)
+app.include_router(
+    worker_profiles.router,
+    prefix="/api",
+    tags=["worker-profiles"],
     dependencies=[Depends(require_authenticated_user)],
 )
 app.include_router(
