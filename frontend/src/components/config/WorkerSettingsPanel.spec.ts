@@ -402,6 +402,28 @@ describe('WorkerSettingsPanel', () => {
     })
   })
 
+  it('does not save workspace retention days when worker profile save fails', async () => {
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: {
+        isMobile: false,
+        reloadKey: 0
+      }
+    })
+
+    await flushPromises()
+
+    mockUpdateWorkerProfile.mockRejectedValueOnce({
+      response: { data: { detail: 'worker profile invalid' } }
+    })
+
+    const vm = wrapper.vm as any
+    vm.workerFormValue.worker_workspace_retention_days = 30
+    await vm.handleSaveWorker()
+
+    expect(mockUpdateConfig).not.toHaveBeenCalled()
+    expect(mockMessage.error).toHaveBeenCalledWith('worker profile invalid')
+  })
+
   it('loads configured secret environment variables without exposing stored values', async () => {
     const wrapper = mount(WorkerSettingsPanel, {
       props: {

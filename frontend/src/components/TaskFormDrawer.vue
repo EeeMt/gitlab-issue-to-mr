@@ -891,7 +891,6 @@ function handleWorkerProfileChange(profileId: number | null) {
   const nextTemplate = getDefaultRunInstructionTemplate(taskMode.value)
   if (!nextTemplate) return
   runInstructionTemplate.value = nextTemplate
-  initialRunInstructionTemplate.value = nextTemplate
   invalidateRunInstructionPreview()
 }
 
@@ -1005,10 +1004,12 @@ async function handleCreate() {
     const req: Parameters<typeof createTask>[0] = {
       issue_id: props.issueId!,
       priority: priority.value,
-      require_changes: taskMode.value === 'plan' ? false : requireChanges.value,
-      run_instruction_template: runInstructionTemplate.value
+      require_changes: taskMode.value === 'plan' ? false : requireChanges.value
     }
     if (taskMode.value !== null) req.task_mode = taskMode.value
+    if (runInstructionDirty.value) {
+      req.run_instruction_template = runInstructionTemplate.value
+    }
     if (prompt.value.trim()) req.user_prompt = prompt.value.trim()
     if (scheduleType.value === 'scheduled' && scheduledAt.value) {
       req.scheduled_datetime = new Date(scheduledAt.value).toISOString()

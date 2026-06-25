@@ -119,6 +119,7 @@ async def test_update_task_worker_profile_rebuilds_snapshot_prompt_from_snapshot
         provider_id=44,
         worker_profile_id=33,
         task_mode="execute",
+        run_instruction_template="Old {{user_prompt}}",
         require_changes=True,
         trigger_source="manual",
         created_at=datetime(2026, 6, 25, 9, 0, 0),

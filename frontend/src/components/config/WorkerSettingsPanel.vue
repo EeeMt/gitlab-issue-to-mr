@@ -678,21 +678,22 @@ async function handleSaveWorker() {
   }
   workerSaving.value = true
   try {
-    const savedConfig = await updateConfig({
-      runtime: {
-        worker_workspace_retention_days: workerFormValue.value.worker_workspace_retention_days
-      }
-    })
+    const retentionDays = workerFormValue.value.worker_workspace_retention_days
     const savedProfile = await updateWorkerProfile(
       selectedProfileId.value,
       buildWorkerProfilePayload()
     )
+    const savedConfig = await updateConfig({
+      runtime: {
+        worker_workspace_retention_days: retentionDays
+      }
+    })
     replaceLoadedProfile(savedProfile)
     selectedProfileId.value = savedProfile.id
     workerFormValue.value = mapProfileToWorkerFormValue(
       savedProfile,
       savedConfig.runtime?.worker_workspace_retention_days ??
-        workerFormValue.value.worker_workspace_retention_days
+        retentionDays
     )
     lastLoadedWorker.value = cloneWorkerFormValue(workerFormValue.value)
     message.success(t('config.saved'))

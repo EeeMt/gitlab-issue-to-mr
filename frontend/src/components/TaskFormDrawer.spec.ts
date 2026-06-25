@@ -572,6 +572,19 @@ describe('TaskFormDrawer', () => {
       )
     })
 
+    it('submits a manually edited run instruction template on create', async () => {
+      await mountDrawer()
+      await openDrawer()
+
+      wrapper.vm.selectTaskMode('execute')
+      wrapper.vm.handleRunInstructionInput('Custom {{user_prompt}}')
+      await submitCreate()
+
+      expect(mockApi.createTask).toHaveBeenCalledWith(
+        expect.objectContaining({ run_instruction_template: 'Custom {{user_prompt}}' })
+      )
+    })
+
     it('keeps manually edited run instruction when worker changes', async () => {
       await mountDrawer()
       await openDrawer()
@@ -1055,13 +1068,13 @@ describe('TaskFormDrawer', () => {
       )
     })
 
-    it('submits the execute default even when Advanced is never opened', async () => {
+    it('leaves the execute default to the backend when Advanced is never opened', async () => {
       await mountDrawer()
       await openDrawer()
       wrapper.vm.selectTaskMode('execute')
       await submitCreate()
       expect(mockApi.createTask).toHaveBeenCalledWith(
-        expect.objectContaining({ run_instruction_template: 'Worker execute {{user_prompt}}' })
+        expect.not.objectContaining({ run_instruction_template: expect.anything() })
       )
       expect(wrapper.find('details.run-instruction-advanced').attributes('open')).toBeUndefined()
     })
@@ -1104,6 +1117,48 @@ describe('TaskFormDrawer', () => {
       expect(mockApi.updateTask).toHaveBeenCalledWith(
         42,
         expect.objectContaining({ run_instruction_template: 'Changed snapshot' })
+      )
+    })
+
+    it('patches the new default template when switching workers in edit mode', async () => {
+      mockApi.getWorkerProfiles.mockResolvedValue([
+        ...mockWorkerProfiles,
+        {
+          ...mockWorkerProfiles[0],
+          id: 4,
+          name: 'Python Worker',
+          is_default: false,
+          default_execute_run_instruction_template: 'Python execute {{user_prompt}}'
+        }
+      ])
+      await mountDrawer({
+        mode: 'edit',
+        issueId: undefined,
+        issueDescription: undefined,
+        task: {
+          id: 42,
+          issue_id: 1,
+          user_prompt: 'Original prompt',
+          priority: 1,
+          require_changes: true,
+          provider_id: 7,
+          worker_profile_id: 3,
+          task_mode: 'execute',
+          run_instruction_template: 'Stored snapshot'
+        }
+      })
+      await openDrawer()
+
+      wrapper.vm.handleWorkerProfileChange(4)
+      await wrapper.find('[data-testid="task-form-save-button"]').trigger('click')
+      await flushPromises()
+
+      expect(mockApi.updateTask).toHaveBeenCalledWith(
+        42,
+        expect.objectContaining({
+          worker_profile_id: 4,
+          run_instruction_template: 'Python execute {{user_prompt}}'
+        })
       )
     })
 

@@ -1085,6 +1085,8 @@ async def update_task(
 
     if "run_instruction_template" in updated_fields:
         task.run_instruction_template = request.run_instruction_template
+    elif "worker_profile_id" in updated_fields:
+        task.run_instruction_template = None
 
     # Enforce invariant: plan tasks must never have require_changes=True,
     # regardless of whether task_mode or require_changes was the field being updated.
