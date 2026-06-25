@@ -43,6 +43,7 @@ def test_worker_profiles_migration_uses_postgres_json_defaults():
     assert """return sa.text("'[]'::json")""" in content
     assert "server_default=_empty_json_array_default()" in content
     assert """server_default=sa.text("'[]'")""" not in content
+    assert 'column("volume_mounts", sa.JSON())' in content
 
 
 def test_worker_profiles_migration_uses_built_in_template_fallbacks():

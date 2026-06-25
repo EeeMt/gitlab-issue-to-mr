@@ -188,7 +188,7 @@ def upgrade() -> None:
         column("enabled"),
         column("is_default"),
         column("image"),
-        column("volume_mounts"),
+        column("volume_mounts", sa.JSON()),
         column("pre_script"),
         column("post_script"),
         column("default_execute_run_instruction_template"),
