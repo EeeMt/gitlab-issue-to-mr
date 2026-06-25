@@ -59,6 +59,18 @@ NPM_CONFIG_CACHE=/opt/codify-issue-shared/cache/npm
 
 环境变量值不会做 shell 展开，建议直接写完整绝对路径。现有环境变量 key 校验只允许大写，因此 npm 使用 `NPM_CONFIG_CACHE`。
 
+## Worker Profiles
+
+新任务不再直接从全局 runtime config 读取自定义挂载、环境变量、Worker 脚本或运行指令默认值。任务创建时会解析 Worker Profile，并保存任务级 Worker 快照。
+
+运行时 volume 顺序保持为：
+
+1. issue workspace 挂载
+2. Claude session/runtime/shared 挂载
+3. 任务 Worker 快照中的自定义挂载
+
+旧的全局 Worker 字段保留一个版本，作为迁移来源和兼容面。新的执行路径读取 `task_worker_profile_snapshots`。
+
 ### 容器内行为（`entrypoint.worker.sh`）
 
 ```bash
