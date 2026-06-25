@@ -177,11 +177,12 @@ function formatCompactDateTime(value?: string | null): string {
   height: 2px;
   background: linear-gradient(90deg, transparent, #2563eb, #18a058, transparent);
   transform: translateX(-55%);
+  animation: execution-activity 2.6s ease-in-out infinite;
 }
 
-@media (prefers-reduced-motion: no-preference) {
+@media (prefers-reduced-motion: reduce) {
   .execution-card__activity {
-    animation: execution-activity 2.6s ease-in-out infinite;
+    animation: none;
   }
 }
 
