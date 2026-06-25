@@ -11,7 +11,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from fastapi.testclient import TestClient
 
-from app.models import TaskStatus
+from app.core.worker_profiles import WorkerProfileValidationError
+from app.models import Issue, TaskStatus, TaskWorkerProfileSnapshot
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -33,6 +34,9 @@ def _make_task(task_id=1, project_id=1, status=TaskStatus.PENDING):
     task.priority = 1
     task.require_changes = True
     task.provider_id = None
+    task.worker_profile_id = 12
+    task.worker_profile = None
+    task.worker_profile_snapshot = None
     task.status = status
     task.initiator_user_id = None
     task.initiator_gitlab_user_id = None
@@ -67,6 +71,37 @@ def _make_task(task_id=1, project_id=1, status=TaskStatus.PENDING):
     return task
 
 
+def _make_issue(task):
+    issue = Issue(
+        id=task.issue_id,
+        title="Issue",
+        project_id=task.project_id,
+        status="open",
+        description="Issue body",
+        created_at=datetime(2024, 1, 1, 12, 0, 0),
+        updated_at=datetime(2024, 1, 1, 12, 0, 0),
+    )
+    issue.tasks = []
+    return issue
+
+
+def _make_snapshot(task):
+    return TaskWorkerProfileSnapshot(
+        task_id=task.id,
+        worker_profile_id=task.worker_profile_id,
+        profile_name="Default Worker",
+        image="codify-worker:latest",
+        volume_mounts=[],
+        environment_variables=[],
+        pre_script="",
+        post_script="",
+        default_execute_run_instruction_template="Do {{user_prompt}}",
+        default_plan_run_instruction_template="Plan {{user_prompt}}",
+        ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+        created_at=datetime(2024, 1, 1, 12, 0, 0),
+    )
+
+
 def _make_client(mock_db):
     """Build a TestClient with all auth and DB dependencies overridden."""
     from app.database import get_db
@@ -94,7 +129,17 @@ def _mock_db_for_task(task):
 
     mock_db = MagicMock()
     mock_db.execute = AsyncMock(return_value=mock_result)
-    mock_db.get = AsyncMock(return_value=None)   # default: provider not found
+    issue = _make_issue(task)
+    snapshot = _make_snapshot(task)
+
+    async def get_model(model, _id):
+        if model is Issue:
+            return issue
+        if model is TaskWorkerProfileSnapshot:
+            return snapshot
+        return None
+
+    mock_db.get = AsyncMock(side_effect=get_model)
     mock_db.commit = AsyncMock()
     mock_db.rollback = AsyncMock()
     mock_db.refresh = AsyncMock()
@@ -143,24 +188,46 @@ class UpdateTaskHappyPathTests(unittest.TestCase):
         resp, _task = self._patch(1, {"run_instruction_template": ""})
         self.assertEqual(resp.status_code, 422)
 
-    def test_update_provider_id_to_null_clears_provider(self):
-        """provider_id: null removes the provider assignment."""
+    def test_update_provider_id_to_null_restores_default_provider(self):
+        """provider_id: null restores the issue/system default provider."""
         task = _make_task()
         task.provider_id = 5
-        resp, _ = self._patch(1, {"provider_id": None}, task=task)
+        mock_db = _mock_db_for_task(task)
+        provider = MagicMock()
+        provider.id = 8
+        provider.is_disabled = False
+
+        async def resolve_provider(_db, _issue, explicit_provider_id):
+            self.assertIsNone(explicit_provider_id)
+            return provider
+
+        client, app = _make_client(mock_db)
+        with (
+            patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
+            patch("app.api.tasks.resolve_provider_for_issue", new=AsyncMock(side_effect=resolve_provider)),
+        ):
+            resp = client.patch("/api/tasks/1", json={"provider_id": None})
+        app.dependency_overrides.clear()
+
         self.assertEqual(resp.status_code, 200)
-        self.assertIsNone(task.provider_id)
+        self.assertEqual(task.provider_id, 8)
 
     def test_update_provider_id_to_valid_sets_provider(self):
         """provider_id: <int> sets the provider after existence check passes."""
         task = _make_task()
         mock_db = _mock_db_for_task(task)
         mock_provider = MagicMock()
+        mock_provider.id = 7
         mock_provider.is_disabled = False
-        mock_db.get = AsyncMock(return_value=mock_provider)   # provider found
 
         client, app = _make_client(mock_db)
-        with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+        with (
+            patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
+            patch(
+                "app.api.tasks.resolve_provider_for_issue",
+                new=AsyncMock(return_value=mock_provider),
+            ),
+        ):
             resp = client.patch("/api/tasks/1", json={"provider_id": 7})
         app.dependency_overrides.clear()
 
@@ -256,13 +323,36 @@ class UpdateTaskValidationTests(unittest.TestCase):
         resp = self._patch({"require_changes": None})
         self.assertEqual(resp.status_code, 422)
 
+    def test_prompt_change_without_worker_snapshot_returns_422(self):
+        task = _make_task()
+        task.run_instruction_template = None
+        mock_db = _mock_db_for_task(task)
+        issue = _make_issue(task)
+
+        async def get_model(model, _id):
+            if model is Issue:
+                return issue
+            if model is TaskWorkerProfileSnapshot:
+                return None
+            return None
+
+        mock_db.get = AsyncMock(side_effect=get_model)
+
+        client, app = _make_client(mock_db)
+        with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+            resp = client.patch("/api/tasks/1", json={"user_prompt": "Changed"})
+        app.dependency_overrides.clear()
+
+        self.assertEqual(resp.status_code, 422)
+        self.assertEqual(resp.json()["detail"], "Task has no worker profile snapshot")
+
 
 # ---------------------------------------------------------------------------
 # Provider validation: non-existent provider_id returns 404
 # ---------------------------------------------------------------------------
 
 class UpdateTaskProviderValidationTests(unittest.TestCase):
-    """PATCH /tasks/{id} returns 404 when provider_id does not exist."""
+    """PATCH /tasks/{id} validates provider selection through the resolver."""
 
     def tearDown(self):
         from app.main import app
@@ -271,42 +361,57 @@ class UpdateTaskProviderValidationTests(unittest.TestCase):
     def test_nonexistent_provider_returns_404(self):
         task = _make_task()
         mock_db = _mock_db_for_task(task)
-        mock_db.get = AsyncMock(return_value=None)   # provider not found
 
         client, app = _make_client(mock_db)
-        resp = client.patch("/api/tasks/1", json={"provider_id": 9999})
+        with patch(
+            "app.api.tasks.resolve_provider_for_issue",
+            new=AsyncMock(
+                side_effect=WorkerProfileValidationError(
+                    "configured AI provider 9999 not found"
+                )
+            ),
+        ):
+            resp = client.patch("/api/tasks/1", json={"provider_id": 9999})
         app.dependency_overrides.clear()
 
-        self.assertEqual(resp.status_code, 404)
-        self.assertIn("Provider not found", resp.json()["detail"])
+        self.assertEqual(resp.status_code, 422)
+        self.assertIn("not found", resp.json()["detail"])
 
     def test_disabled_provider_returns_409(self):
         task = _make_task()
         mock_db = _mock_db_for_task(task)
-        mock_provider = MagicMock()
-        mock_provider.is_disabled = True
-        mock_db.get = AsyncMock(return_value=mock_provider)
 
         client, app = _make_client(mock_db)
-        resp = client.patch("/api/tasks/1", json={"provider_id": 9999})
+        with patch(
+            "app.api.tasks.resolve_provider_for_issue",
+            new=AsyncMock(
+                side_effect=WorkerProfileValidationError("AI provider 'Old' is disabled")
+            ),
+        ):
+            resp = client.patch("/api/tasks/1", json={"provider_id": 9999})
         app.dependency_overrides.clear()
 
-        self.assertEqual(resp.status_code, 409)
-        self.assertIn("Provider is disabled", resp.json()["detail"])
+        self.assertEqual(resp.status_code, 422)
+        self.assertIn("disabled", resp.json()["detail"])
 
-    def test_null_provider_id_skips_existence_check(self):
-        """provider_id: null means 'clear provider' — no DB lookup needed."""
+    def test_null_provider_id_resolves_default_provider(self):
+        """provider_id: null means restore issue/default provider."""
         task = _make_task()
         mock_db = _mock_db_for_task(task)
-        # db.get should NOT be called for null provider_id
-        mock_db.get = AsyncMock(side_effect=AssertionError("db.get called for null provider_id"))
+        provider = MagicMock()
+        provider.id = 11
+        provider.is_disabled = False
 
         client, app = _make_client(mock_db)
-        with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+        with (
+            patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
+            patch("app.api.tasks.resolve_provider_for_issue", new=AsyncMock(return_value=provider)),
+        ):
             resp = client.patch("/api/tasks/1", json={"provider_id": None})
         app.dependency_overrides.clear()
 
         self.assertEqual(resp.status_code, 200)
+        self.assertEqual(task.provider_id, 11)
 
 
 # ---------------------------------------------------------------------------

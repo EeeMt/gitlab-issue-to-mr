@@ -49,7 +49,6 @@ from app.core.task_prompt import (
     build_task_prompt_context,
     render_and_store_task_prompt,
     render_run_instruction_template,
-    select_run_instruction_template,
 )
 from app.core.usage_limits import (
     UsageLimitExceeded,
@@ -72,7 +71,14 @@ from app.dependencies.project_access import (
     require_project_access,
     require_project_access_scope,
 )
-from app.models import AIProvider, Issue, Task, TaskLog, TaskStatus, TaskWorkerProfileSnapshot, User
+from app.models import (
+    Issue,
+    Task,
+    TaskLog,
+    TaskStatus,
+    TaskWorkerProfileSnapshot,
+    User,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -121,6 +127,15 @@ def _loaded_task_relationship(task: Task, name: str):
     if value.__class__.__module__.startswith("unittest.mock"):
         return None
     return value
+
+
+def _attach_task_worker_snapshot(
+    task: Task,
+    snapshot: TaskWorkerProfileSnapshot | None,
+) -> None:
+    """Keep snapshot metadata available for immediate API serialization."""
+    if snapshot is not None:
+        task.worker_profile_snapshot = snapshot
 
 
 @router.get("/tasks")
@@ -1138,6 +1153,7 @@ async def update_task(
 
     await db.commit()
     await db.refresh(task)
+    _attach_task_worker_snapshot(task, snapshot)
 
     logger.info(
         "Task %s updated via PATCH: fields=%s", task_id, sorted(updated_fields)
@@ -1344,26 +1360,28 @@ async def retry_task(
                 detail=slot_full_detail_dict(slot_info),
             )
 
-    provider_id = original_task.provider_id
-    if provider_id is None:
-        default_result = await db.execute(
-            select(AIProvider).where(AIProvider.is_default == True)
-        )
-        provider = default_result.scalar_one_or_none()
-        if not provider:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No default provider configured. Please set a default AI provider.",
-            )
-        provider_id = provider.id
-    else:
-        provider = await db.get(AIProvider, provider_id)
+    issue = (
+        await db.execute(select(Issue).where(Issue.id == original_task.issue_id))
+    ).scalar_one_or_none()
+    if issue is None:
+        raise HTTPException(status_code=404, detail="Issue not found")
 
-    if provider and provider.is_disabled is True:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Provider is disabled",
+    try:
+        provider = await resolve_provider_for_issue(
+            db,
+            issue,
+            original_task.provider_id,
         )
+        worker_profile = await resolve_worker_profile_for_issue(
+            db,
+            issue,
+            original_task.worker_profile_id,
+        )
+    except WorkerProfileValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
 
     new_task = Task(
         issue_id=original_task.issue_id,
@@ -1375,7 +1393,8 @@ async def retry_task(
         retry_source_task_id=original_task.id,
         trigger_source="retry",
         ci_failure_run_id=original_task.ci_failure_run_id,
-        provider_id=provider_id,
+        provider_id=provider.id,
+        worker_profile_id=worker_profile.id,
         initiator_user_id=current_user.id if current_user is not None else None,
         initiator_gitlab_user_id=current_user.gitlab_user_id if current_user is not None else None,
         initiator_username=current_user.username if current_user is not None else None,
@@ -1386,15 +1405,15 @@ async def retry_task(
     )
     db.add(new_task)
     await db.flush()
-    issue = (
-        await db.execute(select(Issue).where(Issue.id == new_task.issue_id))
-    ).scalar_one_or_none()
-    retry_template = select_run_instruction_template(
-        get_effective_settings(),
-        task_mode=new_task.task_mode,
-        trigger_source=original_task.trigger_source or "manual",
-        retry_snapshot=original_task.run_instruction_template,
-    )
+    snapshot = await replace_task_worker_snapshot(db, new_task, worker_profile)
+    new_task.worker_profile_snapshot = snapshot
+    retry_template = original_task.run_instruction_template
+    if retry_template is None:
+        retry_template = select_snapshot_run_instruction_template(
+            snapshot,
+            task_mode=new_task.task_mode,
+            trigger_source=original_task.trigger_source or "manual",
+        )
     try:
         render_and_store_task_prompt(
             new_task,
@@ -1410,6 +1429,7 @@ async def retry_task(
         ) from exc
     await db.commit()
     await db.refresh(new_task)
+    _attach_task_worker_snapshot(new_task, snapshot)
     # Eagerly set the issue relationship for serialization
     new_task.issue = issue
 
@@ -1614,6 +1634,7 @@ async def create_task(
         ) from exc
     await db.commit()
     await db.refresh(task)
+    _attach_task_worker_snapshot(task, snapshot)
     task.issue = issue  # ensure nested issue is included in serialization
 
     logger.info(

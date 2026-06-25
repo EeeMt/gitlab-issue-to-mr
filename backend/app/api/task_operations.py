@@ -51,8 +51,16 @@ async def get_task_with_access_check(
         HTTPException: If task not found or access denied
     """
     from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
 
-    query = select(Task).where(Task.id == task_id)
+    query = (
+        select(Task)
+        .options(
+            selectinload(Task.worker_profile),
+            selectinload(Task.worker_profile_snapshot),
+        )
+        .where(Task.id == task_id)
+    )
     if with_for_update:
         query = query.with_for_update()
     result = await db.execute(query)

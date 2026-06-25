@@ -19,7 +19,8 @@ from app.api.task_operations import (
     validate_task_status_for_reschedule,
     validate_task_status_for_retry,
 )
-from app.models import TaskStatus
+from app.core.worker_profiles import WorkerProfileValidationError
+from app.models import TaskStatus, TaskWorkerProfileSnapshot
 
 
 def _make_task(status: TaskStatus, scheduled_at=None) -> MagicMock:
@@ -421,6 +422,9 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     task.commit_message = None
     task.provider_id = None
     task.provider = None
+    task.worker_profile_id = 12
+    task.worker_profile = None
+    task.worker_profile_snapshot = None
     task.issue = None
     now = datetime(2024, 1, 1, 12, 0, 0)
     task.created_at = now
@@ -439,6 +443,33 @@ def _make_mock_provider(id=1):
     provider.is_default = True
     provider.is_disabled = False
     return provider
+
+
+def _make_mock_worker_profile(id=12):
+    """Create a mock WorkerProfile with minimal attributes."""
+    profile = MagicMock()
+    profile.id = id
+    profile.name = "Default Worker"
+    profile.enabled = True
+    return profile
+
+
+def _make_worker_snapshot(task_id=101, worker_profile_id=12):
+    """Create a real task worker snapshot for task API serialization/rendering."""
+    return TaskWorkerProfileSnapshot(
+        task_id=task_id,
+        worker_profile_id=worker_profile_id,
+        profile_name="Default Worker",
+        image="codify-worker:latest",
+        volume_mounts=[],
+        environment_variables=[],
+        pre_script="",
+        post_script="",
+        default_execute_run_instruction_template="Execute {{user_prompt}}",
+        default_plan_run_instruction_template="Plan {{user_prompt}}",
+        ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+        created_at=datetime(2024, 1, 1, 12, 0, 0),
+    )
 
 
 def _make_app_client_with_db(mock_db, extra_overrides=None):
@@ -738,15 +769,13 @@ class RetryTaskAPITests(unittest.TestCase):
         task.project_id = 1
 
         # First execute returns the task; second returns None (no existing retry);
-        # third resolves default provider; fourth fetches the Issue for serialization
+        # third fetches the Issue used for worker/provider resolution and serialization.
         mock_result_task = MagicMock()
         mock_result_task.scalar_one_or_none.return_value = task
         mock_result_no_retry = MagicMock()
         mock_result_no_retry.scalar_one_or_none.return_value = None
-        mock_result_default_provider = MagicMock()
-        mock_result_default_provider.scalar_one_or_none.return_value = _make_mock_provider(id=1)
         mock_result_issue = MagicMock()
-        mock_result_issue.scalar_one_or_none.return_value = None
+        mock_result_issue.scalar_one_or_none.return_value = MagicMock(id=1, project_id=1)
 
         now = datetime(2024, 1, 1, 12, 0, 0)
 
@@ -758,7 +787,9 @@ class RetryTaskAPITests(unittest.TestCase):
                 obj.updated_at = now
 
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_default_provider, mock_result_issue])
+        mock_db.execute = AsyncMock(
+            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue]
+        )
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.flush = AsyncMock()
@@ -766,10 +797,24 @@ class RetryTaskAPITests(unittest.TestCase):
 
         client, app = _make_app_client_with_db(mock_db)
 
-        with patch("app.api.task_operations.notify_task_retried", new=AsyncMock()):
-            with patch("app.core.task_helpers._require_task_operator", return_value=None):
-                with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
-                    response = client.post("/api/tasks/5/retry")
+        with (
+            patch("app.api.task_operations.notify_task_retried", new=AsyncMock()),
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
+            patch(
+                "app.api.tasks.resolve_worker_profile_for_issue",
+                new=AsyncMock(return_value=_make_mock_worker_profile()),
+            ),
+            patch(
+                "app.api.tasks.resolve_provider_for_issue",
+                new=AsyncMock(return_value=_make_mock_provider(id=1)),
+            ),
+            patch(
+                "app.api.tasks.replace_task_worker_snapshot",
+                new=AsyncMock(return_value=_make_worker_snapshot(task_id=100)),
+            ),
+        ):
+            response = client.post("/api/tasks/5/retry")
 
         app.dependency_overrides.clear()
 
@@ -814,10 +859,24 @@ class RetryTaskAPITests(unittest.TestCase):
 
         client, app = _make_app_client_with_db(mock_db)
 
-        with patch("app.api.task_operations.notify_task_retried", new=AsyncMock()):
-            with patch("app.core.task_helpers._require_task_operator", return_value=None):
-                with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
-                    response = client.post("/api/tasks/6/retry")
+        with (
+            patch("app.api.task_operations.notify_task_retried", new=AsyncMock()),
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
+            patch(
+                "app.api.tasks.resolve_worker_profile_for_issue",
+                new=AsyncMock(return_value=_make_mock_worker_profile()),
+            ),
+            patch(
+                "app.api.tasks.resolve_provider_for_issue",
+                new=AsyncMock(return_value=_make_mock_provider(id=1)),
+            ),
+            patch(
+                "app.api.tasks.replace_task_worker_snapshot",
+                new=AsyncMock(return_value=_make_worker_snapshot(task_id=101)),
+            ),
+        ):
+            response = client.post("/api/tasks/6/retry")
 
         app.dependency_overrides.clear()
 
@@ -839,7 +898,7 @@ class RetryTaskAPITests(unittest.TestCase):
         mock_result_no_retry = MagicMock()
         mock_result_no_retry.scalar_one_or_none.return_value = None
         mock_result_issue = MagicMock()
-        mock_result_issue.scalar_one_or_none.return_value = None
+        mock_result_issue.scalar_one_or_none.return_value = MagicMock(id=1, project_id=1)
 
         now = datetime(2024, 1, 1, 12, 0, 0)
 
@@ -852,7 +911,6 @@ class RetryTaskAPITests(unittest.TestCase):
 
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue])
-        mock_db.get = AsyncMock(return_value=_make_mock_provider(id=23))
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.flush = AsyncMock()
@@ -860,16 +918,32 @@ class RetryTaskAPITests(unittest.TestCase):
 
         client, app = _make_app_client_with_db(mock_db)
 
-        with patch("app.api.task_operations.notify_task_retried", new=AsyncMock()):
-            with patch("app.core.task_helpers._require_task_operator", return_value=None):
-                with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
-                    response = client.post("/api/tasks/7/retry")
+        with (
+            patch("app.api.task_operations.notify_task_retried", new=AsyncMock()),
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
+            patch(
+                "app.api.tasks.resolve_worker_profile_for_issue",
+                new=AsyncMock(return_value=_make_mock_worker_profile(id=12)),
+            ),
+            patch(
+                "app.api.tasks.resolve_provider_for_issue",
+                new=AsyncMock(return_value=_make_mock_provider(id=23)),
+            ),
+            patch(
+                "app.api.tasks.replace_task_worker_snapshot",
+                new=AsyncMock(return_value=_make_worker_snapshot(task_id=107)),
+            ) as mock_replace_snapshot,
+        ):
+            response = client.post("/api/tasks/7/retry")
 
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 200)
         created_task = mock_db.add.call_args.args[0]
         self.assertEqual(created_task.provider_id, 23)
+        self.assertEqual(created_task.worker_profile_id, 12)
+        mock_replace_snapshot.assert_awaited_once()
 
     def test_retry_task_preserves_ci_failure_context(self):
         """Retrying a CI repair keeps the bundle provenance and renders its stable path."""
@@ -907,7 +981,6 @@ class RetryTaskAPITests(unittest.TestCase):
         mock_db.execute = AsyncMock(
             side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue]
         )
-        mock_db.get = AsyncMock(return_value=_make_mock_provider(id=23))
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.flush = AsyncMock()
@@ -918,6 +991,18 @@ class RetryTaskAPITests(unittest.TestCase):
             patch("app.api.task_operations.notify_task_retried", new=AsyncMock()),
             patch("app.core.task_helpers._require_task_operator", return_value=None),
             patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
+            patch(
+                "app.api.tasks.resolve_worker_profile_for_issue",
+                new=AsyncMock(return_value=_make_mock_worker_profile()),
+            ),
+            patch(
+                "app.api.tasks.resolve_provider_for_issue",
+                new=AsyncMock(return_value=_make_mock_provider(id=23)),
+            ),
+            patch(
+                "app.api.tasks.replace_task_worker_snapshot",
+                new=AsyncMock(return_value=_make_worker_snapshot(task_id=108)),
+            ),
         ):
             response = client.post("/api/tasks/8/retry")
         app.dependency_overrides.clear()
@@ -939,23 +1024,34 @@ class RetryTaskAPITests(unittest.TestCase):
         mock_result_task.scalar_one_or_none.return_value = task
         mock_result_no_retry = MagicMock()
         mock_result_no_retry.scalar_one_or_none.return_value = None
-        disabled_provider = _make_mock_provider(id=23)
-        disabled_provider.is_disabled = True
+        mock_result_issue = MagicMock()
+        mock_result_issue.scalar_one_or_none.return_value = MagicMock(id=1, project_id=1)
 
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry])
-        mock_db.get = AsyncMock(return_value=disabled_provider)
+        mock_db.execute = AsyncMock(
+            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue]
+        )
         mock_db.add = MagicMock()
 
         client, app = _make_app_client_with_db(mock_db)
 
-        with patch("app.core.task_helpers._require_task_operator", return_value=None):
+        with (
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch(
+                "app.api.tasks.resolve_provider_for_issue",
+                new=AsyncMock(
+                    side_effect=WorkerProfileValidationError(
+                        "AI provider 'Test Provider' is disabled"
+                    )
+                ),
+            ),
+        ):
             response = client.post("/api/tasks/71/retry")
 
         app.dependency_overrides.clear()
 
-        self.assertEqual(response.status_code, 409)
-        self.assertEqual(response.json()["detail"], "Provider is disabled")
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("disabled", response.json()["detail"])
         mock_db.add.assert_not_called()
 
     def test_retry_task_rejects_disabled_default_provider(self):
@@ -969,26 +1065,34 @@ class RetryTaskAPITests(unittest.TestCase):
         mock_result_task.scalar_one_or_none.return_value = task
         mock_result_no_retry = MagicMock()
         mock_result_no_retry.scalar_one_or_none.return_value = None
-        disabled_default = _make_mock_provider(id=1)
-        disabled_default.is_disabled = True
-        mock_result_default_provider = MagicMock()
-        mock_result_default_provider.scalar_one_or_none.return_value = disabled_default
+        mock_result_issue = MagicMock()
+        mock_result_issue.scalar_one_or_none.return_value = MagicMock(id=1, project_id=1)
 
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(
-            side_effect=[mock_result_task, mock_result_no_retry, mock_result_default_provider]
+            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue]
         )
         mock_db.add = MagicMock()
 
         client, app = _make_app_client_with_db(mock_db)
 
-        with patch("app.core.task_helpers._require_task_operator", return_value=None):
+        with (
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch(
+                "app.api.tasks.resolve_provider_for_issue",
+                new=AsyncMock(
+                    side_effect=WorkerProfileValidationError(
+                        "AI provider 'Test Provider' is disabled"
+                    )
+                ),
+            ),
+        ):
             response = client.post("/api/tasks/72/retry")
 
         app.dependency_overrides.clear()
 
-        self.assertEqual(response.status_code, 409)
-        self.assertEqual(response.json()["detail"], "Provider is disabled")
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("disabled", response.json()["detail"])
         mock_db.add.assert_not_called()
 
     def test_retry_task_returns_409_when_usage_limit_exceeded(self):
@@ -1005,7 +1109,7 @@ class RetryTaskAPITests(unittest.TestCase):
         mock_result_no_retry = MagicMock()
         mock_result_no_retry.scalar_one_or_none.return_value = None
         mock_result_issue = MagicMock()
-        mock_result_issue.scalar_one_or_none.return_value = None
+        mock_result_issue.scalar_one_or_none.return_value = MagicMock(id=1, project_id=1)
 
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue])
@@ -1289,7 +1393,21 @@ class CreateTaskAPITests(unittest.TestCase):
         mock_db.get = AsyncMock(return_value=mock_issue)
 
         client = TestClient(app, raise_server_exceptions=False)
-        with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+        with (
+            patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
+            patch(
+                "app.api.tasks.resolve_worker_profile_for_issue",
+                new=AsyncMock(return_value=_make_mock_worker_profile()),
+            ),
+            patch(
+                "app.api.tasks.resolve_provider_for_issue",
+                new=AsyncMock(return_value=_make_mock_provider(id=1)),
+            ),
+            patch(
+                "app.api.tasks.replace_task_worker_snapshot",
+                new=AsyncMock(return_value=_make_worker_snapshot(task_id=99)),
+            ),
+        ):
             response = client.post("/api/tasks", json={
                 "issue_id": 1,
                 "user_prompt": "Fix the login bug",
@@ -1345,6 +1463,18 @@ class CreateTaskAPITests(unittest.TestCase):
         with (
             patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
             patch("app.core.task_helpers._require_issue_operator", return_value=None),
+            patch(
+                "app.api.tasks.resolve_worker_profile_for_issue",
+                new=AsyncMock(return_value=_make_mock_worker_profile()),
+            ),
+            patch(
+                "app.api.tasks.resolve_provider_for_issue",
+                new=AsyncMock(return_value=_make_mock_provider(id=1)),
+            ),
+            patch(
+                "app.api.tasks.replace_task_worker_snapshot",
+                new=AsyncMock(return_value=_make_worker_snapshot(task_id=99)),
+            ),
             patch(
                 "app.api.tasks.get_usage_quota_service",
                 return_value=MagicMock(
@@ -1570,19 +1700,16 @@ class RetryTaskWithScheduleTests(unittest.TestCase):
         task.project_id = 1
 
         # First execute returns the task; second returns None (no existing retry);
-        # third resolves default provider; fourth is for slot capacity count query;
-        # fifth fetches Issue for serialization
+        # third is for slot capacity count query; fourth fetches Issue.
         mock_result_task = MagicMock()
         mock_result_task.scalar_one_or_none.return_value = task
         mock_result_no_retry = MagicMock()
         mock_result_no_retry.scalar_one_or_none.return_value = None
-        mock_result_default_provider = MagicMock()
-        mock_result_default_provider.scalar_one_or_none.return_value = _make_mock_provider(id=1)
         mock_result_default = MagicMock()
         mock_result_default.scalar_one_or_none.return_value = None
         mock_result_default.scalar.return_value = 0
         mock_result_issue = MagicMock()
-        mock_result_issue.scalar_one_or_none.return_value = None
+        mock_result_issue.scalar_one_or_none.return_value = MagicMock(id=1, project_id=1)
 
         now = datetime(2024, 1, 1, 12, 0, 0)
 
@@ -1594,7 +1721,14 @@ class RetryTaskWithScheduleTests(unittest.TestCase):
                 obj.updated_at = now
 
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_default, mock_result_default_provider, mock_result_issue])
+        mock_db.execute = AsyncMock(
+            side_effect=[
+                mock_result_task,
+                mock_result_no_retry,
+                mock_result_default,
+                mock_result_issue,
+            ]
+        )
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.flush = AsyncMock()
@@ -1604,12 +1738,26 @@ class RetryTaskWithScheduleTests(unittest.TestCase):
 
         future_dt = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
 
-        with patch("app.api.task_operations.notify_task_retried", new=AsyncMock()):
-            with patch("app.core.task_helpers._require_task_operator", return_value=None):
-                with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
-                    response = client.post("/api/tasks/80/retry", json={
-                        "scheduled_datetime": future_dt
-                    })
+        with (
+            patch("app.api.task_operations.notify_task_retried", new=AsyncMock()),
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
+            patch(
+                "app.api.tasks.resolve_worker_profile_for_issue",
+                new=AsyncMock(return_value=_make_mock_worker_profile()),
+            ),
+            patch(
+                "app.api.tasks.resolve_provider_for_issue",
+                new=AsyncMock(return_value=_make_mock_provider(id=1)),
+            ),
+            patch(
+                "app.api.tasks.replace_task_worker_snapshot",
+                new=AsyncMock(return_value=_make_worker_snapshot(task_id=102)),
+            ),
+        ):
+            response = client.post("/api/tasks/80/retry", json={
+                "scheduled_datetime": future_dt
+            })
 
         app.dependency_overrides.clear()
 
