@@ -88,6 +88,18 @@ class Issue(Base):
     ci_auto_repair_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("false"), nullable=False
     )
+    default_worker_profile_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("worker_profiles.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    default_provider_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("ai_providers.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     # Claude session persistence
     claude_session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -114,6 +126,15 @@ class Issue(Base):
         order_by="Task.created_at",
         cascade="all, delete-orphan",
         passive_deletes=True,
+    )
+    default_worker_profile: Mapped["WorkerProfile | None"] = relationship(
+        "WorkerProfile",
+        foreign_keys=[default_worker_profile_id],
+    )
+    default_provider: Mapped["AIProvider | None"] = relationship(
+        "AIProvider",
+        foreign_keys=[default_provider_id],
+        back_populates="default_for_issues",
     )
 
     __table_args__ = (
@@ -145,6 +166,11 @@ class AIProvider(Base):
     )
 
     tasks: Mapped[list["Task"]] = relationship("Task", back_populates="provider")
+    default_for_issues: Mapped[list["Issue"]] = relationship(
+        "Issue",
+        back_populates="default_provider",
+        foreign_keys="Issue.default_provider_id",
+    )
 
 
 class Task(Base):
@@ -163,6 +189,12 @@ class Task(Base):
     # AI Provider
     provider_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("ai_providers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    worker_profile_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("worker_profiles.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
 
     # Task details
@@ -252,6 +284,16 @@ class Task(Base):
         "Task", remote_side="Task.id", foreign_keys=[retry_source_task_id]
     )
     provider: Mapped[Optional["AIProvider"]] = relationship("AIProvider", back_populates="tasks")
+    worker_profile: Mapped["WorkerProfile | None"] = relationship(
+        "WorkerProfile",
+        foreign_keys=[worker_profile_id],
+    )
+    worker_profile_snapshot: Mapped["TaskWorkerProfileSnapshot | None"] = relationship(
+        "TaskWorkerProfileSnapshot",
+        back_populates="task",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
     ci_failure_run: Mapped[Optional["CIFailureRun"]] = relationship(
         "CIFailureRun",
         foreign_keys=[ci_failure_run_id],
@@ -425,6 +467,118 @@ class WorkerEnvironmentVariable(Base):
     __table_args__ = (
         Index("ix_worker_environment_variables_key", "key", unique=True),
     )
+
+
+class WorkerProfile(Base):
+    """Editable worker runtime profile."""
+
+    __tablename__ = "worker_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    image: Mapped[str] = mapped_column(String(255), nullable=False)
+    volume_mounts: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+    pre_script: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    post_script: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    default_execute_run_instruction_template: Mapped[str] = mapped_column(Text, nullable=False)
+    default_plan_run_instruction_template: Mapped[str] = mapped_column(Text, nullable=False)
+    ci_auto_repair_run_instruction_template: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=utcnow,
+        onupdate=utcnow,
+    )
+
+    environment_variables: Mapped[list["WorkerProfileEnvironmentVariable"]] = relationship(
+        "WorkerProfileEnvironmentVariable",
+        back_populates="profile",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_worker_profiles_default",
+            "is_default",
+            unique=True,
+            postgresql_where=text("is_default = true"),
+            sqlite_where=text("is_default = true"),
+        ),
+    )
+
+
+class WorkerProfileEnvironmentVariable(Base):
+    """Custom environment variable scoped to one worker profile."""
+
+    __tablename__ = "worker_profile_environment_variables"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    worker_profile_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("worker_profiles.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    key: Mapped[str] = mapped_column(String(255), nullable=False)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    is_secret: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=utcnow,
+        onupdate=utcnow,
+    )
+
+    profile: Mapped[WorkerProfile] = relationship(
+        "WorkerProfile",
+        back_populates="environment_variables",
+    )
+
+    __table_args__ = (
+        Index("uq_worker_profile_environment_key", "worker_profile_id", "key", unique=True),
+    )
+
+
+class TaskWorkerProfileSnapshot(Base):
+    """Task-level immutable worker runtime configuration snapshot."""
+
+    __tablename__ = "task_worker_profile_snapshots"
+
+    task_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    worker_profile_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("worker_profiles.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    profile_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    image: Mapped[str] = mapped_column(String(255), nullable=False)
+    volume_mounts: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+    environment_variables: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+    pre_script: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    post_script: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    default_execute_run_instruction_template: Mapped[str] = mapped_column(Text, nullable=False)
+    default_plan_run_instruction_template: Mapped[str] = mapped_column(Text, nullable=False)
+    ci_auto_repair_run_instruction_template: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=utcnow,
+        onupdate=utcnow,
+    )
+
+    task: Mapped[Task] = relationship("Task", back_populates="worker_profile_snapshot")
+    worker_profile: Mapped[WorkerProfile | None] = relationship("WorkerProfile")
 
 
 class PromptTemplate(Base):
