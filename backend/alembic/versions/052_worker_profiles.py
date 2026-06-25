@@ -12,6 +12,12 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy import column, table
 
+from app.core.task_prompt import (
+    BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE,
+    BUILT_IN_EXECUTE_RUN_INSTRUCTION_TEMPLATE,
+    BUILT_IN_PLAN_RUN_INSTRUCTION_TEMPLATE,
+)
+
 
 revision: str = "052_worker_profiles"
 down_revision: Union[str, None] = "051_fix_retry_source_ondelete"
@@ -37,6 +43,12 @@ def _parse_volume_mounts(raw_mounts: str) -> list[dict]:
     return mounts if isinstance(mounts, list) else []
 
 
+def _empty_json_array_default() -> sa.TextClause:
+    if op.get_context().dialect.name == "postgresql":
+        return sa.text("'[]'::json")
+    return sa.text("'[]'")
+
+
 def upgrade() -> None:
     op.create_table("worker_profiles",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
@@ -45,7 +57,12 @@ def upgrade() -> None:
         sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column("is_default", sa.Boolean(), nullable=False, server_default=sa.text("false")),
         sa.Column("image", sa.String(length=255), nullable=False),
-        sa.Column("volume_mounts", sa.JSON(), nullable=False, server_default=sa.text("'[]'")),
+        sa.Column(
+            "volume_mounts",
+            sa.JSON(),
+            nullable=False,
+            server_default=_empty_json_array_default(),
+        ),
         sa.Column("pre_script", sa.Text(), nullable=False, server_default=""),
         sa.Column("post_script", sa.Text(), nullable=False, server_default=""),
         sa.Column("default_execute_run_instruction_template", sa.Text(), nullable=False),
@@ -127,12 +144,17 @@ def upgrade() -> None:
         sa.Column("worker_profile_id", sa.Integer(), nullable=True),
         sa.Column("profile_name", sa.String(length=100), nullable=False),
         sa.Column("image", sa.String(length=255), nullable=False),
-        sa.Column("volume_mounts", sa.JSON(), nullable=False, server_default=sa.text("'[]'")),
+        sa.Column(
+            "volume_mounts",
+            sa.JSON(),
+            nullable=False,
+            server_default=_empty_json_array_default(),
+        ),
         sa.Column(
             "environment_variables",
             sa.JSON(),
             nullable=False,
-            server_default=sa.text("'[]'"),
+            server_default=_empty_json_array_default(),
         ),
         sa.Column("pre_script", sa.Text(), nullable=False, server_default=""),
         sa.Column("post_script", sa.Text(), nullable=False, server_default=""),
@@ -187,17 +209,17 @@ def upgrade() -> None:
             default_execute_run_instruction_template=_config_value(
                 conn,
                 "default_execute_run_instruction_template",
-                "",
+                BUILT_IN_EXECUTE_RUN_INSTRUCTION_TEMPLATE,
             ),
             default_plan_run_instruction_template=_config_value(
                 conn,
                 "default_plan_run_instruction_template",
-                "",
+                BUILT_IN_PLAN_RUN_INSTRUCTION_TEMPLATE,
             ),
             ci_auto_repair_run_instruction_template=_config_value(
                 conn,
                 "ci_auto_repair_run_instruction_template",
-                "",
+                BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE,
             ),
         )
     )

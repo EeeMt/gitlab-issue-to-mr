@@ -35,3 +35,22 @@ def test_worker_profiles_migration_seeds_default_worker_from_legacy_config():
     assert "ci_auto_repair_run_instruction_template" in content
     assert "worker_environment_variables" in content
     assert "default_provider_id" in content
+
+
+def test_worker_profiles_migration_uses_postgres_json_defaults():
+    content = MIGRATION.read_text(encoding="utf-8")
+
+    assert """return sa.text("'[]'::json")""" in content
+    assert "server_default=_empty_json_array_default()" in content
+    assert """server_default=sa.text("'[]'")""" not in content
+
+
+def test_worker_profiles_migration_uses_built_in_template_fallbacks():
+    content = MIGRATION.read_text(encoding="utf-8")
+
+    assert "BUILT_IN_EXECUTE_RUN_INSTRUCTION_TEMPLATE" in content
+    assert "BUILT_IN_PLAN_RUN_INSTRUCTION_TEMPLATE" in content
+    assert "BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE" in content
+    assert '"default_execute_run_instruction_template",\n                "",' not in content
+    assert '"default_plan_run_instruction_template",\n                "",' not in content
+    assert '"ci_auto_repair_run_instruction_template",\n                "",' not in content
