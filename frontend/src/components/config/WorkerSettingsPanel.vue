@@ -12,6 +12,35 @@
         </template>
 
         <n-form :model="workerFormValue" label-placement="top" class="config-section-form">
+          <div class="worker-profile-layout">
+            <aside class="worker-profile-list">
+              <div class="worker-profile-list__header">
+                <span>{{ t('config.workerProfiles') }}</span>
+                <n-button size="small" secondary @click="handleCreateProfile">
+                  {{ t('config.createWorkerProfile') }}
+                </n-button>
+              </div>
+              <button
+                v-for="profile in workerProfiles"
+                :key="profile.id"
+                type="button"
+                class="worker-profile-list__item"
+                :class="{ 'worker-profile-list__item--active': profile.id === selectedProfileId }"
+                @click="selectProfile(profile.id)"
+              >
+                <span class="worker-profile-list__name">{{ profile.name }}</span>
+                <span class="worker-profile-list__tags">
+                  <n-tag v-if="profile.is_default" size="small" type="success" :bordered="false">
+                    {{ t('config.defaultWorkerProfile') }}
+                  </n-tag>
+                  <n-tag v-if="!profile.enabled" size="small" type="warning" :bordered="false">
+                    {{ t('config.disabled') }}
+                  </n-tag>
+                </span>
+                <small>{{ profile.image }}</small>
+              </button>
+            </aside>
+            <section class="worker-profile-editor">
           <div class="config-form__section">
             <div class="config-form__section-title">{{ t('config.workerWorkspaceCleanup') }}</div>
             <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
@@ -26,6 +55,55 @@
                   <template #feedback>
                     {{ t('config.workerWorkspaceRetentionDaysHint') }}
                   </template>
+                </n-form-item>
+              </n-gi>
+            </n-grid>
+          </div>
+
+          <div class="config-form__section">
+            <div class="config-form__section-header">
+              <div class="config-form__section-title">{{ t('config.workerProfiles') }}</div>
+              <n-space :size="8" wrap>
+                <n-button
+                  size="small"
+                  secondary
+                  :disabled="selectedProfileId === null || isWorkerBusy"
+                  @click="handleDuplicateProfile"
+                >
+                  {{ t('config.duplicateWorkerProfile') }}
+                </n-button>
+                <n-button
+                  size="small"
+                  secondary
+                  :disabled="selectedProfileId === null || workerFormValue.is_default || isWorkerBusy"
+                  @click="handleSetDefaultProfile"
+                >
+                  {{ t('config.setDefaultWorkerProfile') }}
+                </n-button>
+                <n-button
+                  size="small"
+                  secondary
+                  :disabled="
+                    selectedProfileId === null ||
+                    workerFormValue.is_default ||
+                    !workerFormValue.enabled ||
+                    isWorkerBusy
+                  "
+                  @click="handleDisableProfile"
+                >
+                  {{ t('config.disableWorkerProfile') }}
+                </n-button>
+              </n-space>
+            </div>
+            <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+              <n-gi>
+                <n-form-item :label="t('config.workerProfileName')">
+                  <n-input v-model:value="workerFormValue.name" class="config-form__input" />
+                </n-form-item>
+              </n-gi>
+              <n-gi>
+                <n-form-item :label="t('config.workerProfileImage')">
+                  <n-input v-model:value="workerFormValue.image" class="config-form__input" />
                 </n-form-item>
               </n-gi>
             </n-grid>
@@ -280,6 +358,8 @@
               </n-button>
             </n-space>
           </div>
+            </section>
+          </div>
         </n-form>
       </n-card>
     </div>
@@ -305,24 +385,31 @@ import {
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import {
+  createWorkerProfile,
+  disableWorkerProfile,
+  duplicateWorkerProfile,
   getConfig,
   getRunInstructionTemplateBuiltIns,
+  getWorkerProfiles,
+  setDefaultWorkerProfile,
   updateConfig,
+  updateWorkerProfile,
   type RunInstructionTemplateBuiltIns,
-  type RuntimeConfig,
-  type WorkerEnvironmentVariable,
-  type WorkerEnvironmentVariableUpdate
+  type WorkerProfile,
+  type WorkerProfileEnvironmentVariable,
+  type WorkerProfileEnvironmentVariableUpdate,
+  type WorkerProfileMount,
+  type WorkerProfilePayload
 } from '../../api'
 import RunInstructionTemplateEditor from '../RunInstructionTemplateEditor.vue'
 
-type MountItem = {
-  host_path: string
-  container_path: string
-  mode: 'ro' | 'rw'
-}
-
 type WorkerFormValue = {
-  mounts: MountItem[]
+  name: string
+  description: string | null
+  enabled: boolean
+  is_default: boolean
+  image: string
+  mounts: WorkerProfileMount[]
   environment_variables: EnvironmentVariableFormItem[]
   worker_workspace_retention_days: number
   worker_pre_script: string
@@ -351,6 +438,8 @@ const { t } = useI18n()
 const loading = ref(false)
 const workerSaving = ref(false)
 const builtIns = ref<RunInstructionTemplateBuiltIns | null>(null)
+const workerProfiles = ref<WorkerProfile[]>([])
+const selectedProfileId = ref<number | null>(null)
 const knownPromptPlaceholders = computed(() => [
   ...new Set(builtIns.value?.execute.known_placeholders ?? [
     ...(builtIns.value?.execute.available_placeholders ?? []),
@@ -370,6 +459,11 @@ const environmentVariableTypeOptions = [
 ]
 
 const workerFormValue = ref<WorkerFormValue>({
+  name: '',
+  description: null,
+  enabled: true,
+  is_default: false,
+  image: '',
   mounts: [],
   environment_variables: [],
   worker_workspace_retention_days: 14,
@@ -388,29 +482,8 @@ const isWorkerDirty = computed(() =>
 
 const isWorkerBusy = computed(() => loading.value || workerSaving.value)
 
-function parseMounts(jsonStr: string): MountItem[] {
-  if (!jsonStr || !jsonStr.trim()) return []
-  try {
-    const parsed = JSON.parse(jsonStr)
-    if (Array.isArray(parsed)) {
-      return parsed.map(m => ({
-        host_path: m.host_path || '',
-        container_path: m.container_path || '',
-        mode: m.mode === 'rw' ? 'rw' : 'ro'
-      }))
-    }
-    return []
-  } catch {
-    return []
-  }
-}
-
-function serializeMounts(mounts: MountItem[]): string {
-  return JSON.stringify(mounts.filter(m => m.host_path && m.container_path))
-}
-
 function parseEnvironmentVariables(
-  environmentVariables: WorkerEnvironmentVariable[] | undefined
+  environmentVariables: WorkerProfileEnvironmentVariable[] | undefined
 ): EnvironmentVariableFormItem[] {
   if (!Array.isArray(environmentVariables)) return []
 
@@ -428,7 +501,7 @@ function parseEnvironmentVariables(
 
 function serializeEnvironmentVariables(
   environmentVariables: EnvironmentVariableFormItem[]
-): WorkerEnvironmentVariableUpdate[] {
+): WorkerProfileEnvironmentVariableUpdate[] {
   return environmentVariables
     .map((environmentVariable) => ({
       id: environmentVariable.id,
@@ -439,24 +512,37 @@ function serializeEnvironmentVariables(
     .filter((environmentVariable) => environmentVariable.key)
 }
 
-function mapRuntimeConfigToWorkerFormValue(runtime?: Partial<RuntimeConfig>): WorkerFormValue {
+function mapProfileToWorkerFormValue(
+  profile: WorkerProfile | null,
+  workerWorkspaceRetentionDays: number
+): WorkerFormValue {
   return {
-    mounts: parseMounts(runtime?.worker_volume_mounts ?? ''),
-    environment_variables: parseEnvironmentVariables(runtime?.worker_environment_variables),
-    worker_workspace_retention_days: runtime?.worker_workspace_retention_days ?? 14,
-    worker_pre_script: runtime?.worker_pre_script || '',
-    worker_post_script: runtime?.worker_post_script || '',
+    name: profile?.name ?? '',
+    description: profile?.description ?? null,
+    enabled: profile?.enabled ?? true,
+    is_default: profile?.is_default ?? false,
+    image: profile?.image ?? '',
+    mounts: (profile?.volume_mounts ?? []).map((mount) => ({ ...mount })),
+    environment_variables: parseEnvironmentVariables(profile?.environment_variables),
+    worker_workspace_retention_days: workerWorkspaceRetentionDays,
+    worker_pre_script: profile?.pre_script || '',
+    worker_post_script: profile?.post_script || '',
     default_execute_run_instruction_template:
-      runtime?.default_execute_run_instruction_template || '',
+      profile?.default_execute_run_instruction_template || '',
     default_plan_run_instruction_template:
-      runtime?.default_plan_run_instruction_template || '',
+      profile?.default_plan_run_instruction_template || '',
     ci_auto_repair_run_instruction_template:
-      runtime?.ci_auto_repair_run_instruction_template || ''
+      profile?.ci_auto_repair_run_instruction_template || ''
   }
 }
 
 function cloneWorkerFormValue(value: WorkerFormValue): WorkerFormValue {
   return {
+    name: value.name,
+    description: value.description,
+    enabled: value.enabled,
+    is_default: value.is_default,
+    image: value.image,
     mounts: value.mounts.map((mount) => ({ ...mount })),
     environment_variables: value.environment_variables.map((environmentVariable) => ({
       ...environmentVariable
@@ -473,16 +559,26 @@ function cloneWorkerFormValue(value: WorkerFormValue): WorkerFormValue {
 async function fetchConfig() {
   loading.value = true
   try {
-    const [configResult, builtInsResult] = await Promise.allSettled([
+    const [configResult, builtInsResult, profilesResult] = await Promise.allSettled([
       getConfig(),
-      getRunInstructionTemplateBuiltIns()
+      getRunInstructionTemplateBuiltIns(),
+      getWorkerProfiles()
     ])
     if (configResult.status === 'rejected') throw configResult.reason
+    if (profilesResult.status === 'rejected') throw profilesResult.reason
     const config = configResult.value
     if (builtInsResult.status === 'fulfilled') {
       builtIns.value = builtInsResult.value
     }
-    workerFormValue.value = mapRuntimeConfigToWorkerFormValue(config.runtime)
+    workerProfiles.value = profilesResult.value
+    const retentionDays = config.runtime?.worker_workspace_retention_days ?? 14
+    const selectedProfile =
+      workerProfiles.value.find((profile) => profile.is_default) ??
+      workerProfiles.value.find((profile) => profile.enabled) ??
+      workerProfiles.value[0] ??
+      null
+    selectedProfileId.value = selectedProfile?.id ?? null
+    workerFormValue.value = mapProfileToWorkerFormValue(selectedProfile, retentionDays)
     lastLoadedWorker.value = cloneWorkerFormValue(workerFormValue.value)
   } catch {
     message.error(t('config.loadError'))
@@ -510,6 +606,11 @@ function addEnvironmentVariable() {
 
 function createEmptyWorkerFormValue(): WorkerFormValue {
   return {
+    name: '',
+    description: null,
+    enabled: true,
+    is_default: false,
+    image: '',
     mounts: [],
     environment_variables: [],
     worker_workspace_retention_days: 14,
@@ -529,24 +630,70 @@ function removeEnvironmentVariable(index: number) {
   workerFormValue.value.environment_variables.splice(index, 1)
 }
 
+function selectProfile(profileId: number) {
+  const profile = workerProfiles.value.find((item) => item.id === profileId)
+  if (!profile) return
+  selectedProfileId.value = profileId
+  workerFormValue.value = mapProfileToWorkerFormValue(
+    profile,
+    workerFormValue.value.worker_workspace_retention_days
+  )
+  lastLoadedWorker.value = cloneWorkerFormValue(workerFormValue.value)
+}
+
+function buildWorkerProfilePayload(): WorkerProfilePayload {
+  return {
+    name: workerFormValue.value.name,
+    description: workerFormValue.value.description,
+    enabled: workerFormValue.value.enabled,
+    image: workerFormValue.value.image,
+    volume_mounts: workerFormValue.value.mounts.filter(
+      (mount) => mount.host_path && mount.container_path
+    ),
+    environment_variables: serializeEnvironmentVariables(
+      workerFormValue.value.environment_variables
+    ),
+    pre_script: workerFormValue.value.worker_pre_script,
+    post_script: workerFormValue.value.worker_post_script,
+    default_execute_run_instruction_template:
+      workerFormValue.value.default_execute_run_instruction_template,
+    default_plan_run_instruction_template: workerFormValue.value.default_plan_run_instruction_template,
+    ci_auto_repair_run_instruction_template: workerFormValue.value.ci_auto_repair_run_instruction_template
+  }
+}
+
+function replaceLoadedProfile(profile: WorkerProfile) {
+  const index = workerProfiles.value.findIndex((item) => item.id === profile.id)
+  if (index >= 0) {
+    workerProfiles.value.splice(index, 1, profile)
+  } else {
+    workerProfiles.value.unshift(profile)
+  }
+}
+
 async function handleSaveWorker() {
+  if (selectedProfileId.value === null) {
+    message.error(t('config.saveError'))
+    return
+  }
   workerSaving.value = true
   try {
     const savedConfig = await updateConfig({
       runtime: {
-        worker_volume_mounts: serializeMounts(workerFormValue.value.mounts),
-        worker_environment_variables: serializeEnvironmentVariables(
-          workerFormValue.value.environment_variables
-        ),
-        worker_workspace_retention_days: workerFormValue.value.worker_workspace_retention_days,
-        worker_pre_script: workerFormValue.value.worker_pre_script,
-        worker_post_script: workerFormValue.value.worker_post_script,
-        default_execute_run_instruction_template: workerFormValue.value.default_execute_run_instruction_template,
-        default_plan_run_instruction_template: workerFormValue.value.default_plan_run_instruction_template,
-        ci_auto_repair_run_instruction_template: workerFormValue.value.ci_auto_repair_run_instruction_template
+        worker_workspace_retention_days: workerFormValue.value.worker_workspace_retention_days
       }
     })
-    workerFormValue.value = mapRuntimeConfigToWorkerFormValue(savedConfig.runtime)
+    const savedProfile = await updateWorkerProfile(
+      selectedProfileId.value,
+      buildWorkerProfilePayload()
+    )
+    replaceLoadedProfile(savedProfile)
+    selectedProfileId.value = savedProfile.id
+    workerFormValue.value = mapProfileToWorkerFormValue(
+      savedProfile,
+      savedConfig.runtime?.worker_workspace_retention_days ??
+        workerFormValue.value.worker_workspace_retention_days
+    )
     lastLoadedWorker.value = cloneWorkerFormValue(workerFormValue.value)
     message.success(t('config.saved'))
   } catch (error: any) {
@@ -558,6 +705,86 @@ async function handleSaveWorker() {
 
 function resetWorker() {
   workerFormValue.value = cloneWorkerFormValue(lastLoadedWorker.value)
+}
+
+async function handleCreateProfile() {
+  workerSaving.value = true
+  try {
+    const created = await createWorkerProfile({
+      name: `Worker Profile ${workerProfiles.value.length + 1}`,
+      description: null,
+      enabled: true,
+      image: workerFormValue.value.image || 'codify-worker:latest',
+      volume_mounts: [],
+      environment_variables: [],
+      pre_script: '',
+      post_script: '',
+      default_execute_run_instruction_template:
+        builtIns.value?.execute.content ||
+        workerFormValue.value.default_execute_run_instruction_template,
+      default_plan_run_instruction_template:
+        builtIns.value?.plan.content || workerFormValue.value.default_plan_run_instruction_template,
+      ci_auto_repair_run_instruction_template:
+        builtIns.value?.ci_auto_repair.content ||
+        workerFormValue.value.ci_auto_repair_run_instruction_template
+    })
+    replaceLoadedProfile(created)
+    selectProfile(created.id)
+    message.success(t('config.saved'))
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || t('config.saveError'))
+  } finally {
+    workerSaving.value = false
+  }
+}
+
+async function handleDuplicateProfile() {
+  if (selectedProfileId.value === null) return
+  workerSaving.value = true
+  try {
+    const copy = await duplicateWorkerProfile(selectedProfileId.value)
+    replaceLoadedProfile(copy)
+    selectProfile(copy.id)
+    message.success(t('config.saved'))
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || t('config.saveError'))
+  } finally {
+    workerSaving.value = false
+  }
+}
+
+async function handleSetDefaultProfile() {
+  if (selectedProfileId.value === null) return
+  workerSaving.value = true
+  try {
+    const updated = await setDefaultWorkerProfile(selectedProfileId.value)
+    workerProfiles.value = workerProfiles.value.map((profile) => ({
+      ...profile,
+      is_default: profile.id === updated.id
+    }))
+    replaceLoadedProfile(updated)
+    selectProfile(updated.id)
+    message.success(t('config.saved'))
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || t('config.saveError'))
+  } finally {
+    workerSaving.value = false
+  }
+}
+
+async function handleDisableProfile() {
+  if (selectedProfileId.value === null) return
+  workerSaving.value = true
+  try {
+    const disabled = await disableWorkerProfile(selectedProfileId.value)
+    replaceLoadedProfile(disabled)
+    selectProfile(disabled.id)
+    message.success(t('config.saved'))
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || t('config.saveError'))
+  } finally {
+    workerSaving.value = false
+  }
 }
 
 function restoreBuiltIn(kind: keyof RunInstructionTemplateBuiltIns) {
@@ -581,6 +808,74 @@ watch(() => props.reloadKey, () => {
 </script>
 
 <style scoped>
+.worker-profile-layout {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.worker-profile-list {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.worker-profile-list__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(15, 23, 42, 0.68);
+}
+
+.worker-profile-list__item {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  padding: 10px;
+  text-align: left;
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 8px;
+}
+
+.worker-profile-list__item--active {
+  border-color: rgba(24, 160, 88, 0.42);
+  background: rgba(24, 160, 88, 0.06);
+}
+
+.worker-profile-list__name {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  color: rgba(15, 23, 42, 0.84);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worker-profile-list__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.worker-profile-list small {
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(15, 23, 42, 0.52);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worker-profile-editor {
+  min-width: 0;
+}
+
 .config-collection-section {
   gap: 8px;
 }
@@ -666,6 +961,10 @@ watch(() => props.reloadKey, () => {
 }
 
 @media (max-width: 767px) {
+  .worker-profile-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .config-collection-heading {
     flex-wrap: wrap;
   }

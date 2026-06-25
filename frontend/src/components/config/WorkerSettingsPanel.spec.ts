@@ -5,10 +5,26 @@ import WorkerSettingsPanel from './WorkerSettingsPanel.vue'
 
 function createRuntimeConfig() {
   return {
-    worker_volume_mounts:
-      '[{"host_path":"/host/cache","container_path":"/container/cache","mode":"rw"}]',
-    worker_workspace_retention_days: 14,
-    worker_environment_variables: [
+    worker_workspace_retention_days: 14
+  }
+}
+
+function createWorkerProfile(overrides: Record<string, any> = {}) {
+  return {
+    id: 1,
+    name: 'Default Worker',
+    description: null,
+    enabled: true,
+    is_default: true,
+    image: 'codify-worker:latest',
+    volume_mounts: [
+      {
+        host_path: '/host/cache',
+        container_path: '/container/cache',
+        mode: 'rw'
+      }
+    ],
+    environment_variables: [
       {
         id: 7,
         key: 'SECRET_TOKEN',
@@ -24,18 +40,38 @@ function createRuntimeConfig() {
         value_configured: true
       }
     ],
-    worker_pre_script: 'echo pre',
-    worker_post_script: 'echo post',
+    pre_script: 'echo pre',
+    post_script: 'echo post',
     default_execute_run_instruction_template: 'Execute {{user_prompt}}',
     default_plan_run_instruction_template: 'Plan {{user_prompt}}',
-    ci_auto_repair_run_instruction_template: 'Repair {{issue_title}}'
+    ci_auto_repair_run_instruction_template: 'Repair {{issue_title}}',
+    created_at: '2026-06-25T00:00:00',
+    updated_at: '2026-06-25T00:00:00',
+    ...overrides
   }
 }
 
-const { mockGetConfig, mockGetBuiltIns, mockUpdateConfig, mockMessage } = vi.hoisted(() => ({
+const {
+  mockGetConfig,
+  mockGetBuiltIns,
+  mockGetWorkerProfiles,
+  mockUpdateConfig,
+  mockUpdateWorkerProfile,
+  mockCreateWorkerProfile,
+  mockDuplicateWorkerProfile,
+  mockSetDefaultWorkerProfile,
+  mockDisableWorkerProfile,
+  mockMessage
+} = vi.hoisted(() => ({
   mockGetConfig: vi.fn(),
   mockGetBuiltIns: vi.fn(),
+  mockGetWorkerProfiles: vi.fn(),
   mockUpdateConfig: vi.fn(),
+  mockUpdateWorkerProfile: vi.fn(),
+  mockCreateWorkerProfile: vi.fn(),
+  mockDuplicateWorkerProfile: vi.fn(),
+  mockSetDefaultWorkerProfile: vi.fn(),
+  mockDisableWorkerProfile: vi.fn(),
   mockMessage: {
     success: vi.fn(),
     error: vi.fn()
@@ -218,7 +254,13 @@ vi.mock('naive-ui', () => ({
 vi.mock('../../api', () => ({
   getConfig: mockGetConfig,
   getRunInstructionTemplateBuiltIns: mockGetBuiltIns,
-  updateConfig: mockUpdateConfig
+  getWorkerProfiles: mockGetWorkerProfiles,
+  updateConfig: mockUpdateConfig,
+  updateWorkerProfile: mockUpdateWorkerProfile,
+  createWorkerProfile: mockCreateWorkerProfile,
+  duplicateWorkerProfile: mockDuplicateWorkerProfile,
+  setDefaultWorkerProfile: mockSetDefaultWorkerProfile,
+  disableWorkerProfile: mockDisableWorkerProfile
 }))
 
 describe('WorkerSettingsPanel', () => {
@@ -227,6 +269,7 @@ describe('WorkerSettingsPanel', () => {
     mockGetConfig.mockResolvedValue({
       runtime: createRuntimeConfig()
     })
+    mockGetWorkerProfiles.mockResolvedValue([createWorkerProfile()])
     mockGetBuiltIns.mockResolvedValue({
       execute: { content: 'Execute {{user_prompt}}', available_placeholders: ['user_prompt'] },
       plan: { content: 'Plan {{user_prompt}}', available_placeholders: ['user_prompt'] },
@@ -235,6 +278,11 @@ describe('WorkerSettingsPanel', () => {
     mockUpdateConfig.mockResolvedValue({
       runtime: createRuntimeConfig()
     })
+    mockUpdateWorkerProfile.mockResolvedValue(createWorkerProfile())
+    mockCreateWorkerProfile.mockResolvedValue(createWorkerProfile({ id: 2, name: 'Worker Profile 2' }))
+    mockDuplicateWorkerProfile.mockResolvedValue(createWorkerProfile({ id: 2, name: 'Default Worker Copy' }))
+    mockSetDefaultWorkerProfile.mockResolvedValue(createWorkerProfile())
+    mockDisableWorkerProfile.mockResolvedValue(createWorkerProfile({ enabled: false }))
   })
 
   it('does not render the legacy AI provider redirect card in worker settings', async () => {
@@ -248,6 +296,9 @@ describe('WorkerSettingsPanel', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('config.workerSettings')
+    expect(mockGetWorkerProfiles).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Default Worker')
+    expect((wrapper.vm as any).workerFormValue.image).toBe('codify-worker:latest')
     expect(wrapper.text()).not.toContain('config.aiProvider')
     expect(wrapper.text()).not.toContain('config.providers.movedNotice')
   })
@@ -318,12 +369,13 @@ describe('WorkerSettingsPanel', () => {
 
     await vm.handleSaveWorker()
 
-    expect(mockUpdateConfig).toHaveBeenCalledWith({
-      runtime: expect.objectContaining({
-        worker_pre_script: 'npm ci',
-        worker_post_script: 'npm test'
+    expect(mockUpdateWorkerProfile).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        pre_script: 'npm ci',
+        post_script: 'npm test'
       })
-    })
+    )
   })
 
   it('loads and saves workspace retention days', async () => {
@@ -344,9 +396,9 @@ describe('WorkerSettingsPanel', () => {
     await vm.handleSaveWorker()
 
     expect(mockUpdateConfig).toHaveBeenCalledWith({
-      runtime: expect.objectContaining({
+      runtime: {
         worker_workspace_retention_days: 30
-      })
+      }
     })
   })
 
@@ -396,16 +448,10 @@ describe('WorkerSettingsPanel', () => {
     const vm = wrapper.vm as any
     await vm.handleSaveWorker()
 
-    expect(mockUpdateConfig).toHaveBeenCalledWith({
-      runtime: {
-        worker_volume_mounts: '[{"host_path":"/host/cache","container_path":"/container/cache","mode":"rw"}]',
-        worker_workspace_retention_days: 14,
-        worker_pre_script: 'echo pre',
-        worker_post_script: 'echo post',
-        default_execute_run_instruction_template: 'Execute {{user_prompt}}',
-        default_plan_run_instruction_template: 'Plan {{user_prompt}}',
-        ci_auto_repair_run_instruction_template: 'Repair {{issue_title}}',
-        worker_environment_variables: [
+    expect(mockUpdateWorkerProfile).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        environment_variables: [
           {
             id: 7,
             key: 'SECRET_TOKEN',
@@ -419,8 +465,8 @@ describe('WorkerSettingsPanel', () => {
             is_secret: false
           }
         ]
-      }
-    })
+      })
+    )
     expect(vm.workerFormValue.environment_variables).toEqual([
       {
         id: 7,
@@ -474,16 +520,9 @@ describe('WorkerSettingsPanel', () => {
       value_configured: false
     })
 
-    mockUpdateConfig.mockResolvedValueOnce({
-      runtime: {
-        worker_volume_mounts:
-          '[{"host_path":"/host/cache","container_path":"/container/cache","mode":"rw"}]',
-        worker_pre_script: 'echo pre',
-        worker_post_script: 'echo post',
-        default_execute_run_instruction_template: 'Execute {{user_prompt}}',
-        default_plan_run_instruction_template: 'Plan {{user_prompt}}',
-        ci_auto_repair_run_instruction_template: 'Repair {{issue_title}}',
-        worker_environment_variables: [
+    mockUpdateWorkerProfile.mockResolvedValueOnce(
+      createWorkerProfile({
+        environment_variables: [
           {
             id: 7,
             key: 'SECRET_TOKEN',
@@ -506,8 +545,8 @@ describe('WorkerSettingsPanel', () => {
             value_configured: true
           }
         ]
-      }
-    })
+      })
+    )
 
     await vm.handleSaveWorker()
 
@@ -558,16 +597,10 @@ describe('WorkerSettingsPanel', () => {
       }
     ])
     expect(wrapper.text()).toContain('config.configured')
-    expect(mockUpdateConfig).toHaveBeenCalledWith({
-      runtime: {
-        worker_volume_mounts: '[{"host_path":"/host/cache","container_path":"/container/cache","mode":"rw"}]',
-        worker_workspace_retention_days: 14,
-        worker_pre_script: 'echo pre',
-        worker_post_script: 'echo post',
-        default_execute_run_instruction_template: 'Execute {{user_prompt}}',
-        default_plan_run_instruction_template: 'Plan {{user_prompt}}',
-        ci_auto_repair_run_instruction_template: 'Repair {{issue_title}}',
-        worker_environment_variables: [
+    expect(mockUpdateWorkerProfile).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        environment_variables: [
           {
             id: 7,
             key: 'SECRET_TOKEN',
@@ -587,8 +620,8 @@ describe('WorkerSettingsPanel', () => {
             is_secret: true
           }
         ]
-      }
-    })
+      })
+    )
   })
 
   it('loads, restores, and saves independent run instruction templates', async () => {
@@ -607,12 +640,13 @@ describe('WorkerSettingsPanel', () => {
     )
     vm.workerFormValue.default_plan_run_instruction_template = 'Custom plan'
     await vm.handleSaveWorker()
-    expect(mockUpdateConfig).toHaveBeenCalledWith({
-      runtime: expect.objectContaining({
+    expect(mockUpdateWorkerProfile).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
         default_execute_run_instruction_template: 'Execute {{user_prompt}}',
         default_plan_run_instruction_template: 'Custom plan',
         ci_auto_repair_run_instruction_template: 'Repair {{issue_title}}'
       })
-    })
+    )
   })
 })
