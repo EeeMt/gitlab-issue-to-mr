@@ -175,6 +175,10 @@ export interface Issue {
   delete_branch_on_close: boolean
   branch_deleted: boolean
   ci_auto_repair_enabled: boolean
+  default_worker_profile_id: number | null
+  default_provider_id: number | null
+  default_worker_profile_name?: string | null
+  default_provider_name?: string | null
 }
 
 export interface CreateIssueRequest {
@@ -186,6 +190,8 @@ export interface CreateIssueRequest {
   // Option to delete branch when a webhook auto-closes the issue
   delete_branch_on_close?: boolean
   ci_auto_repair_enabled?: boolean
+  default_worker_profile_id?: number | null
+  default_provider_id?: number | null
 }
 
 export interface CloseIssueRequest {
@@ -237,6 +243,10 @@ export interface Task {
   task_mode: 'execute' | 'plan'
   provider_id: number | null
   provider_name?: string | null
+  worker_profile_id: number | null
+  worker_profile_name?: string | null
+  worker_image?: string | null
+  worker_snapshot_created_at?: string | null
   created_at: string
   updated_at: string
   started_at: string | null
@@ -312,6 +322,59 @@ export interface UpdateProviderRequest {
   is_disabled?: boolean
 }
 
+export interface WorkerProfileEnvironmentVariable {
+  id?: number
+  key: string
+  value: string | null
+  is_secret: boolean
+  value_configured: boolean
+}
+
+export interface WorkerProfileEnvironmentVariableUpdate {
+  id?: number
+  key: string
+  value: string
+  is_secret: boolean
+}
+
+export interface WorkerProfileMount {
+  host_path: string
+  container_path: string
+  mode: 'ro' | 'rw'
+}
+
+export interface WorkerProfile {
+  id: number
+  name: string
+  description: string | null
+  enabled: boolean
+  is_default: boolean
+  image: string
+  volume_mounts: WorkerProfileMount[]
+  environment_variables: WorkerProfileEnvironmentVariable[]
+  pre_script: string
+  post_script: string
+  default_execute_run_instruction_template: string
+  default_plan_run_instruction_template: string
+  ci_auto_repair_run_instruction_template: string
+  created_at: string
+  updated_at: string
+}
+
+export interface WorkerProfilePayload {
+  name?: string
+  description?: string | null
+  enabled?: boolean
+  image?: string
+  volume_mounts?: WorkerProfileMount[]
+  environment_variables?: WorkerProfileEnvironmentVariableUpdate[]
+  pre_script?: string
+  post_script?: string
+  default_execute_run_instruction_template?: string
+  default_plan_run_instruction_template?: string
+  ci_auto_repair_run_instruction_template?: string
+}
+
 // Request types
 export interface CreateTaskRequest {
   issue_id: number
@@ -320,6 +383,7 @@ export interface CreateTaskRequest {
   delay_seconds?: number
   scheduled_datetime?: string
   provider_id?: number | null
+  worker_profile_id?: number | null
   require_changes?: boolean
   task_mode?: 'execute' | 'plan'
   run_instruction_template?: string
@@ -1606,6 +1670,7 @@ export interface UpdateTaskRequest {
   user_prompt?: string
   priority?: number
   provider_id?: number | null
+  worker_profile_id?: number | null
   require_changes?: boolean
   task_mode?: 'execute' | 'plan'
   run_instruction_template?: string
@@ -1685,6 +1750,8 @@ export async function updateIssue(id: number, data: Partial<{
   description: string
   status: string
   ci_auto_repair_enabled: boolean
+  default_worker_profile_id: number | null
+  default_provider_id: number | null
 }>): Promise<Issue> {
   const response = await api.patch(`/issues/${id}`, data)
   return response.data
@@ -1729,6 +1796,39 @@ export async function deleteProvider(id: number): Promise<void> {
 
 export async function setDefaultProvider(id: number): Promise<AIProvider> {
   const { data } = await api.post(`/providers/${id}/set-default`)
+  return data
+}
+
+export async function getWorkerProfiles(): Promise<WorkerProfile[]> {
+  const { data } = await api.get('/worker-profiles')
+  return data
+}
+
+export async function createWorkerProfile(payload: WorkerProfilePayload): Promise<WorkerProfile> {
+  const { data } = await api.post('/worker-profiles', payload)
+  return data
+}
+
+export async function updateWorkerProfile(
+  profileId: number,
+  payload: WorkerProfilePayload
+): Promise<WorkerProfile> {
+  const { data } = await api.patch(`/worker-profiles/${profileId}`, payload)
+  return data
+}
+
+export async function setDefaultWorkerProfile(profileId: number): Promise<WorkerProfile> {
+  const { data } = await api.post(`/worker-profiles/${profileId}/set-default`)
+  return data
+}
+
+export async function disableWorkerProfile(profileId: number): Promise<WorkerProfile> {
+  const { data } = await api.post(`/worker-profiles/${profileId}/disable`)
+  return data
+}
+
+export async function duplicateWorkerProfile(profileId: number): Promise<WorkerProfile> {
+  const { data } = await api.post(`/worker-profiles/${profileId}/duplicate`)
   return data
 }
 
