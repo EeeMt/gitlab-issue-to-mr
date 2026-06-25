@@ -18,12 +18,18 @@ from app.config import get_effective_settings
 from app.core.ci_failure_logs import append_ci_failure_log
 from app.core.gitlab_client import get_gitlab_client
 from app.core.projects import get_project_metadata
-from app.core.task_prompt import render_and_store_task_prompt, select_run_instruction_template
+from app.core.task_prompt import render_and_store_task_prompt
 from app.core.utcnow import utcnow
+from app.core.worker_profiles import (
+    WorkerProfileValidationError,
+    replace_task_worker_snapshot,
+    resolve_provider_for_issue,
+    resolve_worker_profile_for_issue,
+    select_snapshot_run_instruction_template,
+)
 from app.core.worker_workspace import configured_workspace_root
 from app.database import AsyncSessionLocal
 from app.models import (
-    AIProvider,
     CIFailureJob,
     CIFailureRun,
     Issue,
@@ -597,13 +603,22 @@ async def process_ci_failure_run(
                 .order_by(Task.completed_at.desc().nullslast(), Task.created_at.desc())
             )
         ).scalars().first()
-        provider_id = latest_task.provider_id if latest_task else None
         priority = latest_task.priority if latest_task else 0
-        if provider_id is None:
-            default_provider = (
-                await db.execute(select(AIProvider).where(AIProvider.is_default == True))
-            ).scalar_one_or_none()
-            provider_id = default_provider.id if default_provider else None
+        try:
+            worker_profile = await resolve_worker_profile_for_issue(
+                db,
+                issue,
+                None,
+                allow_system_default=False,
+            )
+            provider = await resolve_provider_for_issue(
+                db,
+                issue,
+                None,
+                allow_system_default=False,
+            )
+        except WorkerProfileValidationError as exc:
+            raise RuntimeError(f"CI auto-repair cannot start: {exc}") from exc
 
         repair_task = Task(
             issue_id=issue.id,
@@ -612,24 +627,26 @@ async def process_ci_failure_run(
             initiator_user_id=issue.initiator_user_id,
             initiator_username=issue.initiator_username,
             priority=priority,
-            provider_id=provider_id,
+            provider_id=provider.id,
+            worker_profile_id=worker_profile.id,
             task_mode="execute",
             require_changes=True,
             trigger_source="ci_auto_repair",
             ci_failure_run_id=run.id,
         )
+        db.add(repair_task)
+        await db.flush()
+        snapshot = await replace_task_worker_snapshot(db, repair_task, worker_profile)
         render_and_store_task_prompt(
             repair_task,
             issue,
             await get_project_metadata(issue.project_id),
-            select_run_instruction_template(
-                settings,
+            select_snapshot_run_instruction_template(
+                snapshot,
                 task_mode="execute",
                 trigger_source="ci_auto_repair",
             ),
         )
-        db.add(repair_task)
-        await db.flush()
         run.repair_task_id = repair_task.id
         run.status = "task_created"
         await append_ci_failure_log(

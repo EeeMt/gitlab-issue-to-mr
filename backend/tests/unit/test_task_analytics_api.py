@@ -103,7 +103,24 @@ async def test_retry_task_persists_manual_initiator_metadata():
         user_prompt="Retry analytics task",
         priority=2,
         provider_id=5,
+        worker_profile_id=12,
         status=TaskStatus.FAILED,
+    )
+    provider = SimpleNamespace(id=5, is_disabled=False)
+    worker_profile = SimpleNamespace(id=12)
+    snapshot = TaskWorkerProfileSnapshot(
+        task_id=24,
+        worker_profile_id=12,
+        profile_name="Default Worker",
+        image="codify-worker:latest",
+        volume_mounts=[],
+        environment_variables=[],
+        pre_script="",
+        post_script="",
+        default_execute_run_instruction_template="Execute {{user_prompt}}",
+        default_plan_run_instruction_template="Plan {{user_prompt}}",
+        ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+        created_at=datetime(2026, 3, 14, 12, 0, 0),
     )
 
     db = MagicMock()
@@ -139,7 +156,13 @@ async def test_retry_task_persists_manual_initiator_metadata():
          patch("app.api.tasks.notify_task_retried", new=AsyncMock()), \
          patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})), \
          patch("app.api.tasks.render_and_store_task_prompt"), \
-         patch("app.api.tasks.select_run_instruction_template", return_value="template"), \
+         patch("app.api.tasks.resolve_provider_for_issue", new=AsyncMock(return_value=provider)), \
+         patch(
+             "app.api.tasks.resolve_worker_profile_for_issue",
+             new=AsyncMock(return_value=worker_profile),
+         ), \
+         patch("app.api.tasks.replace_task_worker_snapshot", new=AsyncMock(return_value=snapshot)), \
+         patch("app.api.tasks.select_snapshot_run_instruction_template", return_value="template"), \
          patch(
              "app.api.tasks.get_usage_quota_service",
              return_value=MagicMock(raise_if_over_limit=AsyncMock()),

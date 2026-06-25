@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from app.models import (
+    AIProvider,
     Base,
     CIFailureJob,
     CIFailureRun,
@@ -17,6 +18,8 @@ from app.models import (
     Issue,
     Task,
     TaskStatus,
+    TaskWorkerProfileSnapshot,
+    WorkerProfile,
 )
 
 _UNSET = object()
@@ -80,7 +83,49 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
         values.update(overrides)
         return SimpleNamespace(**values)
 
-    async def _seed_issue_and_run(self, session, *, enabled=True, sha="abc123"):
+    def _provider(self, provider_id: int) -> AIProvider:
+        return AIProvider(
+            id=provider_id,
+            name=f"Provider {provider_id}",
+            base_url="https://ai.example.com",
+            api_key="secret",
+            model="test-model",
+            is_default=provider_id == 3,
+            is_disabled=False,
+        )
+
+    def _worker_profile(self, worker_profile_id: int) -> WorkerProfile:
+        from app.core.task_prompt import BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE
+
+        return WorkerProfile(
+            id=worker_profile_id,
+            name=f"Worker {worker_profile_id}",
+            enabled=True,
+            is_default=worker_profile_id == 2,
+            image="codify-worker:test",
+            volume_mounts=[],
+            pre_script="",
+            post_script="",
+            default_execute_run_instruction_template="Execute {{user_prompt}}",
+            default_plan_run_instruction_template="Plan {{user_prompt}}",
+            ci_auto_repair_run_instruction_template=(
+                BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE
+            ),
+        )
+
+    async def _seed_issue_and_run(
+        self,
+        session,
+        *,
+        enabled=True,
+        sha="abc123",
+        default_provider_id=3,
+        default_worker_profile_id=2,
+        latest_task_provider_id=3,
+    ):
+        provider_ids = {default_provider_id, latest_task_provider_id}
+        session.add_all([self._provider(provider_id) for provider_id in sorted(provider_ids)])
+        session.add(self._worker_profile(default_worker_profile_id))
         issue = Issue(
             id=1,
             title="Repair CI",
@@ -90,6 +135,8 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
             target_branch="main",
             merge_request_iid=7,
             ci_auto_repair_enabled=enabled,
+            default_worker_profile_id=default_worker_profile_id,
+            default_provider_id=default_provider_id,
             initiator_user_id=9,
             initiator_username="alice",
         )
@@ -102,7 +149,7 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
                 user_prompt="Original task",
                 status=TaskStatus.COMPLETED,
                 priority=1,
-                provider_id=3,
+                provider_id=latest_task_provider_id,
                 task_mode="execute",
             )
         )
@@ -274,6 +321,45 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
 
             steps = [(log.step, log.status) for log in (await session.execute(select(CIFailureRunLog))).scalars().all()]
             self.assertIn(("repair_task_created", "succeeded"), steps)
+
+    async def test_code_failure_uses_issue_default_worker_and_provider(self):
+        from app.core.ci_failure_collector import process_ci_failure_run
+
+        jobs, traces = self._code_failure_jobs()
+        async with self.Session() as session:
+            _, run = await self._seed_issue_and_run(
+                session,
+                enabled=True,
+                default_provider_id=22,
+                default_worker_profile_id=11,
+                latest_task_provider_id=3,
+            )
+
+            with patch(
+                "app.core.ci_failure_collector.get_project_metadata",
+                new_callable=AsyncMock,
+                return_value={
+                    "project_name": "test-project",
+                    "project_path_with_namespace": "group/test-project",
+                },
+            ):
+                await process_ci_failure_run(
+                    session,
+                    run.id,
+                    gitlab_client=FakeGitLabClient(jobs=jobs, traces=traces),
+                    settings=self._settings(),
+                    collector_id="test",
+                )
+
+            refreshed = await session.get(CIFailureRun, run.id)
+            repair_task = await session.get(Task, refreshed.repair_task_id)
+            self.assertEqual(repair_task.provider_id, 22)
+            self.assertEqual(repair_task.worker_profile_id, 11)
+
+            snapshot = await session.get(TaskWorkerProfileSnapshot, repair_task.id)
+            self.assertIsNotNone(snapshot)
+            self.assertEqual(snapshot.worker_profile_id, 11)
+            self.assertEqual(snapshot.image, "codify-worker:test")
 
     async def test_merged_results_pipeline_allows_sha_mismatch_when_pipeline_is_current(self):
         from app.core.ci_failure_collector import process_ci_failure_run
@@ -500,6 +586,7 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
         ]
 
         async with self.Session() as session:
+            session.add_all([self._provider(3), self._worker_profile(2)])
             issue = Issue(
                 id=2,
                 title="Fix pipeline",
@@ -508,6 +595,8 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
                 branch_name="codify/issue-66",
                 target_branch="main",
                 ci_auto_repair_enabled=True,
+                default_worker_profile_id=2,
+                default_provider_id=3,
                 initiator_user_id=9,
                 initiator_username="alice",
             )
