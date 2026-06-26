@@ -391,6 +391,9 @@ describe('WorkerSettingsPanel', () => {
     const vm = wrapper.vm as any
     expect(vm.workerFormValue.worker_workspace_retention_days).toBe(14)
     expect(wrapper.text()).toContain('config.workerWorkspaceRetentionDays')
+    expect(wrapper.find('.worker-profile-editor').text()).not.toContain(
+      'config.workerWorkspaceRetentionDays'
+    )
 
     vm.workerFormValue.worker_workspace_retention_days = 30
     await vm.handleSaveWorker()
@@ -400,6 +403,69 @@ describe('WorkerSettingsPanel', () => {
         worker_workspace_retention_days: 30
       }
     })
+  })
+
+  it('opens a local worker profile draft without posting when create is clicked', async () => {
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: {
+        isMobile: false,
+        reloadKey: 0
+      }
+    })
+
+    await flushPromises()
+
+    const vm = wrapper.vm as any
+    await vm.handleCreateProfile()
+
+    expect(mockCreateWorkerProfile).not.toHaveBeenCalled()
+    expect(vm.selectedProfileId).toBe(null)
+    expect(vm.workerFormValue.name).toBe('')
+    expect(vm.workerFormValue.image).toBe('codify-worker:latest')
+    expect(vm.workerFormValue.mounts).toEqual([])
+    expect(vm.workerFormValue.environment_variables).toEqual([])
+    expect(vm.workerFormValue.default_execute_run_instruction_template).toBe(
+      'Execute {{user_prompt}}'
+    )
+  })
+
+  it('posts a new worker profile only when saving a filled draft', async () => {
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: {
+        isMobile: false,
+        reloadKey: 0
+      }
+    })
+
+    await flushPromises()
+
+    const vm = wrapper.vm as any
+    await vm.handleCreateProfile()
+    vm.workerFormValue.name = 'Java Worker'
+    vm.workerFormValue.image = 'codify-worker-java:latest'
+
+    mockCreateWorkerProfile.mockResolvedValueOnce(
+      createWorkerProfile({
+        id: 3,
+        name: 'Java Worker',
+        image: 'codify-worker-java:latest',
+        volume_mounts: [],
+        environment_variables: []
+      })
+    )
+
+    await vm.handleSaveWorker()
+
+    expect(mockCreateWorkerProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'Java Worker',
+        image: 'codify-worker-java:latest',
+        volume_mounts: [],
+        environment_variables: []
+      })
+    )
+    expect(mockUpdateWorkerProfile).not.toHaveBeenCalled()
+    expect(vm.selectedProfileId).toBe(3)
   })
 
   it('does not save workspace retention days when worker profile save fails', async () => {

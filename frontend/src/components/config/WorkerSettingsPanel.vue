@@ -12,6 +12,25 @@
         </template>
 
         <n-form :model="workerFormValue" label-placement="top" class="config-section-form">
+          <div class="config-form__section">
+            <div class="config-form__section-title">{{ t('config.workerWorkspaceCleanup') }}</div>
+            <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+              <n-gi>
+                <n-form-item :label="t('config.workerWorkspaceRetentionDays')">
+                  <n-input-number
+                    v-model:value="workerFormValue.worker_workspace_retention_days"
+                    :min="0"
+                    :max="365"
+                    class="config-form__input"
+                  />
+                  <template #feedback>
+                    {{ t('config.workerWorkspaceRetentionDaysHint') }}
+                  </template>
+                </n-form-item>
+              </n-gi>
+            </n-grid>
+          </div>
+
           <div class="worker-profile-layout">
             <aside class="worker-profile-list">
               <div class="worker-profile-list__header">
@@ -41,25 +60,6 @@
               </button>
             </aside>
             <section class="worker-profile-editor">
-          <div class="config-form__section">
-            <div class="config-form__section-title">{{ t('config.workerWorkspaceCleanup') }}</div>
-            <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
-              <n-gi>
-                <n-form-item :label="t('config.workerWorkspaceRetentionDays')">
-                  <n-input-number
-                    v-model:value="workerFormValue.worker_workspace_retention_days"
-                    :min="0"
-                    :max="365"
-                    class="config-form__input"
-                  />
-                  <template #feedback>
-                    {{ t('config.workerWorkspaceRetentionDaysHint') }}
-                  </template>
-                </n-form-item>
-              </n-gi>
-            </n-grid>
-          </div>
-
           <div class="config-form__section">
             <div class="config-form__section-header">
               <div class="config-form__section-title">{{ t('config.workerProfiles') }}</div>
@@ -440,6 +440,7 @@ const workerSaving = ref(false)
 const builtIns = ref<RunInstructionTemplateBuiltIns | null>(null)
 const workerProfiles = ref<WorkerProfile[]>([])
 const selectedProfileId = ref<number | null>(null)
+const creatingWorkerProfile = ref(false)
 const knownPromptPlaceholders = computed(() => [
   ...new Set(builtIns.value?.execute.known_placeholders ?? [
     ...(builtIns.value?.execute.available_placeholders ?? []),
@@ -577,6 +578,7 @@ async function fetchConfig() {
       workerProfiles.value.find((profile) => profile.enabled) ??
       workerProfiles.value[0] ??
       null
+    creatingWorkerProfile.value = false
     selectedProfileId.value = selectedProfile?.id ?? null
     workerFormValue.value = mapProfileToWorkerFormValue(selectedProfile, retentionDays)
     lastLoadedWorker.value = cloneWorkerFormValue(workerFormValue.value)
@@ -633,6 +635,7 @@ function removeEnvironmentVariable(index: number) {
 function selectProfile(profileId: number) {
   const profile = workerProfiles.value.find((item) => item.id === profileId)
   if (!profile) return
+  creatingWorkerProfile.value = false
   selectedProfileId.value = profileId
   workerFormValue.value = mapProfileToWorkerFormValue(
     profile,
@@ -672,24 +675,27 @@ function replaceLoadedProfile(profile: WorkerProfile) {
 }
 
 async function handleSaveWorker() {
-  if (selectedProfileId.value === null) {
+  if (selectedProfileId.value === null && !creatingWorkerProfile.value) {
     message.error(t('config.saveError'))
     return
   }
   workerSaving.value = true
   try {
     const retentionDays = workerFormValue.value.worker_workspace_retention_days
-    const savedProfile = await updateWorkerProfile(
-      selectedProfileId.value,
-      buildWorkerProfilePayload()
-    )
+    const savedProfile = creatingWorkerProfile.value
+      ? await createWorkerProfile(buildWorkerProfilePayload())
+      : await updateWorkerProfile(
+          selectedProfileId.value as number,
+          buildWorkerProfilePayload()
+        )
+    replaceLoadedProfile(savedProfile)
+    selectedProfileId.value = savedProfile.id
+    creatingWorkerProfile.value = false
     const savedConfig = await updateConfig({
       runtime: {
         worker_workspace_retention_days: retentionDays
       }
     })
-    replaceLoadedProfile(savedProfile)
-    selectedProfileId.value = savedProfile.id
     workerFormValue.value = mapProfileToWorkerFormValue(
       savedProfile,
       savedConfig.runtime?.worker_workspace_retention_days ??
@@ -708,35 +714,23 @@ function resetWorker() {
   workerFormValue.value = cloneWorkerFormValue(lastLoadedWorker.value)
 }
 
-async function handleCreateProfile() {
-  workerSaving.value = true
-  try {
-    const created = await createWorkerProfile({
-      name: `Worker Profile ${workerProfiles.value.length + 1}`,
-      description: null,
-      enabled: true,
-      image: workerFormValue.value.image || 'codify-worker:latest',
-      volume_mounts: [],
-      environment_variables: [],
-      pre_script: '',
-      post_script: '',
-      default_execute_run_instruction_template:
-        builtIns.value?.execute.content ||
-        workerFormValue.value.default_execute_run_instruction_template,
-      default_plan_run_instruction_template:
-        builtIns.value?.plan.content || workerFormValue.value.default_plan_run_instruction_template,
-      ci_auto_repair_run_instruction_template:
-        builtIns.value?.ci_auto_repair.content ||
-        workerFormValue.value.ci_auto_repair_run_instruction_template
-    })
-    replaceLoadedProfile(created)
-    selectProfile(created.id)
-    message.success(t('config.saved'))
-  } catch (error: any) {
-    message.error(error?.response?.data?.detail || t('config.saveError'))
-  } finally {
-    workerSaving.value = false
-  }
+function handleCreateProfile() {
+  const draft = createEmptyWorkerFormValue()
+  draft.image = workerFormValue.value.image || 'codify-worker:latest'
+  draft.worker_workspace_retention_days = workerFormValue.value.worker_workspace_retention_days
+  draft.default_execute_run_instruction_template =
+    builtIns.value?.execute.content ||
+    workerFormValue.value.default_execute_run_instruction_template
+  draft.default_plan_run_instruction_template =
+    builtIns.value?.plan.content || workerFormValue.value.default_plan_run_instruction_template
+  draft.ci_auto_repair_run_instruction_template =
+    builtIns.value?.ci_auto_repair.content ||
+    workerFormValue.value.ci_auto_repair_run_instruction_template
+
+  creatingWorkerProfile.value = true
+  selectedProfileId.value = null
+  workerFormValue.value = draft
+  lastLoadedWorker.value = cloneWorkerFormValue(draft)
 }
 
 async function handleDuplicateProfile() {

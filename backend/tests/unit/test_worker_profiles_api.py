@@ -5,6 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 from app.api.worker_profiles import (
     WorkerProfileCreateRequest,
@@ -18,6 +20,7 @@ from app.dependencies.auth import (
     require_authenticated_user,
 )
 from app.main import app
+from app.models import Base
 
 
 def _make_profile(
@@ -74,6 +77,35 @@ async def test_create_worker_profile_rejects_duplicate_env_keys():
         await create_worker_profile(request, db=db)
     assert exc.value.status_code == 422
     assert "Duplicate worker environment variable key" in str(exc.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_create_worker_profile_returns_created_profile_after_commit_without_lazy_load():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with session_factory() as db:
+        request = WorkerProfileCreateRequest(
+            name="Java Worker",
+            image="codify-worker-java:latest",
+            volume_mounts=[],
+            environment_variables=[
+                WorkerProfileEnvironmentVariableRequest(key="JAVA_OPTS", value="-Xmx1g")
+            ],
+            default_execute_run_instruction_template="Execute {{user_prompt}}",
+            default_plan_run_instruction_template="Plan {{user_prompt}}",
+            ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+        )
+
+        response = await create_worker_profile(request, db=db)
+
+    await engine.dispose()
+
+    assert response["name"] == "Java Worker"
+    assert response["image"] == "codify-worker-java:latest"
+    assert response["environment_variables"][0]["key"] == "JAVA_OPTS"
 
 
 @pytest.mark.asyncio

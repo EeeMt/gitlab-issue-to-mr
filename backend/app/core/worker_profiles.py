@@ -347,7 +347,12 @@ async def replace_profile_environment_variables(
     items: Iterable[Any],
 ) -> None:
     """Replace all environment variables for one worker profile."""
-    existing_rows = list(profile.environment_variables or [])
+    result = await db.execute(
+        select(WorkerProfileEnvironmentVariable).where(
+            WorkerProfileEnvironmentVariable.worker_profile_id == profile.id
+        )
+    )
+    existing_rows = list(result.scalars().all())
     existing_by_key = {row.key: row for row in existing_rows}
     seen_keys: set[str] = set()
 

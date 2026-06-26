@@ -232,21 +232,36 @@
               <n-alert v-if="defaultsError" type="error" :bordered="false">
                 {{ defaultsError }}
               </n-alert>
-              <n-form-item :label="t('runInstruction.template')">
-                <RunInstructionTemplateEditor
-                  :model-value="runInstructionTemplate"
-                  :available-placeholders="currentAvailablePlaceholders"
-                  :known-placeholders="knownRunInstructionPlaceholders"
-                  preview-enabled
-                  :preview-loading="previewLoading"
-                  :preview-result="previewResult"
-                  :preview-error="previewError"
-                  @update:model-value="handleRunInstructionInput"
-                  @use-prompt-only="usePromptOnly"
-                  @restore-default="restoreRunInstructionDefault"
-                  @preview="handleRunInstructionPreview"
-                />
-              </n-form-item>
+              <div class="run-instruction-field">
+                <div class="run-instruction-header">
+                  <span class="run-instruction-header__title">{{ t('runInstruction.template') }}</span>
+                  <div class="run-instruction-header__actions">
+                    <n-button size="tiny" quaternary @click="usePromptOnly">
+                      {{ t('runInstruction.usePromptOnly') }}
+                    </n-button>
+                    <n-button size="tiny" quaternary @click="restoreRunInstructionDefault">
+                      {{ t('runInstruction.restoreDefault') }}
+                    </n-button>
+                  </div>
+                </div>
+                <n-form-item>
+                  <template #label>
+                    <span class="sr-only">{{ t('runInstruction.template') }}</span>
+                  </template>
+                  <RunInstructionTemplateEditor
+                    :model-value="runInstructionTemplate"
+                    :available-placeholders="currentAvailablePlaceholders"
+                    :known-placeholders="knownRunInstructionPlaceholders"
+                    hide-actions
+                    preview-enabled
+                    :preview-loading="previewLoading"
+                    :preview-result="previewResult"
+                    :preview-error="previewError"
+                    @update:model-value="handleRunInstructionInput"
+                    @preview="handleRunInstructionPreview"
+                  />
+                </n-form-item>
+              </div>
             </n-spin>
           </div>
         </details>
@@ -1120,6 +1135,41 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.run-instruction-field {
+  margin-bottom: -18px;
+}
+
+.run-instruction-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 6px;
+}
+
+.run-instruction-header__title {
+  font-weight: var(--n-label-font-weight, 400);
+  font-size: var(--n-label-font-size, 14px);
+  color: var(--n-label-text-color, var(--n-text-color-1));
+}
+
+.run-instruction-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .task-form-drawer__form {
   max-width: 100%;
 }

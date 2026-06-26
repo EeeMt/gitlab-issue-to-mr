@@ -8,6 +8,14 @@
       :placeholder="t('runInstruction.templatePlaceholder')"
       @update:value="emit('update:modelValue', $event)"
     />
+    <div v-if="!hideActions" class="run-instruction-editor__actions">
+      <n-button size="tiny" quaternary @click="emit('use-prompt-only')">
+        {{ t('runInstruction.usePromptOnly') }}
+      </n-button>
+      <n-button size="tiny" quaternary @click="emit('restore-default')">
+        {{ t('runInstruction.restoreDefault') }}
+      </n-button>
+    </div>
     <div class="run-instruction-editor__toolbar">
       <n-popover
         v-if="availablePlaceholders.length"
@@ -72,14 +80,6 @@
           </div>
         </div>
       </n-popover>
-      <div class="run-instruction-editor__actions">
-        <n-button size="tiny" quaternary @click="emit('use-prompt-only')">
-          {{ t('runInstruction.usePromptOnly') }}
-        </n-button>
-        <n-button size="tiny" quaternary @click="emit('restore-default')">
-          {{ t('runInstruction.restoreDefault') }}
-        </n-button>
-      </div>
     </div>
     <n-alert v-if="unknownPlaceholders.length" type="error" :bordered="false">
       {{ t('runInstruction.unknownPlaceholders', { names: unknownPlaceholders.join(', ') }) }}
@@ -148,12 +148,14 @@ const props = withDefaults(defineProps<{
   previewResult?: string
   previewError?: string
   warnWhenUserPromptMissing?: boolean
+  hideActions?: boolean
 }>(), {
   previewEnabled: false,
   previewLoading: false,
   previewResult: '',
   previewError: '',
-  warnWhenUserPromptMissing: true
+  warnWhenUserPromptMissing: true,
+  hideActions: false
 })
 
 const emit = defineEmits<{
@@ -252,19 +254,19 @@ function handlePreviewToggle(event: Event) {
   transition: height 0.25s ease;
 }
 
-.run-instruction-editor__toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
 .run-instruction-editor__actions {
   display: flex;
   align-items: center;
   gap: 4px;
 }
+
+.run-instruction-editor__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 
 .run-instruction-editor__variables {
   display: inline-flex;
