@@ -1545,7 +1545,7 @@ onUnmounted(() => {
 
 .schedule-mode-card--active {
   border-color: var(--n-primary-color);
-  background: color-mix(in srgb, var(--n-primary-color) 6%, transparent);
+  background: rgba(99, 226, 183, 0.06);
 }
 
 .schedule-mode-card:focus-visible {
@@ -1568,7 +1568,7 @@ onUnmounted(() => {
 }
 
 .schedule-mode-card--active .schedule-mode-card__icon {
-  background: color-mix(in srgb, var(--n-primary-color) 12%, transparent);
+  background: rgba(99, 226, 183, 0.12);
   color: var(--n-primary-color);
 }
 
@@ -1643,7 +1643,7 @@ onUnmounted(() => {
 
 .provider-control:focus-within {
   border-color: var(--n-primary-color);
-  background: color-mix(in srgb, var(--n-primary-color) 4%, transparent);
+  background: rgba(99, 226, 183, 0.04);
 }
 
 .provider-control--empty {
@@ -1655,7 +1655,7 @@ onUnmounted(() => {
 }
 
 .provider-control:focus-within .provider-control__icon {
-  background: color-mix(in srgb, var(--n-primary-color) 12%, transparent);
+  background: rgba(99, 226, 183, 0.12);
   color: var(--n-primary-color);
 }
 
