@@ -86,6 +86,14 @@ router = APIRouter()
 
 TASKS_SORT_FIELDS = {"created_at", "status", "priority", "total_changes", "input_tokens", "output_tokens", "duration"}
 SORT_ORDERS = {"asc", "desc"}
+TASK_RESPONSE_REFRESH_ATTRIBUTES = ["id", "status", "created_at", "updated_at"]
+SNAPSHOT_RESPONSE_REFRESH_ATTRIBUTES = [
+    "task_id",
+    "worker_profile_id",
+    "profile_name",
+    "image",
+    "created_at",
+]
 
 
 def _serialize_task(*args, **kwargs) -> dict:
@@ -136,6 +144,19 @@ def _attach_task_worker_snapshot(
     """Keep snapshot metadata available for immediate API serialization."""
     if snapshot is not None:
         task.worker_profile_snapshot = snapshot
+
+
+async def _refresh_task_response_state(
+    db: AsyncSession,
+    task: Task,
+    snapshot: TaskWorkerProfileSnapshot | None,
+) -> None:
+    await db.refresh(task, attribute_names=TASK_RESPONSE_REFRESH_ATTRIBUTES)
+    if isinstance(snapshot, TaskWorkerProfileSnapshot):
+        await db.refresh(
+            snapshot,
+            attribute_names=SNAPSHOT_RESPONSE_REFRESH_ATTRIBUTES,
+        )
 
 
 @router.get("/tasks")
@@ -1154,7 +1175,7 @@ async def update_task(
             ) from exc
 
     await db.commit()
-    await db.refresh(task)
+    await _refresh_task_response_state(db, task, snapshot)
     _attach_task_worker_snapshot(task, snapshot)
 
     logger.info(
@@ -1430,7 +1451,7 @@ async def retry_task(
             detail=str(exc),
         ) from exc
     await db.commit()
-    await db.refresh(new_task)
+    await _refresh_task_response_state(db, new_task, snapshot)
     _attach_task_worker_snapshot(new_task, snapshot)
     # Eagerly set the issue relationship for serialization
     new_task.issue = issue
@@ -1498,7 +1519,7 @@ async def reschedule_task(
     if task.status == TaskStatus.QUEUED:
         task.status = TaskStatus.PENDING
     await db.commit()
-    await db.refresh(task)
+    await _refresh_task_response_state(db, task, snapshot)
     _attach_task_worker_snapshot(task, snapshot)
 
     await notify_task_rescheduled(task, previous_scheduled_at, normalized_scheduled)
@@ -1637,7 +1658,7 @@ async def create_task(
             detail=str(exc),
         ) from exc
     await db.commit()
-    await db.refresh(task)
+    await _refresh_task_response_state(db, task, snapshot)
     _attach_task_worker_snapshot(task, snapshot)
     task.issue = issue  # ensure nested issue is included in serialization
 

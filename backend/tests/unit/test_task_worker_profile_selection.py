@@ -4,12 +4,21 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.api.task_schemas import UpdateTaskRequest
 from app.api.tasks import CreateTaskRequest, create_task, update_task
 from app.core.worker_profiles import WorkerProfileValidationError
 from app.dependencies.project_access import ProjectAccessScope
-from app.models import Issue, Task, TaskStatus, TaskWorkerProfileSnapshot
+from app.models import (
+    AIProvider,
+    Base,
+    Issue,
+    Task,
+    TaskStatus,
+    TaskWorkerProfileSnapshot,
+    WorkerProfile,
+)
 
 
 @pytest.mark.asyncio
@@ -45,7 +54,7 @@ async def test_create_task_uses_issue_default_worker_and_provider_when_omitted()
     db.flush = AsyncMock()
     db.get = AsyncMock(return_value=issue)
 
-    async def refresh(task):
+    async def refresh(task, attribute_names=None):
         task.id = 88
         task.status = TaskStatus.PENDING
         task.created_at = datetime(2026, 6, 25, 9, 0, 0)
@@ -80,6 +89,76 @@ async def test_create_task_uses_issue_default_worker_and_provider_when_omitted()
     task = db.add.call_args.args[0]
     assert task.worker_profile_id == 33
     assert task.provider_id == 44
+
+
+@pytest.mark.asyncio
+async def test_create_task_loads_worker_profile_environment_from_existing_identity():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autoflush=False,
+    )
+    try:
+        async with session_factory() as db:
+            provider = AIProvider(
+                name="default",
+                base_url="http://ai.example",
+                model="test-model",
+                is_default=True,
+                is_disabled=False,
+            )
+            worker_profile = WorkerProfile(
+                name="Default Worker",
+                enabled=True,
+                is_default=True,
+                image="codify-worker:latest",
+                volume_mounts=[],
+                pre_script="",
+                post_script="",
+                default_execute_run_instruction_template="Execute {{user_prompt}}",
+                default_plan_run_instruction_template="Plan {{user_prompt}}",
+                ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+            )
+            issue = Issue(
+                title="Worker defaults",
+                project_id=101,
+                status="open",
+                description="Implement worker profiles",
+                default_worker_profile=worker_profile,
+                default_provider=provider,
+            )
+            db.add_all([provider, worker_profile, issue])
+            await db.commit()
+
+            request = CreateTaskRequest(
+                issue_id=issue.id,
+                user_prompt="Implement worker profiles",
+                priority=1,
+                worker_profile_id=worker_profile.id,
+                provider_id=provider.id,
+            )
+
+            with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+                response = await create_task(
+                    request=request,
+                    db=db,
+                    current_user=None,
+                    access_scope=ProjectAccessScope(
+                        is_unrestricted=True,
+                        accessible_projects=[],
+                    ),
+                )
+
+        assert response["worker_profile_id"] == worker_profile.id
+        assert response["worker_profile_name"] == "Default Worker"
+        assert response["worker_image"] == "codify-worker:latest"
+    finally:
+        await engine.dispose()
 
 
 @pytest.mark.asyncio

@@ -779,7 +779,7 @@ class RetryTaskAPITests(unittest.TestCase):
 
         now = datetime(2024, 1, 1, 12, 0, 0)
 
-        async def fake_refresh(obj):
+        async def fake_refresh(obj, attribute_names=None):
             if isinstance(obj, Task):
                 obj.id = 100
                 obj.status = TaskStatus.PENDING
@@ -843,7 +843,7 @@ class RetryTaskAPITests(unittest.TestCase):
 
         now = datetime(2024, 1, 1, 12, 0, 0)
 
-        async def fake_refresh(obj):
+        async def fake_refresh(obj, attribute_names=None):
             if isinstance(obj, Task):
                 obj.id = 101
                 obj.status = TaskStatus.PENDING
@@ -902,7 +902,7 @@ class RetryTaskAPITests(unittest.TestCase):
 
         now = datetime(2024, 1, 1, 12, 0, 0)
 
-        async def fake_refresh(obj):
+        async def fake_refresh(obj, attribute_names=None):
             if isinstance(obj, Task):
                 obj.id = 107
                 obj.status = TaskStatus.PENDING
@@ -970,7 +970,7 @@ class RetryTaskAPITests(unittest.TestCase):
 
         now = datetime(2024, 1, 1, 12, 0, 0)
 
-        async def fake_refresh(obj):
+        async def fake_refresh(obj, attribute_names=None):
             if isinstance(obj, Task):
                 obj.id = 108
                 obj.status = TaskStatus.PENDING
@@ -1362,8 +1362,10 @@ class CreateTaskAPITests(unittest.TestCase):
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
-        async def fake_refresh(task):
+        async def fake_refresh(task, attribute_names=None):
             """Simulate DB commit by setting required fields."""
+            if isinstance(task, TaskWorkerProfileSnapshot):
+                return
             task.id = 99
             if task.status is None:
                 task.status = TaskStatus.PENDING
@@ -1713,7 +1715,7 @@ class RetryTaskWithScheduleTests(unittest.TestCase):
 
         now = datetime(2024, 1, 1, 12, 0, 0)
 
-        async def fake_refresh(obj):
+        async def fake_refresh(obj, attribute_names=None):
             if isinstance(obj, Task):
                 obj.id = 102
                 obj.status = TaskStatus.PENDING

@@ -207,6 +207,7 @@ async def get_default_worker_profile(db: AsyncSession) -> WorkerProfile | None:
         select(WorkerProfile)
         .where(WorkerProfile.is_default == True, WorkerProfile.enabled == True)
         .options(selectinload(WorkerProfile.environment_variables))
+        .execution_options(populate_existing=True)
         .limit(1)
     )
     return result.scalar_one_or_none()
@@ -232,11 +233,13 @@ async def resolve_worker_profile_for_issue(
     candidate_id = explicit_worker_profile_id or getattr(issue, "default_worker_profile_id", None)
     profile: WorkerProfile | None = None
     if candidate_id is not None:
-        profile = await db.get(
-            WorkerProfile,
-            candidate_id,
-            options=[selectinload(WorkerProfile.environment_variables)],
+        result = await db.execute(
+            select(WorkerProfile)
+            .where(WorkerProfile.id == candidate_id)
+            .options(selectinload(WorkerProfile.environment_variables))
+            .execution_options(populate_existing=True)
         )
+        profile = result.scalar_one_or_none()
     elif allow_system_default:
         profile = await get_default_worker_profile(db)
 
