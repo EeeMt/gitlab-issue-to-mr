@@ -220,24 +220,30 @@
                 </n-gi>
               </n-grid>
 
-              <!-- Row 2: Delete working branch on close -->
+              <!-- Row 2: Worker profile + Provider + options -->
               <div class="branch-extra-row">
-                <n-form-item :label="t('createTask.defaultWorkerProfile')">
-                  <n-select
-                    v-model:value="defaultWorkerProfileId"
-                    :options="workerProfileOptions"
-                    clearable
-                    :placeholder="t('createTask.selectWorkerProfile')"
-                  />
-                </n-form-item>
-                <n-form-item :label="t('createTask.defaultProvider')">
-                  <n-select
-                    v-model:value="defaultProviderId"
-                    :options="providerOptions"
-                    clearable
-                    :placeholder="t('config.providers.systemDefault')"
-                  />
-                </n-form-item>
+                <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+                  <n-gi>
+                    <n-form-item :label="t('createTask.defaultWorkerProfile')">
+                      <n-select
+                        v-model:value="defaultWorkerProfileId"
+                        :options="workerProfileOptions"
+                        clearable
+                        :placeholder="t('createTask.selectWorkerProfile')"
+                      />
+                    </n-form-item>
+                  </n-gi>
+                  <n-gi>
+                    <n-form-item :label="t('createTask.defaultProvider')">
+                      <n-select
+                        v-model:value="defaultProviderId"
+                        :options="providerOptions"
+                        clearable
+                        :placeholder="t('config.providers.systemDefault')"
+                      />
+                    </n-form-item>
+                  </n-gi>
+                </n-grid>
                 <n-form-item :label="t('issue.deleteBranchOnClose')" path="delete_branch_on_close">
                   <n-space align="center" :size="8">
                     <n-switch v-model:value="formValue.delete_branch_on_close" />
