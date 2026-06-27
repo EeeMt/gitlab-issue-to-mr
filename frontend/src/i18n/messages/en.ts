@@ -1391,6 +1391,8 @@ const en = {
       workerProfiles: 'Worker Profiles',
       workerProfileName: 'Profile name',
       workerProfileImage: 'Worker image',
+      codegraph: 'CodeGraph',
+      codegraphHint: 'Enables the local CodeGraph MCP server and project index for tasks using this profile.',
       defaultWorkerProfile: 'Default',
       duplicateWorkerProfile: 'Duplicate',
       setDefaultWorkerProfile: 'Set default',

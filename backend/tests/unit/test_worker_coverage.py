@@ -705,10 +705,36 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertNotIn("cd /workspace && /usr/local/bin/claude -p --dangerously-skip-permissions --no-session-persistence --output-format text --max-turns 3 --model \"${ANTHROPIC_MODEL}\" < /tmp/delivery-summary-repair-prompt.md", content)
         self.assertIn('delivery-summary.md', content)
         self.assertIn('delivery-summary-validation.json', content)
+        self.assertIn('CODIFY_CODEGRAPH_ENABLED', content)
+        self.assertIn('prepare_codegraph', content)
+        self.assertIn('codegraph init /workspace', content)
+        self.assertIn('codegraph sync /workspace', content)
+        self.assertIn(
+            'codegraph install --target=claude --location=global --yes',
+            content,
+        )
+        self.assertIn(
+            'codegraph uninstall --target=claude --location=global --yes',
+            content,
+        )
+        self.assertNotIn('del(.mcpServers.codegraph)', content)
+        self.assertNotIn('<!-- CODEGRAPH_START -->', content)
 
         dockerfile = (root / "deploy" / "Dockerfile.worker").read_text()
+        self.assertIn("nodesource.com/setup_22.x -o /tmp/nodesource_setup.sh", dockerfile)
+        self.assertIn("npm --version", dockerfile)
         self.assertIn("npm install --omit=dev mermaid@11.15.0 jsdom@25.0.1", dockerfile)
         self.assertIn("deploy/scripts/validate_mermaid_summary.mjs", dockerfile)
+        self.assertIn("@colbymchenry/codegraph@${CODEGRAPH_VERSION}", dockerfile)
+        self.assertIn("CODEGRAPH_NO_DOWNLOAD=1", dockerfile)
+        self.assertLess(
+            dockerfile.index("ENV CODEGRAPH_NO_DOWNLOAD=1"),
+            dockerfile.index("@colbymchenry/codegraph@${CODEGRAPH_VERSION}"),
+        )
+        self.assertIn(
+            'env HOME=/home/codify su -m -s /bin/bash codify -c "codegraph --version"',
+            dockerfile,
+        )
 
         lifecycle = (root / "backend" / "app" / "core" / "worker_task_lifecycle.py").read_text()
         self.assertIn('_CONTAINER_DELIVERY_SUMMARY_PATH = "/tmp/codify-runtime/delivery-summary.md"', lifecycle)

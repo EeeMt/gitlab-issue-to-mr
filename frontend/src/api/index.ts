@@ -350,6 +350,7 @@ export interface WorkerProfile {
   enabled: boolean
   is_default: boolean
   image: string
+  codegraph_enabled: boolean
   volume_mounts: WorkerProfileMount[]
   environment_variables: WorkerProfileEnvironmentVariable[]
   pre_script: string
@@ -366,6 +367,7 @@ export interface WorkerProfilePayload {
   description?: string | null
   enabled?: boolean
   image?: string
+  codegraph_enabled?: boolean
   volume_mounts?: WorkerProfileMount[]
   environment_variables?: WorkerProfileEnvironmentVariableUpdate[]
   pre_script?: string

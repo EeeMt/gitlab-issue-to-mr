@@ -1370,6 +1370,8 @@ const zhCN = {
     workerProfiles: 'Worker 配置',
     workerProfileName: '配置名称',
     workerProfileImage: 'Worker 镜像',
+    codegraph: 'CodeGraph',
+    codegraphHint: '为使用该配置的任务启用本地 CodeGraph MCP 服务和项目索引。',
     defaultWorkerProfile: '默认',
     duplicateWorkerProfile: '复制配置',
     setDefaultWorkerProfile: '设为默认',

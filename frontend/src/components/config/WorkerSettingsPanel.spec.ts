@@ -17,6 +17,7 @@ function createWorkerProfile(overrides: Record<string, any> = {}) {
     enabled: true,
     is_default: true,
     image: 'codify-worker:latest',
+    codegraph_enabled: false,
     volume_mounts: [
       {
         host_path: '/host/cache',
@@ -241,6 +242,21 @@ vi.mock('naive-ui', () => ({
       return () => h('div', { class: 'n-spin' }, slots.default?.())
     }
   },
+  NSwitch: {
+    name: 'NSwitch',
+    props: ['value'],
+    emits: ['update:value'],
+    setup(props: any, { emit }: any) {
+      return () =>
+        h('input', {
+          class: 'n-switch',
+          type: 'checkbox',
+          checked: props.value,
+          onChange: (event: Event) =>
+            emit('update:value', (event.target as HTMLInputElement).checked)
+        })
+    }
+  },
   NTag: {
     name: 'NTag',
     props: ['type', 'round', 'size', 'bordered'],
@@ -378,6 +394,33 @@ describe('WorkerSettingsPanel', () => {
     )
   })
 
+  it('loads and saves the CodeGraph toggle', async () => {
+    mockGetWorkerProfiles.mockResolvedValueOnce([
+      createWorkerProfile({ codegraph_enabled: true })
+    ])
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: {
+        isMobile: false,
+        reloadKey: 0
+      }
+    })
+
+    await flushPromises()
+
+    const vm = wrapper.vm as any
+    expect(vm.workerFormValue.codegraph_enabled).toBe(true)
+
+    vm.workerFormValue.codegraph_enabled = false
+    await vm.handleSaveWorker()
+
+    expect(mockUpdateWorkerProfile).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        codegraph_enabled: false
+      })
+    )
+  })
+
   it('loads and saves workspace retention days', async () => {
     const wrapper = mount(WorkerSettingsPanel, {
       props: {
@@ -460,6 +503,7 @@ describe('WorkerSettingsPanel', () => {
       expect.objectContaining({
         name: 'Java Worker',
         image: 'codify-worker-java:latest',
+        codegraph_enabled: false,
         volume_mounts: [],
         environment_variables: []
       })

@@ -38,6 +38,7 @@ def _make_profile(
         enabled=enabled,
         is_default=is_default,
         image="codify-worker:latest",
+        codegraph_enabled=False,
         volume_mounts=[],
         environment_variables=environment_variables or [],
         pre_script="",
@@ -90,6 +91,7 @@ async def test_create_worker_profile_returns_created_profile_after_commit_withou
         request = WorkerProfileCreateRequest(
             name="Java Worker",
             image="codify-worker-java:latest",
+            codegraph_enabled=True,
             volume_mounts=[],
             environment_variables=[
                 WorkerProfileEnvironmentVariableRequest(key="JAVA_OPTS", value="-Xmx1g")
@@ -105,6 +107,7 @@ async def test_create_worker_profile_returns_created_profile_after_commit_withou
 
     assert response["name"] == "Java Worker"
     assert response["image"] == "codify-worker-java:latest"
+    assert response["codegraph_enabled"] is True
     assert response["environment_variables"][0]["key"] == "JAVA_OPTS"
 
 

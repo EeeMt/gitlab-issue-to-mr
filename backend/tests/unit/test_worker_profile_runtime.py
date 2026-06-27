@@ -57,6 +57,7 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
 
     runtime = SimpleNamespace(
         image="custom-worker:latest",
+        codegraph_enabled=True,
         volume_mounts=[{"host_path": "/cache", "container_path": "/cache", "mode": "rw"}],
         environment={"CUSTOM_ENV": "value"},
         pre_script="echo pre",
@@ -99,6 +100,9 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
     assert worker._prepare_container_inputs.call_args.kwargs["custom_environment"] == {
         "CUSTOM_ENV": "value"
     }
+    assert worker.docker.create_container.call_args.kwargs["environment"][
+        "CODIFY_CODEGRAPH_ENABLED"
+    ] == "true"
     worker._build_container_volumes.assert_called_once_with(
         settings,
         issue,

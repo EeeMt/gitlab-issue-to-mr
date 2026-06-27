@@ -38,6 +38,7 @@ async def test_create_task_persists_manual_initiator_metadata():
         worker_profile_id=12,
         profile_name="Default Worker",
         image="codify-worker:latest",
+        codegraph_enabled=False,
         volume_mounts=[],
         environment_variables=[],
         pre_script="",
@@ -54,7 +55,7 @@ async def test_create_task_persists_manual_initiator_metadata():
     db.flush = AsyncMock()
     db.get = AsyncMock(return_value=mock_issue)
 
-    async def refresh(task):
+    async def refresh(task, **_kwargs):
         task.id = 23
         task.status = TaskStatus.PENDING
         task.created_at = datetime(2026, 3, 14, 12, 0, 0)
@@ -113,6 +114,7 @@ async def test_retry_task_persists_manual_initiator_metadata():
         worker_profile_id=12,
         profile_name="Default Worker",
         image="codify-worker:latest",
+        codegraph_enabled=False,
         volume_mounts=[],
         environment_variables=[],
         pre_script="",
@@ -135,7 +137,7 @@ async def test_retry_task_persists_manual_initiator_metadata():
     issue_result = MagicMock()
     issue_result.scalar_one_or_none.return_value = MagicMock(id=1)
     db.execute = AsyncMock(side_effect=[original_result, issue_result])
-    async def refresh(task):
+    async def refresh(task, **_kwargs):
         task.id = 24
         task.status = TaskStatus.PENDING
         task.created_at = datetime(2026, 3, 14, 12, 0, 0)

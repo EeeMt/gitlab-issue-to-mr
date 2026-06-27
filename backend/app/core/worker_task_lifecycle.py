@@ -410,6 +410,9 @@ async def create_execute_container(
         mr_iid,
         custom_environment=worker_runtime.environment,
     )
+    environment["CODIFY_CODEGRAPH_ENABLED"] = (
+        "true" if worker_runtime.codegraph_enabled else "false"
+    )
     volumes = worker._build_container_volumes(
         settings,
         issue,

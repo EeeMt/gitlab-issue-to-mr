@@ -6,6 +6,12 @@ MIGRATION = (
     / "versions"
     / "052_worker_profiles.py"
 )
+CODEGRAPH_MIGRATION = (
+    Path(__file__).resolve().parents[2]
+    / "alembic"
+    / "versions"
+    / "053_worker_profile_codegraph.py"
+)
 
 
 def test_worker_profiles_migration_defines_expected_tables_and_columns():
@@ -54,3 +60,14 @@ def test_worker_profiles_migration_uses_built_in_template_fallbacks():
     assert '"default_execute_run_instruction_template",\n                "",' not in content
     assert '"default_plan_run_instruction_template",\n                "",' not in content
     assert '"ci_auto_repair_run_instruction_template",\n                "",' not in content
+
+
+def test_worker_profile_codegraph_migration_adds_profile_and_snapshot_flags():
+    content = CODEGRAPH_MIGRATION.read_text(encoding="utf-8")
+
+    assert 'revision: str = "053_worker_profile_codegraph"' in content
+    assert 'down_revision: Union[str, None] = "052_worker_profiles"' in content
+    assert '"worker_profiles"' in content
+    assert '"task_worker_profile_snapshots"' in content
+    assert '"codegraph_enabled"' in content
+    assert 'server_default=sa.text("false")' in content

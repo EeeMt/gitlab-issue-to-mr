@@ -323,6 +323,7 @@ const mockWorkerProfiles = [
     enabled: true,
     is_default: true,
     image: 'codify-worker:latest',
+    codegraph_enabled: false,
     volume_mounts: [],
     environment_variables: [],
     pre_script: '',

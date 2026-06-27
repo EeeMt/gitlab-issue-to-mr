@@ -163,6 +163,10 @@ class WorkerEnvironmentVariableHelperTests(unittest.TestCase):
         self.assertEqual(env["CUSTOM_CA_BUNDLE"], "/etc/ssl/custom-ca.crt")
         self.assertTrue(set(env).issubset(RESERVED_WORKER_ENVIRONMENT_KEYS))
 
+    def test_codegraph_toggle_env_key_is_reserved(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_worker_environment_variable_key("CODIFY_CODEGRAPH_ENABLED")
+
     @patch("app.core.worker.get_settings")
     def test_plan_mode_resumes_existing_issue_session(self, mock_get_settings) -> None:
         mock_get_settings.return_value = SimpleNamespace(

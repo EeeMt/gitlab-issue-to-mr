@@ -49,6 +49,7 @@ class WorkerProfileRequestBase(BaseModel):
     description: str | None = None
     enabled: bool | None = None
     image: str | None = Field(default=None, max_length=255)
+    codegraph_enabled: bool | None = None
     volume_mounts: list[dict[str, Any]] | None = None
     environment_variables: list[WorkerProfileEnvironmentVariableRequest] | None = None
     pre_script: str | None = None
@@ -163,6 +164,7 @@ async def create_worker_profile(
             enabled=True if request.enabled is None else request.enabled,
             is_default=False,
             image=image,
+            codegraph_enabled=bool(request.codegraph_enabled),
             volume_mounts=parse_worker_profile_mounts(request.volume_mounts),
             pre_script=request.pre_script or "",
             post_script=request.post_script or "",
@@ -217,6 +219,8 @@ async def update_worker_profile(
             profile.image = request.image.strip()
             if not profile.image:
                 raise WorkerProfileValidationError("Worker profile image cannot be blank")
+        if "codegraph_enabled" in fields and request.codegraph_enabled is not None:
+            profile.codegraph_enabled = request.codegraph_enabled
         if "volume_mounts" in fields and request.volume_mounts is not None:
             profile.volume_mounts = parse_worker_profile_mounts(request.volume_mounts)
         if "pre_script" in fields:
@@ -316,6 +320,7 @@ async def duplicate_worker_profile(
         enabled=True,
         is_default=False,
         image=source.image,
+        codegraph_enabled=bool(getattr(source, "codegraph_enabled", False)),
         volume_mounts=list(source.volume_mounts or []),
         pre_script=source.pre_script or "",
         post_script=source.post_script or "",

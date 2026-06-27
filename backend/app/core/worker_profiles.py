@@ -38,6 +38,7 @@ class TaskWorkerRuntime:
     """Resolved task worker runtime loaded from a task snapshot."""
 
     image: str
+    codegraph_enabled: bool
     volume_mounts: list[dict[str, str]]
     environment: dict[str, str]
     pre_script: str
@@ -146,6 +147,7 @@ def serialize_worker_profile_for_api(profile: WorkerProfile) -> dict[str, Any]:
         "enabled": profile.enabled,
         "is_default": profile.is_default,
         "image": profile.image,
+        "codegraph_enabled": bool(getattr(profile, "codegraph_enabled", False)),
         "volume_mounts": profile.volume_mounts or [],
         "environment_variables": [
             serialize_profile_environment_variable_for_api(row)
@@ -287,6 +289,7 @@ def snapshot_from_profile(task: Task, profile: WorkerProfile) -> TaskWorkerProfi
         worker_profile_id=profile.id,
         profile_name=profile.name,
         image=profile.image,
+        codegraph_enabled=bool(getattr(profile, "codegraph_enabled", False)),
         volume_mounts=list(profile.volume_mounts or []),
         environment_variables=[
             _profile_env_to_snapshot(row) for row in profile.environment_variables
@@ -337,6 +340,7 @@ async def load_task_worker_runtime(db: AsyncSession, task: Task) -> TaskWorkerRu
         raise WorkerProfileValidationError(f"Task {task.id} has no worker profile snapshot")
     return TaskWorkerRuntime(
         image=snapshot.image,
+        codegraph_enabled=bool(getattr(snapshot, "codegraph_enabled", False)),
         volume_mounts=parse_worker_profile_mounts(snapshot.volume_mounts),
         environment=build_worker_profile_environment_map(snapshot.environment_variables),
         pre_script=snapshot.pre_script or "",

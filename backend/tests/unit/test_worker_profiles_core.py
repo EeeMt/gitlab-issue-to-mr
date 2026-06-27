@@ -10,6 +10,8 @@ from app.core.worker_profiles import (
     resolve_provider_for_issue,
     select_snapshot_run_instruction_template,
     serialize_profile_environment_variable_for_api,
+    serialize_worker_profile_for_api,
+    snapshot_from_profile,
     validate_worker_profile_mounts,
 )
 
@@ -114,6 +116,32 @@ def test_serialize_plain_empty_profile_environment_variable_is_configured():
     )
 
     assert serialize_profile_environment_variable_for_api(row)["value_configured"] is True
+
+
+def test_worker_profile_serialization_and_snapshot_preserve_codegraph_toggle():
+    profile = SimpleNamespace(
+        id=9,
+        name="CodeGraph Worker",
+        description=None,
+        enabled=True,
+        is_default=False,
+        image="codify-worker:latest",
+        codegraph_enabled=True,
+        volume_mounts=[],
+        environment_variables=[],
+        pre_script="",
+        post_script="",
+        default_execute_run_instruction_template="execute {{user_prompt}}",
+        default_plan_run_instruction_template="plan {{user_prompt}}",
+        ci_auto_repair_run_instruction_template="repair {{issue_title}}",
+        created_at=None,
+        updated_at=None,
+    )
+    task = SimpleNamespace(id=44)
+
+    assert serialize_worker_profile_for_api(profile)["codegraph_enabled"] is True
+    snapshot = snapshot_from_profile(task, profile)
+    assert snapshot.codegraph_enabled is True
 
 
 @pytest.mark.asyncio

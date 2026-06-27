@@ -106,6 +106,14 @@
                   <n-input v-model:value="workerFormValue.image" class="config-form__input" />
                 </n-form-item>
               </n-gi>
+              <n-gi>
+                <n-form-item :label="t('config.codegraph')">
+                  <n-switch v-model:value="workerFormValue.codegraph_enabled" />
+                  <template #feedback>
+                    {{ t('config.codegraphHint') }}
+                  </template>
+                </n-form-item>
+              </n-gi>
             </n-grid>
           </div>
 
@@ -380,6 +388,7 @@ import {
   NSelect,
   NSpace,
   NSpin,
+  NSwitch,
   NTag,
   useMessage
 } from 'naive-ui'
@@ -409,6 +418,7 @@ type WorkerFormValue = {
   enabled: boolean
   is_default: boolean
   image: string
+  codegraph_enabled: boolean
   mounts: WorkerProfileMount[]
   environment_variables: EnvironmentVariableFormItem[]
   worker_workspace_retention_days: number
@@ -465,6 +475,7 @@ const workerFormValue = ref<WorkerFormValue>({
   enabled: true,
   is_default: false,
   image: '',
+  codegraph_enabled: false,
   mounts: [],
   environment_variables: [],
   worker_workspace_retention_days: 14,
@@ -523,6 +534,7 @@ function mapProfileToWorkerFormValue(
     enabled: profile?.enabled ?? true,
     is_default: profile?.is_default ?? false,
     image: profile?.image ?? '',
+    codegraph_enabled: profile?.codegraph_enabled ?? false,
     mounts: (profile?.volume_mounts ?? []).map((mount) => ({ ...mount })),
     environment_variables: parseEnvironmentVariables(profile?.environment_variables),
     worker_workspace_retention_days: workerWorkspaceRetentionDays,
@@ -544,6 +556,7 @@ function cloneWorkerFormValue(value: WorkerFormValue): WorkerFormValue {
     enabled: value.enabled,
     is_default: value.is_default,
     image: value.image,
+    codegraph_enabled: value.codegraph_enabled,
     mounts: value.mounts.map((mount) => ({ ...mount })),
     environment_variables: value.environment_variables.map((environmentVariable) => ({
       ...environmentVariable
@@ -613,6 +626,7 @@ function createEmptyWorkerFormValue(): WorkerFormValue {
     enabled: true,
     is_default: false,
     image: '',
+    codegraph_enabled: false,
     mounts: [],
     environment_variables: [],
     worker_workspace_retention_days: 14,
@@ -650,6 +664,7 @@ function buildWorkerProfilePayload(): WorkerProfilePayload {
     description: workerFormValue.value.description,
     enabled: workerFormValue.value.enabled,
     image: workerFormValue.value.image,
+    codegraph_enabled: workerFormValue.value.codegraph_enabled,
     volume_mounts: workerFormValue.value.mounts.filter(
       (mount) => mount.host_path && mount.container_path
     ),
