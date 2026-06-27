@@ -165,6 +165,22 @@
                   <div class="issue-card__eyebrow">{{ t('issue.requirementContext') }}</div>
                   <div class="issue-card__title">{{ t('issue.field.description') }}</div>
                 </div>
+                <n-tooltip trigger="hover" content-style="font-size: 12px">
+                  <template #trigger>
+                    <n-button
+                      size="small"
+                      secondary
+                      circle
+                      :aria-label="t('taskView.copySource')"
+                      @click="copyIssueDescription"
+                    >
+                      <template #icon>
+                        <n-icon :component="CopyOutline" />
+                      </template>
+                    </n-button>
+                  </template>
+                  {{ t('taskView.copySource') }}
+                </n-tooltip>
               </div>
             </template>
             <div class="issue-view__description markdown-content" v-html="renderedDescription"></div>
@@ -312,7 +328,25 @@
       <n-drawer-content :title="t('taskView.retryWithSchedule')" :native-scrollbar="false" closable>
         <div class="retry-drawer">
           <div v-if="retryTargetTask" class="retry-drawer__summary">
-            <div class="retry-drawer__summary-title">Task #{{ retryTargetTask.id }}</div>
+            <div class="retry-drawer__summary-title-row">
+              <div class="retry-drawer__summary-title">Task #{{ retryTargetTask.id }}</div>
+              <n-tooltip trigger="hover" content-style="font-size: 12px">
+                <template #trigger>
+                  <n-button
+                    size="small"
+                    secondary
+                    circle
+                    :aria-label="t('taskView.copySource')"
+                    @click="copyRetryPrompt"
+                  >
+                    <template #icon>
+                      <n-icon :component="CopyOutline" />
+                    </template>
+                  </n-button>
+                </template>
+                {{ t('taskView.copySource') }}
+              </n-tooltip>
+            </div>
             <n-scrollbar
               class="retry-drawer__summary-prompt"
               trigger="hover"
@@ -404,6 +438,7 @@ import { useI18n } from 'vue-i18n'
 import {
   AddOutline,
   CloseCircleOutline,
+  CopyOutline,
   CreateOutline,
   RefreshOutline,
   TrashOutline,
@@ -507,6 +542,16 @@ const ciRootCauseJobCount = computed(() =>
 
 const renderedDescription = computed(() => renderMarkdown(issue.value?.description ?? ''))
 const renderedRetryPrompt = computed(() => renderMarkdown(retryTargetTask.value?.user_prompt ?? ''))
+
+function copyIssueDescription() {
+  navigator.clipboard.writeText(issue.value?.description ?? '')
+  message.success(t('taskView.copied'))
+}
+
+function copyRetryPrompt() {
+  navigator.clipboard.writeText(retryTargetTask.value?.user_prompt ?? '')
+  message.success(t('taskView.copied'))
+}
 
 const sortedTasks = computed(() => [...(issue.value?.tasks ?? [])].sort((a, b) => {
   const timeDiff = new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
@@ -1120,6 +1165,11 @@ onMounted(() => {
   background: rgba(15, 23, 42, 0.035);
 }
 
+.retry-drawer__summary-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
 .retry-drawer__summary-title {
   font-size: 13px;
   font-weight: 600;

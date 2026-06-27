@@ -560,6 +560,8 @@ const en = {
     runInstruction: 'Run instruction',
     fullHeight: 'Full height',
     halfHeight: 'Half height',
+    copySource: 'Copy source',
+    copied: 'Copied to clipboard',
     executionState: {
       pendingTitle: 'Task is waiting to run',
       pendingDescription: 'The task is ready and will enter the scheduling queue at its scheduled time or when run immediately.',

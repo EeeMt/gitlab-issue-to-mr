@@ -558,6 +558,8 @@ const zhCN = {
     runInstruction: '运行指令',
     fullHeight: '全高',
     halfHeight: '半高',
+    copySource: '复制内容',
+    copied: '已复制到剪贴板',
     executionState: {
       pendingTitle: '任务等待执行',
       pendingDescription: '任务已创建，达到预约时间或手动立即执行后将进入调度队列。',

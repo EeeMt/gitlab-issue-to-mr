@@ -266,6 +266,22 @@
                           @click="promptView = 'final'"
                         >{{ t('taskView.finalRunPrompt') }}</button>
                       </div>
+                      <n-tooltip trigger="hover" content-style="font-size: 12px">
+                        <template #trigger>
+                          <n-button
+                            size="small"
+                            secondary
+                            circle
+                            :aria-label="t('taskView.copySource')"
+                            @click="copyPromptSource"
+                          >
+                            <template #icon>
+                              <n-icon :component="CopyOutline" />
+                            </template>
+                          </n-button>
+                        </template>
+                        {{ t('taskView.copySource') }}
+                      </n-tooltip>
                       <n-tooltip trigger="hover">
                         <template #trigger>
                           <n-button
@@ -497,6 +513,7 @@ import {
   ChevronDownOutline,
   ChevronUpOutline,
   CloseCircleOutline,
+  CopyOutline,
   CreateOutline,
   DownloadOutline,
   OpenOutline,
@@ -525,6 +542,14 @@ const renderedSelectedPrompt = computed(() => {
   if (promptView.value === 'user') return renderMarkdown(task.value?.user_prompt ?? '')
   return renderMarkdown(task.value?.rendered_prompt?.trim() || t('taskView.noFinalRunPrompt'))
 })
+
+function copyPromptSource() {
+  const source = promptView.value === 'user'
+    ? (task.value?.user_prompt ?? '')
+    : (task.value?.rendered_prompt ?? '')
+  navigator.clipboard.writeText(source)
+  message.success(t('taskView.copied'))
+}
 
 const task = ref<Task | null>(null)
 const logs = ref('')

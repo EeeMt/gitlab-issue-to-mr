@@ -3,7 +3,25 @@
     <n-drawer-content :title="t('taskView.rescheduleTask')" :native-scrollbar="false" closable>
       <div class="reschedule-drawer">
         <div v-if="task && !hideSummary" class="reschedule-drawer__summary">
-          <div class="reschedule-drawer__summary-title">Task #{{ task.id }}</div>
+          <div class="reschedule-drawer__summary-title-row">
+            <div class="reschedule-drawer__summary-title">Task #{{ task.id }}</div>
+            <n-tooltip trigger="hover" content-style="font-size: 12px">
+              <template #trigger>
+                <n-button
+                  size="small"
+                  secondary
+                  circle
+                  :aria-label="t('taskView.copySource')"
+                  @click="copyPromptSource"
+                >
+                  <template #icon>
+                    <n-icon :component="CopyOutline" />
+                  </template>
+                </n-button>
+              </template>
+              {{ t('taskView.copySource') }}
+            </n-tooltip>
+          </div>
           <div class="reschedule-drawer__summary-prompt markdown-content" v-html="renderedPrompt"></div>
         </div>
 
@@ -51,7 +69,8 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NDrawer, NDrawerContent, NButton, NSpin, NForm, NFormItem, NDatePicker, useMessage } from 'naive-ui'
+import { NDrawer, NDrawerContent, NButton, NIcon, NSpin, NForm, NFormItem, NDatePicker, NTooltip, useMessage } from 'naive-ui'
+import { CopyOutline } from '@vicons/ionicons5'
 import HeatmapChart from './HeatmapChart.vue'
 import { rescheduleTask, getScheduledTasks, getConfig, type Task } from '../api'
 import { renderMarkdown } from './task-process/taskProcessUtils'
@@ -90,6 +109,11 @@ const slotMaxTasks = ref(0)
 const slotEnforce = ref(false)
 
 const renderedPrompt = computed(() => renderMarkdown(props.task?.user_prompt ?? ''))
+
+function copyPromptSource() {
+  navigator.clipboard.writeText(props.task?.user_prompt ?? '')
+  message.success(t('taskView.copied'))
+}
 
 function isDateDisabled(timestamp: number): boolean {
   const candidate = new Date(timestamp)
@@ -159,10 +183,15 @@ function handleHeatmapCellClick(startMs: number) {
   border-radius: 8px;
 }
 
+.reschedule-drawer__summary-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
 .reschedule-drawer__summary-title {
   font-size: 12px;
   color: rgba(15, 23, 42, 0.45);
-  margin-bottom: 6px;
 }
 
 .reschedule-drawer__summary-prompt {
