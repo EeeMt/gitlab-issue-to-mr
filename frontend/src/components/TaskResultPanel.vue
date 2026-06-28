@@ -143,18 +143,20 @@
     v-model:show="summaryViewerVisible"
     preset="card"
     class="summary-content-modal"
-    :style="{ width: 'min(1120px, calc(100vw - 32px))', height: 'calc(100vh - 32px)', maxWidth: 'none' }"
+    :style="{ width: 'min(1320px, calc(100vw - 32px))', height: 'calc(100vh - 32px)', maxWidth: 'none' }"
   >
     <template #header>
       <div class="summary-content-modal__title">
-        <n-icon size="18"><ChatboxOutline /></n-icon>
+        <span class="viewer-modal__title-icon summary-content-modal__title-icon">
+          <n-icon size="18"><ChatboxOutline /></n-icon>
+        </span>
         <span>{{ t('taskView.aiDeliverySummary') }}</span>
       </div>
     </template>
     <n-scrollbar
       class="summary-content-modal__viewport"
       trigger="hover"
-      content-style="min-width: 100%; padding: 4px 20px 28px; box-sizing: border-box;"
+      content-style="min-width: 100%; padding: 20px 24px 32px; box-sizing: border-box;"
     >
       <div
         v-if="summaryRenderedHtml"
@@ -163,7 +165,7 @@
         @click="handleSummaryContentClick"
         v-html="summaryRenderedHtml"
       ></div>
-      <div v-else class="summary-content summary-content--empty">
+      <div v-else class="summary-content summary-content--viewer summary-content--empty">
         {{ t('taskView.emptyContent') }}
       </div>
     </n-scrollbar>
@@ -177,18 +179,43 @@
     :block-scroll="false"
     :style="{ width: 'calc(100vw - 32px)', height: 'calc(100vh - 32px)', maxWidth: 'none' }"
   >
-    <div class="summary-mermaid-modal__toolbar">
-      <n-button
-        v-for="option in mermaidZoomOptions"
-        :key="option.value"
-        size="tiny"
-        secondary
-        :type="mermaidZoom === option.value ? 'primary' : 'default'"
-        @click="mermaidZoom = option.value"
-      >
-        {{ option.label }}
-      </n-button>
-    </div>
+    <template #header>
+      <div class="summary-mermaid-modal__header">
+        <div class="summary-mermaid-modal__title">
+          <span class="viewer-modal__title-icon summary-mermaid-modal__title-icon">
+            <n-icon size="18"><ExpandOutline /></n-icon>
+          </span>
+          <span>Mermaid</span>
+        </div>
+        <div class="summary-mermaid-modal__toolbar">
+          <div class="summary-mermaid-modal__zoom-group">
+            <n-button
+              v-for="option in mermaidZoomOptions"
+              :key="option.value"
+              size="tiny"
+              secondary
+              :type="mermaidZoom === option.value ? 'primary' : 'default'"
+              @click="selectMermaidZoom(option.value)"
+            >
+              {{ option.label }}
+            </n-button>
+            <n-input-number
+              class="summary-mermaid-modal__custom-zoom"
+              :value="mermaidCustomZoom"
+              size="tiny"
+              :min="mermaidZoomMin"
+              :max="mermaidZoomMax"
+              :step="10"
+              :show-button="false"
+              @focus="mermaidZoom = 'custom'"
+              @update:value="handleMermaidCustomZoom"
+            >
+              <template #suffix>%</template>
+            </n-input-number>
+          </div>
+        </div>
+      </div>
+    </template>
     <n-scrollbar
       :key="mermaidViewerScrollbarKey"
       class="summary-mermaid-modal__viewport"
@@ -197,6 +224,7 @@
       trigger="none"
       :content-style="mermaidViewerContentStyle"
       @mousedown="handleMermaidViewerMouseDown"
+      @wheel.prevent="handleMermaidViewerWheel"
     >
       <div
         class="summary-mermaid-modal__canvas"
@@ -211,14 +239,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { CSSProperties } from 'vue'
-import { NCard, NIcon, NButton, NModal, NScrollbar, NTooltip } from 'naive-ui'
+import { NCard, NIcon, NButton, NInputNumber, NModal, NScrollbar, NTooltip } from 'naive-ui'
 import { AlertCircleOutline, GitCommitOutline, OpenOutline, ChevronForward, ChatboxOutline, ExpandOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import type { Task, TaskLog } from '../api'
 import { getTaskPayload } from '../api'
 import { parseTextEntry, renderMarkdown } from './task-process/taskProcessUtils'
 
-type MermaidZoom = 'fit' | '100' | '150' | '200' | '300' | '400'
+type MermaidZoom = 'fit' | '100' | '150' | '200' | '300' | 'custom'
 
 interface SummaryMermaidDiagram {
   source: string
@@ -248,7 +276,10 @@ const summaryViewerVisible = ref(false)
 const summaryMermaidDiagrams = ref<SummaryMermaidDiagram[]>([])
 const mermaidViewerVisible = ref(false)
 const activeMermaidIndex = ref<number | null>(null)
+const mermaidZoomMin = 10
+const mermaidZoomMax = 2000
 const mermaidZoom = ref<MermaidZoom>('fit')
+const mermaidCustomZoom = ref(100)
 const mermaidViewerDragging = ref(false)
 const hiddenSummaryCollapseFloatStyle: CSSProperties = {
   display: 'none',
@@ -295,8 +326,14 @@ const mermaidZoomOptions = computed<{ value: MermaidZoom, label: string }[]>(() 
   { value: '150', label: '150%' },
   { value: '200', label: '200%' },
   { value: '300', label: '300%' },
-  { value: '400', label: '400%' },
 ])
+
+const mermaidZoomPercent = computed(() => {
+  if (mermaidZoom.value === 'fit') return 100
+  return mermaidZoom.value === 'custom'
+    ? mermaidCustomZoom.value
+    : Number(mermaidZoom.value)
+})
 
 const activeMermaidRawSvg = computed(() => {
   if (activeMermaidIndex.value == null) return ''
@@ -308,21 +345,21 @@ const mermaidViewerSvgWidth = computed(() => {
 })
 
 const mermaidViewerCanvasStyle = computed<CSSProperties>(() => {
-  return { width: '100%' }
+  const canvasZoom = mermaidZoom.value === 'fit'
+    ? 100
+    : Math.min(100, mermaidZoomPercent.value)
+  return {
+    width: `${canvasZoom}%`,
+    margin: '0 auto',
+  }
 })
 
 const mermaidViewerContentStyle = computed<CSSProperties>(() => {
-  if (mermaidZoom.value === 'fit') {
-    return {
-      width: '100%',
-      minWidth: '100%',
-      minHeight: '100%',
-      padding: '16px',
-      boxSizing: 'border-box',
-    }
-  }
+  const contentZoom = mermaidZoom.value === 'fit'
+    ? 100
+    : Math.max(100, mermaidZoomPercent.value)
   return {
-    width: `${mermaidZoom.value}%`,
+    width: `${contentZoom}%`,
     minWidth: '100%',
     minHeight: '100%',
     padding: '16px',
@@ -335,8 +372,28 @@ const activeMermaidViewerSvg = computed(() =>
 )
 
 const mermaidViewerScrollbarKey = computed(() =>
-  `${activeMermaidIndex.value ?? 'none'}-${mermaidZoom.value}-${activeMermaidRawSvg.value.length}`
+  `${activeMermaidIndex.value ?? 'none'}-${mermaidZoom.value}-${mermaidCustomZoom.value}-${activeMermaidRawSvg.value.length}`
 )
+
+function handleMermaidCustomZoom(value: number | null) {
+  if (value == null) return
+  const nextZoom = clampMermaidZoom(value)
+  mermaidCustomZoom.value = nextZoom
+  mermaidZoom.value = 'custom'
+}
+
+function clampMermaidZoom(value: number) {
+  return Math.min(mermaidZoomMax, Math.max(mermaidZoomMin, Math.round(value)))
+}
+
+function selectMermaidZoom(value: MermaidZoom) {
+  mermaidZoom.value = value
+  if (value === 'fit') {
+    mermaidCustomZoom.value = 100
+  } else if (value !== 'custom') {
+    mermaidCustomZoom.value = Number(value)
+  }
+}
 
 function updateSummaryCollapseFloat() {
   summaryCollapseFloatRaf = 0
@@ -499,7 +556,7 @@ function renderMermaidError(source: string, error: unknown): string {
 function resetMermaidViewer() {
   mermaidViewerVisible.value = false
   activeMermaidIndex.value = null
-  mermaidZoom.value = 'fit'
+  selectMermaidZoom('fit')
   stopMermaidViewerDrag()
 }
 
@@ -557,6 +614,35 @@ function handleMermaidViewerMouseMove(event: MouseEvent) {
 
 function handleMermaidViewerMouseUp() {
   stopMermaidViewerDrag()
+}
+
+async function handleMermaidViewerWheel(event: WheelEvent) {
+  if (event.deltaY === 0) return
+
+  const container = getMermaidViewerScrollContainer(event.currentTarget)
+  const viewport = event.currentTarget instanceof Element ? event.currentTarget : null
+  const modal = viewport?.closest('.summary-mermaid-modal')
+  if (!container || !modal) return
+
+  const rect = container.getBoundingClientRect()
+  const pointerX = Math.min(container.clientWidth, Math.max(0, event.clientX - rect.left))
+  const pointerY = Math.min(container.clientHeight, Math.max(0, event.clientY - rect.top))
+  const currentZoom = mermaidZoomPercent.value
+  const zoomFactor = event.deltaY < 0 ? 1.1 : 1 / 1.1
+  const nextZoom = clampMermaidZoom(currentZoom * zoomFactor)
+  if (nextZoom === currentZoom) return
+
+  const zoomRatio = nextZoom / currentZoom
+  const nextScrollLeft = (container.scrollLeft + pointerX) * zoomRatio - pointerX
+  const nextScrollTop = (container.scrollTop + pointerY) * zoomRatio - pointerY
+  mermaidCustomZoom.value = nextZoom
+  mermaidZoom.value = 'custom'
+
+  await nextTick()
+  const nextContainer = modal.querySelector<HTMLElement>('.summary-mermaid-modal__viewport .n-scrollbar-container')
+  if (!nextContainer) return
+  nextContainer.scrollLeft = Math.max(0, nextScrollLeft)
+  nextContainer.scrollTop = Math.max(0, nextScrollTop)
 }
 
 function stopMermaidViewerDrag() {
@@ -721,7 +807,7 @@ function handleSummaryContentClick(event: MouseEvent) {
   if (!summaryMermaidDiagrams.value[index]?.svg) return
 
   activeMermaidIndex.value = index
-  mermaidZoom.value = 'fit'
+  selectMermaidZoom('fit')
   mermaidViewerVisible.value = true
 }
 
@@ -1126,10 +1212,17 @@ const hasChanges = computed(() =>
 }
 
 .summary-content--viewer {
-  max-width: 960px;
+  max-width: 1160px;
   margin: 0 auto;
-  padding: 0;
-  background: transparent;
+  padding: clamp(28px, 4vw, 46px);
+  border: 1px solid rgba(2, 132, 199, 0.12);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(2, 132, 199, 0.025), transparent 160px),
+    var(--n-color, #fff);
+  box-shadow:
+    0 18px 50px rgba(15, 23, 42, 0.08),
+    0 2px 8px rgba(15, 23, 42, 0.04);
   font-size: 14px;
   line-height: 1.75;
 }
@@ -1137,15 +1230,50 @@ const hasChanges = computed(() =>
 .summary-content-modal__title {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   font-size: 16px;
   font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.viewer-modal__title-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(2, 132, 199, 0.16);
+  border-radius: 9px;
+  background: linear-gradient(145deg, rgba(2, 132, 199, 0.14), rgba(2, 132, 199, 0.05));
+  color: #0284c7;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
 }
 
 .summary-content-modal__viewport {
   flex: 1 1 auto;
   height: 0;
   min-height: 0;
+  background:
+    radial-gradient(circle at 50% 0, rgba(2, 132, 199, 0.055), transparent 36%),
+    rgba(148, 163, 184, 0.035);
+}
+
+.summary-mermaid-modal__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.summary-mermaid-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  min-width: 0;
 }
 
 .summary-collapse-footer {
@@ -1304,34 +1432,57 @@ const hasChanges = computed(() =>
   flex-direction: column;
   max-width: none;
   position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(2, 132, 199, 0.14);
+  border-radius: 14px;
+  background: var(--n-color-modal, var(--n-color, #fff));
+  box-shadow:
+    0 32px 80px rgba(15, 23, 42, 0.22),
+    0 8px 24px rgba(15, 23, 42, 0.1);
 }
 
 :global(.summary-content-modal) {
   display: flex;
   flex-direction: column;
   max-width: none;
+  overflow: hidden;
+  border: 1px solid rgba(2, 132, 199, 0.14);
+  border-radius: 14px;
+  background: var(--n-color-modal, var(--n-color, #fff));
+  box-shadow:
+    0 32px 80px rgba(15, 23, 42, 0.22),
+    0 8px 24px rgba(15, 23, 42, 0.1);
 }
 
 :global(.summary-content-modal .n-card-header) {
   flex: 0 0 auto;
-  padding-bottom: 14px;
+  padding: 16px 20px;
   border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  background:
+    linear-gradient(90deg, rgba(2, 132, 199, 0.06), transparent 38%),
+    var(--n-color-modal, var(--n-color, #fff));
 }
 
 :global(.summary-content-modal .n-card-content) {
   display: flex;
   flex: 1 1 auto;
   min-height: 0;
-  padding: 16px 0 0;
+  padding: 0;
   overflow: hidden;
 }
 
 :global(.summary-mermaid-modal .n-card-header) {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 1;
-  padding: 0;
+  flex: 0 0 auto;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  background:
+    linear-gradient(90deg, rgba(2, 132, 199, 0.06), transparent 32%),
+    var(--n-color-modal, var(--n-color, #fff));
+}
+
+:global(.summary-mermaid-modal .n-card-header__main) {
+  width: 100%;
+  min-width: 0;
 }
 
 :global(.summary-mermaid-modal .n-card-content) {
@@ -1340,15 +1491,37 @@ const hasChanges = computed(() =>
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  padding-top: 12px;
+  padding: 18px;
 }
 
 :global(.summary-mermaid-modal__toolbar) {
   display: flex;
+  justify-content: flex-end;
   flex-wrap: wrap;
-  gap: 8px;
-  padding-right: 36px;
-  margin-bottom: 10px;
+  min-width: 0;
+  padding: 0;
+}
+
+:global(.summary-mermaid-modal__zoom-group) {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid rgba(2, 132, 199, 0.12);
+  border-radius: 10px;
+  background: rgba(2, 132, 199, 0.045);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+:global(.summary-mermaid-modal__zoom-group .n-button) {
+  min-width: 44px;
+  border-radius: 7px;
+}
+
+:global(.summary-mermaid-modal__custom-zoom) {
+  display: flex;
+  width: 64px;
 }
 
 :global(.summary-mermaid-modal__viewport) {
@@ -1356,8 +1529,17 @@ const hasChanges = computed(() =>
   height: 0;
   min-height: 0;
   border: 1px solid var(--n-border-color, rgba(128, 128, 128, 0.18));
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.72);
+  border-radius: 10px;
+  background-color: var(--n-color, #fff);
+  background-image:
+    linear-gradient(rgba(2, 132, 199, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(2, 132, 199, 0.055) 1px, transparent 1px),
+    radial-gradient(circle at 50% 45%, rgba(2, 132, 199, 0.055), transparent 42%);
+  background-size: 24px 24px, 24px 24px, 100% 100%;
+  background-position: -1px -1px, -1px -1px, 0 0;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    0 10px 28px rgba(15, 23, 42, 0.08);
   cursor: grab;
   user-select: none;
   overscroll-behavior: contain;
@@ -1377,7 +1559,10 @@ const hasChanges = computed(() =>
 }
 
 :global(.summary-mermaid-modal__canvas) {
-  min-width: 100%;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 100%;
 }
 
 :global(.summary-mermaid-modal__canvas svg) {
@@ -1388,5 +1573,44 @@ const hasChanges = computed(() =>
 
 :global(.summary-mermaid-modal__canvas--fit svg) {
   max-width: 100%;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  :global(.summary-mermaid-modal__zoom-group .n-button:hover) {
+    transform: translateY(-1px);
+  }
+}
+
+@media (max-width: 640px) {
+  .summary-content--viewer {
+    padding: 24px 18px;
+    border-radius: 10px;
+  }
+
+  :global(.summary-content-modal),
+  :global(.summary-mermaid-modal) {
+    border-radius: 10px;
+  }
+
+  :global(.summary-content-modal .n-card-header),
+  :global(.summary-mermaid-modal .n-card-header) {
+    padding: 14px;
+  }
+
+  :global(.summary-mermaid-modal .n-card-content) {
+    padding: 10px;
+  }
+
+  .summary-mermaid-modal__header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  :global(.summary-mermaid-modal__toolbar) {
+    justify-content: flex-start;
+    width: 100%;
+    padding: 0;
+  }
 }
 </style>
