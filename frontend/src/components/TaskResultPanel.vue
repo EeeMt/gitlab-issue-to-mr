@@ -65,7 +65,6 @@
             <n-scrollbar
               v-if="summaryRenderedHtml"
               class="summary-content-scrollbar"
-              x-scrollable
               trigger="hover"
               content-style="min-width: 100%;"
             >
@@ -79,7 +78,6 @@
             <n-scrollbar
               v-else-if="!summaryPayloadLoading && summaryPayloadLoaded && !summaryRenderedHtml"
               class="summary-content-scrollbar"
-              x-scrollable
               trigger="hover"
               content-style="min-width: 100%;"
             >
@@ -155,7 +153,6 @@
     </template>
     <n-scrollbar
       class="summary-content-modal__viewport"
-      x-scrollable
       trigger="hover"
       content-style="min-width: 100%; padding: 4px 20px 28px; box-sizing: border-box;"
     >
@@ -1105,14 +1102,22 @@ const hasChanges = computed(() =>
   border-radius: 7px;
 }
 
+.summary-content-scrollbar :deep(.n-scrollbar-container) {
+  overflow-x: hidden;
+}
+
 .summary-content {
+  min-width: 0;
+  max-width: 100%;
   width: 100%;
   box-sizing: border-box;
   padding: 14px 16px;
   font-size: 13px;
   line-height: 1.7;
   color: var(--n-text-color-2);
-  overflow-wrap: break-word;
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .summary-content--empty {
@@ -1186,16 +1191,32 @@ const hasChanges = computed(() =>
   background: rgba(128, 128, 128, 0.12);
   border-radius: 3px;
   padding: 0.1em 0.35em;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .summary-content :deep(pre.md-code-block) {
   margin: 0.5em 0; padding: 10px 12px;
   background: rgba(0, 0, 0, 0.06); border-radius: 5px;
   font-family: var(--n-font-family-mono, monospace);
-  font-size: 0.85em; line-height: 1.55; white-space: pre;
+  max-width: 100%; box-sizing: border-box;
+  font-size: 0.85em; line-height: 1.55; white-space: pre-wrap;
+  overflow-wrap: anywhere; word-break: break-word;
 }
 .summary-content :deep(pre.md-code-block code) { background: none; padding: 0; border-radius: 0; font-size: inherit; color: inherit; }
 .summary-content :deep(a) { color: var(--n-primary-color, #18a058); text-decoration: none; }
 .summary-content :deep(a:hover) { text-decoration: underline; }
+.summary-content :deep(img) { max-width: 100%; height: auto; }
+.summary-content :deep(table) {
+  width: 100%;
+  max-width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+.summary-content :deep(th),
+.summary-content :deep(td) {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
 .summary-content :deep(blockquote) {
   margin: 0.5em 0; padding: 0.2em 0.8em;
   border-left: 3px solid var(--n-border-color, rgba(128,128,128,0.35));
@@ -1252,13 +1273,16 @@ const hasChanges = computed(() =>
   min-height: 96px;
   max-height: 60vh;
   padding: 12px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   color: var(--n-text-color-2);
 }
 
 .summary-content :deep(.summary-mermaid__canvas svg) {
   display: block;
-  max-width: none;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
 }
 
 .summary-content :deep(.summary-mermaid__error) {
