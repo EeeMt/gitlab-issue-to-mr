@@ -1,9 +1,11 @@
 import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
+import { gitCommitDefine } from './build-info'
 
 export default defineConfig({
   plugins: [vue()],
+  define: gitCommitDefine(),
   test: {
     environment: 'jsdom',
     globals: true,

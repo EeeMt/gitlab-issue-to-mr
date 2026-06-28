@@ -253,18 +253,7 @@
           <n-layout content-style="padding: 20px;" :native-scrollbar="false" class="app-shell__content">
             <div class="app-shell__content-inner">
               <router-view />
-              <footer class="app-footer">
-                <span class="app-footer__text">Powered by</span>
-                <a
-                  href="https://github.com/EeeMt/codify"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="app-footer__link"
-                >
-                  <n-icon size="13" :component="LogoGithub" class="app-footer__icon" />
-                  Codify
-                </a>
-              </footer>
+              <PoweredByFooter class="app-footer" />
             </div>
           </n-layout>
 
@@ -313,7 +302,6 @@ import {
   LogOutOutline,
   MenuOutline,
   InformationCircleOutline,
-  LogoGithub,
   CalendarOutline,
   PeopleOutline,
   RocketOutline,
@@ -325,6 +313,7 @@ import { authState, canAccessSharedPage, initializeAuth, isAdmin, logoutAndClear
 import { getMyUsageSummary, getAnnouncement, type CurrentUserUsageSummary, type AnnouncementInfo } from './api'
 import LanguageToggle from './components/LanguageToggle.vue'
 import OnboardingModal from './components/OnboardingModal.vue'
+import PoweredByFooter from './components/PoweredByFooter.vue'
 import { useBreakpoints } from './composables/useBreakpoints'
 import { getOnboardingDismissed, setOnboardingDismissed } from './composables/useOnboarding'
 import { formatLargeNumber, formatUsageResetAt } from './utils/usageLimits'
@@ -1300,34 +1289,6 @@ a.app-link:visited:hover {
 .app-footer {
   margin-top: 32px;
   padding: 12px 0;
-  text-align: center;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-}
-
-.app-footer__text {
-  font-size: 11px;
-  color: rgba(15, 23, 42, 0.22);
-}
-
-.app-footer__link {
-  font-size: 11px;
-  color: rgba(15, 23, 42, 0.28);
-  text-decoration: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  transition: color 0.2s ease;
-}
-
-.app-footer__link:hover {
-  color: rgba(15, 23, 42, 0.45);
-}
-
-.app-footer__icon {
-  flex-shrink: 0;
 }
 
 @media (max-width: 480px) {

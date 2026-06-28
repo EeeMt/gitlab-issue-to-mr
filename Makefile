@@ -3,6 +3,8 @@
 
 # Project root directory
 PROJECT_ROOT := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
+GIT_COMMIT ?= $(shell git -C $(PROJECT_ROOT) rev-parse HEAD 2>/dev/null || printf unknown)
+export GIT_COMMIT
 
 # Enable Docker BuildKit for faster builds
 export DOCKER_BUILDKIT := 1

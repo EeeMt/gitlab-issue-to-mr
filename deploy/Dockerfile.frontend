@@ -12,6 +12,7 @@ RUN --mount=type=cache,target=/root/.npm \
 COPY frontend/ .
 # Skip type checking during production build (vue-tsc --noEmit)
 # Use vite build directly for faster builds
+ARG GIT_COMMIT=unknown
 RUN npx vite build
 
 # Stage 2: Serve static files with nginx.

@@ -72,6 +72,8 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile.frontend
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
     container_name: codify-e2e-nginx
     ports:
       - "18980:80"

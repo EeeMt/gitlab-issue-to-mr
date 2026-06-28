@@ -172,18 +172,7 @@
     </n-card>
     </div>
 
-    <footer class="login-footer">
-      <span class="login-footer__text">Powered by</span>
-      <a
-        href="https://github.com/EeeMt/codify"
-        target="_blank"
-        rel="noopener noreferrer"
-        class="login-footer__link"
-      >
-        <n-icon size="13" :component="LogoGithub" />
-        Codify
-      </a>
-    </footer>
+    <PoweredByFooter class="login-footer" />
   </div>
 </template>
 
@@ -192,11 +181,12 @@ import axios from 'axios'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NAlert, NButton, NCard, NCollapseTransition, NDivider, NIcon, NInput, NSpace, NTabPane, NTabs, NText, useMessage } from 'naive-ui'
-import { KeyOutline, LogoGithub, LogoGitlab, RocketOutline } from '@vicons/ionicons5'
+import { KeyOutline, LogoGitlab, RocketOutline } from '@vicons/ionicons5'
 import { useRoute } from 'vue-router'
 import { authState, startLogin } from '../auth'
 import { breakGlassLogin } from '../api'
 import LanguageToggle from '../components/LanguageToggle.vue'
+import PoweredByFooter from '../components/PoweredByFooter.vue'
 
 const route = useRoute()
 const message = useMessage()
@@ -441,29 +431,6 @@ async function handleBreakGlassLogin() {
 
 .login-footer {
   margin-top: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-}
-
-.login-footer__text {
-  font-size: 11px;
-  color: rgba(15, 23, 42, 0.22);
-}
-
-.login-footer__link {
-  font-size: 11px;
-  color: rgba(15, 23, 42, 0.28);
-  text-decoration: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  transition: color 0.2s ease;
-}
-
-.login-footer__link:hover {
-  color: rgba(15, 23, 42, 0.45);
 }
 
 /* ─── Responsive ─── */
