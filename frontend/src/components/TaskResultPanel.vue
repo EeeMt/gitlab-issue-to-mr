@@ -21,45 +21,73 @@
 
       <!-- AI delivery summary (collapsed by default) -->
       <div v-if="selectedSummaryLog" ref="summaryCardRef" class="result-card result-card--summary-text">
-        <button
-          type="button"
+        <div
           class="summary-trigger"
-          :class="{ 'summary-trigger--expanded': summaryExpanded }"
-          :disabled="summaryPayloadLoading"
-          :aria-expanded="summaryExpanded"
-          @click="toggleSummary"
+          :class="{
+            'summary-trigger--expanded': summaryExpanded,
+            'summary-trigger--loading': summaryPayloadLoading,
+          }"
         >
-          <div class="summary-trigger__leading">
-            <div class="summary-trigger__icon-wrap">
-              <span v-if="summaryPayloadLoading" class="badge-spin-ring badge-spin-ring--accent"></span>
-              <n-icon v-else size="18" class="summary-trigger__icon"><ChatboxOutline /></n-icon>
+          <button
+            type="button"
+            class="summary-trigger__main"
+            :disabled="summaryPayloadLoading"
+            :aria-expanded="summaryExpanded"
+            @click="toggleSummary"
+          >
+            <div class="summary-trigger__leading">
+              <div class="summary-trigger__icon-wrap">
+                <span v-if="summaryPayloadLoading" class="badge-spin-ring badge-spin-ring--accent"></span>
+                <n-icon v-else size="18" class="summary-trigger__icon"><ChatboxOutline /></n-icon>
+              </div>
+              <div class="summary-trigger__text" :class="{ 'summary-trigger__text--has-preview': summaryPreview }">
+                <span class="summary-trigger__title">{{ t('taskView.aiDeliverySummary') }}</span>
+                <span class="summary-trigger__preview">{{ summaryPreview }}</span>
+              </div>
             </div>
-            <div class="summary-trigger__text" :class="{ 'summary-trigger__text--has-preview': summaryPreview }">
-              <span class="summary-trigger__title">{{ t('taskView.aiDeliverySummary') }}</span>
-              <span class="summary-trigger__preview">{{ summaryPreview }}</span>
-            </div>
-          </div>
+          </button>
           <div class="summary-trigger__actions">
             <n-tooltip trigger="hover">
               <template #trigger>
-                <span
+                <button
+                  type="button"
                   class="summary-trigger__action-btn"
-                  role="button"
-                  tabindex="0"
+                  :disabled="summaryPayloadLoading"
+                  :aria-label="t('taskView.copySource')"
+                  @click="copySummarySource"
+                >
+                  <n-icon size="15"><component :is="summaryCopied ? Checkmark : CopyOutline" /></n-icon>
+                </button>
+              </template>
+              {{ t('taskView.copySource') }}
+            </n-tooltip>
+            <n-tooltip trigger="hover">
+              <template #trigger>
+                <button
+                  type="button"
+                  class="summary-trigger__action-btn"
+                  :disabled="summaryPayloadLoading"
                   :aria-label="t('taskView.summaryOpenLarge')"
-                  @click.stop="openSummaryViewer"
-                  @keydown.enter.stop="openSummaryViewer"
+                  @click="openSummaryViewer"
                 >
                   <n-icon size="15"><ExpandOutline /></n-icon>
-                </span>
+                </button>
               </template>
               {{ t('taskView.summaryOpenLarge') }}
             </n-tooltip>
-            <span class="summary-trigger__chevron" :class="{ 'summary-trigger__chevron--open': summaryExpanded }">
+            <button
+              type="button"
+              class="summary-trigger__chevron"
+              :class="{ 'summary-trigger__chevron--open': summaryExpanded }"
+              :disabled="summaryPayloadLoading"
+              :aria-expanded="summaryExpanded"
+              :aria-label="summaryExpanded ? t('taskView.summaryCollapse') : t('taskView.summaryExpand')"
+              @click="toggleSummary"
+            >
               <n-icon size="14"><ChevronForward /></n-icon>
-            </span>
+            </button>
           </div>
-        </button>
+        </div>
         <div class="summary-expand-track" :class="{ 'summary-expand-track--open': summaryExpanded }">
           <div class="summary-expand-body">
             <n-scrollbar
@@ -146,11 +174,30 @@
     :style="{ width: 'min(1320px, calc(100vw - 32px))', height: 'calc(100vh - 32px)', maxWidth: 'none' }"
   >
     <template #header>
-      <div class="summary-content-modal__title">
-        <span class="viewer-modal__title-icon summary-content-modal__title-icon">
-          <n-icon size="18"><ChatboxOutline /></n-icon>
-        </span>
-        <span>{{ t('taskView.aiDeliverySummary') }}</span>
+      <div class="summary-content-modal__header">
+        <div class="summary-content-modal__title">
+          <span class="viewer-modal__title-icon summary-content-modal__title-icon">
+            <n-icon size="18"><ChatboxOutline /></n-icon>
+          </span>
+          <span>{{ t('taskView.aiDeliverySummary') }}</span>
+        </div>
+        <n-tooltip trigger="hover">
+          <template #trigger>
+            <n-button
+              class="summary-content-modal__copy"
+              size="small"
+              quaternary
+              circle
+              :aria-label="t('taskView.copySource')"
+              @click="copySummarySource"
+            >
+              <template #icon>
+                <n-icon><component :is="summaryCopied ? Checkmark : CopyOutline" /></n-icon>
+              </template>
+            </n-button>
+          </template>
+          {{ t('taskView.copySource') }}
+        </n-tooltip>
       </div>
     </template>
     <n-scrollbar
@@ -239,8 +286,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { CSSProperties } from 'vue'
-import { NCard, NIcon, NButton, NInputNumber, NModal, NScrollbar, NTooltip } from 'naive-ui'
-import { AlertCircleOutline, GitCommitOutline, OpenOutline, ChevronForward, ChatboxOutline, ExpandOutline } from '@vicons/ionicons5'
+import { NCard, NIcon, NButton, NInputNumber, NModal, NScrollbar, NTooltip, useMessage } from 'naive-ui'
+import { AlertCircleOutline, GitCommitOutline, OpenOutline, ChevronForward, ChatboxOutline, Checkmark, CopyOutline, ExpandOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import type { Task, TaskLog } from '../api'
 import { getTaskPayload } from '../api'
@@ -261,6 +308,7 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const message = useMessage()
 
 // Delivery summary, falling back to the last assistant text event for older tasks.
 const summaryExpanded = ref(false)
@@ -465,6 +513,7 @@ watch(() => selectedSummaryLog.value?.id ?? null, async () => {
   resetMermaidViewer()
   if (summaryExpanded.value) {
     await loadSummaryPayloadIfNeeded()
+    syncSummaryRender()
   }
 })
 
@@ -491,7 +540,10 @@ function renderSummaryMermaidPlaceholder(index: number): string {
     `<div class="summary-mermaid" data-summary-mermaid-index="${index}" data-summary-mermaid-state="loading">`,
     '<div class="summary-mermaid__toolbar">',
     '<span class="summary-mermaid__label">Mermaid</span>',
+    '<div class="summary-mermaid__actions">',
+    `<button type="button" class="summary-mermaid__copy" data-summary-mermaid-action="copy" data-summary-mermaid-index="${index}">${escapeHtml(t('taskView.copySource'))}</button>`,
     `<button type="button" class="summary-mermaid__expand" data-summary-mermaid-action="zoom" data-summary-mermaid-index="${index}">${escapeHtml(t('taskView.mermaidOpenLarge'))}</button>`,
+    '</div>',
     '</div>',
     `<div class="summary-mermaid__canvas" data-summary-mermaid-canvas="${index}">${escapeHtml(t('taskView.mermaidLoading'))}</div>`,
     '</div>',
@@ -765,17 +817,13 @@ async function loadSummaryPayloadIfNeeded() {
   const entry = summaryEntry.value
   if (!entry) return
 
-  if (entry.text) {
-    syncSummaryRender()
-    return
-  }
+  if (entry.text) return
   if (entry.payloadId && !summaryPayloadLoaded.value && !summaryPayloadLoading.value) {
     summaryPayloadLoading.value = true
     try {
       const payload = await getTaskPayload(props.task.id, entry.payloadId)
       summaryPayloadText.value = payload.content
       summaryPayloadLoaded.value = true
-      syncSummaryRender()
     } catch {
       // silently fail; empty state shown
     } finally {
@@ -788,23 +836,76 @@ async function toggleSummary() {
   summaryExpanded.value = !summaryExpanded.value
   if (!summaryExpanded.value) return
   await loadSummaryPayloadIfNeeded()
+  syncSummaryRender()
 }
 
 async function openSummaryViewer() {
   await loadSummaryPayloadIfNeeded()
+  syncSummaryRender()
   summaryViewerVisible.value = true
 }
+
+const summaryCopied = ref(false)
+let summaryCopiedTimer: ReturnType<typeof setTimeout> | undefined
+const mermaidCopyTimers = new Map<HTMLButtonElement, ReturnType<typeof setTimeout>>()
+
+async function copySource(source: string): Promise<boolean> {
+  if (!source) {
+    message.error(t('taskView.copyFailed'))
+    return false
+  }
+  try {
+    await navigator.clipboard.writeText(source)
+    message.success(t('taskView.copied'))
+    return true
+  } catch {
+    message.error(t('taskView.copyFailed'))
+    return false
+  }
+}
+
+async function copySummarySource() {
+  await loadSummaryPayloadIfNeeded()
+  const ok = await copySource(summaryText.value)
+  if (!ok) return
+  summaryCopied.value = true
+  if (summaryCopiedTimer) clearTimeout(summaryCopiedTimer)
+  summaryCopiedTimer = setTimeout(() => { summaryCopied.value = false }, 2000)
+}
+
+onBeforeUnmount(() => {
+  if (summaryCopiedTimer) clearTimeout(summaryCopiedTimer)
+  mermaidCopyTimers.forEach(timer => clearTimeout(timer))
+  mermaidCopyTimers.clear()
+})
 
 function handleSummaryContentClick(event: MouseEvent) {
   const target = event.target
   if (!(target instanceof HTMLElement)) return
 
-  const button = target.closest<HTMLButtonElement>('[data-summary-mermaid-action="zoom"]')
+  const button = target.closest<HTMLButtonElement>('[data-summary-mermaid-action]')
   if (!button) return
 
   const index = Number(button.dataset.summaryMermaidIndex)
   if (!Number.isInteger(index)) return
-  if (!summaryMermaidDiagrams.value[index]?.svg) return
+  const diagram = summaryMermaidDiagrams.value[index]
+  if (!diagram) return
+
+  if (button.dataset.summaryMermaidAction === 'copy') {
+    void copySource(diagram.source).then(ok => {
+      if (!ok) return
+      const activeTimer = mermaidCopyTimers.get(button)
+      if (activeTimer) clearTimeout(activeTimer)
+      button.textContent = t('taskView.copied')
+      const timer = setTimeout(() => {
+        button.textContent = t('taskView.copySource')
+        mermaidCopyTimers.delete(button)
+      }, 2000)
+      mermaidCopyTimers.set(button, timer)
+    })
+    return
+  }
+  if (button.dataset.summaryMermaidAction !== 'zoom' || !diagram.svg) return
 
   activeMermaidIndex.value = index
   selectMermaidZoom('fit')
@@ -1026,20 +1127,41 @@ const hasChanges = computed(() =>
   transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
 }
 
+.summary-trigger__main {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
 .summary-trigger:hover {
   border-color: rgba(2, 132, 199, 0.28);
   background: linear-gradient(135deg, rgba(2, 132, 199, 0.07) 0%, rgba(2, 132, 199, 0.03) 100%);
   box-shadow: 0 1px 4px rgba(2, 132, 199, 0.08);
 }
 
-.summary-trigger:focus-visible {
+.summary-trigger__main:focus-visible,
+.summary-trigger__action-btn:focus-visible,
+.summary-trigger__chevron:focus-visible {
   outline: 2px solid rgba(2, 132, 199, 0.45);
   outline-offset: 2px;
 }
 
-.summary-trigger:disabled {
-  cursor: wait;
+.summary-trigger--loading {
   opacity: 0.72;
+}
+
+.summary-trigger__main:disabled,
+.summary-trigger__action-btn:disabled,
+.summary-trigger__chevron:disabled {
+  cursor: wait;
 }
 
 .summary-trigger--expanded {
@@ -1120,8 +1242,12 @@ const hasChanges = computed(() =>
   justify-content: center;
   width: 28px;
   height: 28px;
+  padding: 0;
+  border: 0;
   border-radius: 6px;
+  background: transparent;
   color: var(--n-text-color-3, #8a8f98);
+  font: inherit;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
@@ -1137,7 +1263,12 @@ const hasChanges = computed(() =>
   justify-content: center;
   width: 24px;
   height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--n-text-color-3, #8a8f98);
+  font: inherit;
+  cursor: pointer;
   transition: transform 0.2s ease, color 0.15s;
 }
 
@@ -1234,6 +1365,19 @@ const hasChanges = computed(() =>
   font-size: 16px;
   font-weight: 600;
   letter-spacing: -0.01em;
+}
+
+.summary-content-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  min-width: 0;
+}
+
+.summary-content-modal__copy {
+  flex: 0 0 auto;
 }
 
 .viewer-modal__title-icon {
@@ -1375,6 +1519,13 @@ const hasChanges = computed(() =>
   color: var(--n-text-color-3, #777);
 }
 
+.summary-content :deep(.summary-mermaid__actions) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.summary-content :deep(.summary-mermaid__copy),
 .summary-content :deep(.summary-mermaid__expand) {
   border: 1px solid rgba(2, 132, 199, 0.22);
   border-radius: 4px;
@@ -1387,6 +1538,7 @@ const hasChanges = computed(() =>
   cursor: pointer;
 }
 
+.summary-content :deep(.summary-mermaid__copy:hover),
 .summary-content :deep(.summary-mermaid__expand:hover) {
   background: rgba(2, 132, 199, 0.14);
   border-color: rgba(2, 132, 199, 0.36);

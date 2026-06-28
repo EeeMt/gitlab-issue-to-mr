@@ -562,6 +562,7 @@ const en = {
     halfHeight: 'Half height',
     copySource: 'Copy source',
     copied: 'Copied to clipboard',
+    copyFailed: 'Copy failed. Please try again.',
     executionState: {
       pendingTitle: 'Task is waiting to run',
       pendingDescription: 'The task is ready and will enter the scheduling queue at its scheduled time or when run immediately.',

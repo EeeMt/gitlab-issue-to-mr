@@ -50,6 +50,33 @@ describe('TaskResultPanel', () => {
     expect(taskResultPanelSource).toContain("width: 'min(1320px, calc(100vw - 32px))'")
   })
 
+  it('copies the complete raw delivery summary from the card and large viewer', () => {
+    expect(taskResultPanelSource.match(/@click(?:\.stop)?="copySummarySource"/g)).toHaveLength(2)
+    expect(taskResultPanelSource).toContain('async function copySummarySource()')
+    expect(taskResultPanelSource).toContain('await loadSummaryPayloadIfNeeded()')
+    expect(taskResultPanelSource).toContain('await copySource(summaryText.value)')
+    expect(taskResultPanelSource).toContain('await navigator.clipboard.writeText(source)')
+    expect(taskResultPanelSource).toContain("message.success(t('taskView.copied'))")
+    expect(taskResultPanelSource).toContain('summaryCopied.value = true')
+    expect(taskResultPanelSource).toContain('summaryCopied ? Checkmark : CopyOutline')
+  })
+
+  it('keeps the large summary viewer copy action visually quiet until interaction', () => {
+    const copyButtonStart = taskResultPanelSource.indexOf('class="summary-content-modal__copy"')
+    const copyButtonEnd = taskResultPanelSource.indexOf('</n-button>', copyButtonStart)
+    const copyButton = taskResultPanelSource.slice(copyButtonStart, copyButtonEnd)
+
+    expect(copyButton).toContain('quaternary')
+    expect(copyButton).not.toContain('secondary')
+  })
+
+  it('copies the original Mermaid source from every diagram card', () => {
+    expect(taskResultPanelSource).toContain('data-summary-mermaid-action="copy"')
+    expect(taskResultPanelSource).toContain('const diagram = summaryMermaidDiagrams.value[index]')
+    expect(taskResultPanelSource).toContain('void copySource(diagram.source)')
+    expect(taskResultPanelSource).toContain("button.textContent = t('taskView.copied')")
+  })
+
   it('presents the full delivery summary as a focused document reader', () => {
     const summaryModal = cssBlock(':global(.summary-content-modal)')
     const summaryModalHeader = cssBlock(':global(.summary-content-modal .n-card-header)')
