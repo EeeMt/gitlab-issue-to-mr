@@ -229,7 +229,7 @@
                         v-model:value="defaultWorkerProfileId"
                         :options="workerProfileOptions"
                         clearable
-                        :placeholder="t('createTask.selectWorkerProfile')"
+                        :placeholder="t('createTask.selectDefaultWorkerProfile')"
                       />
                     </n-form-item>
                   </n-gi>
@@ -516,7 +516,7 @@ const branchOptions = computed(() =>
 
 const workerProfileOptions = computed(() =>
   workerProfiles.value.map(profile => ({
-    label: `${profile.name} (${profile.image})${profile.is_default ? ' ★' : ''}`,
+    label: profile.name,
     value: profile.id,
   }))
 )
@@ -778,8 +778,6 @@ async function loadExecutionDefaults() {
     workerProfiles.value = Array.isArray(workerResult.value)
       ? workerResult.value.filter(profile => profile.enabled)
       : []
-    defaultWorkerProfileId.value =
-      workerProfiles.value.find(profile => profile.is_default)?.id ?? null
   }
   if (providerResult.status === 'fulfilled') {
     providers.value = Array.isArray(providerResult.value)
@@ -834,8 +832,7 @@ async function handleReset() {
   branches.value = []
   projectSearch.value = ''
   Object.assign(formValue.value, createInitialFormValue())
-  defaultWorkerProfileId.value =
-    workerProfiles.value.find(profile => profile.is_default)?.id ?? null
+  defaultWorkerProfileId.value = null
   defaultProviderId.value =
     providers.value.find(provider => provider.is_default)?.id ?? null
   formRef.value?.restoreValidation()

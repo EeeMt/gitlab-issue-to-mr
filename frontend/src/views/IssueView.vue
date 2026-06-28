@@ -285,7 +285,7 @@
             v-model:value="editForm.default_worker_profile_id"
             :options="workerProfileOptions"
             clearable
-            :placeholder="t('createTask.selectWorkerProfile')"
+            :placeholder="t('createTask.selectDefaultWorkerProfile')"
           />
         </n-form-item>
         <n-form-item :label="t('createTask.defaultProvider')">
@@ -582,7 +582,7 @@ const workerProfileOptions = computed(() =>
   workerProfiles.value
     .filter(profile => profile.enabled || profile.id === issue.value?.default_worker_profile_id)
     .map(profile => ({
-      label: `${profile.name} (${profile.image})${profile.is_default ? ' ★' : ''}`,
+      label: profile.name,
       value: profile.id,
       disabled: !profile.enabled,
     }))

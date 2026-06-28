@@ -591,6 +591,19 @@ describe('TaskFormDrawer', () => {
       )
     })
 
+    it('shows only worker profile names in the worker options', async () => {
+      await mountDrawer()
+      await openDrawer()
+
+      expect(wrapper.vm.workerProfileOptions).toEqual([
+        { label: 'Java Worker', value: 3, disabled: false },
+        { label: 'Python Worker', value: 4, disabled: false },
+      ])
+      expect(
+        wrapper.findAllComponents({ name: 'NSelect' }).map(select => select.props('placeholder'))
+      ).toContain('createTask.selectProvider')
+    })
+
     it('shows issue default worker when worker selection is left empty', async () => {
       await mountDrawer({ defaultWorkerProfileId: 4 })
       await openDrawer()

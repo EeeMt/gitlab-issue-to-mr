@@ -421,7 +421,7 @@
                 class="provider-control__select"
                 :options="providerOptions"
                 clearable
-                :placeholder="t('config.providers.systemDefault')"
+                :placeholder="t('createTask.selectProvider')"
               />
               <div v-if="effectiveProvider" class="provider-control__summary">
                 <span class="provider-control__status">
@@ -665,7 +665,7 @@ const selectableWorkerProfiles = computed(() =>
 )
 const workerProfileOptions = computed(() =>
   selectableWorkerProfiles.value.map(profile => ({
-    label: `${profile.name} (${profile.image})${profile.is_default ? ' ★' : ''}${!profile.enabled ? ` - ${t('config.disabled')}` : ''}`,
+    label: profile.name,
     value: profile.id,
     disabled: !profile.enabled,
   }))

@@ -504,6 +504,18 @@ describe('CreateIssue', () => {
       expect(wrapper.vm.projects[0].name).toBe('Project 1')
       expect(wrapper.vm.projects[1].name).toBe('Project 2')
     })
+
+    it('should leave the default worker empty for manual selection', async () => {
+      await mountComponent()
+
+      expect(wrapper.vm.defaultWorkerProfileId).toBeNull()
+      expect(wrapper.vm.workerProfileOptions).toEqual([
+        { label: 'Default Worker', value: 3 },
+      ])
+      expect(
+        wrapper.findAllComponents({ name: 'NSelect' }).map(select => select.props('placeholder'))
+      ).toContain('createTask.selectDefaultWorkerProfile')
+    })
   })
 
   // ── Project Selection & Branch Loading ────────────────────────
@@ -956,6 +968,7 @@ describe('CreateIssue', () => {
 	      wrapper.vm.formValue.target_branch = 'develop'
 	      wrapper.vm.formValue.create_mr = true
 	      wrapper.vm.formValue.ci_auto_repair_enabled = true
+	      wrapper.vm.defaultWorkerProfileId = 3
 
 	      await wrapper.vm.handleReset()
 
@@ -966,6 +979,7 @@ describe('CreateIssue', () => {
 	      expect(wrapper.vm.formValue.target_branch).toBeUndefined()
 	      expect(wrapper.vm.formValue.create_mr).toBe(true)
 	      expect(wrapper.vm.formValue.ci_auto_repair_enabled).toBe(false)
+	      expect(wrapper.vm.defaultWorkerProfileId).toBeNull()
 	    })
 
     it('should clear branches on reset', async () => {

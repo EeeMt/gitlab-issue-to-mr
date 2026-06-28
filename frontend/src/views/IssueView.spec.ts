@@ -427,6 +427,7 @@ vi.mock('@vicons/ionicons5', () => {
     CloseOutline: icon('CloseOutline'),
     CodeOutline: icon('CodeOutline'),
     CodeSlashOutline: icon('CodeSlashOutline'),
+    CopyOutline: icon('CopyOutline'),
     CreateOutline: icon('CreateOutline'),
     DocumentTextOutline: icon('DocumentTextOutline'),
     FolderOpenOutline: icon('FolderOpenOutline'),
@@ -1350,6 +1351,21 @@ describe('IssueView', () => {
   // Edit issue
   // =========================================================================
   describe('edit issue', () => {
+    it('shows only worker profile names in the worker options', async () => {
+      setupDefaultMocks()
+      wrapper = await mountComponent()
+
+      expect(wrapper.vm.workerProfileOptions).toEqual([
+        { label: 'Default Worker', value: 2, disabled: false },
+      ])
+
+      await wrapper.find('[data-testid="issue-edit-button"]').trigger('click')
+      await nextTick()
+      expect(
+        wrapper.findAllComponents({ name: 'NSelect' }).map(select => select.props('placeholder'))
+      ).toContain('createTask.selectDefaultWorkerProfile')
+    })
+
     it('opens edit modal with prefilled title and description', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()

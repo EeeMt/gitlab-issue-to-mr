@@ -869,11 +869,13 @@ const en = {
     workerProfile: 'Worker',
     workerProfileHint: 'Choose the worker runtime for this task',
     selectWorkerProfile: 'Follow issue default',
+    selectDefaultWorkerProfile: 'Select a default worker',
     defaultWorkerProfile: 'Default Worker',
     defaultProvider: 'Default AI Provider',
     workerUsesDefault: 'Following issue default',
     workerUsesSelected: 'Selected for this task',
     providerHint: 'Choose the model provider for this task',
+    selectProvider: 'Follow issue default',
     providerUsesDefault: 'Following issue default',
     providerUsesSelected: 'Selected for this task',
     manualTaskBranchConflict:
