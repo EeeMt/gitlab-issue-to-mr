@@ -42,6 +42,31 @@ from app.models import Task, TaskLog, TaskStatus
 # Shared helpers
 # ---------------------------------------------------------------------------
 
+_WORKER_ENTRYPOINT_MODULES = (
+    "bootstrap",
+    "gitlab",
+    "delivery",
+    "task-environment",
+    "codegraph",
+    "runtime",
+    "main",
+)
+
+
+def _read_worker_entrypoint_sources(entrypoint: Path) -> str:
+    """Return the deployed entrypoint and its sourced modules as one test surface."""
+    module_dir = entrypoint.parent / "worker-entrypoint"
+    return "\n".join(
+        [
+            entrypoint.read_text(),
+            *(
+                module_dir.joinpath(f"{name}.sh").read_text()
+                for name in _WORKER_ENTRYPOINT_MODULES
+            ),
+        ]
+    )
+
+
 def _make_settings(**overrides):
     """Return a mock settings object with sensible defaults."""
     s = MagicMock()
@@ -637,15 +662,99 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
     """Regression tests for commit attribution shell logic."""
 
     @staticmethod
+    def _run_entrypoint_loader(*, failing_module: str | None = None):
+        root = Path(__file__).resolve().parents[3]
+        entrypoint = root / "deploy" / "entrypoint.worker.sh"
+        production_assignment = 'ENTRYPOINT_LIB_DIR="/opt/codify/worker-entrypoint"'
+        test_assignment = 'ENTRYPOINT_LIB_DIR="${ENTRYPOINT_TEST_LIB_DIR:?}"'
+        source = entrypoint.read_text()
+        test_source = source.replace(production_assignment, test_assignment, 1)
+        if test_source == source:
+            raise AssertionError("entrypoint library directory assignment not found")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            module_dir = temp_path / "worker-entrypoint"
+            module_dir.mkdir()
+            log_path = temp_path / "loaded-modules.log"
+
+            for module_name in _WORKER_ENTRYPOINT_MODULES:
+                module_lines = [
+                    f'printf "%s\\n" "{module_name}" >> "${{ENTRYPOINT_TEST_LOG}}"',
+                ]
+                if module_name == failing_module:
+                    module_lines.append("return 23")
+                (module_dir / f"{module_name}.sh").write_text(
+                    "\n".join(module_lines) + "\n"
+                )
+
+            test_entrypoint = temp_path / "entrypoint.sh"
+            test_entrypoint.write_text(test_source)
+            env = {
+                **os.environ,
+                "ENTRYPOINT_TEST_LIB_DIR": str(module_dir),
+                "ENTRYPOINT_TEST_LOG": str(log_path),
+            }
+            result = subprocess.run(
+                ["bash", str(test_entrypoint)],
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            loaded_modules = log_path.read_text().splitlines() if log_path.exists() else []
+            return result, loaded_modules
+
+    @staticmethod
     def _extract_shell_function(content, name):
         match = re.search(rf"(?ms)^{re.escape(name)}\(\) \{{\n.*?^\}}\n", content)
         if match is None:
             raise AssertionError(f"{name} shell function not found")
         return match.group(0)
 
+    def test_entrypoint_loads_bounded_modules_in_lifecycle_order(self):
+        root = Path(__file__).resolve().parents[3]
+        entrypoint = root / "deploy" / "entrypoint.worker.sh"
+        module_dir = root / "deploy" / "worker-entrypoint"
+
+        content = entrypoint.read_text()
+        self.assertLessEqual(len(content.splitlines()), 40)
+        previous_index = -1
+        for module_name in _WORKER_ENTRYPOINT_MODULES:
+            module_path = module_dir / f"{module_name}.sh"
+            self.assertTrue(module_path.is_file(), f"missing entrypoint module: {module_path}")
+            self.assertLessEqual(
+                len(module_path.read_text().splitlines()),
+                450,
+                f"entrypoint module grew too large: {module_path}",
+            )
+            module_index = content.index(f"    {module_name}")
+            self.assertGreater(module_index, previous_index)
+            previous_index = module_index
+
+        dockerfile = (root / "deploy" / "Dockerfile.worker").read_text()
+        test_dockerfile = (
+            root / "backend" / "tests" / "mock_integration" / "fake_claude" / "Dockerfile.worker-test"
+        ).read_text()
+        copy_instruction = "COPY deploy/worker-entrypoint/ /opt/codify/worker-entrypoint/"
+        self.assertIn(copy_instruction, dockerfile)
+        self.assertIn(copy_instruction, test_dockerfile)
+
+    def test_entrypoint_sources_every_module_in_lifecycle_order(self):
+        result, loaded_modules = self._run_entrypoint_loader()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(loaded_modules, list(_WORKER_ENTRYPOINT_MODULES))
+
+    def test_entrypoint_propagates_module_failure_and_stops_loading(self):
+        result, loaded_modules = self._run_entrypoint_loader(failing_module="delivery")
+
+        self.assertEqual(result.returncode, 23, result.stderr)
+        self.assertEqual(loaded_modules, ["bootstrap", "gitlab", "delivery"])
+
     def test_entrypoint_uses_codify_coauthor_and_git_author_env(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
-        content = script.read_text()
+        content = _read_worker_entrypoint_sources(script)
 
         self.assertIn('GIT_AUTHOR_NAME_VALUE', content)
         self.assertIn('GIT_AUTHOR_EMAIL_VALUE', content)
@@ -656,7 +765,7 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
 
     def test_entrypoint_configures_git_for_codify_runtime_user(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
-        content = script.read_text()
+        content = _read_worker_entrypoint_sources(script)
 
         self.assertIn('CODIFY_GIT_CONFIG="/home/codify/.gitconfig"', content)
         self.assertIn('/home/codify/.git-credentials', content)
@@ -669,14 +778,14 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
 
     def test_entrypoint_includes_commit_message_in_finalization(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
-        content = script.read_text()
+        content = _read_worker_entrypoint_sources(script)
 
         self.assertIn('commit_message:$commit_message', content)
         self.assertIn('--arg commit_message "${FINAL_COMMIT_MESSAGE:-}"', content)
 
     def test_entrypoint_consumes_persisted_main_prompt(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
-        content = script.read_text()
+        content = _read_worker_entrypoint_sources(script)
 
         self.assertIn('CODIFY_TASK_PROMPT_FILE="${CODIFY_TASK_PROMPT_FILE:?Missing CODIFY_TASK_PROMPT_FILE}"', content)
         self.assertIn('cp "${CODIFY_TASK_PROMPT_FILE}" /tmp/claude_prompt.txt', content)
@@ -684,7 +793,7 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
 
     def test_entrypoint_has_no_plan_main_prompt_fallback(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
-        content = script.read_text()
+        content = _read_worker_entrypoint_sources(script)
         self.assertNotIn("请分析下面的需求，给出详细的实施方案", content)
         self.assertIn('Task prompt file does not exist', content)
         self.assertIn('Task prompt file is empty', content)
@@ -692,7 +801,7 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
     def test_entrypoint_validates_and_persists_delivery_summary(self):
         root = Path(__file__).resolve().parents[3]
         script = root / "deploy" / "entrypoint.worker.sh"
-        content = script.read_text()
+        content = _read_worker_entrypoint_sources(script)
 
         self.assertIn('DELIVERY_SUMMARY_FILE="${CODIFY_RUNTIME_DIR}/delivery-summary.md"', content)
         self.assertIn('DELIVERY_SUMMARY_VALIDATION_FILE="${CODIFY_RUNTIME_DIR}/delivery-summary-validation.json"', content)
@@ -744,7 +853,7 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
 
     def test_entrypoint_writes_plan_task_metadata_for_previous_summaries(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
-        content = script.read_text()
+        content = _read_worker_entrypoint_sources(script)
         function_definition = self._extract_shell_function(content, "write_plan_task_metadata")
         plan_exit_block = content.split('if [ "${TASK_MODE}" = "plan" ]; then', 1)[1].split(
             "fi",
@@ -764,7 +873,7 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
 
     def test_entrypoint_generates_overall_summary_with_claude_cli(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
-        content = script.read_text()
+        content = _read_worker_entrypoint_sources(script)
 
         self.assertIn('FINAL_OVERALL_SUMMARY=""', content)
         self.assertIn('PREVIOUS_SUMMARY_FILE="${CODIFY_RUNTIME_DIR}/previous-task-summaries.md"', content)
@@ -785,7 +894,7 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
 
     def test_entrypoint_sanitizes_generated_commit_message(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
-        content = script.read_text()
+        content = _read_worker_entrypoint_sources(script)
         function_definition = self._extract_shell_function(content, "normalize_model_commit_message")
         raw_message = textwrap.dedent(
             """
@@ -818,7 +927,7 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
 
     def test_entrypoint_does_not_clear_commit_message_for_unclosed_think_tag(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
-        content = script.read_text()
+        content = _read_worker_entrypoint_sources(script)
         function_definition = self._extract_shell_function(content, "normalize_model_commit_message")
         raw_message = "<think>\ndocs: 新增程序员笑话文件\n\nAI-Generated: true"
 
@@ -837,7 +946,7 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
 
     def test_entrypoint_logs_commit_message_generation_steps(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
-        content = script.read_text()
+        content = _read_worker_entrypoint_sources(script)
 
         self.assertIn('echo "Generating commit message with Claude..."', content)
         self.assertIn('echo "Commit message prompt written to /tmp/commit_message_prompt.txt"', content)
@@ -852,14 +961,14 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
 
     def test_entrypoint_pipes_commit_message_prompt_to_claude_stdin(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
-        content = script.read_text()
+        content = _read_worker_entrypoint_sources(script)
 
         self.assertIn("< /tmp/commit_message_prompt.txt", content)
         self.assertNotIn('"$(cat /tmp/commit_message_prompt.txt)"', content)
 
     def test_entrypoint_writes_system_prompt_file_for_ci_claude(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
-        content = script.read_text()
+        content = _read_worker_entrypoint_sources(script)
 
         self.assertIn('CLAUDE_SYSTEM_PROMPT_FILE="/tmp/claude_system_prompt.txt"', content)
         self.assertIn('printf \'%s\' "${APPEND_SYSTEM_PROMPT}" > "${CLAUDE_SYSTEM_PROMPT_FILE}"', content)
@@ -867,7 +976,7 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
 
     def test_entrypoint_makes_issue_shared_dir_writable_without_traversing_cache_contents(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
-        content = script.read_text()
+        content = _read_worker_entrypoint_sources(script)
 
         self.assertIn('if [ -d /opt/codify-issue-shared ]; then', content)
         self.assertIn('chown codify:codify /opt/codify-issue-shared', content)
@@ -875,7 +984,7 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
 
     def test_entrypoint_keeps_runtime_artifacts_outside_worktree_until_after_commit(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
-        content = script.read_text()
+        content = _read_worker_entrypoint_sources(script)
 
         self.assertIn('CODIFY_RUNTIME_DIR="${CODIFY_RUNTIME_DIR:-/tmp/codify-runtime}"', content)
         self.assertIn('CONSOLE_LOG="${CODIFY_RUNTIME_DIR}/console.log"', content)
@@ -901,14 +1010,14 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
 
     def test_entrypoint_silences_update_ca_certificate_noise(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
-        content = script.read_text()
+        content = _read_worker_entrypoint_sources(script)
 
         self.assertIn('update-ca-certificates --fresh >/dev/null 2>&1 || true', content)
         self.assertNotIn('update-ca-certificates --fresh 2>/dev/null || true', content)
 
     def test_entrypoint_does_not_emit_legacy_codify_markers_to_console(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
-        content = script.read_text()
+        content = _read_worker_entrypoint_sources(script)
 
         for marker in [
             "CODIFY_STATS",
@@ -922,7 +1031,7 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
 
     def test_entrypoint_reuses_existing_git_workspace_safely(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
-        content = script.read_text()
+        content = _read_worker_entrypoint_sources(script)
 
         self.assertIn('if [ -d /workspace/.git ]; then', content)
         self.assertIn('git remote set-url origin "${GIT_REPO_URL}"', content)
@@ -933,7 +1042,7 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
 
     def test_entrypoint_runs_worker_custom_scripts_around_claude(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
-        content = script.read_text()
+        content = _read_worker_entrypoint_sources(script)
 
         self.assertIn('CODIFY_WORKER_PRE_SCRIPT_FILE="${CODIFY_RUNTIME_DIR}/worker-pre-script.sh"', content)
         self.assertIn('CODIFY_WORKER_POST_SCRIPT_FILE="${CODIFY_RUNTIME_DIR}/worker-post-script.sh"', content)
@@ -955,7 +1064,7 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
 
     def test_entrypoint_no_changes_uses_require_changes_not_target_branch(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
-        content = script.read_text()
+        content = _read_worker_entrypoint_sources(script)
 
         self.assertIn('REQUIRE_CHANGES', content)
         self.assertIn('[ "${REQUIRE_CHANGES:-true}" = "false" ]', content)

@@ -1,0 +1,337 @@
+# Execute Claude, validate delivery, commit/push changes, and persist metadata.
+
+trap create_runtime_archive EXIT
+
+run_worker_script "pre" "${CODIFY_WORKER_PRE_SCRIPT_FILE}"
+
+prepare_codegraph
+
+echo "CodeGraph CLI version: $(codegraph --version 2>/dev/null || echo unavailable)"
+echo "Claude CLI version: $(/usr/local/bin/claude --version)"
+echo "Updating MR with execution status..."
+update_mr_description "$(build_running_mr_description)" || true
+
+echo "Starting Claude CLI (streaming mode)..."
+set +e
+env HOME=/home/codify timeout "${TASK_TIMEOUT:-1800}" su -m -s /bin/bash codify -c \
+    'cd /workspace && export PATH="/usr/local/bin:/usr/bin:/bin:${JAVA_HOME}/bin" && ARTIFACT_DIR="${CODIFY_RUNTIME_DIR}" CI_CLAUDE_DISABLE_CONSOLE_TEE=1 PROMPT_FILE=/tmp/claude_prompt.txt /usr/local/bin/ci-claude.sh' \
+    > /tmp/claude_result.json
+SCRIPT_RESULT=$?
+set -e
+echo "Claude CLI exited with code: ${SCRIPT_RESULT}"
+
+RESULT=${SCRIPT_RESULT}
+
+# Always emit structured tool calls if the JSON file exists, even on failure.
+# This lets the frontend show a timeline of what was attempted before the failure.
+if [ -f /tmp/claude_result.json ] && [ -s /tmp/claude_result.json ]; then
+    SUMMARY_CONTENT=$(jq -r '.result // ""' /tmp/claude_result.json 2>/dev/null || true)
+    if [ ${#SUMMARY_CONTENT} -gt 45000 ]; then
+        SUMMARY_CONTENT="${SUMMARY_CONTENT:0:45000}
+
+...(内容已截断)"
+    fi
+    FINAL_SUMMARY_CONTENT="$(sanitize_summary_content "${SUMMARY_CONTENT}")"
+
+fi
+
+if [ $RESULT -ne 0 ]; then
+    echo "Claude execution failed with exit code: ${RESULT}"
+    create_runtime_archive
+    exit $RESULT
+fi
+
+run_worker_script "post" "${CODIFY_WORKER_POST_SCRIPT_FILE}"
+
+FINAL_SUMMARY_CONTENT="$(prepare_delivery_summary "${FINAL_SUMMARY_CONTENT}")"
+write_delivery_summary_artifacts "${FINAL_SUMMARY_CONTENT}"
+
+# Plan mode: discard any accidental workspace changes and exit successfully
+if [ "${TASK_MODE}" = "plan" ]; then
+    echo "Plan mode: discarding any workspace changes..."
+    git checkout -- . 2>/dev/null || true
+    git clean -fd 2>/dev/null || true
+    write_plan_task_metadata "${FINAL_SUMMARY_CONTENT}"
+    create_runtime_archive
+    echo "========================================"
+    echo "Plan task completed successfully!"
+    echo "========================================"
+    exit 0
+fi
+
+# Now commit and push the changes
+# Check if any changes were made (excluding result.md)
+CHANGES=$(git status --porcelain || true)
+if [ -n "$CHANGES" ]; then
+    echo "Changes detected:"
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        status=$(printf '%s' "$line" | cut -c1-2)
+        filepath=$(printf '%s' "$line" | cut -c4-)
+        case "$status" in
+            "??") echo "  [new] ${filepath}" ;;
+            " M"|"M "|"MM") echo "  [modified] ${filepath}" ;;
+            " D"|"D ") echo "  [deleted] ${filepath}" ;;
+            "A "|" A") echo "  [added] ${filepath}" ;;
+            "R "|" R") echo "  [renamed] ${filepath}" ;;
+            *) echo "  [${status}] ${filepath}" ;;
+        esac
+    done <<< "$CHANGES"
+    echo "Changes detected, committing..."
+
+    # Remove result.md if it exists from prior runs
+    rm -f /workspace/result.md
+    git rm -f result.md 2>/dev/null || true
+
+    # Add all changed files
+    git add -A
+
+    # Calculate change statistics from staged changes before committing.
+    echo "Calculating change statistics..."
+    DIFF_STATS=$(git diff --cached --stat || echo "0 files changed")
+    echo "Diff stats: ${DIFF_STATS}"
+
+    # Parse additions, deletions from git diff --stat output
+    # Format: " X files changed, Y insertions(+), Z deletions(-)"
+    # or: " X files changed, Y insertions(+), Z deletions(-), N files unresolved"
+    ADDITIONS=0
+    DELETIONS=0
+
+    # Extract insertions (additions)
+    INS_LINE=$(echo "${DIFF_STATS}" | grep -o '[0-9]\+ insertion' || echo "0 insertion")
+    ADDITIONS=$(echo "${INS_LINE}" | grep -o '[0-9]\+' || echo "0")
+
+    # Extract deletions
+    DEL_LINE=$(echo "${DIFF_STATS}" | grep -o '[0-9]\+ deletion' || echo "0 deletion")
+    DELETIONS=$(echo "${DEL_LINE}" | grep -o '[0-9]\+' || echo "0")
+
+    # Calculate total changes
+    TOTAL_CHANGES=$((ADDITIONS + DELETIONS))
+
+    echo "Changes: +${ADDITIONS} -${DELETIONS} (${TOTAL_CHANGES} total)"
+
+    # Collect changed file lists from the staged diff before committing.
+    NEW_FILES=""
+    MODIFIED_FILES=""
+    DELETED_FILES=""
+    STAGED_NAME_STATUS=$(git diff --cached --name-status --no-renames || true)
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        status=$(printf '%s' "$line" | awk '{print $1}')
+        filepath=$(printf '%s' "$line" | cut -f2-)
+        case "$status" in
+            A) NEW_FILES="${NEW_FILES}${filepath}," ;;
+            M) MODIFIED_FILES="${MODIFIED_FILES}${filepath}," ;;
+            D) DELETED_FILES="${DELETED_FILES}${filepath}," ;;
+        esac
+    done <<< "${STAGED_NAME_STATUS}"
+
+    # Remove trailing commas.
+    # NOTE: files with commas in their names will be split incorrectly when
+    # task-metadata.json is parsed on the backend (split(",")). This is an
+    # inherent limitation of the comma-delimiter approach; such filenames are
+    # extremely rare in practice.
+    NEW_FILES="${NEW_FILES%,}"
+    MODIFIED_FILES="${MODIFIED_FILES%,}"
+    DELETED_FILES="${DELETED_FILES%,}"
+
+    CHANGED_FILES_TEXT="新增: ${NEW_FILES:-无}
+修改: ${MODIFIED_FILES:-无}
+删除: ${DELETED_FILES:-无}"
+    FINAL_CHANGED_FILES_TEXT="$(build_changed_files_table "${NEW_FILES}" "${MODIFIED_FILES}" "${DELETED_FILES}" "${FINAL_SUMMARY_CONTENT}")"
+
+    COMMIT_DIFF_STATS=$(git diff --cached --stat || echo "0 files changed")
+    echo "Generating commit message with Claude..."
+    COMMIT_MESSAGE_PROMPT=$(build_commit_message_prompt "${CHANGED_FILES_TEXT}" "${COMMIT_DIFF_STATS}" "${FINAL_SUMMARY_CONTENT}")
+    printf '%s\n' "${COMMIT_MESSAGE_PROMPT}" > /tmp/commit_message_prompt.txt
+    chmod 644 /tmp/commit_message_prompt.txt
+    chown codify:codify /tmp/commit_message_prompt.txt
+    echo "Commit message prompt written to /tmp/commit_message_prompt.txt"
+
+    set +e
+    GENERATED_COMMIT_MESSAGE=$(env HOME=/home/codify timeout 60 su -m -s /bin/bash codify -c 'cd /workspace && /usr/local/bin/claude -p --dangerously-skip-permissions --no-session-persistence --output-format text --max-turns 3 --model "${ANTHROPIC_MODEL}" < /tmp/commit_message_prompt.txt' 2>/dev/null)
+    COMMIT_MESSAGE_RESULT=$?
+    set -e
+
+    if [ ${COMMIT_MESSAGE_RESULT} -eq 0 ]; then
+        echo "Claude commit message generation succeeded"
+        echo "Claude raw commit message response:"
+        printf '%s\n' "${GENERATED_COMMIT_MESSAGE}" | sed 's/^/  /'
+        FINAL_COMMIT_MESSAGE=$(normalize_model_commit_message "${GENERATED_COMMIT_MESSAGE}")
+    else
+        echo "Claude commit message generation failed with exit code ${COMMIT_MESSAGE_RESULT}; using fallback"
+    fi
+
+    if [ -z "${FINAL_COMMIT_MESSAGE}" ]; then
+        echo "Generated commit message was empty after normalization; using fallback"
+        FINAL_COMMIT_MESSAGE="chore: 更新 ${BRANCH_NAME} 分支实现
+
+- 完成用户请求对应的代码修改
+- 同步更新相关文件与验证结果
+
+AI-Generated: true"
+    fi
+
+    if ! printf '%s\n' "${FINAL_COMMIT_MESSAGE}" | grep -q '^AI-Generated: true$'; then
+        FINAL_COMMIT_MESSAGE="${FINAL_COMMIT_MESSAGE}
+
+AI-Generated: true"
+    fi
+
+    echo "Generating overall MR summary with Claude..."
+    PREVIOUS_SUMMARY_FILE="${CODIFY_RUNTIME_DIR}/previous-task-summaries.md"
+    if [ -f "${PREVIOUS_SUMMARY_FILE}" ]; then
+        PREVIOUS_SUMMARY_BYTES=$(wc -c < "${PREVIOUS_SUMMARY_FILE}" | tr -d ' ')
+        echo "Previous task summaries found: ${PREVIOUS_SUMMARY_FILE} (${PREVIOUS_SUMMARY_BYTES} bytes)"
+    else
+        echo "Previous task summaries not found at ${PREVIOUS_SUMMARY_FILE}; using empty history"
+    fi
+    OVERALL_SUMMARY_PROMPT=$(build_overall_summary_prompt "${PREVIOUS_SUMMARY_FILE}" "${FINAL_SUMMARY_CONTENT}" "${FINAL_COMMIT_MESSAGE}" "${COMMIT_DIFF_STATS}" "${USER_PROMPT}")
+    printf '%s\n' "${OVERALL_SUMMARY_PROMPT}" > /tmp/overall_summary_prompt.txt
+    chmod 644 /tmp/overall_summary_prompt.txt
+    chown codify:codify /tmp/overall_summary_prompt.txt
+    echo "Overall summary prompt written to /tmp/overall_summary_prompt.txt (${#OVERALL_SUMMARY_PROMPT} chars)"
+
+    set +e
+    GENERATED_OVERALL_SUMMARY=$(env HOME=/home/codify timeout 60 su -m -s /bin/bash codify -c 'cd /workspace && /usr/local/bin/claude -p --dangerously-skip-permissions --no-session-persistence --output-format text --max-turns 3 --model "${ANTHROPIC_MODEL}" < /tmp/overall_summary_prompt.txt' 2>/dev/null)
+    OVERALL_SUMMARY_RESULT=$?
+    set -e
+
+    if [ ${OVERALL_SUMMARY_RESULT} -eq 0 ]; then
+        echo "Claude overall summary generation succeeded"
+        FINAL_OVERALL_SUMMARY=$(normalize_model_overall_summary "${GENERATED_OVERALL_SUMMARY}")
+        if [ -n "${FINAL_OVERALL_SUMMARY}" ]; then
+            echo "Overall MR summary generated (${#FINAL_OVERALL_SUMMARY} chars)"
+        else
+            echo "Claude overall summary normalized to empty; keeping previous MR summary"
+        fi
+    else
+        echo "Claude overall summary generation failed with exit code ${OVERALL_SUMMARY_RESULT}; keeping previous MR summary"
+    fi
+
+    {
+        printf '%s\n' "${FINAL_COMMIT_MESSAGE}"
+        printf '\nCo-authored-by: %s <%s>\n' "${CODIFY_COAUTHOR_NAME_VALUE}" "${CODIFY_COAUTHOR_EMAIL_VALUE}"
+    } > /tmp/commit_message.txt
+    echo "Commit message written to /tmp/commit_message.txt"
+    echo "Final commit message:"
+    sed 's/^/  /' /tmp/commit_message.txt
+
+    # Create commit
+    GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME_VALUE}" \
+    GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL_VALUE}" \
+    git commit -F /tmp/commit_message.txt
+
+    # Push to remote using git push
+    echo "Pushing to remote..."
+    git remote set-url origin "${GITLAB_SCHEME}://${GITLAB_HOST}/${PROJECT_PATH}.git"
+    git config --local http.extraHeader "PRIVATE-TOKEN: ${GITLAB_TOKEN}"
+    GIT_TERMINAL_PROMPT=0 git push -u origin "${BRANCH_NAME}"
+
+    # Get commit SHA
+    COMMIT_SHA=$(git rev-parse HEAD)
+    echo "Committed: ${COMMIT_SHA}"
+
+    # MR was already created by backend before worker started.
+    # In no-MR mode (TARGET_BRANCH is empty), skip all MR operations.
+    MR_WEB_URL=""
+    if [ -z "${TARGET_BRANCH:-}" ]; then
+        echo "No-MR mode: skipping MR lookup and update"
+    elif [ -n "${MR_IID}" ]; then
+        echo "Using existing MR: !${MR_IID}"
+        MR_WEB_URL=$(curl -sS -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+            "${GITLAB_URL}/api/v4/projects/${PROJECT_ID}/merge_requests/${MR_IID}" | \
+            grep -o '"web_url":"[^"]*"' | cut -d'"' -f4)
+    else
+        # Fallback: check if MR already exists for this branch
+        echo "Checking for existing MR..."
+        EXISTING_MR=$(curl -sS -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+            "${GITLAB_URL}/api/v4/projects/${PROJECT_ID}/merge_requests?state=opened&source_branch=${BRANCH_NAME}" | \
+            grep -o '"iid":[0-9]*' | head -1 | cut -d':' -f2)
+        if [ -n "$EXISTING_MR" ]; then
+            MR_IID="${EXISTING_MR}"
+            MR_WEB_URL=$(curl -sS -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+                "${GITLAB_URL}/api/v4/projects/${PROJECT_ID}/merge_requests/${EXISTING_MR}" | \
+                grep -o '"web_url":"[^"]*"' | cut -d'"' -f4)
+        fi
+    fi
+
+    if [ -z "${TARGET_BRANCH:-}" ]; then
+        echo "No-MR mode: branch pushed, no MR created"
+    else
+        if [ -z "$MR_WEB_URL" ]; then
+            MR_WEB_URL=$(cat /workspace/mr_response.json 2>/dev/null | grep -o '"web_url":"[^"]*"' | cut -d'"' -f4)
+        fi
+        echo "MR: ${MR_WEB_URL:-none}"
+    fi
+
+    if [ -n "${MR_IID}" ]; then
+        echo "MR IID: ${MR_IID}"
+    fi
+
+    FINALIZATION_EVENT=$(jq -nc \
+        --arg commit_sha "${COMMIT_SHA:-}" \
+        --argjson additions "${ADDITIONS:-0}" \
+        --argjson deletions "${DELETIONS:-0}" \
+        --argjson total "${TOTAL_CHANGES:-0}" \
+        --arg commit_message "${FINAL_COMMIT_MESSAGE:-}" \
+        '{
+            type:"codify_worker",
+            subtype:"finalization",
+            commit_sha:$commit_sha,
+            diff:{additions:$additions,deletions:$deletions,total:$total},
+            commit_message:$commit_message
+        }')
+    append_runtime_event "${FINALIZATION_EVENT}"
+
+    # Write per-task metadata for MR description aggregation across tasks.
+    # FINAL_SUMMARY_CONTENT is Claude's execution narrative (truncated to 3000 chars).
+    SUMMARY_TRUNCATED="${FINAL_SUMMARY_CONTENT:0:3000}"
+    TASK_METADATA=$(jq -nc \
+        --argjson task_id "${TASK_ID:-0}" \
+        --arg prompt "${USER_PROMPT:-}" \
+        --arg commit_sha "${COMMIT_SHA:-}" \
+        --arg commit_message "${FINAL_COMMIT_MESSAGE:-}" \
+        --arg overall_summary "${FINAL_OVERALL_SUMMARY:-}" \
+        --arg execution_summary "${SUMMARY_TRUNCATED}" \
+        --arg new_files "${NEW_FILES:-}" \
+        --arg modified_files "${MODIFIED_FILES:-}" \
+        --arg deleted_files "${DELETED_FILES:-}" \
+        --argjson additions "${ADDITIONS:-0}" \
+        --argjson deletions "${DELETIONS:-0}" \
+        --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        '{
+            task_id: $task_id,
+            prompt: $prompt,
+            commit_sha: $commit_sha,
+            commit_message: $commit_message,
+            overall_summary: $overall_summary,
+            execution_summary: $execution_summary,
+            new_files: (if $new_files == "" then [] else ($new_files | split(",")) end),
+            modified_files: (if $modified_files == "" then [] else ($modified_files | split(",")) end),
+            deleted_files: (if $deleted_files == "" then [] else ($deleted_files | split(",")) end),
+            additions: $additions,
+            deletions: $deletions,
+            timestamp: $timestamp
+        }')
+    printf '%s\n' "${TASK_METADATA}" > "${CODIFY_RUNTIME_DIR}/task-metadata.json"
+    echo "Task metadata written to ${CODIFY_RUNTIME_DIR}/task-metadata.json (overall_summary_chars=${#FINAL_OVERALL_SUMMARY})"
+
+    create_runtime_archive
+
+    echo "========================================"
+    echo "Task completed successfully!"
+    echo "========================================"
+else
+    echo "No changes made by Claude CLI"
+    if [ "${REQUIRE_CHANGES:-true}" = "false" ]; then
+        echo "require_changes disabled: task completed without code changes"
+        create_runtime_archive
+        echo "========================================"
+        echo "Task completed successfully!"
+        echo "========================================"
+        exit 0
+    fi
+    create_runtime_archive
+    exit 1
+fi

@@ -28,6 +28,7 @@ RUN chmod +x /usr/local/bin/ci-claude.sh
 
 # Copy real entrypoint.sh (this is what we're testing!)
 COPY deploy/entrypoint.worker.sh /entrypoint.sh
+COPY deploy/worker-entrypoint/ /opt/codify/worker-entrypoint/
 RUN chmod +x /entrypoint.sh
 
 # Ensure codify user can write to workspace

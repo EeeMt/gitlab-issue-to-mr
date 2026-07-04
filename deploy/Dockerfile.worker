@@ -61,6 +61,7 @@ RUN claude --version
 
 # Copy entrypoint scripts
 COPY deploy/entrypoint.worker.sh /entrypoint.sh
+COPY deploy/worker-entrypoint/ /opt/codify/worker-entrypoint/
 COPY deploy/ci-claude.sh /usr/local/bin/ci-claude.sh
 COPY deploy/scripts/validate_mermaid_summary.mjs /opt/codify-mermaid/validate_mermaid_summary.mjs
 RUN chmod +x /entrypoint.sh /usr/local/bin/ci-claude.sh /opt/codify-mermaid/validate_mermaid_summary.mjs
