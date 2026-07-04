@@ -29,9 +29,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     openjdk-21-jdk \
     maven \
     nodejs \
+    openssh-client \
     ripgrep \
     && node --version \
     && npm --version \
+    && ssh -V \
     && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /opt/codify-mermaid \

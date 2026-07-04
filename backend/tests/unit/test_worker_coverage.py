@@ -752,6 +752,23 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertEqual(result.returncode, 23, result.stderr)
         self.assertEqual(loaded_modules, ["bootstrap", "gitlab", "delivery"])
 
+    def test_worker_images_include_ssh_client(self):
+        root = Path(__file__).resolve().parents[3]
+        dockerfiles = (
+            root / "deploy" / "Dockerfile.worker",
+            root
+            / "backend"
+            / "tests"
+            / "mock_integration"
+            / "fake_claude"
+            / "Dockerfile.worker-test",
+        )
+
+        for dockerfile in dockerfiles:
+            content = dockerfile.read_text()
+            self.assertIn("openssh-client \\", content)
+            self.assertIn("&& ssh -V \\", content)
+
     def test_entrypoint_uses_codify_coauthor_and_git_author_env(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
         content = _read_worker_entrypoint_sources(script)
