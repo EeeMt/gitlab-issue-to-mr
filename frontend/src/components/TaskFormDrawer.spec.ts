@@ -395,6 +395,20 @@ describe('TaskFormDrawer', () => {
   }
 
   describe('create mode', () => {
+    it('does not require code changes by default', async () => {
+      await mountDrawer()
+      await openDrawer()
+
+      expect(wrapper.vm.requireChanges).toBe(false)
+
+      wrapper.vm.taskMode = 'execute'
+      await submitCreate()
+
+      expect(mockApi.createTask).toHaveBeenCalledWith(
+        expect.objectContaining({ require_changes: false })
+      )
+    })
+
     it('pre-fills prompt from issue description when opened', async () => {
       await mountDrawer({ issueDescription: 'Auto-filled description' })
       await openDrawer()

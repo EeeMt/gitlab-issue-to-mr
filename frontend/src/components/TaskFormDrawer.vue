@@ -580,7 +580,7 @@ const drawerTestId = computed(() => {
 // Form state
 const prompt = ref('')
 const priority = ref(1)
-const requireChanges = ref(true)
+const requireChanges = ref(false)
 const taskMode = ref<'execute' | 'plan' | null>(null)
 const taskModeErrorVisible = ref(false)
 const selectedProviderId = ref<number | null>(null)
@@ -760,7 +760,7 @@ watch(() => props.show, (val) => {
       runInstructionTemplate.value = ''
       initialRunInstructionTemplate.value = ''
       runInstructionDirty.value = false
-      requireChanges.value = true
+      requireChanges.value = false
       scheduleType.value = 'now'
       scheduledAt.value = null
       void loadScheduleContext()
