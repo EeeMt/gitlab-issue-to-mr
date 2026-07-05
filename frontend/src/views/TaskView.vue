@@ -497,7 +497,7 @@ import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NSpace, NCard, NTag, NSpin, NDatePicker, NDrawer, NDrawerContent, NIcon, NInput, NModal, NScrollbar, NTooltip, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { getTask, getTaskLogs, cancelTask, retryTask, executeTask, getIssue, getTaskArchive, downloadTaskArchive, overrideTaskStatus, type Issue, type Task, type TaskLog } from '../api'
+import { getTask, getTaskLogs, getIssue, getTaskArchive, type Issue, type Task, type TaskLog } from '../api'
 import { authState, isAdmin, initializeAuth } from '../auth'
 import { renderMarkdown, summarizeSkillUsage } from '../components/task-process/taskProcessUtils'
 import PageHeader from '../components/PageHeader.vue'
@@ -531,6 +531,10 @@ import {
   isActiveTaskStatus,
   useTaskLogStreams,
 } from '../features/tasks/useTaskLogStreams'
+import {
+  useTaskViewActions,
+  type TaskArchiveMetadata,
+} from '../features/tasks/useTaskViewActions'
 
 const ansiConverter = new AnsiToHtml({ escapeXML: true })
 
@@ -563,16 +567,6 @@ const loading = ref(false)
 const hasLoadedOnce = ref(false)
 const logsLoading = ref(false)
 const containerLogsLoading = ref(false)
-const actionLoading = ref(false)
-const retryScheduleDatetime = ref<number | null>(null)
-const showScheduleDrawer = ref(false)
-const showEditDrawer = ref(false)
-const showCreateDrawer = ref(false)
-const showRescheduleDrawer = ref(false)
-const showOverrideModal = ref(false)
-const overrideTargetStatus = ref<'completed' | 'failed' | null>(null)
-const overrideReason = ref('')
-const overrideLoading = ref(false)
 const {
   scheduledTasks: scheduledTasksForPreview,
   scheduledTasksLoading,
@@ -587,8 +581,7 @@ const issueDescription = ref<string | undefined>(undefined)
 const issueStatus = ref<Issue['status'] | null>(null)
 const issueDefaultWorkerProfileId = ref<number | null>(null)
 const issueDefaultProviderId = ref<number | null>(null)
-const archiveMetadata = ref<{ archive_name: string; archive_size_bytes: number; created_at: string; file_exists: boolean } | null>(null)
-const archiveDownloadLoading = ref(false)
+const archiveMetadata = ref<TaskArchiveMetadata | null>(null)
 let pollTimer: number | null = null
 let taskRequestGeneration = 0
 let logRequestGeneration = 0
@@ -619,6 +612,37 @@ const {
   onRawDone: () => {
     void fetchTask()
   },
+})
+const {
+  actionLoading,
+  archiveDownloadLoading,
+  confirmOverride,
+  handleAppendTaskCreated,
+  handleCancel,
+  handleDownloadArchive,
+  handleExecute,
+  handleRetry,
+  handleRetryWithSchedule,
+  handleScheduleHeatmapCellClick,
+  openOverrideModal,
+  openScheduleDrawer,
+  overrideLoading,
+  overrideReason,
+  overrideTargetStatus,
+  retryScheduleDatetime,
+  showCreateDrawer,
+  showEditDrawer,
+  showOverrideModal,
+  showRescheduleDrawer,
+  showScheduleDrawer,
+} = useTaskViewActions({
+  taskId,
+  task,
+  archiveMetadata,
+  refreshTask: () => refreshTask(),
+  resetLogsState: () => resetLogsState(),
+  checkActiveRetry: () => checkActiveRetry(),
+  loadScheduleContext,
 })
 watch(taskId, () => {
   promptView.value = 'user'
@@ -737,26 +761,6 @@ const canManageTask = computed(() => {
     )
   )
 })
-
-function openOverrideModal(targetStatus: 'completed' | 'failed') {
-  overrideTargetStatus.value = targetStatus
-  overrideReason.value = ''
-  showOverrideModal.value = true
-}
-
-async function confirmOverride() {
-  if (!overrideTargetStatus.value || !task.value) return
-  overrideLoading.value = true
-  try {
-    await overrideTaskStatus(task.value.id, overrideTargetStatus.value, overrideReason.value || undefined)
-    showOverrideModal.value = false
-    await refreshTask()
-  } catch {
-    message.error(t('taskView.failedToOverrideStatus'))
-  } finally {
-    overrideLoading.value = false
-  }
-}
 
 const latestIssueTask = computed(() => {
   return issueTasks.value.reduce<Task | null>((latest, item) => {
@@ -951,42 +955,6 @@ async function loadTaskView() {
   }
 }
 
-async function handleCancel() {
-  actionLoading.value = true
-  try {
-    await cancelTask(taskId.value)
-    message.success(t('taskView.taskCancelled'))
-    refreshTask()
-  } catch (error) {
-    message.error(t('taskView.failedToCancelTask'))
-  } finally {
-    actionLoading.value = false
-  }
-}
-
-async function handleDownloadArchive() {
-  if (!archiveMetadata.value?.file_exists) return
-  archiveDownloadLoading.value = true
-  try {
-    const blob = await downloadTaskArchive(taskId.value)
-    const url = URL.createObjectURL(blob)
-    try {
-      const anchor = document.createElement('a')
-      anchor.href = url
-      anchor.download = archiveMetadata.value.archive_name
-      document.body.appendChild(anchor)
-      anchor.click()
-      anchor.remove()
-    } finally {
-      URL.revokeObjectURL(url)
-    }
-  } catch {
-    message.error(t('taskView.failedToDownloadRuntimeArchive'))
-  } finally {
-    archiveDownloadLoading.value = false
-  }
-}
-
 function resetLogsState() {
   logRequestGeneration += 1
   taskLogs.value = []
@@ -994,82 +962,6 @@ function resetLogsState() {
   containerLogs.value = ''
   archiveMetadata.value = null
   resetLogStreams()
-}
-
-async function handleRetry() {
-  actionLoading.value = true
-  try {
-    const newTask = await retryTask(taskId.value)
-    resetLogsState()
-    message.success(t('taskView.taskRetryScheduled'))
-    router.push(`/tasks/${newTask.id}`)
-  } catch (error: any) {
-    if (error?.response?.status === 409) {
-      message.warning(t('taskView.retryAlreadyExists'))
-      await checkActiveRetry()
-    } else {
-      message.error(t('taskView.failedToRetryTask'))
-    }
-  } finally {
-    actionLoading.value = false
-  }
-}
-
-async function handleRetryWithSchedule() {
-  if (!retryScheduleDatetime.value) {
-    message.error(t('taskView.selectRescheduleTime'))
-    return
-  }
-  if (retryScheduleDatetime.value <= Date.now()) {
-    message.error(t('taskView.rescheduleTimeFuture'))
-    return
-  }
-  actionLoading.value = true
-  try {
-    const newTask = await retryTask(taskId.value, new Date(retryScheduleDatetime.value).toISOString())
-    retryScheduleDatetime.value = null
-    showScheduleDrawer.value = false
-    resetLogsState()
-    message.success(t('taskView.taskRetryRescheduled'))
-    router.push(`/tasks/${newTask.id}`)
-  } catch (error: any) {
-    if (error?.response?.status === 409) {
-      message.warning(t('taskView.retryAlreadyExists'))
-      await checkActiveRetry()
-    } else {
-      message.error(t('taskView.failedToRetryTask'))
-    }
-  } finally {
-    actionLoading.value = false
-  }
-}
-
-async function handleExecute() {
-  actionLoading.value = true
-  try {
-    await executeTask(taskId.value)
-    message.success(t('taskView.taskExecutionStarted'))
-    refreshTask()
-  } catch (error) {
-    message.error(t('taskView.failedToExecuteTask'))
-  } finally {
-    actionLoading.value = false
-  }
-}
-
-
-async function openScheduleDrawer() {
-  showScheduleDrawer.value = true
-  await loadScheduleContext(true)
-}
-
-function handleScheduleHeatmapCellClick(startMs: number) {
-  retryScheduleDatetime.value = startMs
-}
-
-function handleAppendTaskCreated(created: Task) {
-  showCreateDrawer.value = false
-  router.push(`/tasks/${created.id}`)
 }
 
 onMounted(async () => {

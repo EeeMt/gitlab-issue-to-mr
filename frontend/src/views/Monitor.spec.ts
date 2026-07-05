@@ -445,11 +445,12 @@ describe('Monitor', () => {
   // C. Computed Properties — Container Analysis
   // =========================================================================
   describe('computed — container analysis', () => {
-    it('runningContainers filters to containers with status=running', async () => {
+    it('sortedContainers keeps the running container subset visible', async () => {
       wrapper = mountComponent()
       await flushPromises()
 
-      const running = wrapper.vm.runningContainers as any[]
+      const running = (wrapper.vm.sortedContainers as any[])
+        .filter((container: any) => container.status === 'running')
       // ctr-1, ctr-2, ctr-3 are running; ctr-4 is exited
       expect(running).toHaveLength(3)
       expect(running.every((c: any) => c.status === 'running')).toBe(true)
@@ -623,7 +624,9 @@ describe('Monitor', () => {
       wrapper = mountComponent()
       await flushPromises()
 
-      expect((wrapper.vm.healthSummary as any).tagType).toBe('error')
+      const healthCard = (wrapper.vm.overviewCards as any[])
+        .find((card: any) => card.key === 'health')
+      expect(healthCard.tagType).toBe('error')
     })
 
     it('healthSummary: warning when checks include warning but no error', async () => {
@@ -633,7 +636,9 @@ describe('Monitor', () => {
       wrapper = mountComponent()
       await flushPromises()
 
-      expect((wrapper.vm.healthSummary as any).tagType).toBe('warning')
+      const healthCard = (wrapper.vm.overviewCards as any[])
+        .find((card: any) => card.key === 'health')
+      expect(healthCard.tagType).toBe('warning')
     })
 
     it('healthSummary: success when all checks pass', async () => {
@@ -648,7 +653,9 @@ describe('Monitor', () => {
       wrapper = mountComponent()
       await flushPromises()
 
-      expect((wrapper.vm.healthSummary as any).tagType).toBe('success')
+      const healthCard = (wrapper.vm.overviewCards as any[])
+        .find((card: any) => card.key === 'health')
+      expect(healthCard.tagType).toBe('success')
     })
   })
 

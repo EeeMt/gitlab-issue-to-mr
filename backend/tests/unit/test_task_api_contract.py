@@ -1,5 +1,6 @@
 """Stable HTTP and response contracts for the task API boundary."""
 
+import inspect
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, call, patch
@@ -7,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 import pytest
 from fastapi.routing import APIRoute
 
+import app.api.tasks as tasks_module
 from app.api.task_schemas import CreateTaskRequest
 from app.api.tasks import (
     _serialize_task,
@@ -52,6 +54,39 @@ def test_task_router_preserves_public_method_and_path_surface() -> None:
         for method in route.methods
     }
     assert actual == EXPECTED_TASK_ROUTES
+
+
+@pytest.mark.parametrize(
+    ("handler", "service_call"),
+    [
+        (tasks_module.update_task, "update_task_record("),
+        (tasks_module.retry_task, "retry_task_record("),
+        (tasks_module.create_task, "create_task_record("),
+    ],
+)
+def test_task_mutation_routes_delegate_business_implementation(handler, service_call) -> None:
+    source = inspect.getsource(handler)
+
+    assert service_call in source
+    assert "db.execute(" not in source
+    assert "db.commit(" not in source
+
+
+def test_task_mutation_service_factories_capture_patchable_module_dependencies() -> None:
+    metadata_lookup = AsyncMock(return_value={})
+    issue_operator_check = MagicMock()
+
+    with (
+        patch.object(tasks_module, "get_project_metadata", new=metadata_lookup),
+        patch(
+            "app.core.task_helpers._require_issue_operator",
+            new=issue_operator_check,
+        ),
+    ):
+        creation_services = tasks_module._task_creation_services()
+        assert creation_services.get_project_metadata is metadata_lookup
+        assert creation_services.require_issue_operator is issue_operator_check
+        assert tasks_module._task_update_services().get_project_metadata is metadata_lookup
 
 
 @pytest.mark.asyncio

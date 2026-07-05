@@ -235,7 +235,12 @@
 
                   <!-- Scrollable area -->
                   <n-scrollbar ref="timelineScrollRef" class="queue-timeline__scroll" x-scrollable trigger="hover">
-                    <div class="queue-timeline__container" :style="{ minWidth: timelineContainerMinWidth }">
+                    <div
+                      class="queue-timeline__container"
+                      :style="{ minWidth: timelineContainerMinWidth }"
+                      :data-range-start="timelineRange.start"
+                      :data-range-end="timelineRange.end"
+                    >
                       <!-- Time axis -->
                       <div class="queue-timeline__axis">
                         <span
@@ -561,7 +566,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, h, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NAlert,
@@ -580,95 +585,37 @@ import {
   NScrollbar,
   NTooltip,
   type DataTableColumns,
-  useMessage
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { getContainers, getStats, getTasks, getTasksPaginated, type Container, type Stats, type Task } from '../api'
+import { type Container, type Task } from '../api'
 import PageHeader from '../components/PageHeader.vue'
 import SummaryCard from '../components/SummaryCard.vue'
+import { useMonitorData } from '../features/monitor/useMonitorData'
+import {
+  useMonitorHealth,
+  type CardTagType,
+} from '../features/monitor/useMonitorHealth'
+import { useMonitorTimeline } from '../features/monitor/useMonitorTimeline'
 import { formatDateTimeUtc8Compact, formatTimeUtc8, parseUtcDate } from '../utils/datetime'
 import { formatPriority, formatDurationMs, getProjectLabel as _getProjectLabel } from '../utils/format'
 
-type CardTagType = 'default' | 'info' | 'success' | 'warning' | 'error'
-type CheckType = 'default' | 'info' | 'success' | 'warning' | 'error'
-
-type MonitorCard = {
-  key: string
-  label: string
-  value: string
-  help: string
-  tag?: string
-  tagType?: CardTagType
-}
-
-type HealthCheck = {
-  key: string
-  label: string
-  detail: string
-  badge: string
-  type: CheckType
-}
-
-const ACTIVE_STATUSES = ['pending', 'queued', 'running']
-
 const router = useRouter()
-const message = useMessage()
 const { t } = useI18n()
 
-const loading = ref(false)
-const hasLoadedOnce = ref(false)
 const activeTab = ref('runtime')
-const refreshRequestInFlight = ref(false)
-const stats = ref<Stats>({
-  total: 0,
-  pending: 0,
-  queued: 0,
-  running: 0,
-  completed: 0,
-  failed: 0,
-  cancelled: 0,
-  completed_24h: 0,
-  failed_cancelled_24h: 0,
-  running_long_30min: 0,
-})
-const containers = ref<Container[]>([])
-const tasks = ref<Task[]>([])
-const recentFinishedList = ref<Task[]>([])
-const recentFailureList = ref<Task[]>([])
-let pendingSilentRefresh = false
-let pendingVisibleRefresh = false
-let refreshTimer: number | null = null
-let elapsedTimer: ReturnType<typeof setInterval> | null = null
+const {
+  containers,
+  fetchData,
+  hasLoadedOnce,
+  loading,
+  nowMs,
+  recentFailureList,
+  recentFinishedList,
+  stats,
+  tasks,
+} = useMonitorData()
 
 const queueViewMode = ref<'kanban' | 'timeline' | 'table'>('kanban')
-const nowMs = ref(Date.now())
-const timelineZoom = ref<'auto' | '1h' | '2h' | '4h' | '8h' | '24h'>('auto')
-
-const timelineZoomOptions = [
-  { label: 'Auto', value: 'auto' as const },
-  { label: '1h', value: '1h' as const },
-  { label: '2h', value: '2h' as const },
-  { label: '4h', value: '4h' as const },
-  { label: '8h', value: '8h' as const },
-  { label: '24h', value: '24h' as const },
-]
-
-const timelineScrollRef = ref<InstanceType<typeof NScrollbar> | null>(null)
-
-function scrollTimelineToNow() {
-  const el = timelineScrollRef.value?.$el as HTMLElement | undefined
-  if (!el) return
-  const scrollEl = (el.querySelector('.n-scrollbar-container') as HTMLElement) || el
-  const containerWidth = scrollEl.scrollWidth
-  const viewportWidth = scrollEl.clientWidth
-  const nowPct = timelinePct(nowMs.value) / 100
-  const nowPx = nowPct * containerWidth
-  scrollEl.scrollLeft = nowPx - viewportWidth / 2
-}
-
-watch(timelineZoom, () => {
-  nextTick(() => scrollTimelineToNow())
-})
 
 const queueViewOptions = computed(() => [
   { label: t('monitor.viewKanban'), value: 'kanban' as const },
@@ -679,65 +626,42 @@ const queueViewOptions = computed(() => [
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 const tableLoading = computed(() => loading.value && hasLoadedOnce.value)
 
-const tasksById = computed(() => new Map(tasks.value.map((task) => [task.id, task])))
-
-const activeTasks = computed(() => {
-  const now = nowMs.value
-  return tasks.value
-    .filter((task) => ACTIVE_STATUSES.includes(task.status))
-    .sort((a, b) => {
-      // 1. Running tasks always first
-      const aRunning = a.status === 'running' ? 0 : 1
-      const bRunning = b.status === 'running' ? 0 : 1
-      if (aRunning !== bRunning) return aRunning - bRunning
-
-      // 2. Ready (due now or immediate) before Waiting (future scheduled)
-      const aReady = !a.scheduled_at || parseUtcDate(a.scheduled_at).getTime() <= now ? 0 : 1
-      const bReady = !b.scheduled_at || parseUtcDate(b.scheduled_at).getTime() <= now ? 0 : 1
-      if (aReady !== bReady) return aReady - bReady
-
-      // Within Ready group: scheduler ordering
-      if (aReady === 0 && bReady === 0) {
-        if (a.priority !== b.priority) return a.priority - b.priority
-        // Due scheduled > immediate
-        const aDue = a.scheduled_at ? 0 : 1
-        const bDue = b.scheduled_at ? 0 : 1
-        if (aDue !== bDue) return aDue - bDue
-        if (a.scheduled_at && b.scheduled_at) {
-          const diff = parseUtcDate(a.scheduled_at).getTime() - parseUtcDate(b.scheduled_at).getTime()
-          if (diff !== 0) return diff
-        }
-        return parseUtcDate(a.created_at).getTime() - parseUtcDate(b.created_at).getTime()
-      }
-
-      // Within Waiting group: earliest scheduled_at first
-      if (a.scheduled_at && b.scheduled_at) {
-        return parseUtcDate(a.scheduled_at).getTime() - parseUtcDate(b.scheduled_at).getTime()
-      }
-      return 0
-    })
+const {
+  activeTasks,
+  debugCards,
+  healthChecks,
+  orphanContainers,
+  overviewCards,
+  readyTasks,
+  recentFailures,
+  recentFinishedTasks,
+  runningTasks,
+  runningTasksWithoutContainer,
+  runtimeCards,
+  sortedContainers,
+  statusBreakdown,
+  tasksById,
+  waitingTasks,
+} = useMonitorHealth({
+  stats,
+  containers,
+  tasks,
+  recentFinishedList,
+  recentFailureList,
+  nowMs,
+  translate: t,
 })
-
-const runningTasks = computed(() =>
-  activeTasks.value.filter((task) => task.status === 'running')
-)
-
-const pendingQueuedTasks = computed(() =>
-  activeTasks.value.filter((task) => task.status === 'pending' || task.status === 'queued')
-)
-
-const readyTasks = computed(() => {
-  const now = nowMs.value
-  return pendingQueuedTasks.value.filter(
-    (t) => !t.scheduled_at || parseUtcDate(t.scheduled_at).getTime() <= now
-  )
-})
-
-const waitingTasks = computed(() => {
-  const now = nowMs.value
-  return pendingQueuedTasks.value.filter(
-    (t) => t.scheduled_at != null && parseUtcDate(t.scheduled_at).getTime() > now
-  )
+const {
+  timelineContainerMinWidth,
+  timelinePct,
+  timelineRange,
+  timelineScrollRef,
+  timelineTicks,
+  timelineZoom,
+  timelineZoomOptions,
+} = useMonitorTimeline({
+  activeTasks,
+  nowMs,
 })
 
 /* --- Smart timeline tooltip --- */
@@ -770,235 +694,6 @@ function showTimelineTooltip(e: MouseEvent, text: string) {
 function hideTimelineTooltip() {
   tooltipVisible.value = false
 }
-
-const runningContainers = computed(() =>
-  containers.value.filter((container) => container.status === 'running')
-)
-
-const linkedRunningContainers = computed(() =>
-  runningContainers.value.filter((container) => {
-    const task = container.task_id ? tasksById.value.get(container.task_id) : undefined
-    return task?.status === 'running'
-  })
-)
-
-const runningTasksWithoutContainer = computed(() =>
-  runningTasks.value.filter((task) => {
-    return !runningContainers.value.some(
-      (container) => container.task_id === task.id || container.id === task.container_id
-    )
-  })
-)
-
-const orphanContainers = computed(() =>
-  runningContainers.value.filter((container) => {
-    if (!container.task_id) {
-      return true
-    }
-
-    const task = tasksById.value.get(container.task_id)
-    return !task || task.status !== 'running'
-  })
-)
-
-const recentFinishedTasks = computed(() => recentFinishedList.value)
-
-const recentFailures = computed(() => recentFailureList.value)
-
-const recentFinishedCount24h = computed(() => stats.value.completed_24h)
-
-const recentFailureCount24h = computed(() => stats.value.failed_cancelled_24h)
-
-const longRunningTasks = computed(() =>
-  runningTasks.value.filter((task) => {
-    if (!task.started_at) return false
-    return Date.now() - parseUtcDate(task.started_at).getTime() > 30 * 60 * 1000
-  })
-)
-
-const sortedContainers = computed(() =>
-  [...containers.value].sort((left, right) => {
-    if (left.status === 'running' && right.status !== 'running') return -1
-    if (left.status !== 'running' && right.status === 'running') return 1
-    return parseTimestamp(right.created_at) - parseTimestamp(left.created_at)
-  })
-)
-
-const statusBreakdown = computed(() => {
-  const total = Math.max(stats.value.total, 1)
-
-  return [
-    { key: 'pending', label: t('monitor.pending'), value: stats.value.pending, percent: (stats.value.pending / total) * 100 },
-    { key: 'queued', label: t('monitor.queued'), value: stats.value.queued, percent: (stats.value.queued / total) * 100 },
-    { key: 'running', label: t('monitor.running'), value: stats.value.running, percent: (stats.value.running / total) * 100 },
-    { key: 'completed', label: t('monitor.completed'), value: stats.value.completed, percent: (stats.value.completed / total) * 100 },
-    { key: 'failed', label: t('monitor.failed'), value: stats.value.failed, percent: (stats.value.failed / total) * 100 },
-    { key: 'cancelled', label: t('monitor.cancelled'), value: stats.value.cancelled, percent: (stats.value.cancelled / total) * 100 }
-  ]
-})
-
-const healthChecks = computed<HealthCheck[]>(() => {
-  const backlog = pendingQueuedTasks.value.length
-  const running = runningTasks.value.length
-  const missingContainers = runningTasksWithoutContainer.value.length
-  const orphaned = orphanContainers.value.length
-  const failures24h = recentFailureCount24h.value
-
-  return [
-    {
-      key: 'queue',
-      label: t('monitor.queueHealthLabel'),
-      detail:
-        backlog > Math.max(6, running * 2)
-          ? t('monitor.queueHealthHighDetail', { backlog })
-          : t('monitor.queueHealthNormalDetail', { backlog }),
-      badge: backlog > Math.max(6, running * 2) ? t('monitor.attention') : t('monitor.healthy'),
-      type: backlog > Math.max(6, running * 2) ? 'warning' : 'success'
-    },
-    {
-      key: 'workers',
-      label: t('monitor.workerHealthLabel'),
-      detail:
-        missingContainers > 0 || orphaned > 0
-          ? t('monitor.workerHealthMismatchDetail', { missing: missingContainers, orphaned })
-          : t('monitor.workerHealthAlignedDetail'),
-      badge: missingContainers > 0 || orphaned > 0 ? t('monitor.needsReview') : t('monitor.aligned'),
-      type: missingContainers > 0 || orphaned > 0 ? 'warning' : 'success'
-    },
-    {
-      key: 'failures',
-      label: t('monitor.failureHealthLabel'),
-      detail:
-        failures24h > 0
-          ? t('monitor.failureHealthDetail', { count: failures24h })
-          : t('monitor.failureHealthCleanDetail'),
-      badge: failures24h > 2 ? t('monitor.risky') : failures24h > 0 ? t('monitor.watch') : t('monitor.stable'),
-      type: failures24h > 2 ? 'error' : failures24h > 0 ? 'warning' : 'success'
-    },
-    {
-      key: 'runtime',
-      label: t('monitor.runtimeHealthLabel'),
-      detail:
-        longRunningTasks.value.length > 0
-          ? t('monitor.runtimeHealthSlowDetail', { count: longRunningTasks.value.length })
-          : t('monitor.runtimeHealthNormalDetail'),
-      badge: longRunningTasks.value.length > 0 ? t('monitor.slow') : t('monitor.normal'),
-      type: longRunningTasks.value.length > 0 ? 'warning' : 'success'
-    }
-  ]
-})
-
-const healthSummary = computed(() => {
-  const types = healthChecks.value.map((check) => check.type)
-  if (types.includes('error')) {
-    return {
-      label: t('monitor.healthNeedsAttention'),
-      tag: t('monitor.risky'),
-      tagType: 'error' as CardTagType
-    }
-  }
-  if (types.includes('warning')) {
-    return {
-      label: t('monitor.healthWatch'),
-      tag: t('monitor.watch'),
-      tagType: 'warning' as CardTagType
-    }
-  }
-  return {
-    label: t('monitor.healthHealthy'),
-    tag: t('monitor.healthy'),
-    tagType: 'success' as CardTagType
-  }
-})
-
-const overviewCards = computed<MonitorCard[]>(() => [
-  {
-    key: 'running',
-    label: t('monitor.runningNowLabel'),
-    value: String(runningTasks.value.length),
-    help: t('monitor.runningNowHelp', { containers: runningContainers.value.length }),
-    tag: t('monitor.live'),
-    tagType: runningTasks.value.length > 0 ? 'warning' : 'default'
-  },
-  {
-    key: 'backlog',
-    label: t('monitor.backlogLabel'),
-    value: String(pendingQueuedTasks.value.length),
-    help: t('monitor.backlogHelp', { pending: stats.value.pending, queued: stats.value.queued }),
-    tag: pendingQueuedTasks.value.length > 0 ? t('monitor.waiting') : t('monitor.clear'),
-    tagType: pendingQueuedTasks.value.length > 6 ? 'warning' : 'info'
-  },
-  {
-    key: 'containers',
-    label: t('monitor.activeContainersLabel'),
-    value: String(runningContainers.value.length),
-    help: t('monitor.activeContainersHelp', { linked: linkedRunningContainers.value.length }),
-    tag: runningTasksWithoutContainer.value.length > 0 ? t('monitor.gaps') : t('monitor.aligned'),
-    tagType: runningTasksWithoutContainer.value.length > 0 ? 'warning' : 'success'
-  },
-  {
-    key: 'health',
-    label: t('monitor.healthSummaryLabel'),
-    value: healthSummary.value.label,
-    help: t('monitor.healthSummaryHelp'),
-    tag: healthSummary.value.tag,
-    tagType: healthSummary.value.tagType
-  }
-])
-
-const runtimeCards = computed<MonitorCard[]>(() => [
-  {
-    key: 'active',
-    label: t('monitor.activeTasksMetric'),
-    value: String(activeTasks.value.length),
-    help: t('monitor.activeTasksMetricHelp')
-  },
-  {
-    key: 'completed24h',
-    label: t('monitor.completed24hMetric'),
-    value: String(recentFinishedCount24h.value),
-    help: t('monitor.completed24hMetricHelp')
-  },
-  {
-    key: 'failures24h',
-    label: t('monitor.failures24hMetric'),
-    value: String(recentFailureCount24h.value),
-    help: t('monitor.failures24hMetricHelp')
-  },
-  {
-    key: 'longRunning',
-    label: t('monitor.longRunningMetric'),
-    value: String(longRunningTasks.value.length),
-    help: t('monitor.longRunningMetricHelp')
-  }
-])
-
-const debugCards = computed<MonitorCard[]>(() => [
-  {
-    key: 'visible',
-    label: t('monitor.visibleContainersMetric'),
-    value: String(containers.value.length),
-    help: t('monitor.visibleContainersMetricHelp')
-  },
-  {
-    key: 'linked',
-    label: t('monitor.linkedContainersMetric'),
-    value: String(linkedRunningContainers.value.length),
-    help: t('monitor.linkedContainersMetricHelp')
-  },
-  {
-    key: 'missing',
-    label: t('monitor.missingContainersMetric'),
-    value: String(runningTasksWithoutContainer.value.length),
-    help: t('monitor.missingContainersMetricHelp')
-  },
-  {
-    key: 'orphaned',
-    label: t('monitor.orphanContainersMetric'),
-    value: String(orphanContainers.value.length),
-    help: t('monitor.orphanContainersMetricHelp')
-  }
-])
 
 const activeTaskColumns = computed<DataTableColumns<Task>>(() => [
   {
@@ -1392,162 +1087,6 @@ function kanbanIssueLabel(task: Task): string {
   return '—'
 }
 
-/* ----- Timeline computed helpers ----- */
-
-const timelineRange = computed(() => {
-  const now = nowMs.value
-  let minTime = now - 60 * 60 * 1000
-  let maxTime = now + 4 * 60 * 60 * 1000
-
-  for (const task of activeTasks.value) {
-    if (task.started_at) {
-      minTime = Math.min(minTime, parseUtcDate(task.started_at).getTime())
-    }
-    if (task.scheduled_at) {
-      const st = parseUtcDate(task.scheduled_at).getTime()
-      minTime = Math.min(minTime, st)
-      maxTime = Math.max(maxTime, st + 30 * 60 * 1000)
-    }
-  }
-
-  // In zoom mode, extend range to at least cover the zoom window
-  if (timelineZoom.value !== 'auto') {
-    const hours = parseInt(timelineZoom.value)
-    const windowMs = hours * 60 * 60 * 1000
-    minTime = Math.min(minTime, now - windowMs * 0.3)
-    maxTime = Math.max(maxTime, now + windowMs * 0.7)
-  }
-
-  const span = maxTime - minTime
-  const pad = span * 0.05
-  return { start: minTime - pad, end: maxTime + pad }
-})
-
-function timelinePct(timeMs: number): number {
-  const { start, end } = timelineRange.value
-  const span = end - start
-  if (span <= 0) return 0
-  return Math.max(0, Math.min(100, ((timeMs - start) / span) * 100))
-}
-
-const timelineTicks = computed(() => {
-  const { start, end } = timelineRange.value
-  const span = end - start
-  const intervals = [15, 30, 60, 120, 240]
-  let intervalMin = 60
-
-  if (timelineZoom.value !== 'auto') {
-    // Tick density based on zoom level
-    const zoomMs = parseInt(timelineZoom.value) * 60 * 60 * 1000
-    for (const iv of intervals) {
-      if (zoomMs / (iv * 60 * 1000) <= 8) {
-        intervalMin = iv
-        break
-      }
-    }
-  } else {
-    for (const iv of intervals) {
-      if (span / (iv * 60 * 1000) <= 8) {
-        intervalMin = iv
-        break
-      }
-    }
-  }
-  const intervalMs = intervalMin * 60 * 1000
-
-  const firstTick = Math.ceil(start / intervalMs) * intervalMs
-  const ticks: { time: number; pct: number; label: string }[] = []
-  for (let t = firstTick; t <= end; t += intervalMs) {
-    ticks.push({
-      time: t,
-      pct: timelinePct(t),
-      label: formatTimeUtc8(new Date(t)),
-    })
-  }
-  return ticks
-})
-
-const timelineContainerMinWidth = computed(() => {
-  return Math.max(600, timelineTicks.value.length * 90) + 'px'
-})
-
-async function fetchData(options: { silent?: boolean } = {}) {
-  const silent = options.silent ?? false
-
-  if (refreshRequestInFlight.value) {
-    if (silent) {
-      pendingSilentRefresh = true
-    } else {
-      pendingVisibleRefresh = true
-    }
-    return
-  }
-
-  refreshRequestInFlight.value = true
-  if (!silent) {
-    loading.value = true
-  }
-
-  try {
-    const [statsData, containersData, tasksData, finishedResult, failedResult] = await Promise.all([
-      getStats(),
-      getContainers(),
-      getTasks({ status: 'running,pending,queued' }),
-      getTasksPaginated({ status: 'completed,failed,cancelled', page: 1, page_size: 10 }),
-      getTasksPaginated({ status: 'failed,cancelled', page: 1, page_size: 10 }),
-    ])
-
-    stats.value = statsData
-    containers.value = containersData
-    tasks.value = tasksData
-    recentFinishedList.value = finishedResult.items
-    recentFailureList.value = failedResult.items
-    hasLoadedOnce.value = true
-  } catch (error) {
-    console.error(error)
-    message.error(t('monitor.failedToFetchData'))
-  } finally {
-    if (!silent) {
-      loading.value = false
-    }
-    refreshRequestInFlight.value = false
-
-    if (pendingVisibleRefresh || pendingSilentRefresh) {
-      const nextSilent = !pendingVisibleRefresh
-      pendingVisibleRefresh = false
-      pendingSilentRefresh = false
-      await fetchData({ silent: nextSilent })
-    }
-  }
-}
-
-function startAutoRefresh() {
-  stopAutoRefresh()
-  refreshTimer = window.setInterval(() => {
-    void fetchData({ silent: true })
-  }, 15000)
-}
-
-function stopAutoRefresh() {
-  if (refreshTimer !== null) {
-    window.clearInterval(refreshTimer)
-    refreshTimer = null
-  }
-}
-
-onMounted(async () => {
-  await fetchData()
-  startAutoRefresh()
-  elapsedTimer = setInterval(() => { nowMs.value = Date.now() }, 1000)
-})
-
-onBeforeUnmount(() => {
-  stopAutoRefresh()
-  if (elapsedTimer) {
-    clearInterval(elapsedTimer)
-    elapsedTimer = null
-  }
-})
 </script>
 
 <style scoped>

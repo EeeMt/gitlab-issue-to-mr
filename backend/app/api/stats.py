@@ -3,45 +3,63 @@
 from __future__ import annotations
 
 import logging
-from collections import defaultdict
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import case, false, func, literal_column, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.analytics_queries import (
+    apply_analytics_filters as _apply_analytics_filters,
+)
+from app.api.analytics_queries import (
+    apply_issue_analytics_filters as _apply_issue_analytics_filters,
+)
+from app.api.analytics_queries import (
+    apply_project_column_scope as _apply_project_column_scope,
+)
+from app.api.analytics_queries import apply_project_scope as _apply_project_scope
+from app.api.analytics_queries import build_analytics_queries
+from app.api.analytics_responses import AnalyticsSummary, build_analytics_response
+from app.api.analytics_responses import (
+    build_error_breakdown as _build_error_breakdown,
+)
+from app.api.analytics_responses import (
+    build_provider_chart_series as _build_provider_chart_series,
+)
+from app.api.analytics_responses import (
+    build_status_breakdown_rows as _build_status_breakdown_rows,
+)
+from app.api.analytics_responses import (
+    categorize_error_message as _categorize_error_message,
+)
+from app.api.analytics_responses import safe_ratio as _safe_ratio
+from app.api.analytics_responses import (
+    summarize_error_message as _summarize_error_message,
+)
 from app.config import get_effective_settings
 from app.core.projects import build_project_lookup
 from app.core.utcnow import utcnow
 from app.database import get_db
 from app.dependencies.auth import get_optional_current_user, require_page_access
 from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
-from app.models import AIProvider, Issue, IssueStatus, Task, TaskStatus, User
+from app.models import Issue, IssueStatus, Task, TaskStatus, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-FINISHED_TASK_STATUSES = (
-    TaskStatus.COMPLETED,
-    TaskStatus.FAILED,
-    TaskStatus.CANCELLED,
-)
-
-ERROR_CATEGORY_PATTERNS = (
-    ("Timeout", ("timeout", "timed out", "deadline exceeded")),
-    ("Resource", ("out of memory", "oom", "no space left", "disk quota", "killed")),
-    ("Docker", ("docker", "container", "image pull", "oci runtime")),
-    ("Authentication", ("unauthorized", "forbidden", "authentication", "token", "permission denied")),
-    ("Network", ("connection", "connect", "dns", "tls", "ssl", "socket", "proxy")),
-    ("Git", ("merge conflict", "rebase", "checkout", "git ", "branch", "commit", "push failed")),
-    (
-        "Dependencies",
-        ("module not found", "modulenotfounderror", "importerror", "pip ", "npm ", "package"),
-    ),
-    ("Tests", ("pytest", "test failed", "assertionerror", "failing test", "unit test", "integration test")),
-    ("Code", ("syntaxerror", "indentationerror", "typeerror", "nameerror", "attributeerror", "traceback")),
-)
-
+__all__ = [
+    "_apply_analytics_filters",
+    "_apply_issue_analytics_filters",
+    "_apply_project_column_scope",
+    "_apply_project_scope",
+    "_build_error_breakdown",
+    "_build_provider_chart_series",
+    "_build_status_breakdown_rows",
+    "_categorize_error_message",
+    "_safe_ratio",
+    "_summarize_error_message",
+]
 
 @router.get("/stats")
 async def get_stats(
@@ -159,157 +177,6 @@ async def get_stats(
     }
 
 
-def _apply_project_column_scope(query, project_column, access_scope: ProjectAccessScope):
-    """Apply project-based access control to a query using the specified project column."""
-    if access_scope.is_unrestricted:
-        return query
-
-    allowed_project_ids = access_scope.accessible_project_ids
-    if not allowed_project_ids:
-        return query.where(false())
-    return query.where(project_column.in_(allowed_project_ids))
-
-
-def _apply_project_scope(query, access_scope: ProjectAccessScope):
-    """Apply project-based access control to a Task query."""
-    return _apply_project_column_scope(query, Task.project_id, access_scope)
-
-
-def _apply_analytics_filters(
-    query,
-    access_scope: ProjectAccessScope,
-    project_id: int | None = None,
-    initiator_username: str | None = None,
-):
-    query = _apply_project_scope(query, access_scope)
-    if project_id is not None:
-        query = query.where(Task.project_id == project_id)
-    if initiator_username:
-        query = query.where(Task.initiator_username == initiator_username)
-    return query
-
-
-def _apply_issue_analytics_filters(
-    query,
-    access_scope: ProjectAccessScope,
-    project_id: int | None = None,
-    initiator_username: str | None = None,
-):
-    query = _apply_project_column_scope(query, Issue.project_id, access_scope)
-    if project_id is not None:
-        query = query.where(Issue.project_id == project_id)
-    if initiator_username:
-        query = query.where(Issue.initiator_username == initiator_username)
-    return query
-
-
-def _build_status_breakdown_rows(statuses, raw_rows: list) -> list[dict]:
-    counts_by_status: dict[str, int] = {}
-    for row in raw_rows:
-        status_value = getattr(row.status, "value", row.status)
-        counts_by_status[str(status_value)] = int(row.count or 0)
-
-    total = sum(counts_by_status.get(getattr(status, "value", status), 0) for status in statuses)
-    rows: list[dict] = []
-    for status in statuses:
-        status_value = str(getattr(status, "value", status))
-        count = counts_by_status.get(status_value, 0)
-        rows.append(
-            {
-                "status": status_value,
-                "count": count,
-                "share": (count / total) if total else 0,
-            }
-        )
-    return rows
-
-
-def _safe_ratio(numerator: int | float | None, denominator: int | float | None) -> float | None:
-    if denominator in (None, 0) or numerator is None:
-        return None
-    return float(numerator) / float(denominator)
-
-
-def _provider_display_label(provider_name: str | None, provider_model: str | None) -> str:
-    if not provider_name:
-        return "Unknown / Legacy"
-    return f"{provider_name} / {provider_model}" if provider_model else provider_name
-
-
-def _build_provider_chart_series(rows: list[dict]) -> dict[str, list[dict]]:
-    def build(metric_key: str) -> list[dict]:
-        return [
-            {
-                "provider_id": row["provider_id"],
-                "label": _provider_display_label(row["provider_name"], row["provider_model"]),
-                "value": row[metric_key],
-            }
-            for row in rows
-            if row[metric_key] is not None
-        ]
-
-    return {
-        "success_rate": build("success_rate"),
-        "avg_tokens_per_second": build("avg_tokens_per_second"),
-        "avg_tokens_per_changed_line": build("avg_tokens_per_changed_line"),
-        "avg_execution_seconds_per_changed_line": build("avg_execution_seconds_per_changed_line"),
-    }
-
-
-def _build_error_breakdown(error_rows: list[tuple[str, int]], failed_tasks: int) -> list[dict]:
-    grouped: dict[str, dict[str, object]] = defaultdict(
-        lambda: {
-            "count": 0,
-            "sample_message": None,
-            "sample_count": 0,
-        }
-    )
-
-    for error_message, count in error_rows:
-        category = _categorize_error_message(error_message)
-        bucket = grouped[category]
-        bucket["count"] = int(bucket["count"]) + int(count)
-        if bucket["sample_message"] is None or int(count) > int(bucket["sample_count"]):
-            bucket["sample_message"] = _summarize_error_message(error_message)
-            bucket["sample_count"] = int(count)
-
-    rows = []
-    for category, values in grouped.items():
-        count = int(values["count"])
-        rows.append(
-            {
-                "category": category,
-                "count": count,
-                "share_of_failed": (count / failed_tasks) if failed_tasks else 0,
-                "sample_message": values["sample_message"],
-            }
-        )
-
-    rows.sort(key=lambda row: (-row["count"], row["category"]))
-    return rows
-
-
-def _categorize_error_message(error_message: str | None) -> str:
-    if not error_message:
-        return "Other"
-
-    normalized = error_message.lower()
-    for category, patterns in ERROR_CATEGORY_PATTERNS:
-        if any(pattern in normalized for pattern in patterns):
-            return category
-    return "Other"
-
-
-def _summarize_error_message(error_message: str | None) -> str | None:
-    if not error_message:
-        return None
-
-    first_line = next((line.strip() for line in error_message.splitlines() if line.strip()), "")
-    if not first_line:
-        return None
-    return first_line[:160]
-
-
 @router.get("/stats/analytics")
 async def get_analytics(
     days: int = Query(default=30, ge=7, le=90),
@@ -341,603 +208,46 @@ async def get_analytics(
     now = utcnow()
     since = now - timedelta(days=days - 1)
 
-    finished_task_expr = case((Task.status.in_(FINISHED_TASK_STATUSES), 1), else_=0)
-    execution_seconds_expr = case(
-        (
-            Task.started_at.is_not(None) & Task.completed_at.is_not(None),
-            func.extract("epoch", Task.completed_at - Task.started_at),
-        ),
-        else_=None,
-    )
-    queue_wait_seconds_expr = case(
-        (
-            Task.started_at.is_not(None)
-            & Task.scheduled_at.is_not(None)
-            & (Task.scheduled_at > Task.created_at),
-            func.extract("epoch", Task.started_at - Task.scheduled_at),
-        ),
-        (
-            Task.started_at.is_not(None),
-            func.extract("epoch", Task.started_at - Task.created_at),
-        ),
-        else_=None,
-    )
-    token_total_expr = case(
-        (
-            Task.input_tokens.is_not(None) | Task.output_tokens.is_not(None),
-            func.coalesce(Task.input_tokens, 0) + func.coalesce(Task.output_tokens, 0),
-        ),
-        else_=None,
-    )
-    output_tokens_expr = case(
-        (Task.output_tokens.is_not(None), Task.output_tokens),
-        else_=None,
-    )
-    token_tracked_expr = case(
-        (Task.input_tokens.is_not(None) | Task.output_tokens.is_not(None), 1),
-        else_=0,
-    )
-
-    throughput_eligible_expr = (
-        output_tokens_expr.is_not(None)
-        & execution_seconds_expr.is_not(None)
-        & (execution_seconds_expr > 0)
-    )
-
-    summary_query = _apply_analytics_filters(
-        select(
-            func.count(Task.id),
-            func.coalesce(func.sum(Task.additions), 0),
-            func.coalesce(func.sum(Task.deletions), 0),
-            func.coalesce(func.sum(Task.total_changes), 0),
-            func.coalesce(func.sum(Task.input_tokens), 0),
-            func.coalesce(func.sum(Task.output_tokens), 0),
-            func.coalesce(func.sum(case((Task.status == TaskStatus.COMPLETED, 1), else_=0)), 0),
-            func.coalesce(func.sum(case((Task.status == TaskStatus.FAILED, 1), else_=0)), 0),
-            func.coalesce(func.sum(case((Task.status == TaskStatus.CANCELLED, 1), else_=0)), 0),
-            func.coalesce(func.sum(finished_task_expr), 0),
-            func.coalesce(func.sum(case((Task.initiator_username.is_not(None), 1), else_=0)), 0),
-            func.coalesce(func.sum(token_tracked_expr), 0),
-            func.min(case((Task.initiator_username.is_not(None), Task.created_at), else_=None)),
-            func.coalesce(func.sum(execution_seconds_expr), 0).label("total_execution_seconds"),
-            func.avg(execution_seconds_expr),
-            func.max(execution_seconds_expr),
-            func.avg(queue_wait_seconds_expr),
-            func.max(queue_wait_seconds_expr),
-            func.avg(token_total_expr),
-            func.max(token_total_expr),
-        ).where(Task.created_at >= since),
-        access_scope,
+    queries = build_analytics_queries(
+        since=since,
+        access_scope=access_scope,
         project_id=project_id,
         initiator_username=selected_initiator_username,
     )
-    summary_result = await db.execute(summary_query)
-    (
-        total_tasks,
-        total_additions,
-        total_deletions,
-        total_changes,
-        total_input_tokens,
-        total_output_tokens,
-        completed_tasks,
-        failed_tasks,
-        cancelled_tasks,
-        finished_tasks,
-        tracked_initiator_tasks,
-        token_tracked_tasks,
-        initiator_tracking_started_at,
-        total_execution_seconds,
-        avg_execution_seconds,
-        max_execution_seconds,
-        avg_queue_wait_seconds,
-        max_queue_wait_seconds,
-        avg_total_tokens_per_tracked_task,
-        max_total_tokens_per_tracked_task,
-    ) = summary_result.one()
+    summary = AnalyticsSummary.from_row((await db.execute(queries.summary)).one())
 
-    project_query = (
-        select(
-            Task.project_id,
-            func.count(Task.id).label("task_count"),
-            func.coalesce(func.sum(case((Task.status == TaskStatus.COMPLETED, 1), else_=0)), 0).label(
-                "completed_tasks"
-            ),
-            func.coalesce(func.sum(case((Task.status == TaskStatus.FAILED, 1), else_=0)), 0).label(
-                "failed_tasks"
-            ),
-            func.coalesce(func.sum(case((Task.status == TaskStatus.CANCELLED, 1), else_=0)), 0).label(
-                "cancelled_tasks"
-            ),
-            func.coalesce(func.sum(Task.additions), 0).label("additions"),
-            func.coalesce(func.sum(Task.deletions), 0).label("deletions"),
-            func.coalesce(func.sum(Task.total_changes), 0).label("total_changes"),
-            func.coalesce(func.sum(Task.input_tokens), 0).label("input_tokens"),
-            func.coalesce(func.sum(Task.output_tokens), 0).label("output_tokens"),
-            func.coalesce(func.sum(func.coalesce(Task.input_tokens, 0) + func.coalesce(Task.output_tokens, 0)), 0).label(
-                "total_tokens"
-            ),
-            func.avg(execution_seconds_expr).label("avg_execution_seconds"),
-            func.coalesce(func.sum(execution_seconds_expr), 0).label("total_execution_seconds"),
-            func.avg(queue_wait_seconds_expr).label("avg_queue_wait_seconds"),
-            func.max(Task.created_at).label("last_task_at"),
-        )
-        .where(Task.created_at >= since)
-        .group_by(Task.project_id)
-        .order_by(
-            func.count(Task.id).desc(),
-            func.coalesce(func.sum(Task.total_changes), 0).desc(),
-            Task.project_id.asc(),
-        )
-    )
-    project_query = _apply_analytics_filters(
-        project_query,
-        access_scope,
-        project_id=project_id,
-        initiator_username=selected_initiator_username,
-    )
-    project_rows = (await db.execute(project_query)).all()
+    project_rows = (await db.execute(queries.projects)).all()
     project_lookup = await build_project_lookup(
         accessible_projects=access_scope.accessible_projects,
         is_unrestricted=access_scope.is_unrestricted,
     )
 
-    available_initiators_query = (
-        select(
-            Task.initiator_username,
-            Task.initiator_gitlab_user_id,
-            func.count(Task.id).label("task_count"),
-        )
-        .where(Task.created_at >= since, Task.initiator_username.is_not(None))
-        .group_by(Task.initiator_username, Task.initiator_gitlab_user_id)
-        .order_by(func.count(Task.id).desc(), Task.initiator_username.asc())
-    )
-    available_initiators_query = _apply_analytics_filters(
-        available_initiators_query,
-        access_scope,
-        project_id=project_id,
-    )
-    available_initiator_rows = (await db.execute(available_initiators_query)).all()
+    available_initiator_rows = (await db.execute(queries.available_initiators)).all()
+    initiator_rows = (await db.execute(queries.initiators)).all()
 
-    initiator_query = (
-        select(
-            Task.initiator_username,
-            Task.initiator_gitlab_user_id,
-            func.count(Task.id).label("task_count"),
-            func.coalesce(func.sum(case((Task.status == TaskStatus.COMPLETED, 1), else_=0)), 0).label(
-                "completed_tasks"
-            ),
-            func.coalesce(func.sum(case((Task.status == TaskStatus.FAILED, 1), else_=0)), 0).label(
-                "failed_tasks"
-            ),
-            func.coalesce(func.sum(case((Task.status == TaskStatus.CANCELLED, 1), else_=0)), 0).label(
-                "cancelled_tasks"
-            ),
-            func.coalesce(func.sum(Task.additions), 0).label("additions"),
-            func.coalesce(func.sum(Task.deletions), 0).label("deletions"),
-            func.coalesce(func.sum(Task.total_changes), 0).label("total_changes"),
-            func.coalesce(func.sum(Task.input_tokens), 0).label("input_tokens"),
-            func.coalesce(func.sum(Task.output_tokens), 0).label("output_tokens"),
-            func.coalesce(func.sum(func.coalesce(Task.input_tokens, 0) + func.coalesce(Task.output_tokens, 0)), 0).label(
-                "total_tokens"
-            ),
-            func.avg(execution_seconds_expr).label("avg_execution_seconds"),
-            func.coalesce(func.sum(execution_seconds_expr), 0).label("total_execution_seconds"),
-            func.avg(queue_wait_seconds_expr).label("avg_queue_wait_seconds"),
-            func.max(Task.created_at).label("last_task_at"),
-        )
-        .where(Task.created_at >= since, Task.initiator_username.is_not(None))
-        .group_by(Task.initiator_username, Task.initiator_gitlab_user_id)
-        .order_by(func.count(Task.id).desc(), func.coalesce(func.sum(Task.total_changes), 0).desc(), Task.initiator_username.asc())
-    )
-    initiator_query = _apply_analytics_filters(
-        initiator_query,
-        access_scope,
-        project_id=project_id,
-        initiator_username=selected_initiator_username,
-    )
-    initiator_rows = (await db.execute(initiator_query)).all()
+    trend_rows = (await db.execute(queries.trends)).all()
+    priority_wait_rows = (await db.execute(queries.priority_waits)).all()
+    issue_status_rows = (await db.execute(queries.issue_statuses)).all()
+    task_status_rows = (await db.execute(queries.task_statuses)).all()
+    error_rows = (await db.execute(queries.errors)).all()
+    provider_rows = (await db.execute(queries.providers)).all()
 
-    trend_query = (
-        select(
-            func.date(Task.created_at).label("day"),
-            func.count(Task.id).label("task_count"),
-            func.coalesce(func.sum(case((Task.status == TaskStatus.COMPLETED, 1), else_=0)), 0).label(
-                "completed_tasks"
-            ),
-            func.coalesce(func.sum(case((Task.status == TaskStatus.FAILED, 1), else_=0)), 0).label(
-                "failed_tasks"
-            ),
-            func.coalesce(func.sum(case((Task.status == TaskStatus.CANCELLED, 1), else_=0)), 0).label(
-                "cancelled_tasks"
-            ),
-            func.coalesce(func.sum(Task.additions), 0).label("additions"),
-            func.coalesce(func.sum(Task.deletions), 0).label("deletions"),
-            func.coalesce(func.sum(Task.total_changes), 0).label("total_changes"),
-            func.coalesce(func.sum(Task.input_tokens), 0).label("input_tokens"),
-            func.coalesce(func.sum(Task.output_tokens), 0).label("output_tokens"),
-            func.coalesce(func.sum(func.coalesce(Task.input_tokens, 0) + func.coalesce(Task.output_tokens, 0)), 0).label(
-                "total_tokens"
-            ),
-            func.avg(execution_seconds_expr).label("avg_execution_seconds"),
-        )
-        .where(Task.created_at >= since)
-        .group_by(func.date(Task.created_at))
-        .order_by(func.date(Task.created_at).asc())
+    return build_analytics_response(
+        days=days,
+        now=now,
+        since=since,
+        summary=summary,
+        project_rows=project_rows,
+        project_lookup=project_lookup,
+        available_initiator_rows=available_initiator_rows,
+        initiator_rows=initiator_rows,
+        trend_rows=trend_rows,
+        priority_wait_rows=priority_wait_rows,
+        issue_status_rows=issue_status_rows,
+        task_status_rows=task_status_rows,
+        error_rows=error_rows,
+        provider_rows=provider_rows,
     )
-    trend_query = _apply_analytics_filters(
-        trend_query,
-        access_scope,
-        project_id=project_id,
-        initiator_username=selected_initiator_username,
-    )
-    trend_rows = (await db.execute(trend_query)).all()
-    trend_map = {str(row.day): row for row in trend_rows}
-
-    priority_wait_query = (
-        select(
-            Task.priority,
-            func.count(Task.id).label("task_count"),
-            func.avg(queue_wait_seconds_expr).label("avg_queue_wait_seconds"),
-            func.max(queue_wait_seconds_expr).label("max_queue_wait_seconds"),
-        )
-        .where(Task.created_at >= since, Task.started_at.is_not(None))
-        .group_by(Task.priority)
-        .order_by(Task.priority.asc())
-    )
-    priority_wait_query = _apply_analytics_filters(
-        priority_wait_query,
-        access_scope,
-        project_id=project_id,
-        initiator_username=selected_initiator_username,
-    )
-    priority_wait_rows = (await db.execute(priority_wait_query)).all()
-
-    issue_status_query = (
-        select(Issue.status.label("status"), func.count(Issue.id).label("count"))
-        .where(Issue.created_at >= since)
-        .group_by(Issue.status)
-        .order_by(Issue.status.asc())
-    )
-    issue_status_query = _apply_issue_analytics_filters(
-        issue_status_query,
-        access_scope,
-        project_id=project_id,
-        initiator_username=selected_initiator_username,
-    )
-    issue_status_breakdown = _build_status_breakdown_rows(
-        IssueStatus,
-        (await db.execute(issue_status_query)).all(),
-    )
-
-    task_status_query = (
-        select(Task.status.label("status"), func.count(Task.id).label("count"))
-        .where(Task.created_at >= since)
-        .group_by(Task.status)
-        .order_by(Task.status.asc())
-    )
-    task_status_query = _apply_analytics_filters(
-        task_status_query,
-        access_scope,
-        project_id=project_id,
-        initiator_username=selected_initiator_username,
-    )
-    task_status_breakdown = _build_status_breakdown_rows(
-        TaskStatus,
-        (await db.execute(task_status_query)).all(),
-    )
-
-    error_query = (
-        select(Task.error_message, func.count(Task.id).label("count"))
-        .where(
-            Task.created_at >= since,
-            Task.status == TaskStatus.FAILED,
-            Task.error_message.is_not(None),
-        )
-        .group_by(Task.error_message)
-        .order_by(func.count(Task.id).desc(), Task.error_message.asc())
-    )
-    error_query = _apply_analytics_filters(
-        error_query,
-        access_scope,
-        project_id=project_id,
-        initiator_username=selected_initiator_username,
-    )
-    error_rows = [
-        (str(row.error_message), int(row.count or 0))
-        for row in (await db.execute(error_query)).all()
-        if row.error_message
-    ]
-    error_breakdown = _build_error_breakdown(error_rows, int(failed_tasks or 0))
-    provider_query = (
-        select(
-            Task.provider_id.label("provider_id"),
-            AIProvider.name.label("provider_name"),
-            AIProvider.model.label("provider_model"),
-            func.count(Task.id).label("task_count"),
-            func.coalesce(func.sum(case((Task.status == TaskStatus.COMPLETED, 1), else_=0)), 0).label(
-                "completed_tasks"
-            ),
-            func.coalesce(func.sum(case((Task.status == TaskStatus.FAILED, 1), else_=0)), 0).label(
-                "failed_tasks"
-            ),
-            func.coalesce(func.sum(case((Task.status == TaskStatus.CANCELLED, 1), else_=0)), 0).label(
-                "cancelled_tasks"
-            ),
-            func.coalesce(func.sum(finished_task_expr), 0).label("finished_tasks"),
-            func.coalesce(func.sum(Task.input_tokens), 0).label("total_input_tokens"),
-            func.coalesce(func.sum(Task.output_tokens), 0).label("total_output_tokens"),
-            func.coalesce(func.sum(token_total_expr), 0).label("total_tokens"),
-            func.avg(case((token_total_expr.is_not(None), token_total_expr), else_=None)).label(
-                "avg_tokens_per_task"
-            ),
-            (
-                func.sum(case((throughput_eligible_expr, output_tokens_expr), else_=None))
-                / func.nullif(
-                    func.sum(case((throughput_eligible_expr, execution_seconds_expr), else_=None)),
-                    0,
-                )
-            ).label("avg_tokens_per_second"),
-            func.avg(
-                case(
-                    (
-                        (token_total_expr.is_not(None))
-                        & (Task.total_changes.is_not(None))
-                        & (Task.total_changes > 0),
-                        token_total_expr / Task.total_changes,
-                    ),
-                    else_=None,
-                )
-            ).label("avg_tokens_per_changed_line"),
-            func.avg(execution_seconds_expr).label("avg_execution_seconds"),
-            func.avg(
-                case(
-                    (
-                        (execution_seconds_expr.is_not(None))
-                        & (Task.total_changes.is_not(None))
-                        & (Task.total_changes > 0),
-                        execution_seconds_expr / Task.total_changes,
-                    ),
-                    else_=None,
-                )
-            ).label("avg_execution_seconds_per_changed_line"),
-        )
-        .select_from(Task)
-        .join(AIProvider, AIProvider.id == Task.provider_id)
-        .where(
-            Task.created_at >= since,
-            Task.status.in_(FINISHED_TASK_STATUSES),
-        )
-        .group_by(Task.provider_id, AIProvider.name, AIProvider.model)
-        .order_by(
-            func.count(Task.id).desc(),
-            func.coalesce(func.sum(token_total_expr), 0).desc(),
-            AIProvider.name.asc(),
-            AIProvider.model.asc(),
-            Task.provider_id.asc(),
-        )
-    )
-    provider_query = _apply_analytics_filters(
-        provider_query,
-        access_scope,
-        project_id=project_id,
-        initiator_username=selected_initiator_username,
-    )
-    provider_rows = (await db.execute(provider_query)).all()
-
-    provider_items: list[dict] = []
-    for row in provider_rows:
-        provider_name = row.provider_name or "Unknown / Legacy"
-        provider_model = row.provider_model
-        finished_count = int(row.finished_tasks or 0)
-        completed_count = int(row.completed_tasks or 0)
-
-        provider_items.append(
-            {
-                "provider_id": int(row.provider_id) if row.provider_id is not None else None,
-                "provider_name": provider_name,
-                "provider_model": provider_model,
-                "task_count": int(row.task_count or 0),
-                "finished_task_count": finished_count,
-                "completed_task_count": completed_count,
-                "failed_task_count": int(row.failed_tasks or 0),
-                "cancelled_task_count": int(row.cancelled_tasks or 0),
-                "success_rate": _safe_ratio(completed_count, finished_count),
-                "total_input_tokens": int(row.total_input_tokens or 0),
-                "total_output_tokens": int(row.total_output_tokens or 0),
-                "total_tokens": int(row.total_tokens or 0),
-                "avg_tokens_per_task": (
-                    float(row.avg_tokens_per_task) if row.avg_tokens_per_task is not None else None
-                ),
-                "avg_tokens_per_second": (
-                    float(row.avg_tokens_per_second) if row.avg_tokens_per_second is not None else None
-                ),
-                "avg_tokens_per_changed_line": (
-                    float(row.avg_tokens_per_changed_line)
-                    if row.avg_tokens_per_changed_line is not None
-                    else None
-                ),
-                "avg_execution_seconds": (
-                    float(row.avg_execution_seconds) if row.avg_execution_seconds is not None else None
-                ),
-                "avg_execution_seconds_per_changed_line": (
-                    float(row.avg_execution_seconds_per_changed_line)
-                    if row.avg_execution_seconds_per_changed_line is not None
-                    else None
-                ),
-            }
-        )
-
-    provider_summary = {
-        "active_provider_count": len(provider_items),
-        "provider_covered_task_count": sum(item["task_count"] for item in provider_items),
-        "provider_covered_total_tokens": sum(item["total_tokens"] for item in provider_items),
-        "provider_success_rate": _safe_ratio(
-            sum(item["completed_task_count"] for item in provider_items),
-            sum(item["finished_task_count"] for item in provider_items),
-        ),
-    }
-
-    trends: list[dict] = []
-    for offset in range(days):
-        day = since.date() + timedelta(days=offset)
-        row = trend_map.get(day.isoformat())
-        trends.append(
-            {
-                "date": day.isoformat(),
-                "task_count": int(row.task_count) if row else 0,
-                "completed_tasks": int(row.completed_tasks) if row else 0,
-                "failed_tasks": int(row.failed_tasks) if row else 0,
-                "cancelled_tasks": int(row.cancelled_tasks) if row else 0,
-                "additions": int(row.additions) if row else 0,
-                "deletions": int(row.deletions) if row else 0,
-                "total_changes": int(row.total_changes) if row else 0,
-                "input_tokens": int(row.input_tokens) if row else 0,
-                "output_tokens": int(row.output_tokens) if row else 0,
-                "total_tokens": int(row.total_tokens) if row else 0,
-                "avg_execution_seconds": float(row.avg_execution_seconds) if row and row.avg_execution_seconds is not None else None,
-            }
-        )
-
-    success_rate = (int(completed_tasks or 0) / int(finished_tasks or 0)) if finished_tasks else None
-    failure_rate = (int(failed_tasks or 0) / int(finished_tasks or 0)) if finished_tasks else None
-
-    return {
-        "window_days": days,
-        "generated_at": now.isoformat(),
-        "summary": {
-            "total_tasks": int(total_tasks or 0),
-            "total_additions": int(total_additions or 0),
-            "total_deletions": int(total_deletions or 0),
-            "total_changes": int(total_changes or 0),
-            "total_input_tokens": int(total_input_tokens or 0),
-            "total_output_tokens": int(total_output_tokens or 0),
-            "total_tokens": int(total_input_tokens or 0) + int(total_output_tokens or 0),
-            "completed_tasks": int(completed_tasks or 0),
-            "failed_tasks": int(failed_tasks or 0),
-            "cancelled_tasks": int(cancelled_tasks or 0),
-            "finished_tasks": int(finished_tasks or 0),
-            "success_rate": success_rate,
-            "failure_rate": failure_rate,
-            "tracked_initiator_tasks": int(tracked_initiator_tasks or 0),
-            "token_tracked_tasks": int(token_tracked_tasks or 0),
-            "initiator_tracking_started_at": (
-                initiator_tracking_started_at.isoformat() if initiator_tracking_started_at else None
-            ),
-            "total_execution_seconds": float(total_execution_seconds) if total_execution_seconds is not None else 0.0,
-            "avg_execution_seconds": float(avg_execution_seconds) if avg_execution_seconds is not None else None,
-            "max_execution_seconds": float(max_execution_seconds) if max_execution_seconds is not None else None,
-            "avg_queue_wait_seconds": float(avg_queue_wait_seconds) if avg_queue_wait_seconds is not None else None,
-            "max_queue_wait_seconds": float(max_queue_wait_seconds) if max_queue_wait_seconds is not None else None,
-            "avg_total_tokens_per_tracked_task": (
-                float(avg_total_tokens_per_tracked_task)
-                if avg_total_tokens_per_tracked_task is not None
-                else None
-            ),
-            "max_total_tokens_per_tracked_task": (
-                float(max_total_tokens_per_tracked_task)
-                if max_total_tokens_per_tracked_task is not None
-                else None
-            ),
-        },
-        "available_initiators": [
-            {
-                "initiator_username": row.initiator_username,
-                "initiator_gitlab_user_id": int(row.initiator_gitlab_user_id)
-                if row.initiator_gitlab_user_id is not None
-                else None,
-                "task_count": int(row.task_count or 0),
-            }
-            for row in available_initiator_rows
-        ],
-        "projects": [
-            {
-                "project_id": int(row.project_id),
-                "project_name": (project_lookup.get(int(row.project_id)) or {}).get("project_name")
-                or f"Project {row.project_id}",
-                "project_path_with_namespace": (project_lookup.get(int(row.project_id)) or {}).get(
-                    "project_path_with_namespace"
-                ),
-                "task_count": int(row.task_count or 0),
-                "completed_tasks": int(row.completed_tasks or 0),
-                "failed_tasks": int(row.failed_tasks or 0),
-                "cancelled_tasks": int(row.cancelled_tasks or 0),
-                "success_rate": (
-                    int(row.completed_tasks or 0)
-                    / max(int(row.completed_tasks or 0) + int(row.failed_tasks or 0) + int(row.cancelled_tasks or 0), 1)
-                )
-                if (int(row.completed_tasks or 0) + int(row.failed_tasks or 0) + int(row.cancelled_tasks or 0)) > 0
-                else None,
-                "additions": int(row.additions or 0),
-                "deletions": int(row.deletions or 0),
-                "total_changes": int(row.total_changes or 0),
-                "input_tokens": int(row.input_tokens or 0),
-                "output_tokens": int(row.output_tokens or 0),
-                "total_tokens": int(row.total_tokens or 0),
-                "avg_execution_seconds": (
-                    float(row.avg_execution_seconds) if row.avg_execution_seconds is not None else None
-                ),
-                "total_execution_seconds": float(row.total_execution_seconds or 0),
-                "avg_queue_wait_seconds": (
-                    float(row.avg_queue_wait_seconds) if row.avg_queue_wait_seconds is not None else None
-                ),
-                "last_task_at": row.last_task_at.isoformat() if row.last_task_at else None,
-            }
-            for row in project_rows
-        ],
-        "initiators": [
-            {
-                "initiator_username": row.initiator_username,
-                "initiator_gitlab_user_id": int(row.initiator_gitlab_user_id)
-                if row.initiator_gitlab_user_id is not None
-                else None,
-                "task_count": int(row.task_count or 0),
-                "completed_tasks": int(row.completed_tasks or 0),
-                "failed_tasks": int(row.failed_tasks or 0),
-                "cancelled_tasks": int(row.cancelled_tasks or 0),
-                "success_rate": (
-                    int(row.completed_tasks or 0)
-                    / max(int(row.completed_tasks or 0) + int(row.failed_tasks or 0) + int(row.cancelled_tasks or 0), 1)
-                )
-                if (int(row.completed_tasks or 0) + int(row.failed_tasks or 0) + int(row.cancelled_tasks or 0)) > 0
-                else None,
-                "additions": int(row.additions or 0),
-                "deletions": int(row.deletions or 0),
-                "total_changes": int(row.total_changes or 0),
-                "input_tokens": int(row.input_tokens or 0),
-                "output_tokens": int(row.output_tokens or 0),
-                "total_tokens": int(row.total_tokens or 0),
-                "avg_execution_seconds": (
-                    float(row.avg_execution_seconds) if row.avg_execution_seconds is not None else None
-                ),
-                "total_execution_seconds": float(row.total_execution_seconds or 0),
-                "avg_queue_wait_seconds": (
-                    float(row.avg_queue_wait_seconds) if row.avg_queue_wait_seconds is not None else None
-                ),
-                "last_task_at": row.last_task_at.isoformat() if row.last_task_at else None,
-            }
-            for row in initiator_rows
-        ],
-        "provider_summary": provider_summary,
-        "providers": provider_items,
-        "provider_chart_series": _build_provider_chart_series(provider_items),
-        "trends": trends,
-        "priority_waits": [
-            {
-                "priority": int(row.priority),
-                "task_count": int(row.task_count or 0),
-                "avg_queue_wait_seconds": (
-                    float(row.avg_queue_wait_seconds) if row.avg_queue_wait_seconds is not None else None
-                ),
-                "max_queue_wait_seconds": (
-                    float(row.max_queue_wait_seconds) if row.max_queue_wait_seconds is not None else None
-                ),
-            }
-            for row in priority_wait_rows
-        ],
-        "issue_status_breakdown": issue_status_breakdown,
-        "task_status_breakdown": task_status_breakdown,
-        "error_breakdown": error_breakdown,
-    }
 
 
 @router.get("/stats/activity-heatmap")
