@@ -1,14 +1,12 @@
 # Codify 功能地图
-# 编译: d2 docs/FEATURE_MAP.d2 docs/FEATURE_MAP.svg --pad 24 --theme 200
+# d2 docs/FEATURE_MAP.d2 docs/FEATURE_MAP.svg --pad 24 --theme 0 --layout dagre
 
 vars: {
   d2-config: {
-    layout-engine: elk
-    sketch: false
+    layout-engine: dagre
   }
 }
 
-# ---- 全局样式 ----
 styles: {
   style.opacity: 1
   style.stroke-width: 1
@@ -17,270 +15,114 @@ styles: {
   style.shadow: false
 }
 
-# ---- 配色 ----
-engine:  { style.fill: "#E3F2FD"; style.stroke: "#1E88E5" }
-data:    { style.fill: "#E8F5E9"; style.stroke: "#43A047" }
-config:  { style.fill: "#FFF3E0"; style.stroke: "#FB8C00" }
-collab:  { style.fill: "#F3E5F5"; style.stroke: "#8E24AA" }
-govern:  { style.fill: "#FFEBEE"; style.stroke: "#E53935" }
-fe:      { style.fill: "#E0F2F1"; style.stroke: "#00897B" }
-
 # ================================================================
-# 核心引擎
+# 纯纵向树 - 6 行 × 向右展开
 # ================================================================
-engine.title: "🧠 核心引擎" { style.stroke-width: 2; style.font-size: 16; style.font-color: "#0D47A1" }
 
-engine.task: "任务生命周期" {
-  style.fill: "#BBDEFB"; style.stroke: "#1E88E5"; style.font-color: "#0D47A1"
-  style.font-size: 14
-  create: |md
-    **创建** — 手动/重试/CI修复 · Provider/Profile选择 · Prompt模板
-    P0-P2 · execute/plan · 立即/延时/定时 · slot检查 · 用量校验
-  | { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  schedule: |md
-    **调度** — P0>P1>P2 · 定时优先 · 并发控制
-    Issue互斥锁 · 崩溃恢复 · 线程池隔离
-  | { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  execute: |md
-    **执行** — Docker隔离 · 环境变量注入 · Volume挂载
-    Claude-CLI · 超时/取消 · 脱敏 · Session续接
-  | { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  result: |md
-    **结果** — MR创建 · 代码统计 · Token用量
-    Commit-SHA · 状态覆盖 · require_changes
-  | { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
+# 行 1: 核心引擎
+engine: "🧠 核心引擎" {
+  style.fill: "#E3F2FD"; style.stroke: "#1E88E5"; style.font-color: "#0D47A1"
+  style.stroke-width: 2; style.font-size: 16; style.bold: true
+  task: "任务生命周期\n\n创建 — 手动/重试/CI修复 · Provider/Profile/Prompt模板 · P0-P2 · execute/plan\n调度 — P0>P1>P2定时优先 · concurrency · Issue互斥锁 · 崩溃恢复\n执行 — Docker隔离 · 环境变量 · Volume · Claude CLI · SSH · 脱敏 · 超时取消\n结果 — MR · 代码统计 · Token · Commit · 状态覆盖 · RESUME续接" {
+    style.fill: "#BBDEFB"; style.stroke: "#1E88E5"; style.font-color: "#0D47A1"
+  }
+  issue: "Issue 管理\n\nCRUD · 分支自动命名 · 关闭删分支 · 409防删除\nbase/target branch · OPEN→CLOSED状态流转\n默认Provider/Profile · CI修复开关" {
+    style.fill: "#BBDEFB"; style.stroke: "#1E88E5"; style.font-color: "#0D47A1"
+  }
 }
 
-engine.issue: "Issue 管理" {
-  style.fill: "#BBDEFB"; style.stroke: "#1E88E5"; style.font-color: "#0D47A1"
-  style.font-size: 14
-  icrud: |md
-    **CRUD** — 创建(项目/标题/分支) · 编辑 · 分页筛选列表
-    关闭(自动删分支可配) · 409阻止删除活跃Issue
-  | { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  ibranch: |md
-    **分支与状态** — base/target · 自动命名codify/issue-{id}
-    OPEN→IN_PROGRESS→IN_REVIEW→CLOSED
-  | { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  idefaults: "**默认配置** — Issue级默认Provider/Profile · CI修复开关" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
+# 行 2: 数据洞察
+data: "📊 数据与洞察" {
+  style.fill: "#E8F5E9"; style.stroke: "#43A047"; style.font-color: "#1B5E20"
+  style.stroke-width: 2; style.font-size: 16; style.bold: true
+  logs: "日志与可观测\n\n结构化 — thinking/tool_call/assistant_text/system_init · Payload懒加载\n原始 — TaskRawLogChunk分块 · SSE推送 · 容器轮询\n归档 — event.jsonl+runtime.json打包下载" {
+    style.fill: "#C8E6C9"; style.stroke: "#43A047"; style.font-color: "#1B5E20"
+  }
+  delivery: "AI交付物展示\n\nMarkdown摘要 · Mermaid SVG · 缩放弹窗 · 拖拽平移\nTaskContinuationPanel后续引导" {
+    style.fill: "#C8E6C9"; style.stroke: "#43A047"; style.font-color: "#1B5E20"
+  }
+  stats: "统计分析\n\nDashboard · 热力图 · MyWorkBoard\nAnalytics 7/30/90天 · Provider对比\n调度热力图 · slot容量" {
+    style.fill: "#C8E6C9"; style.stroke: "#43A047"; style.font-color: "#1B5E20"
+  }
+  monitor: "系统监控\n\n队列压力 · Worker对齐 · 失败率\n容器列表 · Kanban看板" {
+    style.fill: "#C8E6C9"; style.stroke: "#43A047"; style.font-color: "#1B5E20"
+  }
 }
 
-# ================================================================
-# 数据洞察
-# ================================================================
-data.title: "📊 数据与洞察" { style.stroke-width: 2; style.font-size: 16; style.font-color: "#1B5E20" }
-
-data.logs: "日志与可观测" {
-  style.fill: "#C8E6C9"; style.stroke: "#43A047"; style.font-color: "#1B5E20"
-  style.font-size: 14
-  structured: |md
-    **结构化日志** — thinking · tool_call · assistant_text
-    context_compact · system_init · Payload懒加载
-  | { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  raw: |md
-    **原始日志** — TaskRawLogChunk分块 · sequence_no排序
-    SSE实时推送 · 容器轮询 · finalized标记
-  | { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  archive: "**运行归档** — event.jsonl+runtime.json+console.log打包 · 下载" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
+# 行 3: 配置中心
+config: "⚙️ 配置中心" {
+  style.fill: "#FFF3E0"; style.stroke: "#FB8C00"; style.font-color: "#E65100"
+  style.stroke-width: 2; style.font-size: 16; style.bold: true
+  runtime: "运行时\n\nconcurrency · timeout · slot · 公告\nWorker Volume · 全局环境变量\nFernet加密 · 单key/全量重置" {
+    style.fill: "#FFE0B2"; style.stroke: "#FB8C00"; style.font-color: "#E65100"
+  }
+  gitlab: "GitLab/OIDC/告警\n\nURL/Token · 连接测试 · Webhook\nissuer/client · 诊断 · Session\n告警webhook" {
+    style.fill: "#FFE0B2"; style.stroke: "#FB8C00"; style.font-color: "#E65100"
+  }
+  provider: "AI Provider\n\nCRUD · 默认 · 启用禁用\nbase_url/model/max_turns" {
+    style.fill: "#FFE0B2"; style.stroke: "#FB8C00"; style.font-color: "#E65100"
+  }
+  profile: "Worker Profile\n\nCRUD+复制 · Codegraph · Volume\n三模板 · 不可变快照" {
+    style.fill: "#FFE0B2"; style.stroke: "#FB8C00"; style.font-color: "#E65100"
+  }
+  template: "提示词模板\n\nCRUD · tags · sort_order\n标签筛选选择器" {
+    style.fill: "#FFE0B2"; style.stroke: "#FB8C00"; style.font-color: "#E65100"
+  }
 }
 
-data.delivery: "AI 交付物展示" {
-  style.fill: "#C8E6C9"; style.stroke: "#43A047"; style.font-color: "#1B5E20"
-  style.font-size: 14
-  summary: "**摘要** — Markdown渲染 · TaskPayload懒加载 · 源码复制" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  mermaid: "**Mermaid** — SVG渲染 · 缩放弹窗(100-300%) · 拖拽平移 · 滚轮" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  continuation: "**后续任务** — TaskContinuationPanel · 追加新任务 · 返回Issue" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
+# 行 4: 协作集成
+collab: "🔔 协作与集成" {
+  style.fill: "#F3E5F5"; style.stroke: "#8E24AA"; style.font-color: "#4A148C"
+  style.stroke-width: 2; style.font-size: 16; style.bold: true
+  mattermost: "Mattermost通知\n\nChannel/DM · @mention · 6事件\n用户自动映射 · 投递追踪" {
+    style.fill: "#E1BEE7"; style.stroke: "#8E24AA"; style.font-color: "#4A148C"
+  }
+  gitlab: "GitLab集成\n\n项目/分支 · Webhook管理 · Secret\n事件日志 · MR自动创建 · Draft" {
+    style.fill: "#E1BEE7"; style.stroke: "#8E24AA"; style.font-color: "#4A148C"
+  }
+  ci: "CI失败自动修复\n\nWebhook接收 · Pipeline识别\n证据收集 · 根因分析 · 并发锁\nIssue匹配 · 自动修复 · Collector" {
+    style.fill: "#E1BEE7"; style.stroke: "#8E24AA"; style.font-color: "#4A148C"
+  }
 }
 
-data.stats: "统计分析" {
-  style.fill: "#C8E6C9"; style.stroke: "#43A047"; style.font-color: "#1B5E20"
-  style.font-size: 14
-  dashboard: |md
-    **Dashboard** — 状态卡片 · 热力图 · 趋势图
-    饼图 · MyWorkBoard看板(Running/Ready/Waiting)
-  | { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  analytics: |md
-    **Analytics** — 7/30/90天 · 项目/发起人/Provider对比
-    队列等待分布 · 失败原因分类
-  | { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  schedstats: "**调度统计** — 7天x24h热力图 · 忙闲识别 · slot容量 · 内联改期" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
+# 行 5: 平台治理
+govern: "🛡️ 平台治理" {
+  style.fill: "#FFEBEE"; style.stroke: "#E53935"; style.font-color: "#B71C1C"
+  style.stroke-width: 2; style.font-size: 16; style.bold: true
+  users: "用户与权限\n\nOIDC · 本地密码 · Break-glass · 审计\n会话管理 · Token加密 · 角色权限 · Bootstrap" {
+    style.fill: "#FFCDD2"; style.stroke: "#E53935"; style.font-color: "#B71C1C"
+  }
+  usage: "用量管理\n\n日/周Token · 日/周任务 · 三种模式\n账本 · 双关口阻断 · 管理员编辑" {
+    style.fill: "#FFCDD2"; style.stroke: "#E53935"; style.font-color: "#B71C1C"
+  }
+  ops: "系统运维\n\n数据清理 · Alembic迁移 · prompt回填\n/health · Trace-ID · 500异常处理" {
+    style.fill: "#FFCDD2"; style.stroke: "#E53935"; style.font-color: "#B71C1C"
+  }
 }
 
-data.monitor: "系统监控" {
-  style.fill: "#C8E6C9"; style.stroke: "#43A047"; style.font-color: "#1B5E20"
-  style.font-size: 14
-  mruntime: "**运行时** — 队列压力 · Worker对齐 · 失败率 · 长任务检测" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  mcontainer: "**容器** — 列表(ID/名称/状态) · 实时SSE日志 · Docker健康" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  mviews: "**视图** — Kanban看板(按状态分列) · 时间线 · 筛选排序表格" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
+# 行 6: 前端设施
+fe: "🎨 前端基础设施" {
+  style.fill: "#E0F2F1"; style.stroke: "#00897B"; style.font-color: "#004D40"
+  style.stroke-width: 2; style.font-size: 16; style.bold: true
+  i18n: "国际化与UI\n\n中英文 · Naive-UI · 响应式断点" {
+    style.fill: "#B2DFDB"; style.stroke: "#00897B"; style.font-color: "#004D40"
+  }
+  components: "组件\n\nPageHeader · FilterToolbar · HeatmapChart\nTaskFormDrawer · TaskProcessPanel · 配置面板" {
+    style.fill: "#B2DFDB"; style.stroke: "#00897B"; style.font-color: "#004D40"
+  }
+  apilogic: "API与逻辑\n\nAxios · 401跳转 · Trace-ID\nComposables(6通用+14Feature) · 工具函数" {
+    style.fill: "#B2DFDB"; style.stroke: "#00897B"; style.font-color: "#004D40"
+  }
 }
 
-# ================================================================
-# 配置中心
-# ================================================================
-config.title: "⚙️ 配置中心" { style.stroke-width: 2; style.font-size: 16; style.font-color: "#E65100" }
+# 连接: 引擎 → 数据
+engine.task -> data.logs: "产出日志" { style.stroke-dash: 3; style.stroke: "#90A4AE" }
 
-config.runtime: "运行时配置" {
-  style.fill: "#FFE0B2"; style.stroke: "#FB8C00"; style.font-color: "#E65100"
-  style.font-size: 14
-  cscheduler: |md
-    **调度与控制** — concurrency · interval · timeout · default_branch
-    retries · delay · slot_max/enforce · ci_repair_max
-  | { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  cworker: |md
-    **Worker** — Volume挂载 · Pre/Post脚本 · workspace保留天数
-    全局环境变量(加密/保留字校验) · 公告
-  | { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  csecurity: "**安全** — 6敏感key-Fernet加密 · 单key/全量重置 · 功能开关" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-}
+# 连接: 引擎 → 通知
+engine.task -> collab.mattermost: "触发通知" { style.stroke-dash: 3; style.stroke: "#90A4AE" }
 
-config.integration: "GitLab · OIDC · 告警" {
-  style.fill: "#FFE0B2"; style.stroke: "#FB8C00"; style.font-color: "#E65100"
-  style.font-size: 14
-  cgl: "**GitLab** — URL/Token · 连接测试 · Webhook管理" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  coidc: "**OIDC** — issuer/client/secret · 诊断 · Admin映射" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  csession: "**Session** — Cookie名/TTL/SameSite · 保留天数 · 告警webhook" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-}
+# 连接: 引擎 ← 配置中心
+engine.task -> config.runtime: "读取配置" { style.stroke-dash: 3; style.stroke: "#90A4AE" }
 
-config.provider: "AI Provider" {
-  style.fill: "#FFE0B2"; style.stroke: "#FB8C00"; style.font-color: "#E65100"
-  style.font-size: 14
-  cprd: "CRUD · 默认(单例约束) · 启用/禁用 · base_url/api_key/model · max_turns · system_prompt" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-}
-
-config.profile: "Worker Profile" {
-  style.fill: "#FFE0B2"; style.stroke: "#FB8C00"; style.font-color: "#E65100"
-  style.font-size: 14
-  cpfl: "CRUD+复制(加密保留) · Codegraph · Volume · 环境变量 · 三模板(execute/plan/ci_repair) · 不可变快照" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-}
-
-config.template: "提示词模板" {
-  style.fill: "#FFE0B2"; style.stroke: "#FB8C00"; style.font-color: "#E65100"
-  style.font-size: 14
-  ctpl: "CRUD · tags(≤20个,≤30字符) · is_active · sort_order拖拽排序 · 前端标签筛选选择器" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-}
-
-# ================================================================
-# 协作集成
-# ================================================================
-collab.title: "🔔 协作与集成" { style.stroke-width: 2; style.font-size: 16; style.font-color: "#4A148C" }
-
-collab.mattermost: "Mattermost 通知" {
-  style.fill: "#E1BEE7"; style.stroke: "#8E24AA"; style.font-color: "#4A148C"
-  style.font-size: 14
-  mm1: |md
-    **集成** — Server/Bot Token · 连接测试 · Channel解析(正反向)
-    **Profile** — Channel/DM(发起人私信) · @mention · 6种事件订阅
-  | { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  mm2: |md
-    **内容** — 12字段可选 · GitLab→Mattermost用户自动映射
-    **投递** — success/failed/skipped追踪 · 失败原因记录
-  | { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-}
-
-collab.gitlab: "GitLab 集成" {
-  style.fill: "#E1BEE7"; style.stroke: "#8E24AA"; style.font-color: "#4A148C"
-  style.font-size: 14
-  gl1: "**项目** — 可访问列表 · 分支查询 · CI可用性检查" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  gl2: "**Webhook** — 创建/状态/总览 · Secret加密 · 事件日志(processed/unmatched/ignored)" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  gl3: "**MR** — 容器内自动创建/更新 · URL关联Issue · 描述更新 · Draft管理" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-}
-
-collab.ci: "CI 失败自动修复" {
-  style.fill: "#E1BEE7"; style.stroke: "#8E24AA"; style.font-color: "#4A148C"
-  style.font-size: 14
-  ci1: |md
-    **接收** — X-Gitlab-Token验证 · Pipeline失败识别
-    **证据** — Job信息 · Trace下载 · 根因分析(first_failed_stage)
-  | { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  ci2: |md
-    **关联** — source/target/project匹配Issue · 自动创建
-    **修复** — 自动repair-task · CI模板 · 过程日志 · Collector后台进程
-  | { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-}
-
-# ================================================================
-# 平台治理
-# ================================================================
-govern.title: "🛡️ 平台治理" { style.stroke-width: 2; style.font-size: 16; style.font-color: "#B71C1C" }
-
-govern.users: "用户与权限" {
-  style.fill: "#FFCDD2"; style.stroke: "#E53935"; style.font-color: "#B71C1C"
-  style.font-size: 14
-  uauth: |md
-    **认证** — OIDC · 本地密码 · Break-glass · 登出
-    **审计** — AuthAuditLog(事件/用户/成败/IP/UA)
-  | { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  usession: |md
-    **会话** — Cookie · 列表/撤销/批量撤销 · 自动过期清理
-    OIDC Token加密存储(access+refresh供Worker用)
-  | { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  urole: |md
-    **角色与权限** — admin/user · active/disabled
-    4受控页 · 功能开关 · Bootstrap初始化
-  | { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-}
-
-govern.usage: "用量管理" {
-  style.fill: "#FFCDD2"; style.stroke: "#E53935"; style.font-color: "#B71C1C"
-  style.font-size: 14
-  uquota: "**配额** — 日/周Token · 日/周任务 · custom/inherit/unlimited · 系统默认(单例) · 用户级覆盖" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  ucheck: "**执行** — TaskUsageLedger账本 · 按天/周时间桶聚合 · 创建+调度双关口超限阻断 · 前端展示 · 管理员编辑界面" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-}
-
-govern.ops: "系统运维" {
-  style.fill: "#FFCDD2"; style.stroke: "#E53935"; style.font-color: "#B71C1C"
-  style.font-size: 14
-  ocleanup: "**清理** — Session/Workspace/归档/容器 · 手动全量(Maintenance Panel)" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  ostart: "**启动** — Alembic自动迁移 · 活跃任务rendered_prompt回填" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  ohealth: "**健康与追踪** — /health(DB+Docker+checks+trace_id) · X-Trace-ID · 慢请求>2s告警 · 全局500异常处理" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-}
-
-# ================================================================
-# 前端设施
-# ================================================================
-fe.title: "🎨 前端基础设施" { style.stroke-width: 2; style.font-size: 16; style.font-color: "#004D40" }
-
-fe.i18n: "国际化与UI框架" {
-  style.fill: "#B2DFDB"; style.stroke: "#00897B"; style.font-color: "#004D40"
-  style.font-size: 14
-  fi18n: "**i18n** — 中英文(en/zh-CN) · 自动检测 · localStorage · Naive UI locale联动" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  fuikit: "**UI** — Naive UI主题色 · Provider · 响应式断点(isMobile<768/isCompact<480)" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-}
-
-fe.components: "通用组件" {
-  style.fill: "#B2DFDB"; style.stroke: "#00897B"; style.font-color: "#004D40"
-  style.font-size: 14
-  fshared: "PageHeader · SummaryCard · StatCard · FilterToolbar系列 · ErrorToast · TraceBadge · LanguageToggle · OnboardingModal(5步引导) · HeatmapChart" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-}
-
-fe.taskcomps: "业务组件" {
-  style.fill: "#B2DFDB"; style.stroke: "#00897B"; style.font-color: "#004D40"
-  style.font-size: 14
-  ftask: |md
-    **任务** — TaskFormDrawer · VariableEditor(CodeMirror)
-    TaskProcessPanel · TaskResultPanel · TaskRunMetrics · TaskContinuationPanel
-  | { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  fissue: "**Issue** — IssueCurrentExecution · IssueTaskPanel/Record · IssueOverviewSidebar · IssueCIAutomationPanel" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  fconfig: "**配置面板** — RuntimeSettings · Auth · GitLab · AIProviders · WorkerSettings · Mattermost · PromptTemplates · Maintenance · WebhookEvents" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-}
-
-fe.logic: "API层与逻辑" {
-  style.fill: "#B2DFDB"; style.stroke: "#00897B"; style.font-color: "#004D40"
-  style.font-size: 14
-  fapi: |md
-    **API层** — Axios(/api·30s·withCredentials)
-    401跳转/login?next= · Trace-ID拦截器 · 错误标准化
-  | { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  fcomposable: |md
-    **Composables** — 通用6个(useFilterSort/usePolling/useBreakpoints
-    useOnboarding/useVariableEditor/useConfigForm)
-    Feature14个(useTaskFormSubmission/useTaskLogStreams等)
-  | { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-  futils: "**工具函数** — datetime(UTC+8) · formatDuration · MR-URL提取 · slotError · usageLimit" { style.fill: "#FAFAFA"; style.stroke: "#BDBDBD"; style.font-size: 12; style.font-color: "#616161" }
-}
-
-# ---- 跨域关系 ----
-engine.task -> data.logs { style.stroke-dash: 3; style.stroke: "#90A4AE" }
-engine.task -> collab.mattermost { style.stroke-dash: 3; style.stroke: "#90A4AE" }
-engine.task -> config.runtime { style.stroke-dash: 3; style.stroke: "#90A4AE" }
-govern.users -> fe.components { style.stroke-dash: 3; style.stroke: "#90A4AE" }
+# 强制纵向堆叠
+engine -> data -> config -> collab -> govern -> fe { style.opacity: 0 }
