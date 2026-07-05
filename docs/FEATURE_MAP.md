@@ -3,92 +3,91 @@
 > 系统性地梳理当前项目所有功能，粒度到具体操作/交互层面。
 
 ```mermaid
-mindmap
-  root(("Codify<br/>项目功能地图"))
-    ("1. 任务执行与生命周期")
-      [任务创建<br/>手动/重试/CI自动修复]
-      [任务调度<br/>优先级队列 并发控制 崩溃恢复]
-      [任务执行<br/>Docker隔离 Claude CLI Session续接]
-      [任务结果<br/>MR 代码统计 Token用量 状态覆盖]
-    ("2. Issue 管理")
-      [CRUD<br/>创建/编辑/关闭/删除]
-      [分支管理<br/>自动命名 base/target 分支删除]
-      [默认配置<br/>Provider Profile CI修复开关]
-      [状态流转<br/>OPEN→IN_PROGRESS→IN_REVIEW→CLOSED]
-    ("3. 日志与可观测性")
-      [结构化日志<br/>thinking/tool_call/assistant_text]
-      [原始日志<br/>分块存储 实时SSE推送]
-      [日志SSE流<br/>结构化+原始流 自动重连]
-      [运行归档<br/>event.jsonl+runtime.json+console.log]
-    ("4. AI 交付物展示")
-      [交付摘要<br/>Markdown渲染 懒加载 源码复制]
-      [Mermaid图表<br/>SVG渲染 缩放弹窗 拖拽平移]
-      [后续任务<br/>完成引导 追加/返回Issue]
-    ("5. 统计分析")
-      [Dashboard<br/>状态卡片 热力图 趋势图 我的工作台]
-      [Analytics<br/>7/30/90天 按项目/发起人/Provider]
-      [调度统计<br/>时段热力图 忙闲识别 内联改期]
-    ("6. 系统监控")
-      [运行时概览<br/>队列压力 Worker对齐 失败率]
-      [容器调试<br/>容器列表 实时日志 Docker健康检查]
-      [活跃任务<br/>看板/时间线/表格三视图]
-    ("7. 配置管理")
-      [运行时配置<br/>并发/超时/容量 Provider 公告]
-      [GitLab集成<br/>URL/Token Webhook管理 连接测试]
-      [OIDC认证<br/>issuer/client 诊断 Admin映射]
-      [Session安全<br/>Cookie/TTL/SameSite]
-      [告警配置<br/>Webhook URL 失败告警开关]
-    ("8. Mattermost 通知")
-      [集成配置<br/>Server/Bot Token 连接测试]
-      [通知Profile<br/>Channel/DM 事件订阅 字段选择]
-      [用户映射<br/>GitLab→Mattermost 自动匹配]
-      [投递追踪<br/>success/failed/skipped 记录]
-    ("9. CI 失败自动修复")
-      [Webhook接收<br/>X-Gitlab-Token验证 Pipeline识别]
-      [证据收集<br/>Job日志 根因分析 并发锁]
-      [Issue关联<br/>分支匹配 自动创建Issue]
-      [修复任务<br/>自动创建 CI模板 过程日志]
-    ("10. 提示词模板")
-      [CRUD<br/>名称/内容/变量提示]
-      [标签分类<br/>最多20个 最长30字符]
-      [排序管理<br/>拖拽排序 启用/禁用]
-      [前端选择器<br/>标签筛选 覆盖确认]
-    ("11. AI Provider 管理")
-      [CRUD<br/>名称/base_url/model/max_turns]
-      [默认管理<br/>单例默认 启用/禁用]
-      [System Prompt<br/>可选的系统提示词]
-    ("12. Worker Profile 管理")
-      [CRUD+复制<br/>镜像/描述 加密变量保留]
-      [Codegraph开关<br/>Volume挂载 Pre/Post脚本]
-      [Run Instruction<br/>execute/plan/ci_repair三模板]
-      [配置快照<br/>任务执行时不可变记录]
-    ("13. 用量管理")
-      [配额模型<br/>日/周 Token/任务数]
-      [三种模式<br/>custom/inherit/unlimited]
-      [配额检查<br/>创建+调度双关口 超限阻断]
-      [用量账本<br/>按天/周时间桶 前端展示]
-    ("14. 用户与权限")
-      [认证方式<br/>OIDC/本地密码/Break-glass]
-      [会话管理<br/>Cookie 列表/撤销/过期清理]
-      [用户角色<br/>admin/user 状态active/disabled]
-      [页面权限<br/>4个受控页 功能开关 Admin全权限]
-      [系统初始化<br/>Bootstrap流程 首次创建管理员]
-    ("15. GitLab 集成")
-      [项目管理<br/>列表/分支/CI可用性检查]
-      [Webhook管理<br/>创建/状态/全局总览 Secret加密]
-      [Webhook事件<br/>日志 按项目/Issue查询]
-      [MR操作<br/>自动创建/更新 URL关联 Draft管理]
-    ("16. 系统运维")
-      [数据清理<br/>Session/Workspace/归档 手动全量]
-      [自动迁移<br/>Alembic启动执行 prompt回填]
-      [健康检查<br/>DB+Docker /health端点 Trace ID]
-      [请求追踪<br/>X-Trace-ID 慢请求>2s告警]
-    ("17. 前端基础设施")
-      [国际化<br/>中英文 Naive UI locale联动]
-      [UI组件<br/>Naive UI 主题色 响应式断点]
-      [通用组件<br/>PageHeader FilterToolbar ErrorToast等]
-      [API层<br/>Axios 401跳转 Trace ID拦截器]
-      [Composables<br/>useFilterSort usePolling等14个]
+flowchart TB
+  %% —— 配色方案 ——————————————————————
+  classDef engine   fill:#E3F2FD,stroke:#1E88E5,stroke-width:2px,color:#0D47A1
+  classDef data     fill:#E8F5E9,stroke:#43A047,stroke-width:2px,color:#1B5E20
+  classDef config   fill:#FFF3E0,stroke:#FB8C00,stroke-width:2px,color:#E65100
+  classDef collab   fill:#F3E5F5,stroke:#8E24AA,stroke-width:2px,color:#4A148C
+  classDef govern   fill:#FFEBEE,stroke:#E53935,stroke-width:2px,color:#B71C1C
+  classDef frontend fill:#E0F2F1,stroke:#00897B,stroke-width:2px,color:#004D40
+  classDef domain   font-weight:bold,font-size:15px
+  classDef item     font-size:13px,rx:6,ry:6
+
+  %% —— 核心引擎 ——————————————————————
+  subgraph ENGINE["　🧠　核 心 引 擎　"]
+    direction LR
+    E1("任务生命周期"):::item --- E1a["创建 · 重试 · CI自动修复"]:::engine
+    E1 --- E1b["调度 · 优先级队列 · 并发控制"]:::engine
+    E1 --- E1c["执行 · Docker隔离 · Session续接"]:::engine
+    E1 --- E1d["结果 · MR统计 · Token · 状态覆盖"]:::engine
+
+    E2("Issue 管理"):::item --- E2a["CRUD · 分支自动命名 · 状态流转"]:::engine
+    E2 --- E2b["默认Provider/Profile · CI修复开关"]:::engine
+  end
+
+  %% —— 数据与洞察 ————————————————————
+  subgraph DATA["　📊　数 据 与 洞 察　"]
+    direction LR
+    D1("日志与可观测"):::item --- D1a["结构化 · thinking/tool_call"]:::data
+    D1 --- D1b["原始日志 · SSE流 · 运行归档"]:::data
+
+    D2("AI 交付物展示"):::item --- D2a["Markdown摘要 · Mermaid图表"]:::data
+    D2 --- D2b["懒加载 · 缩放弹窗 · 后续任务"]:::data
+
+    D3("统计分析"):::item --- D3a["Dashboard · 热力图 · 我的工作台"]:::data
+    D3 --- D3b["Analytics 7/30/90天 · Provider对比"]:::data
+    D3 --- D3c["调度热力图 · 时隙容量 · 内联改期"]:::data
+
+    D4("系统监控"):::item --- D4a["运行时概览 · 队列压力 · 失败率"]:::data
+    D4 --- D4b["容器列表 · 看板/时间线/表格"]:::data
+  end
+
+  %% —— 配置中心 ——————————————————————
+  subgraph CONFIG["　⚙️　配 置 中 心　"]
+    direction LR
+    C1("运行时配置"):::item --- C1a["并发 · 超时 · Slot容量 · 公告"]:::config
+    C1 --- C1b["GitLab · OIDC · Session · 告警"]:::config
+
+    C2("AI Provider"):::item --- C2a["CRUD · 默认 · 启用/禁用"]:::config
+
+    C3("Worker Profile"):::item --- C3a["镜像 · Codegraph · 环境变量 · 模板"]:::config
+    C3 --- C3b["复制 · 快照 · Pre/Post脚本"]:::config
+
+    C4("提示词模板"):::item --- C4a["CRUD · 标签 · 排序 · 前端选择器"]:::config
+  end
+
+  %% —— 协作与集成 ————————————————————
+  subgraph COLLAB["　🔔　协 作 与 集 成　"]
+    direction LR
+    N1("Mattermost 通知"):::item --- N1a["Channel/DM · 事件订阅 · 投递追踪"]:::collab
+    N2("GitLab 集成"):::item --- N2a["项目/分支查询 · Webhook管理"]:::collab
+    N2 --- N2b["事件日志 · MR自动创建"]:::collab
+    N3("CI 自动修复"):::item --- N3a["Pipeline失败 · 证据收集 · 自动修复"]:::collab
+  end
+
+  %% —— 平台治理 ——————————————————————
+  subgraph GOVERN["　🛡️　平 台 治 理　"]
+    direction LR
+    G1("用户与权限"):::item --- G1a["OIDC · 本地密码 · Break-glass"]:::govern
+    G1 --- G1b["会话管理 · 角色admin/user · 页面权限"]:::govern
+    G1 --- G1c["Bootstrap 系统初始化"]:::govern
+
+    G2("用量管理"):::item --- G2a["日/周 Token · 任务数配额"]:::govern
+    G2 --- G2b["custom/inherit/unlimited · 超限阻断"]:::govern
+
+    G3("系统运维"):::item --- G3a["数据清理 · 自动迁移 · prompt回填"]:::govern
+    G3 --- G3b["健康检查 · Trace-ID · 慢请求告警"]:::govern
+  end
+
+  %% —— 前端基础设施 ——————————————————
+  subgraph FRONTEND["　🎨　前 端 基 础 设 施　"]
+    direction LR
+    F1("国际化"):::item --- F1a["中英文 · Naive UI locale联动"]:::frontend
+    F2("通用组件"):::item --- F2a["PageHeader · FilterToolbar · ErrorToast"]:::frontend
+    F3("API 层"):::item --- F3a["Axios · 401跳转 · Trace ID拦截器"]:::frontend
+    F4("Composables"):::item --- F4a["useFilterSort · usePolling 等14个"]:::frontend
+  end
 ```
 
 ---
