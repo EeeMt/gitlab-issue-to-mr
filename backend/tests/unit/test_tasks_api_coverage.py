@@ -27,6 +27,7 @@ from app.models import TaskStatus
 # Helpers (reused patterns from test_tasks_api.py)
 # ---------------------------------------------------------------------------
 
+
 def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_id=1):
     """Create a mock task with all attributes needed for _serialize_task."""
     task = MagicMock()
@@ -93,11 +94,13 @@ def _make_app_client_with_db(mock_db, extra_overrides=None):
 # Lines 71-72, 75-76: list_tasks with comma-separated status filter
 # ---------------------------------------------------------------------------
 
+
 class ListTasksStatusFilterTests(unittest.TestCase):
     """Tests for GET /api/tasks with comma-separated status values."""
 
     def tearDown(self):
         from app.main import app
+
         app.dependency_overrides.clear()
 
     def test_invalid_status_values_return_400(self):
@@ -167,11 +170,13 @@ class ListTasksStatusFilterTests(unittest.TestCase):
 # Lines 166-167, 171: list_scheduled_tasks with project_id + restricted scope
 # ---------------------------------------------------------------------------
 
+
 class ListScheduledTasksTests(unittest.TestCase):
     """Tests for GET /api/tasks/scheduled with various filters."""
 
     def tearDown(self):
         from app.main import app
+
         app.dependency_overrides.clear()
 
     def _setup_scheduled_client(self, tasks_list, access_scope=None):
@@ -215,8 +220,10 @@ class ListScheduledTasksTests(unittest.TestCase):
 
         client, app = self._setup_scheduled_client([task])
 
-        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})), \
-             patch("app.dependencies.auth.can_access_page", return_value=True):
+        with (
+            patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})),
+            patch("app.dependencies.auth.can_access_page", return_value=True),
+        ):
             response = client.get("/api/tasks/scheduled?project_id=101")
 
         app.dependency_overrides.clear()
@@ -229,8 +236,10 @@ class ListScheduledTasksTests(unittest.TestCase):
         scope = ProjectAccessScope(is_unrestricted=False, accessible_projects=[])
         client, app = self._setup_scheduled_client([], access_scope=scope)
 
-        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})), \
-             patch("app.dependencies.auth.can_access_page", return_value=True):
+        with (
+            patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})),
+            patch("app.dependencies.auth.can_access_page", return_value=True),
+        ):
             response = client.get("/api/tasks/scheduled")
 
         app.dependency_overrides.clear()
@@ -250,8 +259,10 @@ class ListScheduledTasksTests(unittest.TestCase):
 
         client, app = self._setup_scheduled_client([task], access_scope=scope)
 
-        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})), \
-             patch("app.dependencies.auth.can_access_page", return_value=True):
+        with (
+            patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})),
+            patch("app.dependencies.auth.can_access_page", return_value=True),
+        ):
             response = client.get("/api/tasks/scheduled")
 
         app.dependency_overrides.clear()
@@ -262,11 +273,13 @@ class ListScheduledTasksTests(unittest.TestCase):
 # Line 244: get_task slow-path warning
 # ---------------------------------------------------------------------------
 
+
 class GetTaskSlowPathTests(unittest.TestCase):
     """Tests for GET /api/tasks/{id} slow query warning."""
 
     def tearDown(self):
         from app.main import app
+
         app.dependency_overrides.clear()
 
     def test_get_task_slow_response_emits_warning(self):
@@ -290,9 +303,11 @@ class GetTaskSlowPathTests(unittest.TestCase):
             # First call returns 0, subsequent calls create large gaps
             return 0.0 + (call_count * 0.3)
 
-        with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})), \
-             patch("app.api.tasks.time.time", side_effect=slow_time), \
-             patch("app.api.tasks.logger") as mock_logger:
+        with (
+            patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
+            patch("app.api.tasks.time.time", side_effect=slow_time),
+            patch("app.api.tasks.logger") as mock_logger,
+        ):
             response = client.get("/api/tasks/42")
 
         app.dependency_overrides.clear()
@@ -309,11 +324,13 @@ class GetTaskSlowPathTests(unittest.TestCase):
 # Lines 314-370: stream_task_logs SSE endpoint
 # ---------------------------------------------------------------------------
 
+
 class StreamTaskLogsTests(unittest.TestCase):
     """Tests for GET /api/tasks/{task_id}/log-stream SSE endpoint."""
 
     def tearDown(self):
         from app.main import app
+
         app.dependency_overrides.clear()
 
     def test_stream_task_logs_returns_404_for_missing_task(self):
@@ -327,7 +344,7 @@ class StreamTaskLogsTests(unittest.TestCase):
         mock_db.__aexit__ = AsyncMock(return_value=False)
 
         client, app = _make_app_client_with_db(mock_db)
-        with patch("app.api.tasks.AsyncSessionLocal", MagicMock(return_value=mock_db)):
+        with patch("app.api.task_log_routes.AsyncSessionLocal", MagicMock(return_value=mock_db)):
             response = client.get("/api/tasks/9999/log-stream")
         app.dependency_overrides.clear()
 
@@ -376,8 +393,10 @@ class StreamTaskLogsTests(unittest.TestCase):
         client, app = _make_app_client_with_db(mock_db)
 
         mock_session_local = MagicMock(return_value=mock_db)
-        with patch("app.api.tasks.AsyncSessionLocal", mock_session_local), \
-             patch("app.api.tasks.asyncio.sleep", new_callable=AsyncMock):
+        with (
+            patch("app.api.task_log_routes.AsyncSessionLocal", mock_session_local),
+            patch("app.api.task_log_routes.asyncio.sleep", new_callable=AsyncMock),
+        ):
             response = client.get("/api/tasks/5/log-stream?since_id=0")
 
         app.dependency_overrides.clear()
@@ -391,7 +410,8 @@ class StreamTaskLogsTests(unittest.TestCase):
         self.assertIn("event: batch\n", body)
         import json as _json_mod
         import re
-        match = re.search(r'event: batch\ndata: (.+)\n', body)
+
+        match = re.search(r"event: batch\ndata: (.+)\n", body)
         self.assertIsNotNone(match, "batch event data line not found")
         batch_payload = _json_mod.loads(match.group(1))
         self.assertIsInstance(batch_payload, list, "batch event data must be a JSON array")
@@ -400,7 +420,7 @@ class StreamTaskLogsTests(unittest.TestCase):
         for line in body.splitlines():
             if line.startswith("data:") and '"log_type"' in line:
                 try:
-                    obj = _json_mod.loads(line[len("data:"):].strip())
+                    obj = _json_mod.loads(line[len("data:") :].strip())
                     if isinstance(obj, dict) and not obj.get("error"):
                         self.fail(f"log entry leaked into unnamed data: event: {line[:120]}")
                 except _json_mod.JSONDecodeError:
@@ -437,8 +457,10 @@ class StreamTaskLogsTests(unittest.TestCase):
         mock_db.execute = AsyncMock(
             side_effect=[
                 task_result,
-                log_result1, running_status,
-                empty_log_result, completed_status,
+                log_result1,
+                running_status,
+                empty_log_result,
+                completed_status,
             ]
         )
         mock_db.__aenter__ = AsyncMock(return_value=mock_db)
@@ -447,8 +469,10 @@ class StreamTaskLogsTests(unittest.TestCase):
         client, app = _make_app_client_with_db(mock_db)
 
         mock_session_local = MagicMock(return_value=mock_db)
-        with patch("app.api.tasks.AsyncSessionLocal", mock_session_local), \
-             patch("app.api.tasks.asyncio.sleep", new_callable=AsyncMock):
+        with (
+            patch("app.api.task_log_routes.AsyncSessionLocal", mock_session_local),
+            patch("app.api.task_log_routes.asyncio.sleep", new_callable=AsyncMock),
+        ):
             response = client.get("/api/tasks/6/log-stream")
 
         app.dependency_overrides.clear()
@@ -478,8 +502,10 @@ class StreamTaskLogsTests(unittest.TestCase):
         client, app = _make_app_client_with_db(mock_db)
 
         mock_session_local = MagicMock(return_value=mock_db)
-        with patch("app.api.tasks.AsyncSessionLocal", mock_session_local), \
-             patch("app.api.tasks.asyncio.sleep", new_callable=AsyncMock):
+        with (
+            patch("app.api.task_log_routes.AsyncSessionLocal", mock_session_local),
+            patch("app.api.task_log_routes.asyncio.sleep", new_callable=AsyncMock),
+        ):
             response = client.get("/api/tasks/7/log-stream")
 
         app.dependency_overrides.clear()
@@ -494,11 +520,13 @@ class StreamTaskLogsTests(unittest.TestCase):
 # Lines 418-430: get_task_stats GitLab API fallback
 # ---------------------------------------------------------------------------
 
+
 class GetTaskStatsGitLabFallbackTests(unittest.TestCase):
     """Tests for GET /api/tasks/{task_id}/stats with GitLab API fallback."""
 
     def tearDown(self):
         from app.main import app
+
         app.dependency_overrides.clear()
 
     def test_stats_fallback_to_gitlab_returns_stats(self):
@@ -524,8 +552,10 @@ class GetTaskStatsGitLabFallbackTests(unittest.TestCase):
         mock_gitlab.get_merge_request_stats.return_value = fake_stats
 
         # get_gitlab_client is imported locally inside get_task_stats, so patch at source
-        with patch("app.core.gitlab_client.get_gitlab_client", return_value=mock_gitlab), \
-             patch("asyncio.to_thread", new_callable=AsyncMock, return_value=fake_stats):
+        with (
+            patch("app.core.gitlab_client.get_gitlab_client", return_value=mock_gitlab),
+            patch("asyncio.to_thread", new_callable=AsyncMock, return_value=fake_stats),
+        ):
             response = client.get("/api/tasks/30/stats")
 
         app.dependency_overrides.clear()
@@ -557,8 +587,10 @@ class GetTaskStatsGitLabFallbackTests(unittest.TestCase):
         mock_gitlab = MagicMock()
         mock_gitlab.get_merge_request_stats.return_value = None
 
-        with patch("app.core.gitlab_client.get_gitlab_client", return_value=mock_gitlab), \
-             patch("asyncio.to_thread", new_callable=AsyncMock, return_value=None):
+        with (
+            patch("app.core.gitlab_client.get_gitlab_client", return_value=mock_gitlab),
+            patch("asyncio.to_thread", new_callable=AsyncMock, return_value=None),
+        ):
             response = client.get("/api/tasks/31/stats")
 
         app.dependency_overrides.clear()
@@ -572,11 +604,13 @@ class GetTaskStatsGitLabFallbackTests(unittest.TestCase):
 # Lines 502-504: cancel_task docker container stop
 # ---------------------------------------------------------------------------
 
+
 class CancelTaskDockerStopTests(unittest.TestCase):
     """Tests for cancel_task Docker container stop logic."""
 
     def tearDown(self):
         from app.main import app
+
         app.dependency_overrides.clear()
 
     def test_cancel_task_stops_docker_container(self):
@@ -601,10 +635,14 @@ class CancelTaskDockerStopTests(unittest.TestCase):
 
         client, app = _make_app_client_with_db(mock_db)
 
-        with patch("app.api.task_operations.notify_task_cancelled", new=AsyncMock()), \
-             patch("app.core.task_helpers._require_task_operator", return_value=None), \
-             patch("app.api.tasks.get_docker_client", return_value=mock_docker), \
-             patch("app.api.tasks.asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
+        with (
+            patch("app.api.task_action_routes.notify_task_cancelled", new=AsyncMock()),
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch("app.api.task_action_routes.get_docker_client", return_value=mock_docker),
+            patch(
+                "app.api.task_action_routes.asyncio.to_thread", new_callable=AsyncMock
+            ) as mock_to_thread,
+        ):
             # Mock asyncio.to_thread to call the function synchronously
             mock_to_thread.side_effect = lambda fn, *args, **kwargs: fn(*args, **kwargs)
             response = client.post("/api/tasks/40/cancel")
@@ -640,10 +678,14 @@ class CancelTaskDockerStopTests(unittest.TestCase):
 
         client, app = _make_app_client_with_db(mock_db)
 
-        with patch("app.api.task_operations.notify_task_cancelled", new=AsyncMock()), \
-             patch("app.core.task_helpers._require_task_operator", return_value=None), \
-             patch("app.api.tasks.get_docker_client", return_value=mock_docker), \
-             patch("app.api.tasks.asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
+        with (
+            patch("app.api.task_action_routes.notify_task_cancelled", new=AsyncMock()),
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch("app.api.task_action_routes.get_docker_client", return_value=mock_docker),
+            patch(
+                "app.api.task_action_routes.asyncio.to_thread", new_callable=AsyncMock
+            ) as mock_to_thread,
+        ):
             mock_to_thread.side_effect = lambda fn, *args, **kwargs: fn(*args, **kwargs)
             response = client.post("/api/tasks/41/cancel")
 
@@ -672,11 +714,17 @@ class CancelTaskDockerStopTests(unittest.TestCase):
         mock_docker.read_file_from_container.return_value = b"complete console\n"
         client, app = _make_app_client_with_db(mock_db)
 
-        with patch("app.api.task_operations.notify_task_cancelled", new=AsyncMock()), \
-             patch("app.core.task_helpers._require_task_operator", return_value=None), \
-             patch("app.api.tasks.get_docker_client", return_value=mock_docker), \
-             patch("app.api.tasks.persist_raw_log_snapshot", new=AsyncMock()) as persist_snapshot, \
-             patch("app.api.tasks.asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
+        with (
+            patch("app.api.task_action_routes.notify_task_cancelled", new=AsyncMock()),
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch("app.api.task_action_routes.get_docker_client", return_value=mock_docker),
+            patch(
+                "app.api.task_action_routes.persist_raw_log_snapshot", new=AsyncMock()
+            ) as persist_snapshot,
+            patch(
+                "app.api.task_action_routes.asyncio.to_thread", new_callable=AsyncMock
+            ) as mock_to_thread,
+        ):
             mock_to_thread.side_effect = lambda fn, *args, **kwargs: fn(*args, **kwargs)
             response = client.post("/api/tasks/43/cancel")
 
@@ -713,10 +761,14 @@ class CancelTaskDockerStopTests(unittest.TestCase):
         mock_docker.read_file_from_container.return_value = None
         client, app = _make_app_client_with_db(mock_db)
 
-        with patch("app.api.task_operations.notify_task_cancelled", new=AsyncMock()), \
-             patch("app.core.task_helpers._require_task_operator", return_value=None), \
-             patch("app.api.tasks.get_docker_client", return_value=mock_docker), \
-             patch("app.api.tasks.asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
+        with (
+            patch("app.api.task_action_routes.notify_task_cancelled", new=AsyncMock()),
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch("app.api.task_action_routes.get_docker_client", return_value=mock_docker),
+            patch(
+                "app.api.task_action_routes.asyncio.to_thread", new_callable=AsyncMock
+            ) as mock_to_thread,
+        ):
             mock_to_thread.side_effect = lambda fn, *args, **kwargs: fn(*args, **kwargs)
             response = client.post("/api/tasks/44/cancel")
 
@@ -744,9 +796,14 @@ class CancelTaskDockerStopTests(unittest.TestCase):
 
         client, app = _make_app_client_with_db(mock_db)
 
-        with patch("app.api.task_operations.notify_task_cancelled", new=AsyncMock()), \
-             patch("app.core.task_helpers._require_task_operator", return_value=None), \
-             patch("app.api.tasks.get_docker_client", side_effect=RuntimeError("Docker not running")):
+        with (
+            patch("app.api.task_action_routes.notify_task_cancelled", new=AsyncMock()),
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch(
+                "app.api.task_action_routes.get_docker_client",
+                side_effect=RuntimeError("Docker not running"),
+            ),
+        ):
             response = client.post("/api/tasks/42/cancel")
 
         app.dependency_overrides.clear()

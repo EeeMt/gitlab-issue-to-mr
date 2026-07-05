@@ -863,9 +863,13 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         )
 
         lifecycle = (root / "backend" / "app" / "core" / "worker_task_lifecycle.py").read_text()
-        self.assertIn('_CONTAINER_DELIVERY_SUMMARY_PATH = "/tmp/codify-runtime/delivery-summary.md"', lifecycle)
-        self.assertIn('payload_kind="delivery_summary"', lifecycle)
-        self.assertIn('log_type="delivery_summary"', lifecycle)
+        artifacts = (root / "backend" / "app" / "core" / "worker_task_artifacts.py").read_text()
+        self.assertIn(
+            '_CONTAINER_DELIVERY_SUMMARY_PATH = "/tmp/codify-runtime/delivery-summary.md"',
+            artifacts,
+        )
+        self.assertIn('payload_kind="delivery_summary"', artifacts)
+        self.assertIn('log_type="delivery_summary"', artifacts)
         self.assertIn('await _save_delivery_summary_from_container(worker, container, task, db)', lifecycle)
 
     def test_entrypoint_writes_plan_task_metadata_for_previous_summaries(self):
@@ -2232,7 +2236,7 @@ class TestExecuteTask(unittest.TestCase):
         db = _make_db(task)
 
         with (
-            patch('app.core.worker.logger') as mock_logger,
+            patch('app.core.worker_task_runner.logger') as mock_logger,
         ):
             result = asyncio.run(worker.execute_task(db, task.id))
 

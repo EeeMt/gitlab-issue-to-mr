@@ -155,6 +155,50 @@ describe('TaskResultPanel copy interactions', () => {
     expect(clipboardWrite).toHaveBeenCalledWith('Complete **raw** summary')
   })
 
+  it('does not copy stale payload content after the selected summary changes', async () => {
+    let resolveFirstPayload!: (value: { content: string }) => void
+    let resolveSecondPayload!: (value: { content: string }) => void
+    mockGetTaskPayload
+      .mockImplementationOnce(() => new Promise(resolve => {
+        resolveFirstPayload = resolve
+      }))
+      .mockImplementationOnce(() => new Promise(resolve => {
+        resolveSecondPayload = resolve
+      }))
+
+    const wrapper = mountPanel({
+      text: '',
+      preview: 'Old summary',
+      payload_id: 91,
+      truncated: true,
+    })
+    void wrapper.get('[aria-label="Copy source"]').trigger('click')
+    await nextTick()
+
+    await wrapper.setProps({
+      deliverySummaryLog: createMockTaskLog({
+        id: 35,
+        task_id: 12,
+        metadata: {
+          text: '',
+          preview: 'New summary',
+          payload_id: 92,
+          truncated: true,
+        },
+      }),
+    })
+    void wrapper.get('[aria-label="Copy source"]').trigger('click')
+    await nextTick()
+
+    resolveSecondPayload({ content: 'New complete summary' })
+    await flushPromises()
+    resolveFirstPayload({ content: 'Old complete summary' })
+    await flushPromises()
+
+    expect(clipboardWrite).toHaveBeenCalledTimes(1)
+    expect(clipboardWrite).toHaveBeenCalledWith('New complete summary')
+  })
+
   it('restores the Mermaid copy label after repeated successful copies', async () => {
     vi.useFakeTimers()
     const wrapper = mountPanel({

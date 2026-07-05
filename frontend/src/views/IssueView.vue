@@ -452,7 +452,7 @@ import TaskFormDrawer from '../components/TaskFormDrawer.vue'
 import RescheduleDrawer from '../components/RescheduleDrawer.vue'
 import {
   getIssue, updateIssue, closeIssue, retryTask, deleteIssueBranch,
-  getScheduledTasks, getConfig, getProjects, getIssueCIFailures, getIssueWebhookEvents,
+  getProjects, getIssueCIFailures, getIssueWebhookEvents,
   getProviders, getWorkerProfiles,
   type AIProvider, type Issue, type Task, type Project, type CIFailureRun, type WebhookEvent,
   type WorkerProfile
@@ -464,6 +464,7 @@ import { extractSlotErrorMessage } from '../utils/slotError'
 import { authState, isAdmin } from '../auth'
 import { renderMarkdown } from '../components/task-process/taskProcessUtils'
 import { issueDetailTooltipContentStyle, issueDetailTooltipThemeOverrides } from '../components/issue-detail/tooltip'
+import { useTaskScheduleContext } from '../features/tasks/useTaskScheduleContext'
 
 const route = useRoute()
 const router = useRouter()
@@ -609,10 +610,13 @@ const showRescheduleDrawer = ref(false)
 const rescheduleTargetTask = ref<Task | null>(null)
 
 // Schedule heatmap
-const scheduledTasksForPreview = ref<Task[]>([])
-const scheduledTasksLoading = ref(false)
-const slotMaxTasks = ref(0)
-const slotEnforce = ref(false)
+const {
+  scheduledTasks: scheduledTasksForPreview,
+  scheduledTasksLoading,
+  slotMaxTasks,
+  slotEnforce,
+  loadScheduleContext,
+} = useTaskScheduleContext()
 
 // Edit modal
 const showEditModal = ref(false)
@@ -692,24 +696,6 @@ onUnmounted(() => {
     pollTimer = null
   }
 })
-
-async function loadScheduleContext(force = false) {
-  if (force || scheduledTasksForPreview.value.length === 0) {
-    scheduledTasksLoading.value = true
-    try {
-      scheduledTasksForPreview.value = await getScheduledTasks()
-    } catch {
-      scheduledTasksForPreview.value = []
-    } finally {
-      scheduledTasksLoading.value = false
-    }
-  }
-  try {
-    const config = await getConfig()
-    slotMaxTasks.value = config.runtime?.slot_max_tasks ?? 0
-    slotEnforce.value = config.runtime?.slot_max_tasks_enforce ?? false
-  } catch { /* ignore */ }
-}
 
 function handleRetryHeatmapCellClick(startMs: number) {
   retryTaskSchedule.value = startMs

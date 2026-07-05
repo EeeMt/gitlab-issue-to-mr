@@ -164,7 +164,13 @@ class CreateIssueTests(unittest.IsolatedAsyncioTestCase):
             base_branch="main",
         )
 
-        with patch("app.api.issues.get_effective_settings") as mock_settings:
+        with patch(
+            "app.api.issues._resolve_issue_default_worker_id",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "app.api.issues._resolve_issue_default_provider_id",
+            new=AsyncMock(return_value=None),
+        ), patch("app.api.issues.get_effective_settings") as mock_settings:
             mock_settings.return_value.session_storage_root = "/var/codify/sessions"
             mock_settings.return_value.worker_workspace_host_path = "/opt/codify-workspaces"
             await create_issue(body=body, db=mock_db, current_user=mock_user)
@@ -214,7 +220,13 @@ class CreateIssueTests(unittest.IsolatedAsyncioTestCase):
             base_branch="main",
         )
 
-        with patch("app.api.issues.get_effective_settings") as mock_settings:
+        with patch(
+            "app.api.issues._resolve_issue_default_worker_id",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "app.api.issues._resolve_issue_default_provider_id",
+            new=AsyncMock(return_value=None),
+        ), patch("app.api.issues.get_effective_settings") as mock_settings:
             mock_settings.return_value.session_storage_root = "/var/codify/sessions"
             mock_settings.return_value.worker_workspace_host_path = ""
             await create_issue(body=body, db=mock_db, current_user=mock_user)
@@ -247,7 +259,13 @@ class CreateIssueTests(unittest.IsolatedAsyncioTestCase):
 
         body = CreateIssueRequest(title="Test", project_id=5)
 
-        with patch("app.api.issues.get_effective_settings") as mock_settings:
+        with patch(
+            "app.api.issues._resolve_issue_default_worker_id",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "app.api.issues._resolve_issue_default_provider_id",
+            new=AsyncMock(return_value=None),
+        ), patch("app.api.issues.get_effective_settings") as mock_settings:
             mock_settings.return_value.session_storage_root = "/tmp/sessions"
             await create_issue(body=body, db=mock_db, current_user=mock_user)
 

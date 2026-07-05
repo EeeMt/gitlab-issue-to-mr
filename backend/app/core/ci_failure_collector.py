@@ -18,6 +18,7 @@ from app.config import get_effective_settings
 from app.core.ci_failure_logs import append_ci_failure_log
 from app.core.gitlab_client import get_gitlab_client
 from app.core.projects import get_project_metadata
+from app.core.task_creation import prepare_task_runtime_snapshot
 from app.core.task_prompt import render_and_store_task_prompt
 from app.core.utcnow import utcnow
 from app.core.worker_profiles import (
@@ -636,16 +637,17 @@ async def process_ci_failure_run(
         )
         db.add(repair_task)
         await db.flush()
-        snapshot = await replace_task_worker_snapshot(db, repair_task, worker_profile)
-        render_and_store_task_prompt(
+        await prepare_task_runtime_snapshot(
+            db,
             repair_task,
             issue,
+            worker_profile,
             await get_project_metadata(issue.project_id),
-            select_snapshot_run_instruction_template(
-                snapshot,
-                task_mode="execute",
-                trigger_source="ci_auto_repair",
-            ),
+            run_instruction_template=None,
+            template_trigger_source="ci_auto_repair",
+            replace_snapshot=replace_task_worker_snapshot,
+            select_template=select_snapshot_run_instruction_template,
+            render_prompt=render_and_store_task_prompt,
         )
         run.repair_task_id = repair_task.id
         run.status = "task_created"

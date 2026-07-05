@@ -321,8 +321,9 @@ class TestRescheduleTask:
         db.execute.return_value = MagicMock(scalar_one_or_none=lambda: task)
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
-        with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
-
+        with patch(
+            "app.api.task_action_routes.get_project_metadata", new=AsyncMock(return_value={})
+        ):
             result = await reschedule_task(
                 task_id=1,
                 request=request,
@@ -334,7 +335,10 @@ class TestRescheduleTask:
         assert task.scheduled_at is not None
         assert abs((task.scheduled_at - (now + timedelta(hours=2))).total_seconds()) < 1
         db.commit.assert_awaited_once()
-        db.refresh.assert_awaited_once_with(task)
+        db.refresh.assert_awaited_once_with(
+            task,
+            attribute_names=["id", "status", "created_at", "updated_at"],
+        )
         assert result["scheduled_at"] == task.scheduled_at.isoformat()
 
     @pytest.mark.asyncio
@@ -353,7 +357,9 @@ class TestRescheduleTask:
         db.execute.return_value = MagicMock(scalar_one_or_none=lambda: task)
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
-        with pytest.raises(HTTPException, match="Task must be in PENDING or QUEUED status to reschedule"):
+        with pytest.raises(
+            HTTPException, match="Task must be in PENDING or QUEUED status to reschedule"
+        ):
             await reschedule_task(
                 task_id=1,
                 request=request,
@@ -378,7 +384,9 @@ class TestRescheduleTask:
         db.execute.return_value = MagicMock(scalar_one_or_none=lambda: task)
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
-        with pytest.raises(HTTPException, match="Only scheduled or queued tasks can update their scheduled time"):
+        with pytest.raises(
+            HTTPException, match="Only scheduled or queued tasks can update their scheduled time"
+        ):
             await reschedule_task(
                 task_id=1,
                 request=request,
@@ -405,9 +413,14 @@ class TestRescheduleTask:
         db = AsyncMock()
         db.execute.return_value = MagicMock(scalar_one_or_none=lambda: task)
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
-        current_user = User(id=11, gitlab_user_id=101, username="other", platform_role="platform_user")
+        current_user = User(
+            id=11, gitlab_user_id=101, username="other", platform_role="platform_user"
+        )
 
-        with patch("app.core.task_helpers.get_effective_settings", return_value=MagicMock(oidc_enabled=True)):
+        with patch(
+            "app.core.task_helpers.get_effective_settings",
+            return_value=MagicMock(oidc_enabled=True),
+        ):
             with pytest.raises(HTTPException, match="You may only operate on your own tasks"):
                 await reschedule_task(
                     task_id=1,
@@ -421,30 +434,52 @@ class TestRescheduleTask:
 class TestTaskOperatorPermissions:
     def test_can_manage_task_allows_admin(self):
         task = Task(project_id=1, user_prompt="Test", initiator_user_id=10)
-        current_user = User(id=99, gitlab_user_id=999, username="admin", platform_role="platform_admin")
+        current_user = User(
+            id=99, gitlab_user_id=999, username="admin", platform_role="platform_admin"
+        )
 
-        with patch("app.core.task_helpers.get_effective_settings", return_value=MagicMock(oidc_enabled=True)):
+        with patch(
+            "app.core.task_helpers.get_effective_settings",
+            return_value=MagicMock(oidc_enabled=True),
+        ):
             assert _can_manage_task(task, current_user) is True
 
     def test_can_manage_task_allows_owner_by_dashboard_user_id(self):
         task = Task(project_id=1, user_prompt="Test", initiator_user_id=10)
-        current_user = User(id=10, gitlab_user_id=999, username="owner", platform_role="platform_user")
+        current_user = User(
+            id=10, gitlab_user_id=999, username="owner", platform_role="platform_user"
+        )
 
-        with patch("app.core.task_helpers.get_effective_settings", return_value=MagicMock(oidc_enabled=True)):
+        with patch(
+            "app.core.task_helpers.get_effective_settings",
+            return_value=MagicMock(oidc_enabled=True),
+        ):
             assert _can_manage_task(task, current_user) is True
 
     def test_can_manage_task_allows_owner_by_gitlab_user_id(self):
         task = Task(project_id=1, user_prompt="Test", initiator_gitlab_user_id=123)
-        current_user = User(id=10, gitlab_user_id=123, username="owner", platform_role="platform_user")
+        current_user = User(
+            id=10, gitlab_user_id=123, username="owner", platform_role="platform_user"
+        )
 
-        with patch("app.core.task_helpers.get_effective_settings", return_value=MagicMock(oidc_enabled=True)):
+        with patch(
+            "app.core.task_helpers.get_effective_settings",
+            return_value=MagicMock(oidc_enabled=True),
+        ):
             assert _can_manage_task(task, current_user) is True
 
     def test_can_manage_task_rejects_other_user(self):
-        task = Task(project_id=1, user_prompt="Test", initiator_user_id=10, initiator_gitlab_user_id=123)
-        current_user = User(id=11, gitlab_user_id=456, username="other", platform_role="platform_user")
+        task = Task(
+            project_id=1, user_prompt="Test", initiator_user_id=10, initiator_gitlab_user_id=123
+        )
+        current_user = User(
+            id=11, gitlab_user_id=456, username="other", platform_role="platform_user"
+        )
 
-        with patch("app.core.task_helpers.get_effective_settings", return_value=MagicMock(oidc_enabled=True)):
+        with patch(
+            "app.core.task_helpers.get_effective_settings",
+            return_value=MagicMock(oidc_enabled=True),
+        ):
             assert _can_manage_task(task, current_user) is False
 
 

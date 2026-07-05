@@ -727,7 +727,8 @@ describe('TaskFormDrawer', () => {
       await mountDrawer({ issueDescription: '' })
       await openDrawer()
 
-      wrapper.vm.applyPromptTemplate(mockTemplates[0])
+      wrapper.vm.prompt = ''
+      wrapper.vm.handleTemplateItemClick(mockTemplates[0])
 
       expect(wrapper.vm.prompt).toBe('Fix {{issue_type}}')
       expect(wrapper.vm.promptVariableTips).toEqual({ issue_type: 'Bug type' })
@@ -738,7 +739,8 @@ describe('TaskFormDrawer', () => {
       await openDrawer()
 
       wrapper.vm.promptVariableTips = { old: 'tip' }
-      wrapper.vm.applyPromptTemplate(mockTemplates[1])
+      wrapper.vm.prompt = ''
+      wrapper.vm.handleTemplateItemClick(mockTemplates[1])
 
       expect(wrapper.vm.prompt).toBe('Do something')
       expect(wrapper.vm.promptVariableTips).toEqual({ old: 'tip' })
@@ -786,14 +788,14 @@ describe('TaskFormDrawer', () => {
     })
 
     it('filters active templates by all selected tags', async () => {
-      await mountDrawer({ issueDescription: '' })
-      await openDrawer()
-
-      wrapper.vm.promptTemplates = [
+      mockApi.getPromptTemplates.mockResolvedValue([
         ...mockTemplates,
         { id: 3, name: 'Inactive', content: 'Hidden', tags: ['backend', 'review'], is_active: false, sort_order: 3, created_at: '2026-03-29T10:00:00Z', updated_at: '2026-03-29T10:00:00Z' },
         { id: 4, name: 'Backend only', content: 'Backend', tags: ['backend'], is_active: true, sort_order: 4, created_at: '2026-03-28T10:00:00Z', updated_at: '2026-03-28T10:00:00Z' },
-      ]
+      ])
+      await mountDrawer({ issueDescription: '' })
+      await openDrawer()
+
       wrapper.vm.selectedTemplateTags = ['backend', 'review']
       wrapper.vm.showTemplateDrawer = true
       await nextTick()
@@ -818,12 +820,12 @@ describe('TaskFormDrawer', () => {
     })
 
     it('renders legacy templates without tags in the drawer', async () => {
+      mockApi.getPromptTemplates.mockResolvedValue([
+        { id: 5, name: 'Legacy', content: 'Legacy content', is_active: true, sort_order: 5, created_at: '2026-03-27T10:00:00Z', updated_at: '2026-03-27T10:00:00Z' },
+      ])
       await mountDrawer({ issueDescription: '' })
       await openDrawer()
 
-      wrapper.vm.promptTemplates = [
-        { id: 5, name: 'Legacy', content: 'Legacy content', is_active: true, sort_order: 5, created_at: '2026-03-27T10:00:00Z', updated_at: '2026-03-27T10:00:00Z' },
-      ]
       wrapper.vm.showTemplateDrawer = true
       await nextTick()
 
@@ -949,6 +951,31 @@ describe('TaskFormDrawer', () => {
       wrapper.vm.scheduledAt = null
       await nextTick()
 
+      expect(wrapper.vm.slotCapacity).toBeNull()
+    })
+
+    it('clears slot capacity loading when schedule time changes during a request', async () => {
+      await mountDrawer()
+      await openDrawer()
+      vi.useFakeTimers()
+      let resolveCapacity!: (value: { available: number }) => void
+      mockApi.getSlotCapacity.mockReturnValue(new Promise(resolve => {
+        resolveCapacity = resolve
+      }))
+
+      wrapper.vm.scheduledAt = Date.now() + 3600000
+      await nextTick()
+      vi.advanceTimersByTime(350)
+      await nextTick()
+      expect(wrapper.vm.slotCapacityLoading).toBe(true)
+
+      wrapper.vm.scheduledAt = null
+      await nextTick()
+      expect(wrapper.vm.slotCapacityLoading).toBe(false)
+
+      resolveCapacity({ available: 5 })
+      await flushPromises()
+      expect(wrapper.vm.slotCapacityLoading).toBe(false)
       expect(wrapper.vm.slotCapacity).toBeNull()
     })
 

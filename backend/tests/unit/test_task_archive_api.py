@@ -5,7 +5,7 @@ import sys
 import unittest
 from datetime import datetime
 from tempfile import NamedTemporaryFile
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -15,6 +15,12 @@ from app.models import TaskPayload, TaskRunArchive
 
 
 class TestGetTaskArchive(unittest.IsolatedAsyncioTestCase):
+    def allow_task_access(self):
+        return patch(
+            "app.api.tasks.get_task_with_access_check",
+            new=AsyncMock(return_value=MagicMock(project_id=1)),
+        )
+
     async def test_get_task_archive_returns_metadata(self):
         """Test /tasks/{id}/archive returns archive metadata when it exists."""
 
@@ -33,7 +39,8 @@ class TestGetTaskArchive(unittest.IsolatedAsyncioTestCase):
         mock_db.execute = AsyncMock(return_value=mock_result)
 
         mock_access = MagicMock()
-        result = await get_task_archive(task_id=1, db=mock_db, access_scope=mock_access)
+        with self.allow_task_access():
+            result = await get_task_archive(task_id=1, db=mock_db, access_scope=mock_access)
 
         assert result["archive_name"] == "task-1-runtime-archive.tar.gz"
         assert result["archive_size_bytes"] == 1024
@@ -58,7 +65,8 @@ class TestGetTaskArchive(unittest.IsolatedAsyncioTestCase):
             mock_result.scalar_one_or_none.return_value = mock_archive
             mock_db.execute = AsyncMock(return_value=mock_result)
 
-            result = await get_task_archive(task_id=1, db=mock_db, access_scope=MagicMock())
+            with self.allow_task_access():
+                result = await get_task_archive(task_id=1, db=mock_db, access_scope=MagicMock())
 
             assert result["file_exists"] is True
 
@@ -72,7 +80,7 @@ class TestGetTaskArchive(unittest.IsolatedAsyncioTestCase):
         mock_result.scalar_one_or_none.return_value = None
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        with self.assertRaises(HTTPException) as ctx:
+        with self.allow_task_access(), self.assertRaises(HTTPException) as ctx:
             await get_task_archive(task_id=999, db=mock_db, access_scope=MagicMock())
         assert ctx.exception.status_code == 404
 
@@ -96,7 +104,12 @@ class TestGetTaskArchive(unittest.IsolatedAsyncioTestCase):
             mock_result.scalar_one_or_none.return_value = mock_archive
             mock_db.execute = AsyncMock(return_value=mock_result)
 
-            result = await download_task_archive(task_id=1, db=mock_db, access_scope=MagicMock())
+            with self.allow_task_access():
+                result = await download_task_archive(
+                    task_id=1,
+                    db=mock_db,
+                    access_scope=MagicMock(),
+                )
 
             assert isinstance(result, FileResponse)
             assert result.path == tmp.name
@@ -119,7 +132,7 @@ class TestGetTaskArchive(unittest.IsolatedAsyncioTestCase):
         mock_result.scalar_one_or_none.return_value = mock_archive
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        with self.assertRaises(HTTPException) as ctx:
+        with self.allow_task_access(), self.assertRaises(HTTPException) as ctx:
             await download_task_archive(task_id=1, db=mock_db, access_scope=MagicMock())
         assert ctx.exception.status_code == 404
 
@@ -140,7 +153,13 @@ class TestGetTaskArchive(unittest.IsolatedAsyncioTestCase):
         mock_result.scalar_one_or_none.return_value = mock_payload
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        result = await get_task_payload(task_id=1, payload_id=5, db=mock_db, access_scope=MagicMock())
+        with self.allow_task_access():
+            result = await get_task_payload(
+                task_id=1,
+                payload_id=5,
+                db=mock_db,
+                access_scope=MagicMock(),
+            )
 
         assert result["content"] == '{"file_path": "a.py"}'
         assert result["payload_kind"] == "tool_input"
@@ -155,7 +174,7 @@ class TestGetTaskArchive(unittest.IsolatedAsyncioTestCase):
         mock_result.scalar_one_or_none.return_value = None
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        with self.assertRaises(HTTPException) as ctx:
+        with self.allow_task_access(), self.assertRaises(HTTPException) as ctx:
             await get_task_payload(task_id=1, payload_id=999, db=mock_db, access_scope=MagicMock())
         assert ctx.exception.status_code == 404
 

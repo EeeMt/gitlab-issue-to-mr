@@ -284,22 +284,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import type { CSSProperties } from 'vue'
-import { NCard, NIcon, NButton, NInputNumber, NModal, NScrollbar, NTooltip, useMessage } from 'naive-ui'
+import { computed, ref, toRef, watch } from 'vue'
+import { NCard, NIcon, NButton, NInputNumber, NModal, NScrollbar, NTooltip } from 'naive-ui'
 import { AlertCircleOutline, GitCommitOutline, OpenOutline, ChevronForward, ChatboxOutline, Checkmark, CopyOutline, ExpandOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import type { Task, TaskLog } from '../api'
-import { getTaskPayload } from '../api'
-import { parseTextEntry, renderMarkdown } from './task-process/taskProcessUtils'
-
-type MermaidZoom = 'fit' | '100' | '150' | '200' | '300' | 'custom'
-
-interface SummaryMermaidDiagram {
-  source: string
-  svg: string
-  error: string
-}
+import type { SummaryMermaidDiagram } from '../features/tasks/summaryMermaid'
+import { useSummaryMermaidViewer } from '../features/tasks/useSummaryMermaidViewer'
+import { useSummaryCollapseFloat } from '../features/tasks/useSummaryCollapseFloat'
+import { useSummaryRenderer } from '../features/tasks/useSummaryRenderer'
+import { useDeliverySummaryPayload } from '../features/tasks/useDeliverySummaryPayload'
+import { useSummaryCopyActions } from '../features/tasks/useSummaryCopyActions'
 
 const props = defineProps<{
   task: Task
@@ -308,529 +303,87 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
-const message = useMessage()
 
 // Delivery summary, falling back to the last assistant text event for older tasks.
 const summaryExpanded = ref(false)
-const summaryPayloadText = ref('')
-const summaryPayloadLoading = ref(false)
-const summaryPayloadLoaded = ref(false)
-const summaryRenderedHtml = ref('')
-const summaryRenderedSource = ref('')
-const summaryCardRef = ref<HTMLElement | null>(null)
 const summaryContentRef = ref<HTMLElement | null>(null)
 const summaryViewerContentRef = ref<HTMLElement | null>(null)
 const summaryViewerVisible = ref(false)
 const summaryMermaidDiagrams = ref<SummaryMermaidDiagram[]>([])
-const mermaidViewerVisible = ref(false)
-const activeMermaidIndex = ref<number | null>(null)
-const mermaidZoomMin = 10
-const mermaidZoomMax = 2000
-const mermaidZoom = ref<MermaidZoom>('fit')
-const mermaidCustomZoom = ref(100)
-const mermaidViewerDragging = ref(false)
-const hiddenSummaryCollapseFloatStyle: CSSProperties = {
-  display: 'none',
-  left: '0px',
-  top: '0px',
-  visibility: 'hidden',
-}
-const summaryCollapseFloatStyle = ref<CSSProperties>(hiddenSummaryCollapseFloatStyle)
-const summaryCollapseFloatEndThreshold = 160
-let mermaidConfigured = false
-let mermaidRenderer: typeof import('mermaid').default | null = null
-let summaryMermaidRenderRun = 0
-let summaryCollapseFloatRaf = 0
-let mermaidViewerDrag: {
-  container: HTMLElement
-  startX: number
-  startY: number
-  scrollLeft: number
-  scrollTop: number
-} | null = null
-
-const selectedSummaryLog = computed(() =>
-  props.deliverySummaryLog ?? props.lastAssistantLog ?? null
-)
-
-const summaryEntry = computed(() =>
-  selectedSummaryLog.value ? parseTextEntry(selectedSummaryLog.value.metadata) : null
-)
-
-const summaryText = computed(() =>
-  summaryPayloadLoaded.value ? summaryPayloadText.value : (summaryEntry.value?.text ?? '')
-)
-
-const summaryPreview = computed(() => {
-  const entry = summaryEntry.value
-  if (!entry) return ''
-  if (entry.preview) return entry.truncated ? entry.preview + '…' : entry.preview
-  return entry.text.slice(0, 120) || ''
+const {
+  loadSummaryPayloadIfNeeded,
+  selectedSummaryLog,
+  summaryPayloadLoaded,
+  summaryPayloadLoading,
+  summaryPreview,
+  summaryText,
+} = useDeliverySummaryPayload({
+  taskId: toRef(() => props.task.id),
+  deliverySummaryLog: toRef(props, 'deliverySummaryLog'),
+  lastAssistantLog: toRef(props, 'lastAssistantLog'),
 })
-
-const mermaidZoomOptions = computed<{ value: MermaidZoom, label: string }[]>(() => [
-  { value: 'fit', label: t('taskView.mermaidFitWidth') },
-  { value: '100', label: '100%' },
-  { value: '150', label: '150%' },
-  { value: '200', label: '200%' },
-  { value: '300', label: '300%' },
-])
-
-const mermaidZoomPercent = computed(() => {
-  if (mermaidZoom.value === 'fit') return 100
-  return mermaidZoom.value === 'custom'
-    ? mermaidCustomZoom.value
-    : Number(mermaidZoom.value)
+const {
+  activeMermaidIndex,
+  activeMermaidViewerSvg,
+  handleMermaidCustomZoom,
+  handleMermaidViewerMouseDown,
+  handleMermaidViewerWheel,
+  mermaidCustomZoom,
+  mermaidViewerCanvasStyle,
+  mermaidViewerContentStyle,
+  mermaidViewerDragging,
+  mermaidViewerScrollbarKey,
+  mermaidViewerVisible,
+  mermaidZoom,
+  mermaidZoomMax,
+  mermaidZoomMin,
+  mermaidZoomOptions,
+  resetMermaidViewer,
+  selectMermaidZoom,
+} = useSummaryMermaidViewer(summaryMermaidDiagrams)
+const {
+  copySummarySource,
+  handleSummaryContentClick,
+  summaryCopied,
+} = useSummaryCopyActions({
+  summaryText,
+  diagrams: summaryMermaidDiagrams,
+  loadSummaryPayloadIfNeeded,
+  activeMermaidIndex,
+  mermaidViewerVisible,
+  selectMermaidZoom,
 })
-
-const activeMermaidRawSvg = computed(() => {
-  if (activeMermaidIndex.value == null) return ''
-  return summaryMermaidDiagrams.value[activeMermaidIndex.value]?.svg ?? ''
+const {
+  resetSummaryRender,
+  summaryRenderedHtml,
+  syncSummaryRender,
+} = useSummaryRenderer({
+  taskId: toRef(() => props.task.id),
+  summaryText,
+  diagrams: summaryMermaidDiagrams,
+  summaryContentRef,
+  summaryViewerContentRef,
+  summaryViewerVisible,
+  resetMermaidViewer,
 })
-
-const mermaidViewerSvgWidth = computed(() => {
-  return '100%'
-})
-
-const mermaidViewerCanvasStyle = computed<CSSProperties>(() => {
-  const canvasZoom = mermaidZoom.value === 'fit'
-    ? 100
-    : Math.min(100, mermaidZoomPercent.value)
-  return {
-    width: `${canvasZoom}%`,
-    margin: '0 auto',
-  }
-})
-
-const mermaidViewerContentStyle = computed<CSSProperties>(() => {
-  const contentZoom = mermaidZoom.value === 'fit'
-    ? 100
-    : Math.max(100, mermaidZoomPercent.value)
-  return {
-    width: `${contentZoom}%`,
-    minWidth: '100%',
-    minHeight: '100%',
-    padding: '16px',
-    boxSizing: 'border-box',
-  }
-})
-
-const activeMermaidViewerSvg = computed(() =>
-  applyMermaidViewerSvgStyle(activeMermaidRawSvg.value, mermaidViewerSvgWidth.value)
-)
-
-const mermaidViewerScrollbarKey = computed(() =>
-  `${activeMermaidIndex.value ?? 'none'}-${mermaidZoom.value}-${mermaidCustomZoom.value}-${activeMermaidRawSvg.value.length}`
-)
-
-function handleMermaidCustomZoom(value: number | null) {
-  if (value == null) return
-  const nextZoom = clampMermaidZoom(value)
-  mermaidCustomZoom.value = nextZoom
-  mermaidZoom.value = 'custom'
-}
-
-function clampMermaidZoom(value: number) {
-  return Math.min(mermaidZoomMax, Math.max(mermaidZoomMin, Math.round(value)))
-}
-
-function selectMermaidZoom(value: MermaidZoom) {
-  mermaidZoom.value = value
-  if (value === 'fit') {
-    mermaidCustomZoom.value = 100
-  } else if (value !== 'custom') {
-    mermaidCustomZoom.value = Number(value)
-  }
-}
-
-function updateSummaryCollapseFloat() {
-  summaryCollapseFloatRaf = 0
-  const card = summaryCardRef.value
-  if (!summaryExpanded.value || mermaidViewerVisible.value || summaryViewerVisible.value || !card) {
-    summaryCollapseFloatStyle.value = hiddenSummaryCollapseFloatStyle
-    return
-  }
-
-  const rect = card.getBoundingClientRect()
-  const visibleTop = Math.max(rect.top, 0)
-  const visibleBottom = Math.min(rect.bottom, window.innerHeight)
-  const nearSummaryEnd = rect.bottom <= window.innerHeight + summaryCollapseFloatEndThreshold
-  if (visibleBottom <= visibleTop || nearSummaryEnd) {
-    summaryCollapseFloatStyle.value = hiddenSummaryCollapseFloatStyle
-    return
-  }
-
-  summaryCollapseFloatStyle.value = {
-    display: 'flex',
-    left: `${rect.left + rect.width / 2}px`,
-    top: `${Math.max(visibleTop + 44, visibleBottom - 12)}px`,
-    visibility: 'visible',
-  }
-}
-
-function scheduleSummaryCollapseFloatUpdate() {
-  if (summaryCollapseFloatRaf) return
-  summaryCollapseFloatRaf = window.requestAnimationFrame(updateSummaryCollapseFloat)
-}
-
-onMounted(() => {
-  window.addEventListener('scroll', scheduleSummaryCollapseFloatUpdate, true)
-  window.addEventListener('resize', scheduleSummaryCollapseFloatUpdate)
-})
-
-onBeforeUnmount(() => {
-  window.removeEventListener('scroll', scheduleSummaryCollapseFloatUpdate, true)
-  window.removeEventListener('resize', scheduleSummaryCollapseFloatUpdate)
-  if (summaryCollapseFloatRaf) {
-    window.cancelAnimationFrame(summaryCollapseFloatRaf)
-  }
-  stopMermaidViewerDrag()
-})
-
-watch([summaryExpanded, mermaidViewerVisible, summaryViewerVisible, summaryRenderedHtml], async () => {
-  await nextTick()
-  scheduleSummaryCollapseFloatUpdate()
-})
-
-watch(mermaidViewerVisible, (visible) => {
-  if (!visible) stopMermaidViewerDrag()
-})
-
-watch([summaryViewerVisible, summaryRenderedHtml, summaryMermaidDiagrams], async () => {
-  if (!summaryViewerVisible.value) return
-  await nextTick()
-  hydrateSummaryViewerMermaid()
+const {
+  summaryCardRef,
+  summaryCollapseFloatStyle,
+} = useSummaryCollapseFloat({
+  summaryExpanded,
+  mermaidViewerVisible,
+  summaryViewerVisible,
+  summaryRenderedHtml,
 })
 
 watch(() => selectedSummaryLog.value?.id ?? null, async () => {
-  summaryPayloadText.value = ''
-  summaryPayloadLoading.value = false
-  summaryPayloadLoaded.value = false
-  summaryRenderedHtml.value = ''
-  summaryRenderedSource.value = ''
-  summaryMermaidDiagrams.value = []
+  resetSummaryRender()
   summaryViewerVisible.value = false
-  resetMermaidViewer()
   if (summaryExpanded.value) {
     await loadSummaryPayloadIfNeeded()
     syncSummaryRender()
   }
 })
-
-function applyMermaidViewerSvgStyle(svg: string, width: string): string {
-  if (!svg) return ''
-  const viewerStyle = `width: ${width}; height: auto; max-width: none; display: block;`
-  if (/\sstyle="/i.test(svg)) {
-    return svg.replace(/\sstyle="([^"]*)"/i, ` style="$1 ${viewerStyle}"`)
-  }
-  return svg.replace(/<svg\b/i, `<svg style="${viewerStyle}"`)
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
-
-function renderSummaryMermaidPlaceholder(index: number): string {
-  return [
-    `<div class="summary-mermaid" data-summary-mermaid-index="${index}" data-summary-mermaid-state="loading">`,
-    '<div class="summary-mermaid__toolbar">',
-    '<span class="summary-mermaid__label">Mermaid</span>',
-    '<div class="summary-mermaid__actions">',
-    `<button type="button" class="summary-mermaid__copy" data-summary-mermaid-action="copy" data-summary-mermaid-index="${index}">${escapeHtml(t('taskView.copySource'))}</button>`,
-    `<button type="button" class="summary-mermaid__expand" data-summary-mermaid-action="zoom" data-summary-mermaid-index="${index}">${escapeHtml(t('taskView.mermaidOpenLarge'))}</button>`,
-    '</div>',
-    '</div>',
-    `<div class="summary-mermaid__canvas" data-summary-mermaid-canvas="${index}">${escapeHtml(t('taskView.mermaidLoading'))}</div>`,
-    '</div>',
-  ].join('')
-}
-
-function renderSummaryMarkdown(text: string): string {
-  const diagrams: SummaryMermaidDiagram[] = []
-  const mermaidFencePattern = /(^|\n)(`{3,}|~{3,})[ \t]*mermaid[^\n]*\n([\s\S]*?)\n\2[ \t]*(?=\n|$)/gi
-  let html = ''
-  let lastIndex = 0
-  let match: RegExpExecArray | null
-
-  while ((match = mermaidFencePattern.exec(text)) !== null) {
-    const prefix = match[1] ?? ''
-    const blockStart = match.index + prefix.length
-    const before = text.slice(lastIndex, blockStart)
-    if (before) html += renderMarkdown(before)
-
-    const source = (match[3] ?? '').trim()
-    const index = diagrams.length
-    diagrams.push({ source, svg: '', error: '' })
-    html += renderSummaryMermaidPlaceholder(index)
-    lastIndex = mermaidFencePattern.lastIndex
-  }
-
-  const after = text.slice(lastIndex)
-  if (after) html += renderMarkdown(after)
-  summaryMermaidDiagrams.value = diagrams
-  return html || renderMarkdown(text)
-}
-
-async function getMermaidRenderer() {
-  if (!mermaidRenderer) {
-    mermaidRenderer = (await import('mermaid')).default
-  }
-  if (mermaidConfigured) return mermaidRenderer
-
-  const mermaid = mermaidRenderer
-  mermaid.initialize({
-    startOnLoad: false,
-    theme: 'neutral',
-    securityLevel: 'strict',
-    flowchart: {
-      useMaxWidth: true,
-      htmlLabels: true,
-    },
-  })
-  mermaidConfigured = true
-  return mermaid
-}
-
-function renderMermaidError(source: string, error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error)
-  return [
-    `<div class="summary-mermaid__error">${escapeHtml(t('taskView.mermaidRenderError'))}</div>`,
-    `<pre class="md-code-block hljs"><code>${escapeHtml(source)}</code></pre>`,
-    message ? `<div class="summary-mermaid__error-detail">${escapeHtml(message)}</div>` : '',
-  ].join('')
-}
-
-function resetMermaidViewer() {
-  mermaidViewerVisible.value = false
-  activeMermaidIndex.value = null
-  selectMermaidZoom('fit')
-  stopMermaidViewerDrag()
-}
-
-function isInteractiveMermaidDragTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return false
-  const ignoredSelector = [
-    'button',
-    'a',
-    'input',
-    'textarea',
-    'select',
-    '[role="button"]',
-    '.n-scrollbar-rail',
-    '.n-scrollbar-rail__scrollbar',
-  ].join(', ')
-  return Boolean(target.closest(ignoredSelector))
-}
-
-function getMermaidViewerScrollContainer(target: EventTarget | null): HTMLElement | null {
-  if (!(target instanceof Element)) return null
-  const viewport = target.closest('.summary-mermaid-modal__viewport')
-  return viewport?.querySelector<HTMLElement>('.n-scrollbar-container') ?? null
-}
-
-function handleMermaidViewerMouseDown(event: MouseEvent) {
-  if (event.button !== 0 || isInteractiveMermaidDragTarget(event.target)) return
-
-  const container = getMermaidViewerScrollContainer(event.currentTarget)
-  if (!container) return
-  const canDrag = container.scrollWidth > container.clientWidth || container.scrollHeight > container.clientHeight
-  if (!canDrag) return
-
-  mermaidViewerDrag = {
-    container,
-    startX: event.clientX,
-    startY: event.clientY,
-    scrollLeft: container.scrollLeft,
-    scrollTop: container.scrollTop,
-  }
-  mermaidViewerDragging.value = true
-  event.preventDefault()
-  window.addEventListener('mousemove', handleMermaidViewerMouseMove)
-  window.addEventListener('mouseup', handleMermaidViewerMouseUp)
-}
-
-function handleMermaidViewerMouseMove(event: MouseEvent) {
-  if (!mermaidViewerDrag) return
-
-  const deltaX = event.clientX - mermaidViewerDrag.startX
-  const deltaY = event.clientY - mermaidViewerDrag.startY
-  mermaidViewerDrag.container.scrollLeft = mermaidViewerDrag.scrollLeft - deltaX
-  mermaidViewerDrag.container.scrollTop = mermaidViewerDrag.scrollTop - deltaY
-  event.preventDefault()
-}
-
-function handleMermaidViewerMouseUp() {
-  stopMermaidViewerDrag()
-}
-
-async function handleMermaidViewerWheel(event: WheelEvent) {
-  if (event.deltaY === 0) return
-
-  const container = getMermaidViewerScrollContainer(event.currentTarget)
-  const viewport = event.currentTarget instanceof Element ? event.currentTarget : null
-  const modal = viewport?.closest('.summary-mermaid-modal')
-  if (!container || !modal) return
-
-  const rect = container.getBoundingClientRect()
-  const pointerX = Math.min(container.clientWidth, Math.max(0, event.clientX - rect.left))
-  const pointerY = Math.min(container.clientHeight, Math.max(0, event.clientY - rect.top))
-  const currentZoom = mermaidZoomPercent.value
-  const zoomFactor = event.deltaY < 0 ? 1.1 : 1 / 1.1
-  const nextZoom = clampMermaidZoom(currentZoom * zoomFactor)
-  if (nextZoom === currentZoom) return
-
-  const zoomRatio = nextZoom / currentZoom
-  const nextScrollLeft = (container.scrollLeft + pointerX) * zoomRatio - pointerX
-  const nextScrollTop = (container.scrollTop + pointerY) * zoomRatio - pointerY
-  mermaidCustomZoom.value = nextZoom
-  mermaidZoom.value = 'custom'
-
-  await nextTick()
-  const nextContainer = modal.querySelector<HTMLElement>('.summary-mermaid-modal__viewport .n-scrollbar-container')
-  if (!nextContainer) return
-  nextContainer.scrollLeft = Math.max(0, nextScrollLeft)
-  nextContainer.scrollTop = Math.max(0, nextScrollTop)
-}
-
-function stopMermaidViewerDrag() {
-  if (!mermaidViewerDrag && !mermaidViewerDragging.value) return
-  window.removeEventListener('mousemove', handleMermaidViewerMouseMove)
-  window.removeEventListener('mouseup', handleMermaidViewerMouseUp)
-  mermaidViewerDrag = null
-  mermaidViewerDragging.value = false
-}
-
-function markMermaidDiagramError(
-  root: HTMLElement,
-  diagrams: SummaryMermaidDiagram[],
-  index: number,
-  error: unknown,
-) {
-  const diagram = diagrams[index]
-  const container = root.querySelector<HTMLElement>(`[data-summary-mermaid-index="${index}"]`)
-  const canvas = root.querySelector<HTMLElement>(`[data-summary-mermaid-canvas="${index}"]`)
-  if (!diagram || !container || !canvas) return
-
-  diagram.svg = ''
-  diagram.error = error instanceof Error ? error.message : String(error)
-  canvas.innerHTML = renderMermaidError(diagram.source, error)
-  container.dataset.summaryMermaidState = 'error'
-}
-
-function hydrateSummaryViewerMermaid() {
-  const root = summaryViewerContentRef.value
-  if (!root) return
-
-  summaryMermaidDiagrams.value.forEach((diagram, index) => {
-    const container = root.querySelector<HTMLElement>(`[data-summary-mermaid-index="${index}"]`)
-    const canvas = root.querySelector<HTMLElement>(`[data-summary-mermaid-canvas="${index}"]`)
-    if (!container || !canvas) return
-
-    if (diagram.svg) {
-      canvas.innerHTML = diagram.svg
-      container.dataset.summaryMermaidState = 'ready'
-    } else if (diagram.error) {
-      canvas.innerHTML = renderMermaidError(diagram.source, diagram.error)
-      container.dataset.summaryMermaidState = 'error'
-    }
-  })
-}
-
-function cleanupMermaidRenderArtifacts(renderId: string) {
-  document.getElementById(`d${renderId}`)?.remove()
-  document.getElementById(`i${renderId}`)?.remove()
-}
-
-async function renderSummaryMermaidDiagrams(renderRun: number) {
-  const diagrams = summaryMermaidDiagrams.value
-  if (diagrams.length === 0) return
-
-  await nextTick()
-  if (renderRun !== summaryMermaidRenderRun) return
-
-  const root = summaryContentRef.value
-  if (!root) return
-
-  let mermaid: typeof import('mermaid').default
-  try {
-    mermaid = await getMermaidRenderer()
-  } catch (error) {
-    if (renderRun !== summaryMermaidRenderRun) return
-    diagrams.forEach((_, index) => markMermaidDiagramError(root, diagrams, index, error))
-    summaryMermaidDiagrams.value = [...diagrams]
-    return
-  }
-  if (renderRun !== summaryMermaidRenderRun) return
-
-  await Promise.all(diagrams.map(async (diagram, index) => {
-    const container = root.querySelector<HTMLElement>(`[data-summary-mermaid-index="${index}"]`)
-    const canvas = root.querySelector<HTMLElement>(`[data-summary-mermaid-canvas="${index}"]`)
-    if (!container || !canvas) return
-
-    try {
-      const renderId = `summary-mermaid-${props.task.id}-${renderRun}-${index}`
-      cleanupMermaidRenderArtifacts(renderId)
-      const { svg, bindFunctions } = await mermaid.render(renderId, diagram.source, canvas)
-      if (renderRun !== summaryMermaidRenderRun) return
-      diagram.svg = svg
-      diagram.error = ''
-      canvas.innerHTML = svg
-      bindFunctions?.(canvas)
-      container.dataset.summaryMermaidState = 'ready'
-    } catch (error) {
-      if (renderRun !== summaryMermaidRenderRun) return
-      markMermaidDiagramError(root, diagrams, index, error)
-    } finally {
-      const renderId = `summary-mermaid-${props.task.id}-${renderRun}-${index}`
-      cleanupMermaidRenderArtifacts(renderId)
-    }
-  }))
-
-  summaryMermaidDiagrams.value = [...diagrams]
-}
-
-function syncSummaryRender() {
-  const text = summaryText.value.trim()
-  if (!text) {
-    summaryMermaidRenderRun += 1
-    summaryRenderedHtml.value = ''
-    summaryRenderedSource.value = ''
-    summaryMermaidDiagrams.value = []
-    resetMermaidViewer()
-    return
-  }
-  if (summaryRenderedSource.value === text) return
-  const renderRun = ++summaryMermaidRenderRun
-  resetMermaidViewer()
-  summaryRenderedHtml.value = renderSummaryMarkdown(text)
-  summaryRenderedSource.value = text
-  if (summaryMermaidDiagrams.value.length === 0) return
-  void renderSummaryMermaidDiagrams(renderRun)
-}
-
-async function loadSummaryPayloadIfNeeded() {
-  const entry = summaryEntry.value
-  if (!entry) return
-
-  if (entry.text) return
-  if (entry.payloadId && !summaryPayloadLoaded.value && !summaryPayloadLoading.value) {
-    summaryPayloadLoading.value = true
-    try {
-      const payload = await getTaskPayload(props.task.id, entry.payloadId)
-      summaryPayloadText.value = payload.content
-      summaryPayloadLoaded.value = true
-    } catch {
-      // silently fail; empty state shown
-    } finally {
-      summaryPayloadLoading.value = false
-    }
-  }
-}
 
 async function toggleSummary() {
   summaryExpanded.value = !summaryExpanded.value
@@ -843,73 +396,6 @@ async function openSummaryViewer() {
   await loadSummaryPayloadIfNeeded()
   syncSummaryRender()
   summaryViewerVisible.value = true
-}
-
-const summaryCopied = ref(false)
-let summaryCopiedTimer: ReturnType<typeof setTimeout> | undefined
-const mermaidCopyTimers = new Map<HTMLButtonElement, ReturnType<typeof setTimeout>>()
-
-async function copySource(source: string): Promise<boolean> {
-  if (!source) {
-    message.error(t('taskView.copyFailed'))
-    return false
-  }
-  try {
-    await navigator.clipboard.writeText(source)
-    message.success(t('taskView.copied'))
-    return true
-  } catch {
-    message.error(t('taskView.copyFailed'))
-    return false
-  }
-}
-
-async function copySummarySource() {
-  await loadSummaryPayloadIfNeeded()
-  const ok = await copySource(summaryText.value)
-  if (!ok) return
-  summaryCopied.value = true
-  if (summaryCopiedTimer) clearTimeout(summaryCopiedTimer)
-  summaryCopiedTimer = setTimeout(() => { summaryCopied.value = false }, 2000)
-}
-
-onBeforeUnmount(() => {
-  if (summaryCopiedTimer) clearTimeout(summaryCopiedTimer)
-  mermaidCopyTimers.forEach(timer => clearTimeout(timer))
-  mermaidCopyTimers.clear()
-})
-
-function handleSummaryContentClick(event: MouseEvent) {
-  const target = event.target
-  if (!(target instanceof HTMLElement)) return
-
-  const button = target.closest<HTMLButtonElement>('[data-summary-mermaid-action]')
-  if (!button) return
-
-  const index = Number(button.dataset.summaryMermaidIndex)
-  if (!Number.isInteger(index)) return
-  const diagram = summaryMermaidDiagrams.value[index]
-  if (!diagram) return
-
-  if (button.dataset.summaryMermaidAction === 'copy') {
-    void copySource(diagram.source).then(ok => {
-      if (!ok) return
-      const activeTimer = mermaidCopyTimers.get(button)
-      if (activeTimer) clearTimeout(activeTimer)
-      button.textContent = t('taskView.copied')
-      const timer = setTimeout(() => {
-        button.textContent = t('taskView.copySource')
-        mermaidCopyTimers.delete(button)
-      }, 2000)
-      mermaidCopyTimers.set(button, timer)
-    })
-    return
-  }
-  if (button.dataset.summaryMermaidAction !== 'zoom' || !diagram.svg) return
-
-  activeMermaidIndex.value = index
-  selectMermaidZoom('fit')
-  mermaidViewerVisible.value = true
 }
 
 const commitUrl = computed(() => {

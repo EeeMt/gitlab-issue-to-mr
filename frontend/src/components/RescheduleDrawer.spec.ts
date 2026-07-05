@@ -123,6 +123,22 @@ vi.mock('naive-ui', () => ({
       })
     },
   },
+  NTooltip: {
+    name: 'NTooltip',
+    setup(_props: any, { slots }: any) {
+      return () => h('div', { class: 'n-tooltip' }, [
+        slots.trigger?.(),
+        slots.default?.(),
+      ])
+    },
+  },
+  NIcon: {
+    name: 'NIcon',
+    props: ['component', 'size'],
+    setup() {
+      return () => h('i', { class: 'n-icon' })
+    },
+  },
   useMessage: () => mockMessage,
 }))
 

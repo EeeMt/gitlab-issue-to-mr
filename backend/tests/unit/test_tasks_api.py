@@ -35,6 +35,7 @@ def _make_task(status: TaskStatus, scheduled_at=None) -> MagicMock:
 # validate_task_status_for_cancel
 # ---------------------------------------------------------------------------
 
+
 class ValidateCancelTests(unittest.TestCase):
     """Tests for validate_task_status_for_cancel."""
 
@@ -57,6 +58,7 @@ class ValidateCancelTests(unittest.TestCase):
 # validate_task_status_for_retry
 # ---------------------------------------------------------------------------
 
+
 class ValidateRetryTests(unittest.TestCase):
     """Tests for validate_task_status_for_retry."""
 
@@ -68,7 +70,12 @@ class ValidateRetryTests(unittest.TestCase):
 
     def test_retry_invalid_statuses(self) -> None:
         """PENDING, RUNNING, QUEUED and COMPLETED tasks cannot be retried."""
-        for status in [TaskStatus.PENDING, TaskStatus.RUNNING, TaskStatus.QUEUED, TaskStatus.COMPLETED]:
+        for status in [
+            TaskStatus.PENDING,
+            TaskStatus.RUNNING,
+            TaskStatus.QUEUED,
+            TaskStatus.COMPLETED,
+        ]:
             with self.subTest(status=status):
                 with self.assertRaises(HTTPException) as ctx:
                     validate_task_status_for_retry(_make_task(status))
@@ -78,6 +85,7 @@ class ValidateRetryTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # validate_task_status_for_execute
 # ---------------------------------------------------------------------------
+
 
 class ValidateExecuteTests(unittest.TestCase):
     """Tests for validate_task_status_for_execute."""
@@ -89,8 +97,12 @@ class ValidateExecuteTests(unittest.TestCase):
 
     def test_execute_invalid_statuses(self) -> None:
         """Non-PENDING/QUEUED tasks cannot be executed immediately."""
-        for status in [TaskStatus.RUNNING, TaskStatus.FAILED,
-                       TaskStatus.CANCELLED, TaskStatus.COMPLETED]:
+        for status in [
+            TaskStatus.RUNNING,
+            TaskStatus.FAILED,
+            TaskStatus.CANCELLED,
+            TaskStatus.COMPLETED,
+        ]:
             with self.subTest(status=status):
                 with self.assertRaises(HTTPException) as ctx:
                     validate_task_status_for_execute(_make_task(status))
@@ -100,6 +112,7 @@ class ValidateExecuteTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # validate_task_status_for_reschedule
 # ---------------------------------------------------------------------------
+
 
 class ValidateRescheduleTests(unittest.TestCase):
     """Tests for validate_task_status_for_reschedule."""
@@ -133,6 +146,7 @@ class ValidateRescheduleTests(unittest.TestCase):
 # validate_scheduled_datetime_in_future
 # ---------------------------------------------------------------------------
 
+
 class ValidateScheduledDatetimeTests(unittest.TestCase):
     """Tests for validate_scheduled_datetime_in_future."""
 
@@ -159,6 +173,7 @@ class ValidateScheduledDatetimeTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # cancel_task endpoint via FastAPI TestClient
 # ---------------------------------------------------------------------------
+
 
 class CancelTaskEndpointTests(unittest.TestCase):
     """Integration-style tests for the POST /api/tasks/{task_id}/cancel endpoint."""
@@ -202,7 +217,7 @@ class CancelTaskEndpointTests(unittest.TestCase):
 
         client, app = self._get_client(task)
 
-        with patch("app.api.task_operations.notify_task_cancelled", new=AsyncMock()):
+        with patch("app.api.task_action_routes.notify_task_cancelled", new=AsyncMock()):
             with patch("app.core.task_helpers._require_task_operator", return_value=None):
                 response = client.post("/api/tasks/1/cancel")
 
@@ -223,9 +238,11 @@ class CancelTaskEndpointTests(unittest.TestCase):
 
         client, app = self._get_client(task)
 
-        with patch("app.api.task_operations.notify_task_cancelled", new=AsyncMock()):
+        with patch("app.api.task_action_routes.notify_task_cancelled", new=AsyncMock()):
             with patch("app.core.task_helpers._require_task_operator", return_value=None):
-                with patch("app.api.tasks.release_issue_execution_lock", new=AsyncMock()) as mock_release:
+                with patch(
+                    "app.api.task_action_routes.release_issue_execution_lock", new=AsyncMock()
+                ) as mock_release:
                     response = client.post("/api/tasks/2/cancel")
 
         app.dependency_overrides.clear()
@@ -306,7 +323,9 @@ class CancelTaskEndpointTests(unittest.TestCase):
             return_value=MagicMock(worker_workspace_host_path="/opt/codify-workspaces"),
         ):
             with patch("app.api.tasks.build_issue_workspace_paths", return_value=paths):
-                with patch("app.api.tasks.remove_issue_workspace", return_value=True) as mock_remove:
+                with patch(
+                    "app.api.tasks.remove_issue_workspace", return_value=True
+                ) as mock_remove:
                     response = client.delete("/api/tasks/4/workspace")
 
         app.dependency_overrides.clear()
@@ -322,11 +341,11 @@ class CancelTaskEndpointTests(unittest.TestCase):
 
 
 class TestRequireChangesSchema(unittest.TestCase):
-    def test_create_task_request_defaults_require_changes_to_true(self):
+    def test_create_task_request_defaults_require_changes_to_false(self):
         from app.api.task_schemas import CreateTaskRequest
 
         req = CreateTaskRequest(issue_id=1, provider_id=1)
-        self.assertTrue(req.require_changes)
+        self.assertFalse(req.require_changes)
 
     def test_create_task_request_accepts_explicit_false(self):
         from app.api.task_schemas import CreateTaskRequest
@@ -370,8 +389,10 @@ class TestRequireChangesSerialization(unittest.TestCase):
         task.completed_at = None
         task.require_changes = True
 
-        with patch("app.core.task_helpers.get_effective_settings",
-                   return_value=MagicMock(gitlab_url="http://gitlab.example.com")):
+        with patch(
+            "app.core.task_helpers.get_effective_settings",
+            return_value=MagicMock(gitlab_url="http://gitlab.example.com"),
+        ):
             with patch("app.core.task_helpers.sa_inspect") as mock_inspect:
                 mock_insp = MagicMock()
                 mock_insp.unloaded = {"issue", "provider"}
@@ -389,6 +410,7 @@ if __name__ == "__main__":
 # ---------------------------------------------------------------------------
 # Helper: make a serializable mock task (all attributes _serialize_task needs)
 # ---------------------------------------------------------------------------
+
 
 def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_id=1):
     """Create a mock task with all attributes needed for _serialize_task."""
@@ -498,11 +520,13 @@ def _make_app_client_with_db(mock_db, extra_overrides=None):
 # GET /tasks/{task_id}/logs — log retrieval endpoint
 # ---------------------------------------------------------------------------
 
+
 class GetTaskLogsAPITests(unittest.TestCase):
     """Tests for GET /api/tasks/{task_id}/logs."""
 
     def tearDown(self):
         from app.main import app
+
         app.dependency_overrides.clear()
 
     def test_get_task_logs_returns_logs_for_valid_task(self):
@@ -754,16 +778,19 @@ class GetTaskLogsAPITests(unittest.TestCase):
 # POST /tasks/{task_id}/retry — retry endpoint
 # ---------------------------------------------------------------------------
 
+
 class RetryTaskAPITests(unittest.TestCase):
     """Tests for POST /api/tasks/{task_id}/retry."""
 
     def tearDown(self):
         from app.main import app
+
         app.dependency_overrides.clear()
 
     def test_retry_task_success_for_failed_task(self):
         """POST /api/tasks/{id}/retry should create a new retry task from a FAILED task."""
         from app.models import Task
+
         task = _make_serializable_task(task_status=TaskStatus.FAILED)
         task.id = 5
         task.project_id = 1
@@ -798,7 +825,7 @@ class RetryTaskAPITests(unittest.TestCase):
         client, app = _make_app_client_with_db(mock_db)
 
         with (
-            patch("app.api.task_operations.notify_task_retried", new=AsyncMock()),
+            patch("app.api.tasks.notify_task_retried", new=AsyncMock()),
             patch("app.core.task_helpers._require_task_operator", return_value=None),
             patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
             patch(
@@ -826,6 +853,7 @@ class RetryTaskAPITests(unittest.TestCase):
     def test_retry_task_success_for_cancelled_task(self):
         """POST /api/tasks/{id}/retry should create a new retry task from a CANCELLED task."""
         from app.models import Task
+
         task = _make_serializable_task(task_status=TaskStatus.CANCELLED)
         task.id = 6
         task.project_id = 1
@@ -851,7 +879,14 @@ class RetryTaskAPITests(unittest.TestCase):
                 obj.updated_at = now
 
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_default_provider, mock_result_issue])
+        mock_db.execute = AsyncMock(
+            side_effect=[
+                mock_result_task,
+                mock_result_no_retry,
+                mock_result_default_provider,
+                mock_result_issue,
+            ]
+        )
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.flush = AsyncMock()
@@ -860,7 +895,7 @@ class RetryTaskAPITests(unittest.TestCase):
         client, app = _make_app_client_with_db(mock_db)
 
         with (
-            patch("app.api.task_operations.notify_task_retried", new=AsyncMock()),
+            patch("app.api.tasks.notify_task_retried", new=AsyncMock()),
             patch("app.core.task_helpers._require_task_operator", return_value=None),
             patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
             patch(
@@ -888,6 +923,7 @@ class RetryTaskAPITests(unittest.TestCase):
     def test_retry_task_preserves_provider_id(self):
         """POST /api/tasks/{id}/retry should keep the original provider_id."""
         from app.models import Task
+
         task = _make_serializable_task(task_status=TaskStatus.FAILED)
         task.id = 7
         task.project_id = 1
@@ -910,7 +946,9 @@ class RetryTaskAPITests(unittest.TestCase):
                 obj.updated_at = now
 
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue])
+        mock_db.execute = AsyncMock(
+            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue]
+        )
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.flush = AsyncMock()
@@ -919,7 +957,7 @@ class RetryTaskAPITests(unittest.TestCase):
         client, app = _make_app_client_with_db(mock_db)
 
         with (
-            patch("app.api.task_operations.notify_task_retried", new=AsyncMock()),
+            patch("app.api.tasks.notify_task_retried", new=AsyncMock()),
             patch("app.core.task_helpers._require_task_operator", return_value=None),
             patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
             patch(
@@ -988,7 +1026,7 @@ class RetryTaskAPITests(unittest.TestCase):
 
         client, app = _make_app_client_with_db(mock_db)
         with (
-            patch("app.api.task_operations.notify_task_retried", new=AsyncMock()),
+            patch("app.api.tasks.notify_task_retried", new=AsyncMock()),
             patch("app.core.task_helpers._require_task_operator", return_value=None),
             patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
             patch(
@@ -1112,7 +1150,9 @@ class RetryTaskAPITests(unittest.TestCase):
         mock_result_issue.scalar_one_or_none.return_value = MagicMock(id=1, project_id=1)
 
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue])
+        mock_db.execute = AsyncMock(
+            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue]
+        )
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock()
@@ -1140,14 +1180,16 @@ class RetryTaskAPITests(unittest.TestCase):
                     raise_if_over_limit=AsyncMock(
                         side_effect=UsageLimitExceeded(
                             scope="create",
-                            exceeded_items=[{
-                                "field": "daily_tasks",
-                                "window": "daily",
-                                "metric": "tasks",
-                                "used": 6,
-                                "limit": 5,
-                                "reset_at": "2026-04-28T00:00:00+00:00",
-                            }],
+                            exceeded_items=[
+                                {
+                                    "field": "daily_tasks",
+                                    "window": "daily",
+                                    "metric": "tasks",
+                                    "used": 6,
+                                    "limit": 5,
+                                    "reset_at": "2026-04-28T00:00:00+00:00",
+                                }
+                            ],
                         )
                     )
                 ),
@@ -1198,11 +1240,13 @@ class RetryTaskAPITests(unittest.TestCase):
 # POST /tasks/{task_id}/execute — immediate execution endpoint
 # ---------------------------------------------------------------------------
 
+
 class ExecuteTaskAPITests(unittest.TestCase):
     """Tests for POST /api/tasks/{task_id}/execute."""
 
     def tearDown(self):
         from app.main import app
+
         app.dependency_overrides.clear()
 
     def test_execute_task_success_for_pending_task(self):
@@ -1222,7 +1266,7 @@ class ExecuteTaskAPITests(unittest.TestCase):
 
         client, app = _make_app_client_with_db(mock_db)
 
-        with patch("app.api.task_operations.notify_task_execute_now", new=AsyncMock()):
+        with patch("app.api.task_action_routes.notify_task_execute_now", new=AsyncMock()):
             with patch("app.core.task_helpers._require_task_operator", return_value=None):
                 response = client.post("/api/tasks/10/execute")
 
@@ -1271,11 +1315,13 @@ class ExecuteTaskAPITests(unittest.TestCase):
 # GET /tasks/{task_id}/stats — task MR stats endpoint
 # ---------------------------------------------------------------------------
 
+
 class GetTaskStatsAPITests(unittest.TestCase):
     """Tests for GET /api/tasks/{task_id}/stats."""
 
     def tearDown(self):
         from app.main import app
+
         app.dependency_overrides.clear()
 
     def test_get_task_stats_returns_db_values_when_available(self):
@@ -1346,11 +1392,13 @@ class GetTaskStatsAPITests(unittest.TestCase):
 # POST /tasks — create task endpoint
 # ---------------------------------------------------------------------------
 
+
 class CreateTaskAPITests(unittest.TestCase):
     """Tests for POST /api/tasks endpoint."""
 
     def tearDown(self):
         from app.main import app
+
         app.dependency_overrides.clear()
 
     def test_create_task_success(self):
@@ -1410,12 +1458,15 @@ class CreateTaskAPITests(unittest.TestCase):
                 new=AsyncMock(return_value=_make_worker_snapshot(task_id=99)),
             ),
         ):
-            response = client.post("/api/tasks", json={
-                "issue_id": 1,
-                "user_prompt": "Fix the login bug",
-                "priority": 0,
-                "provider_id": 1,
-            })
+            response = client.post(
+                "/api/tasks",
+                json={
+                    "issue_id": 1,
+                    "user_prompt": "Fix the login bug",
+                    "priority": 0,
+                    "provider_id": 1,
+                },
+            )
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 200)
@@ -1483,24 +1534,29 @@ class CreateTaskAPITests(unittest.TestCase):
                     raise_if_over_limit=AsyncMock(
                         side_effect=UsageLimitExceeded(
                             scope="create",
-                            exceeded_items=[{
-                                "metric": "tokens",
-                                "window": "daily",
-                                "used": 120000,
-                                "limit": 100000,
-                                "reset_at": "2026-04-28T00:00:00+08:00",
-                            }],
+                            exceeded_items=[
+                                {
+                                    "metric": "tokens",
+                                    "window": "daily",
+                                    "used": 120000,
+                                    "limit": 100000,
+                                    "reset_at": "2026-04-28T00:00:00+08:00",
+                                }
+                            ],
                         )
                     )
                 ),
             ),
         ):
-            response = client.post("/api/tasks", json={
-                "issue_id": 1,
-                "user_prompt": "Ship it",
-                "priority": 0,
-                "provider_id": 1,
-            })
+            response = client.post(
+                "/api/tasks",
+                json={
+                    "issue_id": 1,
+                    "user_prompt": "Ship it",
+                    "priority": 0,
+                    "provider_id": 1,
+                },
+            )
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 409)
@@ -1511,11 +1567,13 @@ class CreateTaskAPITests(unittest.TestCase):
 # Additional cancel tests
 # ---------------------------------------------------------------------------
 
+
 class CancelTaskAdditionalTests(unittest.TestCase):
     """Additional tests for the cancel task endpoint."""
 
     def tearDown(self):
         from app.main import app
+
         app.dependency_overrides.clear()
 
     def test_cancel_task_returns_400_for_completed_task(self):
@@ -1543,11 +1601,13 @@ class CancelTaskAdditionalTests(unittest.TestCase):
 # GET /tasks/{task_id} — get single task endpoint
 # ---------------------------------------------------------------------------
 
+
 class GetTaskEndpointTests(unittest.TestCase):
     """Tests for GET /api/tasks/{task_id} endpoint."""
 
     def tearDown(self):
         from app.main import app
+
         app.dependency_overrides.clear()
 
     def test_get_task_returns_serialized_task(self):
@@ -1635,11 +1695,13 @@ class GetTaskEndpointTests(unittest.TestCase):
 # PATCH /tasks/{task_id}/stats — update task stats endpoint
 # ---------------------------------------------------------------------------
 
+
 class UpdateTaskStatsAPITests(unittest.TestCase):
     """Tests for PATCH /api/tasks/{task_id}/stats endpoint."""
 
     def tearDown(self):
         from app.main import app
+
         app.dependency_overrides.clear()
 
     def test_update_task_stats_success(self):
@@ -1687,16 +1749,19 @@ class UpdateTaskStatsAPITests(unittest.TestCase):
 # POST /tasks/{task_id}/retry — with scheduled_datetime
 # ---------------------------------------------------------------------------
 
+
 class RetryTaskWithScheduleTests(unittest.TestCase):
     """Tests for retry task with a scheduled_datetime in request body."""
 
     def tearDown(self):
         from app.main import app
+
         app.dependency_overrides.clear()
 
     def test_retry_task_with_future_scheduled_datetime(self):
         """POST /api/tasks/{id}/retry with future scheduled_datetime schedules retry."""
         from app.models import Task
+
         task = _make_serializable_task(task_status=TaskStatus.FAILED)
         task.id = 80
         task.project_id = 1
@@ -1741,7 +1806,7 @@ class RetryTaskWithScheduleTests(unittest.TestCase):
         future_dt = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
 
         with (
-            patch("app.api.task_operations.notify_task_retried", new=AsyncMock()),
+            patch("app.api.tasks.notify_task_retried", new=AsyncMock()),
             patch("app.core.task_helpers._require_task_operator", return_value=None),
             patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
             patch(
@@ -1757,9 +1822,7 @@ class RetryTaskWithScheduleTests(unittest.TestCase):
                 new=AsyncMock(return_value=_make_worker_snapshot(task_id=102)),
             ),
         ):
-            response = client.post("/api/tasks/80/retry", json={
-                "scheduled_datetime": future_dt
-            })
+            response = client.post("/api/tasks/80/retry", json={"scheduled_datetime": future_dt})
 
         app.dependency_overrides.clear()
 
@@ -1775,6 +1838,7 @@ class ListTasksProviderTests(unittest.TestCase):
 
     def tearDown(self):
         from app.main import app
+
         app.dependency_overrides.clear()
 
     def test_list_tasks_includes_provider_name_when_loaded(self):
@@ -1810,11 +1874,13 @@ class ListTasksProviderTests(unittest.TestCase):
 # GET /tasks — list tasks with restricted access scope
 # ---------------------------------------------------------------------------
 
+
 class ListTasksRestrictedScopeTests(unittest.TestCase):
     """Tests for GET /api/tasks with restricted access scope."""
 
     def tearDown(self):
         from app.main import app
+
         app.dependency_overrides.clear()
 
     def _setup_restricted_client(self, tasks_list, accessible_project_ids):
@@ -1823,7 +1889,9 @@ class ListTasksRestrictedScopeTests(unittest.TestCase):
         from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
         from app.main import app
 
-        accessible_projects = [{"id": pid, "name": f"Project {pid}"} for pid in accessible_project_ids]
+        accessible_projects = [
+            {"id": pid, "name": f"Project {pid}"} for pid in accessible_project_ids
+        ]
         access_scope = ProjectAccessScope(
             is_unrestricted=False,
             accessible_projects=accessible_projects,
@@ -1885,11 +1953,13 @@ class ListTasksRestrictedScopeTests(unittest.TestCase):
 # GET /tasks — pagination support
 # ---------------------------------------------------------------------------
 
+
 class PaginationTests(unittest.TestCase):
     """Tests for GET /api/tasks hybrid pagination (legacy array vs paginated dict)."""
 
     def tearDown(self):
         from app.main import app
+
         app.dependency_overrides.clear()
 
     def _setup_paginated_client(self, tasks_list, total_count=None):

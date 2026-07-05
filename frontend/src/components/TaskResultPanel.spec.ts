@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest'
 import taskResultPanelSource from './TaskResultPanel.vue?raw'
 import taskRunMetricsSource from './TaskRunMetrics.vue?raw'
 import taskContinuationPanelSource from './TaskContinuationPanel.vue?raw'
+import summaryMermaidSource from '../features/tasks/summaryMermaid.ts?raw'
+import summaryMermaidViewerSource from '../features/tasks/useSummaryMermaidViewer.ts?raw'
+import summaryCollapseFloatSource from '../features/tasks/useSummaryCollapseFloat.ts?raw'
+import summaryRendererSource from '../features/tasks/useSummaryRenderer.ts?raw'
+import deliverySummaryPayloadSource from '../features/tasks/useDeliverySummaryPayload.ts?raw'
+import summaryCopyActionsSource from '../features/tasks/useSummaryCopyActions.ts?raw'
 
 function cssBlock(selector: string): string {
   const start = taskResultPanelSource.indexOf(`${selector} {`)
@@ -21,7 +27,9 @@ describe('TaskResultPanel', () => {
 
   it('execution summary card is guarded by selectedSummaryLog and uses result-card--summary-text class', () => {
     expect(taskResultPanelSource).toContain('v-if="selectedSummaryLog"')
-    expect(taskResultPanelSource).toContain('props.deliverySummaryLog ?? props.lastAssistantLog ?? null')
+    expect(deliverySummaryPayloadSource).toContain(
+      'options.deliverySummaryLog.value ?? options.lastAssistantLog.value ?? null'
+    )
     expect(taskResultPanelSource).toContain('result-card--summary-text')
     // Both must appear together on the same element
     const summaryCardIndex = taskResultPanelSource.indexOf('result-card--summary-text')
@@ -45,19 +53,21 @@ describe('TaskResultPanel', () => {
     expect(taskResultPanelSource).toContain('openSummaryViewer')
     expect(taskResultPanelSource).toContain('class="summary-content-modal"')
     expect(taskResultPanelSource).toContain('ref="summaryViewerContentRef"')
-    expect(taskResultPanelSource).toContain('function hydrateSummaryViewerMermaid()')
-    expect(taskResultPanelSource).toContain('canvas.innerHTML = diagram.svg')
+    expect(summaryRendererSource).toContain('function hydrateSummaryViewerMermaid()')
+    expect(summaryRendererSource).toContain('canvas.innerHTML = diagram.svg')
     expect(taskResultPanelSource).toContain("width: 'min(1320px, calc(100vw - 32px))'")
   })
 
   it('copies the complete raw delivery summary from the card and large viewer', () => {
     expect(taskResultPanelSource.match(/@click(?:\.stop)?="copySummarySource"/g)).toHaveLength(2)
-    expect(taskResultPanelSource).toContain('async function copySummarySource()')
-    expect(taskResultPanelSource).toContain('await loadSummaryPayloadIfNeeded()')
-    expect(taskResultPanelSource).toContain('await copySource(summaryText.value)')
-    expect(taskResultPanelSource).toContain('await navigator.clipboard.writeText(source)')
-    expect(taskResultPanelSource).toContain("message.success(t('taskView.copied'))")
-    expect(taskResultPanelSource).toContain('summaryCopied.value = true')
+    expect(summaryCopyActionsSource).toContain('async function copySummarySource()')
+    expect(summaryCopyActionsSource).toContain(
+      'const payloadAvailable = await options.loadSummaryPayloadIfNeeded()'
+    )
+    expect(summaryCopyActionsSource).toContain('await copySource(options.summaryText.value)')
+    expect(summaryCopyActionsSource).toContain('await navigator.clipboard.writeText(source)')
+    expect(summaryCopyActionsSource).toContain("message.success(t('taskView.copied'))")
+    expect(summaryCopyActionsSource).toContain('summaryCopied.value = true')
     expect(taskResultPanelSource).toContain('summaryCopied ? Checkmark : CopyOutline')
   })
 
@@ -71,10 +81,10 @@ describe('TaskResultPanel', () => {
   })
 
   it('copies the original Mermaid source from every diagram card', () => {
-    expect(taskResultPanelSource).toContain('data-summary-mermaid-action="copy"')
-    expect(taskResultPanelSource).toContain('const diagram = summaryMermaidDiagrams.value[index]')
-    expect(taskResultPanelSource).toContain('void copySource(diagram.source)')
-    expect(taskResultPanelSource).toContain("button.textContent = t('taskView.copied')")
+    expect(summaryMermaidSource).toContain('data-summary-mermaid-action="copy"')
+    expect(summaryCopyActionsSource).toContain('const diagram = options.diagrams.value[index]')
+    expect(summaryCopyActionsSource).toContain('void copySource(diagram.source)')
+    expect(summaryCopyActionsSource).toContain("button.textContent = t('taskView.copied')")
   })
 
   it('presents the full delivery summary as a focused document reader', () => {
@@ -105,9 +115,8 @@ describe('TaskResultPanel', () => {
     expect(taskResultPanelSource).toContain('class="summary-collapse-footer"')
     expect(taskResultPanelSource).toContain(':style="summaryCollapseFloatStyle"')
     expect(taskResultPanelSource).toContain('ref="summaryCardRef"')
-    expect(taskResultPanelSource).toContain('function updateSummaryCollapseFloat()')
-    expect(taskResultPanelSource).toContain('summaryCollapseFloatEndThreshold')
-    expect(taskResultPanelSource).toContain('rect.bottom <= window.innerHeight + summaryCollapseFloatEndThreshold')
+    expect(summaryCollapseFloatSource).toContain('function update()')
+    expect(summaryCollapseFloatSource).toContain('rect.bottom <= window.innerHeight + 160')
     expect(taskResultPanelSource).toContain('@click="toggleSummary"')
     expect(taskResultPanelSource).toContain("{{ t('taskView.summaryCollapse') }}")
     expect(collapseFloat).toContain('position: fixed;')
@@ -169,31 +178,32 @@ describe('TaskResultPanel', () => {
   })
 
   it('adds Mermaid rendering only to the AI delivery summary panel', () => {
-    expect(taskResultPanelSource).toContain("await import('mermaid')")
-    expect(taskResultPanelSource).not.toContain("import mermaid from 'mermaid'")
-    expect(taskResultPanelSource).toContain('function renderSummaryMarkdown(text: string): string')
-    expect(taskResultPanelSource).toContain('[ \\t]*mermaid')
-    expect(taskResultPanelSource).toContain('const renderRun = ++summaryMermaidRenderRun')
-    expect(taskResultPanelSource).toContain('summaryRenderedHtml.value = renderSummaryMarkdown(text)')
-    expect(taskResultPanelSource).toContain('if (summaryMermaidDiagrams.value.length === 0) return')
-    expect(taskResultPanelSource).toContain('renderSummaryMermaidDiagrams(renderRun)')
-    expect(taskResultPanelSource).toContain('renderMarkdown(before)')
-    expect(taskResultPanelSource).toContain('renderMarkdown(after)')
+    expect(summaryRendererSource).toContain("await import('mermaid')")
+    expect(summaryRendererSource).not.toContain("import mermaid from 'mermaid'")
+    expect(summaryMermaidSource).toContain('function renderSummaryMarkdownWithMermaid(')
+    expect(summaryMermaidSource).toContain('[ \\t]*mermaid')
+    expect(summaryRendererSource).toContain('const generation = ++renderGeneration')
+    expect(summaryRendererSource).toContain('renderSummaryMarkdownWithMermaid(text, renderMarkdown')
+    expect(summaryRendererSource).toContain('summaryRenderedHtml.value = rendered.html')
+    expect(summaryRendererSource).toContain('if (options.diagrams.value.length > 0)')
+    expect(summaryRendererSource).toContain('renderSummaryMermaidDiagrams(generation)')
+    expect(summaryMermaidSource).toContain('renderMarkdown(before)')
+    expect(summaryMermaidSource).toContain('renderMarkdown(after)')
   })
 
   it('handles stale and failed Mermaid render attempts without leaving loading placeholders', () => {
-    expect(taskResultPanelSource).toContain('function markMermaidDiagramError(')
-    expect(taskResultPanelSource).toContain('diagrams.forEach((_, index) => markMermaidDiagramError(root, diagrams, index, error))')
-    expect(taskResultPanelSource).toContain('if (renderRun !== summaryMermaidRenderRun) return')
-    expect(taskResultPanelSource).toContain('resetMermaidViewer()')
+    expect(summaryRendererSource).toContain('function markMermaidDiagramError(')
+    expect(summaryRendererSource).toContain('markMermaidDiagramError(root, diagrams, index, error)')
+    expect(summaryRendererSource).toContain('if (generation !== renderGeneration) return')
+    expect(summaryRendererSource).toContain('options.resetMermaidViewer()')
   })
 
   it('keeps Mermaid temporary render artifacts inside the summary canvas', () => {
-    expect(taskResultPanelSource).toContain('function cleanupMermaidRenderArtifacts(renderId: string)')
-    expect(taskResultPanelSource).toContain('document.getElementById(`d${renderId}`)?.remove()')
-    expect(taskResultPanelSource).toContain('document.getElementById(`i${renderId}`)?.remove()')
-    expect(taskResultPanelSource).toContain('await mermaid.render(renderId, diagram.source, canvas)')
-    expect(taskResultPanelSource).toContain('cleanupMermaidRenderArtifacts(renderId)')
+    expect(summaryRendererSource).toContain('function cleanupMermaidRenderArtifacts(renderId: string)')
+    expect(summaryRendererSource).toContain('document.getElementById(`d${renderId}`)?.remove()')
+    expect(summaryRendererSource).toContain('document.getElementById(`i${renderId}`)?.remove()')
+    expect(summaryRendererSource).toContain('const { svg, bindFunctions } = await mermaid.render(')
+    expect(summaryRendererSource).toContain('cleanupMermaidRenderArtifacts(renderId)')
   })
 
   it('provides a larger Mermaid diagram viewer for summary diagrams', () => {
@@ -211,37 +221,36 @@ describe('TaskResultPanel', () => {
     expect(taskResultPanelSource).toContain('summary-mermaid-modal')
     expect(taskResultPanelSource).toContain('mermaidViewerVisible')
     expect(taskResultPanelSource).toContain('mermaidZoomOptions')
-    expect(taskResultPanelSource).toContain('taskView.mermaidOpenLarge')
+    expect(summaryRendererSource).toContain('taskView.mermaidOpenLarge')
     expect(taskResultPanelSource).toContain("height: 'calc(100vh - 32px)'")
     expect(taskResultPanelSource).toContain("width: 'calc(100vw - 32px)'")
     expect(taskResultPanelSource).not.toContain("{ value: '400', label: '400%' }")
-    expect(taskResultPanelSource).toContain('const mermaidCustomZoom = ref(100)')
-    expect(taskResultPanelSource).toContain('const mermaidZoomPercent = computed')
-    expect(taskResultPanelSource).toContain('Math.min(100, mermaidZoomPercent.value)')
-    expect(taskResultPanelSource).toContain('Math.max(100, mermaidZoomPercent.value)')
-    expect(taskResultPanelSource).toContain('width: `${contentZoom}%`')
+    expect(summaryMermaidViewerSource).toContain('const mermaidCustomZoom = ref(100)')
+    expect(summaryMermaidViewerSource).toContain('const mermaidZoomPercent = computed')
+    expect(summaryMermaidViewerSource).toContain('Math.min(100, mermaidZoomPercent.value)')
+    expect(summaryMermaidViewerSource).toContain('Math.max(100, mermaidZoomPercent.value)')
+    expect(summaryMermaidViewerSource).toContain('width: `${contentZoom}%`')
     expect(taskResultPanelSource).toContain('<n-input-number')
     expect(taskResultPanelSource).toContain(':min="mermaidZoomMin"')
     expect(taskResultPanelSource).toContain(':max="mermaidZoomMax"')
     expect(taskResultPanelSource).toContain(':step="10"')
     expect(taskResultPanelSource).toContain('<template #suffix>%</template>')
-    expect(taskResultPanelSource).toContain('applyMermaidViewerSvgStyle(activeMermaidRawSvg.value, mermaidViewerSvgWidth.value)')
+    expect(summaryMermaidViewerSource).toContain("applyMermaidViewerSvgStyle(activeMermaidRawSvg.value, '100%')")
     expect(taskResultPanelSource).toContain(':style="mermaidViewerCanvasStyle"')
-    expect(taskResultPanelSource).toContain('const mermaidViewerCanvasStyle = computed<CSSProperties>')
+    expect(summaryMermaidViewerSource).toContain('const mermaidViewerCanvasStyle = computed<CSSProperties>')
     expect(taskResultPanelSource).toContain(':content-style="mermaidViewerContentStyle"')
-    expect(taskResultPanelSource).toContain('const mermaidViewerContentStyle = computed<CSSProperties>')
-    expect(taskResultPanelSource).toContain("return '100%'")
-    expect(taskResultPanelSource).toContain('width: ${width}; height: auto; max-width: none; display: block;')
-    expect(taskResultPanelSource).toContain('style="$1 ${viewerStyle}"')
+    expect(summaryMermaidViewerSource).toContain('const mermaidViewerContentStyle = computed<CSSProperties>')
+    expect(summaryMermaidSource).toContain('width: ${width}; height: auto; max-width: none; display: block;')
+    expect(summaryMermaidSource).toContain('style="$1 ${viewerStyle}"')
     expect(taskResultPanelSource).toContain(':key="mermaidViewerScrollbarKey"')
-    expect(taskResultPanelSource).toContain('const mermaidViewerScrollbarKey = computed')
+    expect(summaryMermaidViewerSource).toContain('const mermaidViewerScrollbarKey = computed')
     expect(taskResultPanelSource).toContain('@mousedown="handleMermaidViewerMouseDown"')
     expect(taskResultPanelSource).toContain('@wheel.prevent="handleMermaidViewerWheel"')
-    expect(taskResultPanelSource).toContain('function handleMermaidViewerMouseMove(event: MouseEvent)')
-    expect(taskResultPanelSource).toContain('container.scrollLeft = mermaidViewerDrag.scrollLeft - deltaX')
-    expect(taskResultPanelSource).toContain('container.scrollTop = mermaidViewerDrag.scrollTop - deltaY')
-    expect(taskResultPanelSource).toContain("viewport?.querySelector<HTMLElement>('.n-scrollbar-container')")
-    expect(taskResultPanelSource).toContain("window.removeEventListener('mousemove', handleMermaidViewerMouseMove)")
+    expect(summaryMermaidViewerSource).toContain('function handleMermaidViewerMouseMove(event: MouseEvent)')
+    expect(summaryMermaidViewerSource).toContain('container.scrollLeft = mermaidViewerDrag.scrollLeft - deltaX')
+    expect(summaryMermaidViewerSource).toContain('container.scrollTop = mermaidViewerDrag.scrollTop - deltaY')
+    expect(summaryMermaidViewerSource).toContain("viewport?.querySelector<HTMLElement>('.n-scrollbar-container')")
+    expect(summaryMermaidViewerSource).toContain("window.removeEventListener('mousemove', handleMermaidViewerMouseMove)")
     expect(taskResultPanelSource).toContain('class="summary-mermaid-modal__title"')
     expect(taskResultPanelSource).toContain('class="summary-mermaid-modal__zoom-group"')
     expect(mermaidModalHeader).toContain('flex: 0 0 auto;')
@@ -282,17 +291,17 @@ describe('TaskResultPanel', () => {
   })
 
   it('keeps wheel, preset, and custom Mermaid zoom values synchronized', () => {
-    expect(taskResultPanelSource).toContain('const mermaidZoomMin = 10')
-    expect(taskResultPanelSource).toContain('const mermaidZoomMax = 2000')
+    expect(summaryMermaidViewerSource).toContain('const mermaidZoomMin = 10')
+    expect(summaryMermaidViewerSource).toContain('const mermaidZoomMax = 2000')
     expect(taskResultPanelSource).toContain('@click="selectMermaidZoom(option.value)"')
-    expect(taskResultPanelSource).toContain('function selectMermaidZoom(value: MermaidZoom)')
-    expect(taskResultPanelSource).toContain('function clampMermaidZoom(value: number)')
-    expect(taskResultPanelSource).toContain('function handleMermaidViewerWheel(event: WheelEvent)')
-    expect(taskResultPanelSource).toContain("mermaidZoom.value = 'custom'")
-    expect(taskResultPanelSource).toContain('mermaidCustomZoom.value = nextZoom')
-    expect(taskResultPanelSource).toContain('const zoomRatio = nextZoom / currentZoom')
-    expect(taskResultPanelSource).toContain('nextContainer.scrollLeft =')
-    expect(taskResultPanelSource).toContain('nextContainer.scrollTop =')
+    expect(summaryMermaidViewerSource).toContain('function selectMermaidZoom(value: MermaidZoom)')
+    expect(summaryMermaidViewerSource).toContain('function clampMermaidZoom(value: number)')
+    expect(summaryMermaidViewerSource).toContain('function handleMermaidViewerWheel(event: WheelEvent)')
+    expect(summaryMermaidViewerSource).toContain("mermaidZoom.value = 'custom'")
+    expect(summaryMermaidViewerSource).toContain('mermaidCustomZoom.value = nextZoom')
+    expect(summaryMermaidViewerSource).toContain('const zoomRatio = nextZoom / currentZoom')
+    expect(summaryMermaidViewerSource).toContain('nextContainer.scrollLeft =')
+    expect(summaryMermaidViewerSource).toContain('nextContainer.scrollTop =')
   })
 
   it('keeps the Mermaid viewer from changing the page scrollbar gutter', () => {

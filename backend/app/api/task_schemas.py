@@ -109,7 +109,7 @@ class CreateTaskRequest(BaseModel):
     scheduled_datetime: datetime | None = None
     provider_id: int | None = None
     worker_profile_id: int | None = None
-    require_changes: bool | None = True
+    require_changes: bool | None = False
     task_mode: Literal["execute", "plan"] = "execute"
     run_instruction_template: str | None = Field(
         default=None, max_length=MAX_RUN_INSTRUCTION_TEMPLATE_LENGTH
@@ -135,7 +135,7 @@ class CreateTaskRequest(BaseModel):
         """Plan mode never requires code changes."""
         if self.task_mode == "plan":
             return False
-        return self.require_changes if self.require_changes is not None else True
+        return self.require_changes if self.require_changes is not None else False
 
 
 class RunInstructionTemplatePreviewRequest(BaseModel):
@@ -145,4 +145,4 @@ class RunInstructionTemplatePreviewRequest(BaseModel):
     task_mode: Literal["execute", "plan"] = "execute"
     user_prompt: str
     run_instruction_template: str = Field(max_length=MAX_RUN_INSTRUCTION_TEMPLATE_LENGTH)
-    require_changes: bool = True
+    require_changes: bool = False

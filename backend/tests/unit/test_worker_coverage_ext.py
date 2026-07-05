@@ -43,7 +43,7 @@ from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.core.worker import WorkerExecutor
-from app.core.worker_task_lifecycle import _stop_artifact_poller
+from app.core.worker_task_artifacts import _stop_artifact_poller
 from app.models import Task, TaskStatus
 
 # ---------------------------------------------------------------------------
@@ -62,7 +62,7 @@ class TestArtifactPollerShutdown(IsolatedAsyncioTestCase):
 
         poll_task = asyncio.create_task(poller())
 
-        with patch("app.core.worker_task_lifecycle.logger.warning") as mock_warning:
+        with patch("app.core.worker_task_artifacts.logger.warning") as mock_warning:
             await _stop_artifact_poller(
                 task_id=947,
                 stop_event=stop_event,
@@ -80,7 +80,7 @@ class TestArtifactPollerShutdown(IsolatedAsyncioTestCase):
         never_released = asyncio.Event()
         poll_task = asyncio.create_task(never_released.wait())
 
-        with patch("app.core.worker_task_lifecycle.logger.warning") as mock_warning:
+        with patch("app.core.worker_task_artifacts.logger.warning") as mock_warning:
             await _stop_artifact_poller(
                 task_id=947,
                 stop_event=stop_event,
@@ -103,7 +103,7 @@ class TestArtifactPollerShutdown(IsolatedAsyncioTestCase):
 
         poll_task = asyncio.create_task(poller())
 
-        with patch("app.core.worker_task_lifecycle.logger.warning") as mock_warning:
+        with patch("app.core.worker_task_artifacts.logger.warning") as mock_warning:
             await _stop_artifact_poller(
                 task_id=947,
                 stop_event=stop_event,

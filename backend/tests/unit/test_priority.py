@@ -11,9 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
-# Speed up tests by neutralizing asyncio.sleep in worker code
-_patcher_sleep = patch('asyncio.sleep', new_callable=AsyncMock)
-_patcher_sleep.start()
+import pytest
 
 # Mock config before importing worker
 mock_settings = MagicMock()
@@ -34,10 +32,20 @@ mock_settings.custom_ca_bundle = ""
 mock_settings.worker_network = ""
 mock_settings.worker_extra_volumes = ""
 mock_settings.worker_workspace_host_path = "/tmp/test-codify-workspace"
+mock_settings.worker_skip_image_pull = True
 
-with patch('app.core.worker.get_settings', return_value=mock_settings):
-    from app.core.worker import WorkerExecutor
-    from app.models import Issue, Task, TaskStatus
+from app.core.worker import WorkerExecutor
+from app.models import Issue, Task, TaskStatus
+
+
+@pytest.fixture(autouse=True)
+def _worker_test_dependencies():
+    """Keep worker settings and sleep patches scoped to this test module."""
+    with (
+        patch('asyncio.sleep', new_callable=AsyncMock),
+        patch('app.core.worker.get_settings', return_value=mock_settings),
+    ):
+        yield
 
 
 class MockContainer:
@@ -48,7 +56,34 @@ class MockContainer:
 
 def create_mock_db(task, issue=None):
     """Create a properly configured mock database session."""
-    from app.models import AIProvider, Issue
+    from app.models import AIProvider, Issue, TaskWorkerProfileSnapshot
+
+    if getattr(task, "worker_profile_id", None) is None:
+        task.worker_profile_id = 1
+    task.worker_profile_snapshot = TaskWorkerProfileSnapshot(
+        task_id=task.id,
+        worker_profile_id=task.worker_profile_id,
+        profile_name="Default Worker",
+        image="test-worker:latest",
+        volume_mounts=[],
+        environment_variables=[],
+        pre_script="",
+        post_script="",
+        default_execute_run_instruction_template="Execute {{user_prompt}}",
+        default_plan_run_instruction_template="Plan {{user_prompt}}",
+        ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+    )
+    if getattr(task, "provider_id", None) is None:
+        task.provider_id = 1
+    task.provider = AIProvider(
+        id=task.provider_id,
+        name="test-provider",
+        base_url="http://localhost:11434/v1",
+        api_key="test-key",
+        model="claude-sonnet-4-20250514",
+        max_turns=10,
+        is_default=True,
+    )
 
     mock_db = MagicMock()
 
@@ -70,6 +105,8 @@ def create_mock_db(task, issue=None):
     async def _mock_get(model_cls, id_val):
         if model_cls is Issue:
             return issue
+        if model_cls is TaskWorkerProfileSnapshot:
+            return task.worker_profile_snapshot
         if model_cls is AIProvider:
             provider = getattr(task, 'provider', None)
             if provider is not None and getattr(provider, 'id', None) == id_val:

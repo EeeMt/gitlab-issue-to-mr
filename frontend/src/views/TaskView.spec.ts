@@ -442,6 +442,7 @@ vi.mock('@vicons/ionicons5', () => {
     CloseOutline: icon('CloseOutline'),
     CodeSlashOutline: icon('CodeSlashOutline'),
     CodeOutline: icon('CodeOutline'),
+    CopyOutline: icon('CopyOutline'),
     CreateOutline: icon('CreateOutline'),
     CubeOutline: icon('CubeOutline'),
     DocumentTextOutline: icon('DocumentTextOutline'),
@@ -582,6 +583,52 @@ describe('TaskView', () => {
     ;(processPanel.vm as any).activeTab = 'raw'
     await nextTick()
   }
+
+  it('does not let a stale task request overwrite a newly routed task', async () => {
+    await mountComponent()
+
+    let resolveStaleRequest!: (task: ReturnType<typeof createMockTask>) => void
+    const staleRequest = new Promise<ReturnType<typeof createMockTask>>((resolve) => {
+      resolveStaleRequest = resolve
+    })
+    ;(mockApi.getTask as Mock).mockImplementation((id: number) => {
+      if (id === 1) return staleRequest
+      return Promise.resolve(createMockTaskWithStatus('completed', { id: 2 }))
+    })
+
+    const pendingRefresh = wrapper.vm.fetchTask()
+    await router.push('/tasks/2')
+    await vi.waitFor(() => {
+      expect(wrapper.vm.task?.id).toBe(2)
+    })
+
+    resolveStaleRequest(createMockTaskWithStatus('failed', { id: 1 }))
+    await pendingRefresh
+    await flushPromises()
+
+    expect(wrapper.vm.task?.id).toBe(2)
+  })
+
+  it('loads logs when routing to another terminal task in the same view', async () => {
+    await mountComponent()
+    ;(mockApi.getTask as Mock).mockImplementation((id: number) =>
+      Promise.resolve(createMockTaskWithStatus('completed', { id }))
+    )
+    ;(mockApi.getTaskLogs as Mock).mockImplementation((id: number) =>
+      Promise.resolve([
+        createMockTaskLog({ task_id: id, message: `Task ${id} terminal log` })
+      ])
+    )
+    ;(mockApi.getTaskLogs as Mock).mockClear()
+
+    await router.push('/tasks/2')
+    await vi.waitFor(() => {
+      expect(wrapper.vm.task?.id).toBe(2)
+      expect(wrapper.vm.logs).toContain('Task 2 terminal log')
+    })
+
+    expect(mockApi.getTaskLogs).toHaveBeenCalledWith(2)
+  })
 
   it('switches the existing prompt card to the persisted final prompt', async () => {
     await mountComponent({ rendered_prompt: 'Final **rendered** prompt' })

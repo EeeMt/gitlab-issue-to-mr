@@ -497,7 +497,7 @@ import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NSpace, NCard, NTag, NSpin, NDatePicker, NDrawer, NDrawerContent, NIcon, NInput, NModal, NScrollbar, NTooltip, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, streamTaskLogs, getScheduledTasks, getConfig, getIssue, getTaskArchive, downloadTaskArchive, overrideTaskStatus, type Issue, type Task, type TaskLog } from '../api'
+import { getTask, getTaskLogs, cancelTask, retryTask, executeTask, getIssue, getTaskArchive, downloadTaskArchive, overrideTaskStatus, type Issue, type Task, type TaskLog } from '../api'
 import { authState, isAdmin, initializeAuth } from '../auth'
 import { renderMarkdown, summarizeSkillUsage } from '../components/task-process/taskProcessUtils'
 import PageHeader from '../components/PageHeader.vue'
@@ -526,6 +526,11 @@ import TaskFormDrawer from '../components/TaskFormDrawer.vue'
 import RescheduleDrawer from '../components/RescheduleDrawer.vue'
 import AnsiToHtml from 'ansi-to-html'
 import { formatDateTimeUtc8 } from '../utils/datetime'
+import { useTaskScheduleContext } from '../features/tasks/useTaskScheduleContext'
+import {
+  isActiveTaskStatus,
+  useTaskLogStreams,
+} from '../features/tasks/useTaskLogStreams'
 
 const ansiConverter = new AnsiToHtml({ escapeXML: true })
 
@@ -559,7 +564,6 @@ const hasLoadedOnce = ref(false)
 const logsLoading = ref(false)
 const containerLogsLoading = ref(false)
 const actionLoading = ref(false)
-const taskRequestInFlight = ref(false)
 const retryScheduleDatetime = ref<number | null>(null)
 const showScheduleDrawer = ref(false)
 const showEditDrawer = ref(false)
@@ -569,10 +573,13 @@ const showOverrideModal = ref(false)
 const overrideTargetStatus = ref<'completed' | 'failed' | null>(null)
 const overrideReason = ref('')
 const overrideLoading = ref(false)
-const scheduledTasksForPreview = ref<Task[]>([])
-const scheduledTasksLoading = ref(false)
-const slotMaxTasks = ref(0)
-const slotEnforce = ref(false)
+const {
+  scheduledTasks: scheduledTasksForPreview,
+  scheduledTasksLoading,
+  slotMaxTasks,
+  slotEnforce,
+  loadScheduleContext,
+} = useTaskScheduleContext()
 const taskLogs = ref<TaskLog[]>([])
 const activeRetryTask = ref<Task | null>(null)
 const issueTasks = ref<Task[]>([])
@@ -583,20 +590,36 @@ const issueDefaultProviderId = ref<number | null>(null)
 const archiveMetadata = ref<{ archive_name: string; archive_size_bytes: number; created_at: string; file_exists: boolean } | null>(null)
 const archiveDownloadLoading = ref(false)
 let pollTimer: number | null = null
-let logEventSource: EventSource | null = null
-let logStreamTaskId: number | null = null
-let rawLogSequenceNo = 0
-let rawLogStreamFinished = false
-let rawLogsFinalized = false
-let rawTabOpen = false
-let rawLogSnapshotRequest = 0
-let rawLogReconnectInFlight = false
-let structuredLogSse: EventSource | null = null
-// Buffer for logs arriving faster than one-per-tick (e.g. during fast-forward
-// catch-up).  Flushed as a single reactive update via queueMicrotask to avoid
-// O(n²) array copies when hundreds of SSE events arrive in rapid succession.
-let _pendingLogBuffer: TaskLog[] = []
-let _logFlushScheduled = false
+let taskRequestGeneration = 0
+let logRequestGeneration = 0
+const {
+  closeLogStream,
+  closeStructuredLogStream,
+  shouldStreamRawLogs,
+  connectStructuredLogStream,
+  fetchRawLogSnapshot,
+  reconnectLogStream,
+  onRawTabOpen,
+  onRawTabClose,
+  resetLogStreams,
+  hasRawLogStream,
+  hasStructuredLogStream,
+  isRawLogTabOpen,
+} = useTaskLogStreams({
+  taskId,
+  task,
+  taskLogs,
+  containerLogs,
+  containerLogsLoading,
+  translate: t,
+  onStructuredDone: () => {
+    void fetchTask()
+    void fetchLogs()
+  },
+  onRawDone: () => {
+    void fetchTask()
+  },
+})
 watch(taskId, () => {
   promptView.value = 'user'
   promptFullHeight.value = false
@@ -766,10 +789,6 @@ function isScheduledDateDisabled(timestamp: number): boolean {
   return candidate.getTime() < today.getTime()
 }
 
-function isActiveTaskStatus(status?: string | null): boolean {
-  return status === 'running' || status === 'pending' || status === 'queued'
-}
-
 async function checkActiveRetry() {
   if (!task.value || !['failed', 'cancelled'].includes(task.value.status)) {
     activeRetryTask.value = null
@@ -795,7 +814,7 @@ async function checkActiveRetry() {
   }
 }
 
-async function refreshIssueTasks() {
+async function refreshIssueTasks(requestedTaskId: number) {
   const issueId = task.value?.issue_id
   if (!issueId) {
     issueTasks.value = []
@@ -807,12 +826,14 @@ async function refreshIssueTasks() {
   }
   try {
     const issueData = await getIssue(issueId)
+    if (requestedTaskId !== taskId.value || task.value?.issue_id !== issueId) return
     issueTasks.value = issueData.tasks ?? []
     issueDescription.value = issueData.description ?? undefined
     issueStatus.value = issueData.status ?? null
     issueDefaultWorkerProfileId.value = issueData.default_worker_profile_id ?? null
     issueDefaultProviderId.value = issueData.default_provider_id ?? null
   } catch {
+    if (requestedTaskId !== taskId.value || task.value?.issue_id !== issueId) return
     issueTasks.value = []
     issueDescription.value = undefined
     issueStatus.value = null
@@ -821,214 +842,27 @@ async function refreshIssueTasks() {
   }
 }
 
-function closeLogStream() {
-  if (logEventSource) {
-    logEventSource.close()
-    logEventSource = null
-  }
-  logStreamTaskId = null
-}
-
-function closeStructuredLogStream() {
-  if (structuredLogSse) {
-    structuredLogSse.close()
-    structuredLogSse = null
-  }
-  // Discard any buffered logs that haven't been flushed yet.
-  _pendingLogBuffer.length = 0
-  _logFlushScheduled = false
-}
-
-function shouldStreamRawLogs(): boolean {
-  const status = task.value?.status
-  const isTerminalStatus = status === 'completed' || status === 'failed' || status === 'cancelled'
-  return isActiveTaskStatus(status) || (isTerminalStatus && !rawLogsFinalized)
-}
-
-function connectStructuredLogStream() {
-  if (typeof EventSource === 'undefined') return
-  if (!isActiveTaskStatus(task.value?.status)) return
-  if (structuredLogSse) return // already connected
-
-  const sinceId = taskLogs.value.length > 0
-    ? Math.max(...taskLogs.value.map(l => l.id ?? 0))
-    : 0
-
-  // Shared handler: merge an updated log entry into taskLogs by id.
-  const mergeLogUpdate = (log: TaskLog) => {
-    const idx = taskLogs.value.findIndex(l => l.id === log.id)
-    if (idx !== -1) {
-      const updated = [...taskLogs.value]
-      updated[idx] = log
-      taskLogs.value = updated
-    }
-  }
-
-  structuredLogSse = streamTaskLogs(
-    taskId.value,
-    sinceId,
-    (log) => {
-      // Buffer the incoming log and schedule a single microtask flush to avoid
-      // O(n²) array copies when many SSE events arrive back-to-back.
-      _pendingLogBuffer.push(log)
-      if (!_logFlushScheduled) {
-        _logFlushScheduled = true
-        queueMicrotask(() => {
-          _logFlushScheduled = false
-          if (_pendingLogBuffer.length === 0) return
-          const incoming = _pendingLogBuffer.splice(0)
-          const current = taskLogs.value
-          const idSet = new Set(current.map(l => l.id))
-          const toAdd = incoming.filter(l => !idSet.has(l.id))
-          if (toAdd.length > 0) {
-            taskLogs.value = [...current, ...toAdd]
-          }
-          // Handle duplicates (updates) for any that already exist.
-          incoming.filter(l => idSet.has(l.id)).forEach(mergeLogUpdate)
-        })
-      }
-    },
-    () => {
-      // SSE signaled task is done
-      closeStructuredLogStream()
-      fetchTask()
-      fetchLogs()
-    },
-    // "update" events carry in-place metadata changes (e.g. output_payload_id
-    // added to an existing tool_call log row by the worker).
-    mergeLogUpdate,
-  )
-
-  structuredLogSse.onerror = () => {
-    // Don't auto-reconnect — the poll timer will call connectStructuredLogStream() again in 5s
-    closeStructuredLogStream()
-  }
-}
-
-function connectLogStream() {
-  if (typeof EventSource === 'undefined') return
-
-  const containerId = task.value?.container_id
-  if (!containerId || !shouldStreamRawLogs()) {
-    closeLogStream()
-    return
-  }
-
-  const currentTaskId = taskId.value
-  if (logEventSource && logStreamTaskId === currentTaskId) {
-    return
-  }
-  if (rawLogStreamFinished) return
-
-  closeLogStream()
-  containerLogsLoading.value = !containerLogs.value
-  logStreamTaskId = currentTaskId
-  const source = new EventSource(
-    `/api/tasks/${currentTaskId}/raw-log-stream?since_sequence_no=${rawLogSequenceNo}`
-  )
-  logEventSource = source
-
-  source.addEventListener('batch', (event) => {
-    if (logEventSource !== source || taskId.value !== currentTaskId) return
-    let chunks: Array<{ sequence_no: number; content: string }>
-    try {
-      chunks = JSON.parse((event as MessageEvent).data)
-    } catch {
-      if (logEventSource === source) closeLogStream()
-      containerLogsLoading.value = false
-      return
-    }
-    let appended = ''
-    for (const chunk of chunks) {
-      if (chunk.sequence_no <= rawLogSequenceNo) continue
-      rawLogSequenceNo = chunk.sequence_no
-      appended += chunk.content
-    }
-    if (appended) containerLogs.value += appended
-    containerLogsLoading.value = false
-  })
-
-  source.addEventListener('done', () => {
-    if (logEventSource !== source) return
-    rawLogStreamFinished = true
-    rawLogsFinalized = true
-    closeLogStream()
-    containerLogsLoading.value = false
-    void fetchRawLogSnapshot()
-    void fetchTask()
-  })
-
-  source.onerror = () => {
-    if (logEventSource !== source) return
-    containerLogsLoading.value = false
-    // Close explicitly so the browser cannot reconnect with a stale cursor and
-    // replay already-rendered chunks. The task poll reconnects with the latest
-    // sequence number.
-    closeLogStream()
-  }
-}
-
-async function fetchRawLogSnapshot(showLoading = false): Promise<boolean> {
-  const requestId = ++rawLogSnapshotRequest
+async function fetchTask(): Promise<boolean> {
+  const requestGeneration = ++taskRequestGeneration
   const requestedTaskId = taskId.value
-  if (showLoading) containerLogsLoading.value = true
-  try {
-    const result = await getTaskContainerLogs(requestedTaskId, 'db')
-    if (requestId === rawLogSnapshotRequest && requestedTaskId === taskId.value) {
-      containerLogs.value = result.logs
-      rawLogSequenceNo = result.last_sequence_no ?? 0
-      rawLogsFinalized = result.raw_logs_finalized ?? false
-      return true
-    }
-  } catch {
-    if (requestId === rawLogSnapshotRequest && requestedTaskId === taskId.value) {
-      if (showLoading || !containerLogs.value) {
-        containerLogs.value = t('taskView.failedToFetchContainerLogs')
-      }
-    }
-  } finally {
-    if (requestId === rawLogSnapshotRequest && showLoading) {
-      containerLogsLoading.value = false
-    }
-  }
-  return false
-}
-
-async function reconnectLogStream(showLoading = false) {
-  if (rawLogReconnectInFlight || rawLogStreamFinished) return
-  if (!rawTabOpen || !shouldStreamRawLogs()) return
-
-  rawLogReconnectInFlight = true
-  const requestedTaskId = taskId.value
-  closeLogStream()
-  try {
-    // Every connection starts from an authoritative full snapshot. The cursor
-    // returned with that snapshot then selects only newer persisted chunks.
-    const snapshotLoaded = await fetchRawLogSnapshot(showLoading)
-    if (
-      snapshotLoaded
-      && rawTabOpen
-      && requestedTaskId === taskId.value
-      && shouldStreamRawLogs()
-    ) {
-      connectLogStream()
-    }
-  } finally {
-    rawLogReconnectInFlight = false
-  }
-}
-
-async function fetchTask() {
-  if (taskRequestInFlight.value) return
-  taskRequestInFlight.value = true
   loading.value = true
   try {
     const previousStatus = task.value?.status
-    task.value = await getTask(taskId.value)
+    const fetchedTask = await getTask(requestedTaskId)
+    if (requestGeneration !== taskRequestGeneration || requestedTaskId !== taskId.value) {
+      return false
+    }
+    task.value = fetchedTask
 
     if (isActiveTaskStatus(previousStatus) && !isActiveTaskStatus(task.value.status)) {
       await fetchLogs()
-      if (rawTabOpen) await fetchRawLogSnapshot()
+      if (requestGeneration !== taskRequestGeneration || requestedTaskId !== taskId.value) {
+        return false
+      }
+      if (isRawLogTabOpen()) await fetchRawLogSnapshot()
+      if (requestGeneration !== taskRequestGeneration || requestedTaskId !== taskId.value) {
+        return false
+      }
     }
 
     // Auto-retry detection: task restarted (non-active → active) while we were watching.
@@ -1038,65 +872,83 @@ async function fetchTask() {
       connectStructuredLogStream()
     }
 
-    await refreshIssueTasks()
+    await refreshIssueTasks(requestedTaskId)
+    if (requestGeneration !== taskRequestGeneration || requestedTaskId !== taskId.value) {
+      return false
+    }
     await checkActiveRetry()
-    void fetchArchiveMetadata()
-  } catch (error) {
-    message.error(t('taskView.failedToFetchTask'))
+    void fetchArchiveMetadata(requestedTaskId)
+    return true
+  } catch {
+    if (requestGeneration === taskRequestGeneration && requestedTaskId === taskId.value) {
+      message.error(t('taskView.failedToFetchTask'))
+    }
+    return false
   } finally {
-    hasLoadedOnce.value = true
-    loading.value = false
-    taskRequestInFlight.value = false
+    if (requestGeneration === taskRequestGeneration) {
+      hasLoadedOnce.value = true
+      loading.value = false
+    }
   }
 }
 
-async function fetchArchiveMetadata() {
-  if (!task.value || !isTerminal.value) {
-    archiveMetadata.value = null
+async function fetchArchiveMetadata(requestedTaskId = taskId.value) {
+  if (!task.value || task.value.id !== requestedTaskId || !isTerminal.value) {
+    if (requestedTaskId === taskId.value) archiveMetadata.value = null
     return
   }
   try {
-    archiveMetadata.value = await getTaskArchive(taskId.value)
+    const metadata = await getTaskArchive(requestedTaskId)
+    if (requestedTaskId === taskId.value && task.value?.id === requestedTaskId) {
+      archiveMetadata.value = metadata
+    }
   } catch {
-    archiveMetadata.value = null
+    if (requestedTaskId === taskId.value && task.value?.id === requestedTaskId) {
+      archiveMetadata.value = null
+    }
   }
 }
 
-async function fetchLogs() {
+async function fetchLogs(): Promise<boolean> {
+  const requestGeneration = ++logRequestGeneration
+  const requestedTaskId = taskId.value
   logsLoading.value = true
   try {
-    const logEntries = await getTaskLogs(taskId.value)
+    const logEntries = await getTaskLogs(requestedTaskId)
+    if (requestGeneration !== logRequestGeneration || requestedTaskId !== taskId.value) {
+      return false
+    }
     taskLogs.value = logEntries
     logs.value = logEntries.map(l => `[${l.created_at}] [${l.log_level}] ${l.message}`).join('\n')
-  } catch (error) {
-    logs.value = t('taskView.failedToFetchLogs')
+    return true
+  } catch {
+    if (requestGeneration === logRequestGeneration && requestedTaskId === taskId.value) {
+      logs.value = t('taskView.failedToFetchLogs')
+    }
+    return false
   } finally {
-    logsLoading.value = false
+    if (requestGeneration === logRequestGeneration) {
+      logsLoading.value = false
+    }
   }
 }
 
 async function refreshTask() {
-  await fetchTask()
-  if (!isActiveTaskStatus(task.value?.status)) {
+  const requestedTaskId = taskId.value
+  const loaded = await fetchTask()
+  if (loaded && requestedTaskId === taskId.value && !isActiveTaskStatus(task.value?.status)) {
     await fetchLogs()
   }
 }
 
-async function onRawTabOpen() {
-  rawTabOpen = true
-  if (isActiveTaskStatus(task.value?.status)) {
-    await reconnectLogStream(true)
-  } else {
-    // For completed/failed/cancelled tasks, always read from DB (TaskRawLogChunk → TaskLog fallback)
-    const snapshotLoaded = await fetchRawLogSnapshot(true)
-    if (snapshotLoaded && shouldStreamRawLogs()) connectLogStream()
+async function loadTaskView() {
+  const requestedTaskId = taskId.value
+  const loaded = await fetchTask()
+  if (!loaded || requestedTaskId !== taskId.value) return
+  await fetchLogs()
+  if (requestedTaskId === taskId.value && isActiveTaskStatus(task.value?.status)) {
+    connectStructuredLogStream()
   }
-}
-
-function onRawTabClose() {
-  rawTabOpen = false
-  // Close SSE when leaving raw tab to free the backend connection.
-  closeLogStream()
 }
 
 async function handleCancel() {
@@ -1136,16 +988,12 @@ async function handleDownloadArchive() {
 }
 
 function resetLogsState() {
+  logRequestGeneration += 1
   taskLogs.value = []
   logs.value = ''
   containerLogs.value = ''
   archiveMetadata.value = null
-  rawLogSequenceNo = 0
-  rawLogStreamFinished = false
-  rawLogsFinalized = false
-  rawLogSnapshotRequest++
-  closeStructuredLogStream()
-  closeLogStream()
+  resetLogStreams()
 }
 
 async function handleRetry() {
@@ -1212,19 +1060,7 @@ async function handleExecute() {
 
 async function openScheduleDrawer() {
   showScheduleDrawer.value = true
-  scheduledTasksLoading.value = true
-  try {
-    scheduledTasksForPreview.value = await getScheduledTasks()
-  } catch {
-    scheduledTasksForPreview.value = []
-  } finally {
-    scheduledTasksLoading.value = false
-  }
-  try {
-    const config = await getConfig()
-    slotMaxTasks.value = config.runtime?.slot_max_tasks ?? 0
-    slotEnforce.value = config.runtime?.slot_max_tasks_enforce ?? false
-  } catch { /* ignore */ }
+  await loadScheduleContext(true)
 }
 
 function handleScheduleHeatmapCellClick(startMs: number) {
@@ -1238,22 +1074,18 @@ function handleAppendTaskCreated(created: Task) {
 
 onMounted(async () => {
   await initializeAuth()
-  await fetchTask()
-  await fetchLogs()
-  if (isActiveTaskStatus(task.value?.status)) {
-    connectStructuredLogStream()
-  }
+  await loadTaskView()
   pollTimer = window.setInterval(() => {
     if (document.visibilityState !== 'visible') return
 
     if (isActiveTaskStatus(task.value?.status)) {
       fetchTask()
-      if (!structuredLogSse) connectStructuredLogStream() // reconnect if disconnected
-      if (rawTabOpen && !logEventSource) void reconnectLogStream()
+      if (!hasStructuredLogStream()) connectStructuredLogStream()
+      if (isRawLogTabOpen() && !hasRawLogStream()) void reconnectLogStream()
     } else {
       closeStructuredLogStream()
-      if (rawTabOpen && shouldStreamRawLogs()) {
-        if (!logEventSource) void reconnectLogStream()
+      if (isRawLogTabOpen() && shouldStreamRawLogs()) {
+        if (!hasRawLogStream()) void reconnectLogStream()
       } else {
         closeLogStream()
       }
@@ -1276,12 +1108,14 @@ watch(
       showRescheduleDrawer.value = false
       showScheduleDrawer.value = false
       hasLoadedOnce.value = false
-      fetchTask()
+      void loadTaskView()
     }
   }
 )
 
 onBeforeUnmount(() => {
+  taskRequestGeneration += 1
+  logRequestGeneration += 1
   closeLogStream()
   closeStructuredLogStream()
   if (pollTimer !== null) {

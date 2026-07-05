@@ -501,11 +501,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, useAttrs } from 'vue'
+import { ref, computed, watch, onMounted, toRef, useAttrs } from 'vue'
 import {
   NButton, NDrawer, NDrawerContent, NForm, NFormItem, NRadio, NRadioGroup,
   NDatePicker, NSelect, NAlert, NTooltip, NSwitch, NSpin, NIcon, NScrollbar, NTag,
-  useMessage
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import {
@@ -526,21 +525,23 @@ import VariableEditor from './VariableEditor.vue'
 import HeatmapChart from './HeatmapChart.vue'
 import RunInstructionTemplateEditor from './RunInstructionTemplateEditor.vue'
 import {
-  createTask, updateTask, getPromptTemplates, getProviders, getScheduledTasks, getSlotCapacity, getConfig,
-  getRunInstructionTemplateDefaults, getWorkerProfiles, previewRunInstructionTemplate,
-  type Task, type PromptTemplate, type SlotCapacityInfo, type AIProvider, type UpdateTaskRequest,
-  type RunInstructionTemplateDefaults, type WorkerProfile
+  getRunInstructionTemplateDefaults,
+  type Task, type RunInstructionTemplateDefaults
 } from '../api'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeUtc8Compact, formatTimeUtc8 } from '../utils/datetime'
-import {
-  filterPromptTemplatesByTags,
-  getActivePromptTemplates,
-  getPromptTemplateTags
-} from '../utils/promptTemplates'
-import { extractSlotErrorMessage } from '../utils/slotError'
-import { formatUsageResetAt, isUsageLimitExceededDetail, type UsageLimitExceededDetail } from '../utils/usageLimits'
+import { formatUsageResetAt } from '../utils/usageLimits'
 import { issueDetailTooltipContentStyle, issueDetailTooltipThemeOverrides } from './issue-detail/tooltip'
+import {
+  DEFAULT_REQUIRE_CHANGES,
+  DEFAULT_TASK_PRIORITY,
+} from '../features/tasks/taskFormModel'
+import { useTaskScheduleContext } from '../features/tasks/useTaskScheduleContext'
+import { usePromptTemplatePicker } from '../features/tasks/usePromptTemplatePicker'
+import { useTaskExecutionOptions } from '../features/tasks/useTaskExecutionOptions'
+import { useRunInstructionPreview } from '../features/tasks/useRunInstructionPreview'
+import { useTaskSlotCapacity } from '../features/tasks/useTaskSlotCapacity'
+import { useTaskFormSubmission } from '../features/tasks/useTaskFormSubmission'
 
 defineOptions({ inheritAttrs: false })
 
@@ -563,7 +564,6 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const message = useMessage()
 const { isMobile } = useBreakpoints()
 const attrs = useAttrs()
 
@@ -579,50 +579,87 @@ const drawerTestId = computed(() => {
 
 // Form state
 const prompt = ref('')
-const priority = ref(1)
-const requireChanges = ref(false)
+const priority = ref(DEFAULT_TASK_PRIORITY)
+const requireChanges = ref(DEFAULT_REQUIRE_CHANGES)
 const taskMode = ref<'execute' | 'plan' | null>(null)
 const taskModeErrorVisible = ref(false)
 const selectedProviderId = ref<number | null>(null)
 const selectedWorkerProfileId = ref<number | null>(null)
 const scheduleType = ref<'now' | 'scheduled'>('now')
 const scheduledAt = ref<number | null>(null)
-const submitLoading = ref(false)
-const usageLimitDetail = ref<UsageLimitExceededDetail | null>(null)
 const runInstructionTemplate = ref('')
 const initialRunInstructionTemplate = ref('')
 const runInstructionDirty = ref(false)
 const runInstructionDefaults = ref<RunInstructionTemplateDefaults | null>(null)
 const defaultsLoading = ref(false)
 const defaultsError = ref('')
-const previewLoading = ref(false)
-const previewResult = ref('')
-const previewError = ref('')
+const {
+  handleRunInstructionPreview,
+  invalidateRunInstructionPreview,
+  previewError,
+  previewLoading,
+  previewResult,
+} = useRunInstructionPreview({
+  issueId: toRef(props, 'issueId'),
+  task: toRef(props, 'task'),
+  taskMode,
+  prompt,
+  issueDescription: toRef(props, 'issueDescription'),
+  runInstructionTemplate,
+  requireChanges,
+})
 
-// Template picker state
-const showTemplateDrawer = ref(false)
-const promptTemplates = ref<PromptTemplate[]>([])
-const promptTemplatesLoading = ref(false)
-const selectedTemplateTags = ref<string[]>([])
-const templateTagFilterVisible = ref(false)
-const pendingTemplate = ref<PromptTemplate | null>(null)
-const promptVariableTips = ref<Record<string, string> | undefined>(undefined)
+const {
+  activePromptTemplates,
+  cancelTemplateOverwrite,
+  confirmTemplateOverwrite,
+  filteredPromptTemplates,
+  handleTemplateItemClick,
+  handleTemplateTagFilterUpdate,
+  loadTemplates,
+  pendingTemplate,
+  promptTemplatesLoading,
+  promptVariableTips,
+  selectedTemplateTags,
+  showTemplateDrawer,
+  templateTagFilterVisible,
+  templateTagOptions,
+} = usePromptTemplatePicker(prompt)
 
-// Providers state
-const providers = ref<AIProvider[]>([])
-const workerProfiles = ref<WorkerProfile[]>([])
+const {
+  effectiveProvider,
+  effectiveWorkerProfile,
+  loadProviders,
+  loadWorkerProfiles,
+  providerOptions,
+  workerProfileOptions,
+} = useTaskExecutionOptions({
+  mode: toRef(props, 'mode'),
+  task: toRef(props, 'task'),
+  defaultProviderId: toRef(props, 'defaultProviderId'),
+  defaultWorkerProfileId: toRef(props, 'defaultWorkerProfileId'),
+  selectedProviderId,
+  selectedWorkerProfileId,
+})
 
 // Schedule heatmap state (create mode)
 const showHeatmapDrawer = ref(false)
-const scheduledTasksForPreview = ref<Task[]>([])
-const scheduledTasksLoading = ref(false)
-const slotMaxTasks = ref(0)
-const slotEnforce = ref(false)
-const slotCapacity = ref<SlotCapacityInfo | null>(null)
-const slotCapacityLoading = ref(false)
-let slotCheckTimeout: ReturnType<typeof setTimeout> | undefined
-let slotCheckGeneration = 0
-let previewRequestGeneration = 0
+const {
+  scheduledTasks: scheduledTasksForPreview,
+  scheduledTasksLoading,
+  slotMaxTasks,
+  slotEnforce,
+  loadScheduleContext,
+  clearScheduledTasks,
+} = useTaskScheduleContext()
+const {
+  slotCapacity,
+  slotCapacityLoading,
+} = useTaskSlotCapacity({
+  scheduledAt,
+  enabled: computed(() => props.mode === 'create'),
+})
+defineExpose({ slotCapacityLoading })
 
 const priorityOptions = [
   { label: 'P0', value: 0, desc: t('createTask.priorityP0Desc') },
@@ -641,53 +678,6 @@ const unreplacedVariables = computed(() => {
   return matches.map(m => m.replace(/\{\{|\}\}/g, ''))
 })
 
-const hasExistingPrompt = computed(() => Boolean(prompt.value && prompt.value.trim()))
-
-const selectableProviders = computed(() =>
-  providers.value.filter((provider) => {
-    if (!provider.is_disabled) return true
-    return props.mode === 'edit' && provider.id === props.task?.provider_id
-  })
-)
-
-const providerOptions = computed(() =>
-  selectableProviders.value.map(p => ({
-    label: `${p.name} (${p.model})${p.is_default ? ' ★' : ''}${p.is_disabled ? ` - ${t('config.providers.disabled')}` : ''}`,
-    value: p.id,
-    disabled: p.is_disabled,
-  }))
-)
-const selectableWorkerProfiles = computed(() =>
-  workerProfiles.value.filter((profile) => {
-    if (profile.enabled) return true
-    return props.mode === 'edit' && profile.id === props.task?.worker_profile_id
-  })
-)
-const workerProfileOptions = computed(() =>
-  selectableWorkerProfiles.value.map(profile => ({
-    label: profile.name,
-    value: profile.id,
-    disabled: !profile.enabled,
-  }))
-)
-const effectiveProvider = computed(() => {
-  if (selectedProviderId.value !== null) {
-    return selectableProviders.value.find(provider => provider.id === selectedProviderId.value) ?? null
-  }
-  if (props.defaultProviderId !== null && props.defaultProviderId !== undefined) {
-    return selectableProviders.value.find(provider => provider.id === props.defaultProviderId) ?? null
-  }
-  return selectableProviders.value.find(provider => provider.is_default && !provider.is_disabled) ?? null
-})
-const effectiveWorkerProfile = computed(() => {
-  if (selectedWorkerProfileId.value !== null) {
-    return selectableWorkerProfiles.value.find(profile => profile.id === selectedWorkerProfileId.value) ?? null
-  }
-  if (props.defaultWorkerProfileId !== null && props.defaultWorkerProfileId !== undefined) {
-    return selectableWorkerProfiles.value.find(profile => profile.id === props.defaultWorkerProfileId) ?? null
-  }
-  return selectableWorkerProfiles.value.find(profile => profile.is_default && profile.enabled) ?? null
-})
 const currentAvailablePlaceholders = computed(() => {
   if (!runInstructionDefaults.value || !taskMode.value) return []
   return runInstructionDefaults.value[taskMode.value].available_placeholders
@@ -699,25 +689,9 @@ const knownRunInstructionPlaceholders = computed(() => [
   ])
 ])
 
-const activePromptTemplates = computed(() => getActivePromptTemplates(promptTemplates.value))
-const templateTagOptions = computed(() =>
-  getPromptTemplateTags(activePromptTemplates.value).map(tag => ({ label: tag, value: tag }))
-)
-const filteredPromptTemplates = computed(() =>
-  filterPromptTemplatesByTags(activePromptTemplates.value, selectedTemplateTags.value)
-)
-
 // --- Watchers ---
-watch(showTemplateDrawer, (val) => {
-  if (!val) pendingTemplate.value = null
-})
-
 watch(scheduleType, (val) => {
   if (val === 'now') scheduledAt.value = null
-})
-
-watch(scheduledAt, () => {
-  if (props.mode === 'create') checkSlotCapacity()
 })
 
 watch(taskMode, (val) => {
@@ -739,7 +713,7 @@ watch(() => props.show, (val) => {
   if (val) {
     if (props.mode === 'edit' && props.task) {
       prompt.value = props.task.user_prompt ?? ''
-      priority.value = props.task.priority ?? 1
+      priority.value = props.task.priority ?? DEFAULT_TASK_PRIORITY
       requireChanges.value = props.task.require_changes ?? true
       taskMode.value = (props.task.task_mode as 'execute' | 'plan') ?? 'execute'
       selectedProviderId.value = props.task.provider_id ?? null
@@ -760,7 +734,7 @@ watch(() => props.show, (val) => {
       runInstructionTemplate.value = ''
       initialRunInstructionTemplate.value = ''
       runInstructionDirty.value = false
-      requireChanges.value = false
+      requireChanges.value = DEFAULT_REQUIRE_CHANGES
       scheduleType.value = 'now'
       scheduledAt.value = null
       void loadScheduleContext()
@@ -771,27 +745,6 @@ watch(() => props.show, (val) => {
 })
 
 // --- Data loading ---
-async function loadProviders() {
-  try {
-    providers.value = await getProviders()
-  } catch { /* non-critical */ }
-}
-
-async function loadWorkerProfiles() {
-  try {
-    workerProfiles.value = await getWorkerProfiles()
-  } catch { /* non-critical */ }
-}
-
-async function loadTemplates() {
-  promptTemplatesLoading.value = true
-  try {
-    promptTemplates.value = await getPromptTemplates()
-  } catch { /* non-critical */ } finally {
-    promptTemplatesLoading.value = false
-  }
-}
-
 async function loadRunInstructionDefaults() {
   defaultsLoading.value = true
   defaultsError.value = ''
@@ -812,44 +765,6 @@ async function loadRunInstructionDefaults() {
   } finally {
     defaultsLoading.value = false
   }
-}
-
-async function loadScheduleContext() {
-  scheduledTasksLoading.value = true
-  try {
-    scheduledTasksForPreview.value = await getScheduledTasks()
-  } catch {
-    scheduledTasksForPreview.value = []
-  } finally {
-    scheduledTasksLoading.value = false
-  }
-  try {
-    const config = await getConfig()
-    slotMaxTasks.value = config.runtime?.slot_max_tasks ?? 0
-    slotEnforce.value = config.runtime?.slot_max_tasks_enforce ?? false
-  } catch { /* ignore */ }
-}
-
-function checkSlotCapacity() {
-  slotCapacity.value = null
-  if (slotCheckTimeout) clearTimeout(slotCheckTimeout)
-  slotCheckGeneration++
-  const ms = scheduledAt.value
-  if (!ms) return
-  const gen = slotCheckGeneration
-  slotCheckTimeout = setTimeout(async () => {
-    slotCapacityLoading.value = true
-    try {
-      const result = await getSlotCapacity(new Date(ms).toISOString())
-      if (gen !== slotCheckGeneration) return
-      slotCapacity.value = result
-    } catch {
-      if (gen !== slotCheckGeneration) return
-      slotCapacity.value = null
-    } finally {
-      if (gen === slotCheckGeneration) slotCapacityLoading.value = false
-    }
-  }, 300)
 }
 
 async function openHeatmapDrawer() {
@@ -923,42 +838,6 @@ function usePromptOnly() {
   invalidateRunInstructionPreview()
 }
 
-function invalidateRunInstructionPreview() {
-  previewRequestGeneration += 1
-  previewLoading.value = false
-  previewResult.value = ''
-  previewError.value = ''
-}
-
-async function handleRunInstructionPreview() {
-  if (!props.issueId && !props.task) return
-  if (!taskMode.value) return
-  const requestGeneration = ++previewRequestGeneration
-  previewLoading.value = true
-  previewError.value = ''
-  try {
-    const result = await previewRunInstructionTemplate({
-      issue_id: props.issueId ?? props.task!.issue_id,
-      task_mode: taskMode.value,
-      user_prompt: prompt.value.trim() || props.issueDescription || '',
-      run_instruction_template: runInstructionTemplate.value,
-      require_changes: taskMode.value === 'plan' ? false : requireChanges.value
-    })
-    if (requestGeneration !== previewRequestGeneration) return
-    previewResult.value = result.rendered_prompt
-  } catch (error: any) {
-    if (requestGeneration !== previewRequestGeneration) return
-    previewError.value = error?.response?.data?.detail || error?.apiError?.detail || String(error)
-  } finally {
-    if (requestGeneration === previewRequestGeneration) previewLoading.value = false
-  }
-}
-
-function handleTemplateTagFilterUpdate(tags: string[] | null) {
-  selectedTemplateTags.value = tags ?? []
-  templateTagFilterVisible.value = false
-}
-
 function isScheduleDateDisabled(timestamp: number): boolean {
   const candidate = new Date(timestamp)
   const today = new Date()
@@ -967,158 +846,33 @@ function isScheduleDateDisabled(timestamp: number): boolean {
   return candidate.getTime() < today.getTime()
 }
 
-// --- Template actions ---
-function applyPromptTemplate(tmpl: PromptTemplate) {
-  prompt.value = tmpl.content
-  if (tmpl.variable_tips) {
-    promptVariableTips.value = tmpl.variable_tips
-  }
-}
-
-function handleTemplateItemClick(tmpl: PromptTemplate) {
-  if (!hasExistingPrompt.value) {
-    applyPromptTemplate(tmpl)
-    showTemplateDrawer.value = false
-  } else {
-    pendingTemplate.value = tmpl
-  }
-}
-
-function confirmTemplateOverwrite() {
-  if (pendingTemplate.value) {
-    applyPromptTemplate(pendingTemplate.value)
-    pendingTemplate.value = null
-    showTemplateDrawer.value = false
-  }
-}
-
-function cancelTemplateOverwrite() {
-  pendingTemplate.value = null
-}
-
-// --- Submit actions ---
-async function handleCreate() {
-  if (taskMode.value === null) {
-    taskModeErrorVisible.value = true
-    message.warning(t('issue.pleaseSelectTaskMode'))
-    return
-  }
-  if (!runInstructionTemplate.value) {
-    runInstructionTemplate.value = getDefaultRunInstructionTemplate(taskMode.value)
-  }
-  if (!runInstructionTemplate.value.trim()) {
-    message.warning(defaultsError.value || t('runInstruction.defaultsLoadFailed'))
-    return
-  }
-  if (scheduleType.value === 'scheduled') {
-    if (!scheduledAt.value) {
-      message.warning(t('createTask.pleaseSelectScheduledTime'))
-      return
-    }
-    if (scheduledAt.value <= Date.now()) {
-      message.warning(t('createTask.scheduledTimeFuture'))
-      return
-    }
-  }
-
-  submitLoading.value = true
-  usageLimitDetail.value = null
-  try {
-    const req: Parameters<typeof createTask>[0] = {
-      issue_id: props.issueId!,
-      priority: priority.value,
-      require_changes: taskMode.value === 'plan' ? false : requireChanges.value
-    }
-    if (taskMode.value !== null) req.task_mode = taskMode.value
-    if (runInstructionDirty.value) {
-      req.run_instruction_template = runInstructionTemplate.value
-    }
-    if (prompt.value.trim()) req.user_prompt = prompt.value.trim()
-    if (scheduleType.value === 'scheduled' && scheduledAt.value) {
-      req.scheduled_datetime = new Date(scheduledAt.value).toISOString()
-    }
-    if (selectedProviderId.value !== null) {
-      req.provider_id = selectedProviderId.value
-    }
-    if (selectedWorkerProfileId.value !== null) {
-      req.worker_profile_id = selectedWorkerProfileId.value
-    }
-    const created = await createTask(req)
-    message.success(t('issue.taskCreated'))
-    prompt.value = ''
-    scheduledAt.value = null
-    selectedProviderId.value = null
-    selectedWorkerProfileId.value = null
-    scheduleType.value = 'now'
-    scheduledTasksForPreview.value = []
-    emit('update:show', false)
-    emit('created', created)
-  } catch (error: unknown) {
-    const anyError = error as { response?: { data?: { detail?: unknown } } }
-    const detail = anyError?.response?.data?.detail
-    if (isUsageLimitExceededDetail(detail)) {
-      usageLimitDetail.value = detail
-    } else {
-      message.error(extractSlotErrorMessage(error, t, 'createTask.failedToCreateTask'))
-    }
-  } finally {
-    submitLoading.value = false
-  }
-}
-
-async function handleEdit() {
-  if (!props.task) return
-  const trimmedPrompt = prompt.value.trim()
-  if (!trimmedPrompt) {
-    message.warning(t('createTask.pleaseEnterPrompt'))
-    return
-  }
-  // Build a partial payload: only include fields that actually changed.
-  const orig = props.task
-  const payload: UpdateTaskRequest = {}
-  if (trimmedPrompt !== orig.user_prompt) payload.user_prompt = trimmedPrompt
-  if (priority.value !== orig.priority) payload.priority = priority.value
-  if ((selectedProviderId.value ?? null) !== (orig.provider_id ?? null)) {
-    payload.provider_id = selectedProviderId.value
-  }
-  if ((selectedWorkerProfileId.value ?? null) !== (orig.worker_profile_id ?? null)) {
-    payload.worker_profile_id = selectedWorkerProfileId.value
-  }
-  if (requireChanges.value !== orig.require_changes) payload.require_changes = requireChanges.value
-    if (taskMode.value !== null && taskMode.value !== (orig.task_mode ?? 'execute')) {
-    payload.task_mode = taskMode.value
-    // Switching to plan forces require_changes=false; switching back to execute
-    // restores whatever the toggle says (already captured above if changed).
-    if (taskMode.value === 'plan' && orig.require_changes !== false) {
-      payload.require_changes = false
-    }
-  }
-  if (runInstructionTemplate.value !== initialRunInstructionTemplate.value) {
-    payload.run_instruction_template = runInstructionTemplate.value
-  }
-
-  if (Object.keys(payload).length === 0) {
-    emit('update:show', false)
-    return
-  }
-  submitLoading.value = true
-  try {
-    const updated = await updateTask(orig.id, payload)
-    message.success(t('taskView.taskUpdated'))
-    emit('update:show', false)
-    emit('updated', updated)
-  } catch (error: unknown) {
-    const anyError = error as { response?: { data?: { detail?: unknown } } }
-    const detail = anyError?.response?.data?.detail
-    if (typeof detail === 'string') {
-      message.error(detail)
-    } else {
-      message.error(t('taskView.failedToUpdateTask'))
-    }
-  } finally {
-    submitLoading.value = false
-  }
-}
+const {
+  handleCreate,
+  handleEdit,
+  submitLoading,
+  usageLimitDetail,
+} = useTaskFormSubmission({
+  issueId: toRef(props, 'issueId'),
+  task: toRef(props, 'task'),
+  prompt,
+  priority,
+  requireChanges,
+  taskMode,
+  taskModeErrorVisible,
+  selectedProviderId,
+  selectedWorkerProfileId,
+  scheduleType,
+  scheduledAt,
+  runInstructionTemplate,
+  initialRunInstructionTemplate,
+  runInstructionDirty,
+  defaultsError,
+  getDefaultRunInstructionTemplate,
+  clearScheduledTasks,
+  close: () => emit('update:show', false),
+  created: task => emit('created', task),
+  updated: task => emit('updated', task),
+})
 
 // --- Lifecycle ---
 onMounted(() => {
@@ -1126,11 +880,6 @@ onMounted(() => {
   void loadWorkerProfiles()
   void loadTemplates()
   void loadRunInstructionDefaults()
-})
-
-onUnmounted(() => {
-  if (slotCheckTimeout) clearTimeout(slotCheckTimeout)
-  slotCheckGeneration++
 })
 </script>
 

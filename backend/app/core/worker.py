@@ -6,7 +6,6 @@ from typing import Any
 
 import httpx
 from gitlab import Gitlab
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import get_effective_settings as get_settings
@@ -46,33 +45,37 @@ from app.core.worker_runtime import (
     resolve_commit_author,
     resolve_provider,
 )
-from app.core.worker_task_lifecycle import (
-    create_execute_container,
+from app.core.worker_task_lifecycle import monitor_container_run
+from app.core.worker_task_outcomes import (
     fail_execute_task,
     fail_resume_missing_container,
     fail_resume_task,
-    monitor_container_run,
-    prepare_execute_task_context,
-    prepare_resume_task_context,
 )
-from app.core.worker_task_lifecycle import (
+from app.core.worker_task_outcomes import (
     send_failure_alert as lifecycle_send_failure_alert,
 )
-from app.core.worker_task_lifecycle import (
+from app.core.worker_task_outcomes import (
     send_failure_notifications as lifecycle_send_failure_notifications,
 )
-from app.core.worker_task_lifecycle import (
+from app.core.worker_task_outcomes import (
     send_success_notifications as lifecycle_send_success_notifications,
 )
-from app.models import Issue, Task, TaskStatus
+from app.core.worker_task_runner import (
+    process_pending_tasks as run_pending_tasks,
+)
+from app.core.worker_task_runner import (
+    run_execute_task,
+    run_resume_task,
+)
+from app.models import Issue, Task
 
 logger = logging.getLogger(__name__)
 
 _ANSI_ESCAPE = re.compile(
-    r'\x1b\[[0-9;]*[mABCDEFGHJKLMPSTfnsu]'
-    r'|\x1b\][^\x07]*\x07'
-    r'|\x1b[()][A-Z0-9]'
-    r'|\x1b[@-_]',
+    r"\x1b\[[0-9;]*[mABCDEFGHJKLMPSTfnsu]"
+    r"|\x1b\][^\x07]*\x07"
+    r"|\x1b[()][A-Z0-9]"
+    r"|\x1b[@-_]",
     re.DOTALL,
 )
 
@@ -107,10 +110,10 @@ def scrub_sensitive_data(text: str) -> str:
     if not text:
         return text
 
-    text = re.sub(r'glpat-[a-zA-Z0-9\-]{10,}', '[GITLAB_TOKEN]', text)
-    text = re.sub(r'sk-(?:cp|ant|api)-[a-zA-Z0-9\-]{10,}', '[ANTHROPIC_API_KEY]', text)
-    text = re.sub(r'(PRIVATE-TOKEN:\s*)[^\s]+', r'\1[REDACTED]', text)
-    text = text.replace('\x00', '')
+    text = re.sub(r"glpat-[a-zA-Z0-9\-]{10,}", "[GITLAB_TOKEN]", text)
+    text = re.sub(r"sk-(?:cp|ant|api)-[a-zA-Z0-9\-]{10,}", "[ANTHROPIC_API_KEY]", text)
+    text = re.sub(r"(PRIVATE-TOKEN:\s*)[^\s]+", r"\1[REDACTED]", text)
+    text = text.replace("\x00", "")
     return text
 
 
@@ -120,8 +123,8 @@ def sanitize_sensitive_data(text: str) -> str:
         return text
 
     text = scrub_sensitive_data(text)
-    text = _ANSI_ESCAPE.sub('', text)
-    text = re.sub(r'[\ud800-\udfff\ufffe\uffff]', '', text)
+    text = _ANSI_ESCAPE.sub("", text)
+    text = re.sub(r"[\ud800-\udfff\ufffe\uffff]", "", text)
     return text
 
 
@@ -147,100 +150,203 @@ class WorkerExecutor:
     def _reset_stdout_helpers(self) -> None:
         self._log_streamer = WorkerLogStreamer()
 
-    def __getattr__(self, name: str):
-        projector_methods = {
-            '_reset_event_archive_state': self._event_projector.reset,
-            '_load_resume_runtime_state': self._event_projector.load_resume_runtime_state,
-            '_ingest_event_records_from_chunk': self._event_projector.ingest_event_records_from_chunk,
-            '_ingest_event_record': self._event_projector.ingest_event_record,
-            '_tail_event_jsonl': self._event_projector.tail_event_jsonl,
-            '_tail_console_log': self._event_projector.tail_console_log,
-            '_backfill_console_log_from_archive': self._event_projector.backfill_console_log_from_archive,
-            '_backfill_event_jsonl_from_archive': self._event_projector.backfill_event_jsonl_from_archive,
-        }
-        if name in projector_methods:
-            return projector_methods[name]
+    def _reset_event_archive_state(self) -> None:
+        self._event_projector.reset()
 
-        sync_wrappers = {
-            '_build_initial_mr_title': lambda task: build_initial_mr_title(task),
-            '_build_initial_mr_description': lambda task: build_initial_mr_description(task),
-            '_remove_mr_draft_status': lambda task: None,
-            '_remove_mr_draft_status_for_issue': lambda task, issue, sudo_gl=None: remove_mr_draft_status_for_issue(task, issue, self.gitlab, sudo_gl=sudo_gl),
-            '_create_mr_if_needed': lambda task, issue, mr_iid, mr_web_url, sudo_gl=None: create_mr_if_needed(task, issue, mr_iid, mr_web_url, self.gitlab, sudo_gl=sudo_gl),
-            '_find_existing_mr': lambda task, issue: find_existing_mr(task, issue, self.gitlab),
-            '_create_new_mr': lambda task, issue, sudo_gl=None: create_new_mr(task, issue, self.gitlab, sudo_gl=sudo_gl),
-            '_build_container_volumes': lambda *args, **kwargs: build_container_volumes(*args, **kwargs),
-            '_materialize_ci_failure_bundle': lambda *args, **kwargs: materialize_ci_failure_bundle(*args, **kwargs),
-            '_get_container_name': lambda task: get_container_name(task),
-        }
-        if name in sync_wrappers:
-            return sync_wrappers[name]
+    async def _load_resume_runtime_state(self, *, container: Any) -> None:
+        await self._event_projector.load_resume_runtime_state(container=container)
 
-        if name == '_resolve_provider':
+    async def _ingest_event_records_from_chunk(
+        self,
+        *,
+        task_id: int,
+        chunk: str,
+        cursor: Any,
+        db: AsyncSession,
+    ) -> None:
+        await self._event_projector.ingest_event_records_from_chunk(
+            task_id=task_id,
+            chunk=chunk,
+            cursor=cursor,
+            db=db,
+        )
 
-            async def _resolve_provider_wrapper(db: AsyncSession, task: Task):
-                return await resolve_provider(db, task)
+    async def _ingest_event_record(
+        self,
+        *,
+        task_id: int,
+        record: dict,
+        db: AsyncSession,
+    ) -> None:
+        await self._event_projector.ingest_event_record(
+            task_id=task_id,
+            record=record,
+            db=db,
+        )
 
-            return _resolve_provider_wrapper
+    async def _tail_event_jsonl(
+        self,
+        *,
+        task_id: int,
+        container: Any,
+        db: AsyncSession,
+    ) -> None:
+        await self._event_projector.tail_event_jsonl(
+            task_id=task_id,
+            container=container,
+            db=db,
+        )
 
-        if name == '_resolve_commit_author':
+    async def _tail_console_log(
+        self,
+        *,
+        task_id: int,
+        container: Any,
+        db: AsyncSession,
+    ) -> None:
+        await self._event_projector.tail_console_log(
+            task_id=task_id,
+            container=container,
+            db=db,
+        )
 
-            async def _resolve_commit_author_wrapper(db: AsyncSession, task: Task) -> tuple[str, str]:
-                return await resolve_commit_author(db, task)
+    async def _backfill_console_log_from_archive(
+        self,
+        *,
+        task_id: int,
+        db: AsyncSession,
+    ) -> None:
+        await self._event_projector.backfill_console_log_from_archive(
+            task_id=task_id,
+            db=db,
+        )
 
-            return _resolve_commit_author_wrapper
+    async def _backfill_event_jsonl_from_archive(
+        self,
+        *,
+        task_id: int,
+        db: AsyncSession,
+    ) -> None:
+        await self._event_projector.backfill_event_jsonl_from_archive(
+            task_id=task_id,
+            db=db,
+        )
 
-        if name == '_parse_mr_from_logs':
+    def _build_initial_mr_title(self, task: Task) -> str:
+        return build_initial_mr_title(task)
 
-            async def _parse_mr_from_logs_wrapper(task: Task, logs: str) -> None:
-                await parse_mr_from_logs(task, logs, self.gitlab)
+    def _build_initial_mr_description(self, task: Task) -> str:
+        return build_initial_mr_description(task)
 
-            return _parse_mr_from_logs_wrapper
+    def _remove_mr_draft_status(self, task: Task) -> None:
+        """Compatibility no-op retained for callers using the legacy hook."""
 
-        if name == '_update_task_stats_from_logs_or_api':
+    def _remove_mr_draft_status_for_issue(
+        self,
+        task: Task,
+        issue: Issue,
+        sudo_gl: Gitlab | None = None,
+    ) -> None:
+        remove_mr_draft_status_for_issue(
+            task,
+            issue,
+            self.gitlab,
+            sudo_gl=sudo_gl,
+        )
 
-            async def _update_task_stats_wrapper(
-                task: Task,
-                logs: str,
-                issue: Issue | None = None,
-                structured_diff: dict[str, Any] | None = None,
-            ) -> None:
-                await update_task_stats_from_logs_or_api(
-                    task,
-                    logs,
-                    self.gitlab,
-                    issue,
-                    structured_diff,
-                )
+    def _create_mr_if_needed(
+        self,
+        task: Task,
+        issue: Issue,
+        mr_iid: int | None,
+        mr_web_url: str | None,
+        sudo_gl: Gitlab | None = None,
+    ) -> tuple[int | None, str | None]:
+        return create_mr_if_needed(
+            task,
+            issue,
+            mr_iid,
+            mr_web_url,
+            self.gitlab,
+            sudo_gl=sudo_gl,
+        )
 
-            return _update_task_stats_wrapper
+    def _find_existing_mr(
+        self,
+        task: Task,
+        issue: Issue,
+    ) -> tuple[int | None, str | None] | None:
+        return find_existing_mr(task, issue, self.gitlab)
 
-        if name == '_update_mr_description_for_issue':
+    def _create_new_mr(
+        self,
+        task: Task,
+        issue: Issue,
+        sudo_gl: Gitlab | None = None,
+    ) -> tuple[int | None, str | None]:
+        return create_new_mr(task, issue, self.gitlab, sudo_gl=sudo_gl)
 
-            async def _update_mr_description_wrapper(
-                task: Task,
-                issue: Issue,
-                db: AsyncSession,
-                *,
-                sudo_gl: Gitlab | None = None,
-            ) -> None:
-                await update_mr_description_for_issue(task, issue, db, self.gitlab, sudo_gl=sudo_gl)
+    def _build_container_volumes(self, *args, **kwargs) -> dict:
+        return build_container_volumes(*args, **kwargs)
 
-            return _update_mr_description_wrapper
+    def _materialize_ci_failure_bundle(self, *args, **kwargs) -> None:
+        materialize_ci_failure_bundle(*args, **kwargs)
 
-        if name == '_write_previous_task_summaries_file':
+    def _get_container_name(self, task: Task) -> str:
+        return get_container_name(task)
 
-            async def _write_previous_task_summaries_wrapper(
-                db: AsyncSession,
-                settings,
-                issue: Issue,
-                task: Task,
-            ) -> str | None:
-                return await write_previous_task_summaries_file(db, settings, issue, task)
+    async def _resolve_provider(self, db: AsyncSession, task: Task):
+        return await resolve_provider(db, task)
 
-            return _write_previous_task_summaries_wrapper
+    async def _resolve_commit_author(
+        self,
+        db: AsyncSession,
+        task: Task,
+    ) -> tuple[str, str]:
+        return await resolve_commit_author(db, task)
 
-        raise AttributeError(name)
+    async def _parse_mr_from_logs(self, task: Task, logs: str) -> None:
+        await parse_mr_from_logs(task, logs, self.gitlab)
+
+    async def _update_task_stats_from_logs_or_api(
+        self,
+        task: Task,
+        logs: str,
+        issue: Issue | None = None,
+        structured_diff: dict[str, Any] | None = None,
+    ) -> None:
+        await update_task_stats_from_logs_or_api(
+            task,
+            logs,
+            self.gitlab,
+            issue,
+            structured_diff,
+        )
+
+    async def _update_mr_description_for_issue(
+        self,
+        task: Task,
+        issue: Issue,
+        db: AsyncSession,
+        *,
+        sudo_gl: Gitlab | None = None,
+    ) -> None:
+        await update_mr_description_for_issue(
+            task,
+            issue,
+            db,
+            self.gitlab,
+            sudo_gl=sudo_gl,
+        )
+
+    async def _write_previous_task_summaries_file(
+        self,
+        db: AsyncSession,
+        settings,
+        issue: Issue,
+        task: Task,
+    ) -> str | None:
+        return await write_previous_task_summaries_file(db, settings, issue, task)
 
     @property
     def _run_is_resumed(self):
@@ -257,7 +363,6 @@ class WorkerExecutor:
     @_timeline_gate_open.setter
     def _timeline_gate_open(self, value):
         self._event_projector._timeline_gate_open = value
-
 
     def _build_container_env(
         self,
@@ -310,8 +415,9 @@ class WorkerExecutor:
         exit_code: int,
         issue: Issue | None = None,
     ) -> None:
-        await parse_task_result(task, logs, db, exit_code, sanitize_sensitive_data, self.gitlab, issue)
-
+        await parse_task_result(
+            task, logs, db, exit_code, sanitize_sensitive_data, self.gitlab, issue
+        )
 
     async def _send_notifications(
         self,
@@ -353,7 +459,7 @@ class WorkerExecutor:
         try:
             await upsert_task_usage_ledger(db, task)
         except Exception as ledger_error:
-            logger.warning(f'[Task {task.id}] Failed to upsert usage ledger: {ledger_error}')
+            logger.warning(f"[Task {task.id}] Failed to upsert usage ledger: {ledger_error}")
 
     async def _send_failure_alert(self, task: Task, issue: Issue | None = None) -> None:
         await lifecycle_send_failure_alert(
@@ -387,7 +493,7 @@ class WorkerExecutor:
         settings: Any,
         had_existing_mr: bool,
         sudo_gl: Gitlab | None,
-        resume_prefix: str = '',
+        resume_prefix: str = "",
     ) -> bool:
         return await monitor_container_run(
             self,
@@ -452,105 +558,16 @@ class WorkerExecutor:
         return await fail_resume_missing_container(db, task, error)
 
     async def execute_task(self, db: AsyncSession, task_id: int) -> bool:
-        settings = get_settings()
-        context = await prepare_execute_task_context(self, db, task_id, settings=settings)
-        if not context:
-            return False
-        if context['handled']:
-            return context['result']
-
-        settings = context['settings']
-        task = context['task']
-        issue = context['issue']
-        had_existing_mr = context['had_existing_mr']
-        sudo_gl = context['sudo_gl']
-        container = None
-
-        try:
-            try:
-                container = await create_execute_container(
-                    self,
-                    db,
-                    settings=settings,
-                    task=task,
-                    issue=issue,
-                    sudo_gl=sudo_gl,
-                )
-            except ValueError as e:
-                logger.error(f'[Task {task_id}] Failed while building worker environment: {e}')
-                return await self._handle_execute_task_failure(
-                    db,
-                    task,
-                    e,
-                    had_existing_mr=had_existing_mr,
-                    issue=issue,
-                )
-
-            return await self._monitor_container_run(
-                db=db,
-                task=task,
-                issue=issue,
-                container=container,
-                settings=settings,
-                had_existing_mr=had_existing_mr,
-                sudo_gl=sudo_gl,
-            )
-        except Exception as e:  # noqa: BLE001
-            logger.exception(f'Task {task_id} failed with exception: {e}')
-            return await self._handle_execute_task_failure(
-                db,
-                task,
-                e,
-                had_existing_mr=had_existing_mr,
-                issue=issue,
-                container=container,
-            )
+        return await run_execute_task(self, db, task_id, settings=get_settings())
 
     async def resume_task(self, db: AsyncSession, task_id: int, container_name: str) -> bool:
-        settings = get_settings()
-        context = await prepare_resume_task_context(self, db, task_id, container_name, settings=settings)
-        if not context:
-            return False
-        if context['handled']:
-            return context['result']
-
-        settings = context['settings']
-        task = context['task']
-        issue = context['issue']
-        had_existing_mr = context['had_existing_mr']
-        sudo_gl = context['sudo_gl']
-        container = context['container']
-
-        try:
-            return await self._monitor_container_run(
-                db=db,
-                task=task,
-                issue=issue,
-                container=container,
-                settings=settings,
-                had_existing_mr=had_existing_mr,
-                sudo_gl=sudo_gl,
-                resume_prefix=' (resume)',
-            )
-        except Exception as e:  # noqa: BLE001
-            return await self._handle_resume_task_failure(
-                db,
-                task_id,
-                task,
-                container,
-                e,
-                had_existing_mr=had_existing_mr,
-                issue=issue,
-            )
+        return await run_resume_task(
+            self,
+            db,
+            task_id,
+            container_name,
+            settings=get_settings(),
+        )
 
     async def process_pending_tasks(self, db: AsyncSession) -> int:
-        result = await db.execute(select(Task).where(Task.status == TaskStatus.PENDING).order_by(Task.created_at))
-        tasks = result.scalars().all()
-
-        processed = 0
-        for task in tasks:
-            success = await self.execute_task(db, task.id)
-            if success:
-                processed += 1
-
-        return processed
+        return await run_pending_tasks(self, db)

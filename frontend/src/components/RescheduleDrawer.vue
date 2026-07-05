@@ -72,11 +72,12 @@ import { useI18n } from 'vue-i18n'
 import { NDrawer, NDrawerContent, NButton, NIcon, NSpin, NForm, NFormItem, NDatePicker, NTooltip, useMessage } from 'naive-ui'
 import { CopyOutline } from '@vicons/ionicons5'
 import HeatmapChart from './HeatmapChart.vue'
-import { rescheduleTask, getScheduledTasks, getConfig, type Task } from '../api'
+import { rescheduleTask, type Task } from '../api'
 import { renderMarkdown } from './task-process/taskProcessUtils'
 import { parseUtcDate } from '../utils/datetime'
 import { extractSlotErrorMessage } from '../utils/slotError'
 import { useBreakpoints } from '../composables/useBreakpoints'
+import { useTaskScheduleContext } from '../features/tasks/useTaskScheduleContext'
 
 const props = withDefaults(defineProps<{
   show: boolean
@@ -103,10 +104,14 @@ const localShow = computed({
 
 const scheduleDatetime = ref<number | null>(null)
 const loading = ref(false)
-const scheduledTasks = ref<Task[]>([])
-const scheduledTasksLoading = ref(false)
-const slotMaxTasks = ref(0)
-const slotEnforce = ref(false)
+const {
+  scheduledTasks,
+  scheduledTasksLoading,
+  slotMaxTasks,
+  slotEnforce,
+  slotConfigLoadFailed,
+  loadScheduleContext,
+} = useTaskScheduleContext()
 
 const renderedPrompt = computed(() => renderMarkdown(props.task?.user_prompt ?? ''))
 
@@ -128,19 +133,8 @@ watch(() => props.show, async (val) => {
   scheduleDatetime.value = props.task?.scheduled_at
     ? parseUtcDate(props.task.scheduled_at).getTime()
     : null
-  scheduledTasksLoading.value = true
-  try {
-    scheduledTasks.value = await getScheduledTasks()
-  } catch {
-    scheduledTasks.value = []
-  } finally {
-    scheduledTasksLoading.value = false
-  }
-  try {
-    const config = await getConfig()
-    slotMaxTasks.value = config.runtime?.slot_max_tasks ?? 0
-    slotEnforce.value = config.runtime?.slot_max_tasks_enforce ?? false
-  } catch {
+  await loadScheduleContext(true)
+  if (slotConfigLoadFailed.value) {
     console.warn('[RescheduleDrawer] Failed to load slot config; heatmap capacity limits may be inaccurate')
   }
 })

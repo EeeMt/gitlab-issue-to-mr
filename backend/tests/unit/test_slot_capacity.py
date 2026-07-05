@@ -15,6 +15,7 @@ import asyncio
 import os
 import sys
 import unittest
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -111,6 +112,32 @@ def _make_slot_info(
         is_full=is_full,
         enforce=enforce,
     )
+
+
+@contextmanager
+def _mock_task_runtime_dependencies():
+    """Isolate slot-capacity API tests from worker/provider snapshot setup."""
+    worker_profile = MagicMock(id=1)
+    provider = MagicMock(id=1)
+    with (
+        patch(
+            "app.api.tasks.resolve_worker_profile_for_issue",
+            new=AsyncMock(return_value=worker_profile),
+        ),
+        patch(
+            "app.api.tasks.resolve_provider_for_issue",
+            new=AsyncMock(return_value=provider),
+        ),
+        patch(
+            "app.api.tasks.prepare_task_runtime_snapshot",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "app.api.tasks.get_project_metadata",
+            new=AsyncMock(return_value={}),
+        ),
+    ):
+        yield
 
 
 # ===========================================================================
@@ -488,7 +515,7 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
         """POST /tasks with scheduled_at + full + enforce should return 409 Conflict."""
         mock_check.return_value = _make_slot_info(count=5, max_tasks=5, is_full=True, enforce=True)
 
-        async def fake_refresh(task):
+        async def fake_refresh(task, attribute_names=None):
             task.id = 99
             if task.status is None:
                 task.status = TaskStatus.PENDING
@@ -512,7 +539,7 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
         client, app = _make_app_client_with_db(mock_db)
 
         future_dt = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
-        with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+        with _mock_task_runtime_dependencies():
             response = client.post("/api/tasks", json=self._make_create_payload(scheduled_datetime=future_dt))
         app.dependency_overrides.clear()
 
@@ -527,7 +554,7 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
         """POST /tasks with scheduled_at + full + !enforce → 200 with slot_warning."""
         mock_check.return_value = _make_slot_info(count=5, max_tasks=5, is_full=True, enforce=False)
 
-        async def fake_refresh(task):
+        async def fake_refresh(task, attribute_names=None):
             task.id = 99
             if task.status is None:
                 task.status = TaskStatus.PENDING
@@ -551,7 +578,7 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
         client, app = _make_app_client_with_db(mock_db)
 
         future_dt = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
-        with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+        with _mock_task_runtime_dependencies():
             response = client.post("/api/tasks", json=self._make_create_payload(scheduled_datetime=future_dt))
         app.dependency_overrides.clear()
 
@@ -565,7 +592,7 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
         """POST /tasks with scheduled_at + not full → 200 without slot_warning."""
         mock_check.return_value = _make_slot_info(count=2, max_tasks=5, is_full=False, enforce=True)
 
-        async def fake_refresh(task):
+        async def fake_refresh(task, attribute_names=None):
             task.id = 99
             if task.status is None:
                 task.status = TaskStatus.PENDING
@@ -589,7 +616,7 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
         client, app = _make_app_client_with_db(mock_db)
 
         future_dt = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
-        with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+        with _mock_task_runtime_dependencies():
             response = client.post("/api/tasks", json=self._make_create_payload(scheduled_datetime=future_dt))
         app.dependency_overrides.clear()
 
@@ -599,7 +626,7 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
 
     def test_unscheduled_task_no_capacity_check(self) -> None:
         """POST /tasks without scheduled_datetime should not check slot capacity."""
-        async def fake_refresh(task):
+        async def fake_refresh(task, attribute_names=None):
             task.id = 99
             if task.status is None:
                 task.status = TaskStatus.PENDING
@@ -623,7 +650,7 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
         client, app = _make_app_client_with_db(mock_db)
 
         with patch("app.core.slot_capacity.check_slot_capacity", new_callable=AsyncMock) as mock_check:
-            with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+            with _mock_task_runtime_dependencies():
                 response = client.post("/api/tasks", json=self._make_create_payload())
             mock_check.assert_not_called()
 
@@ -695,12 +722,16 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
         mock_result_task.scalar_one_or_none.return_value = task
         mock_result_no_retry = MagicMock()
         mock_result_no_retry.scalar_one_or_none.return_value = None
+        mock_issue = MagicMock()
+        mock_issue.id = 1
+        mock_issue.project_id = 1
+        mock_issue.description = "Fix the login bug"
         mock_result_issue = MagicMock()
-        mock_result_issue.scalar_one_or_none.return_value = None
+        mock_result_issue.scalar_one_or_none.return_value = mock_issue
 
         now = datetime(2024, 1, 1, 12, 0, 0)
 
-        async def fake_refresh(obj):
+        async def fake_refresh(obj, attribute_names=None):
             if isinstance(obj, TaskModel):
                 obj.id = 200
                 obj.status = TaskStatus.PENDING
@@ -719,14 +750,12 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
 
         future_dt = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
 
-        with patch("app.api.task_operations.notify_task_retried", new=AsyncMock()):
+        with patch("app.api.tasks.notify_task_retried", new=AsyncMock()):
             with patch("app.core.task_helpers._require_task_operator", return_value=None):
-                with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
-                    with patch("app.api.tasks.render_and_store_task_prompt"):
-                        with patch("app.api.tasks.select_run_instruction_template", return_value="template"):
-                            response = client.post("/api/tasks/81/retry", json={
-                                "scheduled_datetime": future_dt
-                            })
+                with _mock_task_runtime_dependencies():
+                    response = client.post("/api/tasks/81/retry", json={
+                        "scheduled_datetime": future_dt
+                    })
 
         app.dependency_overrides.clear()
 
@@ -744,12 +773,16 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
         mock_result_task.scalar_one_or_none.return_value = task
         mock_result_no_retry = MagicMock()
         mock_result_no_retry.scalar_one_or_none.return_value = None
+        mock_issue = MagicMock()
+        mock_issue.id = 1
+        mock_issue.project_id = 1
+        mock_issue.description = "Fix the login bug"
         mock_result_issue = MagicMock()
-        mock_result_issue.scalar_one_or_none.return_value = None
+        mock_result_issue.scalar_one_or_none.return_value = mock_issue
 
         now = datetime(2024, 1, 1, 12, 0, 0)
 
-        async def fake_refresh(obj):
+        async def fake_refresh(obj, attribute_names=None):
             if isinstance(obj, TaskModel):
                 obj.id = 201
                 obj.status = TaskStatus.PENDING
@@ -767,12 +800,10 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
         client, app = _make_app_client_with_db(mock_db)
 
         with patch("app.core.slot_capacity.check_slot_capacity", new_callable=AsyncMock) as mock_check:
-            with patch("app.api.task_operations.notify_task_retried", new=AsyncMock()):
+            with patch("app.api.tasks.notify_task_retried", new=AsyncMock()):
                 with patch("app.core.task_helpers._require_task_operator", return_value=None):
-                    with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
-                        with patch("app.api.tasks.render_and_store_task_prompt"):
-                            with patch("app.api.tasks.select_run_instruction_template", return_value="template"):
-                                response = client.post("/api/tasks/82/retry")
+                    with _mock_task_runtime_dependencies():
+                        response = client.post("/api/tasks/82/retry")
             mock_check.assert_not_called()
 
         app.dependency_overrides.clear()
@@ -803,7 +834,7 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
 
         future_dt = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
 
-        with patch("app.api.task_operations.notify_task_retried", new=AsyncMock()):
+        with patch("app.api.tasks.notify_task_retried", new=AsyncMock()):
             with patch("app.core.task_helpers._require_task_operator", return_value=None):
                 client.post("/api/tasks/83/retry", json={
                     "scheduled_datetime": future_dt
@@ -883,7 +914,7 @@ class RescheduleTaskSlotCapacityTests(unittest.TestCase):
 
         future_dt = (datetime.now(UTC) + timedelta(hours=3)).isoformat()
 
-        with patch("app.api.task_operations.notify_task_rescheduled", new=AsyncMock()):
+        with patch("app.api.task_action_routes.notify_task_rescheduled", new=AsyncMock()):
             with patch("app.core.task_helpers._require_task_operator", return_value=None):
                 with patch("app.api.tasks.get_project_metadata", new_callable=AsyncMock, return_value={}):
                     response = client.patch("/api/tasks/91/schedule", json={
@@ -916,7 +947,7 @@ class RescheduleTaskSlotCapacityTests(unittest.TestCase):
 
         future_dt = (datetime.now(UTC) + timedelta(hours=3)).isoformat()
 
-        with patch("app.api.task_operations.notify_task_rescheduled", new=AsyncMock()):
+        with patch("app.api.task_action_routes.notify_task_rescheduled", new=AsyncMock()):
             with patch("app.core.task_helpers._require_task_operator", return_value=None):
                 with patch("app.api.tasks.get_project_metadata", new_callable=AsyncMock, return_value={}):
                     client.patch("/api/tasks/92/schedule", json={
@@ -952,7 +983,7 @@ class RescheduleTaskSlotCapacityTests(unittest.TestCase):
 
         future_dt = (datetime.now(UTC) + timedelta(hours=3)).isoformat()
 
-        with patch("app.api.task_operations.notify_task_rescheduled", new=AsyncMock()):
+        with patch("app.api.task_action_routes.notify_task_rescheduled", new=AsyncMock()):
             with patch("app.core.task_helpers._require_task_operator", return_value=None):
                 with patch("app.api.tasks.get_project_metadata", new_callable=AsyncMock, return_value={}):
                     response = client.patch("/api/tasks/93/schedule", json={
