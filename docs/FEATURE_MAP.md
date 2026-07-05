@@ -3,252 +3,139 @@
 > 系统性地梳理当前项目所有功能，粒度到具体操作/交互层面。
 
 ```mermaid
-flowchart TB
-  %% —— 配色 ——————————————————————————
-  classDef engine   fill:#E3F2FD,stroke:#1E88E5,stroke-width:2px,color:#0D47A1
-  classDef data     fill:#E8F5E9,stroke:#43A047,stroke-width:2px,color:#1B5E20
-  classDef config   fill:#FFF3E0,stroke:#FB8C00,stroke-width:2px,color:#E65100
-  classDef collab   fill:#F3E5F5,stroke:#8E24AA,stroke-width:2px,color:#4A148C
-  classDef govern   fill:#FFEBEE,stroke:#E53935,stroke-width:2px,color:#B71C1C
-  classDef frontend fill:#E0F2F1,stroke:#00897B,stroke-width:2px,color:#004D40
-  classDef cat      font-weight:bold,font-size:14px,rx:8,ry:8
-
-  %% ================================================================
-  subgraph ENGINE["　🧠　核 心 引 擎　"]
-    direction LR
-    E1("任务生命周期"):::cat
-      E1 --- E1a["创建：手动创建 · Prompt模板 · Run-Instruction编辑"]
-      E1 --- E1b["创建：Provider/Profile选择 · P0/P1/P2 · execute/plan模式"]
-      E1 --- E1c["创建：立即/延时(相对秒数)/定时(绝对时间) · 热力图选时"]
-      E1 --- E1d["创建：slot容量检查 · 用量限额校验 · 模板渲染 · Profile快照"]
-      E1 --- E1e["创建：CI自动修复创建 · 重试克隆 · 编辑未开始任务 · 改期"]
-      E1 --- E1f["调度：P0>P1>P2 · 定时优先于立即 · 同类型scheduled_at排序"]
-      E1 --- E1g["调度：max_concurrency并发控制 · Issue执行锁(同Issue互斥)"]
-      E1 --- E1h["调度：崩溃恢复(发现running容器→续接) · 孤儿容器清理"]
-      E1 --- E1i["调度：线程池隔离(每任务独立线程+event-loop) · 独立进程运行"]
-      E1 --- E1j["执行：Docker容器 codify-{task_id}-p{project_id}-i{issue_iid}"]
-      E1 --- E1k["执行：GitLab token · AI Provider配置 · 全局/Profile环境变量"]
-      E1 --- E1l["执行：Volume挂载 · CA证书 · Claude-Session目录 · Pre/Post脚本"]
-      E1 --- E1m["执行：Codegraph开关 · SSH内置 · Claude CLI · 敏感数据脱敏"]
-      E1 --- E1n["执行：task_timeout超时 · 手动取消 · Workspace状态查询/删除"]
-      E1 --- E1o["结果：MR自动创建/更新 · add/del/total统计 · Token用量"]
-      E1 --- E1p["结果：Commit-SHA · AI commit-message · model名称 · 执行时长"]
-      E1 --- E1q["结果：状态覆盖(操作人/原因/时间) · require_changes失败"]
-      E1 --- E1r["结果：RESUME_SESSION环境变量 · Claude会话跨任务续接"]
-    E1 ~~~ E1a ~~~ E1b ~~~ E1c ~~~ E1d ~~~ E1e ~~~ E1f ~~~ E1g ~~~ E1h ~~~ E1i
-    E1 ~~~ E1j ~~~ E1k ~~~ E1l ~~~ E1m ~~~ E1n ~~~ E1o ~~~ E1p ~~~ E1q ~~~ E1r
-
-    E2("Issue 管理"):::cat
-      E2 --- E2a["CRUD：创建(项目/标题/描述/分支配置) · 编辑 · 列表(分页筛选排序)"]
-      E2 --- E2b["关闭：自动删除GitLab分支可配 · 记录closed_via · 409阻止删除"]
-      E2 --- E2c["分支：base/target branch · 自动命名codify/issue-{id} · 手动删除"]
-      E2 --- E2d["状态：OPEN→IN_PROGRESS→IN_REVIEW→CLOSED · 自动转换"]
-      E2 --- E2e["默认：Issue级默认Provider/Profile · CI自动修复开关"]
-    E2 ~~~ E2a ~~~ E2b ~~~ E2c ~~~ E2d ~~~ E2e
-  end
-
-  %% ================================================================
-  subgraph DATA["　📊　数 据 与 洞 察　"]
-    direction LR
-    D1("日志与可观测"):::cat
-      D1 --- D1a["结构化：thinking · assistant_text · tool_call · context_compact · system_init"]
-      D1 --- D1b["结构化：log_level · log_metadata · 时间线视图 · tool_call展开"]
-      D1 --- D1c["结构化：Payload懒加载(TaskPayload表) · 大体积内容按需查询"]
-      D1 --- D1d["原始：TaskRawLogChunk分块 · sequence_no排序 · identity编码"]
-      D1 --- D1e["原始：实时SSE推送 · 容器日志轮询 · finalized标记"]
-      D1 --- D1f["流式：SSE批量推送 · 原始chunk流 · 自动重连 · Tab生命周期"]
-      D1 --- D1g["归档：event.jsonl+runtime.json+console.log打包 · 元数据查询 · 下载"]
-    D1 ~~~ D1a ~~~ D1b ~~~ D1c ~~~ D1d ~~~ D1e ~~~ D1f ~~~ D1g
-
-    D2("AI 交付物展示"):::cat
-      D2 --- D2a["摘要：Markdown渲染 · 从TaskPayload懒加载 · 源文本复制"]
-      D2 --- D2b["Mermaid：自动检测```mermaid代码块 · SVG渲染"]
-      D2 --- D2c["Mermaid：缩放弹窗(fit/100-300%) · 鼠标拖拽平移 · 滚轮缩放"]
-      D2 --- D2d["辅助：摘要折叠浮动按钮(滚动显现) · 复制反馈计时器"]
-      D2 --- D2e["后续：TaskContinuationPanel · 追加新任务 · 返回Issue"]
-    D2 ~~~ D2a ~~~ D2b ~~~ D2c ~~~ D2d ~~~ D2e
-
-    D3("统计分析"):::cat
-      D3 --- D3a["Dashboard：状态计数卡片 · 24h趋势 · 活动热力图"]
-      D3 --- D3b["Dashboard：趋势折线图(任务/代码/Token) · 状态饼图"]
-      D3 --- D3c["Dashboard：MyWorkBoard看板(Running/Ready/Waiting三列)"]
-      D3 --- D3d["Analytics：7/30/90天窗口 · 项目/发起人筛选"]
-      D3 --- D3e["Analytics：按项目/发起人统计表 · Provider对比 · 队列等待分布"]
-      D3 --- D3f["调度：7天×24h热力图 · 忙闲识别 · slot容量 · 内联改期"]
-    D3 ~~~ D3a ~~~ D3b ~~~ D3c ~~~ D3d ~~~ D3e ~~~ D3f
-
-    D4("系统监控"):::cat
-      D4 --- D4a["运行时：队列压力 · Worker对齐(运行/配置) · 失败率 · 长任务检测"]
-      D4 --- D4b["容器：Worker容器列表(ID/名称/状态) · 实时SSE日志 · Docker健康"]
-      D4 --- D4c["视图：Kanban看板(按状态分列) · 时间线 · 表格(筛选排序)"]
-    D4 ~~~ D4a ~~~ D4b ~~~ D4c
-  end
-
-  %% ================================================================
-  subgraph CONFIG["　⚙️　配 置 中 心　"]
-    direction LR
-    C1("运行时配置"):::cat
-      C1 --- C1a["调度：max_concurrency · scheduler_interval · task_timeout · default_target_branch"]
-      C1 --- C1b["控制：max_retries · retry_delay · slot_max_tasks/enforce · ci_auto_repair_max_attempts"]
-      C1 --- C1c["AI全局：anthropic_base_url/api_key/model · claude_max_turns"]
-      C1 --- C1d["Worker：Volume挂载 · Pre/Post脚本 · CA路径 · workspace保留(成功/失败分开)"]
-      C1 --- C1e["全局Worker环境变量(非Profile级) · 加密标记 · 保留字校验"]
-      C1 --- C1f["开关：allow_monitor/schedule_overview/analytics/oidc_diagnostics_for_users"]
-      C1 --- C1g["公告：enabled/text/level · 6个敏感key-Fernet加密 · 单key/全量重置"]
-      C1 --- C1h["env-only：docker_host/TLS · custom_ca_bundle · worker_image/network/prefix/skip_pull"]
-      C1 --- C1i["env-only：database_url · config_encryption_key · auto_migrate · backend_url/frontend_url"]
-    C1 ~~~ C1a ~~~ C1b ~~~ C1c ~~~ C1d ~~~ C1e ~~~ C1f ~~~ C1g ~~~ C1h ~~~ C1i
-
-    C2("GitLab 集成配置"):::cat
-      C2 --- C2a["URL · Bot/Admin Token · 连接测试 · 项目缓存失效刷新"]
-      C2 --- C2b["OIDC：issuer/client_id/secret/redirect_uri · 连接测试 · 诊断"]
-      C2 --- C2c["OIDC：Admin用户名/组映射 · Session Cookie/TTL/SameSite/保留天数"]
-      C2 --- C2d["告警：alert_webhook_url · alert_on_failure开关"]
-    C2 ~~~ C2a ~~~ C2b ~~~ C2c ~~~ C2d
-
-    C3("AI Provider"):::cat
-      C3 --- C3a["CRUD：名称/base_url/api_key/model · max_turns · system_prompt"]
-      C3 --- C3b["默认(单例唯一约束) · 启用/禁用 · 删除"]
-    C3 ~~~ C3a ~~~ C3b
-
-    C4("Worker Profile"):::cat
-      C4 --- C4a["CRUD：名称/描述/镜像 · 启用/禁用 · 默认(单例) · 复制(加密变量保留)"]
-      C4 --- C4b["Codegraph开关 · Volume挂载(JSON) · Pre/Post脚本"]
-      C4 --- C4c["Profile级环境变量(key/value/加密) · 保留字校验"]
-      C4 --- C4d["三模板：default_execute · default_plan · ci_auto_repair"]
-      C4 --- C4e["TaskWorkerProfileSnapshot：执行时不可变快照"]
-    C4 ~~~ C4a ~~~ C4b ~~~ C4c ~~~ C4d ~~~ C4e
-
-    C5("提示词模板"):::cat
-      C5 --- C5a["CRUD：名称/内容/variable_tips · tags(≤20个/≤30字符)"]
-      C5 --- C5b["is_active启用禁用 · sort_order拖拽排序 · 前端标签筛选选择器"]
-    C5 ~~~ C5a ~~~ C5b
-  end
-
-  %% ================================================================
-  subgraph COLLAB["　🔔　协 作 与 集 成　"]
-    direction LR
-    N1("Mattermost 通知"):::cat
-      N1 --- N1a["集成：Server URL · Bot Token · 连接测试 · Channel目标解析(正/反向)"]
-      N1 --- N1b["Profile：创建/编辑/删除 · Channel或DM(发起人私信) · @mention开关"]
-      N1 --- N1c["事件：task_completed/failed/rescheduled/execute_now/retry_scheduled/cancelled"]
-      N1 --- N1d["字段：12个可选展示字段 · 用户映射(GitLab→Mattermost自动匹配)"]
-      N1 --- N1e["投递：success/failed/skipped状态记录 · 目标摘要 · 失败原因"]
-    N1 ~~~ N1a ~~~ N1b ~~~ N1c ~~~ N1d ~~~ N1e
-
-    N2("GitLab 集成"):::cat
-      N2 --- N2a["项目：可访问列表 · 分支查询 · CI自动修复可用性检查"]
-      N2 --- N2b["Webhook：创建/更新(自动配置pipeline-events) · 状态查看 · 全局总览"]
-      N2 --- N2c["Webhook：Secret加密存储 · 事件日志(processed/unmatched/ignored)"]
-      N2 --- N2d["MR：容器内自动创建/更新 · URL关联Issue · 描述更新 · Draft管理"]
-    N2 ~~~ N2a ~~~ N2b ~~~ N2c ~~~ N2d
-
-    N3("CI 失败自动修复"):::cat
-      N3 --- N3a["Webhook：X-Gitlab-Token验证 · Pipeline失败识别 · MR关联"]
-      N3 --- N3b["证据：pipeline_id/sha/ref/status/url · Job列表(name/stage/failure_reason)"]
-      N3 --- N3c["证据：Job-Trace下载 · 根因first_failed_stage · 下游抑制 · 并发锁"]
-      N3 --- N3d["证据：collection_attempts重试 · 忽略原因(非MR-Pipeline)"]
-      N3 --- N3e["Issue：source+target+branch匹配 · 无匹配自动创建"]
-      N3 --- N3f["修复：自动创建 repair-task · CI-Repair模板 · CIFailureRunLog过程日志"]
-      N3 --- N3g["CI Failure Collector 持久后台进程(与Scheduler共同启动)"]
-    N3 ~~~ N3a ~~~ N3b ~~~ N3c ~~~ N3d ~~~ N3e ~~~ N3f ~~~ N3g
-  end
-
-  %% ================================================================
-  subgraph GOVERN["　🛡️　平 台 治 理　"]
-    direction LR
-    G1("用户与权限"):::cat
-      G1 --- G1a["认证：GitLab OIDC(跳转→callback) · 本地密码 · Break-glass应急 · 登出"]
-      G1 --- G1b["审计：AuthAuditLog(事件/用户/成功失败/IP/UA)"]
-      G1 --- G1c["会话：Cookie · 列表/单撤销/批量撤销 · 自动过期清理 · IP/UA/last_seen"]
-      G1 --- G1d["会话：GitLab OIDC Token加密存储(access+refresh供Worker使用)"]
-      G1 --- G1e["角色：platform_admin/user · 来源bootstrap/manual/oidc · active/disabled"]
-      G1 --- G1f["权限：4个受控页(Monitor/Schedule/Analytics/OIDC) · 功能开关 · Admin全权限"]
-      G1 --- G1g["初始化：Bootstrap流程(首次创建管理员) · SystemBootstrap状态追踪 · 初始化前阻断"]
-    G1 ~~~ G1a ~~~ G1b ~~~ G1c ~~~ G1d ~~~ G1e ~~~ G1f ~~~ G1g
-
-    G2("用量管理"):::cat
-      G2 --- G2a["配额：日Token · 周Token · 日任务 · 周任务 · custom/inherit/unlimited"]
-      G2 --- G2b["策略：系统默认(单例) · 用户级覆盖(按user_id唯一)"]
-      G2 --- G2c["账本：TaskUsageLedger(按task_id唯一) · 按天/周时间桶聚合"]
-      G2 --- G2d["检查：创建+调度双关口超限阻断 · 详细错误(限额/重置时间) · 前端展示"]
-      G2 --- G2e["界面：用户用量列表(管理员) · 编辑默认/单用户限额"]
-    G2 ~~~ G2a ~~~ G2b ~~~ G2c ~~~ G2d ~~~ G2e
-
-    G3("系统运维"):::cat
-      G3 --- G3a["清理：旧Session · 过期Workspace · 旧归档 · 旧容器 · 手动全量(Maintenance)"]
-      G3 --- G3b["启动：Alembic自动迁移 · 活跃任务rendered_prompt回填"]
-      G3 --- G3c["健康：/health(DB+Docker+status+checks+trace_id) · 事件循环>1s告警"]
-      G3 --- G3d["追踪：X-Trace-ID(请求头/自动UUID) · 响应头返回 · 慢请求>2s告警"]
-      G3 --- G3e["日志：请求开始/结束/耗时 · 全局500+Trace-ID+错误详情"]
-    G3 ~~~ G3a ~~~ G3b ~~~ G3c ~~~ G3d ~~~ G3e
-  end
-
-  %% ================================================================
-  subgraph FRONTEND["　🎨　前 端 基 础 设 施　"]
-    direction LR
-    F1("国际化 i18n"):::cat
-      F1 --- F1a["中英文(en/zh-CN) · 浏览器语言检测 · localStorage持久化"]
-      F1 --- F1b["Naive UI locale联动 · 日期格式化locale联动"]
-    F1 ~~~ F1a ~~~ F1b
-
-    F2("UI 框架"):::cat
-      F2 --- F2a["Naive UI全局配置(主题色自定义) · Message/LoadingBar/Dialog Provider"]
-      F2 --- F2b["响应式断点：isMobile(<768px) · isCompact(<480px)"]
-    F2 ~~~ F2a ~~~ F2b
-
-    F3("通用组件"):::cat
-      F3 --- F3a["布局：App.vue全局布局(侧边栏+顶栏+公告横幅+内容)"]
-      F3 --- F3b["PageHeader(标题/副标题/操作) · SummaryCard · StatCard"]
-      F3 --- F3c["FilterToolbar(搜索/筛选/排序/列显隐) · FilterPopover · SortPopover · ColumnsPopover"]
-      F3 --- F3d["ErrorToast · TraceBadge · LanguageToggle · PoweredByFooter"]
-      F3 --- F3e["OnboardingModal(5步产品引导) · HeatmapChart · RescheduleDrawer"]
-    F3 ~~~ F3a ~~~ F3b ~~~ F3c ~~~ F3d ~~~ F3e
-
-    F4("任务专用组件"):::cat
-      F4 --- F4a["TaskFormDrawer · VariableEditor(CodeMirror) · RunInstructionTemplateEditor"]
-      F4 --- F4b["TaskProcessPanel(时间线) · TaskProcessRawPane(终端) · TaskProcessToolRow/TextRow"]
-      F4 --- F4c["TaskResultPanel(交付摘要) · TaskRunMetrics(指标) · TaskMetadataPanel(元数据)"]
-      F4 --- F4d["TaskContinuationPanel(后续) · RescheduleDrawer(改期)"]
-    F4 ~~~ F4a ~~~ F4b ~~~ F4c ~~~ F4d
-
-    F5("Issue 专用组件"):::cat
-      F5 --- F5a["IssueCurrentExecution · IssueTaskPanel/Record · IssueOverviewSidebar"]
-      F5 --- F5b["IssueCIAutomationPanel(Webhook事件/CI修复)"]
-    F5 ~~~ F5a ~~~ F5b
-
-    F6("配置面板"):::cat
-      F6 --- F6a["RuntimeSettings · AuthSettings · GitLabSettings · Maintenance"]
-      F6 --- F6b["AIProvidersPanel · WorkerSettingsPanel · MattermostNotificationsPanel"]
-      F6 --- F6c["PromptTemplatesPanel · AnnouncementPanel · WebhookEventsPanel"]
-      F6 --- F6d["OidcDiagnosticsPanel · useConfigForm(跨面板脏检测/保存)"]
-    F6 ~~~ F6a ~~~ F6b ~~~ F6c ~~~ F6d
-
-    F7("API 层"):::cat
-      F7 --- F7a["Axios实例(/api前缀 · 30s超时 · withCredentials)"]
-      F7 --- F7b["401自动跳转/login?next= · Trace-ID请求/响应拦截器 · 错误标准化"]
-    F7 ~~~ F7a ~~~ F7b
-
-    F8("通用 Composables"):::cat
-      F8 --- F8a["useFilterSort(筛选排序+localStorage) · usePolling(轮询+Tab感知)"]
-      F8 --- F8b["useBreakpoints(响应式) · useOnboarding(引导) · useVariableEditor(CodeMirror)"]
-      F8 --- F8c["useConfigForm(Config页多标签表单管理)"]
-    F8 ~~~ F8a ~~~ F8b ~~~ F8c
-
-    F9("Feature Composables (features/tasks/)"):::cat
-      F9 --- F9a["taskFormModel · useTaskFormSubmission(创建/编辑提交+校验+用量检测)"]
-      F9 --- F9b["useTaskExecutionOptions(Provider/Profile加载) · useTaskSlotCapacity(防抖容量检查)"]
-      F9 --- F9c["useTaskScheduleContext(定时任务+容量) · useTaskLogStreams(SSE+重连+Tab管理)"]
-      F9 --- F9d["useDeliverySummaryPayload(懒加载) · usePromptTemplatePicker(标签筛选+覆盖确认)"]
-      F9 --- F9e["useRunInstructionPreview(服务端预览) · useSummaryRenderer(Markdown+Mermaid)"]
-      F9 --- F9f["useSummaryMermaidViewer(缩放弹窗) · useSummaryCollapseFloat · useSummaryCopyActions"]
-    F9 ~~~ F9a ~~~ F9b ~~~ F9c ~~~ F9d ~~~ F9e ~~~ F9f
-
-    F10("工具函数"):::cat
-      F10 --- F10a["datetime(UTC+8/紧凑/相对) · formatPriority/Duration/LargeNumber"]
-      F10 --- F10b["MR URL提取 · PromptTemplate标签筛选 · slotError解析 · usageLimit类型守卫"]
-    F10 ~~~ F10a ~~~ F10b
-  end
+mindmap
+  root(("Codify"))
+    )🧠 核心引擎(
+      [任务生命周期]
+        创建：手动/重试/CI修复 · Provider/Profile选择 · Prompt模板引用
+        创建：P0/P1/P2 · execute/plan模式 · 立即/延时/定时调度
+        创建：slot容量检查 · 用量校验 · 模板渲染 · Profile快照
+        调度：P0>P1>P2 · 定时优先 · concurrency控制 · Issue互斥锁
+        调度：崩溃恢复(容器续接) · 孤儿清理 · 线程池隔离
+        执行：Docker隔离 codify-{id}-p{project}-i{issue}
+        执行：环境变量注入 · Volume挂载 · Pre/Post脚本 · Codegraph
+        执行：Claude CLI · SSH内置 · 敏感数据脱敏 · 超时/取消
+        结果：MR自动创建 · 代码统计 · Token用量 · Commit-SHA
+        结果：状态覆盖 · require_changes · Claude会话续接(RESUME)
+      [Issue 管理]
+        CRUD：创建(项目/标题/分支) · 编辑 · 分页筛选列表
+        关闭：自动删分支可配 · closed_via记录 · 409阻止删除活跃Issue
+        分支：base/target · 自动命名codify/issue-{id} · 手动删除
+        状态：OPEN→IN_PROGRESS→IN_REVIEW→CLOSED 自动转换
+        默认：Issue级默认Provider/Profile · CI自动修复开关
+    )📊 数据洞察(
+      [日志与可观测]
+        结构化：thinking · assistant_text · tool_call · context_compact · system_init
+        结构化：log_level · 元数据 · 时间线视图 · tool_call展开 · Payload懒加载
+        原始：TaskRawLogChunk分块 · sequence_no排序 · SSE实时推送
+        流式：结构化SSE · 原始chunk SSE · 自动重连 · Tab生命周期管理
+        归档：event.jsonl+runtime.json+console.log打包 · 下载
+      [AI 交付物展示]
+        摘要：Markdown渲染 · TaskPayload懒加载 · 源文本复制
+        Mermaid：自动检测代码块 · SVG渲染 · 缩放弹窗(100-300%)
+        Mermaid：鼠标拖拽平移 · 滚轮缩放 · 源码复制
+        辅助：折叠浮动按钮 · 复制反馈计时器 · TaskContinuationPanel后续引导
+      [统计分析]
+        Dashboard：状态卡片 · 24h趋势 · 活动热力图 · 趋势图 · 饼图
+        Dashboard：MyWorkBoard看板(Running/Ready/Waiting三列)
+        Analytics：7/30/90天 · 项目/发起人筛选 · Provider对比 · 队列等待分布
+        调度：7天×24h热力图 · 忙闲识别 · slot容量 · 管理员内联改期
+      [系统监控]
+        运行时：队列压力 · Worker对齐 · 失败率 · 长任务检测
+        容器：Worker列表 · 实时SSE日志 · Docker健康检查
+        视图：Kanban看板 · 时间线 · 筛选排序表格
+    )⚙️ 配置中心(
+      [运行时配置]
+        调度：concurrency · interval · timeout · default_target_branch
+        控制：max_retries · retry_delay · slot_max/ enforce · ci_repair_max
+        AI全局：base_url/api_key/model · max_turns
+        Worker：Volume挂载 · Pre/Post脚本 · workspace保留天数
+        全局Worker环境变量(非Profile级/加密/保留字校验)
+        功能开关：Monitor/Schedule/Analytics/OIDC
+        公告：enabled/text/level · 6个key-Fernet加密 · 单key/全量重置
+      [GitLab · OIDC · 告警]
+        GitLab：URL/Bot/Admin Token · 连接测试 · 项目缓存刷新
+        OIDC：issuer/client/secret · 连接测试 · 诊断 · Admin映射
+        Session：Cookie名/TTL/SameSite · Session保留天数
+        告警：alert_webhook_url · alert_on_failure
+      [AI Provider]
+        CRUD：名称/base_url/api_key/model · max_turns · system_prompt
+        默认(单例约束) · 启用/禁用 · 删除
+      [Worker Profile]
+        CRUD+复制(加密变量保留) · 启用/禁用 · 默认(单例)
+        Codegraph · Volume挂载(JSON) · Pre/Post脚本
+        Profile级环境变量(加密/保留字校验) · 不可变执行快照
+        三模板：default_execute · default_plan · ci_auto_repair
+      [提示词模板]
+        CRUD：名称/内容/variable_tips · tags(≤20个≤30字符)
+        is_active · sort_order拖拽排序 · 前端标签筛选选择器
+    )🔔 协作集成(
+      [Mattermost 通知]
+        集成：Server/Bot Token · 连接测试 · Channel解析(正反向)
+        Profile：Channel/DM(发起人私信) · @mention · 6种事件订阅
+        字段：12个可选 · 用户映射(GitLab→Mattermost自动匹配)
+        投递：success/failed/skipped追踪 · 失败原因记录
+      [GitLab 集成]
+        项目：可访问列表 · 分支查询 · CI可用性检查
+        Webhook：创建/状态/全局总览 · Secret加密 · 事件日志
+        MR：容器内自动创建/更新 · URL关联Issue · Draft管理
+      [CI 失败自动修复]
+        Webhook：X-Gitlab-Token验证 · Pipeline失败识别
+        证据：pipeline/job信息 · Trace下载 · 根因first_failed_stage
+        证据：下游抑制 · 并发锁 · 重试 · 忽略原因
+        Issue：分支匹配+自动创建 · 后台Collector持久运行
+        修复：自动repair-task · CI模板 · CIFailureRunLog过程日志
+    )🛡️ 平台治理(
+      [用户与权限]
+        认证：GitLab OIDC · 本地密码 · Break-glass · 登出
+        审计：AuthAuditLog(事件/用户/成败/IP/UA)
+        会话：Cookie · 列表/撤销/批量撤销 · 自动过期清理
+        会话：GitLab OIDC Token加密存储(access+refresh供Worker用)
+        角色：platform_admin/user · bootstrap/manual/oidc · active/disabled
+        权限：4个受控页 · 功能开关 · Admin全权限 · OIDC禁用时全开放
+        初始化：Bootstrap首次创建管理员 · 初始化前阻断所有操作
+      [用量管理]
+        配额：日/周 Token · 日/周任务数 · custom/inherit/unlimited
+        策略：系统默认(单例) · 用户级覆盖(按user_id唯一)
+        账本：TaskUsageLedger · 按天/周时间桶聚合 · 前端展示
+        检查：创建+调度双关口 · 超限阻断+详细错误 · 管理员编辑界面
+      [系统运维]
+        清理：Session/Workspace/归档/容器 · 手动全量(Maintenance)
+        启动：Alembic自动迁移 · 活跃任务rendered_prompt回填
+        健康：/health(DB+Docker+checks+trace_id) · 事件循环>1s告警
+        追踪：X-Trace-ID · 慢请求>2s告警 · 全局500异常处理
+    )🎨 前端设施(
+      [国际化]
+        中英文(en/zh-CN) · 浏览器检测 · localStorage · Naive UI locale联动
+      [UI 框架]
+        Naive UI全局配置(主题色) · Message/LoadingBar/Dialog Provider
+        响应式断点：isMobile(<768px) · isCompact(<480px)
+      [通用组件]
+        PageHeader · SummaryCard · StatCard · FilterToolbar系列
+        ErrorToast · TraceBadge · LanguageToggle · PoweredByFooter
+        OnboardingModal(5步引导) · HeatmapChart · ActivityHeatmap
+      [任务组件]
+        TaskFormDrawer · VariableEditor(CodeMirror) · RunInstructionEditor
+        TaskProcessPanel · TaskResultPanel · TaskMetadataPanel · TaskRunMetrics
+        TaskContinuationPanel · RescheduleDrawer
+      [Issue组件]
+        IssueCurrentExecution · IssueTaskPanel/Record · IssueOverviewSidebar
+        IssueCIAutomationPanel
+      [配置面板]
+        RuntimeSettings · AuthSettings · GitLabSettings · Maintenance
+        AIProviders · WorkerSettings · MattermostNotifications
+        PromptTemplates · Announcement · WebhookEvents · OidcDiagnostics
+      [API 层]
+        Axios(/api · 30s · withCredentials) · 401跳转/login?next=
+        Trace-ID拦截器 · 错误标准化
+      [Composables]
+        通用：useFilterSort · usePolling · useBreakpoints · useOnboarding
+        通用：useVariableEditor · useConfigForm
+        Feature(14个)：taskFormModel · useTaskFormSubmission · useTaskLogStreams
+        Feature：useSummaryRenderer · useSummaryMermaidViewer 等
+      [工具函数]
+        datetime(UTC+8) · formatDuration · formatLargeNumber
+        MR URL提取 · slotError解析 · usageLimit类型守卫
 ```
 
 ---
