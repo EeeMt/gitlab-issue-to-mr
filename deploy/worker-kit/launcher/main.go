@@ -9,17 +9,12 @@ import (
 )
 
 type manifest struct {
-	SchemaVersion int                `json:"schema_version"`
-	KitVersion    string             `json:"kit_version"`
-	Platform      string             `json:"platform"`
-	RuntimeBin    string             `json:"runtime_bin"`
-	Bash          string             `json:"bash"`
-	Entrypoint    string             `json:"entrypoint"`
-	Components    manifestComponents `json:"components"`
-}
-
-type manifestComponents struct {
-	Claude string `json:"claude"`
+	SchemaVersion int    `json:"schema_version"`
+	KitVersion    string `json:"kit_version"`
+	Platform      string `json:"platform"`
+	RuntimeBin    string `json:"runtime_bin"`
+	Bash          string `json:"bash"`
+	Entrypoint    string `json:"entrypoint"`
 }
 
 func fail(format string, args ...any) {
@@ -58,7 +53,6 @@ func main() {
 	os.Setenv("CODIFY_KIT_VERSION", m.KitVersion)
 	os.Setenv("CODIFY_KIT_BIN", m.RuntimeBin)
 	os.Setenv("CODIFY_BASH", m.Bash)
-	os.Setenv("CODIFY_CLAUDE_VERSION", m.Components.Claude)
 	os.Setenv("CODIFY_RUNTIME_PATH", runtimePath+":"+m.RuntimeBin)
 	os.Setenv("PATH", m.RuntimeBin+":"+runtimePath)
 

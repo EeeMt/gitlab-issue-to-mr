@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import re
 import shutil
 import stat
@@ -31,6 +32,14 @@ def test_worker_kit_uses_content_addressed_nixpkgs_lock():
     assert "builtins.fetchTarball" in nix_expression
     assert "inherit (nixpkgsLock) url sha256" in nix_expression
     assert "nixpkgs_revision" in dockerfile
+    assert "claude.ai/install.sh" not in dockerfile
+    assert "CLAUDE_VERSION" not in dockerfile
+    assert (
+        "components: {nixpkgs: $nixpkgs_version, nixpkgs_revision: $nixpkgs_revision}"
+        in dockerfile
+    )
+    assert "claude-code-cli" not in nix_expression
+    assert "src = ./claude" not in nix_expression
 
 
 def test_make_offline_bundle_export_target_builds_exports_and_packages():
@@ -49,6 +58,101 @@ def test_make_offline_bundle_export_target_builds_exports_and_packages():
     assert "deploy/worker-kit/export.sh" in result.stdout
     assert "deploy/offline-bundle && ./scripts/export-images.sh" in result.stdout
     assert "deploy/offline-bundle && ./scripts/package-bundle.sh" in result.stdout
+
+
+def test_verify_runtime_scripts_mount_claude_without_breaking_docker_args():
+    repo_root = Path(__file__).resolve().parents[3]
+    scripts = (
+        repo_root / "deploy" / "worker-kit" / "verify-runtime.sh",
+        repo_root / "deploy" / "offline-bundle" / "scripts" / "verify-worker-runtime.sh",
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        kit = root / "kit"
+        (kit / "nix" / "store").mkdir(parents=True)
+        launcher = kit / "launcher"
+        launcher.write_text("#!/bin/sh\n", encoding="utf-8")
+        launcher.chmod(launcher.stat().st_mode | stat.S_IEXEC)
+        (kit / "manifest.json").write_text(
+            '{"schema_version":1,"kit_version":"0.1.0"}',
+            encoding="utf-8",
+        )
+        claude = root / "claude"
+        claude.write_text("#!/bin/sh\n", encoding="utf-8")
+        claude.chmod(claude.stat().st_mode | stat.S_IEXEC)
+
+        fake_bin = root / "bin"
+        fake_bin.mkdir()
+        log_path = root / "docker-args.log"
+        docker = fake_bin / "docker"
+        docker.write_text(
+            "#!/usr/bin/env bash\n"
+            "{ printf '__CALL__\\n'; printf '%s\\n' \"$@\"; } >> \"$DOCKER_ARGS_LOG\"\n",
+            encoding="utf-8",
+        )
+        docker.chmod(docker.stat().st_mode | stat.S_IEXEC)
+        env = {
+            **os.environ,
+            "DOCKER_ARGS_LOG": str(log_path),
+            "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        }
+
+        for script in scripts:
+            log_path.write_text("", encoding="utf-8")
+            result = subprocess.run(
+                [
+                    str(script),
+                    "--kit",
+                    str(kit),
+                    "--claude-host-path",
+                    str(claude),
+                    "--image",
+                    "team/runtime:1",
+                    "--smoke",
+                    "java -version",
+                ],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            assert result.returncode == 0, result.stderr
+            calls: list[list[str]] = []
+            current: list[str] | None = None
+            for line in log_path.read_text(encoding="utf-8").splitlines():
+                if line == "__CALL__":
+                    current = []
+                    calls.append(current)
+                elif current is not None:
+                    current.append(line)
+            assert calls[-1] == [
+                "run",
+                "--rm",
+                "--user",
+                "0:0",
+                "--tmpfs",
+                "/workspace:rw,exec,mode=1777",
+                "--volume",
+                f"{kit}:/opt/codify-kit:ro",
+                "--volume",
+                f"{kit}/nix/store:/nix/store:ro",
+                "--volume",
+                f"{claude}:/usr/local/bin/claude:ro",
+                "--entrypoint",
+                "/opt/codify-kit/launcher",
+                "--env",
+                "CODIFY_KIT_VERSION=0.1.0",
+                "--env",
+                "CODIFY_RUNTIME_IMAGE=team/runtime:1",
+                "--env",
+                "CODIFY_CLAUDE_BIN=/usr/local/bin/claude",
+                "team/runtime:1",
+                "--verify",
+                "--smoke",
+                "java -version",
+            ]
 
 
 def test_package_bundle_script_creates_archive_under_deploy_directory():

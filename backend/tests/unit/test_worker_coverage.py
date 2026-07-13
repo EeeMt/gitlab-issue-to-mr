@@ -751,9 +751,8 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         root = Path(__file__).resolve().parents[3]
         content = (root / "deploy" / "entrypoint.worker.sh").read_text()
 
-        self.assertIn('CODIFY_KIT_CLAUDE_BIN="${CODIFY_KIT_BIN}/claude"', content)
         self.assertIn(
-            'CODIFY_CLAUDE_BIN="${CODIFY_CLAUDE_BIN:-${CODIFY_KIT_CLAUDE_BIN}}"',
+            'CODIFY_CLAUDE_BIN="${CODIFY_CLAUDE_BIN:-/usr/local/bin/claude}"',
             content,
         )
         self.assertIn('CODIFY_CLAUDE_BIN must be an absolute path', content)
@@ -765,10 +764,7 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
             "codify_run_shell 'touch /workspace/.codify-worker-kit-write-test",
             content,
         )
-        self.assertIn(
-            '[ "${CODIFY_CLAUDE_BIN}" = "${CODIFY_KIT_CLAUDE_BIN}" ]',
-            content,
-        )
+        self.assertNotIn("CODIFY_KIT_CLAUDE_BIN", content)
 
     def test_entrypoint_propagates_module_failure_and_stops_loading(self):
         result, loaded_modules = self._run_entrypoint_loader(failing_module="delivery")

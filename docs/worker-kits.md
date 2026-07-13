@@ -28,9 +28,9 @@ runtime closure whose binaries refer to immutable paths under `/nix/store`. The 
 therefore run inside glibc and musl-based images without borrowing libraries from the project
 image. The target host does not need Nix installed.
 
-The kit includes Bash, Git, curl, jq, Python, Node.js, SSH, ripgrep, Claude CLI, CodeGraph,
-and the Mermaid validator. Project commands use the runtime image's standard paths first;
-kit commands are the fallback.
+The kit includes Bash, Git, curl, jq, Python, Node.js, SSH, ripgrep, CodeGraph, and the
+Mermaid validator. Claude CLI is intentionally outside the kit and must be supplied by the
+runtime image or a profile volume mount.
 
 ## Build and export
 
@@ -41,21 +41,19 @@ make worker-kit-export WORKER_KIT_VERSION=0.1.0 WORKER_KIT_PLATFORM=linux/amd64
 ```
 
 This creates an archive and checksum under `deploy/offline-bundle/kits/`. Kit versions are
-immutable. The manifest records the actual Claude CLI and nixpkgs versions used by the build.
+immutable. The manifest records the actual nixpkgs version used by the build.
 The nixpkgs source is locked by revision and Nix content hash in
 `deploy/worker-kit/nixpkgs.json`; builds do not follow a mutable Nix channel. Update both values
 deliberately when upgrading nixpkgs, then publish a new worker-kit version. The manifest records
 the locked revision for release auditing.
 The installer rejects an existing version directory; build a new version instead of replacing
-an installed directory in place. Claude CLI is pinned in `Dockerfile.worker-kit`; change that
-pin only together with a new worker-kit version.
+an installed directory in place.
 
-## Replacing Claude CLI at runtime
+## Supplying Claude CLI
 
-The kit remains the audited default. To select a different executable explicitly, set
-`CODIFY_CLAUDE_BIN` in the Worker Profile. The executable can come from the runtime image, or an
-administrator can add a read-only file mount from the Docker host. For example, add both of the
-following profile entries:
+Mounted worker kits default to `/usr/local/bin/claude`. The executable can come from the
+runtime image, or an administrator can add a read-only file mount from the Docker host. For
+example, add this profile mount:
 
 ```json
 {
@@ -65,24 +63,24 @@ following profile entries:
 }
 ```
 
+If you mount Claude somewhere else, also set `CODIFY_CLAUDE_BIN` in the Worker Profile:
+
 ```json
 {
   "key": "CODIFY_CLAUDE_BIN",
-  "value": "/usr/local/bin/claude"
+  "value": "/opt/claude/claude"
 }
 ```
 
-The override file must exist on every selected Docker Engine host, be executable, match the
+The mounted file must exist on every selected Docker Engine host, be executable, match the
 container CPU architecture, and be compatible with the runtime image's libc and loader. This is
 especially important for Alpine images. `CODIFY_CLAUDE_BIN` must be an absolute path. Runtime
 verification executes the effective `claude --version`, so verify every affected profile after
-changing the file. If the variable is absent, Codify always uses the version from the kit.
+changing the file.
 
-This override is operationally mutable: an existing task snapshot stores the mount path, not the
-file content, and the manifest's `components.claude` still describes the kit fallback. For
-reproducible production execution, package the new CLI into a new immutable worker-kit version
-and update profiles explicitly. Use the mount override for controlled testing or emergency
-rollout, not as the normal release mechanism.
+This delivery is operationally mutable: an existing task snapshot stores the mount path, not the
+file content. Update the host file deliberately on every Docker Engine host that can run the
+profile.
 
 ## Offline installation
 
@@ -113,12 +111,15 @@ Verify the kit and one project runtime image before creating a profile:
 ```bash
 ./scripts/verify-worker-runtime.sh \
   --kit /opt/codify/worker-kits/0.1.0-linux-amd64 \
+  --claude-host-path /opt/codify/overrides/claude-2.1.200 \
   --image team/java21-maven:2026.07 \
   --smoke 'java -version && mvn -version'
 ```
 
-The verifier checks the manifest, both read-only mounts, Codify tools, Mermaid, CodeGraph,
-numeric UID/GID downgrade, workspace writes, and the optional project command.
+The verifier checks the manifest, kit mounts, the effective Claude executable, Codify tools,
+Mermaid, CodeGraph, numeric UID/GID downgrade, workspace writes, and the optional project
+command. If the runtime image already includes Claude at `/usr/local/bin/claude`, omit
+`--claude-host-path`.
 
 Administrators can run the same check through Codify after saving a profile:
 
@@ -145,7 +146,13 @@ No UI is required. Create or update a Worker Profile through the existing admin 
   "worker_kit_version": "0.1.0",
   "worker_kit_path": "/opt/codify/worker-kits/0.1.0-linux-amd64",
   "codegraph_enabled": true,
-  "volume_mounts": [],
+  "volume_mounts": [
+    {
+      "host_path": "/opt/codify/overrides/claude-2.1.200",
+      "container_path": "/usr/local/bin/claude",
+      "mode": "ro"
+    }
+  ],
   "environment_variables": []
 }
 ```

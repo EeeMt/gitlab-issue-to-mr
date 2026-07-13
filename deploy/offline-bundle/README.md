@@ -32,7 +32,7 @@ The deployment uses these image tags:
 3. Edit `config/.env.offline` and fill in your real values.
 4. Run `./scripts/load-images.sh`.
 5. On every Docker host, install the kit with `./scripts/install-worker-kit.sh kits/<archive>`.
-6. Verify each runtime image with `./scripts/verify-worker-runtime.sh --kit <installed-path> --image <runtime-image>`.
+6. Verify each runtime image with `./scripts/verify-worker-runtime.sh --kit <installed-path> --claude-host-path <host-claude-bin> --image <runtime-image>`.
 7. Run `./scripts/start.sh` and then `./scripts/health-check.sh`.
 8. Create worker profiles through the API with `runtime_mode=mounted_kit`, the runtime image,
    kit version, and the same absolute kit path installed on that profile's Docker host.

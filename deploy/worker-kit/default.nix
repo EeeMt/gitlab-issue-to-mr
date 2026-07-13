@@ -11,23 +11,6 @@ let
     if pkgs.stdenv.hostPlatform.isAarch64
     then "@colbymchenry/codegraph-linux-arm64"
     else "@colbymchenry/codegraph-linux-x64";
-  claudeCli = pkgs.stdenvNoCC.mkDerivation {
-    pname = "claude-code-cli";
-    version = "2.1.197";
-    src = ./claude;
-    dontUnpack = true;
-    # Claude is a standalone executable with an appended payload; stripping leaves only Bun.
-    dontStrip = true;
-    nativeBuildInputs = [ pkgs.autoPatchelfHook ];
-    buildInputs = [
-      pkgs.stdenv.cc.cc.lib
-      pkgs.zlib
-    ];
-    installPhase = ''
-      mkdir -p $out/bin
-      install -m 755 $src $out/bin/claude
-    '';
-  };
   nodeTools = pkgs.buildNpmPackage {
     pname = "codify-worker-kit-node-tools";
     version = "0.1.0";
@@ -69,7 +52,6 @@ pkgs.symlinkJoin {
     pkgs.python312
     pkgs.ripgrep
     pkgs.which
-    claudeCli
     nodeTools
   ];
   nativeBuildInputs = [ pkgs.makeWrapper ];
