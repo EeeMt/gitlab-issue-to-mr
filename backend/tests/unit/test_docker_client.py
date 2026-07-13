@@ -192,7 +192,7 @@ class TestCreateContainer:
         wrapper.client.containers.run.return_value = mock_container
 
         result = wrapper.create_container(
-            image="codify-worker:latest",
+            image="codify-worker/java21-maven:2026.07",
             command="python run.py",
         )
 

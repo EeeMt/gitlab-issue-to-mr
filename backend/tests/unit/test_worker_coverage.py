@@ -738,7 +738,7 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
             root / "backend" / "tests" / "mock_integration" / "fake_claude" / "Dockerfile.worker-test"
         ).read_text()
         copy_instruction = "COPY deploy/worker-entrypoint/ /opt/codify/worker-entrypoint/"
-        self.assertIn(copy_instruction, dockerfile)
+        self.assertNotIn(copy_instruction, dockerfile)
         self.assertIn(copy_instruction, test_dockerfile)
 
     def test_entrypoint_sources_every_module_in_lifecycle_order(self):
@@ -772,22 +772,38 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertEqual(result.returncode, 23, result.stderr)
         self.assertEqual(loaded_modules, ["bootstrap", "gitlab", "delivery"])
 
-    def test_worker_images_include_ssh_client(self):
+    def test_runtime_worker_image_delegates_codify_tools_to_worker_kit(self):
         root = Path(__file__).resolve().parents[3]
-        dockerfiles = (
-            root / "deploy" / "Dockerfile.worker",
+        dockerfile = (root / "deploy" / "Dockerfile.worker").read_text()
+
+        self.assertIn("Project runtime image for mounted worker-kit profiles", dockerfile)
+        self.assertIn("openjdk-21-jdk \\", dockerfile)
+        self.assertIn("maven \\", dockerfile)
+        self.assertIn("useradd --create-home --shell /bin/bash --uid 1000 codify", dockerfile)
+        self.assertNotIn("claude.ai/install.sh", dockerfile)
+        self.assertNotIn("COPY --from=claude-installer", dockerfile)
+        self.assertNotIn("COPY deploy/entrypoint.worker.sh", dockerfile)
+        self.assertNotIn("COPY deploy/worker-entrypoint/", dockerfile)
+        self.assertNotIn("COPY deploy/ci-claude.sh", dockerfile)
+        self.assertNotIn("@colbymchenry/codegraph", dockerfile)
+        self.assertNotIn("mermaid@", dockerfile)
+        self.assertNotIn("nodesource.com/setup_22.x", dockerfile)
+        self.assertNotIn("ENTRYPOINT", dockerfile)
+
+    def test_mock_worker_image_keeps_ssh_client_for_baked_entrypoint_tests(self):
+        root = Path(__file__).resolve().parents[3]
+        dockerfile = (
             root
             / "backend"
             / "tests"
             / "mock_integration"
             / "fake_claude"
-            / "Dockerfile.worker-test",
+            / "Dockerfile.worker-test"
         )
 
-        for dockerfile in dockerfiles:
-            content = dockerfile.read_text()
-            self.assertIn("openssh-client \\", content)
-            self.assertIn("&& ssh -V \\", content)
+        content = dockerfile.read_text()
+        self.assertIn("openssh-client \\", content)
+        self.assertIn("&& ssh -V \\", content)
 
     def test_entrypoint_uses_codify_coauthor_and_git_author_env(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
@@ -867,21 +883,15 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertNotIn('del(.mcpServers.codegraph)', content)
         self.assertNotIn('<!-- CODEGRAPH_START -->', content)
 
-        dockerfile = (root / "deploy" / "Dockerfile.worker").read_text()
-        self.assertIn("nodesource.com/setup_22.x -o /tmp/nodesource_setup.sh", dockerfile)
-        self.assertIn("npm --version", dockerfile)
-        self.assertIn("npm install --omit=dev mermaid@11.15.0 jsdom@25.0.1", dockerfile)
-        self.assertIn("deploy/scripts/validate_mermaid_summary.mjs", dockerfile)
-        self.assertIn("@colbymchenry/codegraph@${CODEGRAPH_VERSION}", dockerfile)
-        self.assertIn("CODEGRAPH_NO_DOWNLOAD=1", dockerfile)
-        self.assertLess(
-            dockerfile.index("ENV CODEGRAPH_NO_DOWNLOAD=1"),
-            dockerfile.index("@colbymchenry/codegraph@${CODEGRAPH_VERSION}"),
-        )
-        self.assertIn(
-            'env HOME=/home/codify su -m -s /bin/bash codify -c "codegraph --version"',
-            dockerfile,
-        )
+        worker_kit_dockerfile = (root / "deploy" / "Dockerfile.worker-kit").read_text()
+        worker_kit_nix = (root / "deploy" / "worker-kit" / "default.nix").read_text()
+        self.assertIn("COPY deploy/scripts/validate_mermaid_summary.mjs", worker_kit_dockerfile)
+        self.assertIn("codify-worker-kit-node-tools", worker_kit_nix)
+
+        runtime_dockerfile = (root / "deploy" / "Dockerfile.worker").read_text()
+        self.assertNotIn("npm install --omit=dev mermaid", runtime_dockerfile)
+        self.assertNotIn("deploy/scripts/validate_mermaid_summary.mjs", runtime_dockerfile)
+        self.assertNotIn("@colbymchenry/codegraph", runtime_dockerfile)
 
         lifecycle = (root / "backend" / "app" / "core" / "worker_task_lifecycle.py").read_text()
         artifacts = (root / "backend" / "app" / "core" / "worker_task_artifacts.py").read_text()

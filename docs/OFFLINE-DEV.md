@@ -69,7 +69,7 @@
 ```
 codify-backend:latest      后端 API + 调度器（共用同一镜像）
 codify-nginx:latest        前端静态资源 + 反向代理
-codify-worker:latest       AI 工作容器（Claude CLI + Git + Java + Maven）
+codify-worker/java21-maven:2026.07       AI 工作容器（Claude CLI + Git + Java + Maven）
 postgres:16-alpine         PostgreSQL 数据库
 ```
 
@@ -146,14 +146,14 @@ mkdir -p offline-bundle-dev/{images,python-wheels,node-deps,bin,source}
 # ① 先确保所有镜像已构建
 cd deploy
 docker compose build              # 构建 backend, nginx
-docker build -f Dockerfile.worker -t codify-worker:latest ..  # 构建 worker
+docker build -f Dockerfile.worker -t codify-worker/java21-maven:2026.07 ..  # 构建 worker
 docker pull postgres:16-alpine    # 拉取 postgres
 
 # ② 导出运行镜像（部署用）
 docker save \
   codify-backend:latest \
   codify-nginx:latest \
-  codify-worker:latest \
+  codify-worker/java21-maven:2026.07 \
   postgres:16-alpine \
   | gzip -1 > ../offline-bundle-dev/images/codify-runtime-images.tar.gz
 
@@ -233,7 +233,7 @@ cp package.json ../offline-bundle-dev/node-deps/
 ```bash
 # ① Claude CLI
 # 如果已在 worker 镜像中，从镜像提取：
-docker create --name tmp-worker codify-worker:latest
+docker create --name tmp-worker codify-worker/java21-maven:2026.07
 docker cp tmp-worker:/usr/local/bin/claude offline-bundle-dev/bin/claude
 docker rm tmp-worker
 chmod +x offline-bundle-dev/bin/claude
@@ -369,7 +369,7 @@ DATABASE_URL=postgresql+asyncpg://codify:强密码@postgres:5432/codify
 
 BACKEND_URL=http://codify-host:8000
 FRONTEND_URL=http://codify-host:8880
-WORKER_IMAGE=codify-worker:latest
+WORKER_IMAGE=codify-worker/java21-maven:2026.07
 
 # === 内网自签证书（如需要）===
 CUSTOM_CA_BUNDLE=/etc/ssl/certs/custom-ca.crt
@@ -629,7 +629,7 @@ mkdir -p deploy/offline-bin
 cp offline-bundle-dev/bin/claude deploy/offline-bin/
 
 # 构建
-docker build -f deploy/Dockerfile.worker -t codify-worker:latest .
+docker build -f deploy/Dockerfile.worker -t codify-worker/java21-maven:2026.07 .
 ```
 
 修改 Dockerfile.worker：
@@ -658,7 +658,7 @@ build-offline-nginx:
 	docker build -f deploy/Dockerfile.frontend.offline -t codify-nginx:latest .
 
 build-offline-worker:
-	docker build -f deploy/Dockerfile.worker.offline -t codify-worker:latest .
+	docker build -f deploy/Dockerfile.worker.offline -t codify-worker/java21-maven:2026.07 .
 
 build-offline: build-offline-backend build-offline-nginx build-offline-worker
 ```
@@ -833,7 +833,7 @@ cp ~/.local/bin/claude /transfer/claude-new
 
 # 内网：替换 binary 并重新构建 worker 镜像
 cp /transfer/claude-new deploy/offline-bin/claude
-docker build -f deploy/Dockerfile.worker.offline -t codify-worker:latest .
+docker build -f deploy/Dockerfile.worker.offline -t codify-worker/java21-maven:2026.07 .
 ```
 
 ---

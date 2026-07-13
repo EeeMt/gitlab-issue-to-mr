@@ -202,7 +202,7 @@ def upgrade() -> None:
             description="Migrated default worker profile",
             enabled=True,
             is_default=True,
-            image=_config_value(conn, "worker_image", "codify-worker:latest"),
+            image=_config_value(conn, "worker_image", "codify-worker/java21-maven:2026.07"),
             volume_mounts=_parse_volume_mounts(raw_mounts),
             pre_script=_config_value(conn, "worker_pre_script", ""),
             post_script=_config_value(conn, "worker_post_script", ""),

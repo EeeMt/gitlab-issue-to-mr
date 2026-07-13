@@ -17,7 +17,7 @@ function createWorkerProfile(overrides: Record<string, any> = {}) {
     description: null,
     enabled: true,
     is_default: true,
-    image: 'codify-worker:latest',
+    image: 'codify-worker/java21-maven:2026.07',
     docker_host: null,
     docker_tls_ca: null,
     docker_tls_cert: null,
@@ -329,7 +329,7 @@ describe('WorkerSettingsPanel', () => {
     expect(wrapper.text()).toContain('config.workerSettings')
     expect(mockGetAdminWorkerProfiles).toHaveBeenCalled()
     expect(wrapper.text()).toContain('Default Worker')
-    expect((wrapper.vm as any).workerFormValue.image).toBe('codify-worker:latest')
+    expect((wrapper.vm as any).workerFormValue.image).toBe('codify-worker/java21-maven:2026.07')
     expect(wrapper.text()).not.toContain('config.aiProvider')
     expect(wrapper.text()).not.toContain('config.providers.movedNotice')
   })
@@ -479,7 +479,7 @@ describe('WorkerSettingsPanel', () => {
     expect(mockCreateWorkerProfile).not.toHaveBeenCalled()
     expect(vm.selectedProfileId).toBe(null)
     expect(vm.workerFormValue.name).toBe('')
-    expect(vm.workerFormValue.image).toBe('codify-worker:latest')
+    expect(vm.workerFormValue.image).toBe('codify-worker/java21-maven:2026.07')
     expect(vm.workerFormValue.mounts).toEqual([])
     expect(vm.workerFormValue.environment_variables).toEqual([])
     expect(vm.workerFormValue.default_execute_run_instruction_template).toBe(

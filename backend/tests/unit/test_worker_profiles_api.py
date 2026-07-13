@@ -43,7 +43,7 @@ def _make_profile(
         description=None,
         enabled=enabled,
         is_default=is_default,
-        image="codify-worker:latest",
+        image="codify-worker/java21-maven:2026.07",
         runtime_mode="baked_image",
         worker_kit_version=None,
         worker_kit_path=None,

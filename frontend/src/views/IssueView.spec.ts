@@ -532,7 +532,7 @@ const mockWorkerProfiles = [
     description: null,
     enabled: true,
     is_default: true,
-    image: 'codify-worker:latest',
+    image: 'codify-worker/java21-maven:2026.07',
     codegraph_enabled: false,
     volume_mounts: [],
     environment_variables: [],

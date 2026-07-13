@@ -150,7 +150,7 @@ class Settings(BaseSettings):
     auth_break_glass_password_hash: str = Field(default="")
 
     # Worker Configuration
-    worker_image: str = Field(default="codify-worker:latest")
+    worker_image: str = Field(default="codify-worker/java21-maven:2026.07")
     worker_network: str = Field(default="bridge")  # Docker network for worker containers
     worker_container_prefix: str = Field(default="codify")  # Prefix for worker container names
     worker_skip_image_pull: bool = Field(default=False)  # Skip pull_image for local/test environments

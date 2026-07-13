@@ -116,7 +116,7 @@ async def test_create_task_loads_worker_profile_environment_from_existing_identi
                 name="Default Worker",
                 enabled=True,
                 is_default=True,
-                image="codify-worker:latest",
+                image="codify-worker/java21-maven:2026.07",
                 volume_mounts=[],
                 pre_script="",
                 post_script="",
@@ -156,7 +156,7 @@ async def test_create_task_loads_worker_profile_environment_from_existing_identi
 
         assert response["worker_profile_id"] == worker_profile.id
         assert response["worker_profile_name"] == "Default Worker"
-        assert response["worker_image"] == "codify-worker:latest"
+        assert response["worker_image"] == "codify-worker/java21-maven:2026.07"
     finally:
         await engine.dispose()
 
@@ -281,7 +281,7 @@ async def test_update_task_preserves_worker_metadata_after_refresh_without_snaps
         task_id=88,
         worker_profile_id=33,
         profile_name="Default Worker",
-        image="codify-worker:latest",
+        image="codify-worker/java21-maven:2026.07",
         volume_mounts=[],
         environment_variables=[],
         pre_script="",
@@ -319,4 +319,4 @@ async def test_update_task_preserves_worker_metadata_after_refresh_without_snaps
     assert task.priority == 2
     assert response["worker_profile_id"] == 33
     assert response["worker_profile_name"] == "Default Worker"
-    assert response["worker_image"] == "codify-worker:latest"
+    assert response["worker_image"] == "codify-worker/java21-maven:2026.07"

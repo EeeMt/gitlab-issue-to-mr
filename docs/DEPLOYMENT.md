@@ -199,7 +199,7 @@ cd ../deploy && docker-compose build nginx && docker-compose up -d nginx
 请重建 Worker 镜像：
 
 ```bash
-docker build -f deploy/Dockerfile.worker -t codify-worker:latest .
+docker build -f deploy/Dockerfile.worker -t codify-worker/java21-maven:2026.07 .
 ```
 
 如果 `WORKER_IMAGE` 使用了其他标签，请同步更新配置。

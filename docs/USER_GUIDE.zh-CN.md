@@ -296,7 +296,7 @@ Codify（Codify）是一个 AI 驱动的代码生成服务，核心能力如下�
 | `ANTHROPIC_MODEL` | 使用的模型 | `claude-opus-4-5` |
 | `DATABASE_URL` | PostgreSQL 连接串 | `postgresql+asyncpg://...` |
 | `DOCKER_HOST` | Docker 引擎地址 | `tcp://localhost:2376` |
-| `WORKER_IMAGE` | Worker 容器镜像 | `codify-worker:latest` |
+| `WORKER_IMAGE` | Worker 容器镜像 | `codify-worker/java21-maven:2026.07` |
 | `MAX_CONCURRENCY` | 最大并发 Worker 数 | `3` |
 | `TASK_TIMEOUT` | 任务超时秒数 | `1800` |
 | `DEFAULT_TARGET_BRANCH` | 默认 MR 目标分支 | `main` |

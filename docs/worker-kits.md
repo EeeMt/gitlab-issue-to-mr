@@ -32,6 +32,10 @@ The kit includes Bash, Git, curl, jq, Python, Node.js, SSH, ripgrep, CodeGraph, 
 Mermaid validator. Claude CLI is intentionally outside the kit and must be supplied by the
 runtime image or a profile volume mount.
 
+`deploy/Dockerfile.worker` now builds `codify-worker/java21-maven:2026.07` as a mounted-kit runtime image.
+It contains the project-side Python, Java 21, Maven toolchain, workspace, and `codify` UID
+setup, but no Codify entrypoint, Claude CLI, CodeGraph, Mermaid npm bundle, or ci-claude script.
+
 ## Build and export
 
 On a connected build machine:
@@ -141,7 +145,7 @@ No UI is required. Create or update a Worker Profile through the existing admin 
 ```json
 {
   "name": "Java 21 and Maven",
-  "image": "team/java21-maven:2026.07",
+  "image": "codify-worker/java21-maven:2026.07",
   "runtime_mode": "mounted_kit",
   "worker_kit_version": "0.1.0",
   "worker_kit_path": "/opt/codify/worker-kits/0.1.0-linux-amd64",
@@ -178,6 +182,5 @@ that snapshot and are not silently moved to a newer kit.
   or a runtime image policy when Java tools require a private CA.
 - Runtime images that use Nix themselves are incompatible with the reserved `/nix/store` mount.
   Keep those profiles in `baked_image` mode or provide a non-Nix runtime image.
-
-The legacy `codify-worker:latest` image remains available as a rollback path while mounted-kit
-profiles are introduced incrementally.
+- `codify-worker/java21-maven:2026.07` is a mounted-kit runtime image. Profiles that use it must set
+  `runtime_mode=mounted_kit` and provide a worker kit path/version.

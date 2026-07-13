@@ -933,7 +933,7 @@ function resetWorker() {
 
 function handleCreateProfile() {
   const draft = createEmptyWorkerFormValue()
-  draft.image = workerFormValue.value.image || 'codify-worker:latest'
+  draft.image = workerFormValue.value.image || 'codify-worker/java21-maven:2026.07'
   draft.worker_workspace_retention_days = workerFormValue.value.worker_workspace_retention_days
   draft.worker_workspace_host_path = workerFormValue.value.worker_workspace_host_path
   draft.default_execute_run_instruction_template =

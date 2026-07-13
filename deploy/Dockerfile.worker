@@ -1,71 +1,29 @@
-# Stage 1: Download Claude Code CLI (217 MB self-contained binary).
-# Isolated so that updating system deps or scripts does not re-trigger the download.
-FROM debian:bookworm-slim AS claude-installer
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN curl -fL --retry 5 --retry-delay 2 --retry-all-errors https://claude.ai/install.sh | bash -s stable \
-    && install -m 755 "$(readlink -f /root/.local/bin/claude)" /usr/local/bin/claude
-
-# Stage 2: Runtime image with project toolchain.
+# Project runtime image for mounted worker-kit profiles.
+#
+# Codify-owned tools, entrypoint scripts, CodeGraph, Mermaid validation, and ci-claude
+# are supplied by the mounted worker kit. Claude CLI is supplied by the worker profile,
+# usually through a read-only volume mounted at /usr/local/bin/claude.
 FROM python:3.12-slim
 
-WORKDIR /app
+WORKDIR /workspace
 
-ARG CODEGRAPH_VERSION=1.1.1
-
-# Install system dependencies (Java 21, Maven, Node.js 22.x)
+# Keep this image focused on project build tools. The worker kit supplies Git, SSH,
+# curl, jq, ripgrep, Node.js, Python helpers, and Codify orchestration scripts.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    curl \
-    && curl -fsSL https://deb.nodesource.com/setup_22.x -o /tmp/nodesource_setup.sh \
-    && bash /tmp/nodesource_setup.sh \
-    && rm -f /tmp/nodesource_setup.sh \
-    && apt-get update && apt-get install -y --no-install-recommends \
-    git \
-    jq \
     openjdk-21-jdk \
     maven \
-    nodejs \
-    openssh-client \
-    ripgrep \
-    && node --version \
-    && npm --version \
-    && ssh -V \
+    && java -version \
+    && mvn -version \
     && rm -rf /var/lib/apt/lists/*
 
-RUN mkdir -p /opt/codify-mermaid \
-    && cd /opt/codify-mermaid \
-    && npm init -y >/dev/null \
-    && npm install --omit=dev mermaid@11.15.0 jsdom@25.0.1 >/dev/null
-
 RUN useradd --create-home --shell /bin/bash --uid 1000 codify \
-    && mkdir -p /home/codify/.m2/repository \
-    && chown -R codify:codify /home/codify/.m2
-
-ENV CODEGRAPH_TELEMETRY=0
-ENV DO_NOT_TRACK=1
-ENV CODEGRAPH_NO_DOWNLOAD=1
-
-RUN npm install -g --omit=dev --no-audit --no-fund "@colbymchenry/codegraph@${CODEGRAPH_VERSION}" \
-    && env HOME=/home/codify su -m -s /bin/bash codify -c "codegraph --version"
+    && mkdir -p /workspace /home/codify/.m2/repository \
+    && chown -R codify:codify /workspace /home/codify/.m2
 
 ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
 ENV PATH="${JAVA_HOME}/bin:/usr/local/bin:/usr/bin:${PATH}"
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-# Copy Claude CLI binary from installer stage and verify
-COPY --from=claude-installer /usr/local/bin/claude /usr/local/bin/claude
-RUN claude --version
-
-# Copy entrypoint scripts
-COPY deploy/entrypoint.worker.sh /entrypoint.sh
-COPY deploy/worker-entrypoint/ /opt/codify/worker-entrypoint/
-COPY deploy/ci-claude.sh /usr/local/bin/ci-claude.sh
-COPY deploy/scripts/validate_mermaid_summary.mjs /opt/codify-mermaid/validate_mermaid_summary.mjs
-RUN chmod +x /entrypoint.sh /usr/local/bin/ci-claude.sh /opt/codify-mermaid/validate_mermaid_summary.mjs
-
-ENTRYPOINT ["/entrypoint.sh"]
+CMD ["/bin/sh"]

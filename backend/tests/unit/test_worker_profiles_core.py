@@ -178,7 +178,7 @@ def test_worker_profile_serialization_and_snapshot_preserve_codegraph_toggle():
         description=None,
         enabled=True,
         is_default=False,
-        image="codify-worker:latest",
+        image="codify-worker/java21-maven:2026.07",
         codegraph_enabled=True,
         volume_mounts=[],
         environment_variables=[],

@@ -19,11 +19,11 @@ WORKER_KIT_PLATFORM ?= linux/amd64
 .PHONY: build
 build: ## Build all images (backend, nginx, worker)
 	cd $(PROJECT_ROOT)/deploy && docker-compose --env-file .env.test build
-	docker build -f $(PROJECT_ROOT)/deploy/Dockerfile.worker -t codify-worker:latest $(PROJECT_ROOT)
+	docker build -f $(PROJECT_ROOT)/deploy/Dockerfile.worker -t codify-worker/java21-maven:2026.07 $(PROJECT_ROOT)
 	@printf "\nBuild summary:\n"
 	@printf "  - codify-backend:latest\n"
 	@printf "  - codify-nginx:latest\n"
-	@printf "  - codify-worker:latest\n"
+	@printf "  - codify-worker/java21-maven:2026.07\n"
 
 .PHONY: offline-bundle-export
 offline-bundle-export: ## Build images, export offline bundle images, and package deploy/offline-bundle
@@ -37,12 +37,12 @@ worker-kit-export: ## Build and export the portable mounted worker kit
 	WORKER_KIT_VERSION=$(WORKER_KIT_VERSION) WORKER_KIT_PLATFORM=$(WORKER_KIT_PLATFORM) $(PROJECT_ROOT)/deploy/worker-kit/export.sh
 
 .PHONY: worker-kit-verify
-worker-kit-verify: ## Verify KIT_PATH against RUNTIME_IMAGE (optional SMOKE command)
-	$(PROJECT_ROOT)/deploy/worker-kit/verify-runtime.sh --kit "$(KIT_PATH)" --image "$(RUNTIME_IMAGE)" $(if $(SMOKE),--smoke "$(SMOKE)")
+worker-kit-verify: ## Verify KIT_PATH against RUNTIME_IMAGE (optional CLAUDE_HOST_PATH and SMOKE)
+	$(PROJECT_ROOT)/deploy/worker-kit/verify-runtime.sh --kit "$(KIT_PATH)" --image "$(RUNTIME_IMAGE)" $(if $(CLAUDE_HOST_PATH),--claude-host-path "$(CLAUDE_HOST_PATH)") $(if $(CLAUDE_CONTAINER_PATH),--claude-container-path "$(CLAUDE_CONTAINER_PATH)") $(if $(SMOKE),--smoke "$(SMOKE)")
 
 .PHONY: up
 up: ## Start development environment (rebuilds backend, nginx, and worker images)
-	docker build -f $(PROJECT_ROOT)/deploy/Dockerfile.worker -t codify-worker:latest $(PROJECT_ROOT)
+	docker build -f $(PROJECT_ROOT)/deploy/Dockerfile.worker -t codify-worker/java21-maven:2026.07 $(PROJECT_ROOT)
 	cd $(PROJECT_ROOT)/deploy && docker-compose --env-file .env.test up -d --build
 
 .PHONY: down
@@ -85,7 +85,7 @@ rebuild-nginx: ## Rebuild nginx image and restart container
 
 .PHONY: rebuild-worker
 rebuild-worker: ## Rebuild worker image
-	docker build -f $(PROJECT_ROOT)/deploy/Dockerfile.worker -t codify-worker:latest $(PROJECT_ROOT)
+	docker build -f $(PROJECT_ROOT)/deploy/Dockerfile.worker -t codify-worker/java21-maven:2026.07 $(PROJECT_ROOT)
 
 # ============================================
 # Testing

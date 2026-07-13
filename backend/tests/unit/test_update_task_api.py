@@ -90,7 +90,7 @@ def _make_snapshot(task):
         task_id=task.id,
         worker_profile_id=task.worker_profile_id,
         profile_name="Default Worker",
-        image="codify-worker:latest",
+        image="codify-worker/java21-maven:2026.07",
         volume_mounts=[],
         environment_variables=[],
         pre_script="",
