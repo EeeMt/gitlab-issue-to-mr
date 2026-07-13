@@ -1397,7 +1397,7 @@ const zhCN = {
     disabled: '已禁用',
     createWorkerProfile: '新建配置',
     workerWorkspaceCleanup: 'Workspace 清理',
-    saveWorkspaceSettings: '保存 Workspace',
+    saveWorkspaceSettings: '保存工作空间设置',
     workerWorkspaceHostPath: '共享 Workspace 路径',
     workerWorkspaceHostPathHint: 'Backend、Scheduler 和所有 Docker 主机必须挂载相同的绝对路径。',
     workerWorkspaceHostPathDeploymentHint: '由部署时的 WORKER_WORKSPACE_HOST_PATH 配置，修改后需重新创建 Backend 和 Scheduler。',

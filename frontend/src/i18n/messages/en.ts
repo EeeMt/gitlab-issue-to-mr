@@ -1418,7 +1418,7 @@ const en = {
       disabled: 'Disabled',
       createWorkerProfile: 'Create profile',
       workerWorkspaceCleanup: 'Workspace Cleanup',
-      saveWorkspaceSettings: 'Save workspace',
+      saveWorkspaceSettings: 'Save workspace settings',
       workerWorkspaceHostPath: 'Shared workspace path',
       workerWorkspaceHostPathHint: 'The backend, scheduler, and every Docker host must mount this same absolute path.',
       workerWorkspaceHostPathDeploymentHint: 'Configured by WORKER_WORKSPACE_HOST_PATH when Backend and Scheduler are deployed.',
