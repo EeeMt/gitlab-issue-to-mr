@@ -1394,6 +1394,7 @@ const zhCN = {
     duplicateWorkerProfile: '复制配置',
     setDefaultWorkerProfile: '设为默认',
     disableWorkerProfile: '禁用',
+    disabled: '已禁用',
     createWorkerProfile: '新建配置',
     workerWorkspaceCleanup: 'Workspace 清理',
     saveWorkspaceSettings: '保存 Workspace',

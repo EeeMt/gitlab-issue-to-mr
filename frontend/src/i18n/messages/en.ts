@@ -1415,6 +1415,7 @@ const en = {
       duplicateWorkerProfile: 'Duplicate',
       setDefaultWorkerProfile: 'Set default',
       disableWorkerProfile: 'Disable',
+      disabled: 'Disabled',
       createWorkerProfile: 'Create profile',
       workerWorkspaceCleanup: 'Workspace Cleanup',
       saveWorkspaceSettings: 'Save workspace',
