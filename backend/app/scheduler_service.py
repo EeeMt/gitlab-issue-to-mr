@@ -6,6 +6,7 @@ import signal
 
 from app.config import get_effective_settings, get_settings
 from app.core.ci_failure_collector import start_ci_failure_collector
+from app.core.docker_client import close_docker_clients
 from app.core.task_prompt import backfill_active_task_prompts
 from app.database import AsyncSessionLocal, close_db, init_db
 from app.migrations import run_migrations
@@ -68,6 +69,7 @@ async def run_scheduler_service() -> None:
     for task in pending:
         task.cancel()
 
+    close_docker_clients()
     await close_db()
     logger.info("Scheduler service stopped")
 

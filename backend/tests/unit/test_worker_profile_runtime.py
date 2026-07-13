@@ -3,8 +3,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.core.worker_profiles import TaskWorkerRuntime
 from app.core.worker_runtime import build_container_volumes
 from app.core.worker_task_lifecycle import create_execute_container, prepare_container_inputs
+from app.models import TaskStatus
 
 
 def test_build_container_volumes_uses_snapshot_mounts_last(tmp_path):
@@ -36,6 +38,8 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
     task.ci_failure_run_id = None
     task.trigger_source = "manual"
     task.rendered_prompt = "Prompt"
+    task.status = TaskStatus.RUNNING
+    task.cancel_requested_at = None
 
     issue = MagicMock()
     issue.id = 1
@@ -55,8 +59,11 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
     worker.docker.pull_image = MagicMock()
     worker.docker.create_container = MagicMock(return_value=SimpleNamespace(id="container-1"))
 
-    runtime = SimpleNamespace(
+    runtime = TaskWorkerRuntime(
         image="custom-worker:latest",
+        runtime_mode="mounted_kit",
+        worker_kit_version="0.1.0",
+        worker_kit_path="/opt/codify/worker-kits/0.1.0-linux-amd64",
         codegraph_enabled=True,
         volume_mounts=[{"host_path": "/cache", "container_path": "/cache", "mode": "rw"}],
         environment={"CUSTOM_ENV": "value"},
@@ -72,6 +79,7 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
     db.commit = AsyncMock()
     db.flush = AsyncMock()
     db.get = AsyncMock(return_value=None)
+    db.refresh = AsyncMock()
 
     with (
         patch(
@@ -103,6 +111,9 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
     assert worker.docker.create_container.call_args.kwargs["environment"][
         "CODIFY_CODEGRAPH_ENABLED"
     ] == "true"
+    assert worker.docker.create_container.call_args.kwargs["environment"][
+        "CODIFY_KIT_VERSION"
+    ] == "0.1.0"
     worker._build_container_volumes.assert_called_once_with(
         settings,
         issue,
@@ -111,6 +122,16 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
     )
     worker.docker.create_container.assert_called_once()
     assert worker.docker.create_container.call_args.kwargs["image"] == "custom-worker:latest"
+    assert worker.docker.create_container.call_args.kwargs["entrypoint"] == (
+        "/opt/codify-kit/launcher"
+    )
+    assert worker.docker.create_container.call_args.kwargs["user"] == "0:0"
+    assert worker.docker.create_container.call_args.kwargs["volumes"][
+        "/opt/codify/worker-kits/0.1.0-linux-amd64"
+    ] == {"bind": "/opt/codify-kit", "mode": "ro"}
+    assert worker.docker.create_container.call_args.kwargs["volumes"][
+        "/opt/codify/worker-kits/0.1.0-linux-amd64/nix/store"
+    ] == {"bind": "/nix/store", "mode": "ro"}
 
 
 @pytest.mark.asyncio

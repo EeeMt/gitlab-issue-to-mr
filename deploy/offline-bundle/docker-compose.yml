@@ -23,6 +23,7 @@ services:
       - DOCKER_TLS_CA=
       - DOCKER_TLS_CERT=
       - DOCKER_TLS_KEY=
+      - WORKER_WORKSPACE_HOST_PATH=${WORKER_WORKSPACE_HOST_PATH:-/opt/codify-workspaces}
       - AUTO_MIGRATE=true
       - COOKIE_SECURE=false
       - CUSTOM_CA_BUNDLE=/etc/ssl/certs/custom-ca.crt
@@ -30,7 +31,13 @@ services:
       postgres:
         condition: service_healthy
     volumes:
-      - /opt/codify-workspaces:/opt/codify-workspaces
+      - type: bind
+        source: ${WORKER_WORKSPACE_HOST_PATH:-/opt/codify-workspaces}
+        target: ${WORKER_WORKSPACE_HOST_PATH:-/opt/codify-workspaces}
+      - type: bind
+        source: ${DOCKER_CERTS_HOST_PATH:-/opt/codify-docker-certs}
+        target: /opt/codify-docker-certs
+        read_only: true
       - /var/run/docker.sock:/var/run/docker.sock
       # Mount CA cert (place ca.crt at the source path on the Docker host).
       # If you don't use an internal CA, comment out this bind mount and
@@ -62,6 +69,7 @@ services:
       - DOCKER_TLS_CA=
       - DOCKER_TLS_CERT=
       - DOCKER_TLS_KEY=
+      - WORKER_WORKSPACE_HOST_PATH=${WORKER_WORKSPACE_HOST_PATH:-/opt/codify-workspaces}
       - AUTO_MIGRATE=true
       - CUSTOM_CA_BUNDLE=/etc/ssl/certs/custom-ca.crt
       - WORKER_CA_CERT_HOST_PATH=${WORKER_CA_CERT_HOST_PATH:-}
@@ -72,7 +80,13 @@ services:
       backend:
         condition: service_healthy
     volumes:
-      - /opt/codify-workspaces:/opt/codify-workspaces
+      - type: bind
+        source: ${WORKER_WORKSPACE_HOST_PATH:-/opt/codify-workspaces}
+        target: ${WORKER_WORKSPACE_HOST_PATH:-/opt/codify-workspaces}
+      - type: bind
+        source: ${DOCKER_CERTS_HOST_PATH:-/opt/codify-docker-certs}
+        target: /opt/codify-docker-certs
+        read_only: true
       - /var/run/docker.sock:/var/run/docker.sock
       # Session storage — shared with worker containers via host path
       - /var/codify/sessions:/var/codify/sessions

@@ -14,6 +14,7 @@ from app.config import get_effective_settings as get_settings
 from app.core.worker_environment_variables import (
     validate_worker_environment_variable_key as validate_worker_environment_key,
 )
+from app.core.worker_profiles import build_worker_profile_volume_map
 from app.core.worker_workspace import build_issue_workspace_paths
 from app.models import AIProvider, Issue, Task, User
 
@@ -315,12 +316,7 @@ def build_container_volumes(
 
     # --- User-defined mounts (last) — may override subdirectories of any system mount above ---
     mounts = custom_mounts if custom_mounts is not None else settings.worker_volume_mounts_parsed
-    for mount in mounts:
-        host_path = mount.get("host_path")
-        container_path = mount.get("container_path")
-        mode = mount.get("mode", "ro")
-        if host_path and container_path:
-            volumes[host_path] = {"bind": container_path, "mode": mode}
+    volumes.update(build_worker_profile_volume_map(mounts))
 
     return volumes if volumes else {}
 

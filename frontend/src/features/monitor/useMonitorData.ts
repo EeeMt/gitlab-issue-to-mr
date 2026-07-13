@@ -7,6 +7,7 @@ import {
   getTasks,
   getTasksPaginated,
   type Container,
+  type DockerTargetError,
   type Stats,
   type Task,
 } from '../../api'
@@ -32,6 +33,7 @@ export function useMonitorData() {
   const refreshRequestInFlight = ref(false)
   const stats = ref<Stats>({ ...EMPTY_STATS })
   const containers = ref<Container[]>([])
+  const dockerTargetErrors = ref<DockerTargetError[]>([])
   const tasks = ref<Task[]>([])
   const recentFinishedList = ref<Task[]>([])
   const recentFailureList = ref<Task[]>([])
@@ -54,7 +56,7 @@ export function useMonitorData() {
     refreshRequestInFlight.value = true
     if (!silent) loading.value = true
     try {
-      const [statsData, containersData, tasksData, finishedResult, failedResult] =
+      const [statsData, containerResult, tasksData, finishedResult, failedResult] =
         await Promise.all([
           getStats(),
           getContainers(),
@@ -73,7 +75,12 @@ export function useMonitorData() {
 
       if (!disposed) {
         stats.value = statsData
-        containers.value = containersData
+        containers.value = Array.isArray(containerResult)
+          ? containerResult
+          : containerResult.containers
+        dockerTargetErrors.value = Array.isArray(containerResult)
+          ? []
+          : containerResult.target_errors
         tasks.value = tasksData
         recentFinishedList.value = finishedResult.items
         recentFailureList.value = failedResult.items
@@ -135,6 +142,7 @@ export function useMonitorData() {
 
   return {
     containers,
+    dockerTargetErrors,
     fetchData,
     hasLoadedOnce,
     loading,

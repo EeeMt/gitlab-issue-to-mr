@@ -5,7 +5,8 @@ import os
 import sys
 import unittest
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -18,6 +19,7 @@ from app.config import (
 from app.models import SystemConfig
 from app.runtime_config import (
     _deserialize_runtime_value,
+    _handoff_workspace_path_override,
     _serialize_runtime_value,
     load_runtime_config_from_db,
     refresh_runtime_config_if_stale,
@@ -134,6 +136,51 @@ class RuntimeConfigTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(overrides["max_retries"], 3)
         self.assertEqual(overrides["oidc_client_secret"], "stored-secret")
         self.assertEqual(get_effective_settings().max_concurrency, 4)
+
+    async def test_workspace_path_handoff_rejects_mismatched_deployment_mount(self) -> None:
+        row = SystemConfig(
+            key="worker_workspace_host_path",
+            value="/mnt/legacy-workspaces",
+            value_type="str",
+        )
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = row
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=result)
+
+        with patch(
+            "app.runtime_config.get_settings",
+            return_value=SimpleNamespace(
+                worker_workspace_host_path="/opt/codify-workspaces"
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "does not match"):
+                await _handoff_workspace_path_override(db)
+
+        db.commit.assert_not_called()
+
+    async def test_workspace_path_handoff_removes_matching_legacy_override(self) -> None:
+        row = SystemConfig(
+            key="worker_workspace_host_path",
+            value="/mnt/shared-workspaces",
+            value_type="str",
+        )
+        select_result = MagicMock()
+        select_result.scalar_one_or_none.return_value = row
+        delete_result = MagicMock()
+        db = MagicMock()
+        db.execute = AsyncMock(side_effect=[select_result, delete_result])
+        db.commit = AsyncMock()
+
+        with patch(
+            "app.runtime_config.get_settings",
+            return_value=SimpleNamespace(
+                worker_workspace_host_path="/mnt/shared-workspaces"
+            ),
+        ):
+            await _handoff_workspace_path_override(db)
+
+        db.commit.assert_awaited_once()
 
     def test_effective_settings_include_auth_overrides(self) -> None:
         set_runtime_config({

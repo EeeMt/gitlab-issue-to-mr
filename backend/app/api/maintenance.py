@@ -47,5 +47,6 @@ async def cleanup_system_data_endpoint(
         older_than_days=body.older_than_days,
         force=body.force,
         workspace_root=settings.worker_workspace_host_path,
+        settings=settings,
     )
     return CleanupSystemDataResponse(**result.to_dict())

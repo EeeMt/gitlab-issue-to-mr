@@ -11,6 +11,15 @@ IMAGES=(
   "postgres:16-alpine"
 )
 
+EXTRA_IMAGES_FILE="${ROOT_DIR}/config/worker-images.txt"
+if [[ -f "${EXTRA_IMAGES_FILE}" ]]; then
+  while IFS= read -r image; do
+    image="${image%%#*}"
+    image="${image//[[:space:]]/}"
+    [[ -n "${image}" ]] && IMAGES+=("${image}")
+  done < "${EXTRA_IMAGES_FILE}"
+fi
+
 echo "Exporting images to ${ARCHIVE}..."
 docker save "${IMAGES[@]}" | gzip -1 > "${ARCHIVE}"
 if command -v sha256sum >/dev/null 2>&1; then

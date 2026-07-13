@@ -1,4 +1,5 @@
-import { computed } from 'vue'
+import { computed, type Ref } from 'vue'
+import type { DockerTargetError } from '../../api'
 import {
   useMonitorRuntimeState,
   type MonitorRuntimeOptions,
@@ -24,7 +25,9 @@ export interface HealthCheck {
   type: CheckType
 }
 
-type MonitorHealthOptions = MonitorRuntimeOptions
+type MonitorHealthOptions = MonitorRuntimeOptions & {
+  dockerTargetErrors: Ref<DockerTargetError[]>
+}
 
 export function useMonitorHealth(options: MonitorHealthOptions) {
   const t = options.translate
@@ -48,6 +51,9 @@ export function useMonitorHealth(options: MonitorHealthOptions) {
     const missingContainers = runningTasksWithoutContainer.value.length
     const orphaned = orphanContainers.value.length
     const failures24h = recentFailureCount24h.value
+    const unavailableTargets = options.dockerTargetErrors.value.length
+    const workerNeedsReview =
+      missingContainers > 0 || orphaned > 0 || unavailableTargets > 0
     return [
       {
         key: 'queue',
@@ -66,18 +72,15 @@ export function useMonitorHealth(options: MonitorHealthOptions) {
         key: 'workers',
         label: t('monitor.workerHealthLabel'),
         detail:
-          missingContainers > 0 || orphaned > 0
-            ? t('monitor.workerHealthMismatchDetail', {
+          workerNeedsReview
+            ? t('monitor.workerHealthDegradedDetail', {
                 missing: missingContainers,
                 orphaned,
+                unavailable: unavailableTargets,
               })
             : t('monitor.workerHealthAlignedDetail'),
-        badge:
-          missingContainers > 0 || orphaned > 0
-            ? t('monitor.needsReview')
-            : t('monitor.aligned'),
-        type:
-          missingContainers > 0 || orphaned > 0 ? 'warning' : 'success',
+        badge: workerNeedsReview ? t('monitor.needsReview') : t('monitor.aligned'),
+        type: workerNeedsReview ? 'warning' : 'success',
       },
       {
         key: 'failures',
@@ -171,11 +174,15 @@ export function useMonitorHealth(options: MonitorHealthOptions) {
         linked: linkedRunningContainers.value.length,
       }),
       tag:
-        runningTasksWithoutContainer.value.length > 0
+        runningTasksWithoutContainer.value.length > 0 ||
+        options.dockerTargetErrors.value.length > 0
           ? t('monitor.gaps')
           : t('monitor.aligned'),
       tagType:
-        runningTasksWithoutContainer.value.length > 0 ? 'warning' : 'success',
+        runningTasksWithoutContainer.value.length > 0 ||
+        options.dockerTargetErrors.value.length > 0
+          ? 'warning'
+          : 'success',
     },
     {
       key: 'health',

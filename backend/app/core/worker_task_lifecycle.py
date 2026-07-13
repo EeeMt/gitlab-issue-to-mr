@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import time
+from datetime import datetime
 from typing import Any
 
 from gitlab import Gitlab
@@ -182,7 +183,10 @@ async def create_execute_container(
     sudo_gl: Gitlab | None,
 ):
     task_id = task.id
+    if await finalize_pre_container_cancellation(db, task, phase="runtime setup"):
+        return None
     worker_runtime = await load_task_worker_runtime(db, task)
+    worker._configure_docker_for_runtime(worker_runtime, settings)
 
     if not settings.worker_skip_image_pull:
         try:
@@ -261,12 +265,17 @@ async def create_execute_container(
     environment["CODIFY_CODEGRAPH_ENABLED"] = (
         "true" if worker_runtime.codegraph_enabled else "false"
     )
+    container_overrides = worker_runtime.container_overrides()
+    environment.update(container_overrides["environment"])
     volumes = worker._build_container_volumes(
         settings,
         issue,
         task=task,
         custom_mounts=worker_runtime.volume_mounts,
     )
+    volumes.update(container_overrides["volumes"])
+    if await finalize_pre_container_cancellation(db, task, phase="container creation"):
+        return None
     container_name = worker._get_container_name(task)
     container = worker.docker.create_container(
         image=worker_runtime.image,
@@ -275,11 +284,45 @@ async def create_execute_container(
         volumes=volumes if volumes else None,
         network=settings.worker_network,
         name=container_name,
+        entrypoint=container_overrides["entrypoint"],
+        user=container_overrides["user"],
+        labels={
+            "codify.task_id": str(task.id),
+            "codify.worker_runtime_mode": worker_runtime.runtime_mode,
+            "codify.worker_kit_version": worker_runtime.worker_kit_version or "",
+        },
     )
 
     task.container_id = container.id
     await db.commit()
     return container
+
+
+async def finalize_pre_container_cancellation(
+    db: AsyncSession,
+    task: Task,
+    *,
+    phase: str,
+) -> bool:
+    """Converge a durable cancel request before a worker container is created."""
+    await db.refresh(task)
+    cancellation_requested = isinstance(
+        getattr(task, "cancel_requested_at", None),
+        datetime,
+    )
+    if task.status != TaskStatus.CANCELLED and not cancellation_requested:
+        return False
+
+    task.status = TaskStatus.CANCELLED
+    task.completed_at = task.completed_at or utcnow()
+    task.error_message = "Cancelled by user"
+    await db.commit()
+    logger.info(
+        "[Task %s] Applied cancellation before %s; no worker container was created",
+        task.id,
+        phase,
+    )
+    return True
 
 
 async def prepare_resume_task_context(
@@ -295,6 +338,8 @@ async def prepare_resume_task_context(
         return None
 
     issue = await load_issue_for_task(db, task)
+    worker_runtime = await load_task_worker_runtime(db, task)
+    worker._configure_docker_for_runtime(worker_runtime, settings)
     worker._reset_event_archive_state()
     worker._reset_stdout_helpers()
     had_existing_mr = resolve_had_existing_mr(issue)
@@ -400,7 +445,20 @@ async def monitor_container_run(
 
     await db.refresh(task)
     raw_logs_finalized = raw_logs_finalized or task.raw_logs_finalized_at is not None
-    if task.status == TaskStatus.CANCELLED:
+    cancellation_requested = isinstance(
+        getattr(task, "cancel_requested_at", None),
+        datetime,
+    )
+    if task.status == TaskStatus.CANCELLED or cancellation_requested:
+        if task.status != TaskStatus.CANCELLED:
+            task.status = TaskStatus.CANCELLED
+            task.completed_at = task.completed_at or utcnow()
+            task.error_message = "Cancelled by user"
+            await db.commit()
+            logger.info(
+                "[Task %s] Applied persisted cancellation intent during worker finalization",
+                task.id,
+            )
         if raw_logs_finalized:
             logger.info(f"[Task {task.id}] Task was cancelled during execution; removing container")
             try:

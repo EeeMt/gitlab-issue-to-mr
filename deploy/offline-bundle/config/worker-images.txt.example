@@ -1,0 +1,4 @@
+# Add every project runtime image required in the offline environment, one per line.
+# team/java21-maven:2026.07
+# team/node22-pnpm:2026.07
+# team/cpp-gcc14:2026.07

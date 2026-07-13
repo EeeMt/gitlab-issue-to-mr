@@ -6,8 +6,7 @@ configure_codegraph() {
         return 1
     fi
 
-    env HOME=/home/codify su -m -s /bin/bash codify -c \
-        'cd /workspace && codegraph install --target=claude --location=global --yes'
+    codify_run_shell 'cd /workspace && codegraph install --target=claude --location=global --yes'
 }
 
 disable_codegraph() {
@@ -16,8 +15,7 @@ disable_codegraph() {
         return 0
     fi
 
-    if ! env HOME=/home/codify su -m -s /bin/bash codify -c \
-        'cd /workspace && codegraph uninstall --target=claude --location=global --yes'; then
+    if ! codify_run_shell 'cd /workspace && codegraph uninstall --target=claude --location=global --yes'; then
         echo "Warning: could not remove CodeGraph from Claude configuration"
     fi
 }
@@ -36,16 +34,14 @@ prepare_codegraph() {
         touch /workspace/.git/info/exclude
         grep -qxF ".codegraph/" /workspace/.git/info/exclude || \
             printf '.codegraph/\n' >> /workspace/.git/info/exclude
-        chown codify:codify /workspace/.git/info/exclude
+        codify_chown /workspace/.git/info/exclude
     fi
 
     if [ -d /workspace/.codegraph ]; then
         echo "Syncing existing CodeGraph index..."
-        env HOME=/home/codify su -m -s /bin/bash codify -c \
-            'cd /workspace && codegraph sync /workspace'
+        codify_run_shell 'cd /workspace && codegraph sync /workspace'
     else
         echo "Initializing CodeGraph index..."
-        env HOME=/home/codify su -m -s /bin/bash codify -c \
-            'cd /workspace && codegraph init /workspace'
+        codify_run_shell 'cd /workspace && codegraph init /workspace'
     fi
 }

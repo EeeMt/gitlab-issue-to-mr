@@ -44,14 +44,14 @@ annotate_delivery_summary_validation() {
 run_mermaid_summary_validation() {
     local summary_file="$1"
     local output_file="$2"
-    local validator="/opt/codify-mermaid/validate_mermaid_summary.mjs"
+    local validator="${CODIFY_MERMAID_VALIDATOR}"
 
     if [ "${MERMAID_SUMMARY_VALIDATE}" != "true" ]; then
         jq -nc '{ok: true, diagramCount: 0, errors: [], skipped: true, reason: "disabled"}' > "${output_file}"
         return 0
     fi
 
-    if [ ! -f "${validator}" ] || ! command -v node >/dev/null 2>&1; then
+    if [ ! -x "${validator}" ] && [ ! -f "${validator}" ]; then
         jq -nc '{ok: false, diagramCount: 0, errors: [{index: null, message: "Mermaid validator unavailable", source: ""}], skipped: true, reason: "validator_unavailable"}' > "${output_file}"
         return 1
     fi
@@ -59,7 +59,7 @@ run_mermaid_summary_validation() {
     local tmp_file="${output_file}.tmp"
     local err_file="${output_file}.stderr"
     set +e
-    node "${validator}" "${summary_file}" > "${tmp_file}" 2> "${err_file}"
+    "${validator}" "${summary_file}" > "${tmp_file}" 2> "${err_file}"
     local validation_status=$?
     set -e
 
@@ -125,7 +125,7 @@ prepare_delivery_summary() {
 
         set +e
         local repaired_summary
-        repaired_summary=$(env HOME=/home/codify timeout 60 su -m -s /bin/bash codify -c 'cd /tmp && /usr/local/bin/claude -p --bare --tools "" --permission-mode plan --no-session-persistence --output-format text --max-turns 3 --model "${ANTHROPIC_MODEL}" < /tmp/delivery-summary-repair-prompt.md' 2>/dev/null)
+        repaired_summary=$(codify_run_shell 'cd /tmp && timeout 60 "${CODIFY_CLAUDE_BIN}" -p --bare --tools "" --permission-mode plan --no-session-persistence --output-format text --max-turns 3 --model "${ANTHROPIC_MODEL}" < /tmp/delivery-summary-repair-prompt.md' 2>/dev/null)
         local repair_status=$?
         set -e
 
@@ -165,7 +165,7 @@ write_delivery_summary_artifacts() {
 
     printf '%s\n' "${summary_text}" > "${DELIVERY_SUMMARY_FILE}"
     chmod 644 "${DELIVERY_SUMMARY_FILE}" "${DELIVERY_SUMMARY_VALIDATION_FILE}" 2>/dev/null || true
-    chown codify:codify "${DELIVERY_SUMMARY_FILE}" "${DELIVERY_SUMMARY_VALIDATION_FILE}" 2>/dev/null || true
+    codify_chown "${DELIVERY_SUMMARY_FILE}" "${DELIVERY_SUMMARY_VALIDATION_FILE}" 2>/dev/null || true
     echo "Delivery summary written to ${DELIVERY_SUMMARY_FILE} (${#summary_text} chars)"
 }
 
@@ -195,7 +195,7 @@ write_plan_task_metadata() {
         }')
     printf '%s\n' "${task_metadata}" > "${CODIFY_RUNTIME_DIR}/task-metadata.json"
     chmod 644 "${CODIFY_RUNTIME_DIR}/task-metadata.json" 2>/dev/null || true
-    chown codify:codify "${CODIFY_RUNTIME_DIR}/task-metadata.json" 2>/dev/null || true
+    codify_chown "${CODIFY_RUNTIME_DIR}/task-metadata.json" 2>/dev/null || true
     echo "Plan task metadata written to ${CODIFY_RUNTIME_DIR}/task-metadata.json"
 }
 

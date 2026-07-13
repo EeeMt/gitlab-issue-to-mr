@@ -64,6 +64,7 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     task.updated_at = now
     task.started_at = None
     task.completed_at = None
+    task.cancel_requested_at = None
     task.raw_logs_finalized_at = None
     return task
 
@@ -638,7 +639,10 @@ class CancelTaskDockerStopTests(unittest.TestCase):
         with (
             patch("app.api.task_action_routes.notify_task_cancelled", new=AsyncMock()),
             patch("app.core.task_helpers._require_task_operator", return_value=None),
-            patch("app.api.task_action_routes.get_docker_client", return_value=mock_docker),
+            patch("app.api.task_action_routes.get_docker_client_async", return_value=mock_docker),
+            patch(
+                "app.api.task_action_routes.persist_raw_log_snapshot", new=AsyncMock()
+            ),
             patch(
                 "app.api.task_action_routes.asyncio.to_thread", new_callable=AsyncMock
             ) as mock_to_thread,
@@ -681,7 +685,10 @@ class CancelTaskDockerStopTests(unittest.TestCase):
         with (
             patch("app.api.task_action_routes.notify_task_cancelled", new=AsyncMock()),
             patch("app.core.task_helpers._require_task_operator", return_value=None),
-            patch("app.api.task_action_routes.get_docker_client", return_value=mock_docker),
+            patch("app.api.task_action_routes.get_docker_client_async", return_value=mock_docker),
+            patch(
+                "app.api.task_action_routes.persist_raw_log_snapshot", new=AsyncMock()
+            ),
             patch(
                 "app.api.task_action_routes.asyncio.to_thread", new_callable=AsyncMock
             ) as mock_to_thread,
@@ -717,7 +724,7 @@ class CancelTaskDockerStopTests(unittest.TestCase):
         with (
             patch("app.api.task_action_routes.notify_task_cancelled", new=AsyncMock()),
             patch("app.core.task_helpers._require_task_operator", return_value=None),
-            patch("app.api.task_action_routes.get_docker_client", return_value=mock_docker),
+            patch("app.api.task_action_routes.get_docker_client_async", return_value=mock_docker),
             patch(
                 "app.api.task_action_routes.persist_raw_log_snapshot", new=AsyncMock()
             ) as persist_snapshot,
@@ -764,7 +771,7 @@ class CancelTaskDockerStopTests(unittest.TestCase):
         with (
             patch("app.api.task_action_routes.notify_task_cancelled", new=AsyncMock()),
             patch("app.core.task_helpers._require_task_operator", return_value=None),
-            patch("app.api.task_action_routes.get_docker_client", return_value=mock_docker),
+            patch("app.api.task_action_routes.get_docker_client_async", return_value=mock_docker),
             patch(
                 "app.api.task_action_routes.asyncio.to_thread", new_callable=AsyncMock
             ) as mock_to_thread,
@@ -779,8 +786,8 @@ class CancelTaskDockerStopTests(unittest.TestCase):
         mock_container.stop.assert_called_once_with(timeout=10)
         mock_container.remove.assert_not_called()
 
-    def test_cancel_task_docker_failure_is_silently_caught(self):
-        """Lines 505-506: Docker failure during cancel should be silently caught."""
+    def test_cancel_task_docker_failure_defers_cancellation(self):
+        """Unknown remote container state must keep the task active and locked."""
         task = _make_serializable_task(task_status=TaskStatus.RUNNING)
         task.id = 42
         task.project_id = 1
@@ -800,7 +807,7 @@ class CancelTaskDockerStopTests(unittest.TestCase):
             patch("app.api.task_action_routes.notify_task_cancelled", new=AsyncMock()),
             patch("app.core.task_helpers._require_task_operator", return_value=None),
             patch(
-                "app.api.task_action_routes.get_docker_client",
+                "app.api.task_action_routes.get_docker_client_async",
                 side_effect=RuntimeError("Docker not running"),
             ),
         ):
@@ -808,8 +815,86 @@ class CancelTaskDockerStopTests(unittest.TestCase):
 
         app.dependency_overrides.clear()
 
-        # Should still succeed even though Docker failed
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(task.status, TaskStatus.RUNNING)
+        self.assertIsNotNone(task.cancel_requested_at)
+        mock_db.commit.assert_awaited_once()
+
+    def test_cancel_task_uses_stable_container_id(self):
+        """A deployment-time container prefix change must not break cancellation."""
+        task = _make_serializable_task(task_status=TaskStatus.RUNNING)
+        task.id = 45
+        task.project_id = 1
+        task.issue_id = 100
+        task.container_id = "stable-container-45"
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = task
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+
+        mock_container = MagicMock()
+        mock_docker = MagicMock()
+        mock_docker.client.containers.get.return_value = mock_container
+        mock_docker.read_file_from_container.return_value = b"final\n"
+        client, app = _make_app_client_with_db(mock_db)
+
+        with (
+            patch("app.api.task_action_routes.notify_task_cancelled", new=AsyncMock()),
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch("app.api.task_action_routes.get_docker_client_async", return_value=mock_docker),
+            patch(
+                "app.api.task_action_routes.persist_raw_log_snapshot", new=AsyncMock()
+            ),
+            patch(
+                "app.api.task_action_routes.asyncio.to_thread", new_callable=AsyncMock
+            ) as mock_to_thread,
+        ):
+            mock_to_thread.side_effect = lambda fn, *args, **kwargs: fn(*args, **kwargs)
+            response = client.post("/api/tasks/45/cancel")
+
+        app.dependency_overrides.clear()
         self.assertEqual(response.status_code, 200)
+        mock_docker.client.containers.get.assert_called_once_with("stable-container-45")
+
+    def test_cancel_task_defers_when_running_container_has_no_stable_id(self):
+        """NotFound during worker bootstrap must not release the issue lock."""
+        from app.core.worker_docker_targets import TaskContainerNotFoundError
+
+        task = _make_serializable_task(task_status=TaskStatus.RUNNING)
+        task.id = 46
+        task.project_id = 1
+        task.issue_id = 100
+        task.container_id = None
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = task
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+        client, app = _make_app_client_with_db(mock_db)
+
+        with (
+            patch("app.api.task_action_routes.notify_task_cancelled", new=AsyncMock()),
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch(
+                "app.api.task_action_routes.find_task_container",
+                new=AsyncMock(side_effect=TaskContainerNotFoundError("not created yet")),
+            ),
+            patch(
+                "app.api.task_action_routes.release_issue_execution_lock", new=AsyncMock()
+            ) as release_lock,
+        ):
+            response = client.post("/api/tasks/46/cancel")
+
+        app.dependency_overrides.clear()
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(task.status, TaskStatus.RUNNING)
+        self.assertIsNotNone(task.cancel_requested_at)
+        release_lock.assert_not_awaited()
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ import WorkerSettingsPanel from './WorkerSettingsPanel.vue'
 
 function createRuntimeConfig() {
   return {
+    worker_workspace_host_path: '/opt/codify-workspaces',
     worker_workspace_retention_days: 14
   }
 }
@@ -17,6 +18,10 @@ function createWorkerProfile(overrides: Record<string, any> = {}) {
     enabled: true,
     is_default: true,
     image: 'codify-worker:latest',
+    docker_host: null,
+    docker_tls_ca: null,
+    docker_tls_cert: null,
+    docker_tls_key: null,
     codegraph_enabled: false,
     volume_mounts: [
       {
@@ -55,7 +60,8 @@ function createWorkerProfile(overrides: Record<string, any> = {}) {
 const {
   mockGetConfig,
   mockGetBuiltIns,
-  mockGetWorkerProfiles,
+  mockGetAdminWorkerProfiles,
+  mockTestWorkerDockerConnection,
   mockUpdateConfig,
   mockUpdateWorkerProfile,
   mockCreateWorkerProfile,
@@ -66,7 +72,8 @@ const {
 } = vi.hoisted(() => ({
   mockGetConfig: vi.fn(),
   mockGetBuiltIns: vi.fn(),
-  mockGetWorkerProfiles: vi.fn(),
+  mockGetAdminWorkerProfiles: vi.fn(),
+  mockTestWorkerDockerConnection: vi.fn(),
   mockUpdateConfig: vi.fn(),
   mockUpdateWorkerProfile: vi.fn(),
   mockCreateWorkerProfile: vi.fn(),
@@ -270,7 +277,8 @@ vi.mock('naive-ui', () => ({
 vi.mock('../../api', () => ({
   getConfig: mockGetConfig,
   getRunInstructionTemplateBuiltIns: mockGetBuiltIns,
-  getWorkerProfiles: mockGetWorkerProfiles,
+  getAdminWorkerProfiles: mockGetAdminWorkerProfiles,
+  testWorkerDockerConnection: mockTestWorkerDockerConnection,
   updateConfig: mockUpdateConfig,
   updateWorkerProfile: mockUpdateWorkerProfile,
   createWorkerProfile: mockCreateWorkerProfile,
@@ -285,7 +293,14 @@ describe('WorkerSettingsPanel', () => {
     mockGetConfig.mockResolvedValue({
       runtime: createRuntimeConfig()
     })
-    mockGetWorkerProfiles.mockResolvedValue([createWorkerProfile()])
+    mockGetAdminWorkerProfiles.mockResolvedValue([createWorkerProfile()])
+    mockTestWorkerDockerConnection.mockResolvedValue({
+      docker_host: 'tcp://arm-worker:2376',
+      server_version: '27.1.0',
+      architecture: 'aarch64',
+      operating_system: 'Linux',
+      elapsed_ms: 18
+    })
     mockGetBuiltIns.mockResolvedValue({
       execute: { content: 'Execute {{user_prompt}}', available_placeholders: ['user_prompt'] },
       plan: { content: 'Plan {{user_prompt}}', available_placeholders: ['user_prompt'] },
@@ -312,7 +327,7 @@ describe('WorkerSettingsPanel', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('config.workerSettings')
-    expect(mockGetWorkerProfiles).toHaveBeenCalled()
+    expect(mockGetAdminWorkerProfiles).toHaveBeenCalled()
     expect(wrapper.text()).toContain('Default Worker')
     expect((wrapper.vm as any).workerFormValue.image).toBe('codify-worker:latest')
     expect(wrapper.text()).not.toContain('config.aiProvider')
@@ -395,7 +410,7 @@ describe('WorkerSettingsPanel', () => {
   })
 
   it('loads and saves the CodeGraph toggle', async () => {
-    mockGetWorkerProfiles.mockResolvedValueOnce([
+    mockGetAdminWorkerProfiles.mockResolvedValueOnce([
       createWorkerProfile({ codegraph_enabled: true })
     ])
     const wrapper = mount(WorkerSettingsPanel, {
@@ -439,7 +454,7 @@ describe('WorkerSettingsPanel', () => {
     )
 
     vm.workerFormValue.worker_workspace_retention_days = 30
-    await vm.handleSaveWorker()
+    await vm.handleSaveWorkspace()
 
     expect(mockUpdateConfig).toHaveBeenCalledWith({
       runtime: {
@@ -531,6 +546,7 @@ describe('WorkerSettingsPanel', () => {
     await vm.handleSaveWorker()
 
     expect(mockUpdateConfig).not.toHaveBeenCalled()
+    expect(vm.isWorkspaceDirty).toBe(true)
     expect(mockMessage.error).toHaveBeenCalledWith('worker profile invalid')
   })
 
@@ -780,5 +796,71 @@ describe('WorkerSettingsPanel', () => {
         ci_auto_repair_run_instruction_template: 'Repair {{issue_title}}'
       })
     )
+  })
+
+  it('loads and tests a custom Docker daemon target', async () => {
+    mockGetAdminWorkerProfiles.mockResolvedValueOnce([
+      createWorkerProfile({
+        docker_host: 'tcp://arm-worker:2376',
+        docker_tls_ca: '/certs/ca.pem',
+        docker_tls_cert: '/certs/cert.pem',
+        docker_tls_key: '/certs/key.pem'
+      })
+    ])
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: { isMobile: false, reloadKey: 0 }
+    })
+    await flushPromises()
+    const vm = wrapper.vm as any
+
+    expect(vm.workerFormValue.use_system_docker).toBe(false)
+    await vm.handleTestDockerConnection()
+
+    expect(mockTestWorkerDockerConnection).toHaveBeenCalledWith({
+      docker_host: 'tcp://arm-worker:2376',
+      docker_tls_ca: '/certs/ca.pem',
+      docker_tls_cert: '/certs/cert.pem',
+      docker_tls_key: '/certs/key.pem'
+    })
+    expect(vm.dockerTestResult.architecture).toBe('aarch64')
+  })
+
+  it('saves system Docker inheritance as null target fields', async () => {
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: { isMobile: false, reloadKey: 0 }
+    })
+    await flushPromises()
+    const vm = wrapper.vm as any
+    await vm.handleSaveWorker()
+
+    expect(mockUpdateWorkerProfile).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        docker_host: null,
+        docker_tls_ca: null,
+        docker_tls_cert: null,
+        docker_tls_key: null
+      })
+    )
+    expect(mockUpdateConfig).not.toHaveBeenCalled()
+
+    vm.workerFormValue.worker_workspace_retention_days = 21
+    await vm.handleSaveWorkspace()
+
+    expect(mockUpdateConfig).toHaveBeenCalledWith({
+      runtime: {
+        worker_workspace_retention_days: 21
+      }
+    })
+  })
+
+  it('shows the deployment workspace path as read-only', async () => {
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: { isMobile: false, reloadKey: 0 }
+    })
+    await flushPromises()
+    const pathInput = wrapper.find('input[placeholder="/opt/codify-workspaces"]')
+    expect(pathInput.attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('config.workerWorkspaceHostPathDeploymentHint')
   })
 })

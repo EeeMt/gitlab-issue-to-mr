@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { describe, expect, it } from 'vitest'
-import type { Container, Stats, Task } from '../../api'
+import type { Container, DockerTargetError, Stats, Task } from '../../api'
 import { createMockContainer, createMockTask } from '../../test/mocks/api'
 import { useMonitorHealth } from './useMonitorHealth'
 
@@ -18,11 +18,16 @@ const stats: Stats = {
   running_long_30min: 0,
 }
 
-function createHealth(tasks: Task[], containers: Container[]) {
+function createHealth(
+  tasks: Task[],
+  containers: Container[],
+  dockerTargetErrors: DockerTargetError[] = [],
+) {
   return useMonitorHealth({
     stats: ref(stats),
     tasks: ref(tasks),
     containers: ref(containers),
+    dockerTargetErrors: ref(dockerTargetErrors),
     recentFinishedList: ref([]),
     recentFailureList: ref([]),
     nowMs: ref(new Date('2026-07-05T10:00:00Z').getTime()),
@@ -65,5 +70,19 @@ describe('useMonitorHealth', () => {
     expect(
       health.overviewCards.value.find((card) => card.key === 'health')?.tagType,
     ).toBe('warning')
+  })
+
+  it('degrades overall health when a Docker target is unavailable', () => {
+    const health = createHealth([], [], [{ docker_target: 'ARM Worker' }])
+
+    expect(
+      health.overviewCards.value.find((card) => card.key === 'health')?.tagType,
+    ).toBe('warning')
+    expect(
+      health.overviewCards.value.find((card) => card.key === 'containers')?.tagType,
+    ).toBe('warning')
+    expect(health.healthChecks.value.find((check) => check.key === 'workers')?.type).toBe(
+      'warning',
+    )
   })
 })

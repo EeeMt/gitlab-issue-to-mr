@@ -455,7 +455,7 @@ process_stream() {
 
 run_claude_stream() {
   set +e
-  printf '%s' "$PROMPT" | /usr/local/bin/claude "$@" 2>&1 | process_stream
+  printf '%s' "$PROMPT" | "${CODIFY_CLAUDE_BIN:-/usr/local/bin/claude}" "$@" 2>&1 | process_stream
   local pipe_status=("${PIPESTATUS[@]}")
   set -e
   return "${pipe_status[1]}"

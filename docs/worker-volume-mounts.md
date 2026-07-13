@@ -1,5 +1,8 @@
 # Worker Volume Mounts — 完整梳理
 
+使用独立项目运行时镜像并在启动时注入 Codify 工具时，另见
+[Mounted Worker Kits](worker-kits.md)。
+
 ## 概述
 
 Worker 容器有三种挂载来源：
@@ -18,11 +21,41 @@ Worker 容器有三种挂载来源：
 
 | 配置项 | 环境变量 | 默认值 | 说明 |
 |--------|----------|--------|------|
-| `worker_workspace_host_path` | `WORKER_WORKSPACE_HOST_PATH` | `/opt/codify-workspaces` | 宿主机根路径（绝对路径）；设为空字符串可关闭持久 workspace |
+| `worker_workspace_host_path` | `WORKER_WORKSPACE_HOST_PATH` | `/opt/codify-workspaces` | 共享宿主机根路径，必须是非空绝对路径 |
 | `worker_workspace_retention_days` | `WORKER_WORKSPACE_RETENTION_DAYS` | `14` | 正常任务 workspace 保留天数 |
 | `worker_failed_workspace_retention_days` | `WORKER_FAILED_WORKSPACE_RETENTION_DAYS` | `30` | 失败任务 workspace 保留天数（配置已定义，清理逻辑尚未区分） |
 
-配置方式：环境变量（推荐）或通过 `/api/config/runtime` 运行时修改（当前前端暂无 UI 入口）。
+路径通过部署环境变量 `WORKER_WORKSPACE_HOST_PATH` 配置，修改后需要重新创建 Backend
+和 Scheduler 容器。Compose 使用该值同时设置进程配置和同路径 bind mount，避免服务容器
+写入路径与 Docker host 实际 bind source 脱节。Worker 设置页面只读展示该部署值；保留天数
+仍可在线修改。
+
+### 远程 Docker daemon
+
+Worker Profile 可以选择系统默认 Docker，也可以配置独立的 `docker_host` 和 TLS
+CA、客户端证书、客户端密钥文件路径。Docker 目标及 TLS 路径会写入任务级 Worker
+快照；Profile 后续修改不会改变已经创建的任务。
+
+共享路径 MVP 仅接受 `unix://`、`tcp://` 和 `https://` Docker 端点；不接受会被
+Docker SDK 当作明文连接的 `http://`，也暂不支持需要额外运行时依赖的 `ssh://` 或
+仅适用于 Windows 的 `npipe://`。远程 `tcp://` 建议同时配置完整 TLS 文件路径。
+
+共享路径 MVP 要求 Backend、Scheduler 和每个远程 Docker host 都把同一共享存储
+挂载为完全相同的绝对路径。Backend/Scheduler 在该路径写入 prompt、脚本和运行时输入，
+远程 daemon 创建容器时则在自己的主机上解析 bind mount，所以仅仅让两端目录内容相同
+但绝对路径不同仍然不可用。
+
+默认 Compose 将 `${DOCKER_CERTS_HOST_PATH:-/opt/codify-docker-certs}` 只读挂载到
+Backend 和 Scheduler 的 `/opt/codify-docker-certs`。管理员可按 daemon 分目录保存证书，
+并在 Worker Profile 中配置容器内绝对路径，例如：
+
+```text
+/opt/codify-docker-certs/arm64/ca.pem
+/opt/codify-docker-certs/arm64/cert.pem
+/opt/codify-docker-certs/arm64/key.pem
+```
+
+Profile 自定义 volume 的 `host_path` 同样由目标 Docker host 解释，必须预先存在于该主机。
 
 ### 路径构建
 
@@ -127,35 +160,26 @@ runtime/task-{task_id}/task-prompt.md
 
 ## 2. Session Storage（Claude 会话持久化）
 
-### 配置
-
-| 配置项 | 默认值 | 说明 |
-|--------|--------|------|
-| `session_storage_root` | `/var/codify/sessions` | 会话文件根目录 |
-
 ### 路径生成
 
-当 `worker_workspace_host_path` 启用时，Claude 会话目录是 issue workspace 的一部分：
+Claude 会话目录固定属于 issue workspace：
 
 ```
 /opt/codify-workspaces/project-{project_id}/issue-{issue_id}/claude
 ```
 
-当 `worker_workspace_host_path` 设为空字符串并关闭持久 workspace 时，回退到旧版 session 路径：
-
-```
-{session_storage_root}/{issue_id}/claude
-```
+`session_storage_root` 和已有 issue 上的旧 `session_storage_path` 字段仅用于历史数据兼容；
+共享路径 MVP 不允许关闭持久 workspace，也不会为新任务选择 legacy session 路径。
 
 ### 挂载映射
 
 | 宿主机路径 | 容器内路径 | 模式 | 用途 |
 |-----------|-----------|------|------|
-| `.../issue-{issue_id}/claude` 或 `{session_storage_root}/{issue_id}/claude` | `/home/codify/.claude` | `rw` | Claude CLI 会话文件（`.jsonl`） |
+| `.../issue-{issue_id}/claude` | `/home/codify/.claude` | `rw` | Claude CLI 会话文件（`.jsonl`） |
 
 ### 会话生命周期
 
-1. Issue 创建时根据 workspace 配置生成 `session_storage_path`
+1. Issue 创建时生成 workspace 内的 `session_storage_path`
 2. Worker 启动容器时挂载到 `/home/codify/.claude`
 3. 如果 Issue 已有 `claude_session_id`，worker 将其作为 `RESUME_SESSION` 传入容器，脚本再用该值恢复 Claude 会话
 4. 容器退出后，entrypoint 从 session 文件中提取 `CODIFY_SESSION_ID`，worker 将其写回 `issue.claude_session_id`
@@ -163,17 +187,12 @@ runtime/task-{task_id}/task-prompt.md
 
 ### 与 Workspace 的关系
 
-当 `worker_workspace_host_path` 启用时，Session Storage 归属于 issue workspace：
+Session Storage 归属于 issue workspace：
 - `repo/` 存放 Git 仓库和未提交状态
 - `runtime/task-{task_id}/` 存放单个任务的运行时文件
 - `claude/` 存放 Claude CLI 会话状态
 - `shared/` 存放同一 issue 内跨 task 复用的用户配置缓存或工具状态
 - 清理 issue workspace 也会删除 Claude resume context
-
-当 `worker_workspace_host_path` 为空时，不创建 issue workspace，Session Storage 使用 `{session_storage_root}/{issue_id}/claude` legacy 路径：
-- Claude 会话状态仍会挂载到 `/home/codify/.claude`
-- legacy session 路径独立于 workspace cleanup
-- workspace 状态查询和删除接口在该模式下不清理 Claude resume context
 
 ---
 
@@ -310,15 +329,11 @@ Backend/Scheduler 容器需要以下宿主目录挂载（均在 `deploy/docker-c
 ```
 build_container_volumes(settings, issue, task=task)
 │
-├─ worker_workspace_host_path 非空 && issue && task?
-│   └─ YES → build_issue_workspace_paths()
-│       ├─ volumes[repo_path]    = {bind: /workspace,          mode: rw}
-│       ├─ volumes[claude_path]  = {bind: /home/codify/.claude, mode: rw}
-│       ├─ volumes[runtime_path] = {bind: /tmp/codify-runtime, mode: rw}
-│       └─ volumes[shared_path]  = {bind: /opt/codify-issue-shared, mode: rw}
-│
-├─ worker_workspace_host_path 为空 && issue.session_storage_path 非空?
-│   └─ YES → volumes[session_storage_path] = {bind: /home/codify/.claude, mode: rw}
+├─ build_issue_workspace_paths()
+│   ├─ volumes[repo_path]    = {bind: /workspace,             mode: rw}
+│   ├─ volumes[claude_path]  = {bind: /home/codify/.claude,  mode: rw}
+│   ├─ volumes[runtime_path] = {bind: /tmp/codify-runtime,   mode: rw}
+│   └─ volumes[shared_path]  = {bind: /opt/codify-issue-shared, mode: rw}
 │
 └─ worker_volume_mounts_parsed (含 CA cert 自动注入)
     └─ 遍历每个 mount → volumes[host_path] = {bind: container_path, mode}
@@ -332,7 +347,7 @@ build_container_volumes(settings, issue, task=task)
 |------|------|
 | `backend/app/config.py` | 所有配置项定义和默认值 |
 | `backend/app/api/config_runtime.py` | 运行时配置读写 + 校验 |
-| `backend/app/api/issues.py:144` | Issue 创建时生成 workspace-local 或 legacy fallback 的 `session_storage_path` |
+| `backend/app/api/issues.py` | Issue 创建时生成 workspace 内的 `session_storage_path` |
 | `backend/app/core/worker_workspace.py` | Workspace 路径构建、删除、过期清理 |
 | `backend/app/core/worker_runtime.py` | `build_container_volumes()` 组装所有挂载 |
 | `backend/app/core/worker_results.py` | `finalize_archive()` 拉取运行时归档 |

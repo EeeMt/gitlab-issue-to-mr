@@ -50,7 +50,7 @@ run_worker_script() {
     echo "Running custom ${phase} script..."
 
     set +e
-    env HOME=/home/codify su -m -s /bin/bash codify -c "cd /workspace && bash ${script_path}"
+    codify_run_shell "cd /workspace && export PATH=\"${CODIFY_RUNTIME_PATH}\" && \"${CODIFY_BASH}\" \"${script_path}\""
     local script_result=$?
     set -e
 

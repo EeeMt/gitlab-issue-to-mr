@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import inspect
+import time
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -11,18 +15,30 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config import get_effective_settings
+from app.core.docker_client import DockerClientWrapper, resolve_docker_connection
 from app.core.task_prompt import (
     BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE,
     BUILT_IN_EXECUTE_RUN_INSTRUCTION_TEMPLATE,
     BUILT_IN_PLAN_RUN_INSTRUCTION_TEMPLATE,
 )
+from app.core.worker_kit import (
+    BAKED_IMAGE_MODE,
+    WorkerKitValidationError,
+    validate_worker_kit_config,
+    validate_worker_kit_mounts,
+)
 from app.core.worker_profiles import (
+    TaskWorkerRuntime,
     WorkerProfileValidationError,
+    build_worker_profile_environment_map,
+    build_worker_profile_volume_map,
     parse_worker_profile_mounts,
     replace_profile_environment_variables,
     serialize_worker_profile_for_api,
     set_default_worker_profile,
     validate_profile_templates,
+    validate_worker_profile_docker_target,
 )
 from app.core.worker_profiles import (
     disable_worker_profile as disable_worker_profile_domain,
@@ -49,6 +65,13 @@ class WorkerProfileRequestBase(BaseModel):
     description: str | None = None
     enabled: bool | None = None
     image: str | None = Field(default=None, max_length=255)
+    runtime_mode: str | None = Field(default=None, max_length=32)
+    worker_kit_version: str | None = Field(default=None, max_length=128)
+    worker_kit_path: str | None = Field(default=None, max_length=1024)
+    docker_host: str | None = Field(default=None, max_length=500)
+    docker_tls_ca: str | None = Field(default=None, max_length=1024)
+    docker_tls_cert: str | None = Field(default=None, max_length=1024)
+    docker_tls_key: str | None = Field(default=None, max_length=1024)
     codegraph_enabled: bool | None = None
     volume_mounts: list[dict[str, Any]] | None = None
     environment_variables: list[WorkerProfileEnvironmentVariableRequest] | None = None
@@ -62,6 +85,7 @@ class WorkerProfileRequestBase(BaseModel):
 class WorkerProfileCreateRequest(WorkerProfileRequestBase):
     name: str = Field(max_length=100)
     image: str = Field(max_length=255)
+    runtime_mode: str = BAKED_IMAGE_MODE
     volume_mounts: list[dict[str, Any]] = Field(default_factory=list)
     environment_variables: list[WorkerProfileEnvironmentVariableRequest] = Field(
         default_factory=list
@@ -77,6 +101,17 @@ class WorkerProfileCreateRequest(WorkerProfileRequestBase):
 
 class WorkerProfileUpdateRequest(WorkerProfileRequestBase):
     pass
+
+
+class DockerConnectionTestRequest(BaseModel):
+    docker_host: str | None = Field(default=None, max_length=500)
+    docker_tls_ca: str | None = Field(default=None, max_length=1024)
+    docker_tls_cert: str | None = Field(default=None, max_length=1024)
+    docker_tls_key: str | None = Field(default=None, max_length=1024)
+
+
+class WorkerRuntimeVerificationRequest(BaseModel):
+    smoke_command: str | None = Field(default=None, max_length=4000)
 
 
 def _http_profile_error(exc: WorkerProfileValidationError) -> HTTPException:
@@ -137,6 +172,181 @@ async def list_worker_profiles(db: AsyncSession = Depends(get_db)):
     return [serialize_worker_profile_for_api(profile) for profile in profiles]
 
 
+@router.get("/worker-profiles/admin")
+async def list_worker_profiles_for_admin(
+    db: AsyncSession = Depends(get_db),
+    _admin=Depends(require_admin_user),
+):
+    """List worker profiles including administrator-only Docker target fields."""
+    profiles = await list_worker_profiles_domain(db)
+    return [
+        serialize_worker_profile_for_api(profile, include_docker_target=True)
+        for profile in profiles
+    ]
+
+
+@router.post("/worker-profiles/test-docker-connection")
+async def test_worker_profile_docker_connection(
+    request: DockerConnectionTestRequest,
+    _admin=Depends(require_admin_user),
+):
+    """Test an unsaved profile Docker target and return daemon identity."""
+    try:
+        host, tls_ca, tls_cert, tls_key = validate_worker_profile_docker_target(
+            docker_host=request.docker_host,
+            docker_tls_ca=request.docker_tls_ca,
+            docker_tls_cert=request.docker_tls_cert,
+            docker_tls_key=request.docker_tls_key,
+        )
+    except (WorkerProfileValidationError, WorkerKitValidationError) as exc:
+        raise _http_profile_error(exc) from exc
+
+    connection = resolve_docker_connection(
+        get_effective_settings(),
+        docker_host=host,
+        docker_tls_ca=tls_ca,
+        docker_tls_cert=tls_cert,
+        docker_tls_key=tls_key,
+    )
+    started_at = time.monotonic()
+
+    def inspect_connection():
+        client = DockerClientWrapper(
+            connection,
+            connect_timeout=3,
+            operation_timeout=3,
+        )
+        try:
+            return client.inspect_server()
+        finally:
+            with contextlib.suppress(Exception):
+                client.close()
+
+    try:
+        server = await asyncio.wait_for(asyncio.to_thread(inspect_connection), timeout=10)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Unable to connect to Docker daemon {connection.host}: {exc}",
+        ) from exc
+    return {
+        "docker_host": connection.host,
+        "elapsed_ms": round((time.monotonic() - started_at) * 1000),
+        **server,
+    }
+
+
+@router.post("/worker-profiles/{profile_id}/verify-runtime")
+async def verify_worker_profile_runtime(
+    profile_id: int,
+    request: WorkerRuntimeVerificationRequest,
+    db: AsyncSession = Depends(get_db),
+    _admin=Depends(require_admin_user),
+):
+    """Run the mounted kit preflight on the profile's actual Docker target."""
+    profile = await _load_profile_or_404(db, profile_id)
+    try:
+        runtime = TaskWorkerRuntime(
+            image=profile.image,
+            runtime_mode=getattr(profile, "runtime_mode", BAKED_IMAGE_MODE),
+            worker_kit_version=getattr(profile, "worker_kit_version", None),
+            worker_kit_path=getattr(profile, "worker_kit_path", None),
+            codegraph_enabled=bool(getattr(profile, "codegraph_enabled", False)),
+            volume_mounts=parse_worker_profile_mounts(profile.volume_mounts),
+            environment=build_worker_profile_environment_map(
+                profile.environment_variables,
+                include_secrets=False,
+            ),
+            pre_script="",
+            post_script="",
+            docker_host=getattr(profile, "docker_host", None),
+            docker_tls_ca=getattr(profile, "docker_tls_ca", None),
+            docker_tls_cert=getattr(profile, "docker_tls_cert", None),
+            docker_tls_key=getattr(profile, "docker_tls_key", None),
+        )
+        overrides = runtime.container_overrides()
+        verification_volumes = build_worker_profile_volume_map(runtime.volume_mounts)
+        verification_volumes.update(overrides["volumes"])
+    except WorkerProfileValidationError as exc:
+        raise _http_profile_error(exc) from exc
+    if runtime.runtime_mode == BAKED_IMAGE_MODE:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Runtime verification requires mounted_kit mode",
+        )
+
+    command = ["--verify"]
+    smoke_command = (request.smoke_command or "").strip()
+    if smoke_command:
+        command.extend(["--smoke", smoke_command])
+    connection = runtime.docker_connection(get_effective_settings())
+    started_at = time.monotonic()
+
+    def verify_runtime() -> tuple[int, str]:
+        client = DockerClientWrapper(connection)
+        container = None
+        try:
+            client.client.images.get(runtime.image)
+            container = client.create_container(
+                image=runtime.image,
+                command=command,
+                environment={
+                    **runtime.environment,
+                    **overrides["environment"],
+                    "CODIFY_RUNTIME_IMAGE": runtime.image,
+                },
+                volumes=verification_volumes,
+                entrypoint=overrides["entrypoint"],
+                user=overrides["user"],
+                tmpfs={"/workspace": "rw,exec,mode=1777"},
+                name=f"codify-worker-kit-verify-{profile.id}-{uuid.uuid4().hex[:8]}",
+                labels={
+                    "codify.worker_kit_verification": "true",
+                    "codify.worker_kit_version": runtime.worker_kit_version or "",
+                },
+            )
+            return client.wait_for_container(container, timeout=180)
+        finally:
+            if container is not None:
+                with contextlib.suppress(Exception):
+                    container.remove(force=True)
+            with contextlib.suppress(Exception):
+                client.close()
+
+    try:
+        exit_code, logs = await asyncio.wait_for(
+            asyncio.to_thread(verify_runtime),
+            timeout=200,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Worker runtime verification could not start: {exc}",
+        ) from exc
+    if exit_code != 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "message": "Worker runtime verification failed",
+                "exit_code": exit_code,
+                "logs": logs[-8000:],
+            },
+        )
+    return {
+        "ok": True,
+        "image": runtime.image,
+        "worker_kit_version": runtime.worker_kit_version,
+        "docker_host": connection.host,
+        "elapsed_ms": round((time.monotonic() - started_at) * 1000),
+        "omitted_secret_environment_keys": sorted(
+            str(row.key)
+            for row in profile.environment_variables
+            if bool(row.is_secret)
+        ),
+        "logs": logs[-8000:],
+    }
+
+
 @router.post("/worker-profiles", status_code=status.HTTP_201_CREATED)
 async def create_worker_profile(
     request: WorkerProfileCreateRequest,
@@ -158,14 +368,34 @@ async def create_worker_profile(
             plan_template=request.default_plan_run_instruction_template,
             ci_template=request.ci_auto_repair_run_instruction_template,
         )
+        docker_host, tls_ca, tls_cert, tls_key = validate_worker_profile_docker_target(
+            docker_host=request.docker_host,
+            docker_tls_ca=request.docker_tls_ca,
+            docker_tls_cert=request.docker_tls_cert,
+            docker_tls_key=request.docker_tls_key,
+        )
+        runtime_mode, kit_version, kit_path = validate_worker_kit_config(
+            runtime_mode=request.runtime_mode,
+            worker_kit_version=request.worker_kit_version,
+            worker_kit_path=request.worker_kit_path,
+        )
+        mounts = parse_worker_profile_mounts(request.volume_mounts)
+        validate_worker_kit_mounts(runtime_mode, mounts)
         profile = WorkerProfile(
             name=name,
             description=request.description,
             enabled=True if request.enabled is None else request.enabled,
             is_default=False,
             image=image,
+            runtime_mode=runtime_mode,
+            worker_kit_version=kit_version,
+            worker_kit_path=kit_path,
+            docker_host=docker_host,
+            docker_tls_ca=tls_ca,
+            docker_tls_cert=tls_cert,
+            docker_tls_key=tls_key,
             codegraph_enabled=bool(request.codegraph_enabled),
-            volume_mounts=parse_worker_profile_mounts(request.volume_mounts),
+            volume_mounts=mounts,
             pre_script=request.pre_script or "",
             post_script=request.post_script or "",
             default_execute_run_instruction_template=execute_template,
@@ -181,11 +411,11 @@ async def create_worker_profile(
         )
         await db.commit()
         await db.refresh(profile, attribute_names=["environment_variables"])
-        return serialize_worker_profile_for_api(profile)
+        return serialize_worker_profile_for_api(profile, include_docker_target=True)
     except HTTPException:
         await _rollback(db)
         raise
-    except WorkerProfileValidationError as exc:
+    except (WorkerProfileValidationError, WorkerKitValidationError) as exc:
         await _rollback(db)
         raise _http_profile_error(exc) from exc
 
@@ -219,10 +449,67 @@ async def update_worker_profile(
             profile.image = request.image.strip()
             if not profile.image:
                 raise WorkerProfileValidationError("Worker profile image cannot be blank")
+        kit_fields = {"runtime_mode", "worker_kit_version", "worker_kit_path"}
+        if kit_fields & fields:
+            runtime_mode, kit_version, kit_path = validate_worker_kit_config(
+                runtime_mode=(
+                    request.runtime_mode
+                    if "runtime_mode" in fields
+                    else getattr(profile, "runtime_mode", BAKED_IMAGE_MODE)
+                ),
+                worker_kit_version=(
+                    request.worker_kit_version
+                    if "worker_kit_version" in fields
+                    else getattr(profile, "worker_kit_version", None)
+                ),
+                worker_kit_path=(
+                    request.worker_kit_path
+                    if "worker_kit_path" in fields
+                    else getattr(profile, "worker_kit_path", None)
+                ),
+            )
+            profile.runtime_mode = runtime_mode
+            profile.worker_kit_version = kit_version
+            profile.worker_kit_path = kit_path
+        docker_target_fields = {
+            "docker_host",
+            "docker_tls_ca",
+            "docker_tls_cert",
+            "docker_tls_key",
+        }
+        if docker_target_fields & fields:
+            docker_host, tls_ca, tls_cert, tls_key = validate_worker_profile_docker_target(
+                docker_host=(
+                    request.docker_host if "docker_host" in fields else profile.docker_host
+                ),
+                docker_tls_ca=(
+                    request.docker_tls_ca
+                    if "docker_tls_ca" in fields
+                    else profile.docker_tls_ca
+                ),
+                docker_tls_cert=(
+                    request.docker_tls_cert
+                    if "docker_tls_cert" in fields
+                    else profile.docker_tls_cert
+                ),
+                docker_tls_key=(
+                    request.docker_tls_key
+                    if "docker_tls_key" in fields
+                    else profile.docker_tls_key
+                ),
+            )
+            profile.docker_host = docker_host
+            profile.docker_tls_ca = tls_ca
+            profile.docker_tls_cert = tls_cert
+            profile.docker_tls_key = tls_key
         if "codegraph_enabled" in fields and request.codegraph_enabled is not None:
             profile.codegraph_enabled = request.codegraph_enabled
         if "volume_mounts" in fields and request.volume_mounts is not None:
             profile.volume_mounts = parse_worker_profile_mounts(request.volume_mounts)
+        validate_worker_kit_mounts(
+            getattr(profile, "runtime_mode", BAKED_IMAGE_MODE),
+            profile.volume_mounts or [],
+        )
         if "pre_script" in fields:
             profile.pre_script = request.pre_script or ""
         if "post_script" in fields:
@@ -261,11 +548,11 @@ async def update_worker_profile(
 
         await db.commit()
         await db.refresh(profile, attribute_names=["environment_variables"])
-        return serialize_worker_profile_for_api(profile)
+        return serialize_worker_profile_for_api(profile, include_docker_target=True)
     except HTTPException:
         await _rollback(db)
         raise
-    except WorkerProfileValidationError as exc:
+    except (WorkerProfileValidationError, WorkerKitValidationError) as exc:
         await _rollback(db)
         raise _http_profile_error(exc) from exc
 
@@ -282,7 +569,7 @@ async def set_default_worker_profile_endpoint(
         await set_default_worker_profile(db, profile)
         await db.commit()
         await db.refresh(profile, attribute_names=["environment_variables"])
-        return serialize_worker_profile_for_api(profile)
+        return serialize_worker_profile_for_api(profile, include_docker_target=True)
     except WorkerProfileValidationError as exc:
         await _rollback(db)
         raise _http_profile_error(exc) from exc
@@ -300,7 +587,7 @@ async def disable_worker_profile(
         await disable_worker_profile_domain(db, profile)
         await db.commit()
         await db.refresh(profile, attribute_names=["environment_variables"])
-        return serialize_worker_profile_for_api(profile)
+        return serialize_worker_profile_for_api(profile, include_docker_target=True)
     except WorkerProfileValidationError as exc:
         await _rollback(db)
         raise _http_profile_error(exc) from exc
@@ -320,6 +607,13 @@ async def duplicate_worker_profile(
         enabled=True,
         is_default=False,
         image=source.image,
+        runtime_mode=getattr(source, "runtime_mode", BAKED_IMAGE_MODE),
+        worker_kit_version=getattr(source, "worker_kit_version", None),
+        worker_kit_path=getattr(source, "worker_kit_path", None),
+        docker_host=getattr(source, "docker_host", None),
+        docker_tls_ca=getattr(source, "docker_tls_ca", None),
+        docker_tls_cert=getattr(source, "docker_tls_cert", None),
+        docker_tls_key=getattr(source, "docker_tls_key", None),
         codegraph_enabled=bool(getattr(source, "codegraph_enabled", False)),
         volume_mounts=list(source.volume_mounts or []),
         pre_script=source.pre_script or "",
@@ -341,4 +635,4 @@ async def duplicate_worker_profile(
         )
     await db.commit()
     await db.refresh(copy, attribute_names=["environment_variables"])
-    return serialize_worker_profile_for_api(copy)
+    return serialize_worker_profile_for_api(copy, include_docker_target=True)

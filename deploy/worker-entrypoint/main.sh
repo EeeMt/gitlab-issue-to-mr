@@ -7,14 +7,14 @@ run_worker_script "pre" "${CODIFY_WORKER_PRE_SCRIPT_FILE}"
 prepare_codegraph
 
 echo "CodeGraph CLI version: $(codegraph --version 2>/dev/null || echo unavailable)"
-echo "Claude CLI version: $(/usr/local/bin/claude --version)"
+echo "Claude CLI version: $("${CODIFY_CLAUDE_BIN}" --version)"
 echo "Updating MR with execution status..."
 update_mr_description "$(build_running_mr_description)" || true
 
 echo "Starting Claude CLI (streaming mode)..."
 set +e
-env HOME=/home/codify timeout "${TASK_TIMEOUT:-1800}" su -m -s /bin/bash codify -c \
-    'cd /workspace && export PATH="/usr/local/bin:/usr/bin:/bin:${JAVA_HOME}/bin" && ARTIFACT_DIR="${CODIFY_RUNTIME_DIR}" CI_CLAUDE_DISABLE_CONSOLE_TEE=1 PROMPT_FILE=/tmp/claude_prompt.txt /usr/local/bin/ci-claude.sh' \
+codify_run_shell \
+    'cd /workspace && export PATH="${CODIFY_RUNTIME_PATH}" && ARTIFACT_DIR="${CODIFY_RUNTIME_DIR}" CI_CLAUDE_DISABLE_CONSOLE_TEE=1 PROMPT_FILE=/tmp/claude_prompt.txt timeout "${TASK_TIMEOUT:-1800}" "${CODIFY_CI_CLAUDE}"' \
     > /tmp/claude_result.json
 SCRIPT_RESULT=$?
 set -e
@@ -145,11 +145,11 @@ if [ -n "$CHANGES" ]; then
     COMMIT_MESSAGE_PROMPT=$(build_commit_message_prompt "${CHANGED_FILES_TEXT}" "${COMMIT_DIFF_STATS}" "${FINAL_SUMMARY_CONTENT}")
     printf '%s\n' "${COMMIT_MESSAGE_PROMPT}" > /tmp/commit_message_prompt.txt
     chmod 644 /tmp/commit_message_prompt.txt
-    chown codify:codify /tmp/commit_message_prompt.txt
+    codify_chown /tmp/commit_message_prompt.txt
     echo "Commit message prompt written to /tmp/commit_message_prompt.txt"
 
     set +e
-    GENERATED_COMMIT_MESSAGE=$(env HOME=/home/codify timeout 60 su -m -s /bin/bash codify -c 'cd /workspace && /usr/local/bin/claude -p --dangerously-skip-permissions --no-session-persistence --output-format text --max-turns 3 --model "${ANTHROPIC_MODEL}" < /tmp/commit_message_prompt.txt' 2>/dev/null)
+    GENERATED_COMMIT_MESSAGE=$(codify_run_shell 'cd /workspace && timeout 60 "${CODIFY_CLAUDE_BIN}" -p --dangerously-skip-permissions --no-session-persistence --output-format text --max-turns 3 --model "${ANTHROPIC_MODEL}" < /tmp/commit_message_prompt.txt' 2>/dev/null)
     COMMIT_MESSAGE_RESULT=$?
     set -e
 
@@ -189,11 +189,11 @@ AI-Generated: true"
     OVERALL_SUMMARY_PROMPT=$(build_overall_summary_prompt "${PREVIOUS_SUMMARY_FILE}" "${FINAL_SUMMARY_CONTENT}" "${FINAL_COMMIT_MESSAGE}" "${COMMIT_DIFF_STATS}" "${USER_PROMPT}")
     printf '%s\n' "${OVERALL_SUMMARY_PROMPT}" > /tmp/overall_summary_prompt.txt
     chmod 644 /tmp/overall_summary_prompt.txt
-    chown codify:codify /tmp/overall_summary_prompt.txt
+    codify_chown /tmp/overall_summary_prompt.txt
     echo "Overall summary prompt written to /tmp/overall_summary_prompt.txt (${#OVERALL_SUMMARY_PROMPT} chars)"
 
     set +e
-    GENERATED_OVERALL_SUMMARY=$(env HOME=/home/codify timeout 60 su -m -s /bin/bash codify -c 'cd /workspace && /usr/local/bin/claude -p --dangerously-skip-permissions --no-session-persistence --output-format text --max-turns 3 --model "${ANTHROPIC_MODEL}" < /tmp/overall_summary_prompt.txt' 2>/dev/null)
+    GENERATED_OVERALL_SUMMARY=$(codify_run_shell 'cd /workspace && timeout 60 "${CODIFY_CLAUDE_BIN}" -p --dangerously-skip-permissions --no-session-persistence --output-format text --max-turns 3 --model "${ANTHROPIC_MODEL}" < /tmp/overall_summary_prompt.txt' 2>/dev/null)
     OVERALL_SUMMARY_RESULT=$?
     set -e
 

@@ -12,6 +12,24 @@ CODEGRAPH_MIGRATION = (
     / "versions"
     / "053_worker_profile_codegraph.py"
 )
+DOCKER_TARGET_MIGRATION = (
+    Path(__file__).resolve().parents[2]
+    / "alembic"
+    / "versions"
+    / "054_worker_profile_docker_target.py"
+)
+CANCEL_REQUEST_MIGRATION = (
+    Path(__file__).resolve().parents[2]
+    / "alembic"
+    / "versions"
+    / "055_task_cancel_request.py"
+)
+MOUNTED_KIT_MIGRATION = (
+    Path(__file__).resolve().parents[2]
+    / "alembic"
+    / "versions"
+    / "056_worker_profile_mounted_kit.py"
+)
 
 
 def test_worker_profiles_migration_defines_expected_tables_and_columns():
@@ -71,3 +89,37 @@ def test_worker_profile_codegraph_migration_adds_profile_and_snapshot_flags():
     assert '"task_worker_profile_snapshots"' in content
     assert '"codegraph_enabled"' in content
     assert 'server_default=sa.text("false")' in content
+
+
+def test_worker_profile_docker_target_migration_adds_nullable_snapshot_fields():
+    content = DOCKER_TARGET_MIGRATION.read_text(encoding="utf-8")
+
+    assert 'revision: str = "054_worker_docker_target"' in content
+    assert 'down_revision: Union[str, None] = "053_worker_profile_codegraph"' in content
+    assert '("worker_profiles", "task_worker_profile_snapshots")' in content
+    for field in ("docker_host", "docker_tls_ca", "docker_tls_cert", "docker_tls_key"):
+        assert f'Column("{field}"' in content
+    assert content.count("nullable=True") == 4
+    assert "worker_workspace_host_path" in content
+    assert "DELETE FROM system_config" in content
+
+
+def test_task_cancel_request_migration_adds_durable_intent_timestamp():
+    content = CANCEL_REQUEST_MIGRATION.read_text(encoding="utf-8")
+
+    assert 'revision: str = "055_task_cancel_request"' in content
+    assert 'down_revision: Union[str, None] = "054_worker_docker_target"' in content
+    assert 'op.add_column("tasks"' in content
+    assert '"cancel_requested_at"' in content
+
+
+def test_worker_profile_mounted_kit_migration_preserves_baked_default():
+    content = MOUNTED_KIT_MIGRATION.read_text(encoding="utf-8")
+
+    assert 'revision: str = "056_worker_mounted_kit"' in content
+    assert 'down_revision: Union[str, None] = "055_task_cancel_request"' in content
+    assert '("worker_profiles", "task_worker_profile_snapshots")' in content
+    assert '"runtime_mode"' in content
+    assert 'server_default="baked_image"' in content
+    assert '"worker_kit_version"' in content
+    assert '"worker_kit_path"' in content

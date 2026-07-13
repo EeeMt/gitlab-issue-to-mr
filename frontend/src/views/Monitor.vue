@@ -486,6 +486,15 @@
                   </div>
                 </template>
 
+                <n-alert
+                  v-if="dockerTargetErrors.length > 0"
+                  type="warning"
+                  :title="t('monitor.dockerTargetsUnavailable')"
+                  class="monitor-target-alert"
+                >
+                  {{ dockerTargetErrors.map((item) => item.docker_target).join(', ') }}
+                </n-alert>
+
                 <n-empty v-if="!tableLoading && sortedContainers.length === 0" :description="t('monitor.noContainers')" />
                 <n-data-table
                   v-else
@@ -605,6 +614,7 @@ const { t } = useI18n()
 const activeTab = ref('runtime')
 const {
   containers,
+  dockerTargetErrors,
   fetchData,
   hasLoadedOnce,
   loading,
@@ -645,6 +655,7 @@ const {
 } = useMonitorHealth({
   stats,
   containers,
+  dockerTargetErrors,
   tasks,
   recentFinishedList,
   recentFailureList,
@@ -848,6 +859,12 @@ const containerColumns = computed<DataTableColumns<Container>>(() => [
     title: t('monitor.name'),
     key: 'name',
     minWidth: 180
+  },
+  {
+    title: t('monitor.dockerTarget'),
+    key: 'docker_target',
+    minWidth: 150,
+    render: (container) => container.docker_target || '—'
   },
   {
     title: t('monitor.status'),
@@ -1090,6 +1107,10 @@ function kanbanIssueLabel(task: Task): string {
 </script>
 
 <style scoped>
+.monitor-target-alert {
+  margin-bottom: 12px;
+}
+
 .monitor-page {
   max-width: var(--app-page-max-width);
 }

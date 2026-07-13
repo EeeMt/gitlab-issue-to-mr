@@ -3,6 +3,8 @@
 Targets missed lines: 29, 36, 51-52, 59-66, 95-100, 188-189, 201.
 """
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
 
 import docker
@@ -55,8 +57,10 @@ class TestDockerClientInit:
         mock_docker_cls.assert_called_once_with(
             base_url="tcp://docker-host:2376",
             version="auto",
+            timeout=10,
             tls=mock_tls_obj,
         )
+        assert wrapper.client.api.timeout == 60
         # line 36: logger.info is called (implicitly tests line 36 is reached)
         assert wrapper.client is mock_docker_cls.return_value
 
@@ -74,7 +78,9 @@ class TestDockerClientInit:
         mock_docker_cls.assert_called_once_with(
             base_url="unix:///var/run/docker.sock",
             version="auto",
+            timeout=10,
         )
+        assert wrapper.client.api.timeout == 60
         assert wrapper.client is mock_docker_cls.return_value
 
 
@@ -193,6 +199,25 @@ class TestCreateContainerCoverage:
         wrapper.client.containers.get.assert_not_called()
         assert result.id == "anon-111"
 
+    def test_create_container_forwards_runtime_overrides(self):
+        wrapper = _make_wrapper()
+        wrapper.client.containers.run.return_value = MagicMock(id="mounted-kit")
+
+        wrapper.create_container(
+            image="team/runtime:latest",
+            command=["--verify"],
+            entrypoint="/opt/codify-kit/launcher",
+            user="0:0",
+            labels={"codify.worker-kit.version": "0.1.0"},
+            tmpfs={"/workspace": "rw,exec,uid=1000,gid=1000"},
+        )
+
+        kwargs = wrapper.client.containers.run.call_args.kwargs
+        assert kwargs["entrypoint"] == "/opt/codify-kit/launcher"
+        assert kwargs["user"] == "0:0"
+        assert kwargs["labels"] == {"codify.worker-kit.version": "0.1.0"}
+        assert kwargs["tmpfs"] == {"/workspace": "rw,exec,uid=1000,gid=1000"}
+
 
 # ---------------------------------------------------------------------------
 # close  (lines 188-189)
@@ -253,3 +278,32 @@ class TestGetDockerClientSingleton:
 
         # Clean up
         mod._docker_client = None
+
+    @patch("app.core.docker_client.DockerClientWrapper")
+    def test_different_targets_initialize_concurrently(self, mock_cls):
+        """An unreachable target must not hold the cache lock for other daemons."""
+        import app.core.docker_client as mod
+
+        barrier = threading.Barrier(2)
+
+        def construct(_connection):
+            barrier.wait(timeout=1)
+            return MagicMock()
+
+        mock_cls.side_effect = construct
+        first_target = mod.DockerConnectionConfig(host="tcp://first:2376")
+        second_target = mod.DockerConnectionConfig(host="tcp://second:2376")
+        with mod._docker_clients_lock:
+            mod._docker_client = None
+            mod._docker_clients.clear()
+            mod._docker_client_creation_locks.clear()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            first = executor.submit(mod.get_docker_client, first_target)
+            second = executor.submit(mod.get_docker_client, second_target)
+            assert first.result(timeout=2) is not None
+            assert second.result(timeout=2) is not None
+
+        with mod._docker_clients_lock:
+            mod._docker_clients.clear()
+            mod._docker_client_creation_locks.clear()

@@ -13,8 +13,34 @@
 
         <n-form :model="workerFormValue" label-placement="top" class="config-section-form">
           <div class="config-form__section">
-            <div class="config-form__section-title">{{ t('config.workerWorkspaceCleanup') }}</div>
+            <div class="config-form__section-header">
+              <div class="config-form__section-title">{{ t('config.workerWorkspaceCleanup') }}</div>
+              <n-button
+                size="small"
+                type="primary"
+                :loading="workspaceSaving"
+                :disabled="isWorkerBusy || !isWorkspaceDirty"
+                @click="handleSaveWorkspace"
+              >
+                {{ t('config.saveWorkspaceSettings') }}
+              </n-button>
+            </div>
             <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+              <n-gi>
+                <n-form-item
+                  :label="t('config.workerWorkspaceHostPath')"
+                >
+                  <n-input
+                    v-model:value="workerFormValue.worker_workspace_host_path"
+                    class="config-form__input"
+                    placeholder="/opt/codify-workspaces"
+                    disabled
+                  />
+                  <template #feedback>
+                    {{ t('config.workerWorkspaceHostPathDeploymentHint') }}
+                  </template>
+                </n-form-item>
+              </n-gi>
               <n-gi>
                 <n-form-item :label="t('config.workerWorkspaceRetentionDays')">
                   <n-input-number
@@ -115,6 +141,76 @@
                 </n-form-item>
               </n-gi>
             </n-grid>
+          </div>
+
+          <div class="config-form__section docker-target-section">
+            <div class="config-form__section-header">
+              <div class="config-form__section-title">{{ t('config.dockerTarget') }}</div>
+              <n-button
+                size="small"
+                secondary
+                :loading="dockerTesting"
+                :disabled="isWorkerBusy"
+                @click="handleTestDockerConnection"
+              >
+                {{ t('config.testDockerConnection') }}
+              </n-button>
+            </div>
+            <n-form-item :label="t('config.useSystemDockerTarget')">
+              <n-switch v-model:value="workerFormValue.use_system_docker" />
+            </n-form-item>
+            <n-grid
+              v-if="!workerFormValue.use_system_docker"
+              :cols="isMobile ? 1 : 2"
+              :x-gap="16"
+              :y-gap="8"
+            >
+              <n-gi :span="isMobile ? 1 : 2">
+                <n-form-item :label="t('config.dockerHost')">
+                  <n-input
+                    v-model:value="workerFormValue.docker_host"
+                    class="config-form__input"
+                    placeholder="tcp://docker-host:2376"
+                  />
+                </n-form-item>
+              </n-gi>
+              <n-gi>
+                <n-form-item :label="t('config.dockerTlsCa')">
+                  <n-input
+                    v-model:value="workerFormValue.docker_tls_ca"
+                    class="config-form__input"
+                    placeholder="/etc/codify/docker/ca.pem"
+                  />
+                </n-form-item>
+              </n-gi>
+              <n-gi>
+                <n-form-item :label="t('config.dockerTlsCert')">
+                  <n-input
+                    v-model:value="workerFormValue.docker_tls_cert"
+                    class="config-form__input"
+                    placeholder="/etc/codify/docker/cert.pem"
+                  />
+                </n-form-item>
+              </n-gi>
+              <n-gi>
+                <n-form-item :label="t('config.dockerTlsKey')">
+                  <n-input
+                    v-model:value="workerFormValue.docker_tls_key"
+                    class="config-form__input"
+                    placeholder="/etc/codify/docker/key.pem"
+                  />
+                </n-form-item>
+              </n-gi>
+            </n-grid>
+            <div v-if="insecureRemoteDocker" class="docker-target-warning">
+              {{ t('config.insecureDockerTargetWarning') }}
+            </div>
+            <div v-if="dockerTestResult" class="docker-test-result">
+              <strong>{{ dockerTestResult.architecture || '—' }}</strong>
+              <span>{{ dockerTestResult.operating_system || '—' }}</span>
+              <span>{{ dockerTestResult.server_version || '—' }}</span>
+              <span>{{ dockerTestResult.elapsed_ms }} ms</span>
+            </div>
           </div>
 
           <div class="config-form__section config-collection-section">
@@ -398,12 +494,14 @@ import {
   disableWorkerProfile,
   duplicateWorkerProfile,
   getConfig,
+  getAdminWorkerProfiles,
   getRunInstructionTemplateBuiltIns,
-  getWorkerProfiles,
   setDefaultWorkerProfile,
+  testWorkerDockerConnection,
   updateConfig,
   updateWorkerProfile,
   type RunInstructionTemplateBuiltIns,
+  type DockerConnectionTestResult,
   type WorkerProfile,
   type WorkerProfileEnvironmentVariable,
   type WorkerProfileEnvironmentVariableUpdate,
@@ -418,10 +516,16 @@ type WorkerFormValue = {
   enabled: boolean
   is_default: boolean
   image: string
+  use_system_docker: boolean
+  docker_host: string
+  docker_tls_ca: string
+  docker_tls_cert: string
+  docker_tls_key: string
   codegraph_enabled: boolean
   mounts: WorkerProfileMount[]
   environment_variables: EnvironmentVariableFormItem[]
   worker_workspace_retention_days: number
+  worker_workspace_host_path: string
   worker_pre_script: string
   worker_post_script: string
   default_execute_run_instruction_template: string
@@ -447,6 +551,8 @@ const { t } = useI18n()
 
 const loading = ref(false)
 const workerSaving = ref(false)
+const dockerTesting = ref(false)
+const dockerTestResult = ref<DockerConnectionTestResult | null>(null)
 const builtIns = ref<RunInstructionTemplateBuiltIns | null>(null)
 const workerProfiles = ref<WorkerProfile[]>([])
 const selectedProfileId = ref<number | null>(null)
@@ -475,10 +581,16 @@ const workerFormValue = ref<WorkerFormValue>({
   enabled: true,
   is_default: false,
   image: '',
+  use_system_docker: true,
+  docker_host: '',
+  docker_tls_ca: '',
+  docker_tls_cert: '',
+  docker_tls_key: '',
   codegraph_enabled: false,
   mounts: [],
   environment_variables: [],
   worker_workspace_retention_days: 14,
+  worker_workspace_host_path: '/opt/codify-workspaces',
   worker_pre_script: '',
   worker_post_script: '',
   default_execute_run_instruction_template: '',
@@ -487,12 +599,29 @@ const workerFormValue = ref<WorkerFormValue>({
 })
 
 const lastLoadedWorker = ref<WorkerFormValue>(createEmptyWorkerFormValue())
+const lastLoadedWorkspace = ref({
+  worker_workspace_retention_days: 14,
+  worker_workspace_host_path: '/opt/codify-workspaces'
+})
+const workspaceSaving = ref(false)
 
 const isWorkerDirty = computed(() =>
-  JSON.stringify(workerFormValue.value) !== JSON.stringify(lastLoadedWorker.value)
+  JSON.stringify(workerProfileComparable(workerFormValue.value)) !==
+  JSON.stringify(workerProfileComparable(lastLoadedWorker.value))
+)
+const isWorkspaceDirty = computed(() =>
+  workerFormValue.value.worker_workspace_retention_days !==
+    lastLoadedWorkspace.value.worker_workspace_retention_days
 )
 
-const isWorkerBusy = computed(() => loading.value || workerSaving.value)
+const isWorkerBusy = computed(() =>
+  loading.value || workerSaving.value || workspaceSaving.value || dockerTesting.value
+)
+const insecureRemoteDocker = computed(() =>
+  !workerFormValue.value.use_system_docker &&
+  workerFormValue.value.docker_host.startsWith('tcp://') &&
+  !workerFormValue.value.docker_tls_ca
+)
 
 function parseEnvironmentVariables(
   environmentVariables: WorkerProfileEnvironmentVariable[] | undefined
@@ -526,7 +655,8 @@ function serializeEnvironmentVariables(
 
 function mapProfileToWorkerFormValue(
   profile: WorkerProfile | null,
-  workerWorkspaceRetentionDays: number
+  workerWorkspaceRetentionDays: number,
+  workerWorkspaceHostPath = '/opt/codify-workspaces'
 ): WorkerFormValue {
   return {
     name: profile?.name ?? '',
@@ -534,10 +664,16 @@ function mapProfileToWorkerFormValue(
     enabled: profile?.enabled ?? true,
     is_default: profile?.is_default ?? false,
     image: profile?.image ?? '',
+    use_system_docker: !profile?.docker_host,
+    docker_host: profile?.docker_host ?? '',
+    docker_tls_ca: profile?.docker_tls_ca ?? '',
+    docker_tls_cert: profile?.docker_tls_cert ?? '',
+    docker_tls_key: profile?.docker_tls_key ?? '',
     codegraph_enabled: profile?.codegraph_enabled ?? false,
     mounts: (profile?.volume_mounts ?? []).map((mount) => ({ ...mount })),
     environment_variables: parseEnvironmentVariables(profile?.environment_variables),
     worker_workspace_retention_days: workerWorkspaceRetentionDays,
+    worker_workspace_host_path: workerWorkspaceHostPath,
     worker_pre_script: profile?.pre_script || '',
     worker_post_script: profile?.post_script || '',
     default_execute_run_instruction_template:
@@ -556,12 +692,18 @@ function cloneWorkerFormValue(value: WorkerFormValue): WorkerFormValue {
     enabled: value.enabled,
     is_default: value.is_default,
     image: value.image,
+    use_system_docker: value.use_system_docker,
+    docker_host: value.docker_host,
+    docker_tls_ca: value.docker_tls_ca,
+    docker_tls_cert: value.docker_tls_cert,
+    docker_tls_key: value.docker_tls_key,
     codegraph_enabled: value.codegraph_enabled,
     mounts: value.mounts.map((mount) => ({ ...mount })),
     environment_variables: value.environment_variables.map((environmentVariable) => ({
       ...environmentVariable
     })),
     worker_workspace_retention_days: value.worker_workspace_retention_days,
+    worker_workspace_host_path: value.worker_workspace_host_path,
     worker_pre_script: value.worker_pre_script,
     worker_post_script: value.worker_post_script,
     default_execute_run_instruction_template: value.default_execute_run_instruction_template,
@@ -570,13 +712,22 @@ function cloneWorkerFormValue(value: WorkerFormValue): WorkerFormValue {
   }
 }
 
+function workerProfileComparable(value: WorkerFormValue) {
+  const {
+    worker_workspace_retention_days: _retentionDays,
+    worker_workspace_host_path: _workspaceHostPath,
+    ...profile
+  } = value
+  return profile
+}
+
 async function fetchConfig() {
   loading.value = true
   try {
     const [configResult, builtInsResult, profilesResult] = await Promise.allSettled([
       getConfig(),
       getRunInstructionTemplateBuiltIns(),
-      getWorkerProfiles()
+      getAdminWorkerProfiles()
     ])
     if (configResult.status === 'rejected') throw configResult.reason
     if (profilesResult.status === 'rejected') throw profilesResult.reason
@@ -593,8 +744,16 @@ async function fetchConfig() {
       null
     creatingWorkerProfile.value = false
     selectedProfileId.value = selectedProfile?.id ?? null
-    workerFormValue.value = mapProfileToWorkerFormValue(selectedProfile, retentionDays)
+    workerFormValue.value = mapProfileToWorkerFormValue(
+      selectedProfile,
+      retentionDays,
+      config.runtime?.worker_workspace_host_path ?? '/opt/codify-workspaces'
+    )
     lastLoadedWorker.value = cloneWorkerFormValue(workerFormValue.value)
+    lastLoadedWorkspace.value = {
+      worker_workspace_retention_days: workerFormValue.value.worker_workspace_retention_days,
+      worker_workspace_host_path: workerFormValue.value.worker_workspace_host_path
+    }
   } catch {
     message.error(t('config.loadError'))
   } finally {
@@ -626,10 +785,16 @@ function createEmptyWorkerFormValue(): WorkerFormValue {
     enabled: true,
     is_default: false,
     image: '',
+    use_system_docker: true,
+    docker_host: '',
+    docker_tls_ca: '',
+    docker_tls_cert: '',
+    docker_tls_key: '',
     codegraph_enabled: false,
     mounts: [],
     environment_variables: [],
     worker_workspace_retention_days: 14,
+    worker_workspace_host_path: '/opt/codify-workspaces',
     worker_pre_script: '',
     worker_post_script: '',
     default_execute_run_instruction_template: '',
@@ -653,7 +818,8 @@ function selectProfile(profileId: number) {
   selectedProfileId.value = profileId
   workerFormValue.value = mapProfileToWorkerFormValue(
     profile,
-    workerFormValue.value.worker_workspace_retention_days
+    workerFormValue.value.worker_workspace_retention_days,
+    workerFormValue.value.worker_workspace_host_path
   )
   lastLoadedWorker.value = cloneWorkerFormValue(workerFormValue.value)
 }
@@ -664,6 +830,18 @@ function buildWorkerProfilePayload(): WorkerProfilePayload {
     description: workerFormValue.value.description,
     enabled: workerFormValue.value.enabled,
     image: workerFormValue.value.image,
+    docker_host: workerFormValue.value.use_system_docker
+      ? null
+      : workerFormValue.value.docker_host,
+    docker_tls_ca: workerFormValue.value.use_system_docker
+      ? null
+      : workerFormValue.value.docker_tls_ca,
+    docker_tls_cert: workerFormValue.value.use_system_docker
+      ? null
+      : workerFormValue.value.docker_tls_cert,
+    docker_tls_key: workerFormValue.value.use_system_docker
+      ? null
+      : workerFormValue.value.docker_tls_key,
     codegraph_enabled: workerFormValue.value.codegraph_enabled,
     volume_mounts: workerFormValue.value.mounts.filter(
       (mount) => mount.host_path && mount.container_path
@@ -696,7 +874,6 @@ async function handleSaveWorker() {
   }
   workerSaving.value = true
   try {
-    const retentionDays = workerFormValue.value.worker_workspace_retention_days
     const savedProfile = creatingWorkerProfile.value
       ? await createWorkerProfile(buildWorkerProfilePayload())
       : await updateWorkerProfile(
@@ -706,15 +883,10 @@ async function handleSaveWorker() {
     replaceLoadedProfile(savedProfile)
     selectedProfileId.value = savedProfile.id
     creatingWorkerProfile.value = false
-    const savedConfig = await updateConfig({
-      runtime: {
-        worker_workspace_retention_days: retentionDays
-      }
-    })
     workerFormValue.value = mapProfileToWorkerFormValue(
       savedProfile,
-      savedConfig.runtime?.worker_workspace_retention_days ??
-        retentionDays
+      workerFormValue.value.worker_workspace_retention_days,
+      workerFormValue.value.worker_workspace_host_path
     )
     lastLoadedWorker.value = cloneWorkerFormValue(workerFormValue.value)
     message.success(t('config.saved'))
@@ -725,14 +897,45 @@ async function handleSaveWorker() {
   }
 }
 
+async function handleSaveWorkspace() {
+  workspaceSaving.value = true
+  try {
+    const savedConfig = await updateConfig({
+      runtime: {
+        worker_workspace_retention_days:
+          workerFormValue.value.worker_workspace_retention_days
+      }
+    })
+    workerFormValue.value.worker_workspace_retention_days =
+      savedConfig.runtime?.worker_workspace_retention_days ??
+      workerFormValue.value.worker_workspace_retention_days
+    workerFormValue.value.worker_workspace_host_path =
+      savedConfig.runtime?.worker_workspace_host_path ?? workerFormValue.value.worker_workspace_host_path
+    lastLoadedWorkspace.value = {
+      worker_workspace_retention_days: workerFormValue.value.worker_workspace_retention_days,
+      worker_workspace_host_path: workerFormValue.value.worker_workspace_host_path
+    }
+    message.success(t('config.saved'))
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || t('config.saveError'))
+  } finally {
+    workspaceSaving.value = false
+  }
+}
+
 function resetWorker() {
+  const retentionDays = workerFormValue.value.worker_workspace_retention_days
+  const workspaceHostPath = workerFormValue.value.worker_workspace_host_path
   workerFormValue.value = cloneWorkerFormValue(lastLoadedWorker.value)
+  workerFormValue.value.worker_workspace_retention_days = retentionDays
+  workerFormValue.value.worker_workspace_host_path = workspaceHostPath
 }
 
 function handleCreateProfile() {
   const draft = createEmptyWorkerFormValue()
   draft.image = workerFormValue.value.image || 'codify-worker:latest'
   draft.worker_workspace_retention_days = workerFormValue.value.worker_workspace_retention_days
+  draft.worker_workspace_host_path = workerFormValue.value.worker_workspace_host_path
   draft.default_execute_run_instruction_template =
     builtIns.value?.execute.content ||
     workerFormValue.value.default_execute_run_instruction_template
@@ -797,6 +1000,32 @@ async function handleDisableProfile() {
   }
 }
 
+async function handleTestDockerConnection() {
+  dockerTesting.value = true
+  dockerTestResult.value = null
+  try {
+    dockerTestResult.value = await testWorkerDockerConnection({
+      docker_host: workerFormValue.value.use_system_docker
+        ? null
+        : workerFormValue.value.docker_host,
+      docker_tls_ca: workerFormValue.value.use_system_docker
+        ? null
+        : workerFormValue.value.docker_tls_ca,
+      docker_tls_cert: workerFormValue.value.use_system_docker
+        ? null
+        : workerFormValue.value.docker_tls_cert,
+      docker_tls_key: workerFormValue.value.use_system_docker
+        ? null
+        : workerFormValue.value.docker_tls_key
+    })
+    message.success(t('config.dockerConnectionSucceeded'))
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || t('config.dockerConnectionFailed'))
+  } finally {
+    dockerTesting.value = false
+  }
+}
+
 function restoreBuiltIn(kind: keyof RunInstructionTemplateBuiltIns) {
   if (!builtIns.value) return
   if (kind === 'execute') {
@@ -815,6 +1044,19 @@ onMounted(() => {
 watch(() => props.reloadKey, () => {
   fetchConfig()
 })
+
+watch(
+  () => [
+    workerFormValue.value.use_system_docker,
+    workerFormValue.value.docker_host,
+    workerFormValue.value.docker_tls_ca,
+    workerFormValue.value.docker_tls_cert,
+    workerFormValue.value.docker_tls_key
+  ],
+  () => {
+    dockerTestResult.value = null
+  }
+)
 </script>
 
 <style scoped>
@@ -884,6 +1126,31 @@ watch(() => props.reloadKey, () => {
 
 .worker-profile-editor {
   min-width: 0;
+}
+
+.docker-target-section {
+  gap: 8px;
+}
+
+.docker-target-warning {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: #8a5a00;
+  background: #fff8e6;
+  border: 1px solid #f0d79a;
+  border-radius: 6px;
+}
+
+.docker-test-result {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 9px 10px;
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.68);
+  background: rgba(24, 160, 88, 0.06);
+  border: 1px solid rgba(24, 160, 88, 0.2);
+  border-radius: 6px;
 }
 
 .config-collection-section {

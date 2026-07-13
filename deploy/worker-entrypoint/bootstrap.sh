@@ -27,8 +27,8 @@ CODIFY_RUNTIME_DIR="${CODIFY_RUNTIME_DIR:-/tmp/codify-runtime}"
 CODIFY_WORKER_PRE_SCRIPT_FILE="${CODIFY_RUNTIME_DIR}/worker-pre-script.sh"
 CODIFY_WORKER_POST_SCRIPT_FILE="${CODIFY_RUNTIME_DIR}/worker-post-script.sh"
 export CODIFY_RUNTIME_DIR
-mkdir -p "${CODIFY_RUNTIME_DIR}"
-chown -R codify:codify "${CODIFY_RUNTIME_DIR}"
+mkdir -p "${CODIFY_RUNTIME_DIR}" /home/codify /root
+codify_chown -R /home/codify "${CODIFY_RUNTIME_DIR}"
 CONSOLE_LOG="${CODIFY_RUNTIME_DIR}/console.log"
 DELIVERY_SUMMARY_FILE="${CODIFY_RUNTIME_DIR}/delivery-summary.md"
 DELIVERY_SUMMARY_VALIDATION_FILE="${CODIFY_RUNTIME_DIR}/delivery-summary-validation.json"
@@ -36,7 +36,7 @@ MERMAID_SUMMARY_VALIDATE="${MERMAID_SUMMARY_VALIDATE:-true}"
 MERMAID_SUMMARY_REPAIR_ATTEMPTS="${MERMAID_SUMMARY_REPAIR_ATTEMPTS:-2}"
 MERMAID_SUMMARY_STRICT="${MERMAID_SUMMARY_STRICT:-false}"
 touch "${CONSOLE_LOG}"
-chown codify:codify "${CONSOLE_LOG}"
+codify_chown "${CONSOLE_LOG}"
 
 # Persist the same human-readable console stream that Docker exposes while the
 # task is running. TaskRawLogChunk tails this file after completion.
@@ -82,8 +82,10 @@ CODIFY_GIT_CONFIG="/home/codify/.gitconfig"
 # Without a custom CA, fall back to disabling SSL verification (legacy behaviour).
 if [ -n "${CUSTOM_CA_BUNDLE}" ] && [ -f "${CUSTOM_CA_BUNDLE}" ]; then
     echo "Installing custom CA certificate from ${CUSTOM_CA_BUNDLE}"
-    cp "${CUSTOM_CA_BUNDLE}" /usr/local/share/ca-certificates/custom-ca.crt
-    update-ca-certificates --fresh >/dev/null 2>&1 || true
+    if [ -z "${CODIFY_KIT_HOME}" ]; then
+        cp "${CUSTOM_CA_BUNDLE}" /usr/local/share/ca-certificates/custom-ca.crt
+        update-ca-certificates --fresh >/dev/null 2>&1 || true
+    fi
     git config --global http.sslVerify true
     git config --global http.sslCAInfo "${CUSTOM_CA_BUNDLE}"
     git config --file "${CODIFY_GIT_CONFIG}" http.sslVerify true
@@ -93,8 +95,9 @@ if [ -n "${CUSTOM_CA_BUNDLE}" ] && [ -f "${CUSTOM_CA_BUNDLE}" ]; then
     # Python requests / httpx pick this up automatically
     export REQUESTS_CA_BUNDLE="${CUSTOM_CA_BUNDLE}"
     export SSL_CERT_FILE="${CUSTOM_CA_BUNDLE}"
-    # Import into JDK truststore so Java tools (Maven, Gradle, etc.) verify the CA
-    if [ -n "${JAVA_HOME}" ] && [ -x "${JAVA_HOME}/bin/keytool" ]; then
+    # Preserve legacy baked-image behavior. Mounted runtime images own their JDK
+    # truststore and can update it from a profile pre-script when required.
+    if [ -z "${CODIFY_KIT_HOME}" ] && [ -n "${JAVA_HOME}" ] && [ -x "${JAVA_HOME}/bin/keytool" ]; then
         "${JAVA_HOME}/bin/keytool" -importcert -noprompt -trustcacerts \
             -alias custom-ca \
             -file "${CUSTOM_CA_BUNDLE}" \
@@ -151,7 +154,7 @@ printf '%s\n' "${GIT_CREDENTIAL_LINE}" > /root/.git-credentials
 chmod 600 /root/.git-credentials
 printf '%s\n' "${GIT_CREDENTIAL_LINE}" > /home/codify/.git-credentials
 chmod 600 /home/codify/.git-credentials
-chown codify:codify /home/codify/.git-credentials
+codify_chown /home/codify/.git-credentials
 
 git config --global credential.helper store
 git config --file "${CODIFY_GIT_CONFIG}" credential.helper store
@@ -178,7 +181,7 @@ git config --global --add safe.directory /workspace
 git config --file "${CODIFY_GIT_CONFIG}" user.email "bot@codify.local"
 git config --file "${CODIFY_GIT_CONFIG}" user.name "Codify Bot"
 git config --file "${CODIFY_GIT_CONFIG}" --add safe.directory /workspace
-chown codify:codify "${CODIFY_GIT_CONFIG}"
+codify_chown "${CODIFY_GIT_CONFIG}"
 
 GIT_AUTHOR_NAME_VALUE="${GIT_AUTHOR_NAME:-${CODIFY_AUTHOR_NAME:-Codify User}}"
 GIT_AUTHOR_EMAIL_VALUE="${GIT_AUTHOR_EMAIL:-${CODIFY_AUTHOR_EMAIL:-codify-task@codify.local}}"

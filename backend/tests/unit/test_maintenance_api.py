@@ -41,6 +41,7 @@ class MaintenanceApiTests(unittest.IsolatedAsyncioTestCase):
             older_than_days=30,
             force=True,
             workspace_root="/workspaces",
+            settings=settings.return_value,
         )
         self.assertEqual(response.deleted_issues, 1)
         self.assertEqual(response.deleted_tasks, 2)

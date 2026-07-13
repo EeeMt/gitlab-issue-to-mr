@@ -14,7 +14,7 @@ Targets missed lines:
 
 import asyncio
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 from app.models import TaskStatus
 
@@ -181,6 +181,7 @@ class TestRunTaskBackground(unittest.IsolatedAsyncioTestCase):
         mock_db = MagicMock()
         mock_db.__aenter__ = AsyncMock(return_value=mock_db)
         mock_db.__aexit__ = AsyncMock(return_value=False)
+        mock_db.commit = AsyncMock()
 
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.side_effect = [mock_task, None]
@@ -253,11 +254,17 @@ class TestRunTaskBackground(unittest.IsolatedAsyncioTestCase):
         scheduler._running_tasks.add(88)
         scheduler._running_issues.add(10)
 
-        mock_task = _make_mock_task(task_id=88, project_id=100, issue_id=10)
+        mock_task = _make_mock_task(
+            task_id=88,
+            project_id=100,
+            issue_id=10,
+            status=TaskStatus.RUNNING,
+        )
 
         mock_db = MagicMock()
         mock_db.__aenter__ = AsyncMock(return_value=mock_db)
         mock_db.__aexit__ = AsyncMock(return_value=False)
+        mock_db.commit = AsyncMock()
 
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.side_effect = [mock_task, None]
@@ -310,7 +317,7 @@ class TestCrashRecoveryContainers(unittest.IsolatedAsyncioTestCase):
         mock_db.execute = AsyncMock(return_value=mock_result)
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
-             patch("app.scheduler.get_docker_client", return_value=mock_docker):
+             patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker):
             await scheduler._crash_recovery()
 
         running_worker.remove.assert_called_once_with(force=True)
@@ -341,7 +348,7 @@ class TestCrashRecoveryContainers(unittest.IsolatedAsyncioTestCase):
         mock_db.execute = AsyncMock(return_value=mock_result)
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
-             patch("app.scheduler.get_docker_client", return_value=mock_docker):
+             patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker):
             await scheduler._crash_recovery()
 
         backend.remove.assert_not_called()
@@ -369,7 +376,7 @@ class TestCrashRecoveryContainers(unittest.IsolatedAsyncioTestCase):
         mock_docker.client.containers.list.return_value = []
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
-             patch("app.scheduler.get_docker_client", return_value=mock_docker):
+             patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker):
             await scheduler._crash_recovery()
 
         self.assertEqual(stuck_task.status, TaskStatus.FAILED)
@@ -395,11 +402,20 @@ class TestCrashRecoveryContainers(unittest.IsolatedAsyncioTestCase):
         mock_db.execute = AsyncMock(return_value=mock_result)
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
-             patch("app.scheduler.get_docker_client", side_effect=RuntimeError("no docker")):
+             patch("app.scheduler._RECOVERY_RETRY_OFFSETS_SECONDS", (0, 0, 0)), \
+             patch("app.scheduler._get_recovery_docker_client", side_effect=RuntimeError("no docker")), \
+             patch.object(
+                 scheduler,
+                 "_coordinate_unavailable_recovery",
+                 new=MagicMock(return_value=object()),
+             ), \
+             patch("app.scheduler.asyncio.create_task", return_value=MagicMock()), \
+             patch("app.scheduler.release_issue_execution_lock", new=AsyncMock()) as release_lock:
             await scheduler._crash_recovery()
 
-        # Stuck tasks should still be marked as failed
-        self.assertEqual(stuck_task.status, TaskStatus.FAILED)
+        self.assertEqual(stuck_task.status, "running")
+        self.assertIn(stuck_task.id, scheduler._running_tasks)
+        release_lock.assert_not_awaited()
         mock_db.commit.assert_awaited_once()
 
 
@@ -442,7 +458,7 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
         mock_docker.client.containers.list.return_value = [running_container]
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
-             patch("app.scheduler.get_docker_client", return_value=mock_docker), \
+             patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker), \
              patch.object(scheduler, "_resume_task_background", new=MagicMock()) as mock_resume, \
              patch("app.scheduler.asyncio.create_task") as mock_create_task:
             await scheduler._crash_recovery()
@@ -452,7 +468,7 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
         # Container should NOT be removed
         running_container.remove.assert_not_called()
         # _resume_task_background should have been called with the task/container
-        mock_resume.assert_called_once_with(42, "codify-42-issue10")
+        mock_resume.assert_called_once_with(42, "codify-42-issue10", ANY)
         # asyncio.create_task should have been called to schedule the resume
         mock_create_task.assert_called_once()
         # Task should be tracked as running
@@ -482,7 +498,7 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
         mock_docker.client.containers.list.return_value = [container]
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
-             patch("app.scheduler.get_docker_client", return_value=mock_docker), \
+             patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker), \
              patch.object(scheduler, "_resume_task_background", new=MagicMock()), \
              patch("app.scheduler.asyncio.create_task"):
             await scheduler._crash_recovery()
@@ -515,7 +531,7 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
         mock_docker.client.containers.list.return_value = [orphan]
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
-             patch("app.scheduler.get_docker_client", return_value=mock_docker):
+             patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker):
             await scheduler._crash_recovery()
 
         orphan.remove.assert_called_once_with(force=True)
@@ -545,7 +561,7 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
         mock_docker.client.containers.list.return_value = [container_10]
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
-             patch("app.scheduler.get_docker_client", return_value=mock_docker), \
+             patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker), \
              patch.object(scheduler, "_resume_task_background", new=MagicMock()), \
              patch("app.scheduler.asyncio.create_task"):
             await scheduler._crash_recovery()
@@ -589,7 +605,7 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
         mock_docker.client.containers.list.return_value = [exited_container]
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
-             patch("app.scheduler.get_docker_client", return_value=mock_docker), \
+             patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker), \
              patch.object(scheduler, "_resume_task_background", new=MagicMock()), \
              patch("app.scheduler.asyncio.create_task") as mock_create_task:
             await scheduler._crash_recovery()
@@ -625,7 +641,7 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
         mock_docker.client.containers.list.return_value = [dead_container]
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
-             patch("app.scheduler.get_docker_client", return_value=mock_docker):
+             patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker):
             await scheduler._crash_recovery()
 
         # Dead container should be force-removed
@@ -856,7 +872,7 @@ class TestCrashRecoveryContainerRemoveFailures(unittest.IsolatedAsyncioTestCase)
         mock_docker.client.containers.list.return_value = [dead_container]
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
-             patch("app.scheduler.get_docker_client", return_value=mock_docker):
+             patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker):
             # Should NOT raise — exception is caught and logged
             await scheduler._crash_recovery()
 
@@ -888,7 +904,7 @@ class TestCrashRecoveryContainerRemoveFailures(unittest.IsolatedAsyncioTestCase)
         mock_docker.client.containers.list.return_value = [orphan]
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
-             patch("app.scheduler.get_docker_client", return_value=mock_docker):
+             patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker):
             # Should NOT raise
             await scheduler._crash_recovery()
 
@@ -916,7 +932,7 @@ class TestCrashRecoveryContainerRemoveFailures(unittest.IsolatedAsyncioTestCase)
         mock_docker.client.containers.list.return_value = [orphan]
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
-             patch("app.scheduler.get_docker_client", return_value=mock_docker):
+             patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker):
             await scheduler._crash_recovery()
 
         # Exited orphan: force=False (c_status != "running")
@@ -943,6 +959,7 @@ class TestResumeTaskBackground(unittest.IsolatedAsyncioTestCase):
         mock_db = MagicMock()
         mock_db.__aenter__ = AsyncMock(return_value=mock_db)
         mock_db.__aexit__ = AsyncMock(return_value=False)
+        mock_db.commit = AsyncMock()
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.side_effect = [mock_task, None]
         mock_db.execute = AsyncMock(return_value=mock_result)
@@ -968,6 +985,7 @@ class TestResumeTaskBackground(unittest.IsolatedAsyncioTestCase):
         mock_db = MagicMock()
         mock_db.__aenter__ = AsyncMock(return_value=mock_db)
         mock_db.__aexit__ = AsyncMock(return_value=False)
+        mock_db.commit = AsyncMock()
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.side_effect = [mock_task, None]
         mock_db.execute = AsyncMock(return_value=mock_result)
@@ -988,11 +1006,17 @@ class TestResumeTaskBackground(unittest.IsolatedAsyncioTestCase):
         scheduler._running_tasks.add(44)
         scheduler._running_issues.add(30)
 
-        mock_task = _make_mock_task(task_id=44, project_id=300, issue_id=30)
+        mock_task = _make_mock_task(
+            task_id=44,
+            project_id=300,
+            issue_id=30,
+            status=TaskStatus.RUNNING,
+        )
 
         mock_db = MagicMock()
         mock_db.__aenter__ = AsyncMock(return_value=mock_db)
         mock_db.__aexit__ = AsyncMock(return_value=False)
+        mock_db.commit = AsyncMock()
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.side_effect = [mock_task, None]
         mock_db.execute = AsyncMock(return_value=mock_result)

@@ -16,20 +16,20 @@ CLAUDE_SYSTEM_PROMPT_FILE="/tmp/claude_system_prompt.txt"
 if [ -n "${APPEND_SYSTEM_PROMPT}" ]; then
     printf '%s' "${APPEND_SYSTEM_PROMPT}" > "${CLAUDE_SYSTEM_PROMPT_FILE}"
     chmod 600 "${CLAUDE_SYSTEM_PROMPT_FILE}"
-    chown codify:codify "${CLAUDE_SYSTEM_PROMPT_FILE}"
+    codify_chown "${CLAUDE_SYSTEM_PROMPT_FILE}"
     export APPEND_SYSTEM_PROMPT_FILE="${CLAUDE_SYSTEM_PROMPT_FILE}"
     unset APPEND_SYSTEM_PROMPT
 fi
 
 chmod 644 /tmp/claude_prompt.txt
-chown -R codify:codify /workspace /tmp/claude_prompt.txt
+codify_chown -R /workspace /tmp/claude_prompt.txt
 # Ensure issue-scoped shared storage is writable by the codify user
 if [ -d /opt/codify-issue-shared ]; then
-    chown codify:codify /opt/codify-issue-shared
+    codify_chown /opt/codify-issue-shared
 fi
 # Ensure session storage directory is writable by the codify user
 if [ -d /home/codify/.claude ]; then
-    chown -R codify:codify /home/codify/.claude
+    codify_chown -R /home/codify/.claude
 fi
 
 # Restore .claude.json if missing (volume mount persists backups but not the config file)
@@ -42,5 +42,5 @@ if [ ! -f /home/codify/.claude.json ]; then
         echo "Creating minimal .claude.json"
         echo '{}' > /home/codify/.claude.json
     fi
-    chown codify:codify /home/codify/.claude.json
+    codify_chown /home/codify/.claude.json
 fi

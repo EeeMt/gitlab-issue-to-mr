@@ -62,6 +62,7 @@ If the environment is fully offline, both endpoints must exist inside the intran
 ### Worker/scheduler
 
 - `WORKER_IMAGE`: must match the loaded worker image tag
+- `WORKER_WORKSPACE_HOST_PATH`: absolute shared workspace path, bind-mounted into Backend and Scheduler and required at the same path on every remote Docker host (default `/opt/codify-workspaces`; recreate the services after changing it)
 - `MAX_CONCURRENCY`: max number of concurrent tasks
 - `TASK_TIMEOUT`: max seconds a task may run
 - `SCHEDULER_INTERVAL`: polling interval
@@ -161,7 +162,7 @@ Only configure these if the dashboard will use GitLab OIDC in the offline enviro
 1. Copy this bundle to the target host.
 2. Create required host directories:
    ```bash
-   mkdir -p /var/codify/sessions
+   mkdir -p /var/codify/sessions /opt/codify-workspaces
    ```
 3. Create `config/.env.offline` from the example template.
 4. Load the exported images (`./scripts/load-images.sh`).

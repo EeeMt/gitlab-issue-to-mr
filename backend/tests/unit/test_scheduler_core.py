@@ -498,7 +498,7 @@ class SchedulerCrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
         mock_docker.client.containers.list.return_value = []
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_context):
-            with patch("app.scheduler.get_docker_client", return_value=mock_docker):
+            with patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker):
                 await scheduler._crash_recovery()
 
         self.assertEqual(stuck_task.status, TaskStatus.FAILED)
@@ -527,13 +527,28 @@ class SchedulerCrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
         mock_context.__aenter__ = AsyncMock(return_value=mock_db)
         mock_context.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_context):
-            with patch("app.scheduler.get_docker_client", side_effect=RuntimeError("docker down")):
-                # Should not raise — docker failure is logged and skipped
-                await scheduler._crash_recovery()
+        with (
+            patch("app.scheduler.AsyncSessionLocal", return_value=mock_context),
+            patch("app.scheduler._RECOVERY_RETRY_OFFSETS_SECONDS", (0, 0, 0)),
+            patch(
+                "app.scheduler._get_recovery_docker_client",
+                side_effect=RuntimeError("docker down"),
+            ),
+            patch.object(
+                scheduler,
+                "_coordinate_unavailable_recovery",
+                new=MagicMock(return_value=object()),
+            ),
+            patch("app.scheduler.asyncio.create_task", return_value=MagicMock()),
+            patch(
+                "app.scheduler.release_issue_execution_lock", new=AsyncMock()
+            ) as release_lock,
+        ):
+            await scheduler._crash_recovery()
 
-        # Task should still be marked failed
-        self.assertEqual(stuck_task.status, TaskStatus.FAILED)
+        self.assertEqual(stuck_task.status, TaskStatus.RUNNING)
+        self.assertIn(stuck_task.id, scheduler._running_tasks)
+        release_lock.assert_not_awaited()
 
     async def test_crash_recovery_with_no_stuck_tasks(self) -> None:
         """_crash_recovery should handle the case with no stuck tasks."""
@@ -556,7 +571,7 @@ class SchedulerCrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
         mock_docker.client.containers.list.return_value = []
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_context):
-            with patch("app.scheduler.get_docker_client", return_value=mock_docker):
+            with patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker):
                 await scheduler._crash_recovery()
 
         # Should still commit (even if nothing to update)
@@ -584,7 +599,7 @@ class SchedulerCrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
                 "app.scheduler.cleanup_inactive_issue_execution_locks",
                 new=AsyncMock(return_value=2),
             ) as mock_cleanup:
-                with patch("app.scheduler.get_docker_client") as mock_docker:
+                with patch("app.scheduler._get_recovery_docker_client") as mock_docker:
                     mock_docker.side_effect = Exception("docker unavailable")
                     await scheduler._crash_recovery()
 
@@ -988,6 +1003,7 @@ class SchedulerRunTaskBackgroundTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_run_task_background_handles_exception(self) -> None:
         """_run_task_background should clean up tracking even when an exception occurs."""
+        from app.models import TaskStatus
         from app.scheduler import Scheduler
 
         scheduler = Scheduler()
@@ -997,6 +1013,7 @@ class SchedulerRunTaskBackgroundTests(unittest.IsolatedAsyncioTestCase):
         task.id = 11
         task.project_id = 6
         task.issue_id = 60
+        task.status = TaskStatus.RUNNING
 
         task_result = MagicMock()
         task_result.scalar_one_or_none.return_value = task
@@ -1021,6 +1038,8 @@ class SchedulerRunTaskBackgroundTests(unittest.IsolatedAsyncioTestCase):
                 await scheduler._run_task_background(11)
 
         self.assertNotIn(11, scheduler._running_tasks)
+        self.assertEqual(task.status, TaskStatus.FAILED)
+        self.assertIn("Worker failed to start", task.error_message)
 
 
 class SchedulerReconcileRunningStateTests(unittest.IsolatedAsyncioTestCase):

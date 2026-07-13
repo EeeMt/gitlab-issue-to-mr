@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENV_FILE="${ROOT_DIR}/config/.env.offline"
 
 if docker compose version >/dev/null 2>&1; then
   COMPOSE_CMD=(docker compose)
@@ -13,4 +14,8 @@ else
 fi
 
 cd "${ROOT_DIR}"
-"${COMPOSE_CMD[@]}" -f docker-compose.yml down
+if [[ -f "${ENV_FILE}" ]]; then
+  "${COMPOSE_CMD[@]}" --env-file "${ENV_FILE}" -f docker-compose.yml down
+else
+  "${COMPOSE_CMD[@]}" -f docker-compose.yml down
+fi

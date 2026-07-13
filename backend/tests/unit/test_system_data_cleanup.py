@@ -231,7 +231,7 @@ class SystemDataCleanupServiceTests(unittest.IsolatedAsyncioTestCase):
             docker = MagicMock()
             docker.client.containers.get.return_value = container
 
-            with patch("app.core.system_data_cleanup.get_docker_client", return_value=docker):
+            with patch("app.core.system_data_cleanup.get_docker_client_async", return_value=docker):
                 result = await cleanup_system_data(
                     session,
                     older_than_days=30,
@@ -244,8 +244,73 @@ class SystemDataCleanupServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result.skipped_active_issues, 0)
             docker.client.containers.get.assert_called_once_with("codify-301-issue3")
             container.stop.assert_called_once_with(timeout=5)
+            container.remove.assert_called_once_with(force=True)
 
-    async def test_force_cleanup_records_container_stop_errors(self):
+    async def test_force_cleanup_removes_retained_terminal_container_by_id(self):
+        from app.core.system_data_cleanup import cleanup_system_data
+
+        async with self.Session() as session:
+            old = utcnow() - timedelta(days=40)
+            task_ids = await self._seed_issue(
+                session,
+                issue_id=6,
+                created_at=old,
+                task_statuses=[TaskStatus.FAILED],
+            )
+            task = await session.get(Task, task_ids[0])
+            task.container_id = "retained-container-id"
+            task.raw_logs_finalized_at = utcnow()
+            await session.commit()
+            container = MagicMock()
+            docker = MagicMock()
+            docker.client.containers.get.return_value = container
+
+            with patch(
+                "app.core.system_data_cleanup.get_docker_client_async",
+                return_value=docker,
+            ):
+                result = await cleanup_system_data(
+                    session,
+                    older_than_days=30,
+                    force=True,
+                    workspace_root="",
+                )
+
+            self.assertEqual(result.deleted_tasks, 1)
+            docker.client.containers.get.assert_called_once_with(
+                "retained-container-id"
+            )
+            container.stop.assert_not_called()
+            container.remove.assert_called_once_with(force=True)
+
+    async def test_non_force_cleanup_skips_retained_terminal_container(self):
+        from app.core.system_data_cleanup import cleanup_system_data
+
+        async with self.Session() as session:
+            old = utcnow() - timedelta(days=40)
+            task_ids = await self._seed_issue(
+                session,
+                issue_id=8,
+                created_at=old,
+                task_statuses=[TaskStatus.FAILED],
+            )
+            task = await session.get(Task, task_ids[0])
+            task.container_id = "retained-container-id"
+            await session.commit()
+
+            result = await cleanup_system_data(
+                session,
+                older_than_days=30,
+                force=False,
+                workspace_root="",
+            )
+
+            self.assertEqual(result.deleted_issues, 0)
+            self.assertEqual(result.skipped_active_issues, 1)
+            self.assertEqual(result.skipped_active_tasks, 1)
+            self.assertEqual(await self._count(session, Task), 1)
+
+    async def test_force_cleanup_preserves_issue_when_container_lookup_fails(self):
         from app.core.system_data_cleanup import cleanup_system_data
 
         async with self.Session() as session:
@@ -260,7 +325,7 @@ class SystemDataCleanupServiceTests(unittest.IsolatedAsyncioTestCase):
             docker = MagicMock()
             docker.client.containers.get.side_effect = RuntimeError("missing docker")
 
-            with patch("app.core.system_data_cleanup.get_docker_client", return_value=docker):
+            with patch("app.core.system_data_cleanup.get_docker_client_async", return_value=docker):
                 result = await cleanup_system_data(
                     session,
                     older_than_days=30,
@@ -268,9 +333,41 @@ class SystemDataCleanupServiceTests(unittest.IsolatedAsyncioTestCase):
                     workspace_root="",
                 )
 
-            self.assertEqual(result.deleted_issues, 1)
+            self.assertEqual(result.deleted_issues, 0)
+            self.assertEqual(result.deleted_tasks, 0)
             self.assertEqual(result.container_cleanup_errors[0]["task_id"], 401)
             self.assertIn("missing docker", result.container_cleanup_errors[0]["error"])
+            self.assertEqual(await self._count(session, Issue), 1)
+            self.assertEqual(await self._count(session, Task), 1)
+
+    async def test_force_cleanup_removes_container_after_stop_failure(self):
+        from app.core.system_data_cleanup import cleanup_system_data
+
+        async with self.Session() as session:
+            old = utcnow() - timedelta(days=40)
+            await self._seed_issue(
+                session,
+                issue_id=7,
+                created_at=old,
+                task_statuses=[TaskStatus.RUNNING],
+            )
+            await session.commit()
+            container = MagicMock()
+            container.stop.side_effect = RuntimeError("stop timed out")
+            docker = MagicMock()
+            docker.client.containers.get.return_value = container
+
+            with patch("app.core.system_data_cleanup.get_docker_client_async", return_value=docker):
+                result = await cleanup_system_data(
+                    session,
+                    older_than_days=30,
+                    force=True,
+                    workspace_root="",
+                )
+
+            container.remove.assert_called_once_with(force=True)
+            self.assertEqual(result.container_cleanup_errors, [])
+            self.assertEqual(result.deleted_issues, 1)
 
     async def test_retention_filter_keeps_recent_issues(self):
         from app.core.system_data_cleanup import cleanup_system_data

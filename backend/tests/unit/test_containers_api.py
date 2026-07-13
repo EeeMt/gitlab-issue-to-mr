@@ -3,7 +3,9 @@
 
 import os
 import sys
+import threading
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -11,10 +13,21 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from fastapi.testclient import TestClient
 
 from app.api.containers import _compact_raw_log_noise, _get_container_pattern
+from app.core.docker_client import DockerConnectionConfig
+from app.core.worker_docker_targets import KnownDockerTarget
 from app.database import get_db
 from app.dependencies.auth import require_authenticated_context
 from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
 from app.main import app
+
+
+def _single_docker_target():
+    return [
+        KnownDockerTarget(
+            connection=DockerConnectionConfig(host="unix:///var/run/docker.sock"),
+            labels=("System default",),
+        )
+    ]
 
 
 class ContainerPatternTests(unittest.TestCase):
@@ -175,8 +188,8 @@ class ListContainersEndpointTests(unittest.TestCase):
         from app.main import app
         app.dependency_overrides.clear()
 
-    def test_list_containers_returns_500_on_docker_error(self):
-        """If docker_client raises, endpoint should return 500."""
+    def test_list_containers_returns_503_when_all_targets_fail(self):
+        """If every target probe fails, report the daemon set as unavailable."""
         from app.database import get_db
         from app.dependencies.auth import require_authenticated_context
         from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
@@ -192,11 +205,20 @@ class ListContainersEndpointTests(unittest.TestCase):
         app.dependency_overrides[require_authenticated_context] = _make_auth_override()
         app.dependency_overrides[require_project_access_scope] = lambda: access_scope
 
-        with patch("app.api.containers.get_docker_client", side_effect=RuntimeError("docker down")):
+        with (
+            patch(
+                "app.api.containers._get_monitor_docker_client",
+                side_effect=RuntimeError("docker down"),
+            ),
+            patch(
+                "app.api.containers.list_known_docker_targets",
+                new=AsyncMock(return_value=_single_docker_target()),
+            ),
+        ):
             client = TestClient(app, raise_server_exceptions=False)
             response = client.get("/api/containers")
 
-        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.status_code, 503)
 
     def test_list_containers_filters_non_worker_containers(self):
         """Only containers matching the worker pattern should appear in the response."""
@@ -238,7 +260,11 @@ class ListContainersEndpointTests(unittest.TestCase):
         mock_docker = MagicMock()
         mock_docker.client.containers.list.return_value = [worker_container, non_worker_container]
 
-        with patch("app.api.containers.get_docker_client", return_value=mock_docker), \
+        with patch("app.api.containers._get_monitor_docker_client", return_value=mock_docker), \
+             patch(
+                 "app.api.containers.list_known_docker_targets",
+                 new=AsyncMock(return_value=_single_docker_target()),
+             ), \
              patch("app.api.containers.get_settings") as mock_settings:
             mock_settings.return_value.worker_container_prefix = "codify"
             client = TestClient(app, raise_server_exceptions=False)
@@ -251,6 +277,67 @@ class ListContainersEndpointTests(unittest.TestCase):
         self.assertEqual(data[0]["task_id"], 5)
         self.assertEqual(data[0]["issue_id"], 10)
         self.assertEqual(data[0]["project_id"], 1)
+
+    def test_list_containers_probes_targets_concurrently_and_reports_partial_errors(self):
+        from app.dependencies.project_access import ProjectAccessScope
+
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+        task_result = MagicMock()
+        task_result.scalar_one_or_none.return_value = 10
+        project_result = MagicMock()
+        project_result.scalar_one_or_none.return_value = 1
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[task_result, project_result])
+
+        async def override_db():
+            yield mock_db
+
+        good_connection = DockerConnectionConfig(host="tcp://good:2376")
+        bad_connection = DockerConnectionConfig(host="tcp://bad:2376")
+        targets = [
+            KnownDockerTarget(good_connection, ("Good Worker",)),
+            KnownDockerTarget(bad_connection, ("Bad Worker",)),
+        ]
+        barrier = threading.Barrier(2)
+        container = MagicMock()
+        container.name = "codify-5-issue10"
+        container.id = "good-container"
+        container.status = "running"
+        container.attrs = {"Created": "2024-01-01T00:00:00Z"}
+
+        def client_for_connection(connection):
+            barrier.wait(timeout=1)
+            if connection == bad_connection:
+                raise RuntimeError("daemon unavailable")
+            docker = MagicMock()
+            docker.client.containers.list.return_value = [container]
+            return docker
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
+        with (
+            patch(
+                "app.api.containers.list_known_docker_targets",
+                new=AsyncMock(return_value=targets),
+            ),
+            patch(
+                "app.api.containers._get_monitor_docker_client",
+                side_effect=client_for_connection,
+            ),
+            patch("app.api.containers.get_settings") as mock_settings,
+        ):
+            mock_settings.return_value.worker_container_prefix = "codify"
+            response = TestClient(app, raise_server_exceptions=False).get(
+                "/api/containers?include_target_status=true"
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["containers"][0]["id"], "good-container")
+        self.assertEqual(
+            response.json()["target_errors"],
+            [{"docker_target": "Bad Worker"}],
+        )
 
 
 class GetContainerLogsEndpointTests(unittest.TestCase):
@@ -364,7 +451,7 @@ class GetTaskContainerLogsHappyPathTests(unittest.TestCase):
         app.dependency_overrides[require_authenticated_context] = _make_auth_override()
         app.dependency_overrides[require_project_access_scope] = lambda: access_scope
 
-        with patch("app.api.containers.get_docker_client", return_value=mock_docker):
+        with patch("app.api.containers.get_docker_client_async", return_value=mock_docker):
             client = TestClient(app, raise_server_exceptions=False)
             response = client.get("/api/tasks/10/container-logs")
 
@@ -402,7 +489,7 @@ class GetTaskContainerLogsHappyPathTests(unittest.TestCase):
         app.dependency_overrides[require_authenticated_context] = _make_auth_override()
         app.dependency_overrides[require_project_access_scope] = lambda: access_scope
 
-        with patch("app.api.containers.get_docker_client", side_effect=RuntimeError("container not found")):
+        with patch("app.api.containers.get_docker_client_async", side_effect=RuntimeError("container not found")):
             client = TestClient(app, raise_server_exceptions=False)
             response = client.get("/api/tasks/11/container-logs")
 
@@ -467,7 +554,11 @@ class ListContainersAccessScopeFilterTests(unittest.TestCase):
         app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
         app.dependency_overrides[require_project_access_scope] = lambda: access_scope
 
-        with patch("app.api.containers.get_docker_client", return_value=mock_docker), \
+        with patch("app.api.containers._get_monitor_docker_client", return_value=mock_docker), \
+             patch(
+                 "app.api.containers.list_known_docker_targets",
+                 new=AsyncMock(return_value=_single_docker_target()),
+             ), \
              patch("app.api.containers.get_settings") as mock_settings:
             mock_settings.return_value.worker_container_prefix = "codify"
             client = TestClient(app, raise_server_exceptions=False)
@@ -579,7 +670,11 @@ class ListContainersRestrictedAccessTests(unittest.TestCase):
         app.dependency_overrides[require_authenticated_context] = _make_auth_override()
         app.dependency_overrides[require_project_access_scope] = lambda: access_scope
 
-        with patch("app.api.containers.get_docker_client", return_value=mock_docker), \
+        with patch("app.api.containers._get_monitor_docker_client", return_value=mock_docker), \
+             patch(
+                 "app.api.containers.list_known_docker_targets",
+                 new=AsyncMock(return_value=_single_docker_target()),
+             ), \
              patch("app.api.containers.get_settings") as mock_settings:
             mock_settings.return_value.worker_container_prefix = "codify"
             client = TestClient(app, raise_server_exceptions=False)
@@ -620,7 +715,11 @@ class ListContainersRestrictedAccessTests(unittest.TestCase):
         app.dependency_overrides[require_authenticated_context] = _make_auth_override()
         app.dependency_overrides[require_project_access_scope] = lambda: access_scope
 
-        with patch("app.api.containers.get_docker_client", return_value=mock_docker), \
+        with patch("app.api.containers._get_monitor_docker_client", return_value=mock_docker), \
+             patch(
+                 "app.api.containers.list_known_docker_targets",
+                 new=AsyncMock(return_value=_single_docker_target()),
+             ), \
              patch("app.api.containers.get_settings") as mock_settings:
             mock_settings.return_value.worker_container_prefix = "codify"
             client = TestClient(app, raise_server_exceptions=False)
@@ -629,6 +728,51 @@ class ListContainersRestrictedAccessTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(len(data), 0)
+
+    def test_restricted_scope_hides_worker_container_without_task_project(self):
+        """Unowned containers must not bypass project filtering."""
+        access_scope = ProjectAccessScope(
+            is_unrestricted=False,
+            accessible_projects=[{"id": 1}],
+        )
+        task_result = MagicMock()
+        task_result.scalar_one_or_none.return_value = None
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=task_result)
+
+        async def override_db():
+            yield mock_db
+
+        container = MagicMock()
+        container.name = "codify-99-issue10"
+        container.id = "orphan-container"
+        container.status = "running"
+        container.attrs = {"Created": "2024-01-01T00:00:00Z"}
+        mock_docker = MagicMock()
+        mock_docker.client.containers.list.return_value = [container]
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
+
+        with (
+            patch(
+                "app.api.containers._get_monitor_docker_client",
+                return_value=mock_docker,
+            ),
+            patch(
+                "app.api.containers.list_known_docker_targets",
+                new=AsyncMock(return_value=_single_docker_target()),
+            ),
+            patch("app.api.containers.get_settings") as mock_settings,
+        ):
+            mock_settings.return_value.worker_container_prefix = "codify"
+            response = TestClient(app, raise_server_exceptions=False).get(
+                "/api/containers"
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), [])
 
 
 # ---------------------------------------------------------------------------
@@ -639,17 +783,46 @@ class ListContainersRestrictedAccessTests(unittest.TestCase):
 class ContainerLogsSSEEndpointTests(unittest.TestCase):
     """Tests for GET /api/containers/{container_id}/logs SSE streaming endpoint."""
 
-    def _setup_sse_overrides(self):
+    def _setup_sse_overrides(
+        self,
+        *,
+        container_id: str | None = "abc123",
+        project_id: int = 1,
+        access_scope: ProjectAccessScope | None = None,
+    ):
         """Common dependency overrides for SSE endpoint tests."""
+        task = None
+        if container_id is not None:
+            task = SimpleNamespace(id=1, container_id=container_id, project_id=project_id)
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = task
         mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result)
+        mock_db.get.return_value = None
+        context = MagicMock()
+        context.__aenter__ = AsyncMock(return_value=mock_db)
+        context.__aexit__ = AsyncMock(return_value=False)
+        self.session_patcher = patch(
+            "app.api.containers.AsyncSessionLocal",
+            return_value=context,
+        )
+        self.session_patcher.start()
+        self.session_context = context
 
         async def override_db():
             yield mock_db
 
         app.dependency_overrides[get_db] = override_db
         app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_project_access_scope] = lambda: (
+            access_scope
+            or ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+        )
+        return mock_db
 
     def tearDown(self):
+        if hasattr(self, "session_patcher"):
+            self.session_patcher.stop()
         app.dependency_overrides.clear()
 
     def test_sse_streams_container_logs_success(self):
@@ -662,7 +835,14 @@ class ContainerLogsSSEEndpointTests(unittest.TestCase):
         mock_docker = MagicMock()
         mock_docker.client.containers.get.return_value = mock_container
 
-        with patch("app.api.containers.get_docker_client", return_value=mock_docker):
+        async def get_client_after_session_closed(_connection):
+            self.session_context.__aexit__.assert_awaited_once()
+            return mock_docker
+
+        with patch(
+            "app.api.containers.get_docker_client_async",
+            side_effect=get_client_after_session_closed,
+        ):
             client = TestClient(app, raise_server_exceptions=False)
             response = client.get("/api/containers/abc123/logs")
 
@@ -671,70 +851,56 @@ class ContainerLogsSSEEndpointTests(unittest.TestCase):
         self.assertIn("data: line1", response.text)
         self.assertIn("data: line2", response.text)
 
-    def test_sse_fallback_to_partial_id_match(self):
-        """When exact ID lookup fails, should find container by partial ID match."""
-        self._setup_sse_overrides()
+    def test_sse_rejects_partial_container_id(self):
+        """A partial ID must not resolve another task's container."""
+        self._setup_sse_overrides(container_id=None)
 
-        matching_container = MagicMock()
-        matching_container.id = "abc123def456"
-        matching_container.logs.return_value = iter([b"found by partial\n"])
-
-        mock_docker = MagicMock()
-        mock_docker.client.containers.get.side_effect = Exception("not found")
-        mock_docker.client.containers.list.return_value = [matching_container]
-
-        with patch("app.api.containers.get_docker_client", return_value=mock_docker):
+        with patch("app.api.containers.get_docker_client_async") as get_client:
             client = TestClient(app, raise_server_exceptions=False)
             response = client.get("/api/containers/abc123/logs")
 
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("data: found by partial", response.text)
+        self.assertEqual(response.status_code, 404)
+        get_client.assert_not_called()
 
-    def test_sse_empty_stream_when_container_not_found(self):
-        """When container is not found anywhere, stream should close silently (empty body)."""
+    def test_sse_returns_404_when_container_not_found_on_task_daemon(self):
+        """A missing container is reported before opening the SSE response."""
         self._setup_sse_overrides()
 
         mock_docker = MagicMock()
         mock_docker.client.containers.get.side_effect = Exception("not found")
-        mock_docker.client.containers.list.return_value = []
 
-        with patch("app.api.containers.get_docker_client", return_value=mock_docker):
+        with patch("app.api.containers.get_docker_client_async", return_value=mock_docker):
             client = TestClient(app, raise_server_exceptions=False)
             response = client.get("/api/containers/abc123/logs")
 
-        self.assertEqual(response.status_code, 200)
-        # Generator returned without yielding — empty body
-        self.assertEqual(response.text.strip(), "")
+        self.assertEqual(response.status_code, 404)
 
-    def test_sse_error_when_docker_client_fails(self):
-        """When Docker client init fails, should yield an SSE error event."""
+    def test_sse_returns_server_error_when_docker_client_fails(self):
+        """Client initialization failure must not become a successful SSE response."""
         self._setup_sse_overrides()
 
-        with patch("app.api.containers.get_docker_client", side_effect=RuntimeError("Docker daemon not running")):
+        with patch("app.api.containers.get_docker_client_async", side_effect=RuntimeError("Docker daemon not running")):
             client = TestClient(app, raise_server_exceptions=False)
             response = client.get("/api/containers/abc123/logs")
 
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("data: Error:", response.text)
-        self.assertIn("Docker daemon not running", response.text)
+        self.assertEqual(response.status_code, 500)
 
-    def test_sse_partial_id_no_match_among_listed_containers(self):
-        """When exact ID fails and partial match finds nothing, stream is empty."""
-        self._setup_sse_overrides()
+    def test_sse_denies_inaccessible_project_before_docker_lookup(self):
+        """Restricted users cannot use container logs to cross project boundaries."""
+        self._setup_sse_overrides(
+            project_id=2,
+            access_scope=ProjectAccessScope(
+                is_unrestricted=False,
+                accessible_projects=[{"id": 1}],
+            ),
+        )
 
-        non_matching = MagicMock()
-        non_matching.id = "zzz999"
-
-        mock_docker = MagicMock()
-        mock_docker.client.containers.get.side_effect = Exception("not found")
-        mock_docker.client.containers.list.return_value = [non_matching]
-
-        with patch("app.api.containers.get_docker_client", return_value=mock_docker):
+        with patch("app.api.containers.get_docker_client_async") as get_client:
             client = TestClient(app, raise_server_exceptions=False)
             response = client.get("/api/containers/abc123/logs")
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.text.strip(), "")
+        self.assertEqual(response.status_code, 403)
+        get_client.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -1182,7 +1348,10 @@ class TaskContainerLogsDockerFailDbFallbackTests(unittest.TestCase):
         app.dependency_overrides[require_authenticated_context] = _make_auth_override()
         app.dependency_overrides[require_project_access_scope] = lambda: access_scope
 
-        with patch("app.api.containers.get_docker_client", side_effect=RuntimeError("docker is gone")):
+        with patch(
+            "app.api.containers.find_task_container",
+            new=AsyncMock(side_effect=RuntimeError("docker is gone")),
+        ):
             client = TestClient(app, raise_server_exceptions=False)
             response = client.get("/api/tasks/15/container-logs")
 

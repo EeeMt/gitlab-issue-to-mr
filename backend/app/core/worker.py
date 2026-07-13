@@ -31,6 +31,7 @@ from app.core.worker_gitlab import (
     write_previous_task_summaries_file,
 )
 from app.core.worker_log_stream import WorkerLogStreamer
+from app.core.worker_profiles import TaskWorkerRuntime
 from app.core.worker_results import (
     finalize_archive,
     parse_mr_from_logs,
@@ -137,7 +138,8 @@ class WorkerExecutor:
         gitlab_client: GitLabClient | None = None,
         session_factory: async_sessionmaker[AsyncSession] | None = None,
     ):
-        self.docker = docker_client or get_docker_client()
+        self._docker_client_override = docker_client is not None
+        self.docker = docker_client
         self.gitlab = gitlab_client or get_gitlab_client()
         self._session_factory = session_factory
         self._event_projector = WorkerEventProjector(sanitize_sensitive_data)
@@ -146,6 +148,18 @@ class WorkerExecutor:
         self._httpx_async_client = httpx.AsyncClient
         self._get_ssl_verify = get_ssl_verify
         self._reset_stdout_helpers()
+
+    def _configure_docker_for_runtime(
+        self,
+        runtime: TaskWorkerRuntime,
+        settings: Any,
+    ) -> DockerClientWrapper:
+        """Route this per-task executor to the daemon captured in its snapshot."""
+        if not self._docker_client_override:
+            self.docker = get_docker_client(runtime.docker_connection(settings))
+        if self.docker is None:
+            raise RuntimeError("Docker client was not configured for task runtime")
+        return self.docker
 
     def _reset_stdout_helpers(self) -> None:
         self._log_streamer = WorkerLogStreamer()

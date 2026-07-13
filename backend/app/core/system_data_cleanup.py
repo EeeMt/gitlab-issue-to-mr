@@ -12,8 +12,14 @@ from typing import Any
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.docker_client import get_docker_client
+from app.config import get_effective_settings
+from app.core.docker_client import get_docker_client_async
 from app.core.utcnow import utcnow
+from app.core.worker_docker_targets import (
+    TaskContainerNotFoundError,
+    find_task_container,
+    list_known_docker_targets,
+)
 from app.models import (
     Issue,
     IssueExecutionLock,
@@ -70,43 +76,65 @@ def _issue_workspace_path(workspace_root: str, *, project_id: int, issue_id: int
     return os.path.join(workspace_root, f"project-{project_id}", f"issue-{issue_id}")
 
 
-def _container_name(task: Task) -> str:
-    return f"codify-{task.id}-issue{task.issue_id}"
+def _container_name(task: Task, settings: Any) -> str:
+    prefix = settings.worker_container_prefix
+    return f"{prefix}-{task.id}-issue{task.issue_id}"
 
 
-async def _stop_running_containers(
+async def _remove_task_containers(
+    db: AsyncSession,
     tasks: list[Task],
     result: SystemDataCleanupResult,
-) -> None:
-    running_tasks = [
-        task for task in tasks
+    settings: Any,
+) -> set[int]:
+    container_tasks = [
+        task
+        for task in tasks
         if _status_value(task.status) == TaskStatus.RUNNING.value
+        or bool(task.container_id)
     ]
-    if not running_tasks:
-        return
+    if not container_tasks:
+        return set()
 
-    try:
-        docker = get_docker_client()
-    except Exception as exc:
-        for task in running_tasks:
-            result.container_cleanup_errors.append({
-                "task_id": task.id,
-                "container_name": _container_name(task),
-                "error": str(exc),
-            })
-        return
-
-    for task in running_tasks:
-        container_name = _container_name(task)
+    failed_task_ids: set[int] = set()
+    known_targets = await list_known_docker_targets(db, settings, include_retained=True)
+    for task in container_tasks:
+        container_name = _container_name(task, settings)
+        container_reference = task.container_id or container_name
         try:
-            container = await asyncio.to_thread(docker.client.containers.get, container_name)
-            await asyncio.to_thread(container.stop, timeout=5)
+            try:
+                _docker, container, _connection = await find_task_container(
+                    db,
+                    task,
+                    settings,
+                    container_reference,
+                    known_targets=known_targets,
+                    get_client=get_docker_client_async,
+                )
+            except TaskContainerNotFoundError:
+                continue
+            stop_error: Exception | None = None
+            if _status_value(task.status) == TaskStatus.RUNNING.value:
+                try:
+                    await asyncio.to_thread(container.stop, timeout=5)
+                except Exception as exc:  # noqa: BLE001
+                    stop_error = exc
+            try:
+                await asyncio.to_thread(container.remove, force=True)
+            except Exception as exc:  # noqa: BLE001
+                if stop_error is not None:
+                    raise RuntimeError(
+                        f"container stop failed ({stop_error}); force removal failed ({exc})"
+                    ) from exc
+                raise
         except Exception as exc:
+            failed_task_ids.add(task.id)
             result.container_cleanup_errors.append({
                 "task_id": task.id,
                 "container_name": container_name,
                 "error": str(exc),
             })
+    return failed_task_ids
 
 
 def _cleanup_archive_files(paths: list[str], result: SystemDataCleanupResult) -> None:
@@ -146,8 +174,10 @@ async def cleanup_system_data(
     older_than_days: int | None,
     force: bool,
     workspace_root: str,
+    settings: Any | None = None,
     now: datetime | None = None,
 ) -> SystemDataCleanupResult:
+    settings = settings or get_effective_settings()
     result = SystemDataCleanupResult()
     cutoff = None
     if older_than_days is not None:
@@ -174,6 +204,7 @@ async def cleanup_system_data(
             task
             for task in issue_tasks
             if _status_value(task.status) in ACTIVE_TASK_STATUS_VALUES
+            or (task.container_id and task.raw_logs_finalized_at is None)
         ]
         if active_tasks and not force:
             result.skipped_active_issues += 1
@@ -184,17 +215,30 @@ async def cleanup_system_data(
     if not selected_issues:
         return result
 
-    selected_issue_ids = [issue.id for issue in selected_issues]
     selected_tasks = [
         task for task in tasks
-        if task.issue_id in selected_issue_ids
+        if task.issue_id in {issue.id for issue in selected_issues}
     ]
+
+    if force:
+        failed_task_ids = await _remove_task_containers(db, selected_tasks, result, settings)
+        if failed_task_ids:
+            blocked_issue_ids = {
+                task.issue_id for task in selected_tasks if task.id in failed_task_ids
+            }
+            selected_issues = [
+                issue for issue in selected_issues if issue.id not in blocked_issue_ids
+            ]
+            selected_tasks = [
+                task for task in selected_tasks if task.issue_id not in blocked_issue_ids
+            ]
+
+    selected_issue_ids = [issue.id for issue in selected_issues]
     selected_task_ids = [task.id for task in selected_tasks]
     result.deleted_issues = len(selected_issue_ids)
     result.deleted_tasks = len(selected_task_ids)
-
-    if force:
-        await _stop_running_containers(selected_tasks, result)
+    if not selected_issue_ids:
+        return result
 
     archive_paths: list[str] = []
     if selected_task_ids:

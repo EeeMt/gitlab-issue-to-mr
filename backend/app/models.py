@@ -276,6 +276,7 @@ class Task(Base):
     )
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     raw_logs_finalized_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Relationships
@@ -480,6 +481,15 @@ class WorkerProfile(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     image: Mapped[str] = mapped_column(String(255), nullable=False)
+    runtime_mode: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="baked_image"
+    )
+    worker_kit_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    worker_kit_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    docker_host: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    docker_tls_ca: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    docker_tls_cert: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    docker_tls_key: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     codegraph_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     volume_mounts: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
     pre_script: Mapped[str] = mapped_column(Text, nullable=False, default="")
@@ -563,6 +573,15 @@ class TaskWorkerProfileSnapshot(Base):
     )
     profile_name: Mapped[str] = mapped_column(String(100), nullable=False)
     image: Mapped[str] = mapped_column(String(255), nullable=False)
+    runtime_mode: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="baked_image"
+    )
+    worker_kit_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    worker_kit_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    docker_host: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    docker_tls_ca: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    docker_tls_cert: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    docker_tls_key: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     codegraph_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     volume_mounts: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
     environment_variables: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)

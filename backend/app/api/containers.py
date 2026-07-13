@@ -13,8 +13,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.task_operations import get_task_with_access_check
-from app.config import get_settings
-from app.core.docker_client import get_docker_client
+from app.config import get_effective_settings as get_settings
+from app.core.docker_client import DockerClientWrapper, get_docker_client_async
+from app.core.worker_docker_targets import (
+    TaskContainerLookupError,
+    connections_for_task,
+    find_container_with_connections,
+    find_task_container,
+    list_known_docker_targets,
+)
 from app.database import AsyncSessionLocal, get_db
 from app.dependencies.auth import (
     get_optional_current_user,
@@ -32,6 +39,28 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _CA_REPLACEMENT_LINE_RE = re.compile(r"^Replacing debian:[^\r\n]+\.pem\r?$")
+_TARGET_PROBE_REQUEST_TIMEOUT_SECONDS = 5
+_TARGET_PROBE_TIMEOUT_SECONDS = 11
+
+
+def _get_monitor_docker_client(connection):
+    """Create a short-lived client so health probes cannot block normal task clients."""
+    return DockerClientWrapper(
+        connection,
+        connect_timeout=_TARGET_PROBE_REQUEST_TIMEOUT_SECONDS,
+        operation_timeout=_TARGET_PROBE_REQUEST_TIMEOUT_SECONDS,
+    )
+
+
+def _list_monitor_target_containers(connection, prefix: str):
+    docker = _get_monitor_docker_client(connection)
+    try:
+        return docker.client.containers.list(
+            all=True,
+            filters={"name": f"{prefix}-"},
+        )
+    finally:
+        docker.close()
 
 
 def _compact_raw_log_noise(logs: str) -> str:
@@ -70,6 +99,7 @@ def _get_container_pattern() -> re.Pattern:
 
 @router.get("/containers")
 async def list_containers(
+    include_target_status: bool = False,
     db: AsyncSession = Depends(get_db),
     _current_user=Depends(require_page_access("monitor")),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
@@ -84,20 +114,58 @@ async def list_containers(
     """
     containers_info = []
 
-    try:
-        docker = get_docker_client()
-        settings = get_settings()
-        prefix = settings.worker_container_prefix
-        pattern = _get_container_pattern()
-        all_containers = await asyncio.to_thread(
-            docker.client.containers.list,
-            all=True,
-            filters={"name": f"{prefix}-"},
-        )
+    settings = get_settings()
+    prefix = settings.worker_container_prefix
+    pattern = _get_container_pattern()
+    targets = await list_known_docker_targets(db, settings, include_retained=True)
+    seen_containers: set[tuple[object, str]] = set()
+    target_errors: list[dict[str, str]] = []
 
+    async def enumerate_target(target):
+        async def try_connections():
+            last_error: Exception | None = None
+            for connection in target.connections:
+                try:
+                    containers = await asyncio.to_thread(
+                        _list_monitor_target_containers,
+                        connection,
+                        prefix,
+                    )
+                    return target, containers, None
+                except Exception as exc:  # noqa: BLE001
+                    last_error = exc
+                    logger.warning(
+                        "Failed to list containers from %s: %s",
+                        connection.host,
+                        exc,
+                    )
+            return target, [], last_error
+
+        try:
+            return await asyncio.wait_for(
+                try_connections(),
+                timeout=_TARGET_PROBE_TIMEOUT_SECONDS,
+            )
+        except TimeoutError as exc:
+            logger.warning("Timed out listing Docker target %s", target.daemon_key)
+            return target, [], exc
+
+    target_results = await asyncio.gather(
+        *(enumerate_target(target) for target in targets)
+    )
+    successful_targets = 0
+    for target, all_containers, target_error in target_results:
+        if target_error is not None:
+            target_errors.append({"docker_target": ", ".join(target.labels)})
+            continue
+        successful_targets += 1
         for container in all_containers:
             if not pattern.match(container.name):
                 continue
+            container_key = (target.daemon_key, container.id)
+            if container_key in seen_containers:
+                continue
+            seen_containers.add(container_key)
 
             # Extract task_id and issue_id from: {prefix}-{task_id}-issue{issue_id}
             task_id = None
@@ -121,10 +189,9 @@ async def list_containers(
                     )
                     project_id = result2.scalar_one_or_none()
 
-            if (
-                project_id is not None
-                and not access_scope.is_unrestricted
-                and project_id not in access_scope.accessible_project_ids
+            if not access_scope.is_unrestricted and (
+                project_id is None
+                or project_id not in access_scope.accessible_project_ids
             ):
                 continue
 
@@ -136,22 +203,28 @@ async def list_containers(
                 "issue_id": issue_id,
                 "project_id": project_id,
                 "created_at": container.attrs.get("Created", ""),
+                "docker_target": ", ".join(target.labels),
             })
 
-    except Exception as e:
-        logger.error(f"Failed to list containers: {e}")
+    if include_target_status:
+        return {
+            "containers": containers_info,
+            "target_errors": target_errors,
+        }
+    if targets and successful_targets == 0:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list containers: {str(e)}",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="All Docker targets are unavailable",
         )
-
     return containers_info
 
 
 @router.get("/containers/{container_id}/logs")
 async def get_container_logs(
     container_id: str,
-    _current_user=Depends(require_authenticated_user),
+    task_id: int | None = None,
+    current_user: User = Depends(require_authenticated_user),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Stream container logs via SSE.
 
@@ -161,30 +234,37 @@ async def get_container_logs(
     Returns:
         SSE stream of logs
     """
+    async with AsyncSessionLocal() as db:
+        if task_id is None:
+            result = await db.execute(select(Task).where(Task.container_id == container_id))
+            task = result.scalar_one_or_none()
+            if task is None:
+                raise HTTPException(status_code=404, detail="Container task not found")
+            require_project_access(task.project_id, access_scope)
+        else:
+            task = await get_task_with_access_check(
+                task_id,
+                db,
+                access_scope,
+                current_user,
+                require_operator=False,
+            )
+
+        if not task.container_id or task.container_id != container_id:
+            raise HTTPException(status_code=404, detail="Container not found for task")
+        connections = await connections_for_task(db, task, get_settings())
+
+    try:
+        docker, container, _connection = await find_container_with_connections(
+            connections,
+            container_id,
+            get_client=get_docker_client_async,
+        )
+    except TaskContainerLookupError as exc:
+        raise HTTPException(status_code=404, detail="Container not found") from exc
+
     async def generate_logs():
         try:
-            docker = get_docker_client()
-
-            # Try to find container by ID or name
-            t_get = time.time()
-            try:
-                container = await asyncio.to_thread(docker.client.containers.get, container_id)
-            except Exception:
-                # Try by partial ID
-                containers = await asyncio.to_thread(docker.client.containers.list, all=True)
-                container = None
-                for c in containers:
-                    if c.id.startswith(container_id):
-                        container = c
-                        break
-
-                if not container:
-                    return  # Container is gone; close stream silently
-
-            t_got = time.time()
-            if t_got - t_get > 2.0:
-                logger.warning(f"[SLOW SSE] docker.containers.get took {t_got-t_get:.3f}s for {container_id}")
-
             # Stream logs
             t_stream = time.time()
             logs = await asyncio.to_thread(
@@ -389,8 +469,13 @@ async def get_task_container_logs(
         }
 
     try:
-        docker = get_docker_client()
-        container = await asyncio.to_thread(docker.client.containers.get, task.container_id)
+        _docker, container, _connection = await find_task_container(
+            db,
+            task,
+            get_settings(),
+            task.container_id,
+            get_client=get_docker_client_async,
+        )
         raw_logs = await asyncio.to_thread(container.logs, stdout=True, stderr=True, tail=200)
         logs = raw_logs.decode("utf-8", errors="replace")
         return {

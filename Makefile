@@ -9,6 +9,8 @@ export GIT_COMMIT
 # Enable Docker BuildKit for faster builds
 export DOCKER_BUILDKIT := 1
 export COMPOSE_DOCKER_CLI_BUILD := 1
+WORKER_KIT_VERSION ?= 0.1.0
+WORKER_KIT_PLATFORM ?= linux/amd64
 
 # ============================================
 # Development Environment
@@ -16,7 +18,7 @@ export COMPOSE_DOCKER_CLI_BUILD := 1
 
 .PHONY: build
 build: ## Build all images (backend, nginx, worker)
-	cd $(PROJECT_ROOT)/deploy && docker-compose build
+	cd $(PROJECT_ROOT)/deploy && docker-compose --env-file .env.test build
 	docker build -f $(PROJECT_ROOT)/deploy/Dockerfile.worker -t codify-worker:latest $(PROJECT_ROOT)
 	@printf "\nBuild summary:\n"
 	@printf "  - codify-backend:latest\n"
@@ -26,29 +28,38 @@ build: ## Build all images (backend, nginx, worker)
 .PHONY: offline-bundle-export
 offline-bundle-export: ## Build images, export offline bundle images, and package deploy/offline-bundle
 	$(MAKE) build
+	WORKER_KIT_VERSION=$(WORKER_KIT_VERSION) WORKER_KIT_PLATFORM=$(WORKER_KIT_PLATFORM) $(PROJECT_ROOT)/deploy/worker-kit/export.sh
 	cd $(PROJECT_ROOT)/deploy/offline-bundle && ./scripts/export-images.sh
 	cd $(PROJECT_ROOT)/deploy/offline-bundle && ./scripts/package-bundle.sh
+
+.PHONY: worker-kit-export
+worker-kit-export: ## Build and export the portable mounted worker kit
+	WORKER_KIT_VERSION=$(WORKER_KIT_VERSION) WORKER_KIT_PLATFORM=$(WORKER_KIT_PLATFORM) $(PROJECT_ROOT)/deploy/worker-kit/export.sh
+
+.PHONY: worker-kit-verify
+worker-kit-verify: ## Verify KIT_PATH against RUNTIME_IMAGE (optional SMOKE command)
+	$(PROJECT_ROOT)/deploy/worker-kit/verify-runtime.sh --kit "$(KIT_PATH)" --image "$(RUNTIME_IMAGE)" $(if $(SMOKE),--smoke "$(SMOKE)")
 
 .PHONY: up
 up: ## Start development environment (rebuilds backend, nginx, and worker images)
 	docker build -f $(PROJECT_ROOT)/deploy/Dockerfile.worker -t codify-worker:latest $(PROJECT_ROOT)
-	cd $(PROJECT_ROOT)/deploy && docker-compose up -d --build
+	cd $(PROJECT_ROOT)/deploy && docker-compose --env-file .env.test up -d --build
 
 .PHONY: down
 down: ## Stop development environment
-	cd $(PROJECT_ROOT)/deploy && docker-compose down
+	cd $(PROJECT_ROOT)/deploy && docker-compose --env-file .env.test down
 
 .PHONY: logs
 logs: ## View development logs (Ctrl+C to exit)
-	cd $(PROJECT_ROOT)/deploy && docker-compose logs -f
+	cd $(PROJECT_ROOT)/deploy && docker-compose --env-file .env.test logs -f
 
 .PHONY: ps
 ps: ## Show running containers
-	cd $(PROJECT_ROOT)/deploy && docker-compose ps
+	cd $(PROJECT_ROOT)/deploy && docker-compose --env-file .env.test ps
 
 .PHONY: clean
 clean: ## Remove containers and volumes
-	cd $(PROJECT_ROOT)/deploy && docker-compose down -v --rmi local
+	cd $(PROJECT_ROOT)/deploy && docker-compose --env-file .env.test down -v --rmi local
 
 .PHONY: restart
 restart: down up ## Restart development environment
@@ -59,18 +70,18 @@ restart: down up ## Restart development environment
 
 .PHONY: rebuild-backend
 rebuild-backend: ## Rebuild backend image and restart container
-	cd $(PROJECT_ROOT)/deploy && docker-compose build --pull=false backend
-	cd $(PROJECT_ROOT)/deploy && docker-compose up -d backend
+	cd $(PROJECT_ROOT)/deploy && docker-compose --env-file .env.test build --pull=false backend
+	cd $(PROJECT_ROOT)/deploy && docker-compose --env-file .env.test up -d backend
 
 .PHONY: rebuild-scheduler
 rebuild-scheduler: ## Rebuild scheduler image and restart container
-	cd $(PROJECT_ROOT)/deploy && docker-compose build --pull=false scheduler
-	cd $(PROJECT_ROOT)/deploy && docker-compose up -d scheduler
+	cd $(PROJECT_ROOT)/deploy && docker-compose --env-file .env.test build --pull=false scheduler
+	cd $(PROJECT_ROOT)/deploy && docker-compose --env-file .env.test up -d scheduler
 
 .PHONY: rebuild-nginx
 rebuild-nginx: ## Rebuild nginx image and restart container
-	cd $(PROJECT_ROOT)/deploy && docker-compose build --pull=false nginx
-	cd $(PROJECT_ROOT)/deploy && docker-compose up -d nginx
+	cd $(PROJECT_ROOT)/deploy && docker-compose --env-file .env.test build --pull=false nginx
+	cd $(PROJECT_ROOT)/deploy && docker-compose --env-file .env.test up -d nginx
 
 .PHONY: rebuild-worker
 rebuild-worker: ## Rebuild worker image

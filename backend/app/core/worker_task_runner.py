@@ -46,6 +46,8 @@ async def run_execute_task(
                 issue=issue,
                 sudo_gl=sudo_gl,
             )
+            if container is None:
+                return False
         except ValueError as error:
             logger.error(
                 "[Task %s] Failed while building worker environment: %s",

@@ -11,6 +11,16 @@ if [[ ! -f "${IMAGE_ARCHIVE}" ]]; then
   echo "Image archive not found: ${IMAGE_ARCHIVE}. Run ./scripts/export-images.sh first." >&2
   exit 1
 fi
+if ! compgen -G "${ROOT_DIR}/kits/codify-worker-kit-*.tar.gz" >/dev/null; then
+    echo "Worker kit archive not found. Run deploy/worker-kit/export.sh first." >&2
+    exit 1
+fi
+for kit_archive in "${ROOT_DIR}"/kits/codify-worker-kit-*.tar.gz; do
+    if [[ ! -f "${kit_archive}.sha256" ]]; then
+        echo "Worker kit checksum not found: ${kit_archive}.sha256" >&2
+        exit 1
+    fi
+done
 
 rm -f "${TMP_ARCHIVE}"
 

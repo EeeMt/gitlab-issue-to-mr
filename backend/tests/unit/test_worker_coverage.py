@@ -718,7 +718,8 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         module_dir = root / "deploy" / "worker-entrypoint"
 
         content = entrypoint.read_text()
-        self.assertLessEqual(len(content.splitlines()), 40)
+        self.assertLessEqual(len(content.splitlines()), 120)
+        module_list = content.split("for module in", 1)[1].split("do", 1)[0]
         previous_index = -1
         for module_name in _WORKER_ENTRYPOINT_MODULES:
             module_path = module_dir / f"{module_name}.sh"
@@ -728,7 +729,7 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
                 450,
                 f"entrypoint module grew too large: {module_path}",
             )
-            module_index = content.index(f"    {module_name}")
+            module_index = module_list.index(f"    {module_name}")
             self.assertGreater(module_index, previous_index)
             previous_index = module_index
 
@@ -745,6 +746,29 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(loaded_modules, list(_WORKER_ENTRYPOINT_MODULES))
+
+    def test_mounted_entrypoint_allows_explicit_claude_binary_override(self):
+        root = Path(__file__).resolve().parents[3]
+        content = (root / "deploy" / "entrypoint.worker.sh").read_text()
+
+        self.assertIn('CODIFY_KIT_CLAUDE_BIN="${CODIFY_KIT_BIN}/claude"', content)
+        self.assertIn(
+            'CODIFY_CLAUDE_BIN="${CODIFY_CLAUDE_BIN:-${CODIFY_KIT_CLAUDE_BIN}}"',
+            content,
+        )
+        self.assertIn('CODIFY_CLAUDE_BIN must be an absolute path', content)
+        self.assertIn(
+            'claude_version="$(codify_run_shell \'"${CODIFY_CLAUDE_BIN}" --version\')"',
+            content,
+        )
+        self.assertIn(
+            "codify_run_shell 'touch /workspace/.codify-worker-kit-write-test",
+            content,
+        )
+        self.assertIn(
+            '[ "${CODIFY_CLAUDE_BIN}" = "${CODIFY_KIT_CLAUDE_BIN}" ]',
+            content,
+        )
 
     def test_entrypoint_propagates_module_failure_and_stops_loading(self):
         result, loaded_modules = self._run_entrypoint_loader(failing_module="delivery")
@@ -790,8 +814,9 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn('git config --file "${CODIFY_GIT_CONFIG}" user.email "bot@codify.local"', content)
         self.assertIn('git config --file "${CODIFY_GIT_CONFIG}" user.name "Codify Bot"', content)
         self.assertIn('git config --file "${CODIFY_GIT_CONFIG}" --add safe.directory /workspace', content)
-        self.assertIn('chown codify:codify /home/codify/.git-credentials', content)
-        self.assertIn('chown codify:codify "${CODIFY_GIT_CONFIG}"', content)
+        self.assertIn('codify_chown /home/codify/.git-credentials', content)
+        self.assertIn('codify_chown "${CODIFY_GIT_CONFIG}"', content)
+        self.assertIn('chown "${CODIFY_RUN_UID}:${CODIFY_RUN_GID}" "$@"', content)
 
     def test_entrypoint_includes_commit_message_in_finalization(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
@@ -827,7 +852,7 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn('/opt/codify-mermaid/validate_mermaid_summary.mjs', content)
         self.assertIn('reason: "validator_unavailable"', content)
         self.assertIn('ok: false, diagramCount: 0', content)
-        self.assertIn('cd /tmp && /usr/local/bin/claude -p --bare --tools "" --permission-mode plan', content)
+        self.assertIn('cd /tmp && timeout 60 "${CODIFY_CLAUDE_BIN}" -p --bare --tools "" --permission-mode plan', content)
         self.assertNotIn("cd /workspace && /usr/local/bin/claude -p --dangerously-skip-permissions --no-session-persistence --output-format text --max-turns 3 --model \"${ANTHROPIC_MODEL}\" < /tmp/delivery-summary-repair-prompt.md", content)
         self.assertIn('delivery-summary.md', content)
         self.assertIn('delivery-summary-validation.json', content)
@@ -1000,8 +1025,8 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         content = _read_worker_entrypoint_sources(script)
 
         self.assertIn('if [ -d /opt/codify-issue-shared ]; then', content)
-        self.assertIn('chown codify:codify /opt/codify-issue-shared', content)
-        self.assertNotIn('chown -R codify:codify /opt/codify-issue-shared', content)
+        self.assertIn('codify_chown /opt/codify-issue-shared', content)
+        self.assertNotIn('codify_chown -R /opt/codify-issue-shared', content)
 
     def test_entrypoint_keeps_runtime_artifacts_outside_worktree_until_after_commit(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
@@ -1069,7 +1094,8 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn('CODIFY_WORKER_POST_SCRIPT_FILE="${CODIFY_RUNTIME_DIR}/worker-post-script.sh"', content)
         self.assertIn('run_worker_script "pre" "${CODIFY_WORKER_PRE_SCRIPT_FILE}"', content)
         self.assertIn('run_worker_script "post" "${CODIFY_WORKER_POST_SCRIPT_FILE}"', content)
-        self.assertIn('su -m -s /bin/bash codify -c "cd /workspace && bash ${script_path}"', content)
+        self.assertIn('codify_run_shell "cd /workspace && export PATH=', content)
+        self.assertIn(r'\"${CODIFY_BASH}\" \"${script_path}\"', content)
         self.assertNotIn('echo "${CODIFY_WORKER_PRE_SCRIPT}"', content)
         self.assertNotIn('echo "${CODIFY_WORKER_POST_SCRIPT}"', content)
 
@@ -2616,13 +2642,27 @@ class TestDeployComposeWorkspaceMounts(unittest.TestCase):
         compose = Path(__file__).resolve().parents[3] / "deploy" / "docker-compose.yml"
         content = compose.read_text()
 
-        self.assertIn("/opt/codify-workspaces:/opt/codify-workspaces", content)
+        workspace_path = "${WORKER_WORKSPACE_HOST_PATH:-/opt/codify-workspaces}"
+        self.assertGreaterEqual(content.count(f"source: {workspace_path}"), 2)
+        self.assertGreaterEqual(content.count(f"target: {workspace_path}"), 2)
+        self.assertGreaterEqual(
+            content.count(f"WORKER_WORKSPACE_HOST_PATH={workspace_path}"),
+            2,
+        )
+        makefile = Path(__file__).resolve().parents[3] / "Makefile"
+        self.assertIn("docker-compose --env-file .env.test up -d --build", makefile.read_text())
 
     def test_offline_compose_mounts_workspace_root(self):
         compose = Path(__file__).resolve().parents[3] / "deploy" / "offline-bundle" / "docker-compose.yml"
         content = compose.read_text()
 
-        self.assertIn("/opt/codify-workspaces:/opt/codify-workspaces", content)
+        workspace_path = "${WORKER_WORKSPACE_HOST_PATH:-/opt/codify-workspaces}"
+        self.assertGreaterEqual(content.count(f"source: {workspace_path}"), 2)
+        self.assertGreaterEqual(content.count(f"target: {workspace_path}"), 2)
+        self.assertGreaterEqual(
+            content.count(f"WORKER_WORKSPACE_HOST_PATH={workspace_path}"),
+            2,
+        )
 
 
 class TestRequireChangesEnvVar(unittest.TestCase):

@@ -12,6 +12,7 @@ from app.core.worker_profiles import (
     serialize_profile_environment_variable_for_api,
     serialize_worker_profile_for_api,
     snapshot_from_profile,
+    validate_worker_profile_docker_target,
     validate_worker_profile_mounts,
 )
 
@@ -43,12 +44,50 @@ def test_validate_worker_profile_mounts_rejects_bad_mode():
         )
 
 
+@pytest.mark.parametrize(
+    ("mount", "message"),
+    [
+        (
+            {"host_path": "cache", "container_path": "/cache"},
+            "host_path must be absolute",
+        ),
+        (
+            {"host_path": "/cache", "container_path": "cache"},
+            "container_path must be absolute",
+        ),
+    ],
+)
+def test_validate_worker_profile_mounts_requires_absolute_paths(mount, message):
+    with pytest.raises(WorkerProfileValidationError, match=message):
+        validate_worker_profile_mounts([mount])
+
+
+def test_validate_worker_profile_mounts_normalizes_paths_before_duplicate_check():
+    with pytest.raises(WorkerProfileValidationError, match="duplicate host mount path"):
+        validate_worker_profile_mounts(
+            [
+                {"host_path": "/cache", "container_path": "/cache/one"},
+                {"host_path": "/cache/.", "container_path": "/cache/two"},
+            ]
+        )
+
+
 def test_validate_worker_profile_mounts_rejects_duplicate_container_path():
     with pytest.raises(WorkerProfileValidationError, match="duplicate container mount path"):
         validate_worker_profile_mounts(
             [
                 {"host_path": "/cache/a", "container_path": "/cache"},
                 {"host_path": "/cache/b", "container_path": "/cache"},
+            ]
+        )
+
+
+def test_validate_worker_profile_mounts_rejects_duplicate_host_path():
+    with pytest.raises(WorkerProfileValidationError, match="duplicate host mount path"):
+        validate_worker_profile_mounts(
+            [
+                {"host_path": "/cache", "container_path": "/cache/one"},
+                {"host_path": "/cache", "container_path": "/cache/two"},
             ]
         )
 
@@ -75,6 +114,20 @@ def test_build_worker_profile_environment_map_decrypts_secret(monkeypatch):
         "PLAIN_VALUE": "plain",
         "SECRET_VALUE": "decrypted:encrypted",
     }
+
+
+def test_build_worker_profile_environment_map_can_omit_secrets(monkeypatch):
+    rows = [
+        {"key": "PLAIN_VALUE", "value": "plain", "is_secret": False},
+        {"key": "SECRET_VALUE", "value": "encrypted", "is_secret": True},
+    ]
+    decrypt = AsyncMock()
+    monkeypatch.setattr("app.core.worker_profiles.decrypt_config_secret", decrypt)
+
+    assert build_worker_profile_environment_map(rows, include_secrets=False) == {
+        "PLAIN_VALUE": "plain",
+    }
+    decrypt.assert_not_called()
 
 
 def test_build_worker_profile_environment_map_reuses_worker_env_key_validation():
@@ -142,6 +195,136 @@ def test_worker_profile_serialization_and_snapshot_preserve_codegraph_toggle():
     assert serialize_worker_profile_for_api(profile)["codegraph_enabled"] is True
     snapshot = snapshot_from_profile(task, profile)
     assert snapshot.codegraph_enabled is True
+
+
+def test_worker_profile_docker_target_is_admin_only_and_snapshotted():
+    profile = SimpleNamespace(
+        id=9,
+        name="ARM Worker",
+        description=None,
+        enabled=True,
+        is_default=False,
+        image="worker:arm64",
+        docker_host="tcp://arm-worker:2376",
+        docker_tls_ca="/certs/ca.pem",
+        docker_tls_cert="/certs/cert.pem",
+        docker_tls_key="/certs/key.pem",
+        codegraph_enabled=False,
+        volume_mounts=[],
+        environment_variables=[],
+        pre_script="",
+        post_script="",
+        default_execute_run_instruction_template="execute {{user_prompt}}",
+        default_plan_run_instruction_template="plan {{user_prompt}}",
+        ci_auto_repair_run_instruction_template="repair {{issue_title}}",
+        created_at=None,
+        updated_at=None,
+    )
+
+    assert "docker_host" not in serialize_worker_profile_for_api(profile)
+    admin_payload = serialize_worker_profile_for_api(profile, include_docker_target=True)
+    assert admin_payload["docker_host"] == "tcp://arm-worker:2376"
+    snapshot = snapshot_from_profile(SimpleNamespace(id=44), profile)
+    assert snapshot.docker_host == "tcp://arm-worker:2376"
+    assert snapshot.docker_tls_key == "/certs/key.pem"
+
+
+def test_system_docker_profile_snapshots_resolved_deployment_target():
+    profile = SimpleNamespace(
+        id=10,
+        name="System Worker",
+        image="worker:latest",
+        docker_host=None,
+        docker_tls_ca=None,
+        docker_tls_cert=None,
+        docker_tls_key=None,
+        codegraph_enabled=False,
+        volume_mounts=[],
+        environment_variables=[],
+        pre_script="",
+        post_script="",
+        default_execute_run_instruction_template="execute {{user_prompt}}",
+        default_plan_run_instruction_template="plan {{user_prompt}}",
+        ci_auto_repair_run_instruction_template="repair {{issue_title}}",
+    )
+    settings = SimpleNamespace(
+        docker_host="tcp://system-worker:2376",
+        docker_tls_ca="/system/ca.pem",
+        docker_tls_cert="/system/cert.pem",
+        docker_tls_key="/system/key.pem",
+    )
+
+    snapshot = snapshot_from_profile(
+        SimpleNamespace(id=45),
+        profile,
+        settings=settings,
+    )
+
+    assert snapshot.docker_host == "tcp://system-worker:2376"
+    assert snapshot.docker_tls_ca == "/system/ca.pem"
+    assert snapshot.docker_tls_cert == "/system/cert.pem"
+    assert snapshot.docker_tls_key == "/system/key.pem"
+
+
+def test_validate_worker_profile_docker_target_requires_complete_absolute_tls_paths():
+    with pytest.raises(WorkerProfileValidationError, match="configured together"):
+        validate_worker_profile_docker_target(
+            docker_host="tcp://worker:2376",
+            docker_tls_ca="/certs/ca.pem",
+            docker_tls_cert=None,
+            docker_tls_key=None,
+        )
+
+    with pytest.raises(WorkerProfileValidationError, match="absolute"):
+        validate_worker_profile_docker_target(
+            docker_host="tcp://worker:2376",
+            docker_tls_ca="certs/ca.pem",
+            docker_tls_cert="/certs/cert.pem",
+            docker_tls_key="/certs/key.pem",
+        )
+
+    assert validate_worker_profile_docker_target(
+        docker_host=" tcp://worker:2376 ",
+        docker_tls_ca=" /certs/ca.pem ",
+        docker_tls_cert=" /certs/cert.pem ",
+        docker_tls_key=" /certs/key.pem ",
+    ) == (
+        "tcp://worker:2376",
+        "/certs/ca.pem",
+        "/certs/cert.pem",
+        "/certs/key.pem",
+    )
+
+
+@pytest.mark.parametrize(
+    "docker_host",
+    [
+        "http://worker:2376",
+        "ssh://worker",
+        "npipe:////./pipe/docker_engine",
+    ],
+)
+def test_validate_worker_profile_docker_target_rejects_unsupported_mvp_protocols(
+    docker_host,
+):
+    with pytest.raises(WorkerProfileValidationError, match="unix, tcp, or https"):
+        validate_worker_profile_docker_target(
+            docker_host=docker_host,
+            docker_tls_ca=None,
+            docker_tls_cert=None,
+            docker_tls_key=None,
+        )
+
+
+@pytest.mark.parametrize("docker_host", ["tcp://", "https://", "unix://"])
+def test_validate_worker_profile_docker_target_rejects_incomplete_endpoints(docker_host):
+    with pytest.raises(WorkerProfileValidationError):
+        validate_worker_profile_docker_target(
+            docker_host=docker_host,
+            docker_tls_ca=None,
+            docker_tls_cert=None,
+            docker_tls_key=None,
+        )
 
 
 @pytest.mark.asyncio

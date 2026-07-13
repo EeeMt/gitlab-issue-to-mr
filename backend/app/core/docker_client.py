@@ -1,10 +1,16 @@
 """Docker Engine HTTP API client with TLS support."""
 
+import asyncio
 import logging
+import threading
+from dataclasses import dataclass
 from typing import Any, BinaryIO
+from urllib.parse import urlsplit, urlunsplit
 
 import docker
+from docker.constants import DEFAULT_TIMEOUT_SECONDS
 from docker.models.containers import Container
+from docker.utils import parse_host
 
 from app.config import get_settings
 
@@ -12,26 +18,110 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
+@dataclass(frozen=True)
+class DockerConnectionConfig:
+    """Connection details identifying one Docker daemon client."""
+
+    host: str
+    tls_ca: str | None = None
+    tls_cert: str | None = None
+    tls_key: str | None = None
+
+    @classmethod
+    def from_settings(cls, runtime_settings: Any) -> "DockerConnectionConfig":
+        def optional_path(name: str) -> str | None:
+            return str(getattr(runtime_settings, name, "") or "").strip() or None
+
+        return cls(
+            host=str(runtime_settings.docker_host).strip(),
+            tls_ca=optional_path("docker_tls_ca"),
+            tls_cert=optional_path("docker_tls_cert"),
+            tls_key=optional_path("docker_tls_key"),
+        )
+
+
+def canonicalize_docker_host(host: str, *, tls_enabled: bool) -> str:
+    """Return the endpoint identity Docker SDK uses for one daemon connection."""
+    canonical = parse_host(host.strip(), tls=tls_enabled)
+    parsed = urlsplit(canonical)
+    if parsed.scheme == "http+unix":
+        return canonical
+
+    hostname = parsed.hostname
+    if hostname is None:
+        return canonical
+    hostname = hostname.rstrip(".").lower()
+    if ":" in hostname and not hostname.startswith("["):
+        hostname = f"[{hostname}]"
+    netloc = hostname
+    if parsed.port is not None:
+        netloc = f"{netloc}:{parsed.port}"
+    return urlunsplit((parsed.scheme.lower(), netloc, parsed.path, "", ""))
+
+
+def resolve_docker_connection(
+    runtime_settings: Any,
+    *,
+    docker_host: str | None = None,
+    docker_tls_ca: str | None = None,
+    docker_tls_cert: str | None = None,
+    docker_tls_key: str | None = None,
+) -> DockerConnectionConfig:
+    """Resolve profile target fields, falling back to the complete global target."""
+    host = (docker_host or "").strip()
+    if not host:
+        return DockerConnectionConfig.from_settings(runtime_settings)
+    return DockerConnectionConfig(
+        host=host,
+        tls_ca=(docker_tls_ca or "").strip() or None,
+        tls_cert=(docker_tls_cert or "").strip() or None,
+        tls_key=(docker_tls_key or "").strip() or None,
+    )
+
+
 class DockerClientWrapper:
     """Wrapper around Docker SDK for container management."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        connection: DockerConnectionConfig | None = None,
+        *,
+        connect_timeout: int = 10,
+        operation_timeout: int = DEFAULT_TIMEOUT_SECONDS,
+    ) -> None:
         """Initialize Docker client with TLS configuration."""
+        connection = connection or DockerConnectionConfig.from_settings(settings)
         docker_kwargs: dict[str, Any] = {
-            "base_url": settings.docker_host,
+            "base_url": connection.host,
             "version": "auto",
+            "timeout": connect_timeout,
         }
 
         # Add TLS configuration if provided
-        if settings.docker_tls_ca:
+        if connection.tls_ca:
             docker_kwargs["tls"] = docker.tls.TLSConfig(
-                ca_cert=settings.docker_tls_ca,
-                client_cert=(settings.docker_tls_cert, settings.docker_tls_key),
+                ca_cert=connection.tls_ca,
+                client_cert=(connection.tls_cert, connection.tls_key),
                 verify=True,
             )
 
         self.client = docker.DockerClient(**docker_kwargs)
-        logger.info(f"Docker client initialized: {settings.docker_host}")
+        # ``version=auto`` performs I/O during construction. Keep that handshake short,
+        # then restore the normal Docker SDK timeout for image pulls and task execution.
+        self.client.api.timeout = operation_timeout
+        self.connection = connection
+        logger.info("Docker client initialized: %s", connection.host)
+
+    def inspect_server(self) -> dict[str, Any]:
+        """Verify connectivity and return the small server identity used by admins."""
+        self.client.ping()
+        version = self.client.version()
+        info = self.client.info()
+        return {
+            "server_version": version.get("Version") or info.get("ServerVersion"),
+            "architecture": info.get("Architecture") or version.get("Arch"),
+            "operating_system": info.get("OperatingSystem") or version.get("Os"),
+        }
 
     def pull_image(self, image: str, force: bool = False) -> None:
         """Pull Docker image from registry if not exists locally.
@@ -66,12 +156,16 @@ class DockerClientWrapper:
     def create_container(
         self,
         image: str,
-        command: str,
+        command: str | list[str],
         environment: dict[str, str] | None = None,
         volumes: dict[str, dict[str, str]] | None = None,
         working_dir: str | None = None,
         network: str | None = None,
         name: str | None = None,
+        entrypoint: str | list[str] | None = None,
+        user: str | None = None,
+        labels: dict[str, str] | None = None,
+        tmpfs: dict[str, str] | None = None,
     ) -> Container:
         """Create and start a Docker container.
 
@@ -83,6 +177,10 @@ class DockerClientWrapper:
             working_dir: Working directory in container
             network: Network to attach
             name: Container name
+            entrypoint: Optional image entrypoint override
+            user: Optional container user override
+            labels: Optional container labels
+            tmpfs: Optional tmpfs mounts keyed by container path
 
         Returns:
             Container object
@@ -107,6 +205,10 @@ class DockerClientWrapper:
             network=network,
             remove=False,
             name=name,
+            entrypoint=entrypoint,
+            user=user,
+            labels=labels,
+            tmpfs=tmpfs,
         )
 
         logger.info(f"Container created: {container.id}")
@@ -221,13 +323,66 @@ class DockerClientWrapper:
         logger.info("Docker client closed")
 
 
-# Singleton instance
+# Connection-keyed process cache. The legacy singleton name remains for tests and callers
+# that use only the global Docker target.
 _docker_client: DockerClientWrapper | None = None
+_docker_clients: dict[DockerConnectionConfig, DockerClientWrapper] = {}
+_docker_clients_lock = threading.Lock()
+_docker_client_creation_locks: dict[DockerConnectionConfig, threading.Lock] = {}
 
 
-def get_docker_client() -> DockerClientWrapper:
-    """Get singleton Docker client instance."""
+def get_docker_client(
+    connection: DockerConnectionConfig | None = None,
+) -> DockerClientWrapper:
+    """Get a cached Docker client for one target connection."""
     global _docker_client
-    if _docker_client is None:
-        _docker_client = DockerClientWrapper()
-    return _docker_client
+    if connection is None and _docker_client is not None:
+        return _docker_client
+
+    resolved = connection or DockerConnectionConfig.from_settings(settings)
+    with _docker_clients_lock:
+        client = _docker_clients.get(resolved)
+        if client is not None:
+            if connection is None:
+                _docker_client = client
+            return client
+        creation_lock = _docker_client_creation_locks.setdefault(
+            resolved,
+            threading.Lock(),
+        )
+
+    # Client construction negotiates the API version over the network. Serialize only
+    # callers for the same daemon so an unavailable target cannot block other targets.
+    with creation_lock:
+        with _docker_clients_lock:
+            client = _docker_clients.get(resolved)
+        if client is None:
+            client = (
+                DockerClientWrapper(resolved)
+                if connection is not None
+                else DockerClientWrapper()
+            )
+            with _docker_clients_lock:
+                _docker_clients[resolved] = client
+        if connection is None:
+            _docker_client = client
+        return client
+
+
+async def get_docker_client_async(
+    connection: DockerConnectionConfig | None = None,
+) -> DockerClientWrapper:
+    """Get a cached client without blocking the event loop during negotiation."""
+    return await asyncio.to_thread(get_docker_client, connection)
+
+
+def close_docker_clients() -> None:
+    """Close all cached clients, primarily for process shutdown and tests."""
+    global _docker_client
+    with _docker_clients_lock:
+        clients = list({id(client): client for client in _docker_clients.values()}.values())
+        _docker_clients.clear()
+        _docker_client_creation_locks.clear()
+        _docker_client = None
+    for client in clients:
+        client.close()

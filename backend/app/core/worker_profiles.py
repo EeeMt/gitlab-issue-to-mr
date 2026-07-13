@@ -3,14 +3,22 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
+from urllib.parse import urlparse
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config import get_effective_settings
 from app.core.config_crypto import decrypt_config_secret
+from app.core.docker_client import (
+    DockerConnectionConfig,
+    canonicalize_docker_host,
+    resolve_docker_connection,
+)
 from app.core.task_prompt import (
     TaskPromptValidationError,
     validate_run_instruction_template,
@@ -18,6 +26,18 @@ from app.core.task_prompt import (
 from app.core.worker_environment_variables import (
     serialize_worker_environment_variable_value,
     validate_worker_environment_variable_key,
+)
+from app.core.worker_kit import (
+    BAKED_IMAGE_MODE,
+    KIT_CONTAINER_USER,
+    KIT_ENTRYPOINT,
+    MOUNTED_KIT_MODE,
+    WorkerKitValidationError,
+    validate_no_worker_kit_mount_collision,
+    validate_worker_kit_config,
+    validate_worker_kit_mounts,
+    worker_kit_environment,
+    worker_kit_mounts,
 )
 from app.models import (
     AIProvider,
@@ -43,6 +63,46 @@ class TaskWorkerRuntime:
     environment: dict[str, str]
     pre_script: str
     post_script: str
+    runtime_mode: str = BAKED_IMAGE_MODE
+    worker_kit_version: str | None = None
+    worker_kit_path: str | None = None
+    docker_host: str | None = None
+    docker_tls_ca: str | None = None
+    docker_tls_cert: str | None = None
+    docker_tls_key: str | None = None
+
+    def docker_connection(self, settings: Any) -> DockerConnectionConfig:
+        return resolve_docker_connection(
+            settings,
+            docker_host=self.docker_host,
+            docker_tls_ca=self.docker_tls_ca,
+            docker_tls_cert=self.docker_tls_cert,
+            docker_tls_key=self.docker_tls_key,
+        )
+
+    def container_overrides(self) -> dict[str, Any]:
+        """Return Docker arguments and environment owned by the delivery mode."""
+        try:
+            mode, kit_version, kit_path = validate_worker_kit_config(
+                runtime_mode=self.runtime_mode,
+                worker_kit_version=self.worker_kit_version,
+                worker_kit_path=self.worker_kit_path,
+            )
+        except WorkerKitValidationError as exc:
+            raise WorkerProfileValidationError(str(exc)) from exc
+        if mode != MOUNTED_KIT_MODE:
+            return {"volumes": {}, "environment": {}, "entrypoint": None, "user": None}
+        assert kit_version is not None and kit_path is not None
+        try:
+            validate_no_worker_kit_mount_collision(self.volume_mounts)
+        except WorkerKitValidationError as exc:
+            raise WorkerProfileValidationError(str(exc)) from exc
+        return {
+            "volumes": worker_kit_mounts(kit_path),
+            "environment": worker_kit_environment(kit_version),
+            "entrypoint": KIT_ENTRYPOINT,
+            "user": KIT_CONTAINER_USER,
+        }
 
 
 def _profile_value(item: Any, field: str, default: Any = None) -> Any:
@@ -62,6 +122,69 @@ def _validate_environment_key(key: str) -> str:
         raise WorkerProfileValidationError(str(exc)) from exc
 
 
+def validate_worker_profile_docker_target(
+    *,
+    docker_host: str | None,
+    docker_tls_ca: str | None,
+    docker_tls_cert: str | None,
+    docker_tls_key: str | None,
+) -> tuple[str | None, str | None, str | None, str | None]:
+    """Normalize and validate one optional profile-scoped Docker target."""
+    host = (docker_host or "").strip() or None
+    tls_values = tuple(
+        (value or "").strip() or None
+        for value in (docker_tls_ca, docker_tls_cert, docker_tls_key)
+    )
+    if host is None:
+        if any(tls_values):
+            raise WorkerProfileValidationError(
+                "Docker TLS paths require a profile Docker host"
+            )
+        return None, None, None, None
+
+    parsed = urlparse(host)
+    if parsed.scheme not in {"unix", "tcp", "https"}:
+        raise WorkerProfileValidationError(
+            "docker_host must use unix, tcp, or https"
+        )
+
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise WorkerProfileValidationError(
+            "docker_host must not contain credentials, query parameters, or fragments"
+        )
+    if parsed.scheme in {"tcp", "https"}:
+        try:
+            parsed.port
+        except ValueError as exc:
+            raise WorkerProfileValidationError("docker_host has an invalid port") from exc
+        if parsed.hostname is None:
+            raise WorkerProfileValidationError("docker_host must include a hostname")
+        if parsed.path not in {"", "/"}:
+            raise WorkerProfileValidationError("docker_host must not include a URL path")
+    elif not parsed.path or not os.path.isabs(parsed.path):
+        raise WorkerProfileValidationError(
+            "unix docker_host must include an absolute socket path"
+        )
+
+    configured_tls_paths = sum(value is not None for value in tls_values)
+    if configured_tls_paths not in {0, 3}:
+        raise WorkerProfileValidationError(
+            "Docker TLS CA, certificate, and key paths must be configured together"
+        )
+    if configured_tls_paths and parsed.scheme == "unix":
+        raise WorkerProfileValidationError(
+            f"Docker TLS file paths are not supported for {parsed.scheme} endpoints"
+        )
+    for path in tls_values:
+        if path is not None and not os.path.isabs(path):
+            raise WorkerProfileValidationError("Docker TLS paths must be absolute")
+    try:
+        canonicalize_docker_host(host, tls_enabled=configured_tls_paths == 3)
+    except Exception as exc:
+        raise WorkerProfileValidationError(f"Invalid docker_host: {exc}") from exc
+    return host, tls_values[0], tls_values[1], tls_values[2]
+
+
 def validate_worker_profile_mounts(raw_mounts: Any) -> list[dict[str, str]]:
     """Validate and normalize worker profile mount entries."""
     if raw_mounts in (None, ""):
@@ -70,6 +193,7 @@ def validate_worker_profile_mounts(raw_mounts: Any) -> list[dict[str, str]]:
         raise WorkerProfileValidationError("volume_mounts must be a list")
 
     normalized: list[dict[str, str]] = []
+    seen_host_paths: set[str] = set()
     seen_container_paths: set[str] = set()
     for mount in raw_mounts:
         if not isinstance(mount, Mapping):
@@ -81,12 +205,25 @@ def validate_worker_profile_mounts(raw_mounts: Any) -> list[dict[str, str]]:
             raise WorkerProfileValidationError(
                 "volume mounts require host_path and container_path"
             )
+        if not os.path.isabs(host_path):
+            raise WorkerProfileValidationError("volume mount host_path must be absolute")
+        if not os.path.isabs(container_path):
+            raise WorkerProfileValidationError(
+                "volume mount container_path must be absolute"
+            )
+        host_path = os.path.normpath(host_path)
+        container_path = os.path.normpath(container_path)
         if mode not in {"ro", "rw"}:
             raise WorkerProfileValidationError("volume mount mode must be ro or rw")
+        if host_path in seen_host_paths:
+            raise WorkerProfileValidationError(
+                f"duplicate host mount path: {host_path}"
+            )
         if container_path in seen_container_paths:
             raise WorkerProfileValidationError(
                 f"duplicate container mount path: {container_path}"
             )
+        seen_host_paths.add(host_path)
         seen_container_paths.add(container_path)
         normalized.append(
             {"host_path": host_path, "container_path": container_path, "mode": mode}
@@ -138,15 +275,22 @@ def serialize_profile_environment_variable_for_api(
     }
 
 
-def serialize_worker_profile_for_api(profile: WorkerProfile) -> dict[str, Any]:
+def serialize_worker_profile_for_api(
+    profile: WorkerProfile,
+    *,
+    include_docker_target: bool = False,
+) -> dict[str, Any]:
     """Serialize one worker profile for API responses."""
-    return {
+    payload = {
         "id": profile.id,
         "name": profile.name,
         "description": profile.description,
         "enabled": profile.enabled,
         "is_default": profile.is_default,
         "image": profile.image,
+        "runtime_mode": getattr(profile, "runtime_mode", BAKED_IMAGE_MODE),
+        "worker_kit_version": getattr(profile, "worker_kit_version", None),
+        "worker_kit_path": getattr(profile, "worker_kit_path", None),
         "codegraph_enabled": bool(getattr(profile, "codegraph_enabled", False)),
         "volume_mounts": profile.volume_mounts or [],
         "environment_variables": [
@@ -165,6 +309,16 @@ def serialize_worker_profile_for_api(profile: WorkerProfile) -> dict[str, Any]:
         "created_at": profile.created_at,
         "updated_at": profile.updated_at,
     }
+    if include_docker_target:
+        payload.update(
+            {
+                "docker_host": getattr(profile, "docker_host", None),
+                "docker_tls_ca": getattr(profile, "docker_tls_ca", None),
+                "docker_tls_cert": getattr(profile, "docker_tls_cert", None),
+                "docker_tls_key": getattr(profile, "docker_tls_key", None),
+            }
+        )
+    return payload
 
 
 def _profile_env_to_snapshot(row: WorkerProfileEnvironmentVariable) -> dict[str, Any]:
@@ -175,13 +329,19 @@ def _profile_env_to_snapshot(row: WorkerProfileEnvironmentVariable) -> dict[str,
     }
 
 
-def build_worker_profile_environment_map(rows: Iterable[Mapping[str, Any]]) -> dict[str, str]:
+def build_worker_profile_environment_map(
+    rows: Iterable[Any],
+    *,
+    include_secrets: bool = True,
+) -> dict[str, str]:
     """Build runtime env from snapshot environment rows."""
     env: dict[str, str] = {}
     for row in rows:
-        key = _validate_environment_key(str(row["key"]))
-        value = str(row.get("value") or "")
-        is_secret = bool(row.get("is_secret"))
+        key = _validate_environment_key(str(_profile_value(row, "key")))
+        value = str(_profile_value(row, "value") or "")
+        is_secret = bool(_profile_value(row, "is_secret"))
+        if is_secret and not include_secrets:
+            continue
         if not is_secret:
             env[key] = value
             continue
@@ -192,6 +352,22 @@ def build_worker_profile_environment_map(rows: Iterable[Mapping[str, Any]]) -> d
                 f"Unable to decrypt worker environment variable {key}"
             ) from exc
     return env
+
+
+def build_worker_profile_volume_map(
+    mounts: Iterable[Mapping[str, Any]],
+) -> dict[str, dict[str, str]]:
+    """Convert validated profile mounts to the Docker SDK volume mapping."""
+    volumes: dict[str, dict[str, str]] = {}
+    for mount in mounts:
+        host_path = str(mount.get("host_path") or "")
+        container_path = str(mount.get("container_path") or "")
+        if host_path and container_path:
+            volumes[host_path] = {
+                "bind": container_path,
+                "mode": str(mount.get("mode") or "ro"),
+            }
+    return volumes
 
 
 async def list_worker_profiles(db: AsyncSession) -> list[WorkerProfile]:
@@ -282,15 +458,54 @@ async def resolve_provider_for_issue(
     return provider
 
 
-def snapshot_from_profile(task: Task, profile: WorkerProfile) -> TaskWorkerProfileSnapshot:
+def snapshot_from_profile(
+    task: Task,
+    profile: WorkerProfile,
+    *,
+    settings: Any | None = None,
+) -> TaskWorkerProfileSnapshot:
     """Build an immutable task worker snapshot from a loaded profile."""
+    try:
+        runtime_mode, kit_version, kit_path = validate_worker_kit_config(
+            runtime_mode=getattr(profile, "runtime_mode", BAKED_IMAGE_MODE),
+            worker_kit_version=getattr(profile, "worker_kit_version", None),
+            worker_kit_path=getattr(profile, "worker_kit_path", None),
+        )
+        mounts = parse_worker_profile_mounts(profile.volume_mounts)
+        validate_worker_kit_mounts(runtime_mode, mounts)
+    except WorkerKitValidationError as exc:
+        raise WorkerProfileValidationError(str(exc)) from exc
+    connection = (
+        resolve_docker_connection(
+            settings,
+            docker_host=getattr(profile, "docker_host", None),
+            docker_tls_ca=getattr(profile, "docker_tls_ca", None),
+            docker_tls_cert=getattr(profile, "docker_tls_cert", None),
+            docker_tls_key=getattr(profile, "docker_tls_key", None),
+        )
+        if settings is not None
+        else None
+    )
     return TaskWorkerProfileSnapshot(
         task_id=task.id,
         worker_profile_id=profile.id,
         profile_name=profile.name,
         image=profile.image,
+        runtime_mode=runtime_mode,
+        worker_kit_version=kit_version,
+        worker_kit_path=kit_path,
+        docker_host=(connection.host if connection else getattr(profile, "docker_host", None)),
+        docker_tls_ca=(
+            connection.tls_ca if connection else getattr(profile, "docker_tls_ca", None)
+        ),
+        docker_tls_cert=(
+            connection.tls_cert if connection else getattr(profile, "docker_tls_cert", None)
+        ),
+        docker_tls_key=(
+            connection.tls_key if connection else getattr(profile, "docker_tls_key", None)
+        ),
         codegraph_enabled=bool(getattr(profile, "codegraph_enabled", False)),
-        volume_mounts=list(profile.volume_mounts or []),
+        volume_mounts=mounts,
         environment_variables=[
             _profile_env_to_snapshot(row) for row in profile.environment_variables
         ],
@@ -312,7 +527,7 @@ async def replace_task_worker_snapshot(
     if existing is not None:
         await db.delete(existing)
         await db.flush()
-    snapshot = snapshot_from_profile(task, profile)
+    snapshot = snapshot_from_profile(task, profile, settings=get_effective_settings())
     db.add(snapshot)
     task.worker_profile_id = profile.id
     await db.flush()
@@ -338,13 +553,30 @@ async def load_task_worker_runtime(db: AsyncSession, task: Task) -> TaskWorkerRu
     snapshot = await db.get(TaskWorkerProfileSnapshot, task.id)
     if snapshot is None:
         raise WorkerProfileValidationError(f"Task {task.id} has no worker profile snapshot")
+    try:
+        runtime_mode, kit_version, kit_path = validate_worker_kit_config(
+            runtime_mode=getattr(snapshot, "runtime_mode", BAKED_IMAGE_MODE),
+            worker_kit_version=getattr(snapshot, "worker_kit_version", None),
+            worker_kit_path=getattr(snapshot, "worker_kit_path", None),
+        )
+        mounts = parse_worker_profile_mounts(snapshot.volume_mounts)
+        validate_worker_kit_mounts(runtime_mode, mounts)
+    except WorkerKitValidationError as exc:
+        raise WorkerProfileValidationError(str(exc)) from exc
     return TaskWorkerRuntime(
         image=snapshot.image,
+        runtime_mode=runtime_mode,
+        worker_kit_version=kit_version,
+        worker_kit_path=kit_path,
         codegraph_enabled=bool(getattr(snapshot, "codegraph_enabled", False)),
-        volume_mounts=parse_worker_profile_mounts(snapshot.volume_mounts),
+        volume_mounts=mounts,
         environment=build_worker_profile_environment_map(snapshot.environment_variables),
         pre_script=snapshot.pre_script or "",
         post_script=snapshot.post_script or "",
+        docker_host=getattr(snapshot, "docker_host", None),
+        docker_tls_ca=getattr(snapshot, "docker_tls_ca", None),
+        docker_tls_cert=getattr(snapshot, "docker_tls_cert", None),
+        docker_tls_key=getattr(snapshot, "docker_tls_key", None),
     )
 
 

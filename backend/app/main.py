@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
+from app.core.docker_client import close_docker_clients
 from app.core.logging import get_logger, setup_logging
 from app.database import AsyncSessionLocal, close_db, get_db, init_db
 from app.dependencies.auth import require_admin_user, require_authenticated_user
@@ -72,6 +73,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Shutting down...")
 
     lag_monitor.cancel()
+    close_docker_clients()
     await close_db()
     logger.info("Database connection closed")
 

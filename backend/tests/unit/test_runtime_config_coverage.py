@@ -102,9 +102,11 @@ class RuntimeConfigCoverageTests(unittest.IsolatedAsyncioTestCase):
         mock_result.scalars.return_value.all.return_value = [
             SystemConfig(key="max_concurrency", value="10", value_type="int"),
         ]
+        handoff_result = MagicMock()
+        handoff_result.scalar_one_or_none.return_value = None
 
         mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_session.execute = AsyncMock(side_effect=[handoff_result, mock_result])
 
         # AsyncSessionLocal() returns an async context manager
         mock_session_ctx = MagicMock()

@@ -6,13 +6,14 @@ import logging
 import time
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import (
     RuntimeConfigValue,
     get_runtime_config_types,
     get_secret_config_keys,
+    get_settings,
     reset_runtime_config,
     set_runtime_config,
     update_runtime_config,
@@ -26,6 +27,7 @@ from app.database import AsyncSessionLocal
 from app.models import SystemConfig
 
 logger = logging.getLogger(__name__)
+_DEPLOYMENT_WORKSPACE_KEY = "worker_workspace_host_path"
 _runtime_config_last_check_monotonic = 0.0
 _runtime_config_last_signature: tuple[int, datetime | None] | None = None
 
@@ -78,6 +80,7 @@ async def load_runtime_config_from_db(db: AsyncSession | None = None) -> dict[st
     owns_session = db is None
     if owns_session:
         async with AsyncSessionLocal() as session:
+            await _handoff_workspace_path_override(session)
             return await load_runtime_config_from_db(session)
 
     result = await db.execute(select(SystemConfig))
@@ -98,6 +101,32 @@ async def load_runtime_config_from_db(db: AsyncSession | None = None) -> dict[st
     latest_update = max((row.updated_at for row in rows if row.updated_at is not None), default=None)
     _mark_runtime_config_synced((len(rows), latest_update))
     return overrides
+
+
+async def _handoff_workspace_path_override(db: AsyncSession) -> None:
+    """Safely retire the legacy DB workspace path after deployment adopts the bind mount."""
+    result = await db.execute(
+        select(SystemConfig).where(SystemConfig.key == _DEPLOYMENT_WORKSPACE_KEY)
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        return
+
+    stored_path = row.value.strip()
+    deployment_path = get_settings().worker_workspace_host_path
+    if stored_path and stored_path != deployment_path:
+        raise RuntimeError(
+            "Legacy worker_workspace_host_path does not match the deployment bind mount: "
+            f"database={stored_path!r}, WORKER_WORKSPACE_HOST_PATH={deployment_path!r}. "
+            "Set WORKER_WORKSPACE_HOST_PATH to the database value and recreate Backend "
+            "and Scheduler before upgrading."
+        )
+
+    await db.execute(
+        delete(SystemConfig).where(SystemConfig.key == _DEPLOYMENT_WORKSPACE_KEY)
+    )
+    await db.commit()
+    logger.info("Completed deployment handoff for worker workspace path %s", deployment_path)
 
 
 async def refresh_runtime_config_if_stale(

@@ -19,4 +19,4 @@ else
 fi
 
 cd "${ROOT_DIR}"
-"${COMPOSE_CMD[@]}" -f docker-compose.yml up -d
+"${COMPOSE_CMD[@]}" --env-file "${ENV_FILE}" -f docker-compose.yml up -d

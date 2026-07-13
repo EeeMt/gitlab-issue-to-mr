@@ -239,6 +239,13 @@ export interface WorkerProfile {
   enabled: boolean
   is_default: boolean
   image: string
+  runtime_mode: 'baked_image' | 'mounted_kit'
+  worker_kit_version: string | null
+  worker_kit_path: string | null
+  docker_host?: string | null
+  docker_tls_ca?: string | null
+  docker_tls_cert?: string | null
+  docker_tls_key?: string | null
   codegraph_enabled: boolean
   volume_mounts: WorkerProfileMount[]
   environment_variables: WorkerProfileEnvironmentVariable[]
@@ -256,6 +263,13 @@ export interface WorkerProfilePayload {
   description?: string | null
   enabled?: boolean
   image?: string
+  runtime_mode?: 'baked_image' | 'mounted_kit'
+  worker_kit_version?: string | null
+  worker_kit_path?: string | null
+  docker_host?: string | null
+  docker_tls_ca?: string | null
+  docker_tls_cert?: string | null
+  docker_tls_key?: string | null
   codegraph_enabled?: boolean
   volume_mounts?: WorkerProfileMount[]
   environment_variables?: WorkerProfileEnvironmentVariableUpdate[]
@@ -266,6 +280,14 @@ export interface WorkerProfilePayload {
   ci_auto_repair_run_instruction_template?: string
 }
 
+export interface DockerConnectionTestResult {
+  docker_host: string
+  server_version: string | null
+  architecture: string | null
+  operating_system: string | null
+  elapsed_ms: number
+}
+
 export interface Container {
   id: string
   name: string
@@ -273,7 +295,17 @@ export interface Container {
   task_id: number | null
   project_id: number | null
   issue_id: number | null
+  docker_target?: string
   created_at: string
+}
+
+export interface DockerTargetError {
+  docker_target: string
+}
+
+export interface ContainerOverview {
+  containers: Container[]
+  target_errors: DockerTargetError[]
 }
 
 export interface Stats {
@@ -486,6 +518,7 @@ export interface RuntimeConfig {
   worker_pre_script: string
   worker_post_script: string
   worker_environment_variables: WorkerEnvironmentVariable[]
+  worker_workspace_host_path: string
   worker_workspace_retention_days: number
   slot_max_tasks: number
   slot_max_tasks_enforce: boolean
@@ -616,7 +649,10 @@ export interface RuntimeConfigUpdate
   extends Partial<
     Omit<
       RuntimeConfig,
-      'alert_webhook_url_configured' | 'anthropic_api_key_configured' | 'worker_environment_variables'
+      | 'alert_webhook_url_configured'
+      | 'anthropic_api_key_configured'
+      | 'worker_environment_variables'
+      | 'worker_workspace_host_path'
     >
   > {
   alert_webhook_url?: string
@@ -898,13 +934,17 @@ export interface RevokeSessionResponse {
 }
 
 // API functions
-export async function getContainers(): Promise<Container[]> {
-  const response = await api.get('/containers')
+export async function getContainers(): Promise<ContainerOverview | Container[]> {
+  const response = await api.get('/containers', {
+    params: { include_target_status: true },
+  })
   return response.data
 }
 
-export async function getContainerLogs(containerId: string): Promise<string> {
-  const response = await api.get(`/containers/${containerId}/logs`)
+export async function getContainerLogs(containerId: string, taskId?: number): Promise<string> {
+  const response = await api.get(`/containers/${containerId}/logs`, {
+    params: taskId == null ? undefined : { task_id: taskId },
+  })
   return response.data
 }
 
@@ -1320,6 +1360,21 @@ export async function setDefaultProvider(id: number): Promise<AIProvider> {
 
 export async function getWorkerProfiles(): Promise<WorkerProfile[]> {
   const { data } = await api.get('/worker-profiles')
+  return data
+}
+
+export async function getAdminWorkerProfiles(): Promise<WorkerProfile[]> {
+  const { data } = await api.get('/worker-profiles/admin')
+  return data
+}
+
+export async function testWorkerDockerConnection(
+  payload: Pick<
+    WorkerProfilePayload,
+    'docker_host' | 'docker_tls_ca' | 'docker_tls_cert' | 'docker_tls_key'
+  >
+): Promise<DockerConnectionTestResult> {
+  const { data } = await api.post('/worker-profiles/test-docker-connection', payload)
   return data
 }
 

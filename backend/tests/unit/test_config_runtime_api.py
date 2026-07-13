@@ -203,19 +203,10 @@ class ConfigRuntimeAPITests(unittest.TestCase):
             _validate_config_value("worker_workspace_retention_days", -1)
         self.assertEqual(ctx.exception.status_code, 400)
 
-    def test_validate_worker_workspace_host_path_allows_empty_or_absolute(self):
-        from fastapi import HTTPException
+    def test_workspace_host_path_is_not_a_persisted_runtime_key(self):
+        from app.config import get_runtime_config_types
 
-        from app.api.config_runtime import _validate_config_value
-
-        self.assertEqual(_validate_config_value("worker_workspace_host_path", ""), "")
-        self.assertEqual(
-            _validate_config_value("worker_workspace_host_path", "/opt/codify-workspaces"),
-            "/opt/codify-workspaces",
-        )
-        with self.assertRaises(HTTPException) as ctx:
-            _validate_config_value("worker_workspace_host_path", "relative/path")
-        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertNotIn("worker_workspace_host_path", get_runtime_config_types())
 
     def test_patch_runtime_config_updates_max_concurrency(self):
         """PATCH /config/runtime should accept valid max_concurrency update.
@@ -256,6 +247,15 @@ class ConfigRuntimeAPITests(unittest.TestCase):
         self.assertIn("task_timeout", data)
         self.assertIn("default_target_branch", data)
         self.assertIn("anthropic_model", data)
+
+    def test_patch_runtime_config_rejects_workspace_path_hot_update(self):
+        response = self.client.patch(
+            "/api/config/runtime",
+            json={"worker_workspace_host_path": "/mnt/shared-workspaces"},
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("deployment-time", response.json()["detail"])
 
     def test_patch_runtime_config_rejects_invalid_max_concurrency(self):
         """PATCH /config/runtime should reject invalid max_concurrency."""

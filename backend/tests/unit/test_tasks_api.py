@@ -214,6 +214,7 @@ class CancelTaskEndpointTests(unittest.TestCase):
         task.project_id = 1
         task.status = TaskStatus.PENDING
         task.scheduled_at = None
+        task.container_id = None
 
         client, app = self._get_client(task)
 
@@ -229,21 +230,31 @@ class CancelTaskEndpointTests(unittest.TestCase):
 
     def test_cancel_task_releases_issue_execution_lock(self) -> None:
         """POST /cancel should release the DB issue execution lock."""
+        from app.core.worker_docker_targets import TaskContainerNotFoundError
+
         task = MagicMock()
         task.id = 2
         task.project_id = 1
         task.issue_id = 33
         task.status = TaskStatus.RUNNING
         task.scheduled_at = None
+        task.container_id = "gone-container-2"
+        task.cancel_requested_at = None
 
         client, app = self._get_client(task)
 
-        with patch("app.api.task_action_routes.notify_task_cancelled", new=AsyncMock()):
-            with patch("app.core.task_helpers._require_task_operator", return_value=None):
-                with patch(
-                    "app.api.task_action_routes.release_issue_execution_lock", new=AsyncMock()
-                ) as mock_release:
-                    response = client.post("/api/tasks/2/cancel")
+        with (
+            patch("app.api.task_action_routes.notify_task_cancelled", new=AsyncMock()),
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch(
+                "app.api.task_action_routes.find_task_container",
+                new=AsyncMock(side_effect=TaskContainerNotFoundError("missing")),
+            ),
+            patch(
+                "app.api.task_action_routes.release_issue_execution_lock", new=AsyncMock()
+            ) as mock_release,
+        ):
+            response = client.post("/api/tasks/2/cancel")
 
         app.dependency_overrides.clear()
 

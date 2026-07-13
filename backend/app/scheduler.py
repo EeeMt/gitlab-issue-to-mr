@@ -7,12 +7,18 @@ import logging
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 
-from sqlalchemy import case, func, select, update
+from docker.errors import NotFound
+from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_effective_settings as get_settings
-from app.core.docker_client import get_docker_client
+from app.core.docker_client import (
+    DockerClientWrapper,
+    DockerConnectionConfig,
+    get_docker_client,
+)
 from app.core.issue_execution_locks import (
     acquire_issue_execution_lock,
     cleanup_inactive_issue_execution_locks,
@@ -26,6 +32,15 @@ from app.core.usage_limits import (
     usage_limit_exceeded_detail,
 )
 from app.core.utcnow import utcnow
+from app.core.worker_docker_targets import (
+    DockerConnectionsUnavailableError,
+    TaskContainerLookupError,
+    TaskContainerNotFoundError,
+    connection_for_task,
+    docker_daemon_key,
+    find_task_container,
+    list_known_docker_targets,
+)
 from app.core.worker_workspace import cleanup_expired_workspaces
 from app.database import AsyncSessionLocal
 from app.models import Issue, IssueExecutionLock, IssueStatus, Task, TaskStatus
@@ -36,6 +51,10 @@ _SESSION_CLEANUP_INTERVAL_SECONDS = 3600
 _WORKSPACE_CLEANUP_INTERVAL_SECONDS = 21600
 _LOCK_CLEANUP_INTERVAL_SECONDS = 300
 _TERMINAL_WORKER_STUCK_SECONDS = 120
+_RECOVERY_RETRY_OFFSETS_SECONDS = (0.0, 10.0, 20.0)
+_RECOVERY_REQUEST_TIMEOUT_SECONDS = 5
+_RECOVERY_PROBE_TIMEOUT_SECONDS = 11
+_RECOVERY_UNAVAILABLE_RETRY_SECONDS = 30
 
 # Thread pool for running worker tasks (to avoid blocking the event loop)
 _worker_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="worker-")
@@ -51,6 +70,56 @@ def _extract_task_id(container_name: str) -> int | None:
     """Extract task_id from a worker container name like codify-123-issue456."""
     m = _get_container_pattern().match(container_name)
     return int(m.group(1)) if m else None
+
+
+def _get_recovery_docker_client(connection):
+    """Create a bounded, non-cached client for startup recovery."""
+    return DockerClientWrapper(
+        connection,
+        connect_timeout=_RECOVERY_REQUEST_TIMEOUT_SECONDS,
+        operation_timeout=_RECOVERY_REQUEST_TIMEOUT_SECONDS,
+    )
+
+
+def _list_recovery_containers(connection, container_prefix: str):
+    """Probe one daemon and close the transient client afterwards."""
+    docker = _get_recovery_docker_client(connection)
+    try:
+        return docker.client.containers.list(
+            all=True,
+            filters={"name": f"{container_prefix}-"},
+        )
+    finally:
+        docker.close()
+
+
+def _inspect_recovery_container(connection, container_reference: str) -> tuple[str, str]:
+    """Resolve one known container through a bounded transient recovery client."""
+    docker = _get_recovery_docker_client(connection)
+    try:
+        container = docker.client.containers.get(container_reference)
+        return container.name, container.status
+    finally:
+        docker.close()
+
+
+async def _stop_recovered_cancelled_container(container, task_id: int) -> None:
+    """Stop a recovered container so durable cancellation intent is actually enforced."""
+    try:
+        await asyncio.to_thread(container.stop, timeout=10)
+    except Exception as stop_error:  # noqa: BLE001
+        logger.warning(
+            "Graceful stop failed for recovered cancelled task %s: %s; forcing stop",
+            task_id,
+            stop_error,
+        )
+        try:
+            await asyncio.to_thread(container.kill)
+        except Exception as kill_error:  # noqa: BLE001
+            raise RuntimeError(
+                f"could not stop recovered cancelled container: graceful={stop_error}; "
+                f"force={kill_error}"
+            ) from kill_error
 
 
 class Scheduler:
@@ -482,8 +551,9 @@ class Scheduler:
                     f"active_threads={self._active_worker_threads})"
                 )
 
-        except Exception:
+        except Exception as exc:
             logger.exception(f"Task {task_id} failed with exception in background")
+            await self._mark_worker_bootstrap_failed(task_id, exc)
 
         finally:
             self._active_worker_threads -= 1
@@ -517,6 +587,36 @@ class Scheduler:
             except Exception:
                 logger.exception("Failed to release lock for task %s", task_id)
 
+    async def _mark_worker_bootstrap_failed(self, task_id: int, exc: Exception) -> None:
+        """Persist failures that happen before WorkerExecutor can own task state."""
+        try:
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(select(Task).where(Task.id == task_id))
+                task = result.scalar_one_or_none()
+                if task is None or task.status != TaskStatus.RUNNING:
+                    return
+
+                from app.core.worker import sanitize_sensitive_data
+
+                cancellation_requested = isinstance(
+                    getattr(task, "cancel_requested_at", None),
+                    datetime,
+                )
+                task.status = (
+                    TaskStatus.CANCELLED if cancellation_requested else TaskStatus.FAILED
+                )
+                task.error_message = (
+                    "Cancelled by user before worker startup completed"
+                    if cancellation_requested
+                    else sanitize_sensitive_data(f"Worker failed to start: {exc}")[:2000]
+                )
+                task.completed_at = utcnow()
+                await release_issue_execution_lock(db, issue_id=task.issue_id)
+                await db.commit()
+                self._running_issues.discard(task.issue_id)
+        except Exception:
+            logger.exception("Failed to persist worker bootstrap failure for task %s", task_id)
+
     async def _maybe_complete_issue(self, db: AsyncSession, issue_id: int) -> None:
         """Delegate to shared helper."""
         await maybe_update_issue_status(db, issue_id)
@@ -537,27 +637,117 @@ class Scheduler:
             if removed_locks:
                 logger.warning("Cleaned up %s inactive issue execution lock(s)", removed_locks)
 
-            # Find all tasks that are still marked RUNNING in the DB
+            # Running tasks must be resumed; terminal tasks with unfinished raw-log
+            # finalization still own their retained containers and must not be reaped.
             result = await db.execute(
-                select(Task).where(Task.status == TaskStatus.RUNNING)
+                select(Task).where(
+                    or_(
+                        Task.status == TaskStatus.RUNNING,
+                        and_(
+                            Task.container_id.is_not(None),
+                            Task.raw_logs_finalized_at.is_(None),
+                        ),
+                    )
+                )
             )
-            stuck_tasks = result.scalars().all()
-            running_task_map = {t.id: t for t in stuck_tasks}
-
+            owned_tasks = result.scalars().all()
+            stuck_tasks = [
+                task
+                for task in owned_tasks
+                if getattr(task.status, "value", task.status) == TaskStatus.RUNNING.value
+            ]
+            retained_task_ids = {
+                task.id
+                for task in owned_tasks
+                if getattr(task.status, "value", task.status) != TaskStatus.RUNNING.value
+            }
             if stuck_tasks:
                 logger.warning(f"Found {len(stuck_tasks)} tasks in RUNNING status")
 
-            # Discover worker containers and cross-reference with DB
-            resumed_task_ids: set[int] = set()
-            try:
-                docker = get_docker_client()
-                prefix = get_settings().worker_container_prefix
-                all_containers = docker.client.containers.list(
-                    all=True,
-                    filters={"name": f"{prefix}-"}
-                )
-                pattern = _get_container_pattern()
+            settings = get_settings()
+            targets = await list_known_docker_targets(db, settings, include_retained=True)
+            task_connections = {
+                task.id: await connection_for_task(db, task, settings)
+                for task in owned_tasks
+            }
+            task_daemon_keys = {
+                task_id: docker_daemon_key(connection)
+                for task_id, connection in task_connections.items()
+            }
 
+            async def enumerate_target(target):
+                has_running_tasks = any(
+                    task_id not in retained_task_ids and daemon_key == target.daemon_key
+                    for task_id, daemon_key in task_daemon_keys.items()
+                )
+                retry_offsets = (
+                    _RECOVERY_RETRY_OFFSETS_SECONDS
+                    if has_running_tasks
+                    else _RECOVERY_RETRY_OFFSETS_SECONDS[:1]
+                )
+                started_at = asyncio.get_running_loop().time()
+                last_error = None
+                for retry_offset in retry_offsets:
+                    delay = started_at + retry_offset - asyncio.get_running_loop().time()
+                    if delay > 0:
+                        await asyncio.sleep(delay)
+                    async def try_connections():
+                        nonlocal last_error
+                        for connection in target.connections:
+                            try:
+                                containers = await asyncio.to_thread(
+                                    _list_recovery_containers,
+                                    connection,
+                                    settings.worker_container_prefix,
+                                )
+                                return containers, connection
+                            except Exception as exc:  # noqa: BLE001
+                                last_error = exc
+                                logger.warning(
+                                    "Failed to enumerate Docker target %s: %s",
+                                    connection.host,
+                                    exc,
+                                )
+                        if last_error is not None:
+                            raise last_error
+                        return [], None
+
+                    try:
+                        containers, successful_connection = await asyncio.wait_for(
+                            try_connections(),
+                            timeout=_RECOVERY_PROBE_TIMEOUT_SECONDS,
+                        )
+                        return target, containers, successful_connection, None
+                    except Exception as exc:  # noqa: BLE001
+                        last_error = exc
+                return target, [], None, last_error
+
+            target_results = await asyncio.gather(
+                *(enumerate_target(target) for target in targets)
+            )
+            resumed_task_ids: set[int] = set()
+            unavailable_task_ids: set[int] = set()
+            successful_connections: dict[str, DockerConnectionConfig] = {}
+            pattern = _get_container_pattern()
+            for target, all_containers, successful_connection, target_error in target_results:
+                target_owned_task_ids = {
+                    task_id
+                    for task_id, daemon_key in task_daemon_keys.items()
+                    if daemon_key == target.daemon_key
+                }
+                target_running_task_ids = target_owned_task_ids - retained_task_ids
+                target_retained_task_ids = target_owned_task_ids & retained_task_ids
+                if target_error is not None:
+                    unavailable_task_ids.update(target_running_task_ids)
+                    logger.warning(
+                        "Deferring recovery for tasks %s because Docker daemon %s "
+                        "remains unreachable",
+                        sorted(target_running_task_ids),
+                        target.connection.host,
+                    )
+                    continue
+                if successful_connection is not None:
+                    successful_connections[target.daemon_key] = successful_connection
                 for container in all_containers:
                     if not pattern.match(container.name):
                         continue
@@ -565,22 +755,45 @@ class Scheduler:
                     task_id = _extract_task_id(container.name)
                     c_status = container.status
 
-                    if task_id is not None and task_id in running_task_map:
+                    if task_id is not None and task_id in target_running_task_ids:
                         if c_status in ("running", "exited"):
-                            # Legitimate worker (running or just finished) — resume monitoring.
-                            task = running_task_map[task_id]
+                            task = next(task for task in stuck_tasks if task.id == task_id)
+                            cancellation_requested = isinstance(
+                                getattr(task, "cancel_requested_at", None),
+                                datetime,
+                            )
+                            if cancellation_requested and c_status == "running":
+                                try:
+                                    await _stop_recovered_cancelled_container(container, task_id)
+                                except Exception as exc:  # noqa: BLE001
+                                    unavailable_task_ids.add(task_id)
+                                    logger.warning(
+                                        "Deferring recovery for cancelled task %s because "
+                                        "container %s could not be stopped: %s",
+                                        task_id,
+                                        container.name,
+                                        exc,
+                                    )
+                                    continue
                             logger.info(
-                                f"Resuming task {task_id} (container {container.name}, "
-                                f"status={c_status}, issue_id={task.issue_id})"
+                                "Resuming task %s on %s (container %s, status=%s, issue_id=%s)",
+                                task_id,
+                                target.connection.host,
+                                container.name,
+                                c_status,
+                                task.issue_id,
                             )
                             self._running_tasks.add(task_id)
                             self._running_issues.add(task.issue_id)
                             resumed_task_ids.add(task_id)
                             self._worker_tasks[task_id] = asyncio.create_task(
-                                self._resume_task_background(task_id, container.name)
+                                self._resume_task_background(
+                                    task_id,
+                                    container.name,
+                                    successful_connection,
+                                )
                             )
                         else:
-                            # Container in weird state (created, dead, etc.) — remove and let task fail
                             logger.warning(
                                 f"Removing {c_status} container for task {task_id}: {container.name}"
                             )
@@ -588,11 +801,16 @@ class Scheduler:
                                 container.remove(force=True)
                             except Exception as e:
                                 logger.warning(f"Failed to remove container {container.name}: {e}")
+                    elif task_id is not None and task_id in target_retained_task_ids:
+                        logger.info(
+                            "Retaining owned container %s for task %s until raw logs finalize",
+                            container.name,
+                            task_id,
+                        )
                     else:
-                        # No matching RUNNING task — true orphan
                         logger.warning(
                             f"Removing {c_status} orphan container: {container.name} "
-                            f"(task_id={task_id}, in_db={task_id in running_task_map if task_id else 'N/A'})"
+                            f"(task_id={task_id}, target={target.connection.host})"
                         )
                         try:
                             container.remove(force=(c_status == "running"))
@@ -601,27 +819,328 @@ class Scheduler:
                                 f"Failed to remove container {container.name}: {e}"
                             )
 
-            except Exception as e:
-                logger.warning(f"Failed to enumerate containers: {e}")
+            # Prefix-based enumeration is retained for orphan cleanup, but task recovery
+            # uses the immutable container ID so a deployment-time prefix change cannot
+            # make a live worker invisible.
+            for task in stuck_tasks:
+                container_id = getattr(task, "container_id", None)
+                if (
+                    task.id in resumed_task_ids
+                    or task.id in unavailable_task_ids
+                    or not isinstance(container_id, str)
+                    or not container_id.strip()
+                ):
+                    continue
+                daemon_key = task_daemon_keys[task.id]
+                successful_connection = successful_connections.get(daemon_key)
+                if successful_connection is None:
+                    unavailable_task_ids.add(task.id)
+                    continue
+                try:
+                    container_name, container_status = await asyncio.to_thread(
+                        _inspect_recovery_container,
+                        successful_connection,
+                        container_id,
+                    )
+                except NotFound:
+                    continue
+                except Exception as exc:  # noqa: BLE001
+                    unavailable_task_ids.add(task.id)
+                    logger.warning(
+                        "Deferring recovery for task %s because direct lookup of "
+                        "container %s on %s was inconclusive: %s",
+                        task.id,
+                        container_id,
+                        successful_connection.host,
+                        exc,
+                    )
+                    continue
 
-            # Mark truly stuck tasks as failed (RUNNING in DB but no container)
+                if container_status in ("running", "exited"):
+                    cancellation_requested = isinstance(
+                        getattr(task, "cancel_requested_at", None),
+                        datetime,
+                    )
+                    if cancellation_requested and container_status == "running":
+                        try:
+                            _docker, container, _connection = await find_task_container(
+                                db,
+                                task,
+                                settings,
+                                container_id,
+                            )
+                            await _stop_recovered_cancelled_container(container, task.id)
+                        except Exception as exc:  # noqa: BLE001
+                            unavailable_task_ids.add(task.id)
+                            logger.warning(
+                                "Deferring recovery for cancelled task %s because stable "
+                                "container %s could not be stopped: %s",
+                                task.id,
+                                container_id,
+                                exc,
+                            )
+                            continue
+                    logger.info(
+                        "Recovered task %s by stable container ID %s on %s "
+                        "(name=%s, status=%s)",
+                        task.id,
+                        container_id,
+                        successful_connection.host,
+                        container_name,
+                        container_status,
+                    )
+                    self._running_tasks.add(task.id)
+                    self._running_issues.add(task.issue_id)
+                    resumed_task_ids.add(task.id)
+                    self._worker_tasks[task.id] = asyncio.create_task(
+                        self._resume_task_background(
+                            task.id,
+                            container_name,
+                            successful_connection,
+                        )
+                    )
+                else:
+                    unavailable_task_ids.add(task.id)
+                    logger.warning(
+                        "Deferring task %s recovery cleanup for container %s in status %s",
+                        task.id,
+                        container_id,
+                        container_status,
+                    )
+
             for task in stuck_tasks:
                 if task.id in resumed_task_ids:
                     continue
-                task.status = TaskStatus.FAILED
-                task.error_message = "Task was running when scheduler restarted (container not found)"
+                if task.id in unavailable_task_ids:
+                    self._running_tasks.add(task.id)
+                    self._running_issues.add(task.issue_id)
+                    self._worker_tasks[task.id] = asyncio.create_task(
+                        self._coordinate_unavailable_recovery(task.id)
+                    )
+                    logger.warning(
+                        "Task %s remains RUNNING with issue %s locked while Docker "
+                        "recovery is retried in the background",
+                        task.id,
+                        task.issue_id,
+                    )
+                    continue
+                cancellation_requested = isinstance(
+                    getattr(task, "cancel_requested_at", None),
+                    datetime,
+                )
+                task.status = (
+                    TaskStatus.CANCELLED if cancellation_requested else TaskStatus.FAILED
+                )
+                task.error_message = (
+                    "Cancelled by user; worker container is confirmed absent"
+                    if cancellation_requested
+                    else "Task was running when scheduler restarted (container not found)"
+                )
                 task.completed_at = utcnow()
                 await release_issue_execution_lock(db, issue_id=task.issue_id)
-                logger.warning(f"Marked task {task.id} as failed (no running container)")
+                logger.warning(
+                    "Marked task %s as %s after reachable Docker daemon confirmed "
+                    "that its container is absent",
+                    task.id,
+                    task.status.value,
+                )
 
             await db.commit()
 
+        failed_count = len(stuck_tasks) - len(resumed_task_ids) - len(unavailable_task_ids)
         logger.info(
-            f"Crash recovery complete: {len(resumed_task_ids)} resumed, "
-            f"{len(stuck_tasks) - len(resumed_task_ids)} marked failed"
+            "Crash recovery complete: %s resumed, %s awaiting Docker, %s marked failed",
+            len(resumed_task_ids),
+            len(unavailable_task_ids),
+            failed_count,
         )
 
-    async def _resume_task_background(self, task_id: int, container_name: str) -> None:
+    async def _coordinate_unavailable_recovery(self, task_id: int) -> None:
+        """Keep an unknown remote worker owned until its daemon becomes reachable."""
+        attempt = 0
+        try:
+            while self.running:
+                resume_context: tuple[str, DockerConnectionConfig] | None = None
+                should_retry = False
+                async with AsyncSessionLocal() as db:
+                    task = await db.get(Task, task_id)
+                    if task is None:
+                        logger.warning(
+                            "Stopping deferred Docker recovery because task %s no longer exists",
+                            task_id,
+                        )
+                        return
+                    if task.status != TaskStatus.RUNNING:
+                        logger.info(
+                            "Stopping deferred Docker recovery for task %s because status is %s",
+                            task_id,
+                            getattr(task.status, "value", task.status),
+                        )
+                        self._running_tasks.discard(task_id)
+                        self._running_issues.discard(task.issue_id)
+                        return
+
+                    settings = get_settings()
+                    container_name = (
+                        f"{settings.worker_container_prefix}-{task.id}-issue{task.issue_id}"
+                    )
+                    container_reference = task.container_id or container_name
+                    attempt += 1
+                    try:
+                        _docker, container, connection = await find_task_container(
+                            db,
+                            task,
+                            settings,
+                            container_reference,
+                        )
+                        await asyncio.to_thread(container.reload)
+                    except TaskContainerNotFoundError:
+                        await db.refresh(task)
+                        if task.status != TaskStatus.RUNNING:
+                            continue
+                        cancellation_requested = isinstance(
+                            getattr(task, "cancel_requested_at", None),
+                            datetime,
+                        )
+                        task.status = (
+                            TaskStatus.CANCELLED
+                            if cancellation_requested
+                            else TaskStatus.FAILED
+                        )
+                        task.error_message = (
+                            "Cancelled by user; worker container is confirmed absent"
+                            if cancellation_requested
+                            else (
+                                "Task was running when scheduler restarted; Docker later "
+                                "became reachable and confirmed that its container is absent"
+                            )
+                        )
+                        task.completed_at = utcnow()
+                        await release_issue_execution_lock(db, issue_id=task.issue_id)
+                        await db.commit()
+                        self._running_tasks.discard(task_id)
+                        self._running_issues.discard(task.issue_id)
+                        logger.error(
+                            "Deferred recovery marked task %s %s after container %s "
+                            "was confirmed absent",
+                            task_id,
+                            task.status.value,
+                            container_reference,
+                        )
+                        return
+                    except (DockerConnectionsUnavailableError, TaskContainerLookupError) as exc:
+                        should_retry = True
+                        if attempt == 1 or attempt % 10 == 0:
+                            logger.warning(
+                                "Deferred Docker recovery for task %s is still waiting "
+                                "for container %s (attempt=%s): %s",
+                                task_id,
+                                container_reference,
+                                attempt,
+                                exc,
+                            )
+                    except Exception as exc:  # noqa: BLE001
+                        should_retry = True
+                        logger.warning(
+                            "Deferred Docker recovery for task %s could not inspect "
+                            "container %s (attempt=%s): %s",
+                            task_id,
+                            container_reference,
+                            attempt,
+                            exc,
+                        )
+                    else:
+                        await db.refresh(task)
+                        if task.status != TaskStatus.RUNNING:
+                            continue
+                        cancellation_requested = isinstance(
+                            getattr(task, "cancel_requested_at", None),
+                            datetime,
+                        )
+                        cancellation_stop_failed = False
+                        if cancellation_requested and container.status == "running":
+                            try:
+                                await _stop_recovered_cancelled_container(container, task_id)
+                            except Exception as exc:  # noqa: BLE001
+                                should_retry = True
+                                cancellation_stop_failed = True
+                                logger.warning(
+                                    "Deferred recovery found cancelled task %s but could "
+                                    "not stop container %s: %s",
+                                    task_id,
+                                    container_reference,
+                                    exc,
+                                )
+                        if cancellation_stop_failed:
+                            pass
+                        elif container.status not in ("running", "exited"):
+                            try:
+                                await asyncio.to_thread(container.remove, force=True)
+                            except Exception as exc:  # noqa: BLE001
+                                should_retry = True
+                                logger.warning(
+                                    "Deferred recovery found task %s container %s in "
+                                    "status %s but could not remove it: %s",
+                                    task_id,
+                                    container_reference,
+                                    container.status,
+                                    exc,
+                                )
+                            else:
+                                task.status = (
+                                    TaskStatus.CANCELLED
+                                    if cancellation_requested
+                                    else TaskStatus.FAILED
+                                )
+                                task.error_message = (
+                                    "Cancelled by user; recovered worker container was removed"
+                                    if cancellation_requested
+                                    else (
+                                        "Task worker container was not runnable after scheduler "
+                                        f"recovery (status={container.status})"
+                                    )
+                                )
+                                task.completed_at = utcnow()
+                                await release_issue_execution_lock(db, issue_id=task.issue_id)
+                                await db.commit()
+                                self._running_tasks.discard(task_id)
+                                self._running_issues.discard(task.issue_id)
+                                logger.error(
+                                    "Deferred recovery removed non-runnable container %s "
+                                    "and marked task %s failed",
+                                    container_reference,
+                                    task_id,
+                                )
+                                return
+                        else:
+                            resume_context = (container.name, connection)
+                            logger.info(
+                                "Docker daemon recovered for task %s after %s attempt(s); "
+                                "resuming container %s on %s (status=%s)",
+                                task_id,
+                                attempt,
+                                container.name,
+                                connection.host,
+                                container.status,
+                            )
+
+                if resume_context is not None:
+                    await self._resume_task_background(task_id, *resume_context)
+                    return
+                if should_retry:
+                    await asyncio.sleep(_RECOVERY_UNAVAILABLE_RETRY_SECONDS)
+        finally:
+            current = asyncio.current_task()
+            if self._worker_tasks.get(task_id) is current:
+                self._worker_tasks.pop(task_id, None)
+            logger.info("Deferred Docker recovery coordinator stopped for task %s", task_id)
+
+    async def _resume_task_background(
+        self,
+        task_id: int,
+        container_name: str,
+        recovery_connection: DockerConnectionConfig | None = None,
+    ) -> None:
         """Resume monitoring a task in the background thread pool."""
         self._active_worker_threads += 1
         t_submit = time.time()
@@ -637,6 +1156,7 @@ class Scheduler:
                 _run_worker_resume_task,
                 task_id,
                 container_name,
+                recovery_connection,
             )
             elapsed = time.time() - t_submit
             if success:
@@ -649,6 +1169,7 @@ class Scheduler:
                 )
         except Exception as e:
             logger.exception(f"Resumed task {task_id} failed with exception: {e}")
+            await self._mark_worker_bootstrap_failed(task_id, e)
         finally:
             self._active_worker_threads -= 1
             self._worker_tasks.pop(task_id, None)
@@ -752,7 +1273,11 @@ def _run_worker_task(task_id: int) -> bool:
             loop.close()
 
 
-def _run_worker_resume_task(task_id: int, container_name: str) -> bool:
+def _run_worker_resume_task(
+    task_id: int,
+    container_name: str,
+    recovery_connection: DockerConnectionConfig | None = None,
+) -> bool:
     """Resume monitoring a worker task in a separate thread with its own event loop.
 
     Similar to _run_worker_task but calls WorkerExecutor.resume_task()
@@ -786,7 +1311,13 @@ def _run_worker_resume_task(task_id: int, container_name: str) -> bool:
 
     async def run_task():
         async with ThreadSessionLocal() as db:
-            worker = WorkerExecutor(session_factory=ThreadSessionLocal)
+            if recovery_connection is None:
+                worker = WorkerExecutor(session_factory=ThreadSessionLocal)
+            else:
+                worker = WorkerExecutor(
+                    docker_client=get_docker_client(recovery_connection),
+                    session_factory=ThreadSessionLocal,
+                )
             return await worker.resume_task(db, task_id, container_name)
 
     try:

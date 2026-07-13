@@ -1,6 +1,6 @@
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -9,10 +9,16 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from app.api.worker_profiles import (
+    DockerConnectionTestRequest,
     WorkerProfileCreateRequest,
     WorkerProfileEnvironmentVariableRequest,
+    WorkerRuntimeVerificationRequest,
     create_worker_profile,
     set_default_worker_profile_endpoint,
+    verify_worker_profile_runtime,
+)
+from app.api.worker_profiles import (
+    test_worker_profile_docker_connection as run_docker_connection_test,
 )
 from app.database import get_db
 from app.dependencies.auth import (
@@ -38,6 +44,13 @@ def _make_profile(
         enabled=enabled,
         is_default=is_default,
         image="codify-worker:latest",
+        runtime_mode="baked_image",
+        worker_kit_version=None,
+        worker_kit_path=None,
+        docker_host="tcp://worker:2376",
+        docker_tls_ca="/certs/ca.pem",
+        docker_tls_cert="/certs/cert.pem",
+        docker_tls_key="/certs/key.pem",
         codegraph_enabled=False,
         volume_mounts=[],
         environment_variables=environment_variables or [],
@@ -112,6 +125,66 @@ async def test_create_worker_profile_returns_created_profile_after_commit_withou
 
 
 @pytest.mark.asyncio
+async def test_create_mounted_worker_profile_persists_portable_kit_contract():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with session_factory() as db:
+        request = WorkerProfileCreateRequest(
+            name="External Java Runtime",
+            image="team/java21-maven:2026.07",
+            runtime_mode="mounted_kit",
+            worker_kit_version="0.1.0",
+            worker_kit_path="/opt/codify/worker-kits/0.1.0-linux-amd64",
+            volume_mounts=[],
+            environment_variables=[],
+            default_execute_run_instruction_template="Execute {{user_prompt}}",
+            default_plan_run_instruction_template="Plan {{user_prompt}}",
+            ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+        )
+
+        response = await create_worker_profile(request, db=db)
+
+    await engine.dispose()
+
+    assert response["runtime_mode"] == "mounted_kit"
+    assert response["worker_kit_version"] == "0.1.0"
+    assert response["worker_kit_path"] == "/opt/codify/worker-kits/0.1.0-linux-amd64"
+
+
+@pytest.mark.asyncio
+async def test_create_mounted_worker_profile_rejects_kit_mount_collision():
+    db = MagicMock()
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = None
+    db.execute = AsyncMock(return_value=result)
+    db.rollback = AsyncMock()
+
+    request = WorkerProfileCreateRequest(
+        name="Invalid Runtime",
+        image="team/node22:2026.07",
+        runtime_mode="mounted_kit",
+        worker_kit_version="0.1.0",
+        worker_kit_path="/opt/codify/worker-kits/0.1.0-linux-amd64",
+        volume_mounts=[
+            {"host_path": "/tmp/override", "container_path": "/nix", "mode": "rw"}
+        ],
+        environment_variables=[],
+        default_execute_run_instruction_template="Execute {{user_prompt}}",
+        default_plan_run_instruction_template="Plan {{user_prompt}}",
+        ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await create_worker_profile(request, db=db)
+
+    assert exc.value.status_code == 422
+    assert "conflicts with worker-kit path" in str(exc.value.detail)
+
+
+@pytest.mark.asyncio
 async def test_set_default_rejects_disabled_profile():
     profile = _make_profile(id=10, name="Disabled Worker", enabled=False)
 
@@ -126,6 +199,98 @@ async def test_set_default_rejects_disabled_profile():
         )
     assert exc.value.status_code == 422
     assert "Disabled worker profiles cannot be default" in str(exc.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_verify_mounted_worker_profile_runs_preflight_on_profile_target():
+    profile = _make_profile(
+        id=12,
+        name="Java Runtime",
+        environment_variables=[
+            SimpleNamespace(
+                key="CODIFY_CLAUDE_BIN",
+                value="/usr/local/bin/claude",
+                is_secret=False,
+            ),
+            SimpleNamespace(
+                key="RUNTIME_SECRET",
+                value="encrypted-value",
+                is_secret=True,
+            ),
+        ],
+    )
+    profile.image = "team/java21-maven:2026.07"
+    profile.runtime_mode = "mounted_kit"
+    profile.worker_kit_version = "0.1.0"
+    profile.worker_kit_path = "/opt/codify/worker-kits/0.1.0-linux-amd64"
+    profile.volume_mounts = [
+        {
+            "host_path": "/opt/codify/overrides/claude",
+            "container_path": "/usr/local/bin/claude",
+            "mode": "ro",
+        }
+    ]
+    db = MagicMock()
+    db.get = AsyncMock(return_value=profile)
+
+    container = MagicMock()
+    client = MagicMock()
+    client.create_container.return_value = container
+    client.wait_for_container.return_value = (0, "Worker kit verification passed")
+
+    with patch("app.api.worker_profiles.DockerClientWrapper", return_value=client):
+        response = await verify_worker_profile_runtime(
+            12,
+            WorkerRuntimeVerificationRequest(smoke_command="java -version"),
+            db=db,
+        )
+
+    assert response["ok"] is True
+    assert response["image"] == "team/java21-maven:2026.07"
+    client.client.images.get.assert_called_once_with("team/java21-maven:2026.07")
+    create_kwargs = client.create_container.call_args.kwargs
+    assert create_kwargs["command"] == ["--verify", "--smoke", "java -version"]
+    assert create_kwargs["entrypoint"] == "/opt/codify-kit/launcher"
+    assert create_kwargs["user"] == "0:0"
+    assert create_kwargs["tmpfs"] == {"/workspace": "rw,exec,mode=1777"}
+    assert create_kwargs["environment"]["CODIFY_CLAUDE_BIN"] == "/usr/local/bin/claude"
+    assert "RUNTIME_SECRET" not in create_kwargs["environment"]
+    assert response["omitted_secret_environment_keys"] == ["RUNTIME_SECRET"]
+    assert create_kwargs["volumes"]["/opt/codify/overrides/claude"] == {
+        "bind": "/usr/local/bin/claude",
+        "mode": "ro",
+    }
+    assert create_kwargs["volumes"][profile.worker_kit_path] == {
+        "bind": "/opt/codify-kit",
+        "mode": "ro",
+    }
+    assert create_kwargs["volumes"][f"{profile.worker_kit_path}/nix/store"] == {
+        "bind": "/nix/store",
+        "mode": "ro",
+    }
+    container.remove.assert_called_once_with(force=True)
+    client.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_verify_baked_worker_profile_is_rejected_without_docker_access():
+    profile = _make_profile(id=13)
+    db = MagicMock()
+    db.get = AsyncMock(return_value=profile)
+
+    with (
+        patch("app.api.worker_profiles.DockerClientWrapper") as client_class,
+        pytest.raises(HTTPException) as exc,
+    ):
+        await verify_worker_profile_runtime(
+            13,
+            WorkerRuntimeVerificationRequest(),
+            db=db,
+        )
+
+    assert exc.value.status_code == 422
+    assert "mounted_kit" in str(exc.value.detail)
+    client_class.assert_not_called()
 
 
 def test_list_worker_profiles_exposes_secret_configured_not_plaintext():
@@ -158,6 +323,59 @@ def test_list_worker_profiles_exposes_secret_configured_not_plaintext():
     assert env_item["value"] is None
     assert env_item["value_configured"] is True
     assert "encrypted-secret" not in response.text
+    assert "docker_host" not in response.json()[0]
+
+
+def test_admin_worker_profile_list_includes_docker_target():
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = [_make_profile(id=3)]
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=result)
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[require_authenticated_user] = lambda: SimpleNamespace(id=1)
+    app.dependency_overrides[require_admin_user] = lambda: SimpleNamespace(id=1)
+    client = TestClient(app, raise_server_exceptions=False)
+    try:
+        response = client.get("/api/worker-profiles/admin")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()[0]["docker_host"] == "tcp://worker:2376"
+
+
+@pytest.mark.asyncio
+async def test_worker_profile_docker_connection_returns_server_identity():
+    docker = MagicMock()
+    docker.inspect_server.return_value = {
+        "server_version": "27.1.0",
+        "architecture": "aarch64",
+        "operating_system": "Linux",
+    }
+    settings = SimpleNamespace(
+        docker_host="unix:///var/run/docker.sock",
+        docker_tls_ca=None,
+        docker_tls_cert=None,
+        docker_tls_key=None,
+    )
+    with (
+        patch("app.api.worker_profiles.get_effective_settings", return_value=settings),
+        patch("app.api.worker_profiles.DockerClientWrapper", return_value=docker) as wrapper,
+    ):
+        response = await run_docker_connection_test(
+            DockerConnectionTestRequest(docker_host="tcp://arm-worker:2376"),
+            _admin=SimpleNamespace(id=1),
+        )
+
+    assert response["architecture"] == "aarch64"
+    assert response["docker_host"] == "tcp://arm-worker:2376"
+    wrapper.assert_called_once()
+    assert wrapper.call_args.args[0].host == "tcp://arm-worker:2376"
+    assert wrapper.call_args.kwargs == {
+        "connect_timeout": 3,
+        "operation_timeout": 3,
+    }
+    docker.close.assert_called_once()
 
 
 def test_list_worker_profiles_allows_regular_authenticated_user():

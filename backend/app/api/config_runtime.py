@@ -277,20 +277,6 @@ def _validate_config_value(key: str, value: object) -> object:
             )
         return value
 
-    if key == "worker_workspace_host_path":
-        if not isinstance(value, str):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="worker_workspace_host_path must be a string",
-            )
-        stripped = value.strip()
-        if stripped and not stripped.startswith("/"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="worker_workspace_host_path must be empty or an absolute path",
-            )
-        return stripped
-
     if key in {"worker_pre_script", "worker_post_script"}:
         if not isinstance(value, str):
             raise HTTPException(
@@ -455,9 +441,18 @@ async def apply_runtime_config_update(
     """Apply runtime config updates and return the serialized runtime section."""
     await load_runtime_config_from_db(db)
 
+    if "worker_workspace_host_path" in runtime_update.model_fields_set:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "worker_workspace_host_path is a deployment-time setting; update "
+                "WORKER_WORKSPACE_HOST_PATH and recreate Backend and Scheduler"
+            ),
+        )
+
     raw_runtime_updates = runtime_update.model_dump(
         exclude_unset=True,
-        exclude={"worker_environment_variables"},
+        exclude={"worker_environment_variables", "worker_workspace_host_path"},
     )
     runtime_updates = _normalize_runtime_updates(raw_runtime_updates)
     worker_environment_variables_provided = (

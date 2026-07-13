@@ -2,4 +2,6 @@ config/.env.offline
 images/*.tar
 images/*.tar.gz
 images/SHA256SUMS
+kits/*.tar.gz
+kits/*.sha256
 MANIFEST.txt

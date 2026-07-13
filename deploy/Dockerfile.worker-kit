@@ -1,0 +1,84 @@
+# syntax=docker/dockerfile:1.7
+
+ARG NIX_IMAGE=nixos/nix:2.24.11
+ARG WORKER_KIT_VERSION=0.1.0
+
+FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS launcher-builder
+ARG TARGETOS
+ARG TARGETARCH
+WORKDIR /src
+COPY deploy/worker-kit/launcher/main.go ./launcher/main.go
+COPY deploy/worker-kit/run-as/main.go ./run-as/main.go
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags='-s -w' -o /out/launcher ./launcher/main.go \
+    && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags='-s -w' -o /out/codify-run-as ./run-as/main.go
+
+FROM debian:bookworm-slim AS claude-installer
+ARG CLAUDE_VERSION=2.1.197
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl -fL --retry 5 --retry-delay 2 --retry-all-errors https://claude.ai/install.sh | bash -s "${CLAUDE_VERSION}" \
+    && install -m 755 "$(readlink -f /root/.local/bin/claude)" /claude \
+    && /claude --version > /claude-version
+
+FROM ${NIX_IMAGE} AS closure-builder
+WORKDIR /src
+COPY deploy/worker-kit/default.nix ./default.nix
+COPY deploy/worker-kit/nixpkgs.json ./nixpkgs.json
+COPY deploy/worker-kit/npm/ ./npm/
+COPY deploy/scripts/validate_mermaid_summary.mjs ./validate_mermaid_summary.mjs
+COPY --from=claude-installer /claude ./claude
+RUN nix-build default.nix -o /tmp/codify-worker-kit-runtime \
+    && readlink -f /tmp/codify-worker-kit-runtime > /tmp/runtime-store-path \
+    && nix-instantiate --eval --strict -E '(import ./default.nix {}).nixpkgsVersion' \
+      | tr -d '"' > /tmp/nixpkgs-version \
+    && nix-instantiate --eval --strict -E '(import ./default.nix {}).nixpkgsRevision' \
+      | tr -d '"' > /tmp/nixpkgs-revision \
+    && mkdir -p /out/nix/store \
+    && cp -a --parents $(nix-store -qR /tmp/codify-worker-kit-runtime) /out
+
+FROM alpine:3.21 AS artifact
+ARG WORKER_KIT_VERSION=0.1.0
+ARG TARGETARCH
+RUN apk add --no-cache jq
+COPY --from=launcher-builder /out/launcher /worker-kit/launcher
+COPY --from=launcher-builder /out/codify-run-as /worker-kit/bin/codify-run-as
+COPY --from=closure-builder /out/nix /worker-kit/nix
+COPY --from=closure-builder /tmp/runtime-store-path /tmp/runtime-store-path
+COPY --from=closure-builder /tmp/nixpkgs-version /tmp/nixpkgs-version
+COPY --from=closure-builder /tmp/nixpkgs-revision /tmp/nixpkgs-revision
+COPY --from=claude-installer /claude-version /tmp/claude-version
+COPY deploy/entrypoint.worker.sh /worker-kit/entrypoint.sh
+COPY deploy/worker-entrypoint/ /worker-kit/worker-entrypoint/
+COPY deploy/ci-claude.sh /worker-kit/ci-claude.sh
+COPY deploy/scripts/validate_mermaid_summary.mjs /worker-kit/validate_mermaid_summary.mjs
+RUN runtime_store="$(cat /tmp/runtime-store-path)" \
+    && nixpkgs_version="$(cat /tmp/nixpkgs-version)" \
+    && nixpkgs_revision="$(cat /tmp/nixpkgs-revision)" \
+    && claude_version="$(cat /tmp/claude-version)" \
+    && jq -n \
+      --arg version "${WORKER_KIT_VERSION}" \
+      --arg platform "linux/${TARGETARCH}" \
+      --arg runtime_bin "${runtime_store}/bin" \
+      --arg bash "${runtime_store}/bin/bash" \
+      --arg nixpkgs_version "${nixpkgs_version}" \
+      --arg nixpkgs_revision "${nixpkgs_revision}" \
+      --arg claude_version "${claude_version}" \
+      '{schema_version: 1, kit_version: $version, platform: $platform, runtime_bin: $runtime_bin, bash: $bash, entrypoint: "/opt/codify-kit/entrypoint.sh", components: {nixpkgs: $nixpkgs_version, nixpkgs_revision: $nixpkgs_revision, claude: $claude_version}}' \
+      > /worker-kit/manifest.json \
+    && chmod 755 /worker-kit/launcher /worker-kit/bin/* /worker-kit/entrypoint.sh /worker-kit/ci-claude.sh \
+    && test -d /worker-kit/nix/store \
+    && test -s /worker-kit/manifest.json
+
+FROM alpine:3.21 AS smoke
+ARG WORKER_KIT_VERSION
+COPY --from=artifact /worker-kit /opt/codify-kit
+COPY --from=artifact /worker-kit/nix/store /nix/store
+RUN mkdir -p /workspace \
+    && chmod 0777 /workspace \
+    && CODIFY_KIT_VERSION="${WORKER_KIT_VERSION}" /opt/codify-kit/launcher --verify \
+      --smoke 'test "$(command -v sh)" = /bin/sh' \
+    && touch /worker-kit-smoke-passed
+
+FROM artifact AS final
+COPY --from=smoke /worker-kit-smoke-passed /worker-kit/.smoke-passed
+CMD ["/bin/sh"]
