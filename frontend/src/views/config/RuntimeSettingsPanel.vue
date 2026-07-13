@@ -103,7 +103,6 @@
                 <n-input-number
                   v-model:value="formValue.ci_auto_repair_max_attempts"
                   :min="0"
-                  :max="10"
                   class="config-form__input"
                 />
                 <template #feedback>

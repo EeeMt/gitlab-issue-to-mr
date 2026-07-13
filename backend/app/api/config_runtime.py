@@ -270,10 +270,10 @@ def _validate_config_value(key: str, value: object) -> object:
         return value
 
     if key == "ci_auto_repair_max_attempts":
-        if not isinstance(value, int) or value < 0 or value > 10:
+        if not isinstance(value, int) or value < 0:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="ci_auto_repair_max_attempts must be between 0 and 10",
+                detail="ci_auto_repair_max_attempts must be 0 or greater",
             )
         return value
 
