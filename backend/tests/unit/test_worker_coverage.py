@@ -870,14 +870,14 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn('delivery-summary-validation.json', content)
         self.assertIn('CODIFY_CODEGRAPH_ENABLED', content)
         self.assertIn('prepare_codegraph', content)
-        self.assertIn('codegraph init /workspace', content)
-        self.assertIn('codegraph sync /workspace', content)
+        self.assertIn('export PATH="${CODIFY_RUNTIME_PATH}" && codegraph init /workspace', content)
+        self.assertIn('export PATH="${CODIFY_RUNTIME_PATH}" && codegraph sync /workspace', content)
         self.assertIn(
-            'codegraph install --target=claude --location=global --yes',
+            'export PATH="${CODIFY_RUNTIME_PATH}" && codegraph install --target=claude --location=global --yes',
             content,
         )
         self.assertIn(
-            'codegraph uninstall --target=claude --location=global --yes',
+            'export PATH="${CODIFY_RUNTIME_PATH}" && codegraph uninstall --target=claude --location=global --yes',
             content,
         )
         self.assertNotIn('del(.mcpServers.codegraph)', content)
@@ -1034,6 +1034,14 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn('codify_chown /opt/codify-issue-shared', content)
         self.assertNotIn('codify_chown -R /opt/codify-issue-shared', content)
 
+    def test_entrypoint_does_not_recursively_chown_home_with_read_only_mounts(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = _read_worker_entrypoint_sources(script)
+
+        self.assertIn('codify_chown /home/codify "${CODIFY_RUNTIME_DIR}"', content)
+        self.assertIn('codify_chown /home/codify/.m2/repository 2>/dev/null || true', content)
+        self.assertNotIn('codify_chown -R /home/codify "${CODIFY_RUNTIME_DIR}"', content)
+
     def test_entrypoint_keeps_runtime_artifacts_outside_worktree_until_after_commit(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
         content = _read_worker_entrypoint_sources(script)
@@ -1098,6 +1106,10 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
 
         self.assertIn('CODIFY_WORKER_PRE_SCRIPT_FILE="${CODIFY_RUNTIME_DIR}/worker-pre-script.sh"', content)
         self.assertIn('CODIFY_WORKER_POST_SCRIPT_FILE="${CODIFY_RUNTIME_DIR}/worker-post-script.sh"', content)
+        self.assertIn('prepare_worker_script_file "${CODIFY_WORKER_PRE_SCRIPT_FILE}"', content)
+        self.assertIn('prepare_worker_script_file "${CODIFY_WORKER_POST_SCRIPT_FILE}"', content)
+        self.assertIn('chmod 700 "${script_path}"', content)
+        self.assertIn('chmod 755 "${script_path}"', content)
         self.assertIn('run_worker_script "pre" "${CODIFY_WORKER_PRE_SCRIPT_FILE}"', content)
         self.assertIn('run_worker_script "post" "${CODIFY_WORKER_POST_SCRIPT_FILE}"', content)
         self.assertIn('codify_run_shell "cd /workspace && export PATH=', content)

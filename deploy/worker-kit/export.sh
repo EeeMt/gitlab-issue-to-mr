@@ -34,13 +34,15 @@ docker build \
 
 cid="$(docker create --platform "${PLATFORM}" "${IMAGE_TAG}" true)"
 mkdir -p "${STAGING}/build/worker-kit"
+# Stream through tar so read-only Nix store directory modes are applied after children exist.
 docker cp "${cid}:/worker-kit/." - | tar -C "${STAGING}/build/worker-kit/" -xf -
 docker rm "${cid}"
 cid=""
 
 mkdir -p "${STAGING}/${VERSION}-linux-${ARCH}"
 cp -a "${STAGING}/build/worker-kit/." "${STAGING}/${VERSION}-linux-${ARCH}/"
-tar -C "${STAGING}" -czf "${ARCHIVE}" "${VERSION}-linux-${ARCH}"
+# Do not encode macOS extended attributes as AppleDouble files in Linux kits.
+COPYFILE_DISABLE=1 tar -C "${STAGING}" -czf "${ARCHIVE}" "${VERSION}-linux-${ARCH}"
 
 if command -v sha256sum >/dev/null 2>&1; then
     (cd "${OUTPUT_DIR}" && sha256sum "$(basename "${ARCHIVE}")") > "${ARCHIVE}.sha256"

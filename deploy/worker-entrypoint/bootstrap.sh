@@ -28,7 +28,26 @@ CODIFY_WORKER_PRE_SCRIPT_FILE="${CODIFY_RUNTIME_DIR}/worker-pre-script.sh"
 CODIFY_WORKER_POST_SCRIPT_FILE="${CODIFY_RUNTIME_DIR}/worker-post-script.sh"
 export CODIFY_RUNTIME_DIR
 mkdir -p "${CODIFY_RUNTIME_DIR}" /home/codify /root
-codify_chown -R /home/codify "${CODIFY_RUNTIME_DIR}"
+codify_chown /home/codify "${CODIFY_RUNTIME_DIR}"
+if [ -d /home/codify/.m2 ]; then
+    codify_chown /home/codify/.m2 2>/dev/null || true
+fi
+if [ -d /home/codify/.m2/repository ]; then
+    codify_chown /home/codify/.m2/repository 2>/dev/null || true
+fi
+prepare_worker_script_file() {
+    local script_path="$1"
+    if [ ! -f "${script_path}" ]; then
+        return 0
+    fi
+    if codify_chown "${script_path}" 2>/dev/null; then
+        chmod 700 "${script_path}" 2>/dev/null || true
+    else
+        chmod 755 "${script_path}" 2>/dev/null || true
+    fi
+}
+prepare_worker_script_file "${CODIFY_WORKER_PRE_SCRIPT_FILE}"
+prepare_worker_script_file "${CODIFY_WORKER_POST_SCRIPT_FILE}"
 CONSOLE_LOG="${CODIFY_RUNTIME_DIR}/console.log"
 DELIVERY_SUMMARY_FILE="${CODIFY_RUNTIME_DIR}/delivery-summary.md"
 DELIVERY_SUMMARY_VALIDATION_FILE="${CODIFY_RUNTIME_DIR}/delivery-summary-validation.json"

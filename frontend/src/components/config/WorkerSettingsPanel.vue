@@ -133,10 +133,47 @@
                 </n-form-item>
               </n-gi>
               <n-gi>
+                <n-form-item :label="t('config.workerRuntimeMode')">
+                  <n-select
+                    v-model:value="workerFormValue.runtime_mode"
+                    :options="workerRuntimeModeOptions"
+                    class="config-form__input"
+                  />
+                </n-form-item>
+              </n-gi>
+              <n-gi>
                 <n-form-item :label="t('config.codegraph')">
                   <n-switch v-model:value="workerFormValue.codegraph_enabled" />
                   <template #feedback>
                     {{ t('config.codegraphHint') }}
+                  </template>
+                </n-form-item>
+              </n-gi>
+            </n-grid>
+            <n-grid
+              v-if="workerFormValue.runtime_mode === 'mounted_kit'"
+              :cols="isMobile ? 1 : 2"
+              :x-gap="16"
+              :y-gap="8"
+            >
+              <n-gi>
+                <n-form-item :label="t('config.workerKitVersion')">
+                  <n-input
+                    v-model:value="workerFormValue.worker_kit_version"
+                    class="config-form__input"
+                    placeholder="0.1.0"
+                  />
+                </n-form-item>
+              </n-gi>
+              <n-gi>
+                <n-form-item :label="t('config.workerKitPath')">
+                  <n-input
+                    v-model:value="workerFormValue.worker_kit_path"
+                    class="config-form__input"
+                    placeholder="/opt/codify/worker-kits/0.1.0-linux-amd64"
+                  />
+                  <template #feedback>
+                    {{ t('config.workerKitPathHint') }}
                   </template>
                 </n-form-item>
               </n-gi>
@@ -516,6 +553,9 @@ type WorkerFormValue = {
   enabled: boolean
   is_default: boolean
   image: string
+  runtime_mode: 'baked_image' | 'mounted_kit'
+  worker_kit_version: string
+  worker_kit_path: string
   use_system_docker: boolean
   docker_host: string
   docker_tls_ca: string
@@ -570,6 +610,11 @@ const mountModeOptions = [
   { label: 'Read-write (rw)', value: 'rw' }
 ]
 
+const workerRuntimeModeOptions = [
+  { label: t('config.workerRuntimeModeBakedImage'), value: 'baked_image' },
+  { label: t('config.workerRuntimeModeMountedKit'), value: 'mounted_kit' }
+]
+
 const environmentVariableTypeOptions = [
   { label: t('config.environmentVariablePlainText'), value: 'plain_text' },
   { label: t('config.environmentVariableSecret'), value: 'secret' }
@@ -581,6 +626,9 @@ const workerFormValue = ref<WorkerFormValue>({
   enabled: true,
   is_default: false,
   image: '',
+  runtime_mode: 'baked_image',
+  worker_kit_version: '',
+  worker_kit_path: '',
   use_system_docker: true,
   docker_host: '',
   docker_tls_ca: '',
@@ -664,6 +712,9 @@ function mapProfileToWorkerFormValue(
     enabled: profile?.enabled ?? true,
     is_default: profile?.is_default ?? false,
     image: profile?.image ?? '',
+    runtime_mode: profile?.runtime_mode ?? 'baked_image',
+    worker_kit_version: profile?.worker_kit_version ?? '',
+    worker_kit_path: profile?.worker_kit_path ?? '',
     use_system_docker: !profile?.docker_host,
     docker_host: profile?.docker_host ?? '',
     docker_tls_ca: profile?.docker_tls_ca ?? '',
@@ -692,6 +743,9 @@ function cloneWorkerFormValue(value: WorkerFormValue): WorkerFormValue {
     enabled: value.enabled,
     is_default: value.is_default,
     image: value.image,
+    runtime_mode: value.runtime_mode,
+    worker_kit_version: value.worker_kit_version,
+    worker_kit_path: value.worker_kit_path,
     use_system_docker: value.use_system_docker,
     docker_host: value.docker_host,
     docker_tls_ca: value.docker_tls_ca,
@@ -785,6 +839,9 @@ function createEmptyWorkerFormValue(): WorkerFormValue {
     enabled: true,
     is_default: false,
     image: '',
+    runtime_mode: 'baked_image',
+    worker_kit_version: '',
+    worker_kit_path: '',
     use_system_docker: true,
     docker_host: '',
     docker_tls_ca: '',
@@ -830,6 +887,15 @@ function buildWorkerProfilePayload(): WorkerProfilePayload {
     description: workerFormValue.value.description,
     enabled: workerFormValue.value.enabled,
     image: workerFormValue.value.image,
+    runtime_mode: workerFormValue.value.runtime_mode,
+    worker_kit_version:
+      workerFormValue.value.runtime_mode === 'mounted_kit'
+        ? workerFormValue.value.worker_kit_version
+        : null,
+    worker_kit_path:
+      workerFormValue.value.runtime_mode === 'mounted_kit'
+        ? workerFormValue.value.worker_kit_path
+        : null,
     docker_host: workerFormValue.value.use_system_docker
       ? null
       : workerFormValue.value.docker_host,

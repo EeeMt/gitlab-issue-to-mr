@@ -18,6 +18,9 @@ function createWorkerProfile(overrides: Record<string, any> = {}) {
     enabled: true,
     is_default: true,
     image: 'codify-worker/java21-maven:2026.07',
+    runtime_mode: 'baked_image',
+    worker_kit_version: null,
+    worker_kit_path: null,
     docker_host: null,
     docker_tls_ca: null,
     docker_tls_cert: null,
@@ -432,6 +435,76 @@ describe('WorkerSettingsPanel', () => {
       1,
       expect.objectContaining({
         codegraph_enabled: false
+      })
+    )
+  })
+
+  it('loads and saves mounted worker kit runtime settings', async () => {
+    mockGetAdminWorkerProfiles.mockResolvedValueOnce([
+      createWorkerProfile({
+        runtime_mode: 'mounted_kit',
+        worker_kit_version: '0.1.0',
+        worker_kit_path: '/opt/codify/worker-kits/0.1.0-linux-amd64'
+      })
+    ])
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: {
+        isMobile: false,
+        reloadKey: 0
+      }
+    })
+
+    await flushPromises()
+
+    const vm = wrapper.vm as any
+    expect(vm.workerFormValue.runtime_mode).toBe('mounted_kit')
+    expect(vm.workerFormValue.worker_kit_version).toBe('0.1.0')
+    expect(vm.workerFormValue.worker_kit_path).toBe(
+      '/opt/codify/worker-kits/0.1.0-linux-amd64'
+    )
+    expect(wrapper.text()).toContain('config.workerKitPath')
+
+    vm.workerFormValue.worker_kit_version = '0.2.0'
+    vm.workerFormValue.worker_kit_path = '/opt/codify/worker-kits/0.2.0-linux-amd64'
+    await vm.handleSaveWorker()
+
+    expect(mockUpdateWorkerProfile).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        runtime_mode: 'mounted_kit',
+        worker_kit_version: '0.2.0',
+        worker_kit_path: '/opt/codify/worker-kits/0.2.0-linux-amd64'
+      })
+    )
+  })
+
+  it('clears worker kit coordinates when saving baked image mode', async () => {
+    mockGetAdminWorkerProfiles.mockResolvedValueOnce([
+      createWorkerProfile({
+        runtime_mode: 'mounted_kit',
+        worker_kit_version: '0.1.0',
+        worker_kit_path: '/opt/codify/worker-kits/0.1.0-linux-amd64'
+      })
+    ])
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: {
+        isMobile: false,
+        reloadKey: 0
+      }
+    })
+
+    await flushPromises()
+
+    const vm = wrapper.vm as any
+    vm.workerFormValue.runtime_mode = 'baked_image'
+    await vm.handleSaveWorker()
+
+    expect(mockUpdateWorkerProfile).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        runtime_mode: 'baked_image',
+        worker_kit_version: null,
+        worker_kit_path: null
       })
     )
   })

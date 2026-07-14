@@ -60,6 +60,15 @@ def test_make_offline_bundle_export_target_builds_exports_and_packages():
     assert "deploy/offline-bundle && ./scripts/package-bundle.sh" in result.stdout
 
 
+def test_worker_kit_export_omits_macos_appledouble_metadata():
+    repo_root = Path(__file__).resolve().parents[3]
+    export_script = (repo_root / "deploy" / "worker-kit" / "export.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'COPYFILE_DISABLE=1 tar -C "${STAGING}" -czf "${ARCHIVE}"' in export_script
+
+
 def test_verify_runtime_scripts_mount_claude_without_breaking_docker_args():
     repo_root = Path(__file__).resolve().parents[3]
     scripts = (

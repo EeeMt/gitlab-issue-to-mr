@@ -6,7 +6,7 @@ configure_codegraph() {
         return 1
     fi
 
-    codify_run_shell 'cd /workspace && codegraph install --target=claude --location=global --yes'
+    codify_run_shell 'cd /workspace && export PATH="${CODIFY_RUNTIME_PATH}" && codegraph install --target=claude --location=global --yes'
 }
 
 disable_codegraph() {
@@ -15,7 +15,7 @@ disable_codegraph() {
         return 0
     fi
 
-    if ! codify_run_shell 'cd /workspace && codegraph uninstall --target=claude --location=global --yes'; then
+    if ! codify_run_shell 'cd /workspace && export PATH="${CODIFY_RUNTIME_PATH}" && codegraph uninstall --target=claude --location=global --yes'; then
         echo "Warning: could not remove CodeGraph from Claude configuration"
     fi
 }
@@ -39,9 +39,9 @@ prepare_codegraph() {
 
     if [ -d /workspace/.codegraph ]; then
         echo "Syncing existing CodeGraph index..."
-        codify_run_shell 'cd /workspace && codegraph sync /workspace'
+        codify_run_shell 'cd /workspace && export PATH="${CODIFY_RUNTIME_PATH}" && codegraph sync /workspace'
     else
         echo "Initializing CodeGraph index..."
-        codify_run_shell 'cd /workspace && codegraph init /workspace'
+        codify_run_shell 'cd /workspace && export PATH="${CODIFY_RUNTIME_PATH}" && codegraph init /workspace'
     fi
 }
