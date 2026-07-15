@@ -154,12 +154,14 @@
                   <div class="task-mode-card__label">{{ t('issue.taskModeExecute') }}</div>
                   <div class="task-mode-card__desc">{{ t('issue.taskModeExecuteDesc') }}</div>
                 </div>
-                <n-icon
-                  v-if="taskMode === 'execute'"
-                  :component="CheckmarkCircleOutline"
-                  size="16"
-                  class="task-mode-card__check"
-                />
+                <Transition name="selection-check">
+                  <n-icon
+                    v-if="taskMode === 'execute'"
+                    :component="CheckmarkCircleOutline"
+                    size="16"
+                    class="task-mode-card__check"
+                  />
+                </Transition>
               </div>
               <div
                 class="task-mode-card"
@@ -179,78 +181,111 @@
                   <div class="task-mode-card__label">{{ t('issue.taskModePlan') }}</div>
                   <div class="task-mode-card__desc">{{ t('issue.taskModePlanDesc') }}</div>
                 </div>
-                <n-icon
-                  v-if="taskMode === 'plan'"
-                  :component="CheckmarkCircleOutline"
-                  size="16"
-                  class="task-mode-card__check"
-                />
+                <Transition name="selection-check">
+                  <n-icon
+                    v-if="taskMode === 'plan'"
+                    :component="CheckmarkCircleOutline"
+                    size="16"
+                    class="task-mode-card__check"
+                  />
+                </Transition>
               </div>
             </div>
-            <div v-if="taskMode === 'execute'" class="require-changes-row">
-              <span class="prompt-label-require-text">{{ t('issue.requireChanges') }}</span>
-              <n-tooltip
-                trigger="hover"
-                placement="top"
-                :content-style="issueDetailTooltipContentStyle"
-                :theme-overrides="issueDetailTooltipThemeOverrides"
-              >
-                <template #trigger>
-                  <n-icon :component="InformationCircleOutline" size="13" class="require-changes-info-icon" />
-                </template>
-                {{ t('issue.requireChangesHint') }}
-              </n-tooltip>
-              <n-switch v-model:value="requireChanges" size="small" />
-            </div>
+            <Transition name="task-mode-detail">
+              <div v-if="taskMode === 'execute'" class="task-mode-detail-reveal">
+                <div class="task-mode-detail-reveal__inner">
+                  <div class="require-changes-row">
+                    <span class="prompt-label-require-text">{{ t('issue.requireChanges') }}</span>
+                    <n-tooltip
+                      trigger="hover"
+                      placement="top"
+                      :content-style="issueDetailTooltipContentStyle"
+                      :theme-overrides="issueDetailTooltipThemeOverrides"
+                    >
+                      <template #trigger>
+                        <n-icon :component="InformationCircleOutline" size="13" class="require-changes-info-icon" />
+                      </template>
+                      {{ t('issue.requireChangesHint') }}
+                    </n-tooltip>
+                    <n-switch v-model:value="requireChanges" size="small" />
+                  </div>
+                </div>
+              </div>
+            </Transition>
           </div>
         </n-form-item>
 
-        <details v-if="taskMode !== null" class="run-instruction-advanced">
-          <summary class="run-instruction-advanced__summary">
-            <span class="run-instruction-advanced__icon">
-              <n-icon :component="OptionsOutline" size="16" />
-            </span>
-            <span class="run-instruction-advanced__copy">
-              <span class="run-instruction-advanced__title">{{ t('runInstruction.advanced') }}</span>
-              <span class="run-instruction-advanced__hint">
-                {{ t('runInstruction.advancedHint') }}
-              </span>
-            </span>
-            <span class="run-instruction-advanced__chevron" aria-hidden="true">›</span>
-          </summary>
-          <div class="run-instruction-advanced__content">
-            <n-spin :show="defaultsLoading">
-              <n-alert v-if="defaultsError" type="error" :bordered="false">
-                {{ defaultsError }}
-              </n-alert>
-              <div class="run-instruction-field">
-                <div class="run-instruction-header">
-                  <span class="run-instruction-header__title">{{ t('runInstruction.template') }}</span>
-                  <div class="run-instruction-header__actions">
-                    <n-button size="tiny" quaternary @click="usePromptOnly">
-                      {{ t('runInstruction.usePromptOnly') }}
-                    </n-button>
-                    <n-button size="tiny" quaternary @click="restoreRunInstructionDefault">
-                      {{ t('runInstruction.restoreDefault') }}
-                    </n-button>
+        <Transition name="advanced-option">
+          <div v-if="taskMode !== null" class="run-instruction-advanced-reveal">
+            <div class="run-instruction-advanced-reveal__inner">
+              <div
+                class="run-instruction-advanced"
+                :class="{ 'run-instruction-advanced--open': runInstructionExpanded }"
+              >
+                <button
+                  type="button"
+                  class="run-instruction-advanced__summary"
+                  :aria-expanded="runInstructionExpanded"
+                  :aria-controls="runInstructionAdvancedContentId"
+                  @click="runInstructionExpanded = !runInstructionExpanded"
+                >
+                  <span class="run-instruction-advanced__icon">
+                    <n-icon :component="OptionsOutline" size="16" />
+                  </span>
+                  <span class="run-instruction-advanced__copy">
+                    <span class="run-instruction-advanced__title">{{ t('runInstruction.advanced') }}</span>
+                    <span class="run-instruction-advanced__hint">
+                      {{ t('runInstruction.advancedHint') }}
+                    </span>
+                  </span>
+                  <span class="run-instruction-advanced__chevron" aria-hidden="true">›</span>
+                </button>
+                <Transition name="advanced-content">
+                  <div
+                    v-if="runInstructionExpanded"
+                    :id="runInstructionAdvancedContentId"
+                    class="run-instruction-advanced__content-reveal"
+                  >
+                    <div class="run-instruction-advanced__content-reveal-inner">
+                      <div class="run-instruction-advanced__content">
+                        <n-spin :show="defaultsLoading">
+                          <n-alert v-if="defaultsError" type="error" :bordered="false">
+                            {{ defaultsError }}
+                          </n-alert>
+                          <div class="run-instruction-field">
+                            <div class="run-instruction-header">
+                              <span class="run-instruction-header__title">{{ t('runInstruction.template') }}</span>
+                              <div class="run-instruction-header__actions">
+                                <n-button size="tiny" quaternary @click="usePromptOnly">
+                                  {{ t('runInstruction.usePromptOnly') }}
+                                </n-button>
+                                <n-button size="tiny" quaternary @click="restoreRunInstructionDefault">
+                                  {{ t('runInstruction.restoreDefault') }}
+                                </n-button>
+                              </div>
+                            </div>
+                            <RunInstructionTemplateEditor
+                              :model-value="runInstructionTemplate"
+                              :available-placeholders="currentAvailablePlaceholders"
+                              :known-placeholders="knownRunInstructionPlaceholders"
+                              hide-actions
+                              preview-enabled
+                              :preview-loading="previewLoading"
+                              :preview-result="previewResult"
+                              :preview-error="previewError"
+                              @update:model-value="handleRunInstructionInput"
+                              @preview="handleRunInstructionPreview"
+                            />
+                          </div>
+                        </n-spin>
+                      </div>
+                    </div>
                   </div>
-                </div>
-                <RunInstructionTemplateEditor
-                  :model-value="runInstructionTemplate"
-                  :available-placeholders="currentAvailablePlaceholders"
-                  :known-placeholders="knownRunInstructionPlaceholders"
-                  hide-actions
-                  preview-enabled
-                  :preview-loading="previewLoading"
-                  :preview-result="previewResult"
-                  :preview-error="previewError"
-                  @update:model-value="handleRunInstructionInput"
-                  @preview="handleRunInstructionPreview"
-                />
+                </Transition>
               </div>
-            </n-spin>
+            </div>
           </div>
-        </details>
+        </Transition>
 
         <!-- Priority cards -->
         <n-form-item :label="t('common.priority')">
@@ -330,25 +365,29 @@
               </button>
             </div>
             <Transition name="schedule-detail">
-              <div v-if="scheduleType === 'scheduled'" class="schedule-detail-panel">
-                <n-date-picker
-                  v-model:value="scheduledAt"
-                  class="schedule-detail-panel__picker"
-                  type="datetime"
-                  clearable
-                  :placeholder="t('createTask.selectDateTime')"
-                  :is-date-disabled="isScheduleDateDisabled"
-                />
-                <n-button
-                  class="schedule-detail-panel__heatmap"
-                  size="small"
-                  secondary
-                  :loading="scheduledTasksLoading"
-                  @click="openHeatmapDrawer"
-                >
-                  <template #icon><n-icon :component="CalendarOutline" /></template>
-                  {{ t('createTask.viewScheduleHeatmap') }}
-                </n-button>
+              <div v-if="scheduleType === 'scheduled'" class="schedule-detail-reveal">
+                <div class="schedule-detail-reveal__inner">
+                  <div class="schedule-detail-panel">
+                    <n-date-picker
+                      v-model:value="scheduledAt"
+                      class="schedule-detail-panel__picker"
+                      type="datetime"
+                      clearable
+                      :placeholder="t('createTask.selectDateTime')"
+                      :is-date-disabled="isScheduleDateDisabled"
+                    />
+                    <n-button
+                      class="schedule-detail-panel__heatmap"
+                      size="small"
+                      secondary
+                      :loading="scheduledTasksLoading"
+                      @click="openHeatmapDrawer"
+                    >
+                      <template #icon><n-icon :component="CalendarOutline" /></template>
+                      {{ t('createTask.viewScheduleHeatmap') }}
+                    </n-button>
+                  </div>
+                </div>
               </div>
             </Transition>
           </div>
@@ -487,7 +526,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, toRef, useAttrs } from 'vue'
+import { ref, computed, watch, onMounted, toRef, useAttrs, useId } from 'vue'
 import {
   NButton, NDrawer, NDrawerContent, NForm, NFormItem, NRadio, NRadioGroup,
   NDatePicker, NSelect, NAlert, NTooltip, NSwitch, NSpin, NIcon, NScrollbar, NTag,
@@ -569,6 +608,8 @@ const priority = ref(DEFAULT_TASK_PRIORITY)
 const requireChanges = ref(DEFAULT_REQUIRE_CHANGES)
 const taskMode = ref<'execute' | 'plan' | null>(null)
 const taskModeErrorVisible = ref(false)
+const runInstructionExpanded = ref(false)
+const runInstructionAdvancedContentId = `${useId()}-run-instruction-advanced-content`
 const selectedProviderId = ref<number | null>(null)
 const selectedWorkerProfileId = ref<number | null>(null)
 const scheduleType = ref<'now' | 'scheduled'>('now')
@@ -696,6 +737,7 @@ watch([prompt, requireChanges], () => {
 
 watch(() => props.show, (val) => {
   invalidateRunInstructionPreview()
+  runInstructionExpanded.value = false
   if (val) {
     if (props.mode === 'edit' && props.task) {
       prompt.value = props.task.user_prompt ?? ''
@@ -952,7 +994,6 @@ onMounted(() => {
 
 .run-instruction-advanced {
   width: 100%;
-  margin-bottom: 16px;
   overflow: hidden;
   border: 1px solid var(--n-border-color);
   border-radius: 10px;
@@ -960,7 +1001,43 @@ onMounted(() => {
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.run-instruction-advanced[open] {
+.run-instruction-advanced-reveal {
+  display: grid;
+  grid-template-rows: 1fr;
+  margin-bottom: 16px;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.run-instruction-advanced-reveal__inner,
+.run-instruction-advanced__content-reveal-inner {
+  min-height: 0;
+}
+
+.run-instruction-advanced__content-reveal-inner,
+.advanced-option-enter-active .run-instruction-advanced-reveal__inner,
+.advanced-option-leave-active .run-instruction-advanced-reveal__inner {
+  overflow: hidden;
+}
+
+.advanced-option-enter-active,
+.advanced-option-leave-active {
+  transition:
+    grid-template-rows 0.18s cubic-bezier(0.4, 0, 0.2, 1),
+    margin-bottom 0.18s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.14s ease,
+    transform 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.advanced-option-enter-from,
+.advanced-option-leave-to {
+  grid-template-rows: 0fr;
+  margin-bottom: 0;
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+.run-instruction-advanced--open {
   border-color: var(--n-primary-color);
   box-shadow: 0 0 0 2px rgba(99, 226, 183, 0.06);
 }
@@ -969,15 +1046,16 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 10px;
+  width: 100%;
   min-height: 48px;
   padding: 8px 12px;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
-  list-style: none;
   user-select: none;
-}
-
-.run-instruction-advanced__summary::-webkit-details-marker {
-  display: none;
 }
 
 .run-instruction-advanced__icon {
@@ -1024,9 +1102,28 @@ onMounted(() => {
   transition: transform 0.15s ease, color 0.15s ease;
 }
 
-.run-instruction-advanced[open] .run-instruction-advanced__chevron {
+.run-instruction-advanced--open .run-instruction-advanced__chevron {
   color: var(--n-primary-color);
   transform: rotate(90deg);
+}
+
+.run-instruction-advanced__content-reveal {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.advanced-content-enter-active,
+.advanced-content-leave-active {
+  transition:
+    grid-template-rows 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.16s ease;
+}
+
+.advanced-content-enter-from,
+.advanced-content-leave-to {
+  grid-template-rows: 0fr;
+  opacity: 0;
 }
 
 .run-instruction-advanced__content {
@@ -1036,14 +1133,24 @@ onMounted(() => {
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .run-instruction-advanced:not([open]):hover {
+  .run-instruction-advanced:not(.run-instruction-advanced--open):hover {
     border-color: var(--n-primary-color);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .run-instruction-advanced,
-  .run-instruction-advanced__chevron {
+  .run-instruction-advanced__chevron,
+  .task-mode-card,
+  .task-mode-card__icon,
+  .selection-check-enter-active,
+  .selection-check-leave-active,
+  .task-mode-detail-enter-active,
+  .task-mode-detail-leave-active,
+  .advanced-option-enter-active,
+  .advanced-option-leave-active,
+  .advanced-content-enter-active,
+  .advanced-content-leave-active {
     transition: none;
   }
 }
@@ -1069,7 +1176,11 @@ onMounted(() => {
   border: 1px solid var(--n-border-color);
   border-radius: 8px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
 }
 
 .task-mode-card:hover {
@@ -1093,6 +1204,7 @@ onMounted(() => {
   margin-top: 2px;
   flex-shrink: 0;
   color: var(--n-text-color-3);
+  transition: color 0.15s ease;
 }
 
 .task-mode-card--active .task-mode-card__icon {
@@ -1104,6 +1216,17 @@ onMounted(() => {
   top: 10px;
   right: 10px;
   color: var(--n-primary-color);
+}
+
+.selection-check-enter-active,
+.selection-check-leave-active {
+  transition: opacity 0.14s ease, transform 0.14s ease;
+}
+
+.selection-check-enter-from,
+.selection-check-leave-to {
+  opacity: 0;
+  transform: scale(0.72);
 }
 
 .task-mode-card__body {
@@ -1126,8 +1249,37 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 8px;
   padding-left: 12px;
+}
+
+.task-mode-detail-reveal {
+  display: grid;
+  grid-template-rows: 1fr;
+  margin-top: 8px;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.task-mode-detail-reveal__inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.task-mode-detail-enter-active,
+.task-mode-detail-leave-active {
+  transition:
+    grid-template-rows 0.18s cubic-bezier(0.4, 0, 0.2, 1),
+    margin-top 0.18s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.14s ease,
+    transform 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.task-mode-detail-enter-from,
+.task-mode-detail-leave-to {
+  grid-template-rows: 0fr;
+  margin-top: 0;
+  opacity: 0;
+  transform: translateY(-4px);
 }
 
 .prompt-label-require-text {
@@ -1211,7 +1363,6 @@ onMounted(() => {
 .schedule-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
   width: 100%;
 }
 
@@ -1315,15 +1466,34 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
+.schedule-detail-reveal {
+  display: grid;
+  grid-template-rows: 1fr;
+  margin-top: 10px;
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .schedule-detail-enter-active,
 .schedule-detail-leave-active {
-  transition: opacity 0.16s ease, transform 0.16s ease;
+  transition:
+    grid-template-rows 0.18s cubic-bezier(0.4, 0, 0.2, 1),
+    margin-top 0.18s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.14s ease,
+    transform 0.18s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .schedule-detail-enter-from,
 .schedule-detail-leave-to {
+  grid-template-rows: 0fr;
+  margin-top: 0;
   opacity: 0;
   transform: translateY(-4px);
+}
+
+.schedule-detail-reveal__inner {
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* Provider section */

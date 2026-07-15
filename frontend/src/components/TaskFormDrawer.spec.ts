@@ -450,6 +450,13 @@ describe('TaskFormDrawer', () => {
       expect(wrapper.findAll('.task-mode-card--error')).toHaveLength(0)
       expect(wrapper.findAll('.task-mode-selector .n-radio')).toHaveLength(0)
       expect(wrapper.findAll('.task-mode-card__check')).toHaveLength(1)
+      expect(wrapper.find('.task-mode-detail-reveal').exists()).toBe(true)
+
+      await wrapper.findAll('.task-mode-card')[1].trigger('click')
+      await nextTick()
+      expect(wrapper.vm.taskMode).toBe('plan')
+      expect(wrapper.find('.task-mode-detail-reveal').exists()).toBe(false)
+      expect(wrapper.findAll('.task-mode-card__check')).toHaveLength(1)
     })
 
     it('warns when scheduled mode has no selected time', async () => {
@@ -472,14 +479,16 @@ describe('TaskFormDrawer', () => {
       const scheduleCards = wrapper.findAll('.schedule-mode-card')
       expect(scheduleCards).toHaveLength(2)
       expect(scheduleCards[0].attributes('aria-checked')).toBe('true')
-      expect(wrapper.find('.schedule-detail-panel').exists()).toBe(false)
+      expect(wrapper.find('.schedule-detail-reveal').exists()).toBe(false)
 
       await scheduleCards[1].trigger('click')
       await nextTick()
 
       expect(wrapper.vm.scheduleType).toBe('scheduled')
       expect(scheduleCards[1].attributes('aria-checked')).toBe('true')
-      expect(wrapper.find('.schedule-detail-panel').exists()).toBe(true)
+      const scheduleDetail = wrapper.get('.schedule-detail-reveal')
+      expect(scheduleDetail.find('.schedule-detail-reveal__inner').exists()).toBe(true)
+      expect(scheduleDetail.find('.schedule-detail-panel').exists()).toBe(true)
     })
 
     it('warns when scheduled time is in the past', async () => {
@@ -1131,18 +1140,25 @@ describe('TaskFormDrawer', () => {
       expect(wrapper.vm.taskMode).toBeNull()
       expect(wrapper.vm.runInstructionTemplate).toBe('')
       expect(wrapper.get('.n-drawer-content').attributes('data-native-scrollbar')).toBe('false')
-      expect(wrapper.find('details.run-instruction-advanced').exists()).toBe(false)
+      expect(wrapper.find('.run-instruction-advanced-reveal').exists()).toBe(false)
 
       wrapper.vm.selectTaskMode('execute')
       await nextTick()
       expect(wrapper.vm.runInstructionTemplate).toBe('Worker execute {{user_prompt}}')
-      expect(wrapper.find('details.run-instruction-advanced').exists()).toBe(true)
+      expect(wrapper.find('.run-instruction-advanced-reveal').exists()).toBe(true)
       expect(wrapper.find('.run-instruction-advanced__title').text()).toBe(
         'runInstruction.advanced'
       )
       expect(wrapper.find('.run-instruction-advanced__hint').text()).toBe(
         'runInstruction.advancedHint'
       )
+      const advancedSummary = wrapper.get('.run-instruction-advanced__summary')
+      expect(advancedSummary.attributes('aria-expanded')).toBe('false')
+      expect(wrapper.find('.run-instruction-advanced__content-reveal').exists()).toBe(false)
+
+      await advancedSummary.trigger('click')
+      expect(advancedSummary.attributes('aria-expanded')).toBe('true')
+      expect(wrapper.find('.run-instruction-advanced__content-reveal').exists()).toBe(true)
     })
 
     it('leaves the execute default to the backend when Advanced is never opened', async () => {
@@ -1153,7 +1169,7 @@ describe('TaskFormDrawer', () => {
       expect(mockApi.createTask).toHaveBeenCalledWith(
         expect.not.objectContaining({ run_instruction_template: expect.anything() })
       )
-      expect(wrapper.find('details.run-instruction-advanced').attributes('open')).toBeUndefined()
+      expect(wrapper.get('.run-instruction-advanced__summary').attributes('aria-expanded')).toBe('false')
     })
 
     it('keeps an edited template when mode replacement is declined', async () => {
