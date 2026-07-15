@@ -1,0 +1,27 @@
+# Java 21 + Maven project runtime image for mounted worker-kit profiles.
+#
+# Codify-owned tools, entrypoint scripts, CodeGraph, Mermaid validation, and ci-claude
+# are supplied by the mounted worker kit. Claude CLI is supplied by the worker profile,
+# usually through a read-only volume mounted at /usr/local/bin/claude.
+FROM maven:3.9.9-eclipse-temurin-21
+
+WORKDIR /workspace
+
+# Keep this image focused on project build tools. The worker kit supplies jq,
+# ripgrep, Node.js, Python helpers, and Codify orchestration scripts. The base
+# Maven image already provides Java 21, Maven, Git, SSH, curl, and CA tooling.
+RUN ln -sf /opt/java/openjdk/bin/java /usr/local/bin/java \
+    && ln -sf /opt/java/openjdk/bin/keytool /usr/local/bin/keytool \
+    && mkdir -p /workspace /home/codify/.m2/repository \
+    && chown -R 1000:1000 /workspace /home/codify \
+    && java -version \
+    && keytool -help >/dev/null \
+    && mvn -version
+
+ENV JAVA_HOME=/opt/java/openjdk
+ENV MAVEN_CONFIG=/home/codify/.m2
+ENV LC_ALL=C.UTF-8
+ENV LANG=C.UTF-8
+ENV LANGUAGE=C
+
+CMD ["/bin/sh"]

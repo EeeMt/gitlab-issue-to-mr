@@ -192,14 +192,14 @@ cd ../deploy && docker-compose build nginx && docker-compose up -d nginx
 
 当 Worker 执行环境变更时，例如：
 
-- `deploy/Dockerfile.worker`
+- `deploy/Dockerfile.worker-java21-maven`
 - Worker 内依赖工具
 - Claude 执行环境
 
 请重建 Worker 镜像：
 
 ```bash
-docker build -f deploy/Dockerfile.worker -t codify-worker/java21-maven:2026.07 .
+docker build -f deploy/Dockerfile.worker-java21-maven -t codify-worker/java21-maven:2026.07 .
 ```
 
 如果 `WORKER_IMAGE` 使用了其他标签，请同步更新配置。

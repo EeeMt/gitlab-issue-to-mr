@@ -11,6 +11,7 @@ export DOCKER_BUILDKIT := 1
 export COMPOSE_DOCKER_CLI_BUILD := 1
 WORKER_KIT_VERSION ?= 0.1.0
 WORKER_KIT_PLATFORM ?= linux/amd64
+JAVA21_MAVEN_WORKER_DOCKERFILE := $(PROJECT_ROOT)/deploy/Dockerfile.worker-java21-maven
 
 # ============================================
 # Development Environment
@@ -19,7 +20,7 @@ WORKER_KIT_PLATFORM ?= linux/amd64
 .PHONY: build
 build: ## Build all images (backend, nginx, worker)
 	cd $(PROJECT_ROOT)/deploy && docker-compose --env-file .env.test build
-	docker build -f $(PROJECT_ROOT)/deploy/Dockerfile.worker -t codify-worker/java21-maven:2026.07 $(PROJECT_ROOT)
+	docker build -f $(JAVA21_MAVEN_WORKER_DOCKERFILE) -t codify-worker/java21-maven:2026.07 $(PROJECT_ROOT)
 	@printf "\nBuild summary:\n"
 	@printf "  - codify-backend:latest\n"
 	@printf "  - codify-nginx:latest\n"
@@ -42,7 +43,7 @@ worker-kit-verify: ## Verify KIT_PATH against RUNTIME_IMAGE (optional CLAUDE_HOS
 
 .PHONY: up
 up: ## Start development environment (rebuilds backend, nginx, and worker images)
-	docker build -f $(PROJECT_ROOT)/deploy/Dockerfile.worker -t codify-worker/java21-maven:2026.07 $(PROJECT_ROOT)
+	docker build -f $(JAVA21_MAVEN_WORKER_DOCKERFILE) -t codify-worker/java21-maven:2026.07 $(PROJECT_ROOT)
 	cd $(PROJECT_ROOT)/deploy && docker-compose --env-file .env.test up -d --build
 
 .PHONY: down
@@ -85,7 +86,7 @@ rebuild-nginx: ## Rebuild nginx image and restart container
 
 .PHONY: rebuild-worker
 rebuild-worker: ## Rebuild worker image
-	docker build -f $(PROJECT_ROOT)/deploy/Dockerfile.worker -t codify-worker/java21-maven:2026.07 $(PROJECT_ROOT)
+	docker build -f $(JAVA21_MAVEN_WORKER_DOCKERFILE) -t codify-worker/java21-maven:2026.07 $(PROJECT_ROOT)
 
 # ============================================
 # Testing

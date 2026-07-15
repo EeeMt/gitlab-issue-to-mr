@@ -124,7 +124,7 @@ playwright==1.52.0          (pinned for browser compatibility)
 
 ### 2.5 系统 APT 包
 
-已 bake 到各 Docker 镜像中（参见 Dockerfile.backend, Dockerfile.worker, Dockerfile.e2e）。
+已 bake 到各 Docker 镜像中（参见 Dockerfile.backend, Dockerfile.worker-java21-maven, Dockerfile.e2e）。
 **如果只用预构建镜像，无需单独打包 APT 依赖。**
 
 ---
@@ -146,7 +146,7 @@ mkdir -p offline-bundle-dev/{images,python-wheels,node-deps,bin,source}
 # ① 先确保所有镜像已构建
 cd deploy
 docker compose build              # 构建 backend, nginx
-docker build -f Dockerfile.worker -t codify-worker/java21-maven:2026.07 ..  # 构建 worker
+docker build -f Dockerfile.worker-java21-maven -t codify-worker/java21-maven:2026.07 ..  # 构建 Java/Maven worker runtime
 docker pull postgres:16-alpine    # 拉取 postgres
 
 # ② 导出运行镜像（部署用）
@@ -629,10 +629,10 @@ mkdir -p deploy/offline-bin
 cp offline-bundle-dev/bin/claude deploy/offline-bin/
 
 # 构建
-docker build -f deploy/Dockerfile.worker -t codify-worker/java21-maven:2026.07 .
+docker build -f deploy/Dockerfile.worker-java21-maven -t codify-worker/java21-maven:2026.07 .
 ```
 
-修改 Dockerfile.worker：
+修改 Dockerfile.worker-java21-maven：
 
 ```dockerfile
 # 替换在线下载 Claude CLI 为直接 COPY

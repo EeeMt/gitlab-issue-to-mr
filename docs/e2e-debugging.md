@@ -33,7 +33,7 @@ ANTHROPIC_MODEL=MiniMax-M2.5                  # 使用的模型
 
 ```bash
 # 1. 重新构建 worker 镜像（修改 entrypoint.sh 后需要）
-docker build -f deploy/Dockerfile.worker -t codify-worker/java21-maven:2026.07 .
+docker build -f deploy/Dockerfile.worker-java21-maven -t codify-worker/java21-maven:2026.07 .
 
 # 2. 重新构建 backend 镜像（修改 worker.py 后需要）
 docker build -f deploy/Dockerfile.backend -t codify-backend:latest .
@@ -242,7 +242,7 @@ curl -s -H "PRIVATE-TOKEN: $GITLAB_TOKEN" \
 docker ps -a | grep codify
 
 # 7. 重新构建 worker 镜像（修改 entrypoint.sh 后需要）
-docker build -f deploy/Dockerfile.worker -t codify-worker/java21-maven:2026.07 .
+docker build -f deploy/Dockerfile.worker-java21-maven -t codify-worker/java21-maven:2026.07 .
 
 # 8. 重新构建 backend 镜像（修改 worker.py 后需要）
 docker build -f deploy/Dockerfile.backend -t codify-backend:latest .
@@ -308,5 +308,5 @@ GET  /api/v4/projects/1/repository/branches # 列出分支
 ### 配置文件
 - `deploy/.env.test` - 测试环境配置（docker-compose 使用）
 - `deploy/docker-compose.yml` - Docker Compose 配置
-- `deploy/Dockerfile.worker` - Worker 镜像构建
+- `deploy/Dockerfile.worker-java21-maven` - Java 21/Maven Worker runtime 镜像构建
 - `deploy/Dockerfile.backend` - Backend 镜像构建

@@ -136,7 +136,7 @@ docker build -f deploy/Dockerfile.frontend -t codify-nginx:latest .
 cd deploy && docker-compose up -d --build nginx
 
 # worker
-docker build -f deploy/Dockerfile.worker -t codify-worker/java21-maven:2026.07 .
+docker build -f deploy/Dockerfile.worker-java21-maven -t codify-worker/java21-maven:2026.07 .
 ```
 
 ## 使用方式

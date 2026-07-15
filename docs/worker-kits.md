@@ -32,9 +32,10 @@ The kit includes Bash, Git, curl, jq, Python, Node.js, SSH, ripgrep, CodeGraph, 
 Mermaid validator. Claude CLI is intentionally outside the kit and must be supplied by the
 runtime image or a profile volume mount.
 
-`deploy/Dockerfile.worker` now builds `codify-worker/java21-maven:2026.07` as a mounted-kit runtime image.
-It contains the project-side Python, Java 21, Maven toolchain, workspace, and `codify` UID
-setup, but no Codify entrypoint, Claude CLI, CodeGraph, Mermaid npm bundle, or ci-claude script.
+`deploy/Dockerfile.worker-java21-maven` builds `codify-worker/java21-maven:2026.07` as one
+mounted-kit runtime image. It contains the project-side Java 21 and Maven toolchain, workspace,
+and UID 1000 write setup, but no Python runtime, Codify entrypoint, Claude CLI, CodeGraph,
+Mermaid npm bundle, or ci-claude script.
 
 ## Build and export
 

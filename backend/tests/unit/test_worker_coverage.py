@@ -733,7 +733,7 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
             self.assertGreater(module_index, previous_index)
             previous_index = module_index
 
-        dockerfile = (root / "deploy" / "Dockerfile.worker").read_text()
+        dockerfile = (root / "deploy" / "Dockerfile.worker-java21-maven").read_text()
         test_dockerfile = (
             root / "backend" / "tests" / "mock_integration" / "fake_claude" / "Dockerfile.worker-test"
         ).read_text()
@@ -789,12 +789,21 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
 
     def test_runtime_worker_image_delegates_codify_tools_to_worker_kit(self):
         root = Path(__file__).resolve().parents[3]
-        dockerfile = (root / "deploy" / "Dockerfile.worker").read_text()
+        dockerfile = (root / "deploy" / "Dockerfile.worker-java21-maven").read_text()
 
-        self.assertIn("Project runtime image for mounted worker-kit profiles", dockerfile)
-        self.assertIn("openjdk-21-jdk \\", dockerfile)
-        self.assertIn("maven \\", dockerfile)
-        self.assertIn("useradd --create-home --shell /bin/bash --uid 1000 codify", dockerfile)
+        self.assertIn("Java 21 + Maven project runtime image", dockerfile)
+        self.assertIn("FROM maven:3.9.9-eclipse-temurin-21", dockerfile)
+        self.assertIn("MAVEN_CONFIG=/home/codify/.m2", dockerfile)
+        self.assertIn("ln -sf /opt/java/openjdk/bin/java /usr/local/bin/java", dockerfile)
+        self.assertIn("ln -sf /opt/java/openjdk/bin/keytool /usr/local/bin/keytool", dockerfile)
+        self.assertIn("mkdir -p /workspace /home/codify/.m2/repository", dockerfile)
+        self.assertIn("chown -R 1000:1000 /workspace /home/codify", dockerfile)
+        self.assertIn("keytool -help >/dev/null", dockerfile)
+        self.assertNotIn("FROM python:", dockerfile)
+        self.assertNotIn("python3", dockerfile)
+        self.assertNotIn("openjdk-21-jdk", dockerfile)
+        self.assertNotIn("apt-get install", dockerfile)
+        self.assertNotIn("useradd --create-home --shell /bin/bash --uid 1000 codify", dockerfile)
         self.assertNotIn("claude.ai/install.sh", dockerfile)
         self.assertNotIn("COPY --from=claude-installer", dockerfile)
         self.assertNotIn("COPY deploy/entrypoint.worker.sh", dockerfile)
@@ -903,7 +912,7 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn("COPY deploy/scripts/validate_mermaid_summary.mjs", worker_kit_dockerfile)
         self.assertIn("codify-worker-kit-node-tools", worker_kit_nix)
 
-        runtime_dockerfile = (root / "deploy" / "Dockerfile.worker").read_text()
+        runtime_dockerfile = (root / "deploy" / "Dockerfile.worker-java21-maven").read_text()
         self.assertNotIn("npm install --omit=dev mermaid", runtime_dockerfile)
         self.assertNotIn("deploy/scripts/validate_mermaid_summary.mjs", runtime_dockerfile)
         self.assertNotIn("@colbymchenry/codegraph", runtime_dockerfile)
