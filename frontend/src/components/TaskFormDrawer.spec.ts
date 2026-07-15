@@ -58,7 +58,13 @@ vi.mock('../api', () => ({
 vi.mock('./RunInstructionTemplateEditor.vue', () => ({
   default: {
     name: 'RunInstructionTemplateEditor',
-    props: ['modelValue', 'availablePlaceholders', 'previewResult', 'previewError'],
+    props: {
+      modelValue: String,
+      availablePlaceholders: Array,
+      previewResult: String,
+      previewError: String,
+      embedded: Boolean,
+    },
     emits: ['update:modelValue', 'restore-default', 'preview'],
     setup(props: any, { emit }: any) {
       return () => h('div', { class: 'run-instruction-editor-mock' }, [
@@ -253,8 +259,6 @@ vi.mock('@vicons/ionicons5', () => {
     DocumentTextOutline: icon('DocumentTextOutline'),
     InformationCircleOutline: icon('InformationCircleOutline'),
     FlashOutline: icon('FlashOutline'),
-    HardwareChipOutline: icon('HardwareChipOutline'),
-    OptionsOutline: icon('OptionsOutline'),
     TimeOutline: icon('TimeOutline'),
     WarningOutline: icon('WarningOutline'),
   }
@@ -459,6 +463,25 @@ describe('TaskFormDrawer', () => {
       expect(wrapper.findAll('.task-mode-card__check')).toHaveLength(1)
     })
 
+    it('shows a single top-right check on the selected priority card', async () => {
+      await mountDrawer()
+      await openDrawer()
+
+      const priorityCards = wrapper.findAll('.priority-card')
+      expect(priorityCards).toHaveLength(3)
+      expect(priorityCards[1].attributes('aria-checked')).toBe('true')
+      expect(wrapper.findAll('.priority-card__check')).toHaveLength(1)
+      expect(wrapper.findAll('.priority-selector .n-radio')).toHaveLength(0)
+
+      await priorityCards[0].trigger('click')
+      await nextTick()
+
+      expect(wrapper.vm.priority).toBe(0)
+      expect(priorityCards[0].attributes('aria-checked')).toBe('true')
+      expect(priorityCards[1].attributes('aria-checked')).toBe('false')
+      expect(wrapper.findAll('.priority-card__check')).toHaveLength(1)
+    })
+
     it('warns when scheduled mode has no selected time', async () => {
       await mountDrawer()
       await openDrawer()
@@ -548,7 +571,7 @@ describe('TaskFormDrawer', () => {
       ])
     })
 
-    it('shows the effective default provider and updates the summary after selection', async () => {
+    it('collapses the effective execution environment and updates its override summary', async () => {
       mockApi.getProviders.mockResolvedValue([
         { id: 7, name: 'Default Provider', model: 'model-a', is_default: true, is_disabled: false },
         { id: 8, name: 'Fast Provider', model: 'model-b', is_default: false, is_disabled: false },
@@ -556,28 +579,62 @@ describe('TaskFormDrawer', () => {
       await mountDrawer()
       await openDrawer()
 
-      const providerSummary = () => wrapper.findAll('.provider-control__summary')[1]
-      expect(providerSummary().text()).toContain('createTask.providerUsesDefault')
-      expect(providerSummary().text()).toContain('Default Provider / model-a')
+      const environmentSummary = wrapper.get('.execution-environment__summary')
+      const sectionHeaders = wrapper.findAll('.task-form-section__header')
+      expect(sectionHeaders).toHaveLength(3)
+      expect(sectionHeaders[0].text()).toContain('createTask.contentSection')
+      expect(sectionHeaders[1].text()).toContain('createTask.executionSection')
+      expect(sectionHeaders[2].text()).toContain(
+        'createTask.executionEnvironment'
+      )
+      expect(sectionHeaders[2].text()).toContain(
+        'createTask.executionEnvironmentHint'
+      )
+      expect(wrapper.find('.execution-environment__icon').exists()).toBe(false)
+      expect(environmentSummary.attributes('aria-expanded')).toBe('false')
+      expect(environmentSummary.text()).toContain('createTask.executionEnvironmentDefault')
+      expect(environmentSummary.text()).toContain('Java Worker')
+      expect(environmentSummary.text()).toContain('Default Provider / model-a')
+      expect(wrapper.find('.execution-environment__detail').exists()).toBe(false)
+
+      await environmentSummary.trigger('click')
+      expect(environmentSummary.attributes('aria-expanded')).toBe('true')
+      expect(wrapper.find('.execution-environment__detail').exists()).toBe(true)
+      expect(wrapper.findAll('.execution-environment__field')).toHaveLength(2)
 
       wrapper.vm.selectedProviderId = 8
       await nextTick()
 
-      expect(providerSummary().text()).toContain('createTask.providerUsesSelected')
-      expect(providerSummary().text()).toContain('Fast Provider / model-b')
+      expect(environmentSummary.text()).toContain('createTask.executionEnvironmentOverride')
+      expect(environmentSummary.text()).toContain('Fast Provider / model-b')
     })
 
-    it('shows warning summary when no enabled provider exists', async () => {
+    it('keeps the advanced disclosure text-first', async () => {
+      await mountDrawer()
+      await openDrawer()
+
+      wrapper.vm.taskMode = 'execute'
+      await nextTick()
+
+      expect(wrapper.find('.run-instruction-advanced__icon').exists()).toBe(false)
+      expect(wrapper.get('.run-instruction-advanced__summary').text()).toContain(
+        'runInstruction.advancedHint'
+      )
+    })
+
+    it('automatically expands a warning when the default execution environment is incomplete', async () => {
       mockApi.getProviders.mockResolvedValue([
         { id: 7, name: 'Default Provider', model: 'model-a', is_default: true, is_disabled: true },
       ])
       await mountDrawer()
       await openDrawer()
 
-      const summary = wrapper.findAll('.provider-control__summary')[1]
-      expect(summary.exists()).toBe(true)
-      expect(summary.classes()).toContain('provider-control__summary--warning')
-      expect(summary.text()).toContain('config.providers.noEnabledProvider')
+      const summary = wrapper.get('.execution-environment__summary')
+      expect(summary.attributes('aria-expanded')).toBe('true')
+      expect(summary.text()).toContain('createTask.executionEnvironmentNeedsAttention')
+      expect(wrapper.get('.execution-environment__warning').text()).toContain(
+        'createTask.executionEnvironmentMissing'
+      )
     })
 
     it('does not block creation when provider is left to issue default', async () => {
@@ -622,6 +679,7 @@ describe('TaskFormDrawer', () => {
         { label: 'Java Worker', value: 3, disabled: false },
         { label: 'Python Worker', value: 4, disabled: false },
       ])
+      await wrapper.get('.execution-environment__summary').trigger('click')
       expect(
         wrapper.findAllComponents({ name: 'NSelect' }).map(select => select.props('placeholder'))
       ).toContain('createTask.selectProvider')
@@ -631,13 +689,26 @@ describe('TaskFormDrawer', () => {
       await mountDrawer({ defaultWorkerProfileId: 4 })
       await openDrawer()
 
-      expect(wrapper.findAll('.provider-control__summary')[0].text()).toContain(
-        'Python Worker / worker-python:latest'
-      )
+      expect(wrapper.get('.execution-environment__summary').text()).toContain('Python Worker')
 
       wrapper.vm.selectTaskMode('execute')
 
       expect(wrapper.vm.runInstructionTemplate).toBe('Python execute {{user_prompt}}')
+    })
+
+    it('restores both execution environment overrides to their defaults', async () => {
+      await mountDrawer()
+      await openDrawer()
+
+      wrapper.vm.selectedWorkerProfileId = 4
+      wrapper.vm.selectedProviderId = 7
+      await nextTick()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await wrapper.get('.execution-environment__footer button').trigger('click')
+
+      expect(wrapper.vm.selectedWorkerProfileId).toBeNull()
+      expect(wrapper.vm.selectedProviderId).toBeNull()
+      expect(wrapper.vm.executionEnvironmentExpanded).toBe(false)
     })
 
     it('submits a manually edited run instruction template on create', async () => {
@@ -1159,6 +1230,7 @@ describe('TaskFormDrawer', () => {
       await advancedSummary.trigger('click')
       expect(advancedSummary.attributes('aria-expanded')).toBe('true')
       expect(wrapper.find('.run-instruction-advanced__content-reveal').exists()).toBe(true)
+      expect(wrapper.getComponent({ name: 'RunInstructionTemplateEditor' }).props('embedded')).toBe(true)
     })
 
     it('leaves the execute default to the backend when Advanced is never opened', async () => {

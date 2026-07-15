@@ -87,6 +87,13 @@
       closable
     >
       <n-form label-placement="top" class="task-form-drawer__form">
+        <section class="task-form-section task-form-section--content">
+          <header class="task-form-section__header">
+            <span class="task-form-section__title">{{ t('createTask.contentSection') }}</span>
+            <span class="task-form-section__hint">{{ t('createTask.contentSectionHint') }}</span>
+            <span class="task-form-section__divider" aria-hidden="true"></span>
+          </header>
+          <div class="task-form-section__body">
         <!-- Prompt + require changes -->
         <div class="prompt-form-section">
           <div class="prompt-section-header">
@@ -229,9 +236,6 @@
                   :aria-controls="runInstructionAdvancedContentId"
                   @click="runInstructionExpanded = !runInstructionExpanded"
                 >
-                  <span class="run-instruction-advanced__icon">
-                    <n-icon :component="OptionsOutline" size="16" />
-                  </span>
                   <span class="run-instruction-advanced__copy">
                     <span class="run-instruction-advanced__title">{{ t('runInstruction.advanced') }}</span>
                     <span class="run-instruction-advanced__hint">
@@ -273,6 +277,7 @@
                               :preview-loading="previewLoading"
                               :preview-result="previewResult"
                               :preview-error="previewError"
+                              embedded
                               @update:model-value="handleRunInstructionInput"
                               @preview="handleRunInstructionPreview"
                             />
@@ -286,27 +291,56 @@
             </div>
           </div>
         </Transition>
+          </div>
+        </section>
 
+        <section class="task-form-section task-form-section--execution">
+          <header class="task-form-section__header">
+            <span class="task-form-section__title">{{ t('createTask.executionSection') }}</span>
+            <span class="task-form-section__hint">
+              {{ t(mode === 'create'
+                ? 'createTask.executionSectionHint'
+                : 'createTask.executionSectionEditHint') }}
+            </span>
+            <span class="task-form-section__divider" aria-hidden="true"></span>
+          </header>
+          <div class="task-form-section__body">
         <!-- Priority cards -->
-        <n-form-item :label="t('common.priority')">
-          <n-radio-group v-model:value="priority" class="priority-selector">
+        <n-form-item
+          :label="t('common.priority')"
+          class="priority-form-item"
+          :class="{ 'priority-form-item--last': mode !== 'create' }"
+        >
+          <div class="priority-selector" role="radiogroup" :aria-label="t('common.priority')">
             <div
               v-for="opt in priorityOptions"
               :key="opt.value"
               class="priority-card"
+              role="radio"
+              tabindex="0"
+              :aria-checked="priority === opt.value"
               :class="[
                 `priority-card--p${opt.value}`,
                 { 'priority-card--active': priority === opt.value }
               ]"
               @click="priority = opt.value"
+              @keydown.enter.prevent="priority = opt.value"
+              @keydown.space.prevent="priority = opt.value"
             >
-              <n-radio :value="opt.value" />
               <div>
                 <div class="priority-card__label">{{ opt.label }}</div>
                 <div class="priority-card__desc">{{ opt.desc }}</div>
               </div>
+              <Transition name="selection-check">
+                <n-icon
+                  v-if="priority === opt.value"
+                  :component="CheckmarkCircleOutline"
+                  size="16"
+                  class="priority-card__check"
+                />
+              </Transition>
             </div>
-          </n-radio-group>
+          </div>
         </n-form-item>
 
         <!-- Schedule (create mode only) -->
@@ -392,77 +426,111 @@
             </Transition>
           </div>
         </n-form-item>
-
-        <!-- AI Provider -->
-        <n-form-item class="provider-form-item">
-          <template #label>
-            <div class="execution-field-label">
-              <span>{{ t('createTask.workerProfile') }}</span>
-              <span class="execution-field-label__hint">{{ t('createTask.workerProfileHint') }}</span>
-            </div>
-          </template>
-          <div class="provider-control" :class="{ 'provider-control--empty': !effectiveWorkerProfile }">
-            <span class="provider-control__icon">
-              <n-icon :component="HardwareChipOutline" size="18" />
-            </span>
-            <div class="provider-control__body">
-              <n-select
-                v-model:value="selectedWorkerProfileId"
-                class="provider-control__select"
-                :options="workerProfileOptions"
-                clearable
-                :placeholder="t('createTask.selectWorkerProfile')"
-                @update:value="handleWorkerProfileChange"
-              />
-              <div v-if="effectiveWorkerProfile" class="provider-control__summary">
-                <span class="provider-control__status">
-                  {{ selectedWorkerProfileId === null
-                    ? t('createTask.workerUsesDefault')
-                    : t('createTask.workerUsesSelected') }}
-                </span>
-                <span aria-hidden="true">·</span>
-                <span class="provider-control__model">
-                  {{ effectiveWorkerProfile.name }} / {{ effectiveWorkerProfile.image }}
-                </span>
-              </div>
-            </div>
           </div>
-        </n-form-item>
+        </section>
 
-        <n-form-item class="provider-form-item">
-          <template #label>
-            <div class="execution-field-label">
-              <span>{{ t('config.providers.providerLabel') }}</span>
-              <span class="execution-field-label__hint">{{ t('createTask.providerHint') }}</span>
-            </div>
-          </template>
-          <div class="provider-control" :class="{ 'provider-control--empty': !effectiveProvider }">
-            <span class="provider-control__icon">
-              <n-icon :component="HardwareChipOutline" size="18" />
+        <!-- Execution environment -->
+        <section class="task-form-section task-form-section--environment">
+          <header class="task-form-section__header">
+            <span class="task-form-section__title">{{ t('createTask.executionEnvironment') }}</span>
+            <span class="task-form-section__hint">
+              {{ t('createTask.executionEnvironmentHint') }}
             </span>
-            <div class="provider-control__body">
-              <n-select
-                v-model:value="selectedProviderId"
-                class="provider-control__select"
-                :options="providerOptions"
-                clearable
-                :placeholder="t('createTask.selectProvider')"
-              />
-              <div v-if="effectiveProvider" class="provider-control__summary">
-                <span class="provider-control__status">
-                  {{ selectedProviderId === null
-                    ? t('createTask.providerUsesDefault')
-                    : t('createTask.providerUsesSelected') }}
+            <span class="task-form-section__divider" aria-hidden="true"></span>
+          </header>
+          <div
+            class="execution-environment"
+            :class="{
+              'execution-environment--open': executionEnvironmentOpen,
+              'execution-environment--warning': executionEnvironmentMissing
+            }"
+          >
+            <button
+              type="button"
+              class="execution-environment__summary"
+              :aria-expanded="executionEnvironmentOpen"
+              :aria-controls="executionEnvironmentContentId"
+              @click="toggleExecutionEnvironment"
+            >
+              <span class="execution-environment__copy">
+                <span
+                  class="execution-environment__status"
+                  :class="{
+                    'execution-environment__status--override': executionEnvironmentOverridden,
+                    'execution-environment__status--warning': executionEnvironmentMissing
+                  }"
+                >
+                  {{ executionEnvironmentMissing
+                    ? t('createTask.executionEnvironmentNeedsAttention')
+                    : executionEnvironmentOverridden
+                      ? t('createTask.executionEnvironmentOverride')
+                      : t('createTask.executionEnvironmentDefault') }}
                 </span>
-                <span aria-hidden="true">·</span>
-                <span class="provider-control__model">{{ effectiveProvider.name }} / {{ effectiveProvider.model }}</span>
+                <span class="execution-environment__meta">
+                  <span v-if="!executionOptionsReady">{{ t('common.loading') }}</span>
+                  <template v-else>
+                    <span>{{ effectiveWorkerProfile?.name ?? t('common.unavailable') }}</span>
+                    <span aria-hidden="true">·</span>
+                    <span>
+                      {{ effectiveProvider
+                        ? `${effectiveProvider.name} / ${effectiveProvider.model}`
+                        : t('common.unavailable') }}
+                    </span>
+                  </template>
+                </span>
+              </span>
+              <span class="execution-environment__action">
+                <span>{{ executionEnvironmentMissing
+                  ? t('createTask.executionEnvironmentConfigure')
+                  : executionEnvironmentOpen
+                    ? t('createTask.executionEnvironmentCollapse')
+                    : t('createTask.executionEnvironmentChange') }}</span>
+                <span class="execution-environment__chevron" aria-hidden="true">›</span>
+              </span>
+            </button>
+            <Transition name="execution-environment-detail">
+              <div
+                v-if="executionEnvironmentOpen"
+                :id="executionEnvironmentContentId"
+                class="execution-environment__detail-reveal"
+              >
+                <div class="execution-environment__detail-reveal-inner">
+                  <div class="execution-environment__detail">
+                    <div v-if="executionEnvironmentMissing" class="execution-environment__warning">
+                      {{ t('createTask.executionEnvironmentMissing') }}
+                    </div>
+                    <div class="execution-environment__fields">
+                      <label class="execution-environment__field">
+                        <span>{{ t('createTask.workerProfile') }}</span>
+                        <n-select
+                          :value="selectedWorkerProfileId"
+                          :options="workerProfileOptions"
+                          clearable
+                          :placeholder="t('createTask.selectWorkerProfile')"
+                          @update:value="handleWorkerProfileChange"
+                        />
+                      </label>
+                      <label class="execution-environment__field">
+                        <span>{{ t('config.providers.providerLabel') }}</span>
+                        <n-select
+                          v-model:value="selectedProviderId"
+                          :options="providerOptions"
+                          clearable
+                          :placeholder="t('createTask.selectProvider')"
+                        />
+                      </label>
+                    </div>
+                    <div v-if="executionEnvironmentOverridden" class="execution-environment__footer">
+                      <n-button size="tiny" quaternary @click="restoreExecutionEnvironmentDefaults">
+                        {{ t('createTask.executionEnvironmentRestore') }}
+                      </n-button>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div v-else class="provider-control__summary provider-control__summary--warning">
-                {{ t('config.providers.noEnabledProvider') }}
-              </div>
-            </div>
+            </Transition>
           </div>
-        </n-form-item>
+        </section>
       </n-form>
 
       <!-- Slot capacity alert (create mode only) -->
@@ -528,7 +596,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, toRef, useAttrs, useId } from 'vue'
 import {
-  NButton, NDrawer, NDrawerContent, NForm, NFormItem, NRadio, NRadioGroup,
+  NButton, NDrawer, NDrawerContent, NForm, NFormItem,
   NDatePicker, NSelect, NAlert, NTooltip, NSwitch, NSpin, NIcon, NScrollbar, NTag,
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -541,10 +609,8 @@ import {
   CodeSlashOutline,
   BulbOutline,
   CheckmarkCircleOutline,
-  OptionsOutline,
   FlashOutline,
-  TimeOutline,
-  HardwareChipOutline
+  TimeOutline
 } from '@vicons/ionicons5'
 import VariableEditor from './VariableEditor.vue'
 import HeatmapChart from './HeatmapChart.vue'
@@ -610,6 +676,9 @@ const taskMode = ref<'execute' | 'plan' | null>(null)
 const taskModeErrorVisible = ref(false)
 const runInstructionExpanded = ref(false)
 const runInstructionAdvancedContentId = `${useId()}-run-instruction-advanced-content`
+const executionEnvironmentExpanded = ref(false)
+const executionEnvironmentContentId = `${useId()}-execution-environment-content`
+const executionOptionsReady = ref(false)
 const selectedProviderId = ref<number | null>(null)
 const selectedWorkerProfileId = ref<number | null>(null)
 const scheduleType = ref<'now' | 'scheduled'>('now')
@@ -668,6 +737,16 @@ const {
   selectedProviderId,
   selectedWorkerProfileId,
 })
+const executionEnvironmentMissing = computed(() =>
+  executionOptionsReady.value
+  && (!effectiveWorkerProfile.value || !effectiveProvider.value)
+)
+const executionEnvironmentOverridden = computed(() =>
+  selectedWorkerProfileId.value !== null || selectedProviderId.value !== null
+)
+const executionEnvironmentOpen = computed(() =>
+  executionEnvironmentExpanded.value || executionEnvironmentMissing.value
+)
 
 // Schedule heatmap state (create mode)
 const showHeatmapDrawer = ref(false)
@@ -738,6 +817,7 @@ watch([prompt, requireChanges], () => {
 watch(() => props.show, (val) => {
   invalidateRunInstructionPreview()
   runInstructionExpanded.value = false
+  executionEnvironmentExpanded.value = false
   if (val) {
     if (props.mode === 'edit' && props.task) {
       prompt.value = props.task.user_prompt ?? ''
@@ -856,6 +936,28 @@ function handleWorkerProfileChange(profileId: number | null) {
   invalidateRunInstructionPreview()
 }
 
+function toggleExecutionEnvironment() {
+  if (executionEnvironmentMissing.value) {
+    executionEnvironmentExpanded.value = true
+    return
+  }
+  executionEnvironmentExpanded.value = !executionEnvironmentExpanded.value
+}
+
+function restoreExecutionEnvironmentDefaults() {
+  selectedProviderId.value = null
+  handleWorkerProfileChange(null)
+  if (!executionEnvironmentMissing.value) {
+    executionEnvironmentExpanded.value = false
+  }
+}
+
+async function loadExecutionOptions() {
+  executionOptionsReady.value = false
+  await Promise.all([loadProviders(), loadWorkerProfiles()])
+  executionOptionsReady.value = true
+}
+
 function usePromptOnly() {
   runInstructionTemplate.value = '{{user_prompt}}'
   runInstructionDirty.value = true
@@ -900,8 +1002,7 @@ const {
 
 // --- Lifecycle ---
 onMounted(() => {
-  void loadProviders()
-  void loadWorkerProfiles()
+  void loadExecutionOptions()
   void loadTemplates()
   void loadRunInstructionDefaults()
 })
@@ -933,6 +1034,50 @@ onMounted(() => {
 
 .task-form-drawer__form {
   max-width: 100%;
+}
+
+.task-form-section {
+  width: 100%;
+}
+
+.task-form-section + .task-form-section {
+  margin-top: 24px;
+}
+
+.task-form-section__header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 12px;
+}
+
+.task-form-section__title {
+  flex: 0 0 auto;
+  color: var(--n-text-color-1, var(--n-text-color));
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.task-form-section__hint {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--n-text-color-3);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-form-section__divider {
+  flex: 1 1 auto;
+  min-width: 20px;
+  height: 1px;
+  background: var(--n-border-color);
+  opacity: 0.72;
 }
 
 .task-form-drawer__form :deep(.variable-editor__codemirror .cm-editor) {
@@ -992,12 +1137,16 @@ onMounted(() => {
   gap: 0;
 }
 
+.task-mode-form-item {
+  margin-bottom: 12px;
+}
+
 .run-instruction-advanced {
   width: 100%;
   overflow: hidden;
-  border: 1px solid var(--n-border-color);
+  border: 1px solid rgba(128, 128, 128, 0.28);
   border-radius: 10px;
-  background: var(--n-color);
+  background: rgba(128, 128, 128, 0.025);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
@@ -1007,6 +1156,10 @@ onMounted(() => {
   margin-bottom: 16px;
   opacity: 1;
   transform: translateY(0);
+}
+
+.task-form-section--content .run-instruction-advanced-reveal {
+  margin-bottom: 0;
 }
 
 .run-instruction-advanced-reveal__inner,
@@ -1056,18 +1209,6 @@ onMounted(() => {
   text-align: left;
   cursor: pointer;
   user-select: none;
-}
-
-.run-instruction-advanced__icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  flex: 0 0 28px;
-  border-radius: 7px;
-  color: var(--n-primary-color);
-  background: rgba(99, 226, 183, 0.1);
 }
 
 .run-instruction-advanced__copy {
@@ -1303,6 +1444,15 @@ onMounted(() => {
 }
 
 /* Priority selector */
+.priority-form-item {
+  margin-bottom: 18px;
+}
+
+.priority-form-item--last,
+.schedule-form-item {
+  margin-bottom: 0;
+}
+
 .priority-selector {
   display: flex;
   gap: 8px;
@@ -1310,19 +1460,22 @@ onMounted(() => {
 }
 
 .priority-card {
+  position: relative;
   flex: 1;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  min-width: 0;
+  padding: 8px 32px 8px 12px;
   border: 1px solid var(--n-border-color);
   border-radius: 8px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: border-color 0.15s ease, background-color 0.15s ease, transform 0.15s ease;
 }
 
-.priority-card:hover {
-  border-color: var(--n-primary-color);
+.priority-card:focus-visible {
+  outline: 2px solid var(--n-primary-color);
+  outline-offset: 2px;
 }
 
 .priority-card--active.priority-card--p0 {
@@ -1345,6 +1498,17 @@ onMounted(() => {
 .priority-card--p2 .priority-card__label { color: #18a058; }
 .priority-card__label { font-weight: 600; font-size: 13px; }
 .priority-card__desc { font-size: 11px; color: var(--n-text-color-3); }
+
+.priority-card__check {
+  position: absolute;
+  top: 8px;
+  right: 9px;
+  color: currentColor;
+}
+
+.priority-card--p0 .priority-card__check { color: #d03050; }
+.priority-card--p1 .priority-card__check { color: #f0a020; }
+.priority-card--p2 .priority-card__check { color: #18a058; }
 
 /* Execution fields */
 .execution-field-label {
@@ -1402,8 +1566,7 @@ onMounted(() => {
   outline-offset: 2px;
 }
 
-.schedule-mode-card__icon,
-.provider-control__icon {
+.schedule-mode-card__icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1496,84 +1659,201 @@ onMounted(() => {
   overflow: hidden;
 }
 
-/* Provider section */
-.provider-control {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
+/* Execution environment */
+.execution-environment {
   width: 100%;
-  padding: 10px;
+  overflow: hidden;
   border: 1px solid var(--n-border-color);
   border-radius: 9px;
   background: rgba(128, 128, 128, 0.035);
   transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
-.provider-control:focus-within {
+.execution-environment--open,
+.execution-environment:focus-within {
   border-color: var(--n-primary-color);
   background: rgba(99, 226, 183, 0.04);
 }
 
-.provider-control--empty {
+.execution-environment--warning {
   border-color: rgba(240, 160, 32, 0.55);
+  background: rgba(240, 160, 32, 0.035);
 }
 
-.provider-control__icon {
-  margin-top: 1px;
-}
-
-.provider-control:focus-within .provider-control__icon {
-  background: rgba(99, 226, 183, 0.12);
-  color: var(--n-primary-color);
-}
-
-.provider-control__body {
-  flex: 1;
-  min-width: 0;
-}
-
-.provider-control__select {
+.execution-environment__summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
   width: 100%;
+  min-height: 46px;
+  padding: 8px 10px;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
-.provider-control__summary {
+.execution-environment__summary:focus-visible {
+  outline: 2px solid var(--n-primary-color);
+  outline-offset: -2px;
+}
+
+.execution-environment__copy {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+
+.execution-environment__status {
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: var(--n-text-color-3);
+  background: var(--n-action-color);
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.execution-environment__status--override {
+  color: var(--n-primary-color);
+  background: rgba(99, 226, 183, 0.1);
+}
+
+.execution-environment__status--warning {
+  color: #f0a020;
+  background: rgba(240, 160, 32, 0.1);
+}
+
+.execution-environment__meta {
   display: flex;
   align-items: center;
   gap: 5px;
   min-width: 0;
-  margin-top: 6px;
+  color: var(--n-text-color-3);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.execution-environment__meta > span:not([aria-hidden]) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.execution-environment__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--n-text-color-3);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.execution-environment__chevron {
+  color: var(--n-text-color-3);
+  font-size: 18px;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 0.16s ease, color 0.16s ease;
+}
+
+.execution-environment--open .execution-environment__chevron {
+  color: var(--n-primary-color);
+  transform: rotate(90deg);
+}
+
+.execution-environment__detail-reveal {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.execution-environment__detail-reveal-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.execution-environment-detail-enter-active,
+.execution-environment-detail-leave-active {
+  transition:
+    grid-template-rows 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.15s ease;
+}
+
+.execution-environment-detail-enter-from,
+.execution-environment-detail-leave-to {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+
+.execution-environment__detail {
+  padding: 10px;
+  border-top: 1px solid var(--n-border-color);
+  background: var(--n-color);
+}
+
+.execution-environment__warning {
+  margin-bottom: 9px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  color: #f0a020;
+  background: rgba(240, 160, 32, 0.08);
+  font-size: 11px;
+  line-height: 17px;
+}
+
+.execution-environment__fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.execution-environment__field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.execution-environment__field > span {
   color: var(--n-text-color-3);
   font-size: 11px;
   line-height: 16px;
 }
 
-.provider-control__status {
-  color: var(--n-primary-color);
-  white-space: nowrap;
-}
-
-.provider-control__model {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.provider-control__summary--warning {
-  color: #f0a020;
+.execution-environment__footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
 }
 
 @media (hover: hover) and (pointer: fine) {
+  .priority-card:not(.priority-card--active):hover,
   .schedule-mode-card:not(.schedule-mode-card--active):hover,
-  .provider-control:hover {
+  .execution-environment:not(.execution-environment--warning):hover {
     border-color: var(--n-primary-color);
   }
 
+  .priority-card:not(.priority-card--active):hover,
   .schedule-mode-card:not(.schedule-mode-card--active):hover {
     transform: translateY(-1px);
   }
 }
 
 @media (max-width: 520px) {
+  .task-form-section__header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 2px 8px;
+  }
+
+  .task-form-section__divider {
+    flex-basis: 100%;
+  }
+
   .schedule-mode-selector {
     grid-template-columns: 1fr;
   }
@@ -1581,6 +1861,27 @@ onMounted(() => {
   .schedule-detail-panel {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .execution-environment__fields {
+    grid-template-columns: 1fr;
+  }
+
+  .execution-environment__meta {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0;
+    white-space: normal;
+  }
+
+  .execution-environment__meta > span[aria-hidden] {
+    display: none;
+  }
+
+  .execution-environment__copy {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
   }
 
   .schedule-detail-panel__heatmap {
@@ -1595,10 +1896,13 @@ onMounted(() => {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .priority-card,
   .schedule-mode-card,
   .schedule-mode-card__icon,
-  .provider-control,
-  .provider-control__icon,
+  .execution-environment,
+  .execution-environment__chevron,
+  .execution-environment-detail-enter-active,
+  .execution-environment-detail-leave-active,
   .schedule-detail-enter-active,
   .schedule-detail-leave-active {
     transition: none;

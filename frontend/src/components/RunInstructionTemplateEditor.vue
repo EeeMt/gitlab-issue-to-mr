@@ -1,5 +1,9 @@
 <template>
-  <div class="run-instruction-editor" :style="editorThemeStyle">
+  <div
+    class="run-instruction-editor"
+    :class="{ 'run-instruction-editor--embedded': embedded }"
+    :style="editorThemeStyle"
+  >
     <div v-if="!hideActions" class="run-instruction-editor__actions">
       <n-button
         v-if="!hidePromptOnly"
@@ -61,112 +65,119 @@
     <div
       class="run-instruction-editor__stage"
       :class="{ 'run-instruction-editor__stage--switchable': previewEnabled }"
+      :style="stageStyle"
     >
       <div
-        v-show="!previewEnabled || activeView === 'edit'"
         :id="previewEnabled ? editPanelId : undefined"
-        class="run-instruction-editor__edit-panel"
+        ref="editPanelRef"
+        class="run-instruction-editor__view run-instruction-editor__edit-panel"
+        :class="{ 'run-instruction-editor__view--active': !previewEnabled || activeView === 'edit' }"
         :role="previewEnabled ? 'tabpanel' : undefined"
         :aria-labelledby="previewEnabled ? editTabId : undefined"
+        :aria-hidden="previewEnabled ? activeView !== 'edit' : undefined"
+        :inert="previewEnabled && activeView !== 'edit'"
         data-testid="editor-panel"
       >
-        <n-input
-          ref="inputRef"
-          :value="modelValue"
-          type="textarea"
-          :rows="fixedRows"
-          :autosize="fixedRows ? false : { minRows: 7, maxRows: 18 }"
-          :resizable="!fixedRows"
-          :placeholder="t('runInstruction.templatePlaceholder')"
-          @update:value="emit('update:modelValue', $event)"
-        />
-        <div class="run-instruction-editor__toolbar">
-          <n-popover
-            v-if="availablePlaceholders.length"
-            :show="variablePickerVisible"
-            trigger="click"
-            placement="bottom-start"
-            :show-arrow="false"
-            raw
-            class="run-instruction-editor__variables"
-            @update:show="variablePickerVisible = $event"
-          >
-            <template #trigger>
-              <n-button
-                size="tiny"
-                secondary
-                data-testid="variable-picker-toggle"
-                :aria-expanded="variablePickerVisible"
-                aria-haspopup="menu"
-              >
-                <template #icon>
-                  <n-icon :component="CodeSlashOutline" size="14" />
-                </template>
-                {{ t('runInstruction.insertVariable') }}
-                <n-icon
-                  :component="ChevronDownOutline"
-                  size="14"
-                  class="run-instruction-editor__variables-chevron"
-                  :class="{ 'run-instruction-editor__variables-chevron--open': variablePickerVisible }"
-                />
-              </n-button>
-            </template>
-            <div
-              class="run-instruction-editor__variables-panel"
-              :style="editorThemeStyle"
-              role="menu"
+          <n-input
+            ref="inputRef"
+            :value="modelValue"
+            type="textarea"
+            :rows="fixedRows"
+            :autosize="fixedRows ? false : { minRows: 7, maxRows: 18 }"
+            :resizable="!fixedRows"
+            :placeholder="t('runInstruction.templatePlaceholder')"
+            @update:value="emit('update:modelValue', $event)"
+          />
+          <div class="run-instruction-editor__toolbar">
+            <n-popover
+              v-if="availablePlaceholders.length"
+              :show="variablePickerVisible"
+              trigger="click"
+              placement="bottom-start"
+              :show-arrow="false"
+              raw
+              class="run-instruction-editor__variables"
+              @update:show="variablePickerVisible = $event"
             >
-              <div class="run-instruction-editor__variables-heading">
-                <strong>{{ t('runInstruction.availableVariables') }}</strong>
-                <span>{{ t('runInstruction.variableInsertHint') }}</span>
-              </div>
-              <div class="run-instruction-editor__variables-list">
-                <button
-                  v-for="placeholder in availablePlaceholders"
-                  :key="placeholder"
-                  type="button"
-                  class="run-instruction-editor__variable"
-                  :data-placeholder="placeholder"
-                  role="menuitem"
-                  @click="insertPlaceholder(placeholder)"
+              <template #trigger>
+                <n-button
+                  size="tiny"
+                  secondary
+                  data-testid="variable-picker-toggle"
+                  :aria-expanded="variablePickerVisible"
+                  aria-haspopup="menu"
                 >
-                  <span class="run-instruction-editor__variable-copy">
-                    <code>{{ placeholderSyntax(placeholder) }}</code>
-                    <span>{{ placeholderDescription(placeholder) }}</span>
-                  </span>
+                  <template #icon>
+                    <n-icon :component="CodeSlashOutline" size="14" />
+                  </template>
+                  {{ t('runInstruction.insertVariable') }}
                   <n-icon
-                    :component="AddOutline"
-                    size="15"
-                    class="run-instruction-editor__variable-add"
-                    aria-hidden="true"
+                    :component="ChevronDownOutline"
+                    size="14"
+                    class="run-instruction-editor__variables-chevron"
+                    :class="{ 'run-instruction-editor__variables-chevron--open': variablePickerVisible }"
                   />
-                </button>
+                </n-button>
+              </template>
+              <div
+                class="run-instruction-editor__variables-panel"
+                :style="editorThemeStyle"
+                role="menu"
+              >
+                <div class="run-instruction-editor__variables-heading">
+                  <strong>{{ t('runInstruction.availableVariables') }}</strong>
+                  <span>{{ t('runInstruction.variableInsertHint') }}</span>
+                </div>
+                <div class="run-instruction-editor__variables-list">
+                  <button
+                    v-for="placeholder in availablePlaceholders"
+                    :key="placeholder"
+                    type="button"
+                    class="run-instruction-editor__variable"
+                    :data-placeholder="placeholder"
+                    role="menuitem"
+                    @click="insertPlaceholder(placeholder)"
+                  >
+                    <span class="run-instruction-editor__variable-copy">
+                      <code>{{ placeholderSyntax(placeholder) }}</code>
+                      <span>{{ placeholderDescription(placeholder) }}</span>
+                    </span>
+                    <n-icon
+                      :component="AddOutline"
+                      size="15"
+                      class="run-instruction-editor__variable-add"
+                      aria-hidden="true"
+                    />
+                  </button>
+                </div>
               </div>
-            </div>
-          </n-popover>
-        </div>
+            </n-popover>
+          </div>
       </div>
       <div
         v-if="previewEnabled"
-        v-show="activeView === 'preview'"
         :id="previewPanelId"
-        class="run-instruction-editor__preview-panel"
+        ref="previewPanelRef"
+        class="run-instruction-editor__view run-instruction-editor__preview-panel"
+        :class="{ 'run-instruction-editor__view--active': activeView === 'preview' }"
         role="tabpanel"
         :aria-labelledby="previewTabId"
+        :aria-hidden="activeView !== 'preview'"
+        :inert="activeView !== 'preview'"
         data-testid="preview-panel"
       >
-        <div v-if="previewError" class="run-instruction-editor__preview-message">
-          <n-alert type="error" :bordered="false">{{ previewError }}</n-alert>
-        </div>
-        <pre v-if="previewResult" class="run-instruction-editor__preview">{{ previewResult }}</pre>
-        <div v-else class="run-instruction-editor__preview-empty">
-          <n-icon :component="DocumentTextOutline" size="24" aria-hidden="true" />
-          <span>
-            {{ previewLoading
-              ? t('runInstruction.previewLoading')
-              : t('runInstruction.previewEmpty') }}
-          </span>
-        </div>
+          <div v-if="previewError" class="run-instruction-editor__preview-message">
+            <n-alert type="error" :bordered="false">{{ previewError }}</n-alert>
+          </div>
+          <pre v-if="previewResult" class="run-instruction-editor__preview">{{ previewResult }}</pre>
+          <div v-else class="run-instruction-editor__preview-empty">
+            <n-icon :component="DocumentTextOutline" size="24" aria-hidden="true" />
+            <span>
+              {{ previewLoading
+                ? t('runInstruction.previewLoading')
+                : t('runInstruction.previewEmpty') }}
+            </span>
+          </div>
       </div>
     </div>
     <n-alert v-if="unknownPlaceholders.length" type="error" :bordered="false">
@@ -183,7 +194,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, useId } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { NAlert, NButton, NIcon, NInput, NPopover, useThemeVars } from 'naive-ui'
 import {
   AddOutline,
@@ -206,6 +217,7 @@ const props = withDefaults(defineProps<{
   hideActions?: boolean
   hidePromptOnly?: boolean
   fixedRows?: number
+  embedded?: boolean
 }>(), {
   previewEnabled: false,
   previewLoading: false,
@@ -214,7 +226,8 @@ const props = withDefaults(defineProps<{
   warnWhenUserPromptMissing: true,
   hideActions: false,
   hidePromptOnly: false,
-  fixedRows: undefined
+  fixedRows: undefined,
+  embedded: false
 })
 
 const emit = defineEmits<{
@@ -227,6 +240,9 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const themeVars = useThemeVars()
 const inputRef = ref<InstanceType<typeof NInput> | null>(null)
+const editPanelRef = ref<HTMLElement | null>(null)
+const previewPanelRef = ref<HTMLElement | null>(null)
+const stageHeight = ref<number | null>(null)
 const variablePickerVisible = ref(false)
 const activeView = ref<'edit' | 'preview'>('edit')
 const editorId = useId()
@@ -234,6 +250,11 @@ const editTabId = `${editorId}-edit-tab`
 const previewTabId = `${editorId}-preview-tab`
 const editPanelId = `${editorId}-edit-panel`
 const previewPanelId = `${editorId}-preview-panel`
+const stageStyle = computed(() => (
+  props.previewEnabled && stageHeight.value !== null
+    ? { height: `${stageHeight.value}px` }
+    : undefined
+))
 const editorThemeStyle = computed(() => ({
   '--rie-surface': themeVars.value.cardColor,
   '--rie-popover': themeVars.value.popoverColor,
@@ -273,6 +294,57 @@ const unknownPlaceholders = computed(() =>
     (name) => !(props.knownPlaceholders ?? props.availablePlaceholders).includes(name)
   )
 )
+let panelResizeObserver: ResizeObserver | null = null
+
+function activePanelElement() {
+  return activeView.value === 'preview' ? previewPanelRef.value : editPanelRef.value
+}
+
+function measureActivePanel() {
+  if (!props.previewEnabled) {
+    stageHeight.value = null
+    return
+  }
+  const height = activePanelElement()?.getBoundingClientRect().height ?? 0
+  if (height > 0) {
+    stageHeight.value = Math.ceil(height)
+  }
+}
+
+function observePanels() {
+  panelResizeObserver?.disconnect()
+  if (!panelResizeObserver) return
+  if (editPanelRef.value) panelResizeObserver.observe(editPanelRef.value)
+  if (previewPanelRef.value) panelResizeObserver.observe(previewPanelRef.value)
+}
+
+watch(activeView, async () => {
+  await nextTick()
+  measureActivePanel()
+})
+
+watch(() => props.previewEnabled, async () => {
+  await nextTick()
+  observePanels()
+  measureActivePanel()
+})
+
+onMounted(async () => {
+  await nextTick()
+  measureActivePanel()
+  if (typeof ResizeObserver !== 'undefined') {
+    panelResizeObserver = new ResizeObserver((entries) => {
+      if (entries.some((entry) => entry.target === activePanelElement())) {
+        measureActivePanel()
+      }
+    })
+    observePanels()
+  }
+})
+
+onBeforeUnmount(() => {
+  panelResizeObserver?.disconnect()
+})
 
 function insertPlaceholder(name: string) {
   const syntax = placeholderSyntax(name)
@@ -315,6 +387,8 @@ function setActiveView(view: 'edit' | 'preview') {
 }
 
 .run-instruction-editor :deep(textarea) {
+  font-size: 12px;
+  line-height: 1.65;
   transition: height 0.25s ease;
 }
 
@@ -366,10 +440,12 @@ function setActiveView(view: 'edit' | 'preview') {
 }
 
 .run-instruction-editor__stage--switchable {
+  position: relative;
   overflow: hidden;
   border: 1px solid var(--rie-border);
   border-radius: 8px;
   background: var(--rie-surface);
+  transition: height 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .run-instruction-editor__edit-panel {
@@ -379,6 +455,38 @@ function setActiveView(view: 'edit' | 'preview') {
 
 .run-instruction-editor__stage--switchable .run-instruction-editor__edit-panel {
   padding: 8px;
+}
+
+.run-instruction-editor--embedded .run-instruction-editor__stage--switchable {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.run-instruction-editor--embedded .run-instruction-editor__stage--switchable .run-instruction-editor__edit-panel {
+  padding: 0;
+}
+
+.run-instruction-editor__view {
+  width: 100%;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(2px);
+  transition: opacity 0.16s ease, transform 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.run-instruction-editor__view:not(.run-instruction-editor__view--active) {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.run-instruction-editor__view--active {
+  position: relative;
+  z-index: 1;
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
 }
 
 .run-instruction-editor__toolbar {
@@ -504,6 +612,11 @@ function setActiveView(view: 'edit' | 'preview') {
   padding: 10px 10px 0;
 }
 
+.run-instruction-editor__preview-message :deep(.n-alert-body__content) {
+  font-size: 12px;
+  line-height: 18px;
+}
+
 .run-instruction-editor__preview-empty {
   display: flex;
   min-height: 201px;
@@ -533,7 +646,10 @@ function setActiveView(view: 'edit' | 'preview') {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .run-instruction-editor__variables-chevron {
+  .run-instruction-editor__stage--switchable,
+  .run-instruction-editor__view,
+  .run-instruction-editor__variables-chevron,
+  .run-instruction-editor__view--active {
     transition: none;
   }
 }

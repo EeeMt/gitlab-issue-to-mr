@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import RunInstructionTemplateEditor from './RunInstructionTemplateEditor.vue'
 
 vi.mock('vue-i18n', () => ({
@@ -7,6 +7,24 @@ vi.mock('vue-i18n', () => ({
 }))
 
 describe('RunInstructionTemplateEditor', () => {
+  it('removes the intermediate stage shell when embedded', () => {
+    const wrapper = mount(RunInstructionTemplateEditor, {
+      props: {
+        modelValue: '{{user_prompt}}',
+        availablePlaceholders: ['user_prompt'],
+        previewEnabled: true,
+        embedded: true
+      }
+    })
+
+    expect(wrapper.get('.run-instruction-editor').classes()).toContain(
+      'run-instruction-editor--embedded'
+    )
+    expect(wrapper.get('.run-instruction-editor__stage').classes()).toContain(
+      'run-instruction-editor__stage--switchable'
+    )
+  })
+
   it('uses a non-resizable fixed-height textarea when fixed rows are provided', () => {
     const wrapper = mount(RunInstructionTemplateEditor, {
       props: {
@@ -95,10 +113,8 @@ describe('RunInstructionTemplateEditor', () => {
     expect(wrapper.emitted('preview')).toHaveLength(1)
     expect(wrapper.vm.activeView).toBe('preview')
     expect(wrapper.get('[data-testid="preview-tab"]').attributes('aria-selected')).toBe('true')
-    expect(wrapper.get('[data-testid="editor-panel"]').isVisible()).toBe(false)
-    expect(wrapper.get('[data-testid="preview-panel"]').attributes('style') ?? '').not.toContain(
-      'display: none'
-    )
+    expect(wrapper.get('[data-testid="editor-panel"]').attributes('aria-hidden')).toBe('true')
+    expect(wrapper.get('[data-testid="preview-panel"]').attributes('aria-hidden')).toBe('false')
   })
 
   it('shows unknown-placeholder and missing-requirement feedback', async () => {
@@ -123,16 +139,20 @@ describe('RunInstructionTemplateEditor', () => {
         previewError: 'Preview failed'
       }
     })
-    expect(wrapper.get('[data-testid="editor-panel"]').isVisible()).toBe(true)
-    expect(wrapper.get('[data-testid="preview-panel"]').isVisible()).toBe(false)
+    expect(wrapper.get('[data-testid="editor-panel"]').classes()).toContain(
+      'run-instruction-editor__view--active'
+    )
+    expect(wrapper.get('[data-testid="preview-panel"]').attributes('aria-hidden')).toBe('true')
     expect(wrapper.find('[data-testid="preview-refresh"]').exists()).toBe(false)
 
     await wrapper.get('[data-testid="preview-tab"]').trigger('click')
     expect(wrapper.emitted('preview')).toBeUndefined()
     expect(wrapper.vm.activeView).toBe('preview')
-    expect(wrapper.get('[data-testid="editor-panel"]').attributes('style')).toContain('display: none')
-    expect(wrapper.get('[data-testid="preview-panel"]').attributes('style') ?? '').not.toContain(
-      'display: none'
+    expect(wrapper.get('[data-testid="editor-panel"]').classes()).not.toContain(
+      'run-instruction-editor__view--active'
+    )
+    expect(wrapper.get('[data-testid="preview-panel"]').classes()).toContain(
+      'run-instruction-editor__view--active'
     )
     expect(wrapper.get('.run-instruction-editor__stage').text()).toContain('Rendered result')
     expect(wrapper.get('.run-instruction-editor__stage').text()).toContain('Preview failed')
@@ -140,7 +160,55 @@ describe('RunInstructionTemplateEditor', () => {
     expect(wrapper.emitted('preview')).toHaveLength(1)
 
     await wrapper.get('[data-testid="editor-tab"]').trigger('click')
-    expect(wrapper.get('[data-testid="editor-panel"]').isVisible()).toBe(true)
-    expect(wrapper.get('[data-testid="preview-panel"]').attributes('style')).toContain('display: none')
+    expect(wrapper.get('[data-testid="editor-panel"]').classes()).toContain(
+      'run-instruction-editor__view--active'
+    )
+    expect(wrapper.get('[data-testid="preview-panel"]').attributes('aria-hidden')).toBe('true')
+  })
+
+  it('transitions the stage toward the measured height of the active view', async () => {
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        const height = this.dataset.testid === 'preview-panel' ? 280 : 220
+        return {
+          width: 500,
+          height,
+          top: 0,
+          right: 500,
+          bottom: height,
+          left: 0,
+          x: 0,
+          y: 0,
+          toJSON: () => ({})
+        }
+      }
+    )
+
+    try {
+      const wrapper = mount(RunInstructionTemplateEditor, {
+        props: {
+          modelValue: '{{user_prompt}}',
+          availablePlaceholders: ['user_prompt'],
+          previewEnabled: true,
+          previewResult: 'Rendered result'
+        }
+      })
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+
+      expect(wrapper.get('.run-instruction-editor__stage').attributes('style')).toContain(
+        'height: 220px'
+      )
+
+      await wrapper.get('[data-testid="preview-tab"]').trigger('click')
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+
+      expect(wrapper.get('.run-instruction-editor__stage').attributes('style')).toContain(
+        'height: 280px'
+      )
+    } finally {
+      rectSpy.mockRestore()
+    }
   })
 })
