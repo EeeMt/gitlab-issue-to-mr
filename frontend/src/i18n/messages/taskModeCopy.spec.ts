@@ -9,15 +9,15 @@ describe('task mode copy', () => {
     expect(zhCN.issue.taskModePlan).toBe('分析模式')
     expect(zhCN.taskView.taskModeExecute).toBe('实施模式')
     expect(zhCN.taskView.taskModePlan).toBe('分析模式')
-    expect(zhCN.config.defaultExecuteRunInstruction).toBe('默认实施模式运行指令')
-    expect(zhCN.config.defaultPlanRunInstruction).toBe('默认分析模式运行指令')
+    expect(zhCN.config.runInstructionImplementationTab).toBe('实施模式')
+    expect(zhCN.config.runInstructionAnalysisTab).toBe('分析模式')
 
     expect(en.issue.taskModeExecute).toBe('Implementation')
     expect(en.issue.taskModePlan).toBe('Analysis')
     expect(en.taskView.taskModeExecute).toBe('Implementation')
     expect(en.taskView.taskModePlan).toBe('Analysis')
-    expect(en.config.defaultExecuteRunInstruction).toBe('Default Implementation Mode Run Instruction')
-    expect(en.config.defaultPlanRunInstruction).toBe('Default Analysis Mode Run Instruction')
+    expect(en.config.runInstructionImplementationTab).toBe('Implementation')
+    expect(en.config.runInstructionAnalysisTab).toBe('Analysis')
   })
 
   it('describes analysis mode as project-grounded answers without file changes', () => {

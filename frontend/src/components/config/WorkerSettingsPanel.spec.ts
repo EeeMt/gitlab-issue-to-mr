@@ -267,6 +267,36 @@ vi.mock('naive-ui', () => ({
         })
     }
   },
+  NTabPane: {
+    name: 'NTabPane',
+    props: ['name', 'tab'],
+    setup(props: any, { slots }: any) {
+      return () =>
+        h(
+          'div',
+          { class: 'n-tab-pane', 'data-name': props.name, 'data-tab': props.tab },
+          slots.default?.()
+        )
+    }
+  },
+  NTabs: {
+    name: 'NTabs',
+    props: ['value', 'type', 'animated'],
+    emits: ['update:value'],
+    setup(props: any, { slots }: any) {
+      return () =>
+        h(
+          'div',
+          {
+            class: 'n-tabs',
+            'data-value': props.value,
+            'data-type': props.type,
+            'data-animated': props.animated ? 'true' : 'false'
+          },
+          slots.default?.()
+        )
+    }
+  },
   NTag: {
     name: 'NTag',
     props: ['type', 'round', 'size', 'bordered'],
@@ -353,6 +383,68 @@ describe('WorkerSettingsPanel', () => {
     expect(wrapper.find('.config-compact-row--mount .n-form-item').exists()).toBe(false)
     expect(wrapper.find('.config-compact-row--environment .n-form-item').exists()).toBe(false)
     expect(wrapper.text().match(/config\.environmentVariableSecretHint/g)).toHaveLength(1)
+  })
+
+  it('groups run instruction editors into mode tabs', async () => {
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: {
+        isMobile: false,
+        reloadKey: 0
+      }
+    })
+
+    await flushPromises()
+
+    const tabs = wrapper.find('.config-run-instructions-tabs')
+    expect(tabs.attributes('data-value')).toBe('execute')
+    expect(tabs.attributes('data-type')).toBe('segment')
+    expect(tabs.attributes('data-animated')).toBe('false')
+    expect(tabs.findAll('.n-tab-pane').map((pane) => pane.attributes('data-name'))).toEqual([
+      'execute',
+      'plan',
+      'ci_auto_repair'
+    ])
+    expect(tabs.findAll('.n-tab-pane').map((pane) => pane.attributes('data-tab'))).toEqual([
+      'config.runInstructionImplementationTab',
+      'config.runInstructionAnalysisTab',
+      'config.runInstructionCiAutoRepairTab'
+    ])
+    expect(
+      tabs.findAllComponents({ name: 'RunInstructionTemplateEditor' }).map((editor) =>
+        editor.props('fixedRows')
+      )
+    ).toEqual([12, 12, 12])
+  })
+
+  it('applies prompt-only to manual modes and hides it for CI auto-repair', async () => {
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: {
+        isMobile: false,
+        reloadKey: 0
+      }
+    })
+
+    await flushPromises()
+
+    const panes = wrapper.findAll('.config-run-instructions-tabs .n-tab-pane')
+    const promptOnlyLabel = 'runInstruction.usePromptOnly'
+    const executePromptOnly = panes[0]
+      .findAll('.run-instruction-editor__actions button')
+      .find((button) => button.text() === promptOnlyLabel)
+    const planPromptOnly = panes[1]
+      .findAll('.run-instruction-editor__actions button')
+      .find((button) => button.text() === promptOnlyLabel)
+
+    expect(executePromptOnly).toBeDefined()
+    expect(planPromptOnly).toBeDefined()
+    expect(panes[2].text()).not.toContain(promptOnlyLabel)
+
+    await executePromptOnly!.trigger('click')
+    await planPromptOnly!.trigger('click')
+
+    const vm = wrapper.vm as any
+    expect(vm.workerFormValue.default_execute_run_instruction_template).toBe('{{user_prompt}}')
+    expect(vm.workerFormValue.default_plan_run_instruction_template).toBe('{{user_prompt}}')
   })
 
   it('adds new mounts and environment variables at the top of each list', async () => {

@@ -457,31 +457,46 @@
 
           <div class="config-form__section config-run-instructions-section">
             <div class="config-form__section-title">{{ t('config.runInstructions') }}</div>
-            <n-form-item :label="t('config.defaultExecuteRunInstruction')">
-              <RunInstructionTemplateEditor
-                v-model="workerFormValue.default_execute_run_instruction_template"
-                :available-placeholders="builtIns?.execute.available_placeholders ?? []"
-                :known-placeholders="knownPromptPlaceholders"
-                @restore-default="restoreBuiltIn('execute')"
-              />
-            </n-form-item>
-            <n-form-item :label="t('config.defaultPlanRunInstruction')">
-              <RunInstructionTemplateEditor
-                v-model="workerFormValue.default_plan_run_instruction_template"
-                :available-placeholders="builtIns?.plan.available_placeholders ?? []"
-                :known-placeholders="knownPromptPlaceholders"
-                @restore-default="restoreBuiltIn('plan')"
-              />
-            </n-form-item>
-            <n-form-item :label="t('config.ciAutoRepairRunInstruction')">
-              <RunInstructionTemplateEditor
-                v-model="workerFormValue.ci_auto_repair_run_instruction_template"
-                :available-placeholders="builtIns?.ci_auto_repair.available_placeholders ?? []"
-                :known-placeholders="knownPromptPlaceholders"
-                :warn-when-user-prompt-missing="false"
-                @restore-default="restoreBuiltIn('ci_auto_repair')"
-              />
-            </n-form-item>
+            <n-tabs
+              v-model:value="activeRunInstructionTab"
+              type="segment"
+              class="config-run-instructions-tabs"
+            >
+              <n-tab-pane name="execute" :tab="t('config.runInstructionImplementationTab')">
+                <RunInstructionTemplateEditor
+                  v-model="workerFormValue.default_execute_run_instruction_template"
+                  :fixed-rows="12"
+                  :available-placeholders="builtIns?.execute.available_placeholders ?? []"
+                  :known-placeholders="knownPromptPlaceholders"
+                  @use-prompt-only="usePromptOnly('execute')"
+                  @restore-default="restoreBuiltIn('execute')"
+                />
+              </n-tab-pane>
+              <n-tab-pane name="plan" :tab="t('config.runInstructionAnalysisTab')">
+                <RunInstructionTemplateEditor
+                  v-model="workerFormValue.default_plan_run_instruction_template"
+                  :fixed-rows="12"
+                  :available-placeholders="builtIns?.plan.available_placeholders ?? []"
+                  :known-placeholders="knownPromptPlaceholders"
+                  @use-prompt-only="usePromptOnly('plan')"
+                  @restore-default="restoreBuiltIn('plan')"
+                />
+              </n-tab-pane>
+              <n-tab-pane
+                name="ci_auto_repair"
+                :tab="t('config.runInstructionCiAutoRepairTab')"
+              >
+                <RunInstructionTemplateEditor
+                  v-model="workerFormValue.ci_auto_repair_run_instruction_template"
+                  :fixed-rows="12"
+                  :available-placeholders="builtIns?.ci_auto_repair.available_placeholders ?? []"
+                  :known-placeholders="knownPromptPlaceholders"
+                  :warn-when-user-prompt-missing="false"
+                  hide-prompt-only
+                  @restore-default="restoreBuiltIn('ci_auto_repair')"
+                />
+              </n-tab-pane>
+            </n-tabs>
           </div>
 
           <div class="config-card-actions">
@@ -522,6 +537,8 @@ import {
   NSpace,
   NSpin,
   NSwitch,
+  NTabPane,
+  NTabs,
   NTag,
   useMessage
 } from 'naive-ui'
@@ -597,6 +614,7 @@ const builtIns = ref<RunInstructionTemplateBuiltIns | null>(null)
 const workerProfiles = ref<WorkerProfile[]>([])
 const selectedProfileId = ref<number | null>(null)
 const creatingWorkerProfile = ref(false)
+const activeRunInstructionTab = ref<'execute' | 'plan' | 'ci_auto_repair'>('execute')
 const knownPromptPlaceholders = computed(() => [
   ...new Set(builtIns.value?.execute.known_placeholders ?? [
     ...(builtIns.value?.execute.available_placeholders ?? []),
@@ -866,6 +884,14 @@ function removeMount(index: number) {
 
 function removeEnvironmentVariable(index: number) {
   workerFormValue.value.environment_variables.splice(index, 1)
+}
+
+function usePromptOnly(mode: 'execute' | 'plan') {
+  if (mode === 'execute') {
+    workerFormValue.value.default_execute_run_instruction_template = '{{user_prompt}}'
+    return
+  }
+  workerFormValue.value.default_plan_run_instruction_template = '{{user_prompt}}'
 }
 
 function selectProfile(profileId: number) {
@@ -1223,6 +1249,16 @@ watch(
   gap: 8px;
 }
 
+.config-run-instructions-tabs {
+  width: 100%;
+}
+
+.config-run-instructions-tabs :deep(.n-tabs-rail),
+.config-run-instructions-tabs :deep(.n-tabs-capsule),
+.config-run-instructions-tabs :deep(.n-tabs-tab) {
+  border-radius: 8px;
+}
+
 .config-collection-heading {
   display: flex;
   align-items: center;
@@ -1256,12 +1292,12 @@ watch(
 
 .config-compact-table--mounts .config-compact-table__header,
 .config-compact-row--mount {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 158px 52px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 158px 76px;
 }
 
 .config-compact-table--environment .config-compact-table__header,
 .config-compact-row--environment {
-  grid-template-columns: minmax(140px, 0.8fr) 120px minmax(220px, 1.2fr) 52px;
+  grid-template-columns: minmax(140px, 0.8fr) 120px minmax(220px, 1.2fr) 76px;
 }
 
 .config-compact-table__header {
@@ -1300,6 +1336,7 @@ watch(
 }
 
 .config-compact-row__remove {
+  max-width: 100%;
   justify-self: end;
 }
 

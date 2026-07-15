@@ -4,12 +4,19 @@
       ref="inputRef"
       :value="modelValue"
       type="textarea"
-      :autosize="{ minRows: 7, maxRows: 18 }"
+      :rows="fixedRows"
+      :autosize="fixedRows ? false : { minRows: 7, maxRows: 18 }"
+      :resizable="!fixedRows"
       :placeholder="t('runInstruction.templatePlaceholder')"
       @update:value="emit('update:modelValue', $event)"
     />
     <div v-if="!hideActions" class="run-instruction-editor__actions">
-      <n-button size="tiny" quaternary @click="emit('use-prompt-only')">
+      <n-button
+        v-if="!hidePromptOnly"
+        size="tiny"
+        quaternary
+        @click="emit('use-prompt-only')"
+      >
         {{ t('runInstruction.usePromptOnly') }}
       </n-button>
       <n-button size="tiny" quaternary @click="emit('restore-default')">
@@ -149,13 +156,17 @@ const props = withDefaults(defineProps<{
   previewError?: string
   warnWhenUserPromptMissing?: boolean
   hideActions?: boolean
+  hidePromptOnly?: boolean
+  fixedRows?: number
 }>(), {
   previewEnabled: false,
   previewLoading: false,
   previewResult: '',
   previewError: '',
   warnWhenUserPromptMissing: true,
-  hideActions: false
+  hideActions: false,
+  hidePromptOnly: false,
+  fixedRows: undefined
 })
 
 const emit = defineEmits<{

@@ -22,6 +22,14 @@ func fail(format string, args ...any) {
 	os.Exit(127)
 }
 
+func resolveRuntimePath() string {
+	path := os.Getenv("PATH")
+	if path == "" {
+		return "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+	}
+	return path
+}
+
 func main() {
 	kitHome := os.Getenv("CODIFY_KIT_HOME")
 	if kitHome == "" {
@@ -48,13 +56,16 @@ func main() {
 		}
 	}
 
-	runtimePath := "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+	runtimePath := resolveRuntimePath()
 	os.Setenv("CODIFY_KIT_HOME", kitHome)
 	os.Setenv("CODIFY_KIT_VERSION", m.KitVersion)
 	os.Setenv("CODIFY_KIT_BIN", m.RuntimeBin)
 	os.Setenv("CODIFY_BASH", m.Bash)
 	os.Setenv("CODIFY_RUNTIME_PATH", runtimePath+":"+m.RuntimeBin)
 	os.Setenv("PATH", m.RuntimeBin+":"+runtimePath)
+	os.Setenv("LC_ALL", "C.UTF-8")
+	os.Setenv("LANG", "C.UTF-8")
+	os.Unsetenv("LANGUAGE")
 
 	argv := []string{m.Bash, m.Entrypoint}
 	argv = append(argv, os.Args[1:]...)

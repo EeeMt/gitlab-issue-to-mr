@@ -766,6 +766,21 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         )
         self.assertNotIn("CODIFY_KIT_CLAUDE_BIN", content)
 
+    def test_worker_kit_launcher_preserves_runtime_path_and_stable_locale(self):
+        root = Path(__file__).resolve().parents[3]
+        content = (root / "deploy" / "worker-kit" / "launcher" / "main.go").read_text()
+
+        self.assertIn('path := os.Getenv("PATH")', content)
+        self.assertIn('os.Setenv("CODIFY_RUNTIME_PATH", runtimePath+":"+m.RuntimeBin)', content)
+        self.assertIn('os.Setenv("PATH", m.RuntimeBin+":"+runtimePath)', content)
+        self.assertIn('os.Setenv("LC_ALL", "C.UTF-8")', content)
+        self.assertIn('os.Setenv("LANG", "C.UTF-8")', content)
+        self.assertIn('os.Unsetenv("LANGUAGE")', content)
+        self.assertNotIn(
+            'runtimePath := "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"',
+            content,
+        )
+
     def test_entrypoint_propagates_module_failure_and_stops_loading(self):
         result, loaded_modules = self._run_entrypoint_loader(failing_module="delivery")
 

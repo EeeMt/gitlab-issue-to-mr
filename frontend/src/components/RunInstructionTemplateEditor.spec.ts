@@ -7,6 +7,35 @@ vi.mock('vue-i18n', () => ({
 }))
 
 describe('RunInstructionTemplateEditor', () => {
+  it('uses a non-resizable fixed-height textarea when fixed rows are provided', () => {
+    const wrapper = mount(RunInstructionTemplateEditor, {
+      props: {
+        modelValue: '{{user_prompt}}',
+        availablePlaceholders: ['user_prompt'],
+        fixedRows: 12
+      }
+    })
+
+    expect(wrapper.get('textarea').attributes('rows')).toBe('12')
+    expect(wrapper.get('.n-input').classes()).not.toContain('n-input--autosize')
+    expect(wrapper.get('.n-input').classes()).not.toContain('n-input--resizable')
+  })
+
+  it('can hide prompt-only while keeping restore-default available', () => {
+    const wrapper = mount(RunInstructionTemplateEditor, {
+      props: {
+        modelValue: '{{issue_title}}',
+        availablePlaceholders: ['issue_title'],
+        hidePromptOnly: true
+      }
+    })
+
+    const actionLabels = wrapper
+      .findAll('.run-instruction-editor__actions button')
+      .map((button) => button.text())
+    expect(actionLabels).toEqual(['runInstruction.restoreDefault'])
+  })
+
   it('keeps variables compact, explains them, and replaces the current selection', async () => {
     const wrapper = mount(RunInstructionTemplateEditor, {
       attachTo: document.body,
