@@ -293,6 +293,7 @@
                     size="small"
                     :placeholder="t('config.containerPathPlaceholder')"
                     class="config-form__input"
+                    @blur="sortMounts"
                   />
                 </label>
                 <label class="config-compact-field">
@@ -359,6 +360,7 @@
                     size="small"
                     :placeholder="t('config.environmentVariableKeyPlaceholder')"
                     class="config-form__input"
+                    @blur="sortEnvironmentVariables"
                   />
                 </label>
                 <label class="config-compact-field">
@@ -689,21 +691,46 @@ const insecureRemoteDocker = computed(() =>
   !workerFormValue.value.docker_tls_ca
 )
 
+function compareMountContainerPaths(
+  left: Pick<WorkerProfileMount, 'container_path'>,
+  right: Pick<WorkerProfileMount, 'container_path'>
+): number {
+  return left.container_path.localeCompare(right.container_path)
+}
+
+function parseMounts(mounts: WorkerProfileMount[] | undefined): WorkerProfileMount[] {
+  if (!Array.isArray(mounts)) return []
+
+  return mounts.map((mount) => ({ ...mount })).sort(compareMountContainerPaths)
+}
+
+function serializeMounts(mounts: WorkerProfileMount[]): WorkerProfileMount[] {
+  return mounts
+    .filter((mount) => mount.host_path && mount.container_path)
+    .sort(compareMountContainerPaths)
+}
+
+function sortMounts() {
+  workerFormValue.value.mounts.sort(compareMountContainerPaths)
+}
+
 function parseEnvironmentVariables(
   environmentVariables: WorkerProfileEnvironmentVariable[] | undefined
 ): EnvironmentVariableFormItem[] {
   if (!Array.isArray(environmentVariables)) return []
 
-  return environmentVariables.map((environmentVariable) => ({
-    id: environmentVariable.id,
-    key: environmentVariable.key || '',
-    value:
-      environmentVariable.is_secret && environmentVariable.value_configured
-        ? ''
-        : (environmentVariable.value ?? ''),
-    is_secret: Boolean(environmentVariable.is_secret),
-    value_configured: Boolean(environmentVariable.value_configured || environmentVariable.value)
-  }))
+  return [...environmentVariables]
+    .sort(compareEnvironmentVariableKeys)
+    .map((environmentVariable) => ({
+      id: environmentVariable.id,
+      key: environmentVariable.key || '',
+      value:
+        environmentVariable.is_secret && environmentVariable.value_configured
+          ? ''
+          : (environmentVariable.value ?? ''),
+      is_secret: Boolean(environmentVariable.is_secret),
+      value_configured: Boolean(environmentVariable.value_configured || environmentVariable.value)
+    }))
 }
 
 function serializeEnvironmentVariables(
@@ -717,6 +744,18 @@ function serializeEnvironmentVariables(
       is_secret: environmentVariable.is_secret
     }))
     .filter((environmentVariable) => environmentVariable.key)
+    .sort(compareEnvironmentVariableKeys)
+}
+
+function compareEnvironmentVariableKeys(
+  left: Pick<EnvironmentVariableFormItem, 'key'>,
+  right: Pick<EnvironmentVariableFormItem, 'key'>
+): number {
+  return left.key.localeCompare(right.key)
+}
+
+function sortEnvironmentVariables() {
+  workerFormValue.value.environment_variables.sort(compareEnvironmentVariableKeys)
 }
 
 function mapProfileToWorkerFormValue(
@@ -739,7 +778,7 @@ function mapProfileToWorkerFormValue(
     docker_tls_cert: profile?.docker_tls_cert ?? '',
     docker_tls_key: profile?.docker_tls_key ?? '',
     codegraph_enabled: profile?.codegraph_enabled ?? false,
-    mounts: (profile?.volume_mounts ?? []).map((mount) => ({ ...mount })),
+    mounts: parseMounts(profile?.volume_mounts),
     environment_variables: parseEnvironmentVariables(profile?.environment_variables),
     worker_workspace_retention_days: workerWorkspaceRetentionDays,
     worker_workspace_host_path: workerWorkspaceHostPath,
@@ -935,9 +974,7 @@ function buildWorkerProfilePayload(): WorkerProfilePayload {
       ? null
       : workerFormValue.value.docker_tls_key,
     codegraph_enabled: workerFormValue.value.codegraph_enabled,
-    volume_mounts: workerFormValue.value.mounts.filter(
-      (mount) => mount.host_path && mount.container_path
-    ),
+    volume_mounts: serializeMounts(workerFormValue.value.mounts),
     environment_variables: serializeEnvironmentVariables(
       workerFormValue.value.environment_variables
     ),

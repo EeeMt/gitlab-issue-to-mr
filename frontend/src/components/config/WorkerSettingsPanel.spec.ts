@@ -473,7 +473,56 @@ describe('WorkerSettingsPanel', () => {
       is_secret: false,
       value_configured: false
     })
-    expect(vm.workerFormValue.environment_variables[1].key).toBe('SECRET_TOKEN')
+    expect(vm.workerFormValue.environment_variables[1].key).toBe('JAVA_OPTS')
+  })
+
+  it('sorts volume mounts by container path when loading, editing, and saving', async () => {
+    mockGetAdminWorkerProfiles.mockResolvedValueOnce([
+      createWorkerProfile({
+        volume_mounts: [
+          { host_path: '/host/workspace', container_path: '/workspace', mode: 'rw' },
+          { host_path: '/host/cache', container_path: '/cache', mode: 'rw' },
+          { host_path: '/host/tools', container_path: '/opt/tools', mode: 'ro' }
+        ]
+      })
+    ])
+
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: {
+        isMobile: false,
+        reloadKey: 0
+      }
+    })
+
+    await flushPromises()
+
+    const vm = wrapper.vm as any
+    expect(vm.workerFormValue.mounts.map((mount: any) => mount.container_path)).toEqual([
+      '/cache',
+      '/opt/tools',
+      '/workspace'
+    ])
+
+    vm.workerFormValue.mounts[2].container_path = '/bin'
+    vm.sortMounts()
+    expect(vm.workerFormValue.mounts.map((mount: any) => mount.container_path)).toEqual([
+      '/bin',
+      '/cache',
+      '/opt/tools'
+    ])
+
+    await vm.handleSaveWorker()
+
+    expect(mockUpdateWorkerProfile).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        volume_mounts: [
+          { host_path: '/host/workspace', container_path: '/bin', mode: 'rw' },
+          { host_path: '/host/cache', container_path: '/cache', mode: 'rw' },
+          { host_path: '/host/tools', container_path: '/opt/tools', mode: 'ro' }
+        ]
+      })
+    )
   })
 
   it('loads and saves worker custom scripts', async () => {
@@ -715,7 +764,7 @@ describe('WorkerSettingsPanel', () => {
     expect(mockMessage.error).toHaveBeenCalledWith('worker profile invalid')
   })
 
-  it('loads configured secret environment variables without exposing stored values', async () => {
+  it('sorts environment variables by name without exposing stored secret values', async () => {
     const wrapper = mount(WorkerSettingsPanel, {
       props: {
         isMobile: false,
@@ -729,17 +778,17 @@ describe('WorkerSettingsPanel', () => {
 
     expect(vm.workerFormValue.environment_variables).toEqual([
       {
-        id: 7,
-        key: 'SECRET_TOKEN',
-        value: '',
-        is_secret: true,
-        value_configured: true
-      },
-      {
         id: 8,
         key: 'JAVA_OPTS',
         value: '-Xmx512m',
         is_secret: false,
+        value_configured: true
+      },
+      {
+        id: 7,
+        key: 'SECRET_TOKEN',
+        value: '',
+        is_secret: true,
         value_configured: true
       }
     ])
@@ -766,49 +815,49 @@ describe('WorkerSettingsPanel', () => {
       expect.objectContaining({
         environment_variables: [
           {
-            id: 7,
-            key: 'SECRET_TOKEN',
-            value: '',
-            is_secret: true
-          },
-          {
             id: 8,
             key: 'JAVA_OPTS',
             value: '-Xmx512m',
             is_secret: false
+          },
+          {
+            id: 7,
+            key: 'SECRET_TOKEN',
+            value: '',
+            is_secret: true
           }
         ]
       })
     )
     expect(vm.workerFormValue.environment_variables).toEqual([
       {
-        id: 7,
-        key: 'SECRET_TOKEN',
-        value: '',
-        is_secret: true,
-        value_configured: true
-      },
-      {
         id: 8,
         key: 'JAVA_OPTS',
         value: '-Xmx512m',
         is_secret: false,
+        value_configured: true
+      },
+      {
+        id: 7,
+        key: 'SECRET_TOKEN',
+        value: '',
+        is_secret: true,
         value_configured: true
       }
     ])
     expect(vm.lastLoadedWorker.environment_variables).toEqual([
       {
-        id: 7,
-        key: 'SECRET_TOKEN',
-        value: '',
-        is_secret: true,
-        value_configured: true
-      },
-      {
         id: 8,
         key: 'JAVA_OPTS',
         value: '-Xmx512m',
         is_secret: false,
+        value_configured: true
+      },
+      {
+        id: 7,
+        key: 'SECRET_TOKEN',
+        value: '',
+        is_secret: true,
         value_configured: true
       }
     ])
@@ -825,7 +874,10 @@ describe('WorkerSettingsPanel', () => {
     await flushPromises()
 
     const vm = wrapper.vm as any
-    vm.workerFormValue.environment_variables[0].value = 'new-secret-value'
+    const configuredSecret = vm.workerFormValue.environment_variables.find(
+      (environmentVariable: any) => environmentVariable.key === 'SECRET_TOKEN'
+    )
+    configuredSecret.value = 'new-secret-value'
     vm.workerFormValue.environment_variables.push({
       key: 'NEW_SECRET',
       value: 'brand-new-secret',
@@ -865,10 +917,10 @@ describe('WorkerSettingsPanel', () => {
 
     expect(vm.workerFormValue.environment_variables).toEqual([
       {
-        id: 7,
-        key: 'SECRET_TOKEN',
-        value: '',
-        is_secret: true,
+        id: 8,
+        key: 'JAVA_OPTS',
+        value: '-Xmx512m',
+        is_secret: false,
         value_configured: true
       },
       {
@@ -879,19 +931,19 @@ describe('WorkerSettingsPanel', () => {
         value_configured: true
       },
       {
-        id: 8,
-        key: 'JAVA_OPTS',
-        value: '-Xmx512m',
-        is_secret: false,
+        id: 7,
+        key: 'SECRET_TOKEN',
+        value: '',
+        is_secret: true,
         value_configured: true
       }
     ])
     expect(vm.lastLoadedWorker.environment_variables).toEqual([
       {
-        id: 7,
-        key: 'SECRET_TOKEN',
-        value: '',
-        is_secret: true,
+        id: 8,
+        key: 'JAVA_OPTS',
+        value: '-Xmx512m',
+        is_secret: false,
         value_configured: true
       },
       {
@@ -902,10 +954,10 @@ describe('WorkerSettingsPanel', () => {
         value_configured: true
       },
       {
-        id: 8,
-        key: 'JAVA_OPTS',
-        value: '-Xmx512m',
-        is_secret: false,
+        id: 7,
+        key: 'SECRET_TOKEN',
+        value: '',
+        is_secret: true,
         value_configured: true
       }
     ])
@@ -914,12 +966,6 @@ describe('WorkerSettingsPanel', () => {
       1,
       expect.objectContaining({
         environment_variables: [
-          {
-            id: 7,
-            key: 'SECRET_TOKEN',
-            value: 'new-secret-value',
-            is_secret: true
-          },
           {
             id: 8,
             key: 'JAVA_OPTS',
@@ -930,6 +976,12 @@ describe('WorkerSettingsPanel', () => {
             id: undefined,
             key: 'NEW_SECRET',
             value: 'brand-new-secret',
+            is_secret: true
+          },
+          {
+            id: 7,
+            key: 'SECRET_TOKEN',
+            value: 'new-secret-value',
             is_secret: true
           }
         ]
