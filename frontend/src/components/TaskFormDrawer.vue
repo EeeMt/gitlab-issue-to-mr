@@ -205,24 +205,15 @@
           </div>
         </n-form-item>
 
-        <details
-          class="run-instruction-advanced"
-          :class="{ 'run-instruction-advanced--disabled': taskMode === null }"
-        >
-          <summary
-            class="run-instruction-advanced__summary"
-            :aria-disabled="taskMode === null"
-            @click="handleRunInstructionSummaryClick"
-          >
+        <details v-if="taskMode !== null" class="run-instruction-advanced">
+          <summary class="run-instruction-advanced__summary">
             <span class="run-instruction-advanced__icon">
               <n-icon :component="OptionsOutline" size="16" />
             </span>
             <span class="run-instruction-advanced__copy">
               <span class="run-instruction-advanced__title">{{ t('runInstruction.advanced') }}</span>
               <span class="run-instruction-advanced__hint">
-                {{ taskMode === null
-                  ? t('runInstruction.selectModeHint')
-                  : t('runInstruction.advancedHint') }}
+                {{ t('runInstruction.advancedHint') }}
               </span>
             </span>
             <span class="run-instruction-advanced__chevron" aria-hidden="true">›</span>
@@ -244,23 +235,18 @@
                     </n-button>
                   </div>
                 </div>
-                <n-form-item>
-                  <template #label>
-                    <span class="sr-only">{{ t('runInstruction.template') }}</span>
-                  </template>
-                  <RunInstructionTemplateEditor
-                    :model-value="runInstructionTemplate"
-                    :available-placeholders="currentAvailablePlaceholders"
-                    :known-placeholders="knownRunInstructionPlaceholders"
-                    hide-actions
-                    preview-enabled
-                    :preview-loading="previewLoading"
-                    :preview-result="previewResult"
-                    :preview-error="previewError"
-                    @update:model-value="handleRunInstructionInput"
-                    @preview="handleRunInstructionPreview"
-                  />
-                </n-form-item>
+                <RunInstructionTemplateEditor
+                  :model-value="runInstructionTemplate"
+                  :available-placeholders="currentAvailablePlaceholders"
+                  :known-placeholders="knownRunInstructionPlaceholders"
+                  hide-actions
+                  preview-enabled
+                  :preview-loading="previewLoading"
+                  :preview-result="previewResult"
+                  :preview-error="previewError"
+                  @update:model-value="handleRunInstructionInput"
+                  @preview="handleRunInstructionPreview"
+                />
               </div>
             </n-spin>
           </div>
@@ -801,10 +787,6 @@ function handleRunInstructionInput(value: string) {
   invalidateRunInstructionPreview()
 }
 
-function handleRunInstructionSummaryClick(event: MouseEvent) {
-  if (taskMode.value === null) event.preventDefault()
-}
-
 function restoreRunInstructionDefault() {
   if (!taskMode.value) return
   runInstructionTemplate.value = getDefaultRunInstructionTemplate(taskMode.value)
@@ -884,27 +866,15 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
 .run-instruction-field {
-  margin-bottom: -18px;
+  display: grid;
+  gap: 4px;
 }
 
 .run-instruction-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-bottom: 6px;
 }
 
 .run-instruction-header__title {
@@ -995,12 +965,6 @@ onMounted(() => {
   box-shadow: 0 0 0 2px rgba(99, 226, 183, 0.06);
 }
 
-.run-instruction-advanced--disabled {
-  border-color: var(--n-border-color);
-  background: var(--n-color-disabled);
-  box-shadow: none;
-}
-
 .run-instruction-advanced__summary {
   display: flex;
   align-items: center;
@@ -1016,10 +980,6 @@ onMounted(() => {
   display: none;
 }
 
-.run-instruction-advanced--disabled .run-instruction-advanced__summary {
-  cursor: not-allowed;
-}
-
 .run-instruction-advanced__icon {
   display: inline-flex;
   align-items: center;
@@ -1030,11 +990,6 @@ onMounted(() => {
   border-radius: 7px;
   color: var(--n-primary-color);
   background: rgba(99, 226, 183, 0.1);
-}
-
-.run-instruction-advanced--disabled .run-instruction-advanced__icon {
-  color: var(--n-text-color-disabled);
-  background: var(--n-action-color);
 }
 
 .run-instruction-advanced__copy {
@@ -1061,12 +1016,6 @@ onMounted(() => {
   white-space: nowrap;
 }
 
-.run-instruction-advanced--disabled .run-instruction-advanced__title,
-.run-instruction-advanced--disabled .run-instruction-advanced__hint,
-.run-instruction-advanced--disabled .run-instruction-advanced__chevron {
-  color: var(--n-text-color-disabled);
-}
-
 .run-instruction-advanced__chevron {
   color: var(--n-text-color-3);
   font-size: 22px;
@@ -1087,7 +1036,7 @@ onMounted(() => {
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .run-instruction-advanced:not([open], .run-instruction-advanced--disabled):hover {
+  .run-instruction-advanced:not([open]):hover {
     border-color: var(--n-primary-color);
   }
 }

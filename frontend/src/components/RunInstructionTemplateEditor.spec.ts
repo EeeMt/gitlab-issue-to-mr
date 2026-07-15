@@ -77,7 +77,7 @@ describe('RunInstructionTemplateEditor', () => {
     wrapper.unmount()
   })
 
-  it('restores the default and generates the preview on first expansion', async () => {
+  it('restores the default and generates the preview on the first in-place switch', async () => {
     const wrapper = mount(RunInstructionTemplateEditor, {
       props: {
         modelValue: '{{user_prompt}}',
@@ -89,12 +89,16 @@ describe('RunInstructionTemplateEditor', () => {
     await buttons.find((button) => button.text().includes('runInstruction.restoreDefault'))!.trigger('click')
     expect(wrapper.emitted('restore-default')).toHaveLength(1)
 
-    const previewCard = wrapper.get('details.run-instruction-editor__preview-card')
-    expect(previewCard.attributes('open')).toBeUndefined()
-    ;(previewCard.element as HTMLDetailsElement).open = true
-    await previewCard.trigger('toggle')
+    expect(wrapper.get('[data-testid="editor-tab"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('[data-testid="preview-tab"]').attributes('aria-selected')).toBe('false')
+    await wrapper.get('[data-testid="preview-tab"]').trigger('click')
     expect(wrapper.emitted('preview')).toHaveLength(1)
-    expect(wrapper.vm.previewExpanded).toBe(true)
+    expect(wrapper.vm.activeView).toBe('preview')
+    expect(wrapper.get('[data-testid="preview-tab"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('[data-testid="editor-panel"]').isVisible()).toBe(false)
+    expect(wrapper.get('[data-testid="preview-panel"]').attributes('style') ?? '').not.toContain(
+      'display: none'
+    )
   })
 
   it('shows unknown-placeholder and missing-requirement feedback', async () => {
@@ -109,7 +113,7 @@ describe('RunInstructionTemplateEditor', () => {
     expect(wrapper.text()).toContain('runInstruction.userPromptMissing')
   })
 
-  it('keeps the preview card collapsed by default and refreshes in place', async () => {
+  it('switches the editor and preview in the same stage and refreshes in place', async () => {
     const wrapper = mount(RunInstructionTemplateEditor, {
       props: {
         modelValue: '{{user_prompt}}',
@@ -119,27 +123,24 @@ describe('RunInstructionTemplateEditor', () => {
         previewError: 'Preview failed'
       }
     })
-    expect(wrapper.text()).toContain('Rendered result')
-    expect(wrapper.text()).toContain('Preview failed')
-    expect(wrapper.get('[data-testid="preview-toggle"]').text()).toBe(
-      'runInstruction.preview›'
-    )
-    expect(wrapper.find('[data-testid="preview-action"]').exists()).toBe(false)
-    expect(wrapper.text()).not.toContain('runInstruction.previewReady')
-    expect(wrapper.vm.previewExpanded).toBe(false)
-    expect(wrapper.find('details.run-instruction-editor__preview-card').attributes('open')).toBeUndefined()
+    expect(wrapper.get('[data-testid="editor-panel"]').isVisible()).toBe(true)
+    expect(wrapper.get('[data-testid="preview-panel"]').isVisible()).toBe(false)
+    expect(wrapper.find('[data-testid="preview-refresh"]').exists()).toBe(false)
 
-    const previewCard = wrapper.get('details.run-instruction-editor__preview-card')
-    ;(previewCard.element as HTMLDetailsElement).open = true
-    await previewCard.trigger('toggle')
+    await wrapper.get('[data-testid="preview-tab"]').trigger('click')
     expect(wrapper.emitted('preview')).toBeUndefined()
-    expect(wrapper.vm.previewExpanded).toBe(true)
+    expect(wrapper.vm.activeView).toBe('preview')
+    expect(wrapper.get('[data-testid="editor-panel"]').attributes('style')).toContain('display: none')
+    expect(wrapper.get('[data-testid="preview-panel"]').attributes('style') ?? '').not.toContain(
+      'display: none'
+    )
+    expect(wrapper.get('.run-instruction-editor__stage').text()).toContain('Rendered result')
+    expect(wrapper.get('.run-instruction-editor__stage').text()).toContain('Preview failed')
     await wrapper.get('[data-testid="preview-refresh"]').trigger('click')
     expect(wrapper.emitted('preview')).toHaveLength(1)
-    expect(wrapper.vm.previewExpanded).toBe(true)
 
-    ;(previewCard.element as HTMLDetailsElement).open = false
-    await previewCard.trigger('toggle')
-    expect(wrapper.vm.previewExpanded).toBe(false)
+    await wrapper.get('[data-testid="editor-tab"]').trigger('click')
+    expect(wrapper.get('[data-testid="editor-panel"]').isVisible()).toBe(true)
+    expect(wrapper.get('[data-testid="preview-panel"]').attributes('style')).toContain('display: none')
   })
 })

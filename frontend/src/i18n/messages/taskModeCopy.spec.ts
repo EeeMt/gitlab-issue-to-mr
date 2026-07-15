@@ -4,6 +4,11 @@ import en from './en'
 import zhCN from './zh-CN'
 
 describe('task mode copy', () => {
+  it('labels the task input as a prompt', () => {
+    expect(zhCN.issue.prompt).toBe('提示词')
+    expect(en.issue.prompt).toBe('Prompt')
+  })
+
   it('presents execute and plan as implementation and analysis modes', () => {
     expect(zhCN.issue.taskModeExecute).toBe('实施模式')
     expect(zhCN.issue.taskModePlan).toBe('分析模式')

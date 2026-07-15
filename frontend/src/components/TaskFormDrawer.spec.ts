@@ -1124,31 +1124,22 @@ describe('TaskFormDrawer', () => {
   })
 
   describe('run instruction templates', () => {
-    it('disables run instructions until a task mode is selected', async () => {
+    it('shows run instructions only after a task mode is selected', async () => {
       await mountDrawer()
       await openDrawer()
 
       expect(wrapper.vm.taskMode).toBeNull()
       expect(wrapper.vm.runInstructionTemplate).toBe('')
-      expect(wrapper.find('.run-instruction-advanced__title').text()).toBe(
-        'runInstruction.advanced'
-      )
-      expect(wrapper.find('.run-instruction-advanced__hint').text()).toBe(
-        'runInstruction.selectModeHint'
-      )
-      const advanced = wrapper.find('details.run-instruction-advanced')
-      const summary = wrapper.find('.run-instruction-advanced__summary')
       expect(wrapper.get('.n-drawer-content').attributes('data-native-scrollbar')).toBe('false')
-      expect(advanced.classes()).toContain('run-instruction-advanced--disabled')
-      expect(summary.attributes('aria-disabled')).toBe('true')
-      await summary.trigger('click')
-      expect(advanced.attributes('open')).toBeUndefined()
+      expect(wrapper.find('details.run-instruction-advanced').exists()).toBe(false)
 
       wrapper.vm.selectTaskMode('execute')
       await nextTick()
       expect(wrapper.vm.runInstructionTemplate).toBe('Worker execute {{user_prompt}}')
-      expect(advanced.classes()).not.toContain('run-instruction-advanced--disabled')
-      expect(summary.attributes('aria-disabled')).toBe('false')
+      expect(wrapper.find('details.run-instruction-advanced').exists()).toBe(true)
+      expect(wrapper.find('.run-instruction-advanced__title').text()).toBe(
+        'runInstruction.advanced'
+      )
       expect(wrapper.find('.run-instruction-advanced__hint').text()).toBe(
         'runInstruction.advancedHint'
       )
