@@ -29,6 +29,7 @@ def test_worker_kit_uses_content_addressed_nixpkgs_lock():
     assert re.fullmatch(r"[0-9a-df-np-sv-z0-9]{52}", lock["sha256"])
     assert "nix-channel" not in dockerfile
     assert "COPY deploy/worker-kit/nixpkgs.json ./nixpkgs.json" in dockerfile
+    assert 'ENV NIX_CONFIG="filter-syscalls = false"' in dockerfile
     assert "builtins.fetchTarball" in nix_expression
     assert "inherit (nixpkgsLock) url sha256" in nix_expression
     assert "nixpkgs_revision" in dockerfile

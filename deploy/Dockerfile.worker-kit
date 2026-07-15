@@ -13,6 +13,10 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldfl
     && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags='-s -w' -o /out/codify-run-as ./run-as/main.go
 
 FROM ${NIX_IMAGE} AS closure-builder
+# Nix's syscall filter cannot be loaded when an amd64 kit is built through
+# emulation on an Apple Silicon Docker host. This stage already runs inside
+# BuildKit's container sandbox, so disable only Nix's nested seccomp filter.
+ENV NIX_CONFIG="filter-syscalls = false"
 WORKDIR /src
 COPY deploy/worker-kit/default.nix ./default.nix
 COPY deploy/worker-kit/nixpkgs.json ./nixpkgs.json
