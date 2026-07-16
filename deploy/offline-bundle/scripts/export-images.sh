@@ -20,6 +20,7 @@ if [[ -f "${EXTRA_IMAGES_FILE}" ]]; then
   done < "${EXTRA_IMAGES_FILE}"
 fi
 
+mkdir -p "$(dirname "${ARCHIVE}")"
 echo "Exporting images to ${ARCHIVE}..."
 docker save "${IMAGES[@]}" | gzip -1 > "${ARCHIVE}"
 if command -v sha256sum >/dev/null 2>&1; then

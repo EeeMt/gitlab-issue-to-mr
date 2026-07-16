@@ -1,3 +1,4 @@
+import gzip
 import hashlib
 import json
 import os
@@ -68,6 +69,48 @@ def test_worker_kit_export_omits_macos_appledouble_metadata():
     )
 
     assert 'COPYFILE_DISABLE=1 tar -C "${STAGING}" -czf "${ARCHIVE}"' in export_script
+
+
+def test_export_images_script_creates_missing_output_directory():
+    repo_root = Path(__file__).resolve().parents[3]
+    script_path = repo_root / "deploy" / "offline-bundle" / "scripts" / "export-images.sh"
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        scripts_dir = root / "offline-bundle" / "scripts"
+        scripts_dir.mkdir(parents=True)
+
+        script_copy = scripts_dir / "export-images.sh"
+        shutil.copy2(script_path, script_copy)
+        script_copy.chmod(script_copy.stat().st_mode | stat.S_IEXEC)
+
+        fake_bin = root / "bin"
+        fake_bin.mkdir()
+        docker = fake_bin / "docker"
+        docker.write_text(
+            "#!/bin/sh\nprintf 'fake image archive'\n",
+            encoding="utf-8",
+        )
+        docker.chmod(docker.stat().st_mode | stat.S_IEXEC)
+        env = {
+            **os.environ,
+            "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        }
+
+        result = subprocess.run(
+            [str(script_copy)],
+            cwd=root,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr
+        images_dir = root / "offline-bundle" / "images"
+        archive = images_dir / "codify-offline-images.tar.gz"
+        assert gzip.decompress(archive.read_bytes()) == b"fake image archive"
+        assert (images_dir / "SHA256SUMS").is_file()
 
 
 def test_verify_runtime_scripts_mount_claude_without_breaking_docker_args():
