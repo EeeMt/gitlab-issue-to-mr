@@ -1,6 +1,7 @@
 """Task lifecycle helpers for WorkerExecutor."""
 
 import asyncio
+import json
 import logging
 import time
 from datetime import datetime
@@ -39,6 +40,7 @@ from app.database import AsyncSessionLocal
 from app.models import CIFailureRun, Issue, Task, TaskLog, TaskStatus
 
 logger = logging.getLogger(__name__)
+_CONTAINER_RUNTIME_JSON = "/tmp/codify-runtime/runtime.json"
 
 
 async def load_task_or_fail(db: AsyncSession, task_id: int) -> Task | None:
@@ -100,6 +102,46 @@ async def mark_task_running_and_commit(db: AsyncSession, task: Task) -> None:
     task.started_at = utcnow()
     task.raw_logs_finalized_at = None
     await db.commit()
+
+
+async def reconcile_task_input_session_from_runtime(
+    worker,
+    container: Any,
+    task: Task,
+) -> bool:
+    """Replace the planned input session with the one actually used by the CLI wrapper."""
+    try:
+        raw_runtime = await asyncio.to_thread(
+            worker.docker.read_file_from_container,
+            container,
+            _CONTAINER_RUNTIME_JSON,
+        )
+        if not isinstance(raw_runtime, (bytes, bytearray)):
+            return False
+        runtime = json.loads(bytes(raw_runtime).decode("utf-8"))
+        if not isinstance(runtime, dict) or "resume_session" not in runtime:
+            return False
+        raw_resume_session = runtime["resume_session"]
+        if not isinstance(raw_resume_session, str):
+            return False
+        actual_input_session_id = raw_resume_session.strip() or None
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(
+            "[Task %s] Could not reconcile runtime input session: %s",
+            task.id,
+            exc,
+        )
+        return False
+
+    if getattr(task, "input_session_id", None) == actual_input_session_id:
+        return False
+    task.input_session_id = actual_input_session_id
+    logger.info(
+        "[Task %s] Reconciled input session from worker runtime (%s)",
+        task.id,
+        "resumed" if actual_input_session_id else "fresh",
+    )
+    return True
 
 
 def resolve_had_existing_mr(issue: Issue | None) -> bool:
@@ -254,6 +296,17 @@ async def create_execute_container(
             task_id=task.id,
         )
         await db.flush()
+
+    session_mode = getattr(task, "session_mode", "continue")
+    task.input_session_id = (
+        None
+        if session_mode == "fresh" or issue is None
+        else issue.claude_session_id
+    )
+    task.output_session_id = None
+    # Record the exact session decision at execution time. Scheduled tasks must not snapshot
+    # this at creation because earlier queued tasks may advance the Issue session first. The
+    # existing container-id commit below persists these fields in the same transaction.
 
     environment, _target_branch = await worker._prepare_container_inputs(
         db,
@@ -444,6 +497,11 @@ async def monitor_container_run(
         )
 
     await db.refresh(task)
+    input_session_reconciled = await reconcile_task_input_session_from_runtime(
+        worker,
+        container,
+        task,
+    )
     raw_logs_finalized = raw_logs_finalized or task.raw_logs_finalized_at is not None
     cancellation_requested = isinstance(
         getattr(task, "cancel_requested_at", None),
@@ -459,6 +517,8 @@ async def monitor_container_run(
                 "[Task %s] Applied persisted cancellation intent during worker finalization",
                 task.id,
             )
+        elif input_session_reconciled:
+            await db.commit()
         if raw_logs_finalized:
             logger.info(f"[Task {task.id}] Task was cancelled during execution; removing container")
             try:
@@ -479,9 +539,11 @@ async def monitor_container_run(
     if exit_code == 0:
         await _save_delivery_summary_from_container(worker, container, task, db)
 
-    if issue and hasattr(task, "_extracted_session_id") and task._extracted_session_id:
-        if not issue.claude_session_id:
-            issue.claude_session_id = task._extracted_session_id
+    output_session_id = getattr(task, "output_session_id", None)
+    if issue and isinstance(output_session_id, str) and output_session_id:
+        # The session returned by the task is the only safe pointer for subsequent work. This
+        # also covers fresh runs and the CLI wrapper's resume-not-found fallback.
+        issue.claude_session_id = output_session_id
         await db.commit()
 
     if issue:

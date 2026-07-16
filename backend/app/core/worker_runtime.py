@@ -158,7 +158,10 @@ def _build_container_env_with_settings(
 
     task_mode = task.task_mode if task.task_mode else "execute"
     environment["TASK_MODE"] = task_mode
-    if issue.claude_session_id:
+    session_mode = getattr(task, "session_mode", "continue")
+    if session_mode == "fresh":
+        environment["START_FRESH_SESSION"] = "1"
+    elif issue.claude_session_id:
         environment["RESUME_SESSION"] = issue.claude_session_id
 
     if issue.base_branch:

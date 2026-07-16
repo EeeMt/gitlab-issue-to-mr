@@ -37,6 +37,7 @@ RESERVED_WORKER_ENVIRONMENT_KEYS = frozenset(
         "PROJECT_ID",
         "REQUIRE_CHANGES",
         "RESUME_SESSION",
+        "START_FRESH_SESSION",
         "TARGET_BRANCH",
         "TASK_ID",
         "TASK_MODE",

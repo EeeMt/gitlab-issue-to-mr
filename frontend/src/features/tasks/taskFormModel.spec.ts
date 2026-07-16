@@ -13,6 +13,7 @@ const baseDraft: TaskFormDraft = {
   priority: 1,
   requireChanges: DEFAULT_REQUIRE_CHANGES,
   taskMode: 'execute',
+  sessionMode: 'continue',
   selectedProviderId: null,
   selectedWorkerProfileId: null,
   scheduleType: 'now',
@@ -38,6 +39,7 @@ describe('task form request contracts', () => {
       priority: 1,
       task_mode: 'execute',
       require_changes: false,
+      session_mode: 'continue',
       user_prompt: 'Implement it',
     })
   })
@@ -64,12 +66,20 @@ describe('task form request contracts', () => {
       priority: 1,
       task_mode: 'execute',
       require_changes: false,
+      session_mode: 'continue',
       user_prompt: 'Implement it',
       provider_id: 3,
       worker_profile_id: 4,
       scheduled_datetime: new Date(scheduledAt).toISOString(),
       run_instruction_template: 'Execute {{user_prompt}}',
     })
+  })
+
+  it('requests a fresh Claude session when selected', () => {
+    expect(buildCreateTaskRequest(7, {
+      ...baseDraft,
+      sessionMode: 'fresh',
+    }).session_mode).toBe('fresh')
   })
 
   it('builds a minimal edit patch', () => {

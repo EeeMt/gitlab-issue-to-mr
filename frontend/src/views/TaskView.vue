@@ -478,6 +478,7 @@
     mode="create"
     :issue-id="task?.issue_id"
     :issue-description="issueDescription"
+    :has-claude-session="issueHasClaudeSession"
     :default-worker-profile-id="issueDefaultWorkerProfileId"
     :default-provider-id="issueDefaultProviderId"
     data-testid="task-view-create-task-drawer"
@@ -578,6 +579,7 @@ const taskLogs = ref<TaskLog[]>([])
 const activeRetryTask = ref<Task | null>(null)
 const issueTasks = ref<Task[]>([])
 const issueDescription = ref<string | undefined>(undefined)
+const issueHasClaudeSession = ref(false)
 const issueStatus = ref<Issue['status'] | null>(null)
 const issueDefaultWorkerProfileId = ref<number | null>(null)
 const issueDefaultProviderId = ref<number | null>(null)
@@ -823,6 +825,7 @@ async function refreshIssueTasks(requestedTaskId: number) {
   if (!issueId) {
     issueTasks.value = []
     issueDescription.value = undefined
+    issueHasClaudeSession.value = false
     issueStatus.value = null
     issueDefaultWorkerProfileId.value = null
     issueDefaultProviderId.value = null
@@ -833,6 +836,7 @@ async function refreshIssueTasks(requestedTaskId: number) {
     if (requestedTaskId !== taskId.value || task.value?.issue_id !== issueId) return
     issueTasks.value = issueData.tasks ?? []
     issueDescription.value = issueData.description ?? undefined
+    issueHasClaudeSession.value = Boolean(issueData.claude_session_id)
     issueStatus.value = issueData.status ?? null
     issueDefaultWorkerProfileId.value = issueData.default_worker_profile_id ?? null
     issueDefaultProviderId.value = issueData.default_provider_id ?? null
@@ -840,6 +844,7 @@ async function refreshIssueTasks(requestedTaskId: number) {
     if (requestedTaskId !== taskId.value || task.value?.issue_id !== issueId) return
     issueTasks.value = []
     issueDescription.value = undefined
+    issueHasClaudeSession.value = false
     issueStatus.value = null
     issueDefaultWorkerProfileId.value = null
     issueDefaultProviderId.value = null
@@ -994,6 +999,7 @@ watch(
       activeRetryTask.value = null
       issueTasks.value = []
       issueDescription.value = undefined
+      issueHasClaudeSession.value = false
       issueStatus.value = null
       archiveMetadata.value = null
       showCreateDrawer.value = false

@@ -134,10 +134,13 @@ async def test_task_artifact_routes_enforce_task_access_before_loading_content()
 def test_create_request_preserves_execute_and_plan_invariants() -> None:
     execute = CreateTaskRequest(issue_id=1)
     plan = CreateTaskRequest(issue_id=1, task_mode="plan", require_changes=True)
+    fresh = CreateTaskRequest(issue_id=1, session_mode="fresh")
 
     assert execute.task_mode == "execute"
+    assert execute.session_mode == "continue"
     assert execute.effective_require_changes is False
     assert plan.effective_require_changes is False
+    assert fresh.session_mode == "fresh"
 
 
 def test_task_response_preserves_required_frontend_fields() -> None:
@@ -166,6 +169,9 @@ def test_task_response_preserves_required_frontend_fields() -> None:
         commit_message=None,
         require_changes=False,
         task_mode="execute",
+        session_mode="fresh",
+        input_session_id=None,
+        output_session_id="session-new",
         provider_id=None,
         worker_profile_id=None,
         created_at=now,
@@ -198,6 +204,9 @@ def test_task_response_preserves_required_frontend_fields() -> None:
         "priority",
         "require_changes",
         "task_mode",
+        "session_mode",
+        "input_session_id",
+        "output_session_id",
         "provider_id",
         "worker_profile_id",
         "worker_profile_name",
@@ -212,4 +221,6 @@ def test_task_response_preserves_required_frontend_fields() -> None:
     assert required_fields <= response.keys()
     assert response["status"] == "pending"
     assert response["require_changes"] is False
+    assert response["session_mode"] == "fresh"
+    assert response["output_session_id"] == "session-new"
     assert response["project_url"] == "https://gitlab.example.com/team/codify"

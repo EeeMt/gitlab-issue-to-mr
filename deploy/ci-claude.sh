@@ -91,6 +91,7 @@ ALLOWED_TOOLS="${ALLOWED_TOOLS:-Bash,Read,Edit,Write}"
 APPEND_SYSTEM="${APPEND_SYSTEM_PROMPT:-}"
 APPEND_SYSTEM_FILE="${APPEND_SYSTEM_PROMPT_FILE:-}"
 CONTINUE_SESSION="${CONTINUE_SESSION:-0}"
+START_FRESH_SESSION="${START_FRESH_SESSION:-0}"
 MAX_TURNS="${CLAUDE_MAX_TURNS:-}"
 CLAUDE_MODEL="${CLAUDE_MODEL:-}"
 SESSION_ID_FILE=".claude_session_id"
@@ -101,7 +102,12 @@ if [[ -n "$APPEND_SYSTEM_FILE" && ! -f "$APPEND_SYSTEM_FILE" ]]; then
 fi
 
 RESUME="${RESUME_SESSION:-}"
-if [[ -z "$RESUME" && -f "$SESSION_ID_FILE" && "$CONTINUE_SESSION" != "1" ]]; then
+if [[ "$START_FRESH_SESSION" == "1" ]]; then
+  # Fresh mode is the non-interactive equivalent of /clear: keep persisted transcripts and
+  # project state, but never resume conversation context from any source.
+  RESUME=""
+  CONTINUE_SESSION="0"
+elif [[ -z "$RESUME" && -f "$SESSION_ID_FILE" && "$CONTINUE_SESSION" != "1" ]]; then
   RESUME=$(cat "$SESSION_ID_FILE" 2>/dev/null || true)
 fi
 

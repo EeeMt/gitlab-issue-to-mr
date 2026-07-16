@@ -507,6 +507,41 @@ def test_ci_claude_prefers_append_system_prompt_file_when_set(tmp_path):
     assert "file policy: keep this private" not in result.stderr
 
 
+def test_ci_claude_fresh_session_ignores_every_resume_source(tmp_path):
+    (tmp_path / ".claude_session_id").write_text("session-from-file", encoding="utf-8")
+    script_copy = _prepare_script_copy(
+        tmp_path,
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' \"$@\" > claude_args.txt\n"
+        "cat <<'EOF'\n"
+        '{"type":"result","subtype":"success","result":"done","session_id":"session-new","usage":{"input_tokens":1,"output_tokens":1}}\n'
+        "EOF\n",
+    )
+
+    env = os.environ.copy()
+    env["SANDBOX_MODE"] = "1"
+    env["START_FRESH_SESSION"] = "1"
+    env["RESUME_SESSION"] = "session-from-env"
+    env["CONTINUE_SESSION"] = "1"
+
+    result = subprocess.run(
+        [str(script_copy), "start fresh"],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    args = (tmp_path / "claude_args.txt").read_text(encoding="utf-8").splitlines()
+    assert result.returncode == 0, result.stderr
+    assert "--resume" not in args
+    assert "--continue" not in args
+    assert "session-from-env" not in args
+    assert "session-from-file" not in args
+    assert json.loads((tmp_path / "runtime.json").read_text(encoding="utf-8"))["resume_session"] == ""
+
+
 def run_fake_ci_claude(tmp_path, fake_stream_lines):
     script_copy = _prepare_script_copy(
         tmp_path,

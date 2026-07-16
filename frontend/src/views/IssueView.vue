@@ -312,6 +312,7 @@
       mode="create"
       :issue-id="issueId"
       :issue-description="issue?.description ?? undefined"
+      :has-claude-session="Boolean(issue?.claude_session_id)"
       :default-worker-profile-id="issue?.default_worker_profile_id ?? null"
       :default-provider-id="issue?.default_provider_id ?? null"
       data-testid="issue-create-task-drawer"

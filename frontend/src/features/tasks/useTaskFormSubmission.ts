@@ -26,6 +26,7 @@ interface TaskFormSubmissionOptions {
   priority: Ref<number>
   requireChanges: Ref<boolean>
   taskMode: Ref<TaskMode | null>
+  startFreshSession: Ref<boolean>
   taskModeErrorVisible: Ref<boolean>
   selectedProviderId: Ref<number | null>
   selectedWorkerProfileId: Ref<number | null>
@@ -81,6 +82,7 @@ export function useTaskFormSubmission(options: TaskFormSubmissionOptions) {
         priority: options.priority.value,
         requireChanges: options.requireChanges.value,
         taskMode,
+        sessionMode: options.startFreshSession.value ? 'fresh' : 'continue',
         selectedProviderId: options.selectedProviderId.value,
         selectedWorkerProfileId: options.selectedWorkerProfileId.value,
         scheduleType: options.scheduleType.value,
@@ -94,6 +96,7 @@ export function useTaskFormSubmission(options: TaskFormSubmissionOptions) {
       options.scheduledAt.value = null
       options.selectedProviderId.value = null
       options.selectedWorkerProfileId.value = null
+      options.startFreshSession.value = false
       options.scheduleType.value = 'now'
       options.clearScheduledTasks()
       options.close()
@@ -125,6 +128,7 @@ export function useTaskFormSubmission(options: TaskFormSubmissionOptions) {
       priority: options.priority.value,
       requireChanges: options.requireChanges.value,
       taskMode: options.taskMode.value ?? 'execute',
+      sessionMode: 'continue',
       selectedProviderId: options.selectedProviderId.value,
       selectedWorkerProfileId: options.selectedWorkerProfileId.value,
       runInstructionTemplate: options.runInstructionTemplate.value,

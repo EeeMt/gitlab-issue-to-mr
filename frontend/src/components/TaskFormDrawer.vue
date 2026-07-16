@@ -426,6 +426,31 @@
             </Transition>
           </div>
         </n-form-item>
+
+        <n-form-item
+          v-if="mode === 'create'"
+          :label="t('createTask.sessionContext')"
+          class="session-context-form-item"
+        >
+          <div
+            class="session-context-row"
+            data-testid="task-session-mode"
+          >
+            <span class="session-context-row__copy">
+              <span class="session-context-row__title">{{ t('createTask.startFreshSession') }}</span>
+              <span class="session-context-row__description">
+                {{ t(hasClaudeSession
+                  ? 'createTask.startFreshSessionHint'
+                  : 'createTask.startFreshSessionNoCurrent') }}
+              </span>
+            </span>
+            <n-switch
+              v-model:value="startFreshSession"
+              size="small"
+              data-testid="task-session-mode-switch"
+            />
+          </div>
+        </n-form-item>
           </div>
         </section>
 
@@ -641,11 +666,13 @@ const props = withDefaults(defineProps<{
   mode?: 'create' | 'edit'
   issueId?: number
   issueDescription?: string
+  hasClaudeSession?: boolean
   defaultWorkerProfileId?: number | null
   defaultProviderId?: number | null
   task?: Task
 }>(), {
-  mode: 'create'
+  mode: 'create',
+  hasClaudeSession: false
 })
 
 const emit = defineEmits<{
@@ -673,6 +700,7 @@ const prompt = ref('')
 const priority = ref(DEFAULT_TASK_PRIORITY)
 const requireChanges = ref(DEFAULT_REQUIRE_CHANGES)
 const taskMode = ref<'execute' | 'plan' | null>(null)
+const startFreshSession = ref(false)
 const taskModeErrorVisible = ref(false)
 const runInstructionExpanded = ref(false)
 const runInstructionAdvancedContentId = `${useId()}-run-instruction-advanced-content`
@@ -843,6 +871,7 @@ watch(() => props.show, (val) => {
       initialRunInstructionTemplate.value = ''
       runInstructionDirty.value = false
       requireChanges.value = DEFAULT_REQUIRE_CHANGES
+      startFreshSession.value = false
       scheduleType.value = 'now'
       scheduledAt.value = null
       void loadScheduleContext()
@@ -984,6 +1013,7 @@ const {
   priority,
   requireChanges,
   taskMode,
+  startFreshSession,
   taskModeErrorVisible,
   selectedProviderId,
   selectedWorkerProfileId,
@@ -1449,8 +1479,44 @@ onMounted(() => {
 }
 
 .priority-form-item--last,
-.schedule-form-item {
+.session-context-form-item {
   margin-bottom: 0;
+}
+
+.schedule-form-item {
+  margin-bottom: 18px;
+}
+
+.session-context-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--n-border-color);
+  border-radius: 8px;
+  background: var(--n-color-modal, var(--n-color, #fff));
+}
+
+.session-context-row__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.session-context-row__title {
+  color: var(--n-text-color-1);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.session-context-row__description {
+  color: var(--n-text-color-3);
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .priority-selector {

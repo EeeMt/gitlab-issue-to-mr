@@ -111,6 +111,7 @@ class CreateTaskRequest(BaseModel):
     worker_profile_id: int | None = None
     require_changes: bool | None = False
     task_mode: Literal["execute", "plan"] = "execute"
+    session_mode: Literal["continue", "fresh"] = "continue"
     run_instruction_template: str | None = Field(
         default=None, max_length=MAX_RUN_INSTRUCTION_TEMPLATE_LENGTH
     )

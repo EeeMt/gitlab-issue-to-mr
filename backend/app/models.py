@@ -202,6 +202,11 @@ class Task(Base):
     run_instruction_template: Mapped[str | None] = mapped_column(Text, nullable=True)
     rendered_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     rendered_prompt_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    session_mode: Mapped[str] = mapped_column(
+        String(16), default="continue", server_default=text("'continue'"), nullable=False
+    )
+    input_session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    output_session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     initiator_user_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )

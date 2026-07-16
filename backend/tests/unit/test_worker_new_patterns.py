@@ -201,6 +201,7 @@ class TestCodifySystemInitParsing(unittest.TestCase):
             run_result_metadata='{"subtype":"success","session_id":"session-123","usage":{}}',
         )
         self.assertEqual(task._extracted_session_id, "session-123")
+        self.assertEqual(task.output_session_id, "session-123")
 
     def test_updates_commit_diff_and_mr_title_from_worker_finalization(self):
         """Structured finalization sets commit SHA, diff stats, and MR title without markers."""

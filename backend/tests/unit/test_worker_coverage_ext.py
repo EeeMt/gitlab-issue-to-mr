@@ -44,6 +44,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.core.worker import WorkerExecutor
 from app.core.worker_task_artifacts import _stop_artifact_poller
+from app.core.worker_task_lifecycle import reconcile_task_input_session_from_runtime
 from app.models import Task, TaskStatus
 
 # ---------------------------------------------------------------------------
@@ -115,6 +116,23 @@ class TestArtifactPollerShutdown(IsolatedAsyncioTestCase):
         self.assertTrue(poll_task.done())
         self.assertFalse(poll_task.cancelled())
         self.assertEqual(mock_warning.call_count, 2)
+
+
+class TestSessionLineageReconciliation(IsolatedAsyncioTestCase):
+    async def test_resume_fallback_clears_planned_input_session(self):
+        worker = MagicMock()
+        worker.docker.read_file_from_container.return_value = b'{"resume_session":""}'
+        container = MagicMock()
+        task = MagicMock(id=42, input_session_id="session-old")
+
+        changed = await reconcile_task_input_session_from_runtime(worker, container, task)
+
+        self.assertTrue(changed)
+        self.assertIsNone(task.input_session_id)
+        worker.docker.read_file_from_container.assert_called_once_with(
+            container,
+            "/tmp/codify-runtime/runtime.json",
+        )
 
 
 def _make_settings(**overrides):
@@ -698,6 +716,35 @@ class TestResumeTaskSuccess(unittest.TestCase):
 
         self.assertTrue(result)
         self.assertEqual(task.status, TaskStatus.COMPLETED)
+
+    @patch('app.core.worker.get_settings')
+    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
+    def test_run_result_advances_issue_session_pointer(self, mock_notify, mock_get_settings):
+        mock_get_settings.return_value = _make_settings()
+        mock_container = MagicMock(id="ctr-resume-session")
+        mock_docker = MagicMock()
+        mock_docker.client.containers.get.return_value = mock_container
+        worker = _make_worker(mock_docker=mock_docker)
+        task = _make_task(status=TaskStatus.RUNNING)
+        task.issue.claude_session_id = "session-old"
+        db = _make_db(task)
+
+        async def parse_result(current_task, *_args, **_kwargs):
+            current_task.status = TaskStatus.COMPLETED
+            current_task.output_session_id = "session-new"
+
+        with (
+            patch.object(
+                worker,
+                '_stream_logs_to_db',
+                new=AsyncMock(return_value=(0, "", 1, False)),
+            ),
+            patch.object(worker, '_parse_task_result', new=AsyncMock(side_effect=parse_result)),
+        ):
+            result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
+
+        self.assertTrue(result)
+        self.assertEqual(task.issue.claude_session_id, "session-new")
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)

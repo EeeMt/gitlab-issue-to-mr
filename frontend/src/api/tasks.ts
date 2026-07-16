@@ -36,6 +36,9 @@ export interface Task {
   commit_message?: string | null
   require_changes: boolean
   task_mode: 'execute' | 'plan'
+  session_mode: 'continue' | 'fresh'
+  input_session_id: string | null
+  output_session_id: string | null
   provider_id: number | null
   provider_name?: string | null
   worker_profile_id: number | null
@@ -69,6 +72,7 @@ export interface CreateTaskRequest {
   worker_profile_id?: number | null
   require_changes?: boolean
   task_mode?: 'execute' | 'plan'
+  session_mode?: 'continue' | 'fresh'
   run_instruction_template?: string
 }
 

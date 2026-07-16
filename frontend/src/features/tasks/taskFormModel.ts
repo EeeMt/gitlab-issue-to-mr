@@ -15,6 +15,7 @@ export interface TaskFormDraft {
   priority: number
   requireChanges: boolean
   taskMode: TaskMode
+  sessionMode: 'continue' | 'fresh'
   selectedProviderId: number | null
   selectedWorkerProfileId: number | null
   scheduleType: TaskScheduleType
@@ -32,6 +33,7 @@ export function buildCreateTaskRequest(
     priority: draft.priority,
     task_mode: draft.taskMode,
     require_changes: draft.taskMode === 'plan' ? false : draft.requireChanges,
+    session_mode: draft.sessionMode,
   }
   const prompt = draft.prompt.trim()
   if (prompt) request.user_prompt = prompt

@@ -140,6 +140,18 @@ async def retry_task_record(
             detail=str(exc),
         ) from exc
 
+    original_session_mode = getattr(original_task, "session_mode", "continue")
+    original_output_session_id = getattr(original_task, "output_session_id", None)
+    retry_session_mode = (
+        "fresh"
+        if original_session_mode == "fresh"
+        and not (
+            isinstance(original_output_session_id, str)
+            and original_output_session_id.strip()
+        )
+        else "continue"
+    )
+
     new_task = Task(
         issue_id=original_task.issue_id,
         project_id=original_task.project_id,
@@ -163,6 +175,9 @@ async def retry_task_record(
         initiator_email=current_user.email if current_user is not None else None,
         task_mode=original_task.task_mode if original_task.task_mode else "execute",
         require_changes=original_task.require_changes,
+        # Continue a session established by the source run. If a fresh run failed before it
+        # produced a session, preserve fresh mode so the retry cannot fall back to the old one.
+        session_mode=retry_session_mode,
     )
     db.add(new_task)
     await db.flush()
@@ -278,6 +293,7 @@ async def create_task_record(
         worker_profile_id=worker_profile.id,
         task_mode=request.task_mode,
         require_changes=request.effective_require_changes,
+        session_mode=request.session_mode,
     )
     db.add(task)
     await db.flush()

@@ -805,6 +805,8 @@ class RetryTaskAPITests(unittest.TestCase):
         task = _make_serializable_task(task_status=TaskStatus.FAILED)
         task.id = 5
         task.project_id = 1
+        task.session_mode = "fresh"
+        task.output_session_id = None
 
         # First execute returns the task; second returns None (no existing retry);
         # third fetches the Issue used for worker/provider resolution and serialization.
@@ -860,6 +862,8 @@ class RetryTaskAPITests(unittest.TestCase):
         data = response.json()
         self.assertTrue(data["is_retry"])
         self.assertEqual(data["retry_source_task_id"], 5)
+        created_task = mock_db.add.call_args_list[0].args[0]
+        self.assertEqual(created_task.session_mode, "fresh")
 
     def test_retry_task_success_for_cancelled_task(self):
         """POST /api/tasks/{id}/retry should create a new retry task from a CANCELLED task."""
@@ -868,6 +872,8 @@ class RetryTaskAPITests(unittest.TestCase):
         task = _make_serializable_task(task_status=TaskStatus.CANCELLED)
         task.id = 6
         task.project_id = 1
+        task.session_mode = "fresh"
+        task.output_session_id = "session-created-by-source"
 
         # First execute returns the task; second returns None (no existing retry);
         # third resolves default provider; fourth fetches the Issue for serialization
@@ -930,6 +936,8 @@ class RetryTaskAPITests(unittest.TestCase):
         data = response.json()
         self.assertTrue(data["is_retry"])
         self.assertEqual(data["retry_source_task_id"], 6)
+        created_task = mock_db.add.call_args_list[0].args[0]
+        self.assertEqual(created_task.session_mode, "continue")
 
     def test_retry_task_preserves_provider_id(self):
         """POST /api/tasks/{id}/retry should keep the original provider_id."""
@@ -1476,6 +1484,7 @@ class CreateTaskAPITests(unittest.TestCase):
                     "user_prompt": "Fix the login bug",
                     "priority": 0,
                     "provider_id": 1,
+                    "session_mode": "fresh",
                 },
             )
         app.dependency_overrides.clear()
@@ -1485,6 +1494,9 @@ class CreateTaskAPITests(unittest.TestCase):
         self.assertIn("id", data)
         self.assertEqual(data["project_id"], 1)
         self.assertEqual(data["user_prompt"], "Fix the login bug")
+        self.assertEqual(data["session_mode"], "fresh")
+        created_task = mock_db.add.call_args_list[0].args[0]
+        self.assertEqual(created_task.session_mode, "fresh")
 
     def test_create_task_returns_409_when_usage_limit_exceeded(self):
         """POST /api/tasks returns structured 409 when quota is already exceeded."""

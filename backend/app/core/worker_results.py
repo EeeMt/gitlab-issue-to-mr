@@ -213,6 +213,7 @@ async def parse_task_result(
     extracted_session_id = str(run_result_meta.get("session_id") or "").strip()
     if extracted_session_id:
         logger.info(f"[Task {task.id}] Extracted session ID: {extracted_session_id}")
+        task.output_session_id = extracted_session_id
         task._extracted_session_id = extracted_session_id
 
 

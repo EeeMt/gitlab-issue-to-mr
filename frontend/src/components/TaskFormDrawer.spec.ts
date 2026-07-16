@@ -222,12 +222,16 @@ vi.mock('naive-ui', () => ({
   },
   NSwitch: {
     name: 'NSwitch',
-    props: ['value', 'size'],
+    props: ['value', 'size', 'disabled'],
     emits: ['update:value'],
-    setup(props: any, { emit }: any) {
+    setup(props: any, { attrs, emit }: any) {
       return () => h('button', {
+        ...attrs,
         class: 'n-switch',
-        onClick: () => emit('update:value', !props.value),
+        disabled: props.disabled,
+        onClick: () => {
+          if (!props.disabled) emit('update:value', !props.value)
+        },
       })
     },
   },
@@ -409,7 +413,38 @@ describe('TaskFormDrawer', () => {
       await submitCreate()
 
       expect(mockApi.createTask).toHaveBeenCalledWith(
-        expect.objectContaining({ require_changes: false })
+        expect.objectContaining({ require_changes: false, session_mode: 'continue' })
+      )
+    })
+
+    it('allows fresh-session mode when only a legacy workspace session may exist', async () => {
+      await mountDrawer({ hasClaudeSession: false })
+      await openDrawer()
+
+      const switchButton = wrapper.find('[data-testid="task-session-mode-switch"]')
+      expect(switchButton.attributes('disabled')).toBeUndefined()
+      expect(wrapper.find('[data-testid="task-session-mode"]').text())
+        .toContain('createTask.startFreshSessionNoCurrent')
+
+      await switchButton.trigger('click')
+      wrapper.vm.taskMode = 'execute'
+      await submitCreate()
+
+      expect(mockApi.createTask).toHaveBeenCalledWith(
+        expect.objectContaining({ session_mode: 'fresh' })
+      )
+    })
+
+    it('submits fresh-session mode without changing the workspace options', async () => {
+      await mountDrawer({ hasClaudeSession: true })
+      await openDrawer()
+
+      await wrapper.find('[data-testid="task-session-mode-switch"]').trigger('click')
+      wrapper.vm.taskMode = 'execute'
+      await submitCreate()
+
+      expect(mockApi.createTask).toHaveBeenCalledWith(
+        expect.objectContaining({ session_mode: 'fresh' })
       )
     })
 

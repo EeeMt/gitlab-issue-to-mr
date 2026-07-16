@@ -2152,6 +2152,34 @@ class TestExecuteTask(unittest.TestCase):
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
+    def test_fresh_task_snapshots_empty_input_and_disables_resume(
+        self,
+        mock_notify,
+        mock_get_settings,
+    ):
+        mock_get_settings.return_value = _make_settings()
+        mock_docker = MagicMock()
+        mock_docker.create_container.return_value = MagicMock(id="ctr-fresh-session")
+        worker = _make_worker(mock_docker=mock_docker)
+        task = _make_task(target_branch=None, session_mode="fresh")
+        task.issue.claude_session_id = "session-old"
+        db = _make_db(task)
+
+        with patch.object(
+            worker,
+            '_stream_logs_to_db',
+            new=AsyncMock(return_value=(0, "", 1, False)),
+        ):
+            result = asyncio.run(worker.execute_task(db, task.id))
+
+        self.assertTrue(result)
+        self.assertIsNone(task.input_session_id)
+        environment = mock_docker.create_container.call_args.kwargs["environment"]
+        self.assertEqual(environment["START_FRESH_SESSION"], "1")
+        self.assertNotIn("RESUME_SESSION", environment)
+
+    @patch('app.core.worker.get_settings')
+    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
     def test_execute_task_upserts_usage_ledger_when_post_parse_commit_fails(
         self,
         mock_notify,

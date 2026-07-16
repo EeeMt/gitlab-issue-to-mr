@@ -216,6 +216,56 @@ class WorkerEnvironmentVariableHelperTests(unittest.TestCase):
         self.assertEqual(env["TASK_MODE"], "plan")
         self.assertEqual(env["RESUME_SESSION"], "session-123")
 
+    @patch("app.core.worker.get_settings")
+    def test_fresh_session_mode_disables_issue_session_resume(self, mock_get_settings) -> None:
+        mock_get_settings.return_value = SimpleNamespace(
+            gitlab_url="http://gitlab.example.com",
+            gitlab_bot_token="test-token",
+            anthropic_base_url="http://localhost:11434/v1",
+            anthropic_api_key="test-key",
+            anthropic_model="claude-sonnet-4-20250514",
+            claude_max_turns=20,
+            task_timeout=1800,
+            custom_ca_bundle="",
+        )
+        worker = WorkerExecutor(docker_client=MagicMock(), gitlab_client=MagicMock())
+        task = SimpleNamespace(
+            project_id=123,
+            user_prompt="Start without conversation history",
+            id=456,
+            initiator_display_name=None,
+            initiator_email=None,
+            initiator_username="alice",
+            task_mode="execute",
+            session_mode="fresh",
+        )
+        issue = SimpleNamespace(
+            branch_name="task-123",
+            id=789,
+            title="Task title",
+            claude_session_id="session-123",
+            base_branch=None,
+        )
+        provider = SimpleNamespace(
+            id=None,
+            api_key="provider-key",
+            base_url="http://provider.example/v1",
+            model="provider-model",
+            max_turns=33,
+            system_prompt=None,
+        )
+
+        env = worker._build_container_env(
+            task,
+            issue,
+            mr_iid=None,
+            target_branch="main",
+            provider=provider,
+        )
+
+        self.assertEqual(env["START_FRESH_SESSION"], "1")
+        self.assertNotIn("RESUME_SESSION", env)
+
 
 class WorkerEnvironmentVariableQueryTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:

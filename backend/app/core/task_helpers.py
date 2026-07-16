@@ -31,6 +31,15 @@ def _serialize_task(
         settings = get_effective_settings()
     project_path = metadata.get("project_path_with_namespace")
     project_url = f"{settings.gitlab_url.rstrip('/')}/{project_path}" if project_path else None
+    session_mode = getattr(task, "session_mode", "continue")
+    if session_mode not in {"continue", "fresh"}:
+        session_mode = "continue"
+    input_session_id = getattr(task, "input_session_id", None)
+    if not isinstance(input_session_id, str):
+        input_session_id = None
+    output_session_id = getattr(task, "output_session_id", None)
+    if not isinstance(output_session_id, str):
+        output_session_id = None
     data = {
         "id": task.id,
         "issue_id": task.issue_id,
@@ -66,6 +75,9 @@ def _serialize_task(
         "commit_message": task.commit_message,
         "require_changes": task.require_changes,
         "task_mode": task.task_mode if task.task_mode else "execute",
+        "session_mode": session_mode,
+        "input_session_id": input_session_id,
+        "output_session_id": output_session_id,
         "provider_id": task.provider_id,
         "provider_name": None,
         "created_at": task.created_at.isoformat(),
