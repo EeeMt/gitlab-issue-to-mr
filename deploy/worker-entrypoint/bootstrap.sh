@@ -27,8 +27,44 @@ CODIFY_RUNTIME_DIR="${CODIFY_RUNTIME_DIR:-/tmp/codify-runtime}"
 CODIFY_WORKER_PRE_SCRIPT_FILE="${CODIFY_RUNTIME_DIR}/worker-pre-script.sh"
 CODIFY_WORKER_POST_SCRIPT_FILE="${CODIFY_RUNTIME_DIR}/worker-post-script.sh"
 export CODIFY_RUNTIME_DIR
-mkdir -p "${CODIFY_RUNTIME_DIR}" /home/codify /root
-codify_chown /home/codify "${CODIFY_RUNTIME_DIR}"
+mkdir -p "${CODIFY_RUNTIME_DIR}" /workspace /home/codify /root
+codify_chown /workspace /home/codify
+# The uploaded bundle may inherit a restrictive control-plane umask. It is
+# task-local and bounded, so normalize it once before the unprivileged runtime
+# reads CI inputs or custom scripts.
+codify_chown -R "${CODIFY_RUNTIME_DIR}"
+if [ -d /opt/codify-issue-meta ]; then
+    printf '{"project_id":%s,"issue_id":%s,"worker_profile_id":%s}\n' \
+        "${PROJECT_ID}" "${ISSUE_ID}" "${CODIFY_WORKER_PROFILE_ID:-null}" \
+        > /opt/codify-issue-meta/workspace.json
+    if [ -n "${ISSUE_ID}" ] && [ -n "${CODIFY_WORKER_PROFILE_ID:-}" ]; then
+        printf '%s:%s:%s\n' "${PROJECT_ID}" "${ISSUE_ID}" "${CODIFY_WORKER_PROFILE_ID}" \
+            > /opt/codify-issue-meta/owner
+        codify_chown /opt/codify-issue-meta/owner
+    fi
+    # Workspaces created by older releases could contain root-owned Git metadata
+    # because final add/commit/push operations ran as root. Normalize such a tree
+    # once, then keep the marker so later tasks retain the cheap top-level chown.
+    WORKSPACE_OWNERSHIP_MARKER="/opt/codify-issue-meta/ownership"
+    EXPECTED_WORKSPACE_OWNER="${CODIFY_RUN_UID}:${CODIFY_RUN_GID}"
+    CURRENT_WORKSPACE_OWNER=""
+    if [ -f "${WORKSPACE_OWNERSHIP_MARKER}" ]; then
+        CURRENT_WORKSPACE_OWNER=$(cat "${WORKSPACE_OWNERSHIP_MARKER}" 2>/dev/null || true)
+    fi
+    if [ "${CURRENT_WORKSPACE_OWNER}" != "${EXPECTED_WORKSPACE_OWNER}" ]; then
+        echo "Normalizing persistent workspace ownership for ${EXPECTED_WORKSPACE_OWNER}..."
+        for persistent_path in /workspace /home/codify/.claude /opt/codify-issue-shared; do
+            if [ -d "${persistent_path}" ]; then
+                codify_chown -R "${persistent_path}"
+            fi
+        done
+    fi
+    printf '%s\n' "${EXPECTED_WORKSPACE_OWNER}" > "${WORKSPACE_OWNERSHIP_MARKER}"
+    codify_chown \
+        /opt/codify-issue-meta \
+        /opt/codify-issue-meta/workspace.json \
+        "${WORKSPACE_OWNERSHIP_MARKER}"
+fi
 if [ -d /home/codify/.m2 ]; then
     codify_chown /home/codify/.m2 2>/dev/null || true
 fi
@@ -148,6 +184,7 @@ if [ -z "${BASE_BRANCH}" ]; then
         echo "No TARGET_BRANCH set (no-MR mode); using default branch '${BASE_BRANCH}' as base"
     fi
 fi
+export BASE_BRANCH BRANCH_NAME
 
 # Fallback to constructed URL if API fails
 if [ -z "${PROJECT_PATH}" ] && [ -n "${GIT_REPO_URL}" ]; then
@@ -161,6 +198,7 @@ fi
 
 # Build repo URL with the actual configured host and let credential helper provide auth.
 GIT_REPO_URL="${GITLAB_SCHEME}://${GITLAB_HOST}/${PROJECT_PATH}.git"
+export GIT_REPO_URL
 
 # Log repository URL without exposing token
 echo "Repository URL: ${GITLAB_SCHEME}://[TOKEN]@${GITLAB_HOST}/${PROJECT_PATH}.git"
@@ -184,14 +222,13 @@ git config --global --add safe.directory /workspace
 # Clone or reuse repository with authentication.
 if [ -d /workspace/.git ]; then
     echo "Reusing existing workspace..."
-    cd /workspace
-    git remote set-url origin "${GIT_REPO_URL}"
-    git fetch origin
+    codify_run_shell 'cd /workspace && git remote set-url origin "${GIT_REPO_URL}"'
+    codify_run_shell 'cd /workspace && git fetch origin'
 else
     echo "Cloning repository..."
-    git clone "${GIT_REPO_URL}" /workspace
-    cd /workspace
+    codify_run_shell 'git clone "${GIT_REPO_URL}" /workspace'
 fi
+cd /workspace
 
 # Configure git
 git config --global user.email "bot@codify.local"
@@ -208,9 +245,9 @@ CODIFY_COAUTHOR_NAME_VALUE="${CODIFY_COAUTHOR_NAME:-Codify}"
 CODIFY_COAUTHOR_EMAIL_VALUE="${CODIFY_COAUTHOR_EMAIL:-codify@codify.local}"
 
 # Checkout/create branch
-WORKSPACE_CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+WORKSPACE_CURRENT_BRANCH=$(codify_run_shell 'cd /workspace && git rev-parse --abbrev-ref HEAD' 2>/dev/null || echo "")
 if [ -n "${WORKSPACE_CURRENT_BRANCH}" ] && [ "${WORKSPACE_CURRENT_BRANCH}" != "HEAD" ] && [ "${WORKSPACE_CURRENT_BRANCH}" != "${BRANCH_NAME}" ]; then
-    WORKSPACE_DIRTY=$(git status --porcelain || true)
+    WORKSPACE_DIRTY=$(codify_run_shell 'cd /workspace && git status --porcelain' || true)
     if [ -n "${WORKSPACE_DIRTY}" ]; then
         echo "ERROR: Workspace has uncommitted changes on branch ${WORKSPACE_CURRENT_BRANCH}, cannot switch to ${BRANCH_NAME}"
         exit 1
@@ -218,12 +255,12 @@ if [ -n "${WORKSPACE_CURRENT_BRANCH}" ] && [ "${WORKSPACE_CURRENT_BRANCH}" != "H
 fi
 
 echo "Checking out branch: ${BRANCH_NAME}"
-git fetch origin
+codify_run_shell 'cd /workspace && git fetch origin'
 
 # Verify BASE_BRANCH exists on remote; if not, fall back to the remote's actual default branch
-if ! git rev-parse --verify "origin/${BASE_BRANCH}" > /dev/null 2>&1; then
+if ! codify_run_shell 'cd /workspace && git rev-parse --verify "origin/${BASE_BRANCH}"' > /dev/null 2>&1; then
     echo "Warning: origin/${BASE_BRANCH} not found. Detecting remote default branch..."
-    DETECTED=$(git ls-remote --symref origin HEAD 2>/dev/null | grep '^ref:' | sed 's|ref: refs/heads/||;s|	HEAD||')
+    DETECTED=$(codify_run_shell 'cd /workspace && git ls-remote --symref origin HEAD' 2>/dev/null | grep '^ref:' | sed 's|ref: refs/heads/||;s|	HEAD||')
     if [ -n "${DETECTED}" ]; then
         echo "Detected remote default branch: ${DETECTED} (was: ${BASE_BRANCH})"
         BASE_BRANCH="${DETECTED}"
@@ -233,20 +270,20 @@ if ! git rev-parse --verify "origin/${BASE_BRANCH}" > /dev/null 2>&1; then
     fi
 fi
 
-if git checkout "${BRANCH_NAME}" 2>/dev/null; then
+if codify_run_shell 'cd /workspace && git checkout "${BRANCH_NAME}"' 2>/dev/null; then
     echo "Branch ${BRANCH_NAME} exists locally, checking for uncommitted changes..."
-    BRANCH_DIRTY=$(git status --porcelain || true)
+    BRANCH_DIRTY=$(codify_run_shell 'cd /workspace && git status --porcelain' || true)
     if [ -n "${BRANCH_DIRTY}" ]; then
         echo "Warning: Workspace has uncommitted changes from a previous task, skipping pull to preserve work"
-    elif git ls-remote --exit-code --heads origin "${BRANCH_NAME}" > /dev/null 2>&1; then
+    elif codify_run_shell 'cd /workspace && git ls-remote --exit-code --heads origin "${BRANCH_NAME}"' > /dev/null 2>&1; then
         echo "Remote branch found, pulling latest..."
-        git pull origin "${BRANCH_NAME}"
+        codify_run_shell 'cd /workspace && git pull origin "${BRANCH_NAME}"'
     else
         echo "Branch exists locally but not on remote yet (prior task may not have pushed), continuing with local state"
     fi
 else
     echo "Creating new branch from ${BASE_BRANCH}..."
-    git checkout -b "${BRANCH_NAME}" "origin/${BASE_BRANCH}"
+    codify_run_shell 'cd /workspace && git checkout -b "${BRANCH_NAME}" "origin/${BASE_BRANCH}"'
 fi
 
 # Run Claude Code CLI in direct execution mode

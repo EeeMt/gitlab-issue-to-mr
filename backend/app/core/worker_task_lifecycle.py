@@ -7,16 +7,17 @@ import time
 from datetime import datetime
 from typing import Any
 
+from docker.errors import NotFound
 from gitlab import Gitlab
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ci_failure_logs import append_ci_failure_log
 from app.core.utcnow import utcnow
+from app.core.worker_docker_targets import TaskContainerLookupError
 from app.core.worker_profiles import load_task_worker_runtime
 from app.core.worker_runtime import (
-    materialize_task_prompt,
-    materialize_worker_custom_scripts_from_snapshot,
+    build_task_runtime_archive,
     worker_custom_scripts_configured,
 )
 from app.core.worker_task_artifacts import (
@@ -256,37 +257,29 @@ async def create_execute_container(
     await persist_issue_mr_if_changed(db, issue, mr_iid, mr_web_url)
 
     workspace_paths = build_issue_workspace_paths(settings, issue, task) if issue else None
-
     if workspace_paths is None:
-        raise RuntimeError("worker_workspace_host_path is required for persisted task prompts")
-    materialize_task_prompt(task, workspace_paths.runtime_path)
+        raise RuntimeError("worker_workspace_host_path is required for issue workspaces")
 
-    if issue:
-        await worker._write_previous_task_summaries_file(db, settings, issue, task)
+    previous_task_summaries = (
+        await worker._build_previous_task_summaries(db, issue, task) if issue else ""
+    )
 
     if worker_custom_scripts_configured(settings):
         logger.debug(
             "[Task %s] Ignoring legacy global worker scripts; using task worker snapshot",
             task_id,
         )
-    materialize_worker_custom_scripts_from_snapshot(
-        workspace_paths.runtime_path,
-        pre_script=worker_runtime.pre_script,
-        post_script=worker_runtime.post_script,
-    )
-
     is_ci_failure_task = (
         getattr(task, "trigger_source", None) == "ci_auto_repair"
         or getattr(task, "ci_failure_run_id", None) is not None
     )
+    ci_failure_bundle_path = None
     if issue and is_ci_failure_task:
-        if workspace_paths is None:
-            raise RuntimeError("worker_workspace_host_path is required for CI auto-repair tasks")
         run = await db.get(CIFailureRun, task.ci_failure_run_id) if task.ci_failure_run_id else None
         if run is None:
             raise RuntimeError("CI failure run is not available for this repair task")
         task.ci_failure_run = run
-        worker._materialize_ci_failure_bundle(task, workspace_paths.runtime_path)
+        ci_failure_bundle_path = run.bundle_path
         await append_ci_failure_log(
             db,
             run,
@@ -296,6 +289,14 @@ async def create_execute_container(
             task_id=task.id,
         )
         await db.flush()
+
+    runtime_archive = build_task_runtime_archive(
+        task,
+        pre_script=worker_runtime.pre_script,
+        post_script=worker_runtime.post_script,
+        previous_task_summaries=previous_task_summaries,
+        ci_failure_bundle_path=ci_failure_bundle_path,
+    )
 
     session_mode = getattr(task, "session_mode", "continue")
     task.input_session_id = (
@@ -330,13 +331,15 @@ async def create_execute_container(
     if await finalize_pre_container_cancellation(db, task, phase="container creation"):
         return None
     container_name = worker._get_container_name(task)
-    container = worker.docker.create_container(
+    container = _create_stopped_container(
+        worker,
+        task,
+        container_name,
         image=worker_runtime.image,
         command="",
         environment=environment,
         volumes=volumes if volumes else None,
         network=settings.worker_network,
-        name=container_name,
         entrypoint=container_overrides["entrypoint"],
         user=container_overrides["user"],
         labels={
@@ -348,7 +351,133 @@ async def create_execute_container(
 
     task.container_id = container.id
     await db.commit()
+    if await finalize_pre_container_cancellation(db, task, phase="container start"):
+        await _remove_created_container(worker, db, task, container)
+        return None
+    try:
+        worker.docker.put_archive(container, "/tmp", runtime_archive)
+    except Exception:
+        await _remove_created_container(worker, db, task, container)
+        raise
+    await _start_created_container(worker, db, task, container)
     return container
+
+
+def _create_stopped_container(
+    worker,
+    task: Task,
+    container_name: str,
+    **create_kwargs: Any,
+):
+    """Create a stopped container and recover a timed-out successful response safely."""
+    try:
+        return worker.docker.create_container(
+            **create_kwargs,
+            name=container_name,
+            start=False,
+        )
+    except Exception as create_error:
+        try:
+            container = worker.docker.client.containers.get(container_name)
+        except NotFound:
+            raise create_error
+        except Exception as lookup_error:
+            # The create request may have committed server-side. Leave the task
+            # RUNNING so deferred recovery can resolve the stable task name later.
+            raise TaskContainerLookupError(
+                f"Container {container_name} creation outcome is unknown"
+            ) from lookup_error
+
+        labels = getattr(container, "labels", None)
+        task_label = labels.get("codify.task_id") if isinstance(labels, dict) else None
+        if getattr(container, "status", None) != "created" or task_label != str(task.id):
+            raise create_error
+        logger.warning(
+            "[Task %s] Docker create returned an error, but stopped container %s "
+            "exists with the expected owner label; continuing runtime upload",
+            task.id,
+            getattr(container, "id", container_name),
+        )
+        return container
+
+
+async def _remove_created_container(worker, db: AsyncSession, task: Task, container: Any) -> bool:
+    """Remove an unstarted container and durably record that it has no raw logs."""
+    task.raw_logs_finalized_at = getattr(task, "raw_logs_finalized_at", None) or utcnow()
+    try:
+        worker.docker.remove_container(container, force=True)
+    except Exception:
+        logger.warning(
+            "[Task %s] Failed to remove unstarted container %s",
+            task.id,
+            getattr(container, "id", "unknown"),
+            exc_info=True,
+        )
+        # Keep the reference so startup reconciliation can remove the container later,
+        # but do not leave it looking like a container whose logs still need collection.
+        await db.commit()
+        return False
+
+    task.container_id = None
+    await db.commit()
+    return True
+
+
+async def _start_created_container(
+    worker,
+    db: AsyncSession,
+    task: Task,
+    container: Any,
+) -> None:
+    """Start a created container without guessing after an ambiguous Docker response."""
+    try:
+        worker.docker.start_container(container)
+        return
+    except Exception as start_error:
+        try:
+            container.reload()
+        except NotFound:
+            # The daemon conclusively says there is no container to monitor or collect
+            # logs from. Clear the durable owner before reporting the start failure.
+            task.container_id = None
+            task.raw_logs_finalized_at = getattr(task, "raw_logs_finalized_at", None) or utcnow()
+            await db.commit()
+            raise start_error
+        except Exception as lookup_error:
+            # A timed-out start request may have succeeded server-side. Leave the task
+            # RUNNING and retain its issue lock/reference until recovery can inspect it.
+            raise TaskContainerLookupError(
+                f"Container {getattr(container, 'id', 'unknown')} start outcome is unknown"
+            ) from lookup_error
+
+        status = getattr(container, "status", None)
+        if status in ("running", "exited"):
+            logger.warning(
+                "[Task %s] Docker start returned an error, but container %s is %s; "
+                "continuing with normal monitoring",
+                task.id,
+                getattr(container, "id", "unknown"),
+                status,
+            )
+            return
+
+        logger.warning(
+            "[Task %s] Docker start failed and container %s is not runnable (status=%s)",
+            task.id,
+            getattr(container, "id", "unknown"),
+            status,
+        )
+        if status == "created":
+            await _remove_created_container(worker, db, task, container)
+            raise start_error
+        if status in {"dead", "removing"}:
+            # It may have emitted launcher/bootstrap diagnostics before becoming
+            # non-runnable. Keep the durable reference for terminal reconciliation.
+            raise start_error
+        raise TaskContainerLookupError(
+            f"Container {getattr(container, 'id', 'unknown')} is not safely quiescent "
+            f"after start failure (status={status})"
+        ) from start_error
 
 
 async def finalize_pre_container_cancellation(
@@ -369,6 +498,8 @@ async def finalize_pre_container_cancellation(
     task.status = TaskStatus.CANCELLED
     task.completed_at = task.completed_at or utcnow()
     task.error_message = "Cancelled by user"
+    if getattr(task, "container_id", None) is None:
+        task.raw_logs_finalized_at = getattr(task, "raw_logs_finalized_at", None) or utcnow()
     await db.commit()
     logger.info(
         "[Task %s] Applied cancellation before %s; no worker container was created",
@@ -400,11 +531,15 @@ async def prepare_resume_task_context(
 
     try:
         container = worker.docker.client.containers.get(container_name)
-    except Exception as e:
+    except NotFound as e:
         return {
             "handled": True,
             "result": await fail_resume_missing_container(db, task, e),
         }
+    except Exception as e:  # noqa: BLE001
+        raise TaskContainerLookupError(
+            f"Could not confirm resume container {container_name}: {e}"
+        ) from e
 
     return {
         "handled": False,
@@ -519,17 +654,30 @@ async def monitor_container_run(
             )
         elif input_session_reconciled:
             await db.commit()
+        if issue:
+            issue.workspace_last_used_at = utcnow()
+            issue.workspace_delete_attempted_at = None
+            issue.workspace_deleted_at = None
+            issue.workspace_delete_error = None
         if raw_logs_finalized:
             logger.info(f"[Task {task.id}] Task was cancelled during execution; removing container")
             try:
                 worker.docker.remove_container(container, force=True)
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "[Task %s] Failed to remove cancelled container%s: %s",
+                    task.id,
+                    resume_prefix,
+                    exc,
+                )
+            else:
+                task.container_id = None
         else:
             logger.error(
                 f"[Task {task.id}] Retaining cancelled task container because raw logs "
                 "were not finalized"
             )
+        await db.commit()
         return False
 
     if issue:
@@ -619,15 +767,20 @@ async def monitor_container_run(
             )
         )
 
+    if issue:
+        issue.workspace_last_used_at = utcnow()
+        issue.workspace_delete_attempted_at = None
+        issue.workspace_deleted_at = None
+        issue.workspace_delete_error = None
     await worker._try_upsert_usage_ledger(db, task)
     await db.commit()
 
     # Pull task-metadata.json from the container filesystem via the Docker API before
-    # removing the container.  This ensures the file is available on the scheduler's local
-    # filesystem even when the Docker daemon is running on a remote host (where volume mounts
-    # point to the *remote* host's paths, not the scheduler's paths).
+    # removing the container. This keeps result metadata in the database even when the
+    # Docker daemon and its workspace live on another host.
     if issue:
         _save_task_metadata_from_container(worker, container, task, issue)
+        await db.commit()
 
     if issue and issue.merge_request_iid:
         await worker._update_mr_description_for_issue(task, issue, db, sudo_gl=sudo_gl)
@@ -641,6 +794,9 @@ async def monitor_container_run(
             worker.docker.remove_container(container, force=True)
         except Exception as e:
             logger.warning(f"[Task {task.id}] Failed to remove container{resume_prefix}: {e}")
+        else:
+            task.container_id = None
+            await db.commit()
     else:
         logger.error(
             f"[Task {task.id}] Retaining task container because raw logs were not finalized"

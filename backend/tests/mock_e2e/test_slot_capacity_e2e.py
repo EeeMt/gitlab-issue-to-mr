@@ -35,7 +35,7 @@ from app.dependencies.project_access import (
     require_project_access_scope,
 )
 from app.main import app
-from app.models import AIProvider, Base, Issue, Task, TaskStatus
+from app.models import AIProvider, Base, Issue, Task, TaskStatus, WorkerProfile
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -100,6 +100,27 @@ async def _default_provider(session_factory):
 
 
 @pytest.fixture
+async def _default_worker(session_factory):
+    """Seed the Worker that every test Issue must select explicitly."""
+    async with session_factory() as session:
+        worker = WorkerProfile(
+            name="Test Worker",
+            enabled=True,
+            is_default=True,
+            image="codify-worker:test",
+            volume_mounts=[],
+            pre_script="",
+            post_script="",
+            default_execute_run_instruction_template="{{user_prompt}}",
+            default_plan_run_instruction_template="{{user_prompt}}",
+            ci_auto_repair_run_instruction_template="{{user_prompt}}",
+        )
+        session.add(worker)
+        await session.commit()
+        return worker.id
+
+
+@pytest.fixture
 def _mock_admin_user():
     """A mock admin user returned by admin-gated auth overrides."""
     user = MagicMock()
@@ -111,7 +132,7 @@ def _mock_admin_user():
 
 
 @pytest.fixture
-async def client(session_factory, _mock_admin_user, _default_provider):
+async def client(session_factory, _mock_admin_user, _default_provider, _default_worker):
     """``httpx.AsyncClient`` wired to the FastAPI app.
 
     * ``get_db`` → yields sessions from the in-memory test database
@@ -197,6 +218,7 @@ async def _seed_tasks(
             branch_name="test/branch",
             target_branch="main",
             status="open",
+            worker_profile_id=1,
         )
         session.add(issue)
         await session.flush()
@@ -372,6 +394,7 @@ class TestTaskCreationSlotEnforcement:
                 "project_id": 1,
                 "title": "Test issue for task creation",
                 "target_branch": "main",
+                "worker_profile_id": 1,
             })
             assert issue_resp.status_code == 200
             issue_id = issue_resp.json()["id"]

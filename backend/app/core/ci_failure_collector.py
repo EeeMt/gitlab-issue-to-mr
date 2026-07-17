@@ -34,6 +34,7 @@ from app.models import (
     CIFailureJob,
     CIFailureRun,
     Issue,
+    IssueStatus,
     Task,
     TaskStatus,
     WebhookEvent,
@@ -325,6 +326,16 @@ async def process_ci_failure_run(
             details={"issue_id": issue.id, "mr_iid": run.merge_request_iid},
         )
 
+        if issue.status == IssueStatus.CLOSED.value:
+            await _ignore_run(
+                db,
+                run,
+                reason="issue_closed",
+                step="auto_repair_gate_checked",
+                message="Closed issues cannot start CI auto-repair tasks",
+            )
+            return run
+
         if not issue.ci_auto_repair_enabled:
             await _ignore_run(
                 db,
@@ -605,6 +616,18 @@ async def process_ci_failure_run(
             )
         ).scalars().first()
         priority = latest_task.priority if latest_task else 0
+        issue = (
+            await db.execute(select(Issue).where(Issue.id == issue.id).with_for_update())
+        ).scalar_one()
+        if issue.status == IssueStatus.CLOSED.value:
+            await _ignore_run(
+                db,
+                run,
+                reason="issue_closed",
+                step="auto_repair_gate_checked",
+                message="Issue closed before the CI auto-repair task was created",
+            )
+            return run
         try:
             worker_profile = await resolve_worker_profile_for_issue(
                 db,
@@ -635,6 +658,10 @@ async def process_ci_failure_run(
             trigger_source="ci_auto_repair",
             ci_failure_run_id=run.id,
         )
+        issue.workspace_last_used_at = utcnow()
+        issue.workspace_delete_attempted_at = None
+        issue.workspace_deleted_at = None
+        issue.workspace_delete_error = None
         db.add(repair_task)
         await db.flush()
         await prepare_task_runtime_snapshot(

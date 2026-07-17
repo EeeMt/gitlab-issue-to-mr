@@ -14,8 +14,8 @@ class IssueWorkspacePaths:
     issue_root: str
     repo_path: str
     claude_path: str
-    runtime_path: str
     shared_path: str
+    meta_path: str
 
 
 def configured_workspace_root(settings: Any) -> str | None:
@@ -40,16 +40,9 @@ def build_issue_workspace_paths(settings: Any, issue: Any, task: Any) -> IssueWo
         issue_root=issue_root,
         repo_path=os.path.join(issue_root, "repo"),
         claude_path=os.path.join(issue_root, "claude"),
-        runtime_path=os.path.join(issue_root, "runtime", f"task-{task.id}"),
         shared_path=os.path.join(issue_root, "shared"),
+        meta_path=os.path.join(issue_root, "meta"),
     )
-
-
-def remove_issue_workspace(issue_root: str) -> bool:
-    if not issue_root or not os.path.exists(issue_root):
-        return False
-    shutil.rmtree(issue_root)
-    return True
 
 
 def _latest_tree_mtime(path: str) -> float:
@@ -76,31 +69,12 @@ def _latest_tree_mtime(path: str) -> float:
     return latest
 
 
-def cleanup_expired_workspaces(root: str, *, retention_days: int) -> int:
+def cleanup_expired_ci_failure_bundles(root: str, *, retention_days: int) -> int:
     if not root or retention_days <= 0 or not os.path.isdir(root):
         return 0
 
     cutoff = time.time() - (retention_days * 24 * 60 * 60)
     candidates: list[str] = []
-
-    # Issue workspaces use <root>/project-<id>/issue-<id>.
-    # Restrict the scan to that layout so unrelated directories under the
-    # configured root are never treated as disposable workspaces.
-    for project_name in os.listdir(root):
-        if not project_name.startswith("project-"):
-            continue
-        project_path = os.path.join(root, project_name)
-        if not os.path.isdir(project_path):
-            continue
-        for issue_name in os.listdir(project_path):
-            if not issue_name.startswith("issue-"):
-                continue
-            issue_path = os.path.join(project_path, issue_name)
-            if os.path.isdir(issue_path):
-                candidates.append(issue_path)
-
-    # CI failure bundles share the workspace root and intentionally follow the
-    # same retention period as issue workspaces.
     bundle_root = os.path.join(root, "ci-failures")
     if os.path.isdir(bundle_root):
         for run_name in os.listdir(bundle_root):

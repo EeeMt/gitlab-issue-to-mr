@@ -479,7 +479,7 @@
     :issue-id="task?.issue_id"
     :issue-description="issueDescription"
     :has-claude-session="issueHasClaudeSession"
-    :default-worker-profile-id="issueDefaultWorkerProfileId"
+    :worker-profile-id="issueWorkerProfileId"
     :default-provider-id="issueDefaultProviderId"
     data-testid="task-view-create-task-drawer"
     @created="handleAppendTaskCreated"
@@ -581,7 +581,7 @@ const issueTasks = ref<Task[]>([])
 const issueDescription = ref<string | undefined>(undefined)
 const issueHasClaudeSession = ref(false)
 const issueStatus = ref<Issue['status'] | null>(null)
-const issueDefaultWorkerProfileId = ref<number | null>(null)
+const issueWorkerProfileId = ref<number | null>(null)
 const issueDefaultProviderId = ref<number | null>(null)
 const archiveMetadata = ref<TaskArchiveMetadata | null>(null)
 let pollTimer: number | null = null
@@ -827,7 +827,7 @@ async function refreshIssueTasks(requestedTaskId: number) {
     issueDescription.value = undefined
     issueHasClaudeSession.value = false
     issueStatus.value = null
-    issueDefaultWorkerProfileId.value = null
+    issueWorkerProfileId.value = null
     issueDefaultProviderId.value = null
     return
   }
@@ -838,7 +838,7 @@ async function refreshIssueTasks(requestedTaskId: number) {
     issueDescription.value = issueData.description ?? undefined
     issueHasClaudeSession.value = Boolean(issueData.claude_session_id)
     issueStatus.value = issueData.status ?? null
-    issueDefaultWorkerProfileId.value = issueData.default_worker_profile_id ?? null
+    issueWorkerProfileId.value = issueData.worker_profile_id ?? null
     issueDefaultProviderId.value = issueData.default_provider_id ?? null
   } catch {
     if (requestedTaskId !== taskId.value || task.value?.issue_id !== issueId) return
@@ -846,7 +846,7 @@ async function refreshIssueTasks(requestedTaskId: number) {
     issueDescription.value = undefined
     issueHasClaudeSession.value = false
     issueStatus.value = null
-    issueDefaultWorkerProfileId.value = null
+    issueWorkerProfileId.value = null
     issueDefaultProviderId.value = null
   }
 }

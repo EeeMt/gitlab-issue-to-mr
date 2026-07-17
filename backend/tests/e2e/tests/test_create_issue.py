@@ -181,6 +181,11 @@ class TestCreateIssueSubmission:
         logged_in_page.locator(".n-base-select-option").first.click()
         logged_in_page.wait_for_timeout(500)
 
+        # Worker selection is an explicit, immutable Issue assignment.
+        worker_sel = form.locator(".n-base-selection").filter(has_text="Select a worker")
+        worker_sel.click()
+        logged_in_page.locator(".n-base-select-option").first.click()
+
         # Fill title
         logged_in_page.get_by_placeholder("Title").fill("E2E Test Issue Submission")
 

@@ -1064,6 +1064,7 @@ async def _seed_issue(session, *, issue_id=None, project_id=10, **kwargs):
         target_branch="main",
         status="open",
         project_id=project_id,
+        worker_profile_id=1,
     )
     defaults.update(kwargs)
     if issue_id is not None:

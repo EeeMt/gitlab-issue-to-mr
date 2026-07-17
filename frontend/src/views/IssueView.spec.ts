@@ -264,7 +264,7 @@ vi.mock('naive-ui', () => ({
   },
   NInput: {
     name: 'NInput',
-    props: ['value', 'placeholder', 'type', 'rows'],
+    props: ['value', 'placeholder', 'type', 'rows', 'disabled'],
     setup(props: any, { emit }: any) {
       return () => h('input', {
         class: 'n-input',
@@ -473,7 +473,9 @@ function createMockIssue(overrides: Record<string, any> = {}): any {
     target_branch: 'main',
 	    merge_request_iid: 42,
 	    merge_request_url: 'https://gitlab.example.com/mr/42',
-	    ci_auto_repair_enabled: false,
+    ci_auto_repair_enabled: false,
+	    worker_profile_id: 2,
+	    worker_profile_name: 'Default Worker',
 	    claude_session_id: 'session-abc',
     initiator_user_id: null,
     initiator_username: 'testuser',
@@ -1351,19 +1353,16 @@ describe('IssueView', () => {
   // Edit issue
   // =========================================================================
   describe('edit issue', () => {
-    it('shows only worker profile names in the worker options', async () => {
+    it('shows the pinned worker as read-only issue context', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
 
-      expect(wrapper.vm.workerProfileOptions).toEqual([
-        { label: 'Default Worker', value: 2, disabled: false },
-      ])
-
       await wrapper.find('[data-testid="issue-edit-button"]').trigger('click')
       await nextTick()
-      expect(
-        wrapper.findAllComponents({ name: 'NSelect' }).map(select => select.props('placeholder'))
-      ).toContain('createTask.selectDefaultWorkerProfile')
+      const workerInput = wrapper.findAllComponents({ name: 'NInput' }).find(
+        input => input.props('value') === 'Default Worker',
+      )
+      expect(workerInput?.props('disabled')).not.toBe(false)
     })
 
     it('opens edit modal with prefilled title and description', async () => {
@@ -1492,7 +1491,7 @@ describe('IssueView', () => {
 
     it('passes issue execution defaults to the create task drawer', async () => {
       setupDefaultMocks({
-        default_worker_profile_id: 4,
+        worker_profile_id: 4,
         default_provider_id: 8,
       })
       wrapper = await mountComponent()
@@ -1501,7 +1500,7 @@ describe('IssueView', () => {
       await nextTick()
 
       const drawer = wrapper.findComponent({ name: 'TaskFormDrawer' })
-      expect(drawer.props('defaultWorkerProfileId')).toBe(4)
+      expect(drawer.props('workerProfileId')).toBe(4)
       expect(drawer.props('defaultProviderId')).toBe(8)
     })
 

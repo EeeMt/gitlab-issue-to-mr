@@ -150,6 +150,7 @@ async def create_issue(
     target_branch: str = "main",
 ) -> dict:
     """Create an issue via the API. Returns the issue JSON."""
+    worker_profile_id = await get_worker_profile_id(client, backend_url, auth_headers)
     resp = await client.post(
         f"{backend_url}/api/issues",
         json={
@@ -157,11 +158,26 @@ async def create_issue(
             "description": description,
             "project_id": project_id,
             "target_branch": target_branch,
+            "worker_profile_id": worker_profile_id,
         },
         headers=auth_headers,
     )
     assert resp.status_code in (200, 201), f"Create issue failed: {resp.status_code} {resp.text}"
     return resp.json()
+
+
+async def get_worker_profile_id(
+    client: httpx.AsyncClient,
+    backend_url: str,
+    auth_headers: dict,
+) -> int:
+    """Return an enabled Worker for tests that construct raw Issue requests."""
+    resp = await client.get(f"{backend_url}/api/worker-profiles", headers=auth_headers)
+    assert resp.status_code == 200, f"List workers failed: {resp.status_code} {resp.text}"
+    workers = [worker for worker in resp.json() if worker.get("enabled")]
+    assert workers, "No enabled Worker profile is available for integration tests"
+    default = next((worker for worker in workers if worker.get("is_default")), workers[0])
+    return int(default["id"])
 
 
 async def create_task(

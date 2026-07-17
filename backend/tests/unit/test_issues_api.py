@@ -45,6 +45,8 @@ def _make_issue(
     tasks=None,
     delete_branch_on_close=True,
     branch_deleted=False,
+    worker_profile_id=7,
+    workspace_deleted_at=None,
 ):
     """Build a mock Issue ORM object."""
     issue = MagicMock()
@@ -67,6 +69,8 @@ def _make_issue(
     issue.tasks = tasks or []
     issue.delete_branch_on_close = delete_branch_on_close
     issue.branch_deleted = branch_deleted
+    issue.worker_profile_id = worker_profile_id
+    issue.workspace_deleted_at = workspace_deleted_at
     return issue
 
 
@@ -162,11 +166,12 @@ class CreateIssueTests(unittest.IsolatedAsyncioTestCase):
             description="Add feature X to the system",
             project_id=10,
             base_branch="main",
+            worker_profile_id=7,
         )
 
         with patch(
-            "app.api.issues._resolve_issue_default_worker_id",
-            new=AsyncMock(return_value=None),
+            "app.api.issues._resolve_issue_worker_id",
+            new=AsyncMock(return_value=7),
         ), patch(
             "app.api.issues._resolve_issue_default_provider_id",
             new=AsyncMock(return_value=None),
@@ -218,11 +223,12 @@ class CreateIssueTests(unittest.IsolatedAsyncioTestCase):
             description="Add feature X to the system",
             project_id=10,
             base_branch="main",
+            worker_profile_id=7,
         )
 
         with patch(
-            "app.api.issues._resolve_issue_default_worker_id",
-            new=AsyncMock(return_value=None),
+            "app.api.issues._resolve_issue_worker_id",
+            new=AsyncMock(return_value=7),
         ), patch(
             "app.api.issues._resolve_issue_default_provider_id",
             new=AsyncMock(return_value=None),
@@ -257,11 +263,11 @@ class CreateIssueTests(unittest.IsolatedAsyncioTestCase):
         mock_user.id = 1
         mock_user.username = "bob"
 
-        body = CreateIssueRequest(title="Test", project_id=5)
+        body = CreateIssueRequest(title="Test", project_id=5, worker_profile_id=7)
 
         with patch(
-            "app.api.issues._resolve_issue_default_worker_id",
-            new=AsyncMock(return_value=None),
+            "app.api.issues._resolve_issue_worker_id",
+            new=AsyncMock(return_value=7),
         ), patch(
             "app.api.issues._resolve_issue_default_provider_id",
             new=AsyncMock(return_value=None),
@@ -438,6 +444,8 @@ class UpdateIssueTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(issue.title, "New Title")
         mock_db.commit.assert_awaited_once()
+        statement = mock_db.execute.await_args_list[0].args[0]
+        self.assertIsNotNone(statement._for_update_arg)
 
     async def test_update_issue_invalid_status(self):
         """Should raise 400 for invalid status value."""
@@ -491,6 +499,8 @@ class CloseIssueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(issue.status, IssueStatus.CLOSED.value)
         self.assertEqual(issue.closed_via, "manual")
         mock_db.commit.assert_awaited_once()
+        statement = mock_db.execute.await_args_list[0].args[0]
+        self.assertIsNotNone(statement._for_update_arg)
 
     async def test_close_issue_not_found(self):
         """Should raise 404 when issue does not exist."""
@@ -542,7 +552,9 @@ class DeleteIssueTests(unittest.IsolatedAsyncioTestCase):
             await delete_issue(issue_id=1, db=mock_db, current_user=mock_user)
 
         self.assertEqual(ctx.exception.status_code, 409)
-        self.assertIn("active task", ctx.exception.detail)
+        self.assertIn("active or retained task", ctx.exception.detail)
+        count_query = mock_db.execute.await_args_list[1].args[0]
+        self.assertIn("container_id IS NOT NULL", str(count_query))
 
     async def test_delete_issue_success(self):
         """Should delete issue when no active tasks."""
@@ -563,11 +575,45 @@ class DeleteIssueTests(unittest.IsolatedAsyncioTestCase):
         mock_db.commit = AsyncMock()
         mock_user = MagicMock()
 
-        result = await delete_issue(issue_id=1, db=mock_db, current_user=mock_user)
+        with patch(
+            "app.api.issues.remove_issue_workspace_remote",
+            new=AsyncMock(return_value=True),
+        ) as remove_workspace:
+            result = await delete_issue(issue_id=1, db=mock_db, current_user=mock_user)
 
         self.assertEqual(result["status"], "deleted")
         self.assertEqual(result["id"], 1)
         mock_db.delete.assert_awaited_once_with(issue)
+        mock_db.commit.assert_awaited_once()
+        remove_workspace.assert_awaited_once()
+
+    async def test_delete_issue_keeps_database_row_when_remote_cleanup_fails(self):
+        """A daemon failure must not orphan the workspace by deleting its DB owner."""
+        from fastapi import HTTPException
+
+        from app.api.issues import delete_issue
+
+        issue = _make_issue(id=1)
+        issue_result = MagicMock()
+        issue_result.scalar_one_or_none.return_value = issue
+        count_result = MagicMock()
+        count_result.scalar.return_value = 0
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[issue_result, count_result])
+        mock_db.delete = AsyncMock()
+        mock_db.commit = AsyncMock()
+
+        with (
+            patch(
+                "app.api.issues.remove_issue_workspace_remote",
+                new=AsyncMock(side_effect=RuntimeError("daemon offline")),
+            ),
+            self.assertRaises(HTTPException) as ctx,
+        ):
+            await delete_issue(issue_id=1, db=mock_db, current_user=MagicMock())
+
+        self.assertEqual(ctx.exception.status_code, 502)
+        mock_db.delete.assert_not_awaited()
         mock_db.commit.assert_awaited_once()
 
     async def test_delete_issue_not_found(self):

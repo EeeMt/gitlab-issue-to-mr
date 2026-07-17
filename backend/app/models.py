@@ -88,10 +88,10 @@ class Issue(Base):
     ci_auto_repair_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("false"), nullable=False
     )
-    default_worker_profile_id: Mapped[int | None] = mapped_column(
+    worker_profile_id: Mapped[int] = mapped_column(
         Integer,
-        ForeignKey("worker_profiles.id", ondelete="SET NULL"),
-        nullable=True,
+        ForeignKey("worker_profiles.id", ondelete="RESTRICT"),
+        nullable=False,
         index=True,
     )
     default_provider_id: Mapped[int | None] = mapped_column(
@@ -104,6 +104,15 @@ class Issue(Base):
     # Claude session persistence
     claude_session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     session_storage_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+    # The workspace lives on the Issue's pinned Docker daemon. These fields let the
+    # scheduler drive cleanup from database state instead of scanning a shared filesystem.
+    workspace_last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    workspace_delete_attempted_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
+    workspace_deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    workspace_delete_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Creator
     initiator_user_id: Mapped[int | None] = mapped_column(
@@ -127,9 +136,9 @@ class Issue(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
-    default_worker_profile: Mapped["WorkerProfile | None"] = relationship(
+    worker_profile: Mapped["WorkerProfile"] = relationship(
         "WorkerProfile",
-        foreign_keys=[default_worker_profile_id],
+        foreign_keys=[worker_profile_id],
     )
     default_provider: Mapped["AIProvider | None"] = relationship(
         "AIProvider",
@@ -207,6 +216,7 @@ class Task(Base):
     )
     input_session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     output_session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    worker_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     initiator_user_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )

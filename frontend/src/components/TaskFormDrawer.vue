@@ -527,12 +527,9 @@
                     <div class="execution-environment__fields">
                       <label class="execution-environment__field">
                         <span>{{ t('createTask.workerProfile') }}</span>
-                        <n-select
-                          :value="selectedWorkerProfileId"
-                          :options="workerProfileOptions"
-                          clearable
-                          :placeholder="t('createTask.selectWorkerProfile')"
-                          @update:value="handleWorkerProfileChange"
+                        <n-input
+                          :value="effectiveWorkerProfile?.name ?? t('common.unavailable')"
+                          disabled
                         />
                       </label>
                       <label class="execution-environment__field">
@@ -622,7 +619,7 @@
 import { ref, computed, watch, onMounted, toRef, useAttrs, useId } from 'vue'
 import {
   NButton, NDrawer, NDrawerContent, NForm, NFormItem,
-  NDatePicker, NSelect, NAlert, NTooltip, NSwitch, NSpin, NIcon, NScrollbar, NTag,
+  NDatePicker, NInput, NSelect, NAlert, NTooltip, NSwitch, NSpin, NIcon, NScrollbar, NTag,
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import {
@@ -667,7 +664,7 @@ const props = withDefaults(defineProps<{
   issueId?: number
   issueDescription?: string
   hasClaudeSession?: boolean
-  defaultWorkerProfileId?: number | null
+  workerProfileId?: number | null
   defaultProviderId?: number | null
   task?: Task
 }>(), {
@@ -708,7 +705,6 @@ const executionEnvironmentExpanded = ref(false)
 const executionEnvironmentContentId = `${useId()}-execution-environment-content`
 const executionOptionsReady = ref(false)
 const selectedProviderId = ref<number | null>(null)
-const selectedWorkerProfileId = ref<number | null>(null)
 const scheduleType = ref<'now' | 'scheduled'>('now')
 const scheduledAt = ref<number | null>(null)
 const runInstructionTemplate = ref('')
@@ -756,21 +752,19 @@ const {
   loadProviders,
   loadWorkerProfiles,
   providerOptions,
-  workerProfileOptions,
 } = useTaskExecutionOptions({
   mode: toRef(props, 'mode'),
   task: toRef(props, 'task'),
   defaultProviderId: toRef(props, 'defaultProviderId'),
-  defaultWorkerProfileId: toRef(props, 'defaultWorkerProfileId'),
+  workerProfileId: toRef(props, 'workerProfileId'),
   selectedProviderId,
-  selectedWorkerProfileId,
 })
 const executionEnvironmentMissing = computed(() =>
   executionOptionsReady.value
   && (!effectiveWorkerProfile.value || !effectiveProvider.value)
 )
 const executionEnvironmentOverridden = computed(() =>
-  selectedWorkerProfileId.value !== null || selectedProviderId.value !== null
+  selectedProviderId.value !== null
 )
 const executionEnvironmentOpen = computed(() =>
   executionEnvironmentExpanded.value || executionEnvironmentMissing.value
@@ -853,7 +847,6 @@ watch(() => props.show, (val) => {
       requireChanges.value = props.task.require_changes ?? true
       taskMode.value = (props.task.task_mode as 'execute' | 'plan') ?? 'execute'
       selectedProviderId.value = props.task.provider_id ?? null
-      selectedWorkerProfileId.value = props.task.worker_profile_id ?? null
       const snapshot = props.task.run_instruction_template
         ?? getDefaultRunInstructionTemplate(taskMode.value)
         ?? ''
@@ -866,7 +859,6 @@ watch(() => props.show, (val) => {
       }
       taskMode.value = null
       selectedProviderId.value = null
-      selectedWorkerProfileId.value = null
       runInstructionTemplate.value = ''
       initialRunInstructionTemplate.value = ''
       runInstructionDirty.value = false
@@ -956,15 +948,6 @@ function getDefaultRunInstructionTemplate(mode: 'execute' | 'plan' | null): stri
   return runInstructionDefaults.value?.[mode].content ?? ''
 }
 
-function handleWorkerProfileChange(profileId: number | null) {
-  selectedWorkerProfileId.value = profileId
-  if (!taskMode.value || runInstructionDirty.value) return
-  const nextTemplate = getDefaultRunInstructionTemplate(taskMode.value)
-  if (!nextTemplate) return
-  runInstructionTemplate.value = nextTemplate
-  invalidateRunInstructionPreview()
-}
-
 function toggleExecutionEnvironment() {
   if (executionEnvironmentMissing.value) {
     executionEnvironmentExpanded.value = true
@@ -975,7 +958,6 @@ function toggleExecutionEnvironment() {
 
 function restoreExecutionEnvironmentDefaults() {
   selectedProviderId.value = null
-  handleWorkerProfileChange(null)
   if (!executionEnvironmentMissing.value) {
     executionEnvironmentExpanded.value = false
   }
@@ -1016,7 +998,6 @@ const {
   startFreshSession,
   taskModeErrorVisible,
   selectedProviderId,
-  selectedWorkerProfileId,
   scheduleType,
   scheduledAt,
   runInstructionTemplate,

@@ -166,8 +166,9 @@ class DockerClientWrapper:
         user: str | None = None,
         labels: dict[str, str] | None = None,
         tmpfs: dict[str, str] | None = None,
+        start: bool = True,
     ) -> Container:
-        """Create and start a Docker container.
+        """Create a Docker container and optionally start it immediately.
 
         Args:
             image: Docker image to use
@@ -191,28 +192,48 @@ class DockerClientWrapper:
             try:
                 existing = self.client.containers.get(name)
                 logger.info(f"Removing stale container {name} (status: {existing.status})")
-                existing.remove(force=True)
+                existing.remove(force=True, v=True)
             except docker.errors.NotFound:
                 pass
 
-        container = self.client.containers.run(
-            image,
-            command,
-            detach=True,
-            environment=environment,
-            volumes=volumes,
-            working_dir=working_dir,
-            network=network,
-            remove=False,
-            name=name,
-            entrypoint=entrypoint,
-            user=user,
-            labels=labels,
-            tmpfs=tmpfs,
-        )
+        create_kwargs = {
+            "environment": environment,
+            "volumes": volumes,
+            "working_dir": working_dir,
+            "network": network,
+            "name": name,
+            "entrypoint": entrypoint,
+            "user": user,
+            "labels": labels,
+            "tmpfs": tmpfs,
+        }
+        if start:
+            container = self.client.containers.run(
+                image,
+                command,
+                detach=True,
+                remove=False,
+                **create_kwargs,
+            )
+        else:
+            container = self.client.containers.create(
+                image,
+                command,
+                **create_kwargs,
+            )
 
         logger.info(f"Container created: {container.id}")
         return container
+
+    def put_archive(self, container: Any, path: str, data: bytes) -> None:
+        """Upload a tar archive into a stopped or running container."""
+        if not container.put_archive(path, data):
+            raise RuntimeError(f"Docker rejected runtime archive for container {container.id}")
+
+    def start_container(self, container: Any) -> None:
+        """Start a previously created container."""
+        container.start()
+        logger.info("Container started: %s", container.id)
 
     def wait_for_container(
         self, container: Container, timeout: int = 600
@@ -307,14 +328,14 @@ class DockerClientWrapper:
             return None
 
     def remove_container(self, container: Any, force: bool = False) -> None:
-        """Remove a container.
+        """Remove a container and any anonymous volumes declared by its image.
 
         Args:
             container: Container object
             force: Force removal
         """
         logger.info(f"Removing container: {container.id}")
-        container.remove(force=force)
+        container.remove(force=force, v=True)
         logger.info(f"Container removed: {container.id}")
 
     def close(self) -> None:
@@ -374,6 +395,13 @@ async def get_docker_client_async(
 ) -> DockerClientWrapper:
     """Get a cached client without blocking the event loop during negotiation."""
     return await asyncio.to_thread(get_docker_client, connection)
+
+
+async def create_docker_client_async(
+    connection: DockerConnectionConfig | None = None,
+) -> DockerClientWrapper:
+    """Create an uncached client for one short-lived operation."""
+    return await asyncio.to_thread(DockerClientWrapper, connection)
 
 
 def close_docker_clients() -> None:

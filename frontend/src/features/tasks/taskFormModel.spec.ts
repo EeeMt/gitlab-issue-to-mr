@@ -15,7 +15,6 @@ const baseDraft: TaskFormDraft = {
   taskMode: 'execute',
   sessionMode: 'continue',
   selectedProviderId: null,
-  selectedWorkerProfileId: null,
   scheduleType: 'now',
   scheduledAt: null,
   runInstructionTemplate: 'Execute {{user_prompt}}',
@@ -57,7 +56,6 @@ describe('task form request contracts', () => {
     expect(buildCreateTaskRequest(7, {
       ...baseDraft,
       selectedProviderId: 3,
-      selectedWorkerProfileId: 4,
       scheduleType: 'scheduled',
       scheduledAt,
       runInstructionDirty: true,
@@ -69,7 +67,6 @@ describe('task form request contracts', () => {
       session_mode: 'continue',
       user_prompt: 'Implement it',
       provider_id: 3,
-      worker_profile_id: 4,
       scheduled_datetime: new Date(scheduledAt).toISOString(),
       run_instruction_template: 'Execute {{user_prompt}}',
     })
@@ -87,7 +84,6 @@ describe('task form request contracts', () => {
       ...baseDraft,
       requireChanges: true,
       selectedProviderId: 3,
-      selectedWorkerProfileId: 4,
     }, baseDraft.runInstructionTemplate)).toEqual({})
   })
 
@@ -97,7 +93,6 @@ describe('task form request contracts', () => {
       taskMode: 'plan',
       requireChanges: true,
       selectedProviderId: 3,
-      selectedWorkerProfileId: 4,
     }, baseDraft.runInstructionTemplate)).toEqual({
       task_mode: 'plan',
       require_changes: false,

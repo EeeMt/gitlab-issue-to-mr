@@ -6,6 +6,10 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.worker_docker_targets import (
+    DockerConnectionsUnavailableError,
+    TaskContainerLookupError,
+)
 from app.core.worker_task_lifecycle import (
     create_execute_container,
     prepare_execute_task_context,
@@ -71,6 +75,8 @@ async def run_execute_task(
             had_existing_mr=had_existing_mr,
             sudo_gl=sudo_gl,
         )
+    except (DockerConnectionsUnavailableError, TaskContainerLookupError):
+        raise
     except Exception as error:  # noqa: BLE001
         logger.exception("Task %s failed with exception: %s", task_id, error)
         return await worker._handle_execute_task_failure(
@@ -114,6 +120,8 @@ async def run_resume_task(
             sudo_gl=context["sudo_gl"],
             resume_prefix=" (resume)",
         )
+    except (DockerConnectionsUnavailableError, TaskContainerLookupError):
+        raise
     except Exception as error:  # noqa: BLE001
         return await worker._handle_resume_task_failure(
             db,

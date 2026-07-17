@@ -11,9 +11,9 @@ This document explains the configuration items required by `config/.env.offline`
   - PostgreSQL data volume
   - task logs and generated repositories
 - The host user can access `/var/run/docker.sock`
-- Create `/var/codify/sessions` on the host (needed for Claude session persistence across tasks):
+- Create the daemon-local Issue workspace root and the control-plane CI staging directory:
   ```bash
-  mkdir -p /var/codify/sessions
+  mkdir -p /opt/codify-workspaces /opt/codify-ci-failures
   ```
 - (Optional) If your environment uses a custom CA, place the PEM file at `/opt/ca.crt`
 
@@ -62,12 +62,13 @@ If the environment is fully offline, both endpoints must exist inside the intran
 ### Worker/scheduler
 
 - `WORKER_IMAGE`: must match the loaded worker image tag
-- `WORKER_WORKSPACE_HOST_PATH`: absolute shared workspace path, bind-mounted into Backend and Scheduler and required at the same path on every remote Docker host (default `/opt/codify-workspaces`; recreate the services after changing it)
+- `WORKER_WORKSPACE_HOST_PATH`: absolute daemon-local Issue workspace path (default `/opt/codify-workspaces`). Each Worker host owns its own directory; it is not mounted into Backend/Scheduler and does not require NFS.
+- `CI_FAILURE_BUNDLE_HOST_PATH`: Backend/Scheduler-local CI input staging path (default `/opt/codify-ci-failures`). Runtime bundles are uploaded to Worker containers through the Docker API.
 - `MAX_CONCURRENCY`: max number of concurrent tasks
 - `TASK_TIMEOUT`: max seconds a task may run
 - `SCHEDULER_INTERVAL`: polling interval
 - `DEFAULT_TARGET_BRANCH`: fallback branch when a task does not specify one
-- `SESSION_STORAGE_ROOT`: host path for Claude session persistence (default `/var/codify/sessions`; the `docker-compose.yml` already mounts this path to the scheduler)
+- `SESSION_STORAGE_ROOT`: legacy compatibility setting. New Issue sessions persist under the daemon-local `WORKER_WORKSPACE_HOST_PATH`.
 
 ### Slot capacity
 
@@ -162,7 +163,7 @@ Only configure these if the dashboard will use GitLab OIDC in the offline enviro
 1. Copy this bundle to the target host.
 2. Create required host directories:
    ```bash
-   mkdir -p /var/codify/sessions /opt/codify-workspaces
+   mkdir -p /opt/codify-workspaces /opt/codify-ci-failures
    ```
 3. Create `config/.env.offline` from the example template.
 4. Load the exported images (`./scripts/load-images.sh`).

@@ -195,6 +195,21 @@ vi.mock('naive-ui', () => ({
       return () => h('div', { class: 'n-radio-group' }, slots.default?.())
     },
   },
+  NInput: {
+    name: 'NInput',
+    props: ['value', 'placeholder', 'disabled'],
+    emits: ['update:value'],
+    setup(props: any, { emit }: any) {
+      return () => h('input', {
+        class: 'n-input',
+        value: props.value ?? '',
+        disabled: props.disabled,
+        onInput: (event: Event) => {
+          emit('update:value', (event.target as HTMLInputElement).value)
+        },
+      })
+    },
+  },
   NSelect: {
     name: 'NSelect',
     props: ['value', 'options', 'clearable', 'placeholder', 'multiple'],
@@ -384,6 +399,7 @@ describe('TaskFormDrawer', () => {
         mode: 'create',
         issueId: 1,
         issueDescription: 'Issue description',
+        workerProfileId: 3,
         ...props,
       },
     })
@@ -688,40 +704,38 @@ describe('TaskFormDrawer', () => {
       )
     })
 
-    it('creates task with selected worker profile', async () => {
+    it('creates task with the issue worker and selected provider', async () => {
       await mountDrawer()
       await openDrawer()
 
       wrapper.vm.taskMode = 'execute'
-      wrapper.vm.selectedWorkerProfileId = 3
       wrapper.vm.selectedProviderId = 7
       wrapper.vm.runInstructionTemplate = 'Worker execute {{user_prompt}}'
       await submitCreate()
 
       expect(mockApi.createTask).toHaveBeenCalledWith(
         expect.objectContaining({
-          worker_profile_id: 3,
           provider_id: 7
         })
       )
+      expect(mockApi.createTask).toHaveBeenCalledWith(
+        expect.not.objectContaining({ worker_profile_id: expect.anything() })
+      )
     })
 
-    it('shows only worker profile names in the worker options', async () => {
+    it('shows the pinned worker profile as read-only execution context', async () => {
       await mountDrawer()
       await openDrawer()
 
-      expect(wrapper.vm.workerProfileOptions).toEqual([
-        { label: 'Java Worker', value: 3, disabled: false },
-        { label: 'Python Worker', value: 4, disabled: false },
-      ])
+      expect(wrapper.get('.execution-environment__summary').text()).toContain('Java Worker')
       await wrapper.get('.execution-environment__summary').trigger('click')
       expect(
         wrapper.findAllComponents({ name: 'NSelect' }).map(select => select.props('placeholder'))
       ).toContain('createTask.selectProvider')
     })
 
-    it('shows issue default worker when worker selection is left empty', async () => {
-      await mountDrawer({ defaultWorkerProfileId: 4 })
+    it('shows the issue worker and uses its run instruction defaults', async () => {
+      await mountDrawer({ workerProfileId: 4 })
       await openDrawer()
 
       expect(wrapper.get('.execution-environment__summary').text()).toContain('Python Worker')
@@ -731,18 +745,17 @@ describe('TaskFormDrawer', () => {
       expect(wrapper.vm.runInstructionTemplate).toBe('Python execute {{user_prompt}}')
     })
 
-    it('restores both execution environment overrides to their defaults', async () => {
+    it('restores the provider override while preserving the issue worker', async () => {
       await mountDrawer()
       await openDrawer()
 
-      wrapper.vm.selectedWorkerProfileId = 4
       wrapper.vm.selectedProviderId = 7
       await nextTick()
       await wrapper.get('.execution-environment__summary').trigger('click')
       await wrapper.get('.execution-environment__footer button').trigger('click')
 
-      expect(wrapper.vm.selectedWorkerProfileId).toBeNull()
       expect(wrapper.vm.selectedProviderId).toBeNull()
+      expect(wrapper.vm.effectiveWorkerProfile?.id).toBe(3)
       expect(wrapper.vm.executionEnvironmentExpanded).toBe(false)
     })
 
@@ -757,17 +770,6 @@ describe('TaskFormDrawer', () => {
       expect(mockApi.createTask).toHaveBeenCalledWith(
         expect.objectContaining({ run_instruction_template: 'Custom {{user_prompt}}' })
       )
-    })
-
-    it('keeps manually edited run instruction when worker changes', async () => {
-      await mountDrawer()
-      await openDrawer()
-
-      wrapper.vm.runInstructionTemplate = 'Custom instruction'
-      wrapper.vm.runInstructionDirty = true
-      wrapper.vm.handleWorkerProfileChange(4)
-
-      expect(wrapper.vm.runInstructionTemplate).toBe('Custom instruction')
     })
 
     it('resets create state and emits close after successful creation', async () => {
@@ -1317,48 +1319,6 @@ describe('TaskFormDrawer', () => {
       expect(mockApi.updateTask).toHaveBeenCalledWith(
         42,
         expect.objectContaining({ run_instruction_template: 'Changed snapshot' })
-      )
-    })
-
-    it('patches the new default template when switching workers in edit mode', async () => {
-      mockApi.getWorkerProfiles.mockResolvedValue([
-        ...mockWorkerProfiles,
-        {
-          ...mockWorkerProfiles[0],
-          id: 4,
-          name: 'Python Worker',
-          is_default: false,
-          default_execute_run_instruction_template: 'Python execute {{user_prompt}}'
-        }
-      ])
-      await mountDrawer({
-        mode: 'edit',
-        issueId: undefined,
-        issueDescription: undefined,
-        task: {
-          id: 42,
-          issue_id: 1,
-          user_prompt: 'Original prompt',
-          priority: 1,
-          require_changes: true,
-          provider_id: 7,
-          worker_profile_id: 3,
-          task_mode: 'execute',
-          run_instruction_template: 'Stored snapshot'
-        }
-      })
-      await openDrawer()
-
-      wrapper.vm.handleWorkerProfileChange(4)
-      await wrapper.find('[data-testid="task-form-save-button"]').trigger('click')
-      await flushPromises()
-
-      expect(mockApi.updateTask).toHaveBeenCalledWith(
-        42,
-        expect.objectContaining({
-          worker_profile_id: 4,
-          run_instruction_template: 'Python execute {{user_prompt}}'
-        })
       )
     })
 

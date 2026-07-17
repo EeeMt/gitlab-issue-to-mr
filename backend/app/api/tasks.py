@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -30,11 +30,9 @@ from app.api.task_action_routes import (
     router as task_action_router,
 )
 from app.api.task_artifacts import (
-    build_task_workspace_status,
     get_task_archive_file,
     get_task_archive_metadata,
     get_task_payload_content,
-    remove_task_workspace,
 )
 from app.api.task_creation_service import (
     TaskCreationServices,
@@ -81,13 +79,18 @@ from app.core.task_prompt import (
 from app.core.usage_limits import (
     get_usage_quota_service,
 )
+from app.core.utcnow import utcnow
 from app.core.worker_profiles import (
     replace_task_worker_snapshot,
     resolve_provider_for_issue,
     resolve_worker_profile_for_issue,
     select_snapshot_run_instruction_template,
 )
-from app.core.worker_workspace import build_issue_workspace_paths, remove_issue_workspace
+from app.core.worker_workspace import configured_workspace_root
+from app.core.worker_workspace_remote import (
+    inspect_issue_workspace,
+    remove_issue_workspace_remote,
+)
 from app.database import get_db
 from app.dependencies.auth import get_optional_current_user, require_page_access
 from app.dependencies.project_access import (
@@ -135,9 +138,7 @@ def _task_update_services() -> TaskUpdateServices:
     return TaskUpdateServices(
         get_task_with_access_check=get_task_with_access_check,
         get_project_metadata=get_project_metadata,
-        resolve_worker_profile_for_issue=resolve_worker_profile_for_issue,
         resolve_provider_for_issue=resolve_provider_for_issue,
-        replace_task_worker_snapshot=replace_task_worker_snapshot,
         select_snapshot_run_instruction_template=select_snapshot_run_instruction_template,
         render_and_store_task_prompt=render_and_store_task_prompt,
     )
@@ -512,15 +513,32 @@ async def get_task_workspace_status(
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     task = await get_task_with_access_check(task_id, db, access_scope, current_user)
-    if task.issue is None:
-        task.issue = await db.get(Issue, task.issue_id)
-
-    return build_task_workspace_status(
-        task,
-        get_effective_settings(),
-        build_paths=build_issue_workspace_paths,
-        dir_exists=os.path.isdir,
-    )
+    issue = await db.get(Issue, task.issue_id)
+    if issue is None:
+        return {"enabled": False, "reason": "task has no issue"}
+    settings = get_effective_settings()
+    if configured_workspace_root(settings) is None:
+        return {"enabled": False, "reason": "worker workspace host path is not configured"}
+    try:
+        workspace = await inspect_issue_workspace(db, settings, issue)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Failed to inspect workspace for issue %s on worker %s: %s",
+            issue.id,
+            issue.worker_profile_id,
+            exc,
+        )
+        raise HTTPException(
+            status_code=502, detail=f"Worker workspace is unavailable: {exc}"
+        ) from exc
+    return {
+        "enabled": True,
+        "issue_root": workspace.issue_root,
+        "repo_path": workspace.repo_path,
+        "issue_exists": workspace.issue_exists,
+        "repo_exists": workspace.repo_exists,
+        "worker_profile_id": issue.worker_profile_id,
+    }
 
 
 @router.delete("/tasks/{task_id}/workspace")
@@ -531,16 +549,57 @@ async def delete_task_workspace(
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     task = await get_task_with_access_check(task_id, db, access_scope, current_user)
-    if task.status == TaskStatus.RUNNING:
-        raise HTTPException(status_code=400, detail="Cannot delete workspace while task is running")
-    if task.issue is None:
-        task.issue = await db.get(Issue, task.issue_id)
-    return remove_task_workspace(
-        task,
-        get_effective_settings(),
-        build_paths=build_issue_workspace_paths,
-        remove_workspace=remove_issue_workspace,
-    )
+    issue = (
+        await db.execute(select(Issue).where(Issue.id == task.issue_id).with_for_update())
+    ).scalar_one_or_none()
+    if issue is None:
+        raise HTTPException(status_code=404, detail="Workspace not available without issue")
+    active_count = (
+        await db.execute(
+            select(func.count(Task.id)).where(
+                Task.issue_id == issue.id,
+                or_(
+                    Task.status.in_(
+                        (TaskStatus.PENDING, TaskStatus.QUEUED, TaskStatus.RUNNING)
+                    ),
+                    Task.container_id.is_not(None),
+                ),
+            )
+        )
+    ).scalar_one()
+    if active_count:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete workspace while the issue has an active or retained task",
+        )
+
+    settings = get_effective_settings()
+    if configured_workspace_root(settings) is None:
+        raise HTTPException(status_code=404, detail="Worker workspace host path is not configured")
+    try:
+        removed = await remove_issue_workspace_remote(db, settings, issue)
+    except Exception as exc:  # noqa: BLE001
+        issue.workspace_delete_attempted_at = utcnow()
+        issue.workspace_delete_error = str(exc)[:4000]
+        await db.commit()
+        raise HTTPException(
+            status_code=502, detail=f"Worker workspace deletion failed: {exc}"
+        ) from exc
+
+    deleted_at = utcnow()
+    issue.workspace_delete_attempted_at = deleted_at
+    issue.workspace_deleted_at = deleted_at
+    issue.workspace_delete_error = None
+    await db.commit()
+    return {
+        "removed": removed,
+        "issue_root": os.path.join(
+            configured_workspace_root(settings) or "",
+            f"project-{issue.project_id}",
+            f"issue-{issue.id}",
+        ),
+        "worker_profile_id": issue.worker_profile_id,
+    }
 
 
 @router.get("/tasks/{task_id}/archive")

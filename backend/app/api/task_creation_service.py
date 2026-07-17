@@ -20,6 +20,7 @@ from app.api.task_schemas import CreateTaskRequest, RetryTaskRequest
 from app.core.scheduling import resolve_scheduled_at
 from app.core.task_prompt import TaskPromptValidationError
 from app.core.usage_limits import UsageLimitExceeded, usage_limit_exceeded_detail
+from app.core.utcnow import utcnow
 from app.core.worker_profiles import WorkerProfileValidationError
 from app.dependencies.project_access import ProjectAccessScope, require_project_access
 from app.models import Issue, Task, User
@@ -97,9 +98,7 @@ async def retry_task_record(
 
     scheduled_at: datetime | None = None
     if request and request.scheduled_datetime is not None:
-        scheduled_at = services.validate_scheduled_datetime_in_future(
-            request.scheduled_datetime
-        )
+        scheduled_at = services.validate_scheduled_datetime_in_future(request.scheduled_datetime)
 
     await _raise_if_usage_limited(db, current_user, services)
     if scheduled_at is not None:
@@ -118,10 +117,14 @@ async def retry_task_record(
             )
 
     issue = (
-        await db.execute(select(Issue).where(Issue.id == original_task.issue_id))
+        await db.execute(
+            select(Issue).where(Issue.id == original_task.issue_id).with_for_update()
+        )
     ).scalar_one_or_none()
     if issue is None:
         raise HTTPException(status_code=404, detail="Issue not found")
+    if issue.status == "closed":
+        raise HTTPException(status_code=400, detail="Cannot retry tasks on a closed issue")
 
     try:
         provider = await services.resolve_provider_for_issue(
@@ -132,7 +135,6 @@ async def retry_task_record(
         worker_profile = await services.resolve_worker_profile_for_issue(
             db,
             issue,
-            original_task.worker_profile_id,
         )
     except WorkerProfileValidationError as exc:
         raise HTTPException(
@@ -145,10 +147,7 @@ async def retry_task_record(
     retry_session_mode = (
         "fresh"
         if original_session_mode == "fresh"
-        and not (
-            isinstance(original_output_session_id, str)
-            and original_output_session_id.strip()
-        )
+        and not (isinstance(original_output_session_id, str) and original_output_session_id.strip())
         else "continue"
     )
 
@@ -169,9 +168,7 @@ async def retry_task_record(
             current_user.gitlab_user_id if current_user is not None else None
         ),
         initiator_username=current_user.username if current_user is not None else None,
-        initiator_display_name=(
-            current_user.display_name if current_user is not None else None
-        ),
+        initiator_display_name=(current_user.display_name if current_user is not None else None),
         initiator_email=current_user.email if current_user is not None else None,
         task_mode=original_task.task_mode if original_task.task_mode else "execute",
         require_changes=original_task.require_changes,
@@ -179,6 +176,10 @@ async def retry_task_record(
         # produced a session, preserve fresh mode so the retry cannot fall back to the old one.
         session_mode=retry_session_mode,
     )
+    issue.workspace_last_used_at = utcnow()
+    issue.workspace_delete_attempted_at = None
+    issue.workspace_deleted_at = None
+    issue.workspace_delete_error = None
     db.add(new_task)
     await db.flush()
     try:
@@ -223,7 +224,7 @@ async def create_task_record(
     access_scope: ProjectAccessScope,
     services: TaskCreationServices,
 ) -> dict:
-    issue = await db.get(Issue, request.issue_id)
+    issue = await db.get(Issue, request.issue_id, with_for_update=True)
     if not issue:
         raise HTTPException(status_code=404, detail="Issue not found")
     if issue.status == "closed":
@@ -242,7 +243,6 @@ async def create_task_record(
         worker_profile = await services.resolve_worker_profile_for_issue(
             db,
             issue,
-            request.worker_profile_id,
         )
         provider = await services.resolve_provider_for_issue(
             db,
@@ -283,9 +283,7 @@ async def create_task_record(
             current_user.gitlab_user_id if current_user is not None else None
         ),
         initiator_username=current_user.username if current_user is not None else None,
-        initiator_display_name=(
-            current_user.display_name if current_user is not None else None
-        ),
+        initiator_display_name=(current_user.display_name if current_user is not None else None),
         initiator_email=current_user.email if current_user is not None else None,
         priority=request.priority,
         scheduled_at=scheduled_at,
@@ -295,6 +293,10 @@ async def create_task_record(
         require_changes=request.effective_require_changes,
         session_mode=request.session_mode,
     )
+    issue.workspace_last_used_at = utcnow()
+    issue.workspace_delete_attempted_at = None
+    issue.workspace_deleted_at = None
+    issue.workspace_delete_error = None
     db.add(task)
     await db.flush()
     try:

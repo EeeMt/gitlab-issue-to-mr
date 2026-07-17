@@ -30,6 +30,12 @@ MOUNTED_KIT_MIGRATION = (
     / "versions"
     / "056_worker_profile_mounted_kit.py"
 )
+ISSUE_WORKER_AFFINITY_MIGRATION = (
+    Path(__file__).resolve().parents[2]
+    / "alembic"
+    / "versions"
+    / "058_issue_worker_affinity.py"
+)
 
 
 def test_worker_profiles_migration_defines_expected_tables_and_columns():
@@ -123,3 +129,35 @@ def test_worker_profile_mounted_kit_migration_preserves_baked_default():
     assert 'server_default="baked_image"' in content
     assert '"worker_kit_version"' in content
     assert '"worker_kit_path"' in content
+
+
+def test_issue_worker_affinity_migration_pins_worker_and_tracks_remote_workspace():
+    content = ISSUE_WORKER_AFFINITY_MIGRATION.read_text(encoding="utf-8")
+
+    assert 'revision: str = "058_issue_worker_affinity"' in content
+    assert 'down_revision: Union[str, None] = "057_task_session_mode"' in content
+    assert 'new_column_name="worker_profile_id"' in content
+    assert 'ondelete="RESTRICT"' in content
+    assert 'nullable=False' in content
+    assert "unpinned_issue_count" in content
+    assert "SET default_worker_profile_id = NULL" in content
+    assert "worker_profiles.enabled = true" in content
+    assert "tasks.started_at IS NOT NULL" in content
+    running_assignment = content.index(
+        '"WHERE tasks.issue_id = issues.id AND tasks.status = \'running\' "'
+    )
+    historical_assignment = content.index(
+        '"AND tasks.started_at IS NOT NULL "', running_assignment
+    )
+    assert running_assignment < historical_assignment
+    assert "multiple running workers exist for the same issue" in content
+    assert "Worker differs from the Issue affinity selected during upgrade" in content
+    assert "tasks.worker_profile_id IS DISTINCT FROM issues.default_worker_profile_id" in content
+    for field in (
+        "workspace_last_used_at",
+        "workspace_delete_attempted_at",
+        "workspace_deleted_at",
+        "workspace_delete_error",
+        "worker_metadata",
+    ):
+        assert field in content

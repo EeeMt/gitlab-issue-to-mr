@@ -21,6 +21,7 @@ from .conftest import (
     create_issue,
     create_issue_and_task,
     create_task,
+    get_worker_profile_id,
     wait_for_task_status,
 )
 
@@ -458,12 +459,16 @@ class TestBranchValidation:
     ):
         """Issue without target_branch (no-MR mode) should succeed."""
         # Create issue without target_branch via raw POST
+        worker_profile_id = await get_worker_profile_id(
+            http_client, backend_url, admin_auth_headers
+        )
         resp = await http_client.post(
             f"{backend_url}/api/issues",
             json={
                 "title": "No-MR mode test",
                 "description": "No-MR mode task",
                 "project_id": 1,
+                "worker_profile_id": worker_profile_id,
             },
             headers=admin_auth_headers,
         )
@@ -497,6 +502,9 @@ class TestBranchValidation:
         admin_auth_headers: dict,
     ):
         """Issue with explicit base_branch should succeed."""
+        worker_profile_id = await get_worker_profile_id(
+            http_client, backend_url, admin_auth_headers
+        )
         resp = await http_client.post(
             f"{backend_url}/api/issues",
             json={
@@ -505,6 +513,7 @@ class TestBranchValidation:
                 "project_id": 1,
                 "base_branch": "main",
                 "target_branch": "main",
+                "worker_profile_id": worker_profile_id,
             },
             headers=admin_auth_headers,
         )

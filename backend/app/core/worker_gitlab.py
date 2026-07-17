@@ -1,8 +1,6 @@
 """GitLab and notification helpers for worker execution."""
 
-import json
 import logging
-import os
 import re
 import time
 
@@ -48,7 +46,9 @@ def build_initial_mr_description(task: Task) -> str:
 *AI 正在直接实施变更...*"""
 
 
-def remove_mr_draft_status_for_issue(task: Task, issue: Issue, gitlab_client, *, sudo_gl: Gitlab | None = None) -> None:
+def remove_mr_draft_status_for_issue(
+    task: Task, issue: Issue, gitlab_client, *, sudo_gl: Gitlab | None = None
+) -> None:
     gl = sudo_gl or gitlab_client.gl
     t0 = time.monotonic()
     project = gl.projects.get(task.project_id)
@@ -65,7 +65,9 @@ def remove_mr_draft_status_for_issue(task: Task, issue: Issue, gitlab_client, *,
         logger.info(f"[Task {task.id}] Skipping draft removal because MR title is unavailable")
         return
 
-    updated_title = re.sub(r"^(?:\[Draft\]\s*|Draft:\s*|WIP:\s*)", "", title, count=1, flags=re.IGNORECASE).strip()
+    updated_title = re.sub(
+        r"^(?:\[Draft\]\s*|Draft:\s*|WIP:\s*)", "", title, count=1, flags=re.IGNORECASE
+    ).strip()
     mr.draft = False
     if updated_title:
         mr.title = updated_title
@@ -96,7 +98,9 @@ def create_mr_if_needed(
     return create_new_mr(task, issue, gitlab_client, sudo_gl=sudo_gl)
 
 
-def find_existing_mr(task: Task, issue: Issue, gitlab_client) -> tuple[int | None, str | None] | None:
+def find_existing_mr(
+    task: Task, issue: Issue, gitlab_client
+) -> tuple[int | None, str | None] | None:
     try:
         existing_mrs = gitlab_client.gl.projects.get(task.project_id).mergerequests.list(
             source_branch=issue.branch_name,
@@ -107,14 +111,18 @@ def find_existing_mr(task: Task, issue: Issue, gitlab_client) -> tuple[int | Non
 
         mr_iid = existing_mrs[0].iid
         mr_web_url = gitlab_client.normalize_web_url(existing_mrs[0].web_url)
-        logger.info(f"[Task {task.id}] Reusing existing MR !{mr_iid} for branch {issue.branch_name}")
+        logger.info(
+            f"[Task {task.id}] Reusing existing MR !{mr_iid} for branch {issue.branch_name}"
+        )
         return mr_iid, mr_web_url
     except Exception as e:
         logger.warning(f"[Task {task.id}] Failed to look up existing MR: {e}")
     return None
 
 
-def create_new_mr(task: Task, issue: Issue, gitlab_client, *, sudo_gl: Gitlab | None = None) -> tuple[int | None, str | None]:
+def create_new_mr(
+    task: Task, issue: Issue, gitlab_client, *, sudo_gl: Gitlab | None = None
+) -> tuple[int | None, str | None]:
     settings = get_settings()
     target_branch = issue.target_branch or settings.default_target_branch
     mr_title = build_initial_mr_title(task)
@@ -134,14 +142,20 @@ def create_new_mr(task: Task, issue: Issue, gitlab_client, *, sudo_gl: Gitlab | 
         mr_response = gl.projects.get(task.project_id).mergerequests.create(mr_data)
     except Exception as e:
         if sudo_gl:
-            logger.warning(f"[Task {task.id}] Sudo MR creation failed: {e}, retrying with bot token")
+            logger.warning(
+                f"[Task {task.id}] Sudo MR creation failed: {e}, retrying with bot token"
+            )
             try:
-                mr_response = gitlab_client.gl.projects.get(task.project_id).mergerequests.create(mr_data)
+                mr_response = gitlab_client.gl.projects.get(task.project_id).mergerequests.create(
+                    mr_data
+                )
             except Exception as e2:
                 logger.warning(f"[Task {task.id}] Bot token MR creation also failed: {e2}")
                 return None, None
         else:
-            logger.warning(f"[Task {task.id}] Failed to create initial MR: {e}, continuing without MR")
+            logger.warning(
+                f"[Task {task.id}] Failed to create initial MR: {e}, continuing without MR"
+            )
             return None, None
 
     mr_iid = mr_response.iid
@@ -163,28 +177,17 @@ async def update_mr_description_for_issue(
         return
 
     try:
-        all_tasks = (await db.execute(
-            select(Task)
-            .where(Task.issue_id == issue.id)
-            .order_by(Task.id)
-        )).scalars().all()
+        all_tasks = (
+            (await db.execute(select(Task).where(Task.issue_id == issue.id).order_by(Task.id)))
+            .scalars()
+            .all()
+        )
 
-        # Load per-task metadata files from the persistent workspace (if available).
-        settings = get_settings()
-        issue_root = _resolve_issue_root(settings, issue, all_tasks)
-        metadata_map = load_task_metadata_files(issue_root, [t.id for t in all_tasks]) if issue_root else {}
-
-        if issue_root:
-            logger.info(
-                f"[Task {task.id}] Metadata load: {len(metadata_map)}/{len(all_tasks)} task(s) "
-                f"have metadata (workspace: {issue_root})"
-            )
-        else:
-            logger.info(
-                f"[Task {task.id}] Workspace root not resolved — "
-                f"worker_workspace_host_path={getattr(settings, 'worker_workspace_host_path', None)!r}; "
-                f"MR description will omit per-task metadata"
-            )
+        metadata_map = load_task_metadata(all_tasks)
+        logger.info(
+            f"[Task {task.id}] Metadata load: {len(metadata_map)}/{len(all_tasks)} task(s) "
+            "have persisted worker metadata"
+        )
 
         t0 = time.monotonic()
         gl = sudo_gl or gitlab_client.gl
@@ -198,7 +201,9 @@ async def update_mr_description_for_issue(
         overall_summary = _latest_overall_summary(all_tasks, metadata_map)
         overall_summary_source = "task_metadata" if overall_summary else "none"
         if not overall_summary:
-            overall_summary = _extract_existing_overall_summary(getattr(mr, "description", "") or "")
+            overall_summary = _extract_existing_overall_summary(
+                getattr(mr, "description", "") or ""
+            )
             if overall_summary:
                 overall_summary_source = "existing_mr_description"
         logger.info(
@@ -226,96 +231,43 @@ async def update_mr_description_for_issue(
         logger.warning(f"[Task {task.id}] Failed to update MR description: {e}")
 
 
-def _resolve_issue_root(settings, issue: Issue, all_tasks: list) -> str | None:
-    """Return the issue workspace root path, or None if workspace is not configured."""
-    try:
-        from app.core.worker_workspace import build_issue_workspace_paths
-        if not all_tasks:
-            return None
-        paths = build_issue_workspace_paths(settings, issue, all_tasks[0])
-        if paths is None:
-            logger.debug(f"[Issue {issue.id}] worker_workspace_host_path not configured; metadata unavailable")
-            return None
-        logger.info(f"[Issue {issue.id}] Resolved workspace root: {paths.issue_root}")
-        return paths.issue_root
-    except Exception:
-        logger.warning("Could not resolve issue workspace root", exc_info=True)
-        return None
+def load_task_metadata(tasks: list[Task]) -> dict[int, dict]:
+    """Return worker metadata already persisted on Task rows."""
+    return {
+        task.id: task.worker_metadata
+        for task in tasks
+        if isinstance(getattr(task, "worker_metadata", None), dict)
+    }
 
 
-def load_task_metadata_files(issue_root: str, task_ids: list[int]) -> dict[int, dict]:
-    """Read task-metadata.json for each task from the persistent workspace runtime directory.
-
-    Returns a mapping of task_id -> metadata dict. Tasks without a metadata file are omitted.
-    """
-    result: dict[int, dict] = {}
-    for task_id in task_ids:
-        path = os.path.join(issue_root, "runtime", f"task-{task_id}", "task-metadata.json")
-        try:
-            with open(path, encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, dict):
-                result[task_id] = data
-                logger.info(f"[Task {task_id}] Loaded metadata from {path}")
-            else:
-                logger.warning(f"[Task {task_id}] task-metadata.json at {path} is not a JSON object, skipping")
-        except FileNotFoundError:
-            logger.info(f"[Task {task_id}] task-metadata.json not found at {path}")
-        except (OSError, json.JSONDecodeError) as exc:
-            logger.warning(f"[Task {task_id}] Failed to read task-metadata.json at {path}: {exc}")
-    return result
-
-
-async def write_previous_task_summaries_file(
+async def build_previous_task_summaries(
     db: AsyncSession,
-    settings,
     issue: Issue,
     task: Task,
-) -> str | None:
-    """Write previous task summaries for the worker-side overall MR summary prompt."""
+) -> str:
+    """Build previous task summaries for the runtime input bundle."""
     try:
-        from app.core.worker_workspace import build_issue_workspace_paths
-
-        workspace_root = getattr(settings, "worker_workspace_host_path", "") or ""
-        if not isinstance(workspace_root, str) or not workspace_root.strip():
-            logger.debug(
-                f"[Task {task.id}] Workspace root not configured; previous summaries unavailable"
+        previous_tasks = (
+            (
+                await db.execute(
+                    select(Task)
+                    .where(Task.issue_id == issue.id, Task.id < task.id)
+                    .order_by(Task.id)
+                )
             )
-            return None
-
-        paths = build_issue_workspace_paths(settings, issue, task)
-        if paths is None:
-            logger.debug(
-                f"[Task {task.id}] Issue workspace paths unavailable; previous summaries unavailable"
-            )
-            return None
-
-        previous_tasks = (await db.execute(
-            select(Task)
-            .where(Task.issue_id == issue.id, Task.id < task.id)
-            .order_by(Task.id)
-        )).scalars().all()
-        metadata_map = load_task_metadata_files(paths.issue_root, [t.id for t in previous_tasks])
+            .scalars()
+            .all()
+        )
+        metadata_map = load_task_metadata(previous_tasks)
         previous_task_ids = [t.id for t in previous_tasks]
         logger.info(
             f"[Task {task.id}] Preparing previous task summaries "
             f"(previous_task_ids={previous_task_ids}, metadata_task_ids={sorted(metadata_map)})"
         )
-        content = _build_previous_task_summaries_content(issue, previous_tasks, metadata_map)
-
-        os.makedirs(paths.runtime_path, exist_ok=True)
-        path = os.path.join(paths.runtime_path, "previous-task-summaries.md")
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(content)
-
-        logger.info(
-            f"[Task {task.id}] Wrote previous task summaries to {path} "
-            f"({len(previous_tasks)} previous task(s), {len(metadata_map)} with metadata)"
-        )
-        return path
+        return _build_previous_task_summaries_content(issue, previous_tasks, metadata_map)
     except Exception as exc:
-        logger.warning(f"[Task {task.id}] Failed to write previous task summaries: {exc}")
-        return None
+        logger.warning(f"[Task {task.id}] Failed to build previous task summaries: {exc}")
+        return ""
 
 
 def _compact_summary_text(value: str, max_chars: int = 500) -> str:
@@ -352,7 +304,9 @@ def _build_previous_task_summaries_content(
     for previous_task in previous_tasks:
         meta = metadata_map.get(previous_task.id, {})
         status_label = previous_task.status.value if previous_task.status else "unknown"
-        prompt = _compact_summary_text(str(meta.get("prompt") or previous_task.user_prompt or ""), 300)
+        prompt = _compact_summary_text(
+            str(meta.get("prompt") or previous_task.user_prompt or ""), 300
+        )
         commit_msg = _compact_summary_text(
             str(meta.get("commit_message") or previous_task.commit_message or ""),
             200,
@@ -361,14 +315,16 @@ def _build_previous_task_summaries_content(
             str(meta.get("execution_summary") or commit_msg or prompt or ""),
             1500,
         )
-        lines.extend([
-            f"## Task #{previous_task.id}",
-            f"- 状态: {status_label}",
-            f"- 目标: {prompt or '无'}",
-            f"- 提交说明: {commit_msg or '无'}",
-            f"- 执行摘要: {summary or '无'}",
-            "",
-        ])
+        lines.extend(
+            [
+                f"## Task #{previous_task.id}",
+                f"- 状态: {status_label}",
+                f"- 目标: {prompt or '无'}",
+                f"- 提交说明: {commit_msg or '无'}",
+                f"- 执行摘要: {summary or '无'}",
+                "",
+            ]
+        )
 
     return "\n".join(lines)
 
@@ -515,7 +471,9 @@ def _build_mr_description(
     return "\n".join(lines)
 
 
-async def send_failure_alert(task: Task, sanitize_sensitive_data, issue: Issue | None = None) -> None:
+async def send_failure_alert(
+    task: Task, sanitize_sensitive_data, issue: Issue | None = None
+) -> None:
     settings = get_settings()
     if not settings.alert_on_failure or not settings.alert_webhook_url:
         return
@@ -524,15 +482,17 @@ async def send_failure_alert(task: Task, sanitize_sensitive_data, issue: Issue |
     error_msg = sanitize_sensitive_data(error_msg)
     alert_data = {
         "text": "🚨 Task Failed",
-        "attachments": [{
-            "color": "danger",
-            "fields": [
-                {"title": "Task ID", "value": str(task.id), "short": True},
-                {"title": "Project ID", "value": str(task.project_id), "short": True},
-                {"title": "Issue", "value": f"#{issue.id}" if issue else "N/A", "short": True},
-                {"title": "Error", "value": error_msg},
-            ]
-        }]
+        "attachments": [
+            {
+                "color": "danger",
+                "fields": [
+                    {"title": "Task ID", "value": str(task.id), "short": True},
+                    {"title": "Project ID", "value": str(task.project_id), "short": True},
+                    {"title": "Issue", "value": f"#{issue.id}" if issue else "N/A", "short": True},
+                    {"title": "Error", "value": error_msg},
+                ],
+            }
+        ],
     }
 
     try:
@@ -546,14 +506,28 @@ async def send_failure_alert(task: Task, sanitize_sensitive_data, issue: Issue |
         logger.warning(f"Failed to send failure alert: {e}")
 
 
-async def send_notifications(task: Task, gitlab_client, sanitize_sensitive_data, success: bool, had_existing_mr: bool, issue: Issue | None = None) -> None:
+async def send_notifications(
+    task: Task,
+    gitlab_client,
+    sanitize_sensitive_data,
+    success: bool,
+    had_existing_mr: bool,
+    issue: Issue | None = None,
+) -> None:
     try:
         await notify_task_event(task, MATTERMOST_EVENT_TASK_COMPLETED)
     except Exception as e:
         logger.warning(f"Failed to send Mattermost completion notification: {e}")
 
 
-async def send_failure_notifications(task: Task, gitlab_client, sanitize_sensitive_data, success: bool, had_existing_mr: bool, issue: Issue | None = None) -> None:
+async def send_failure_notifications(
+    task: Task,
+    gitlab_client,
+    sanitize_sensitive_data,
+    success: bool,
+    had_existing_mr: bool,
+    issue: Issue | None = None,
+) -> None:
     try:
         await send_failure_alert(task, sanitize_sensitive_data, issue)
     except Exception as e:

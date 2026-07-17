@@ -3,9 +3,19 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.core.worker_docker_targets import TaskContainerLookupError
 from app.core.worker_profiles import TaskWorkerRuntime
 from app.core.worker_runtime import build_container_volumes
-from app.core.worker_task_lifecycle import create_execute_container, prepare_container_inputs
+from app.core.worker_task_artifacts import finalize_task_raw_logs
+from app.core.worker_task_lifecycle import (
+    _create_stopped_container,
+    _remove_created_container,
+    _start_created_container,
+    create_execute_container,
+    prepare_container_inputs,
+)
+from app.core.worker_task_outcomes import fail_execute_task
+from app.core.worker_task_runner import run_execute_task
 from app.models import TaskStatus
 
 
@@ -30,6 +40,45 @@ def test_build_container_volumes_uses_snapshot_mounts_last(tmp_path):
     assert volumes[str(tmp_path / "cache")] == {"bind": "/cache", "mode": "rw"}
 
 
+def test_create_stopped_container_recovers_timed_out_success_by_name_and_label():
+    worker = MagicMock()
+    worker.docker.create_container.side_effect = RuntimeError("response timed out")
+    recovered = SimpleNamespace(
+        id="container-1",
+        status="created",
+        labels={"codify.task_id": "12"},
+    )
+    worker.docker.client.containers.get.return_value = recovered
+    task = SimpleNamespace(id=12)
+
+    container = _create_stopped_container(
+        worker,
+        task,
+        "codify-12-issue1",
+        image="worker:latest",
+        command="",
+    )
+
+    assert container is recovered
+    worker.docker.client.containers.get.assert_called_once_with("codify-12-issue1")
+
+
+def test_create_stopped_container_defers_when_create_outcome_is_unknown():
+    worker = MagicMock()
+    worker.docker.create_container.side_effect = RuntimeError("response timed out")
+    worker.docker.client.containers.get.side_effect = RuntimeError("daemon offline")
+    task = SimpleNamespace(id=12)
+
+    with pytest.raises(TaskContainerLookupError, match="creation outcome is unknown"):
+        _create_stopped_container(
+            worker,
+            task,
+            "codify-12-issue1",
+            image="worker:latest",
+            command="",
+        )
+
+
 @pytest.mark.asyncio
 async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
     task = MagicMock()
@@ -50,7 +99,7 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
     worker = MagicMock()
     worker.gitlab.ensure_project_label = MagicMock()
     worker._create_mr_if_needed = MagicMock(return_value=(None, None))
-    worker._write_previous_task_summaries_file = AsyncMock()
+    worker._build_previous_task_summaries = AsyncMock(return_value="Previous summary")
     worker._prepare_container_inputs = AsyncMock(return_value=({"TASK_ID": "12"}, "main"))
     worker._build_container_volumes = MagicMock(
         return_value={"/cache": {"bind": "/cache", "mode": "rw"}}
@@ -88,10 +137,8 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
         ),
         patch(
             "app.core.worker_task_lifecycle.build_issue_workspace_paths",
-            return_value=SimpleNamespace(runtime_path=str(tmp_path)),
+            return_value=SimpleNamespace(issue_root=str(tmp_path)),
         ),
-        patch("app.core.worker_task_lifecycle.materialize_task_prompt"),
-        patch("app.core.worker_task_lifecycle.materialize_worker_custom_scripts_from_snapshot"),
     ):
         container = await create_execute_container(
             worker,
@@ -121,6 +168,9 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
         custom_mounts=runtime.volume_mounts,
     )
     worker.docker.create_container.assert_called_once()
+    assert worker.docker.create_container.call_args.kwargs["start"] is False
+    worker.docker.put_archive.assert_called_once()
+    worker.docker.start_container.assert_called_once_with(container)
     assert worker.docker.create_container.call_args.kwargs["image"] == "custom-worker:latest"
     assert worker.docker.create_container.call_args.kwargs["entrypoint"] == (
         "/opt/codify-kit/launcher"
@@ -176,3 +226,254 @@ async def test_prepare_container_inputs_uses_only_snapshot_custom_environment():
     }
     legacy_env_loader.assert_not_awaited()
     legacy_env_builder.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_remove_created_container_clears_durable_reference_after_removal():
+    task = SimpleNamespace(
+        id=12,
+        container_id="container-1",
+        raw_logs_finalized_at=None,
+    )
+    container = SimpleNamespace(id="container-1")
+    worker = MagicMock()
+    db = MagicMock()
+    db.commit = AsyncMock()
+
+    removed = await _remove_created_container(worker, db, task, container)
+
+    assert removed is True
+    assert task.container_id is None
+    assert task.raw_logs_finalized_at is not None
+    worker.docker.remove_container.assert_called_once_with(container, force=True)
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_remove_created_container_retains_reference_when_removal_fails():
+    task = SimpleNamespace(
+        id=12,
+        container_id="container-1",
+        raw_logs_finalized_at=None,
+    )
+    container = SimpleNamespace(id="container-1")
+    worker = MagicMock()
+    worker.docker.remove_container.side_effect = RuntimeError("daemon offline")
+    db = MagicMock()
+    db.commit = AsyncMock()
+
+    removed = await _remove_created_container(worker, db, task, container)
+
+    assert removed is False
+    assert task.container_id == "container-1"
+    assert task.raw_logs_finalized_at is not None
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["running", "exited"])
+async def test_start_created_container_continues_when_start_succeeded_despite_error(status):
+    task = SimpleNamespace(
+        id=12,
+        container_id="container-1",
+        raw_logs_finalized_at=None,
+    )
+    container = MagicMock(id="container-1", status=status)
+    container.status = status
+    worker = MagicMock()
+    worker.docker.start_container.side_effect = RuntimeError("response timed out")
+    db = MagicMock()
+    db.commit = AsyncMock()
+
+    await _start_created_container(worker, db, task, container)
+
+    container.reload.assert_called_once_with()
+    worker.docker.remove_container.assert_not_called()
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_start_created_container_defers_when_start_outcome_is_unknown():
+    task = SimpleNamespace(
+        id=12,
+        container_id="container-1",
+        raw_logs_finalized_at=None,
+    )
+    container = MagicMock(id="container-1")
+    container.reload.side_effect = RuntimeError("daemon offline")
+    worker = MagicMock()
+    worker.docker.start_container.side_effect = RuntimeError("response timed out")
+    db = MagicMock()
+    db.commit = AsyncMock()
+
+    with pytest.raises(TaskContainerLookupError, match="start outcome is unknown"):
+        await _start_created_container(worker, db, task, container)
+
+    assert task.container_id == "container-1"
+    assert task.raw_logs_finalized_at is None
+    worker.docker.remove_container.assert_not_called()
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_start_created_container_retains_dead_container_for_log_reconciliation():
+    task = SimpleNamespace(
+        id=12,
+        container_id="container-1",
+        raw_logs_finalized_at=None,
+    )
+    container = MagicMock(id="container-1")
+    container.status = "dead"
+    worker = MagicMock()
+    worker.docker.start_container.side_effect = RuntimeError("start failed")
+    db = MagicMock()
+    db.commit = AsyncMock()
+
+    with pytest.raises(RuntimeError, match="start failed"):
+        await _start_created_container(worker, db, task, container)
+
+    assert task.container_id == "container-1"
+    assert task.raw_logs_finalized_at is None
+    worker.docker.remove_container.assert_not_called()
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_failure_handler_stops_container_and_retains_it_until_logs_are_finalized():
+    task = SimpleNamespace(
+        id=12,
+        status=TaskStatus.RUNNING,
+        completed_at=None,
+        container_id="container-1",
+        raw_logs_finalized_at=None,
+    )
+    container = MagicMock(id="container-1")
+    container.status = "running"
+
+    def reload_container():
+        if container.stop.called:
+            container.status = "exited"
+
+    container.reload.side_effect = reload_container
+    worker = MagicMock()
+    worker._sanitize_sensitive_data.side_effect = lambda value: value
+    worker._send_failure_notifications = AsyncMock()
+    db = MagicMock()
+    db.commit = AsyncMock()
+
+    result = await fail_execute_task(
+        worker,
+        db,
+        task,
+        RuntimeError("stream failed"),
+        had_existing_mr=False,
+        container=container,
+    )
+
+    assert result is False
+    assert task.status == TaskStatus.FAILED
+    assert task.container_id == "container-1"
+    container.stop.assert_called_once_with(timeout=10)
+    worker.docker.remove_container.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_failure_handler_defers_when_container_cannot_be_stopped():
+    task = SimpleNamespace(
+        id=12,
+        status=TaskStatus.RUNNING,
+        completed_at=None,
+        container_id="container-1",
+        raw_logs_finalized_at=None,
+    )
+    container = MagicMock(id="container-1")
+    container.status = "running"
+    container.stop.side_effect = RuntimeError("daemon unavailable")
+    container.kill.side_effect = RuntimeError("daemon unavailable")
+    worker = MagicMock()
+    worker._sanitize_sensitive_data.side_effect = lambda value: value
+    db = MagicMock()
+    db.commit = AsyncMock()
+
+    with pytest.raises(TaskContainerLookupError, match="Could not stop"):
+        await fail_execute_task(
+            worker,
+            db,
+            task,
+            RuntimeError("stream failed"),
+            had_existing_mr=False,
+            container=container,
+        )
+
+    assert task.status == TaskStatus.RUNNING
+    assert task.container_id == "container-1"
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_finalize_raw_logs_falls_back_to_docker_logs_before_bootstrap_console_exists():
+    task = SimpleNamespace(id=12)
+    artifact_task = SimpleNamespace(id=12, raw_logs_finalized_at=None)
+    artifact_db = MagicMock()
+    artifact_db.get = AsyncMock(return_value=artifact_task)
+    artifact_db.commit = AsyncMock()
+    session = MagicMock()
+    session.__aenter__ = AsyncMock(return_value=artifact_db)
+    session.__aexit__ = AsyncMock(return_value=False)
+    session_factory = MagicMock(return_value=session)
+    worker = MagicMock()
+    worker.docker.read_file_from_container.return_value = None
+    worker.docker.get_container_logs.return_value = b"launcher failed\n"
+    container = MagicMock()
+
+    with patch(
+        "app.core.worker_task_artifacts.persist_raw_log_snapshot",
+        new=AsyncMock(),
+    ) as persist_snapshot:
+        await finalize_task_raw_logs(
+            worker,
+            task=task,
+            container=container,
+            session_factory=session_factory,
+        )
+
+    persist_snapshot.assert_awaited_once_with(
+        artifact_db,
+        task_id=12,
+        content=b"launcher failed\n",
+    )
+    worker.docker.get_container_logs.assert_called_once_with(container)
+    assert artifact_task.raw_logs_finalized_at is not None
+    artifact_db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_execute_runner_propagates_unknown_container_outcome_for_scheduler_recovery():
+    task = SimpleNamespace(id=12)
+    issue = SimpleNamespace(id=1)
+    worker = MagicMock()
+    worker._handle_execute_task_failure = AsyncMock()
+    db = MagicMock()
+    context = {
+        "handled": False,
+        "settings": SimpleNamespace(),
+        "task": task,
+        "issue": issue,
+        "had_existing_mr": False,
+        "sudo_gl": None,
+    }
+
+    with (
+        patch(
+            "app.core.worker_task_runner.prepare_execute_task_context",
+            new=AsyncMock(return_value=context),
+        ),
+        patch(
+            "app.core.worker_task_runner.create_execute_container",
+            new=AsyncMock(side_effect=TaskContainerLookupError("create outcome unknown")),
+        ),
+    ):
+        with pytest.raises(TaskContainerLookupError, match="create outcome unknown"):
+            await run_execute_task(worker, db, 12, settings=SimpleNamespace())
+
+    worker._handle_execute_task_failure.assert_not_awaited()

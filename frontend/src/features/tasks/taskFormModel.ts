@@ -17,7 +17,6 @@ export interface TaskFormDraft {
   taskMode: TaskMode
   sessionMode: 'continue' | 'fresh'
   selectedProviderId: number | null
-  selectedWorkerProfileId: number | null
   scheduleType: TaskScheduleType
   scheduledAt: number | null
   runInstructionTemplate: string
@@ -46,9 +45,6 @@ export function buildCreateTaskRequest(
   if (draft.selectedProviderId !== null) {
     request.provider_id = draft.selectedProviderId
   }
-  if (draft.selectedWorkerProfileId !== null) {
-    request.worker_profile_id = draft.selectedWorkerProfileId
-  }
   return request
 }
 
@@ -64,9 +60,6 @@ export function buildUpdateTaskRequest(
   if (draft.priority !== original.priority) request.priority = draft.priority
   if (draft.selectedProviderId !== (original.provider_id ?? null)) {
     request.provider_id = draft.selectedProviderId
-  }
-  if (draft.selectedWorkerProfileId !== (original.worker_profile_id ?? null)) {
-    request.worker_profile_id = draft.selectedWorkerProfileId
   }
   if (draft.requireChanges !== original.require_changes) {
     request.require_changes = draft.requireChanges

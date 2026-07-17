@@ -59,7 +59,12 @@ async def release_issue_execution_lock(
 
 
 async def cleanup_inactive_issue_execution_locks(db: AsyncSession) -> int:
-    """Delete locks whose task is missing or terminal."""
+    """Delete locks whose task is missing or fully terminal.
+
+    A terminal task with a durable container reference still owns its Issue: the
+    container may need to be stopped and its raw logs finalized before another
+    task can safely mutate the same daemon-local workspace.
+    """
     result = await db.execute(select(IssueExecutionLock))
     locks = list(result.scalars().all())
     if not locks:
@@ -73,7 +78,10 @@ async def cleanup_inactive_issue_execution_locks(db: AsyncSession) -> int:
         lock.issue_id
         for lock in locks
         if (task := tasks_by_id.get(lock.task_id)) is None
-        or task.status in _TERMINAL_STATUSES
+        or (
+            task.status in _TERMINAL_STATUSES
+            and getattr(task, "container_id", None) is None
+        )
     ]
     if not stale_issue_ids:
         return 0

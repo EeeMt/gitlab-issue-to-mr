@@ -213,6 +213,7 @@ class TestManualTaskNotification:
             branch_name=TEST_BRANCH,
             target_branch=TEST_TARGET_BRANCH,
             status="open",
+            worker_profile_id=1,
         )
 
         task = Task(

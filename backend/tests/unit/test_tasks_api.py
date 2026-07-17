@@ -190,10 +190,12 @@ class CancelTaskEndpointTests(unittest.TestCase):
         mock_db = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock()
+        mock_db.get = AsyncMock(return_value=getattr(task, "issue", None))
 
         if task is not None:
             mock_result = MagicMock()
             mock_result.scalar_one_or_none.return_value = task
+            mock_result.scalar_one.return_value = 0
             mock_db.execute = AsyncMock(return_value=mock_result)
 
         async def override_db():
@@ -205,7 +207,7 @@ class CancelTaskEndpointTests(unittest.TestCase):
         app.dependency_overrides[require_project_access_scope] = lambda: access_scope
 
         client = TestClient(app, raise_server_exceptions=False)
-        return client, app
+        return client, app, mock_db
 
     def test_cancel_changes_status_to_cancelled(self) -> None:
         """POST /api/tasks/{id}/cancel should set task status to CANCELLED and return 200."""
@@ -216,7 +218,7 @@ class CancelTaskEndpointTests(unittest.TestCase):
         task.scheduled_at = None
         task.container_id = None
 
-        client, app = self._get_client(task)
+        client, app, _mock_db = self._get_client(task)
 
         with patch("app.api.task_action_routes.notify_task_cancelled", new=AsyncMock()):
             with patch("app.core.task_helpers._require_task_operator", return_value=None):
@@ -241,7 +243,7 @@ class CancelTaskEndpointTests(unittest.TestCase):
         task.container_id = "gone-container-2"
         task.cancel_requested_at = None
 
-        client, app = self._get_client(task)
+        client, app, _mock_db = self._get_client(task)
 
         with (
             patch("app.api.task_action_routes.notify_task_cancelled", new=AsyncMock()),
@@ -300,7 +302,7 @@ class CancelTaskEndpointTests(unittest.TestCase):
         task.issue = MagicMock(id=1, project_id=100)
         task.status = TaskStatus.FAILED
 
-        client, app = self._get_client(task)
+        client, app, mock_db = self._get_client(task)
 
         with patch(
             "app.api.tasks.get_effective_settings",
@@ -312,38 +314,63 @@ class CancelTaskEndpointTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIs(response.json()["enabled"], False)
+        mock_db.get.assert_awaited_once()
 
-    def test_delete_task_workspace_calls_remove_helper(self) -> None:
-        """DELETE /workspace removes the issue workspace root."""
+    def test_delete_task_workspace_calls_remote_worker_helper(self) -> None:
+        """DELETE /workspace removes the directory on the issue's worker daemon."""
         task = MagicMock()
         task.id = 4
         task.project_id = 100
         task.issue_id = 1
-        task.issue = MagicMock(id=1, project_id=100)
+        task.issue = MagicMock(id=1, project_id=100, worker_profile_id=7)
         task.status = TaskStatus.FAILED
 
-        client, app = self._get_client(task)
-
-        paths = MagicMock()
-        paths.issue_root = "/opt/codify-workspaces/project-100/issue-1"
-        paths.repo_path = "/opt/codify-workspaces/project-100/issue-1/repo"
-        paths.runtime_path = "/opt/codify-workspaces/project-100/issue-1/runtime/task-4"
+        client, app, mock_db = self._get_client(task)
+        task_result = MagicMock()
+        task_result.scalar_one_or_none.return_value = task
+        issue_result = MagicMock()
+        issue_result.scalar_one_or_none.return_value = task.issue
+        count_result = MagicMock()
+        count_result.scalar_one.return_value = 0
+        mock_db.execute = AsyncMock(side_effect=[task_result, issue_result, count_result])
 
         with patch(
             "app.api.tasks.get_effective_settings",
             return_value=MagicMock(worker_workspace_host_path="/opt/codify-workspaces"),
         ):
-            with patch("app.api.tasks.build_issue_workspace_paths", return_value=paths):
-                with patch(
-                    "app.api.tasks.remove_issue_workspace", return_value=True
-                ) as mock_remove:
-                    response = client.delete("/api/tasks/4/workspace")
+            with patch(
+                "app.api.tasks.remove_issue_workspace_remote",
+                new=AsyncMock(return_value=True),
+            ) as mock_remove:
+                response = client.delete("/api/tasks/4/workspace")
 
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 200)
-        mock_remove.assert_called_once_with("/opt/codify-workspaces/project-100/issue-1")
+        mock_remove.assert_awaited_once()
         self.assertIs(response.json()["removed"], True)
+        self.assertEqual(response.json()["worker_profile_id"], 7)
+
+    def test_delete_task_workspace_counts_retained_containers_as_active(self) -> None:
+        """Workspace deletion must retain mounts needed by unfinished log collection."""
+        task = MagicMock(id=5, project_id=100, issue_id=1, status=TaskStatus.FAILED)
+        task.issue = MagicMock(id=1, project_id=100, worker_profile_id=7)
+        client, app, mock_db = self._get_client(task)
+        task_result = MagicMock()
+        task_result.scalar_one_or_none.return_value = task
+        issue_result = MagicMock()
+        issue_result.scalar_one_or_none.return_value = task.issue
+        count_result = MagicMock()
+        count_result.scalar_one.return_value = 1
+        mock_db.execute = AsyncMock(side_effect=[task_result, issue_result, count_result])
+
+        response = client.delete("/api/tasks/5/workspace")
+
+        app.dependency_overrides.clear()
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("active or retained", response.json()["detail"])
+        count_query = mock_db.execute.await_args_list[2].args[0]
+        self.assertIn("container_id IS NOT NULL", str(count_query))
 
 
 # ---------------------------------------------------------------------------
@@ -864,6 +891,35 @@ class RetryTaskAPITests(unittest.TestCase):
         self.assertEqual(data["retry_source_task_id"], 5)
         created_task = mock_db.add.call_args_list[0].args[0]
         self.assertEqual(created_task.session_mode, "fresh")
+
+    def test_retry_task_rejects_closed_issue(self):
+        task = _make_serializable_task(task_status=TaskStatus.FAILED)
+        task.id = 51
+        task.issue_id = 1
+        mock_result_task = MagicMock()
+        mock_result_task.scalar_one_or_none.return_value = task
+        mock_result_no_retry = MagicMock()
+        mock_result_no_retry.scalar_one_or_none.return_value = None
+        mock_result_issue = MagicMock()
+        mock_result_issue.scalar_one_or_none.return_value = MagicMock(
+            id=1,
+            project_id=1,
+            status="closed",
+        )
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(
+            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue]
+        )
+        mock_db.add = MagicMock()
+
+        client, app = _make_app_client_with_db(mock_db)
+        with patch("app.core.task_helpers._require_task_operator", return_value=None):
+            response = client.post("/api/tasks/51/retry")
+
+        app.dependency_overrides.clear()
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("closed issue", response.json()["detail"])
+        mock_db.add.assert_not_called()
 
     def test_retry_task_success_for_cancelled_task(self):
         """POST /api/tasks/{id}/retry should create a new retry task from a CANCELLED task."""

@@ -45,8 +45,8 @@ services:
     volumes:
       - /opt/codify-archives:/opt/codify-archives
       - type: bind
-        source: ${WORKER_WORKSPACE_HOST_PATH:-/opt/codify-workspaces}
-        target: ${WORKER_WORKSPACE_HOST_PATH:-/opt/codify-workspaces}
+        source: ${CI_FAILURE_BUNDLE_HOST_PATH:-/opt/codify-ci-failures}
+        target: ${WORKER_WORKSPACE_HOST_PATH:-/opt/codify-workspaces}/ci-failures
       - type: bind
         source: ${DOCKER_CERTS_HOST_PATH:-/opt/codify-docker-certs}
         target: /opt/codify-docker-certs
@@ -100,15 +100,13 @@ services:
     volumes:
       - /opt/codify-archives:/opt/codify-archives
       - type: bind
-        source: ${WORKER_WORKSPACE_HOST_PATH:-/opt/codify-workspaces}
-        target: ${WORKER_WORKSPACE_HOST_PATH:-/opt/codify-workspaces}
+        source: ${CI_FAILURE_BUNDLE_HOST_PATH:-/opt/codify-ci-failures}
+        target: ${WORKER_WORKSPACE_HOST_PATH:-/opt/codify-workspaces}/ci-failures
       - type: bind
         source: ${DOCKER_CERTS_HOST_PATH:-/opt/codify-docker-certs}
         target: /opt/codify-docker-certs
         read_only: true
       - /var/run/docker.sock:/var/run/docker.sock
-      # Session storage — shared with worker containers via host path
-      - /var/codify/sessions:/var/codify/sessions
       # Mount CA cert (local-only, not in git — place /opt/ca.crt on Docker host)
       - type: bind
         source: /opt/ca.crt

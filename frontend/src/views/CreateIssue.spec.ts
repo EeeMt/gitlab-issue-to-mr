@@ -508,7 +508,7 @@ describe('CreateIssue', () => {
     it('should leave the default worker empty for manual selection', async () => {
       await mountComponent()
 
-      expect(wrapper.vm.defaultWorkerProfileId).toBeNull()
+      expect(wrapper.vm.workerProfileId).toBeNull()
       expect(wrapper.vm.workerProfileOptions).toEqual([
         { label: 'Default Worker', value: 3 },
       ])
@@ -742,6 +742,7 @@ describe('CreateIssue', () => {
       wrapper.vm.formValue.project_id = 1
       wrapper.vm.formValue.description = 'Issue description'
       wrapper.vm.formValue.base_branch = 'main'
+      wrapper.vm.workerProfileId = 3
 
       await wrapper.vm.handleSubmit()
       await flushPromises()
@@ -760,6 +761,7 @@ describe('CreateIssue', () => {
       wrapper.vm.formValue.title = 'Test Issue'
       wrapper.vm.formValue.project_id = 1
       wrapper.vm.formValue.base_branch = 'main'
+      wrapper.vm.workerProfileId = 3
 
       await wrapper.vm.handleSubmit()
       await flushPromises()
@@ -775,6 +777,7 @@ describe('CreateIssue', () => {
       wrapper.vm.formValue.title = 'Test Issue'
       wrapper.vm.formValue.project_id = 1
       wrapper.vm.formValue.base_branch = 'main'
+      wrapper.vm.workerProfileId = 3
 
       await wrapper.vm.handleSubmit()
       await flushPromises()
@@ -790,6 +793,7 @@ describe('CreateIssue', () => {
       wrapper.vm.formValue.base_branch = 'main'
       wrapper.vm.formValue.target_branch = 'main'
       wrapper.vm.formValue.create_mr = false
+      wrapper.vm.workerProfileId = 3
 
       await wrapper.vm.handleSubmit()
       await flushPromises()
@@ -807,6 +811,7 @@ describe('CreateIssue', () => {
       wrapper.vm.formValue.base_branch = 'main'
       wrapper.vm.formValue.target_branch = 'develop'
       wrapper.vm.formValue.create_mr = true
+      wrapper.vm.workerProfileId = 3
 
       await wrapper.vm.handleSubmit()
       await flushPromises()
@@ -825,6 +830,7 @@ describe('CreateIssue', () => {
 	      wrapper.vm.formValue.target_branch = 'develop'
 	      wrapper.vm.formValue.create_mr = true
 	      wrapper.vm.formValue.ci_auto_repair_enabled = true
+	      wrapper.vm.workerProfileId = 3
 
 	      await wrapper.vm.handleSubmit()
 	      await flushPromises()
@@ -840,6 +846,7 @@ describe('CreateIssue', () => {
       wrapper.vm.formValue.project_id = 1
       wrapper.vm.formValue.base_branch = 'main'
       wrapper.vm.formValue.description = ''
+      wrapper.vm.workerProfileId = 3
 
       await wrapper.vm.handleSubmit()
       await flushPromises()
@@ -873,6 +880,7 @@ describe('CreateIssue', () => {
       wrapper.vm.formValue.title = 'Test Issue'
       wrapper.vm.formValue.project_id = 1
       wrapper.vm.formValue.base_branch = 'main'
+      wrapper.vm.workerProfileId = 3
 
       expect(wrapper.vm.submitting).toBe(false)
 
@@ -901,6 +909,7 @@ describe('CreateIssue', () => {
       wrapper.vm.formValue.title = 'Test Issue'
       wrapper.vm.formValue.project_id = 1
       wrapper.vm.formValue.base_branch = 'main'
+      wrapper.vm.workerProfileId = 3
 
       await wrapper.vm.handleSubmit()
       await flushPromises()
@@ -917,6 +926,7 @@ describe('CreateIssue', () => {
       wrapper.vm.formValue.title = 'Test Issue'
       wrapper.vm.formValue.project_id = 1
       wrapper.vm.formValue.base_branch = 'main'
+      wrapper.vm.workerProfileId = 3
 
       await wrapper.vm.handleSubmit()
       await flushPromises()
@@ -932,6 +942,7 @@ describe('CreateIssue', () => {
       wrapper.vm.formValue.title = 'Test Issue'
       wrapper.vm.formValue.project_id = 1
       wrapper.vm.formValue.base_branch = 'main'
+      wrapper.vm.workerProfileId = 3
 
       await wrapper.vm.handleSubmit()
       await flushPromises()
@@ -968,7 +979,7 @@ describe('CreateIssue', () => {
 	      wrapper.vm.formValue.target_branch = 'develop'
 	      wrapper.vm.formValue.create_mr = true
 	      wrapper.vm.formValue.ci_auto_repair_enabled = true
-	      wrapper.vm.defaultWorkerProfileId = 3
+	      wrapper.vm.workerProfileId = 3
 
 	      await wrapper.vm.handleReset()
 
@@ -979,7 +990,7 @@ describe('CreateIssue', () => {
 	      expect(wrapper.vm.formValue.target_branch).toBeUndefined()
 	      expect(wrapper.vm.formValue.create_mr).toBe(true)
 	      expect(wrapper.vm.formValue.ci_auto_repair_enabled).toBe(false)
-	      expect(wrapper.vm.defaultWorkerProfileId).toBeNull()
+	      expect(wrapper.vm.workerProfileId).toBeNull()
 	    })
 
     it('should clear branches on reset', async () => {
@@ -1396,6 +1407,7 @@ describe('CreateIssue', () => {
       wrapper.vm.formValue.title = 'Test Issue'
       wrapper.vm.formValue.project_id = 1
       wrapper.vm.formValue.base_branch = 'main'
+      wrapper.vm.workerProfileId = 3
 
       await wrapper.vm.handleSubmit()
       await flushPromises()
@@ -1462,6 +1474,7 @@ describe('CreateIssue', () => {
         wrapper.vm.formValue.title = 'Test Issue'
         wrapper.vm.formValue.base_branch = 'develop'
         wrapper.vm.formValue.ci_auto_repair_enabled = true
+        wrapper.vm.workerProfileId = 3
 
         await wrapper.vm.handleSubmit()
         await flushPromises()
@@ -1506,6 +1519,7 @@ describe('CreateIssue', () => {
       wrapper.vm.formValue.title = 'Fix login bug'
       wrapper.vm.formValue.project_id = 1
       wrapper.vm.formValue.base_branch = 'main'
+      wrapper.vm.workerProfileId = 3
 
       await wrapper.vm.handleSubmit()
       await flushPromises()
@@ -1521,6 +1535,7 @@ describe('CreateIssue', () => {
       wrapper.vm.formValue.title = 'Should not be saved'
       wrapper.vm.formValue.project_id = 1
       wrapper.vm.formValue.base_branch = 'main'
+      wrapper.vm.workerProfileId = 3
 
       await wrapper.vm.handleSubmit()
       await flushPromises()
@@ -1536,6 +1551,7 @@ describe('CreateIssue', () => {
       wrapper.vm.formValue.title = 'Fix login bug'
       wrapper.vm.formValue.project_id = 1
       wrapper.vm.formValue.base_branch = 'main'
+      wrapper.vm.workerProfileId = 3
 
       await wrapper.vm.handleSubmit()
       await flushPromises()
@@ -1553,6 +1569,7 @@ describe('CreateIssue', () => {
       wrapper.vm.formValue.title = 'Brand new title'
       wrapper.vm.formValue.project_id = 1
       wrapper.vm.formValue.base_branch = 'main'
+      wrapper.vm.workerProfileId = 3
 
       await wrapper.vm.handleSubmit()
       await flushPromises()
@@ -1590,6 +1607,7 @@ describe('CreateIssue', () => {
       wrapper.vm.formValue.title = 'Reactive test'
       wrapper.vm.formValue.project_id = 1
       wrapper.vm.formValue.base_branch = 'main'
+      wrapper.vm.workerProfileId = 3
 
       await wrapper.vm.handleSubmit()
       await flushPromises()

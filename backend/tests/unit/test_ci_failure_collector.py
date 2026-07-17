@@ -120,12 +120,12 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
         enabled=True,
         sha="abc123",
         default_provider_id=3,
-        default_worker_profile_id=2,
+        worker_profile_id=2,
         latest_task_provider_id=3,
     ):
         provider_ids = {default_provider_id, latest_task_provider_id}
         session.add_all([self._provider(provider_id) for provider_id in sorted(provider_ids)])
-        session.add(self._worker_profile(default_worker_profile_id))
+        session.add(self._worker_profile(worker_profile_id))
         issue = Issue(
             id=1,
             title="Repair CI",
@@ -135,7 +135,7 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
             target_branch="main",
             merge_request_iid=7,
             ci_auto_repair_enabled=enabled,
-            default_worker_profile_id=default_worker_profile_id,
+            worker_profile_id=worker_profile_id,
             default_provider_id=default_provider_id,
             initiator_user_id=9,
             initiator_username="alice",
@@ -243,6 +243,32 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
             logs = (await session.execute(select(CIFailureRunLog))).scalars().all()
             self.assertTrue(any(log.step == "auto_repair_gate_checked" and log.status == "skipped" for log in logs))
 
+    async def test_closed_issue_cannot_create_ci_auto_repair_task(self):
+        from app.core.ci_failure_collector import process_ci_failure_run
+
+        async with self.Session() as session:
+            issue, run = await self._seed_issue_and_run(session, enabled=True)
+            issue.status = "closed"
+            await session.commit()
+
+            await process_ci_failure_run(
+                session,
+                run.id,
+                gitlab_client=FakeGitLabClient(),
+                settings=self._settings(),
+                collector_id="test",
+            )
+
+            refreshed = await session.get(CIFailureRun, run.id)
+            self.assertEqual(refreshed.status, "ignored")
+            self.assertEqual(refreshed.ignored_reason, "issue_closed")
+            tasks = (
+                await session.execute(
+                    select(Task).where(Task.trigger_source == "ci_auto_repair")
+                )
+            ).scalars().all()
+            self.assertEqual(tasks, [])
+
     async def test_code_failure_writes_sanitized_bundle_and_creates_repair_task(self):
         from app.core.ci_failure_collector import process_ci_failure_run
 
@@ -331,7 +357,7 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
                 session,
                 enabled=True,
                 default_provider_id=22,
-                default_worker_profile_id=11,
+                worker_profile_id=11,
                 latest_task_provider_id=3,
             )
 
@@ -595,7 +621,7 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
                 branch_name="codify/issue-66",
                 target_branch="main",
                 ci_auto_repair_enabled=True,
-                default_worker_profile_id=2,
+                worker_profile_id=2,
                 default_provider_id=3,
                 initiator_user_id=9,
                 initiator_username="alice",

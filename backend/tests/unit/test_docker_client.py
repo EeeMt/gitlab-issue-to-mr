@@ -1,6 +1,8 @@
 """Tests for DockerClientWrapper."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
+
+import pytest
 
 
 class MockContainer:
@@ -215,7 +217,7 @@ class TestRemoveContainer:
 
         wrapper.remove_container(mock_container)
 
-        mock_container.remove.assert_called_once_with(force=False)
+        mock_container.remove.assert_called_once_with(force=False, v=True)
 
     def test_remove_container_force(self):
         """Test forced container removal."""
@@ -229,7 +231,7 @@ class TestRemoveContainer:
 
         wrapper.remove_container(mock_container, force=True)
 
-        mock_container.remove.assert_called_once_with(force=True)
+        mock_container.remove.assert_called_once_with(force=True, v=True)
 
 
 class TestGetContainerLogs:
@@ -251,3 +253,21 @@ class TestGetContainerLogs:
             stdout=True, stderr=True, follow=False
         )
         assert result == b"line1\nline2\n"
+
+
+@pytest.mark.asyncio
+async def test_create_docker_client_async_returns_uncached_clients():
+    from app.core.docker_client import DockerConnectionConfig, create_docker_client_async
+
+    connection = DockerConnectionConfig(host="tcp://worker.example:2376")
+    first_client = MagicMock()
+    second_client = MagicMock()
+
+    with patch(
+        "app.core.docker_client.DockerClientWrapper",
+        side_effect=[first_client, second_client],
+    ) as create_client:
+        assert await create_docker_client_async(connection) is first_client
+        assert await create_docker_client_async(connection) is second_client
+
+    assert create_client.call_args_list == [call(connection), call(connection)]

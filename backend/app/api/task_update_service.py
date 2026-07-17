@@ -28,9 +28,7 @@ logger = logging.getLogger(__name__)
 class TaskUpdateServices:
     get_task_with_access_check: Callable[..., Any]
     get_project_metadata: Callable[..., Any]
-    resolve_worker_profile_for_issue: Callable[..., Any]
     resolve_provider_for_issue: Callable[..., Any]
-    replace_task_worker_snapshot: Callable[..., Any]
     select_snapshot_run_instruction_template: Callable[..., Any]
     render_and_store_task_prompt: Callable[..., Any]
 
@@ -80,23 +78,10 @@ async def update_task_record(
 
     issue = None
     snapshot = loaded_task_relationship(task, "worker_profile_snapshot")
-    if updated_fields & {"worker_profile_id", "provider_id"}:
+    if "provider_id" in updated_fields:
         issue = await db.get(Issue, task.issue_id)
         if issue is None:
             raise HTTPException(status_code=404, detail="Issue not found")
-
-    if "worker_profile_id" in updated_fields:
-        try:
-            worker_profile = await services.resolve_worker_profile_for_issue(
-                db,
-                issue,
-                request.worker_profile_id,
-            )
-        except WorkerProfileValidationError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        task.worker_profile_id = worker_profile.id
-        snapshot = await services.replace_task_worker_snapshot(db, task, worker_profile)
-        task.worker_profile_snapshot = snapshot
 
     if "provider_id" in updated_fields:
         try:
@@ -115,8 +100,6 @@ async def update_task_record(
         task.task_mode = request.task_mode
     if "run_instruction_template" in updated_fields:
         task.run_instruction_template = request.run_instruction_template
-    elif "worker_profile_id" in updated_fields:
-        task.run_instruction_template = None
 
     if task.task_mode == "plan":
         task.require_changes = False
@@ -139,7 +122,6 @@ async def update_task_record(
             "run_instruction_template",
             "task_mode",
             "require_changes",
-            "worker_profile_id",
             "provider_id",
         }
     )

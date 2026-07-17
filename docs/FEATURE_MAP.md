@@ -12,7 +12,7 @@
 ### 1.1 任务创建
 - 手动创建任务（从 Issue 页发起）
 - 创建任务时选择 AI Provider
-- 创建任务时选择 Worker Profile
+- 创建 Issue 时显式选择 Worker Profile；Issue 内任务固定继承且不能切换
 - 创建任务时填写 user prompt（自由文本）
 - 创建任务时引用 Prompt Template（模板库选择、标签筛选、覆盖确认）
 - 创建任务时编辑 Run Instruction Template（变量占位符提示、预览渲染）
@@ -93,9 +93,9 @@
 - 手动删除分支（已关闭 Issue）
 - 分支删除状态追踪（branch_deleted 标记）
 
-### 2.3 Issue 默认配置
+### 2.3 Issue 运行配置
 - 默认 AI Provider（Issue 级别，新建任务时继承）
-- 默认 Worker Profile（Issue 级别，新建任务时继承）
+- 固定 Worker Profile（Issue 创建后不可切换，普通任务/重试/CI 修复统一继承）
 - CI 自动修复开关（ci_auto_repair_enabled）
 
 ### 2.4 Issue 状态
@@ -581,7 +581,7 @@ Issue ──→ IssueExecutionLock (1:1)
 Issue ──→ WebhookEvent (1:N)
 Issue ──→ CIFailureRun (1:N)
 Issue ──→ AIProvider (default_provider, N:1)
-Issue ──→ WorkerProfile (default_worker_profile, N:1)
+Issue ──→ WorkerProfile (pinned worker, N:1, creation-time required)
 
 Task ──→ TaskLog (1:N)
 Task ──→ TaskRawLogChunk (1:N)

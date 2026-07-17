@@ -23,6 +23,7 @@ from .conftest import (
     create_issue_and_task,
     create_task,
     get_mock_calls,
+    get_worker_profile_id,
     wait_for_task_status,
 )
 
@@ -267,6 +268,9 @@ class TestNonExistentBaseBranch:
         - Falls back or errors out
         """
         # Create issue with non-existent base_branch via direct API call
+        worker_profile_id = await get_worker_profile_id(
+            http_client, backend_url, admin_auth_headers
+        )
         resp = await http_client.post(
             f"{backend_url}/api/issues",
             json={
@@ -275,6 +279,7 @@ class TestNonExistentBaseBranch:
                 "project_id": 1,
                 "base_branch": "this-branch-does-not-exist",
                 "target_branch": "main",
+                "worker_profile_id": worker_profile_id,
             },
             headers=admin_auth_headers,
         )

@@ -110,7 +110,14 @@ async def test_backfills_only_active_tasks_atomically() -> None:
         ci_auto_repair_run_instruction_template=BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE,
     )
     async with factory() as db:
-        issue = Issue(id=1, title="Issue", project_id=9, status="open", branch_name="work")
+        issue = Issue(
+            id=1,
+            title="Issue",
+            project_id=9,
+            status="open",
+            branch_name="work",
+            worker_profile_id=1,
+        )
         db.add(issue)
         db.add_all(
             [

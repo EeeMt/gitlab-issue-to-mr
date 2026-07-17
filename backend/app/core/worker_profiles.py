@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from typing import Any, Iterable, Mapping
 from urllib.parse import urlparse
 
@@ -51,6 +52,19 @@ from app.models import (
 
 class WorkerProfileValidationError(ValueError):
     """Raised when a worker profile payload is invalid."""
+
+
+_SYSTEM_MOUNT_ROOTS = (
+    PurePosixPath("/workspace"),
+    PurePosixPath("/home/codify/.claude"),
+    PurePosixPath("/opt/codify-issue-shared"),
+    PurePosixPath("/opt/codify-issue-meta"),
+    PurePosixPath("/tmp/codify-runtime"),
+)
+_SEALED_SYSTEM_MOUNT_ROOTS = {
+    PurePosixPath("/opt/codify-issue-meta"),
+    PurePosixPath("/tmp/codify-runtime"),
+}
 
 
 @dataclass(frozen=True)
@@ -213,6 +227,18 @@ def validate_worker_profile_mounts(raw_mounts: Any) -> list[dict[str, str]]:
             )
         host_path = os.path.normpath(host_path)
         container_path = os.path.normpath(container_path)
+        destination = PurePosixPath(container_path)
+        for system_root in _SYSTEM_MOUNT_ROOTS:
+            hides_system_root = destination == system_root or destination in system_root.parents
+            enters_sealed_root = (
+                system_root in _SEALED_SYSTEM_MOUNT_ROOTS
+                and system_root in destination.parents
+            )
+            if hides_system_root or enters_sealed_root:
+                raise WorkerProfileValidationError(
+                    f"custom mount path {container_path} conflicts with Codify system path "
+                    f"{system_root}"
+                )
         if mode not in {"ro", "rw"}:
             raise WorkerProfileValidationError("volume mount mode must be ro or rw")
         if host_path in seen_host_paths:
@@ -407,22 +433,28 @@ async def resolve_worker_profile_for_issue(
     *,
     allow_system_default: bool = True,
 ) -> WorkerProfile:
-    """Resolve explicit, issue default, then system default worker profile."""
-    candidate_id = explicit_worker_profile_id or getattr(issue, "default_worker_profile_id", None)
+    """Resolve the worker pinned to an Issue.
+
+    ``explicit_worker_profile_id`` remains as a compatibility guard for internal callers. It
+    may only repeat the Issue assignment; tasks cannot override the selected worker.
+    """
+    del allow_system_default
+    candidate_id = getattr(issue, "worker_profile_id", None)
+    if explicit_worker_profile_id is not None and explicit_worker_profile_id != candidate_id:
+        raise WorkerProfileValidationError("Tasks must use the worker assigned to their issue")
     profile: WorkerProfile | None = None
     if candidate_id is not None:
         result = await db.execute(
             select(WorkerProfile)
             .where(WorkerProfile.id == candidate_id)
             .options(selectinload(WorkerProfile.environment_variables))
+            .with_for_update()
             .execution_options(populate_existing=True)
         )
         profile = result.scalar_one_or_none()
-    elif allow_system_default:
-        profile = await get_default_worker_profile(db)
 
     if profile is None:
-        raise WorkerProfileValidationError("No worker profile is configured for this issue")
+        raise WorkerProfileValidationError("No worker is assigned to this issue")
     if not profile.enabled:
         raise WorkerProfileValidationError(f"Worker profile '{profile.name}' is disabled")
     return profile

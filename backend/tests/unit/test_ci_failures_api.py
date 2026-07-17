@@ -6,7 +6,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.api.ci_failures import list_issue_ci_failures
 from app.dependencies.project_access import ProjectAccessScope
-from app.models import Base, CIFailureRun, CIFailureRunLog, Issue
+from app.models import Base, CIFailureRun, CIFailureRunLog, Issue, WorkerProfile
 
 
 class ListIssueCIFailuresTests(unittest.IsolatedAsyncioTestCase):
@@ -26,7 +26,29 @@ class ListIssueCIFailuresTests(unittest.IsolatedAsyncioTestCase):
     async def test_list_includes_logs_for_all_runs_in_one_response(self):
         now = datetime(2026, 6, 19, 8, 0, 0)
         async with self.Session() as session:
-            session.add(Issue(id=66, title="Repair CI", project_id=42, status="in_review"))
+            session.add(
+                WorkerProfile(
+                    id=1,
+                    name="CI Worker",
+                    enabled=True,
+                    image="codify-worker:test",
+                    volume_mounts=[],
+                    pre_script="",
+                    post_script="",
+                    default_execute_run_instruction_template="{{user_prompt}}",
+                    default_plan_run_instruction_template="{{user_prompt}}",
+                    ci_auto_repair_run_instruction_template="{{user_prompt}}",
+                )
+            )
+            session.add(
+                Issue(
+                    id=66,
+                    title="Repair CI",
+                    project_id=42,
+                    status="in_review",
+                    worker_profile_id=1,
+                )
+            )
             session.add_all(
                 [
                     CIFailureRun(

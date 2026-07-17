@@ -24,10 +24,11 @@ Covers functionality NOT tested by test_worker_new_patterns.py or test_mr_stats.
 """
 
 import asyncio
-import json
+import io
 import os
 import re
 import subprocess
+import tarfile
 import tempfile
 import textwrap
 import unittest
@@ -96,6 +97,9 @@ def _make_worker(mock_gitlab=None, mock_docker=None):
     """Build a WorkerExecutor with mock clients."""
     mock_gitlab = mock_gitlab or MagicMock()
     mock_docker = mock_docker or MagicMock()
+    created_container = mock_docker.create_container.return_value
+    if not isinstance(getattr(created_container, "status", None), str):
+        created_container.status = "exited"
     # Return valid bytes from read_file_from_container to avoid retry sleeps
     mock_docker.read_file_from_container.return_value = b"console log content"
     return WorkerExecutor(docker_client=mock_docker, gitlab_client=mock_gitlab)
@@ -1062,7 +1066,10 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
         content = _read_worker_entrypoint_sources(script)
 
-        self.assertIn('codify_chown /home/codify "${CODIFY_RUNTIME_DIR}"', content)
+        self.assertIn(
+            'codify_chown /workspace /home/codify', content
+        )
+        self.assertIn('codify_chown -R "${CODIFY_RUNTIME_DIR}"', content)
         self.assertIn('codify_chown /home/codify/.m2/repository 2>/dev/null || true', content)
         self.assertNotIn('codify_chown -R /home/codify "${CODIFY_RUNTIME_DIR}"', content)
 
@@ -1118,11 +1125,33 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         content = _read_worker_entrypoint_sources(script)
 
         self.assertIn('if [ -d /workspace/.git ]; then', content)
-        self.assertIn('git remote set-url origin "${GIT_REPO_URL}"', content)
-        self.assertIn('git fetch origin', content)
-        self.assertIn('WORKSPACE_CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD', content)
+        self.assertIn(
+            "codify_run_shell 'cd /workspace && git remote set-url origin \"${GIT_REPO_URL}\"'",
+            content,
+        )
+        self.assertIn("codify_run_shell 'cd /workspace && git fetch origin'", content)
+        self.assertIn(
+            "WORKSPACE_CURRENT_BRANCH=$(codify_run_shell 'cd /workspace && git rev-parse --abbrev-ref HEAD'",
+            content,
+        )
         self.assertIn('Workspace has uncommitted changes on branch', content)
-        self.assertIn('git clone "${GIT_REPO_URL}" /workspace', content)
+        self.assertIn(
+            "codify_run_shell 'git clone \"${GIT_REPO_URL}\" /workspace'", content
+        )
+        self.assertIn('WORKSPACE_OWNERSHIP_MARKER="/opt/codify-issue-meta/ownership"', content)
+        self.assertIn(
+            'for persistent_path in /workspace /home/codify/.claude /opt/codify-issue-shared; do',
+            content,
+        )
+        self.assertIn('codify_chown -R "${persistent_path}"', content)
+        self.assertIn(
+            "codify_run_shell 'cd /workspace && git remote set-url origin \"${GIT_REPO_URL}\"'",
+            content,
+        )
+        self.assertNotIn(
+            'codify_run_shell \'cd /workspace && git remote set-url origin "${GITLAB_SCHEME}://${GITLAB_HOST}/${PROJECT_PATH}.git"\'',
+            content,
+        )
 
     def test_entrypoint_runs_worker_custom_scripts_around_claude(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
@@ -1144,7 +1173,9 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         pre_index = content.index('run_worker_script "pre" "${CODIFY_WORKER_PRE_SCRIPT_FILE}"')
         claude_index = content.index('echo "Starting Claude CLI (streaming mode)..."')
         post_index = content.index('run_worker_script "post" "${CODIFY_WORKER_POST_SCRIPT_FILE}"')
-        changes_index = content.index('CHANGES=$(git status --porcelain || true)')
+        changes_index = content.index(
+            "CHANGES=$(codify_run_shell 'cd /workspace && git status --porcelain' || true)"
+        )
 
         self.assertLess(pre_index, claude_index)
         self.assertGreater(post_index, claude_index)
@@ -1228,8 +1259,8 @@ class TestBuildContainerVolumes(unittest.TestCase):
 
         self.assertEqual(volumes, {})
 
-    def test_issue_workspace_and_task_runtime_volumes_enabled(self):
-        """Persistent workspace mounts issue repo, Claude state, task runtime, and shared dir."""
+    def test_issue_workspace_volumes_are_daemon_local(self):
+        """Runtime input is uploaded, while persistent issue paths stay daemon-local."""
         settings = _make_settings(worker_workspace_host_path="/opt/codify-workspaces")
         worker = _make_worker()
         issue = MagicMock()
@@ -1241,27 +1272,21 @@ class TestBuildContainerVolumes(unittest.TestCase):
 
         repo_path = "/opt/codify-workspaces/project-123/issue-456/repo"
         claude_path = "/opt/codify-workspaces/project-123/issue-456/claude"
-        runtime_path = "/opt/codify-workspaces/project-123/issue-456/runtime/task-789"
         shared_path = "/opt/codify-workspaces/project-123/issue-456/shared"
+        meta_path = "/opt/codify-workspaces/project-123/issue-456/meta"
 
-        with patch("app.core.worker_runtime.os.makedirs") as makedirs:
-            makedirs.side_effect = [None, OSError("claude unavailable"), None, None]
-
-            volumes = worker._build_container_volumes(settings, issue, task=task)
+        volumes = worker._build_container_volumes(settings, issue, task=task)
 
         self.assertEqual(volumes[repo_path]["bind"], "/workspace")
         self.assertEqual(volumes[repo_path]["mode"], "rw")
         self.assertEqual(volumes[claude_path]["bind"], "/home/codify/.claude")
         self.assertEqual(volumes[claude_path]["mode"], "rw")
-        self.assertEqual(volumes[runtime_path]["bind"], "/tmp/codify-runtime")
-        self.assertEqual(volumes[runtime_path]["mode"], "rw")
         self.assertEqual(volumes[shared_path]["bind"], "/opt/codify-issue-shared")
         self.assertEqual(volumes[shared_path]["mode"], "rw")
+        self.assertEqual(volumes[meta_path]["bind"], "/opt/codify-issue-meta")
+        self.assertEqual(volumes[meta_path]["mode"], "rw")
         self.assertNotIn("/var/codify/sessions/456/claude", volumes)
-        makedirs.assert_any_call(repo_path, exist_ok=True)
-        makedirs.assert_any_call(claude_path, exist_ok=True)
-        makedirs.assert_any_call(runtime_path, exist_ok=True)
-        makedirs.assert_any_call(shared_path, exist_ok=True)
+        self.assertNotIn("/tmp/codify-runtime", [v["bind"] for v in volumes.values()])
 
     def test_issue_workspace_volumes_disabled_when_setting_empty(self):
         settings = _make_settings(worker_workspace_host_path="")
@@ -1607,11 +1632,12 @@ class TestUpdateMrDescriptionForIssue(IsolatedAsyncioTestCase):
         mock_result.scalars.return_value.all.return_value = [task1, task2]
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        with patch("app.core.worker_gitlab.load_task_metadata_files", return_value={}):
-            with patch("app.core.worker_gitlab._resolve_issue_root", return_value=None):
-                with patch("app.core.worker_gitlab.get_settings") as mock_settings:
-                    mock_settings.return_value = _make_settings(dashboard_url="http://codify.example.com")
-                    await worker._update_mr_description_for_issue(task1, issue, mock_db)
+        with patch("app.core.worker_gitlab.load_task_metadata", return_value={}):
+            with patch("app.core.worker_gitlab.get_settings") as mock_settings:
+                mock_settings.return_value = _make_settings(
+                    dashboard_url="http://codify.example.com"
+                )
+                await worker._update_mr_description_for_issue(task1, issue, mock_db)
 
         desc = mock_mr.description
         self.assertNotIn("## Test Issue", desc)  # title not repeated in description body
@@ -1684,11 +1710,14 @@ class TestUpdateMrDescriptionForIssue(IsolatedAsyncioTestCase):
             },
         }
 
-        with patch("app.core.worker_gitlab.load_task_metadata_files", return_value=metadata_map):
-            with patch("app.core.worker_gitlab._resolve_issue_root", return_value="/some/issue/root"):
-                with patch("app.core.worker_gitlab.get_settings") as mock_settings:
-                    mock_settings.return_value = _make_settings(dashboard_url="http://codify.example.com")
-                    await worker._update_mr_description_for_issue(task1, issue, mock_db)
+        with patch(
+            "app.core.worker_gitlab.load_task_metadata", return_value=metadata_map
+        ):
+            with patch("app.core.worker_gitlab.get_settings") as mock_settings:
+                mock_settings.return_value = _make_settings(
+                    dashboard_url="http://codify.example.com"
+                )
+                await worker._update_mr_description_for_issue(task1, issue, mock_db)
 
         desc = mock_mr.description
         # Codify issue link
@@ -1738,11 +1767,10 @@ class TestUpdateMrDescriptionForIssue(IsolatedAsyncioTestCase):
         mock_result.scalars.return_value.all.return_value = []
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        with patch("app.core.worker_gitlab.load_task_metadata_files", return_value={}):
-            with patch("app.core.worker_gitlab._resolve_issue_root", return_value=None):
-                with patch("app.core.worker_gitlab.get_settings") as mock_settings:
-                    mock_settings.return_value = _make_settings()
-                    await worker._update_mr_description_for_issue(_make_task(), issue, mock_db)
+        with patch("app.core.worker_gitlab.load_task_metadata", return_value={}):
+            with patch("app.core.worker_gitlab.get_settings") as mock_settings:
+                mock_settings.return_value = _make_settings()
+                await worker._update_mr_description_for_issue(_make_task(), issue, mock_db)
 
         # Verify get() was invoked (correct code path) but save() was never called
         mock_project.mergerequests.get.assert_called_once()
@@ -1789,11 +1817,14 @@ class TestUpdateMrDescriptionForIssue(IsolatedAsyncioTestCase):
             },
         }
 
-        with patch("app.core.worker_gitlab.load_task_metadata_files", return_value=metadata_map):
-            with patch("app.core.worker_gitlab._resolve_issue_root", return_value="/some/issue/root"):
-                with patch("app.core.worker_gitlab.get_settings") as mock_settings:
-                    mock_settings.return_value = _make_settings(dashboard_url="http://codify.example.com")
-                    await worker._update_mr_description_for_issue(task1, issue, mock_db)
+        with patch(
+            "app.core.worker_gitlab.load_task_metadata", return_value=metadata_map
+        ):
+            with patch("app.core.worker_gitlab.get_settings") as mock_settings:
+                mock_settings.return_value = _make_settings(
+                    dashboard_url="http://codify.example.com"
+                )
+                await worker._update_mr_description_for_issue(task1, issue, mock_db)
 
         self.assertIn("📋 总体总结", mock_mr.description)
         self.assertIn("旧的总体总结", mock_mr.description)
@@ -1803,57 +1834,32 @@ class TestUpdateMrDescriptionForIssue(IsolatedAsyncioTestCase):
 # load_task_metadata_files
 # ===================================================================
 
-class TestLoadTaskMetadataFiles(unittest.TestCase):
-    """Tests for load_task_metadata_files."""
+class TestLoadTaskMetadata(unittest.TestCase):
+    """Tests for task metadata persisted in the database."""
 
-    def test_returns_empty_when_no_files(self):
-        """Returns empty dict when runtime directory does not exist."""
-        from app.core.worker_gitlab import load_task_metadata_files
-        result = load_task_metadata_files("/nonexistent/path", [1, 2, 3])
-        self.assertEqual(result, {})
+    def test_returns_empty_without_persisted_metadata(self):
+        from app.core.worker_gitlab import load_task_metadata
 
-    def test_reads_existing_metadata_files(self):
-        """Reads and parses task-metadata.json files that exist."""
-        import tempfile
+        tasks = [_make_task(id=1), _make_task(id=2)]
+        tasks[0].worker_metadata = None
+        tasks[1].worker_metadata = "not-an-object"
 
-        from app.core.worker_gitlab import load_task_metadata_files
+        self.assertEqual(load_task_metadata(tasks), {})
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            task_dir = os.path.join(tmpdir, "runtime", "task-42")
-            os.makedirs(task_dir)
-            metadata = {
-                "task_id": 42,
-                "prompt": "Add feature",
-                "commit_sha": "abc1234",
-                "new_files": ["src/foo.py"],
-                "modified_files": [],
-                "deleted_files": [],
-                "additions": 10,
-                "deletions": 2,
-            }
-            with open(os.path.join(task_dir, "task-metadata.json"), "w") as f:
-                json.dump(metadata, f)
+    def test_reads_metadata_from_task_rows(self):
+        from app.core.worker_gitlab import load_task_metadata
 
-            result = load_task_metadata_files(tmpdir, [42, 99])
-            self.assertIn(42, result)
-            self.assertNotIn(99, result)
-            self.assertEqual(result[42]["commit_sha"], "abc1234")
-            self.assertEqual(result[42]["new_files"], ["src/foo.py"])
+        task = _make_task(id=42)
+        task.worker_metadata = {
+            "task_id": 42,
+            "commit_sha": "abc1234",
+            "new_files": ["src/foo.py"],
+        }
 
-    def test_skips_invalid_json(self):
-        """Silently skips files with invalid JSON."""
-        import tempfile
+        result = load_task_metadata([task])
 
-        from app.core.worker_gitlab import load_task_metadata_files
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            task_dir = os.path.join(tmpdir, "runtime", "task-7")
-            os.makedirs(task_dir)
-            with open(os.path.join(task_dir, "task-metadata.json"), "w") as f:
-                f.write("not json{{{")
-
-            result = load_task_metadata_files(tmpdir, [7])
-            self.assertEqual(result, {})
+        self.assertEqual(result[42]["commit_sha"], "abc1234")
+        self.assertEqual(result[42]["new_files"], ["src/foo.py"])
 
 
 # ===================================================================
@@ -1948,63 +1954,49 @@ class TestOverallMrSummaryHelpers(unittest.TestCase):
         self.assertIn("暂无前序任务摘要。", result)
 
 
-class TestWritePreviousTaskSummariesFile(IsolatedAsyncioTestCase):
-    """Tests for writing previous task summaries into the current runtime dir."""
+class TestBuildPreviousTaskSummaries(IsolatedAsyncioTestCase):
+    """Tests for previous task summaries uploaded in the runtime bundle."""
 
-    async def test_skips_when_workspace_path_is_not_string(self):
-        from app.core.worker_gitlab import write_previous_task_summaries_file
+    async def test_returns_empty_when_database_query_fails(self):
+        from app.core.worker_gitlab import build_previous_task_summaries
 
-        settings = _make_settings(worker_workspace_host_path=MagicMock())
+        issue = MagicMock(id=10, project_id=100)
+        current_task = _make_task(id=3, issue_id=10, project_id=100)
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(side_effect=RuntimeError("database unavailable"))
+
+        content = await build_previous_task_summaries(mock_db, issue, current_task)
+
+        self.assertEqual(content, "")
+
+    async def test_builds_previous_task_summaries_from_database_metadata(self):
+        from app.core.worker_gitlab import build_previous_task_summaries
+
         issue = MagicMock()
         issue.id = 10
         issue.project_id = 100
+        issue.title = "Auth Issue"
+        issue.description = "Implement auth"
         current_task = _make_task(id=3, issue_id=10, project_id=100)
+        previous_task = _make_task(id=2, issue_id=10, project_id=100)
+        previous_task.status = TaskStatus.COMPLETED
+        previous_task.worker_metadata = {
+            "task_id": 2,
+            "prompt": "Add JWT auth",
+            "commit_message": "feat: add auth",
+            "execution_summary": "Implemented JWT authentication.",
+        }
+
         mock_db = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [previous_task]
+        mock_db.execute = AsyncMock(return_value=mock_result)
 
-        path = await write_previous_task_summaries_file(mock_db, settings, issue, current_task)
+        content = await build_previous_task_summaries(mock_db, issue, current_task)
 
-        self.assertIsNone(path)
-        mock_db.execute.assert_not_called()
-
-    async def test_writes_previous_task_summaries_file(self):
-        import tempfile
-
-        from app.core.worker_gitlab import write_previous_task_summaries_file
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            settings = _make_settings(worker_workspace_host_path=tmpdir)
-            issue = MagicMock()
-            issue.id = 10
-            issue.project_id = 100
-            issue.title = "Auth Issue"
-            issue.description = "Implement auth"
-            current_task = _make_task(id=3, issue_id=10, project_id=100)
-            previous_task = _make_task(id=2, issue_id=10, project_id=100)
-            previous_task.status = TaskStatus.COMPLETED
-
-            previous_runtime = os.path.join(tmpdir, "project-100", "issue-10", "runtime", "task-2")
-            os.makedirs(previous_runtime)
-            with open(os.path.join(previous_runtime, "task-metadata.json"), "w") as f:
-                json.dump({
-                    "task_id": 2,
-                    "prompt": "Add JWT auth",
-                    "commit_message": "feat: add auth",
-                    "execution_summary": "Implemented JWT authentication.",
-                }, f)
-
-            mock_db = AsyncMock()
-            mock_result = MagicMock()
-            mock_result.scalars.return_value.all.return_value = [previous_task]
-            mock_db.execute = AsyncMock(return_value=mock_result)
-
-            path = await write_previous_task_summaries_file(mock_db, settings, issue, current_task)
-
-            self.assertIsNotNone(path)
-            self.assertTrue(os.path.exists(path))
-            content = Path(path).read_text()
-            self.assertIn("Task #2", content)
-            self.assertIn("Implemented JWT authentication.", content)
-            self.assertIn("Auth Issue", content)
+        self.assertIn("Task #2", content)
+        self.assertIn("Implemented JWT authentication.", content)
+        self.assertIn("Auth Issue", content)
 
 
 
@@ -2112,11 +2104,22 @@ class TestExecuteTask(unittest.TestCase):
             'CODIFY_STATS:{"input_tokens":100,"output_tokens":50}\n'
         )
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1, False))):
+        with (
+            patch.object(
+                worker,
+                '_stream_logs_to_db',
+                new=AsyncMock(return_value=(0, fake_logs, 1, False)),
+            ),
+            patch(
+                "app.core.worker_task_lifecycle.finalize_task_raw_logs",
+                new=AsyncMock(),
+            ),
+        ):
             result = asyncio.run(worker.execute_task(db, task.id))
 
         self.assertTrue(result)
         self.assertEqual(task.status, TaskStatus.COMPLETED)
+        self.assertIsNone(task.container_id)
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
@@ -2198,7 +2201,9 @@ class TestExecuteTask(unittest.TestCase):
         worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
         task = _make_task(target_branch=None, merge_request_iid=None, initiator_user_id=7)
         db = _make_db(task)
-        db.commit = AsyncMock(side_effect=[None, None, RuntimeError("post-parse commit failed"), None])
+        db.commit = AsyncMock(
+            side_effect=[None, None, RuntimeError("post-parse commit failed"), None, None]
+        )
 
         fake_logs = (
             "http://gitlab.example.com/project/-/merge_requests/42\n"
@@ -2256,7 +2261,7 @@ class TestExecuteTask(unittest.TestCase):
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
-    def test_execute_task_materializes_worker_custom_scripts_before_container_create(
+    def test_execute_task_uploads_snapshot_custom_scripts_before_container_start(
         self,
         mock_notify,
         mock_get_settings,
@@ -2288,22 +2293,25 @@ class TestExecuteTask(unittest.TestCase):
             ):
                 result = asyncio.run(worker.execute_task(db, task.id))
 
-            runtime_dir = (
-                Path(workspace_root)
-                / f"project-{task.issue.project_id}"
-                / f"issue-{task.issue.id}"
-                / "runtime"
-                / f"task-{task.id}"
-            )
             self.assertTrue(result)
-            self.assertEqual(
-                (runtime_dir / "worker-pre-script.sh").read_text(),
-                "echo snapshot-pre\n",
+            runtime_archive = mock_docker.put_archive.call_args.args[2]
+            with tarfile.open(fileobj=io.BytesIO(runtime_archive)) as archive:
+                pre_script = archive.extractfile(
+                    "codify-runtime/worker-pre-script.sh"
+                ).read()
+                post_script = archive.extractfile(
+                    "codify-runtime/worker-post-script.sh"
+                ).read()
+            self.assertEqual(pre_script, b"echo snapshot-pre\n")
+            self.assertEqual(post_script, b"echo snapshot-post\n")
+            self.assertTrue(
+                mock_docker.create_container.call_args.kwargs["start"] is False
             )
-            self.assertEqual(
-                (runtime_dir / "worker-post-script.sh").read_text(),
-                "echo snapshot-post\n",
+            self.assertIsNone(
+                mock_docker.create_container.call_args.kwargs.get("tmpfs"),
+                "runtime uploads to a created container must not be hidden by a startup tmpfs",
             )
+            mock_docker.start_container.assert_called_once()
             container_env = mock_docker.create_container.call_args.kwargs["environment"]
             self.assertNotIn("CODIFY_WORKER_PRE_SCRIPT", container_env)
             self.assertNotIn("CODIFY_WORKER_POST_SCRIPT", container_env)
@@ -2396,8 +2404,8 @@ class TestExecuteTask(unittest.TestCase):
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
-    def test_task_exception_sets_failed_and_cleans_up(self, mock_notify, mock_get_settings):
-        """Exception during execution sets FAILED and cleans up container — lines 983-1009."""
+    def test_task_exception_sets_failed_and_retains_logs(self, mock_notify, mock_get_settings):
+        """Execution exceptions retain the stopped container until raw logs are finalized."""
         mock_get_settings.return_value = _make_settings()
         mock_container = MagicMock(id="ctr-err")
         mock_docker = MagicMock()
@@ -2417,7 +2425,8 @@ class TestExecuteTask(unittest.TestCase):
         self.assertFalse(result)
         self.assertEqual(task.status, TaskStatus.FAILED)
         self.assertIn("Docker exploded", task.error_message)
-        mock_docker.remove_container.assert_called_with(mock_container, force=True)
+        mock_docker.remove_container.assert_not_called()
+        self.assertEqual(task.container_id, "ctr-err")
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
@@ -2708,13 +2717,15 @@ class TestProcessPendingTasks(unittest.TestCase):
 
 
 class TestDeployComposeWorkspaceMounts(unittest.TestCase):
-    def test_backend_compose_mounts_workspace_root(self):
+    def test_backend_compose_only_mounts_local_ci_bundle_directory(self):
         compose = Path(__file__).resolve().parents[3] / "deploy" / "docker-compose.yml"
         content = compose.read_text()
 
         workspace_path = "${WORKER_WORKSPACE_HOST_PATH:-/opt/codify-workspaces}"
-        self.assertGreaterEqual(content.count(f"source: {workspace_path}"), 2)
-        self.assertGreaterEqual(content.count(f"target: {workspace_path}"), 2)
+        ci_bundle_path = "${CI_FAILURE_BUNDLE_HOST_PATH:-/opt/codify-ci-failures}"
+        self.assertEqual(content.count(f"source: {workspace_path}"), 0)
+        self.assertGreaterEqual(content.count(f"source: {ci_bundle_path}"), 2)
+        self.assertGreaterEqual(content.count(f"target: {workspace_path}/ci-failures"), 2)
         self.assertGreaterEqual(
             content.count(f"WORKER_WORKSPACE_HOST_PATH={workspace_path}"),
             2,
@@ -2722,13 +2733,15 @@ class TestDeployComposeWorkspaceMounts(unittest.TestCase):
         makefile = Path(__file__).resolve().parents[3] / "Makefile"
         self.assertIn("docker-compose --env-file .env.test up -d --build", makefile.read_text())
 
-    def test_offline_compose_mounts_workspace_root(self):
+    def test_offline_compose_only_mounts_local_ci_bundle_directory(self):
         compose = Path(__file__).resolve().parents[3] / "deploy" / "offline-bundle" / "docker-compose.yml"
         content = compose.read_text()
 
         workspace_path = "${WORKER_WORKSPACE_HOST_PATH:-/opt/codify-workspaces}"
-        self.assertGreaterEqual(content.count(f"source: {workspace_path}"), 2)
-        self.assertGreaterEqual(content.count(f"target: {workspace_path}"), 2)
+        ci_bundle_path = "${CI_FAILURE_BUNDLE_HOST_PATH:-/opt/codify-ci-failures}"
+        self.assertEqual(content.count(f"source: {workspace_path}"), 0)
+        self.assertGreaterEqual(content.count(f"source: {ci_bundle_path}"), 2)
+        self.assertGreaterEqual(content.count(f"target: {workspace_path}/ci-failures"), 2)
         self.assertGreaterEqual(
             content.count(f"WORKER_WORKSPACE_HOST_PATH={workspace_path}"),
             2,

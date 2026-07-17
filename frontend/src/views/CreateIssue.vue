@@ -224,9 +224,9 @@
               <div class="branch-extra-row">
                 <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
                   <n-gi>
-                    <n-form-item :label="t('createTask.defaultWorkerProfile')">
+                    <n-form-item :label="t('createTask.workerProfile')" required>
                       <n-select
-                        v-model:value="defaultWorkerProfileId"
+                        v-model:value="workerProfileId"
                         :options="workerProfileOptions"
                         clearable
                         :placeholder="t('createTask.selectDefaultWorkerProfile')"
@@ -430,7 +430,7 @@ const ciAutoRepairAvailability = ref<ProjectCIAutoRepairAvailability | null>(nul
 const promptTemplates = ref<PromptTemplate[]>([])
 const workerProfiles = ref<WorkerProfile[]>([])
 const providers = ref<AIProvider[]>([])
-const defaultWorkerProfileId = ref<number | null>(null)
+const workerProfileId = ref<number | null>(null)
 const defaultProviderId = ref<number | null>(null)
 
 // Template picker state
@@ -832,7 +832,7 @@ async function handleReset() {
   branches.value = []
   projectSearch.value = ''
   Object.assign(formValue.value, createInitialFormValue())
-  defaultWorkerProfileId.value = null
+  workerProfileId.value = null
   defaultProviderId.value =
     providers.value.find(provider => provider.is_default)?.id ?? null
   formRef.value?.restoreValidation()
@@ -851,6 +851,10 @@ async function handleSubmit() {
     message.error(t('createTask.selectBaseBranch'))
     return
   }
+  if (workerProfileId.value === null) {
+    message.error(t('createTask.selectWorkerProfile'))
+    return
+  }
 
   submitting.value = true
 
@@ -866,7 +870,7 @@ async function handleSubmit() {
         formValue.value.create_mr && ciAutoRepairAvailable.value
           ? formValue.value.ci_auto_repair_enabled
           : false,
-      default_worker_profile_id: defaultWorkerProfileId.value,
+      worker_profile_id: workerProfileId.value,
       default_provider_id: defaultProviderId.value,
     }
 

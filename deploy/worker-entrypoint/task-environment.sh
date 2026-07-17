@@ -22,14 +22,14 @@ if [ -n "${APPEND_SYSTEM_PROMPT}" ]; then
 fi
 
 chmod 644 /tmp/claude_prompt.txt
-codify_chown -R /workspace /tmp/claude_prompt.txt
+codify_chown /workspace /tmp/claude_prompt.txt
 # Ensure issue-scoped shared storage is writable by the codify user
 if [ -d /opt/codify-issue-shared ]; then
     codify_chown /opt/codify-issue-shared
 fi
 # Ensure session storage directory is writable by the codify user
 if [ -d /home/codify/.claude ]; then
-    codify_chown -R /home/codify/.claude
+    codify_chown /home/codify/.claude
 fi
 
 # Restore .claude.json if missing (volume mount persists backups but not the config file)

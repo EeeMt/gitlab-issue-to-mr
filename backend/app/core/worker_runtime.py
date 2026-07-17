@@ -1,8 +1,11 @@
 """Runtime and container setup helpers for worker execution."""
 
+import io
 import logging
 import os
 import shutil
+import tarfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +27,7 @@ _WORKSPACE_CONTAINER_PATH = "/workspace"
 _RUNTIME_CONTAINER_PATH = "/tmp/codify-runtime"
 _CLAUDE_CONTAINER_PATH = "/home/codify/.claude"
 _SHARED_CONTAINER_PATH = "/opt/codify-issue-shared"
+_META_CONTAINER_PATH = "/opt/codify-issue-meta"
 _WORKER_PRE_SCRIPT_FILENAME = "worker-pre-script.sh"
 _WORKER_POST_SCRIPT_FILENAME = "worker-post-script.sh"
 _TASK_PROMPT_FILENAME = "task-prompt.md"
@@ -146,6 +150,7 @@ def _build_container_env_with_settings(
         "TASK_TIMEOUT": str(settings.task_timeout),
         "ISSUE_ID": str(issue.id),
         "ISSUE_TITLE": issue.title or "",
+        "CODIFY_WORKER_PROFILE_ID": str(getattr(task, "worker_profile_id", None) or ""),
         "GIT_AUTHOR_NAME": author_name or (getattr(task, "initiator_display_name", None) or task.initiator_username or "Codify User"),
         "GIT_AUTHOR_EMAIL": author_email or (getattr(task, "initiator_email", None) or "codify-task@codify.local"),
         "CODIFY_COAUTHOR_NAME": "Codify",
@@ -246,6 +251,76 @@ def materialize_task_prompt(task: Task, runtime_path: str | os.PathLike[str]) ->
     return prompt_path
 
 
+def build_task_runtime_archive(
+    task: Task,
+    *,
+    pre_script: str = "",
+    post_script: str = "",
+    previous_task_summaries: str = "",
+    ci_failure_bundle_path: str | os.PathLike[str] | None = None,
+) -> bytes:
+    """Build the immutable runtime input bundle uploaded through the Docker API."""
+    rendered_prompt = getattr(task, "rendered_prompt", None)
+    if not isinstance(rendered_prompt, str) or not rendered_prompt.strip():
+        raise RuntimeError(f"Task {task.id} has no persisted rendered prompt")
+
+    buffer = io.BytesIO()
+    now = int(time.time())
+
+    def add_bytes(archive: tarfile.TarFile, name: str, content: str, mode: int) -> None:
+        payload = content.encode("utf-8")
+        info = tarfile.TarInfo(name=f"codify-runtime/{name}")
+        info.size = len(payload)
+        info.mode = mode
+        info.mtime = now
+        archive.addfile(info, io.BytesIO(payload))
+
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        runtime_dir = tarfile.TarInfo(name="codify-runtime")
+        runtime_dir.type = tarfile.DIRTYPE
+        runtime_dir.mode = 0o755
+        runtime_dir.mtime = now
+        archive.addfile(runtime_dir)
+        add_bytes(archive, _TASK_PROMPT_FILENAME, rendered_prompt, 0o600)
+        if isinstance(pre_script, str) and pre_script.strip():
+            add_bytes(
+                archive,
+                _WORKER_PRE_SCRIPT_FILENAME,
+                pre_script if pre_script.endswith("\n") else f"{pre_script}\n",
+                0o700,
+            )
+        if isinstance(post_script, str) and post_script.strip():
+            add_bytes(
+                archive,
+                _WORKER_POST_SCRIPT_FILENAME,
+                post_script if post_script.endswith("\n") else f"{post_script}\n",
+                0o700,
+            )
+        if previous_task_summaries:
+            add_bytes(
+                archive,
+                "previous-task-summaries.md",
+                previous_task_summaries,
+                0o600,
+            )
+
+        if ci_failure_bundle_path:
+            bundle_path = Path(ci_failure_bundle_path)
+            if not bundle_path.is_dir():
+                raise RuntimeError("CI failure bundle is not available for this repair task")
+            for source in sorted(bundle_path.rglob("*")):
+                if source.is_symlink():
+                    raise RuntimeError(f"CI failure bundle contains a symlink: {source}")
+                relative = source.relative_to(bundle_path)
+                archive.add(
+                    source,
+                    arcname=str(Path("codify-runtime") / "ci-failure" / relative),
+                    recursive=False,
+                )
+
+    return buffer.getvalue()
+
+
 def _resolve_provider_environment_values(
     settings: Any,
     provider: AIProvider | None,
@@ -288,22 +363,12 @@ def build_container_volumes(
         logger.info(
             f"[Task {task.id}] Mounting workspace — "
             f"repo: {workspace_paths.repo_path} → {_WORKSPACE_CONTAINER_PATH}, "
-            f"runtime: {workspace_paths.runtime_path} → {_RUNTIME_CONTAINER_PATH}"
+            f"shared: {workspace_paths.shared_path} → {_SHARED_CONTAINER_PATH}"
         )
-        for path in (
-            workspace_paths.repo_path,
-            workspace_paths.claude_path,
-            workspace_paths.runtime_path,
-            workspace_paths.shared_path,
-        ):
-            try:
-                os.makedirs(path, exist_ok=True)
-            except OSError as exc:
-                logger.warning(f"[Task {task.id}] Could not create workspace dir {path}: {exc}")
         volumes[workspace_paths.repo_path] = {"bind": _WORKSPACE_CONTAINER_PATH, "mode": "rw"}
         volumes[workspace_paths.claude_path] = {"bind": _CLAUDE_CONTAINER_PATH, "mode": "rw"}
-        volumes[workspace_paths.runtime_path] = {"bind": _RUNTIME_CONTAINER_PATH, "mode": "rw"}
         volumes[workspace_paths.shared_path] = {"bind": _SHARED_CONTAINER_PATH, "mode": "rw"}
+        volumes[workspace_paths.meta_path] = {"bind": _META_CONTAINER_PATH, "mode": "rw"}
     elif session_storage_path := _legacy_session_storage_path(issue):
         os.makedirs(session_storage_path, exist_ok=True)
         volumes[session_storage_path] = {

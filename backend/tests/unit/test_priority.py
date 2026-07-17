@@ -180,7 +180,10 @@ def test_create_initial_mr():
     async def run_test():
         with patch.object(worker, "_stream_logs_to_db", AsyncMock(return_value=(0, "Success", 1, False))):
             with patch('app.core.worker.notify_task_event', new_callable=AsyncMock):
-                with patch('app.core.worker_task_lifecycle.materialize_task_prompt'):
+                with patch(
+                    "app.core.worker_task_lifecycle.build_task_runtime_archive",
+                    return_value=b"runtime",
+                ):
                     result = await worker.execute_task(mock_db, task.id)
                     return result
 
@@ -280,7 +283,10 @@ def test_mr_iid_passed_to_container():
     async def run_test():
         with patch.object(worker, "_stream_logs_to_db", AsyncMock(return_value=(0, "Success", 1, False))):
             with patch('app.core.worker.notify_task_event', new_callable=AsyncMock):
-                with patch('app.core.worker_task_lifecycle.materialize_task_prompt'):
+                with patch(
+                    "app.core.worker_task_lifecycle.build_task_runtime_archive",
+                    return_value=b"runtime",
+                ):
                     await worker.execute_task(mock_db, task.id)
 
     asyncio.run(run_test())
@@ -336,7 +342,10 @@ def test_mr_creation_failure_handled():
     async def run_test():
         with patch.object(worker, "_stream_logs_to_db", AsyncMock(return_value=(0, "Success", 1, False))):
             with patch('app.core.worker.notify_task_event', new_callable=AsyncMock):
-                with patch('app.core.worker_task_lifecycle.materialize_task_prompt'):
+                with patch(
+                    "app.core.worker_task_lifecycle.build_task_runtime_archive",
+                    return_value=b"runtime",
+                ):
                     result = await worker.execute_task(mock_db, task.id)
                     return result
 
@@ -404,7 +413,10 @@ def test_draft_removed_on_completion():
             AsyncMock(return_value=(0, "Success", 1, False)),
         ):
             with patch('app.core.worker.notify_task_event', new_callable=AsyncMock):
-                with patch('app.core.worker_task_lifecycle.materialize_task_prompt'):
+                with patch(
+                    "app.core.worker_task_lifecycle.build_task_runtime_archive",
+                    return_value=b"runtime",
+                ):
                     await worker.execute_task(mock_db, task.id)
 
     asyncio.run(run_test())

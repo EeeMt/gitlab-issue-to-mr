@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from docker.errors import NotFound
-from sqlalchemy import and_, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.docker_client import (
@@ -261,10 +261,7 @@ async def list_known_docker_targets(
     if include_retained:
         snapshot_filter = or_(
             snapshot_filter,
-            and_(
-                Task.container_id.is_not(None),
-                Task.raw_logs_finalized_at.is_(None),
-            ),
+            Task.container_id.is_not(None),
         )
     running_rows = (
         await db.execute(

@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from app.models import Base, Issue, Task
+from app.models import Base, Issue, Task, WorkerProfile
 
 
 class TestTaskRequireChanges(unittest.TestCase):
@@ -57,11 +57,25 @@ async def test_task_issue_constraint_and_delete_cascade() -> None:
                 await session.commit()
             await session.rollback()
 
+            worker = WorkerProfile(
+                name="Task Worker",
+                enabled=True,
+                image="codify-worker:test",
+                volume_mounts=[],
+                pre_script="",
+                post_script="",
+                default_execute_run_instruction_template="{{user_prompt}}",
+                default_plan_run_instruction_template="{{user_prompt}}",
+                ci_auto_repair_run_instruction_template="{{user_prompt}}",
+            )
+            session.add(worker)
+            await session.flush()
             issue = Issue(
                 project_id=1,
                 title="Owned task",
                 description="Task must be deleted with its issue",
                 status="open",
+                worker_profile_id=worker.id,
             )
             session.add(issue)
             await session.flush()

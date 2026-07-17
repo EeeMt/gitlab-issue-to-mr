@@ -69,7 +69,6 @@ export interface CreateTaskRequest {
   delay_seconds?: number
   scheduled_datetime?: string
   provider_id?: number | null
-  worker_profile_id?: number | null
   require_changes?: boolean
   task_mode?: 'execute' | 'plan'
   session_mode?: 'continue' | 'fresh'
@@ -84,7 +83,6 @@ export interface UpdateTaskRequest {
   user_prompt?: string
   priority?: number
   provider_id?: number | null
-  worker_profile_id?: number | null
   require_changes?: boolean
   task_mode?: 'execute' | 'plan'
   run_instruction_template?: string

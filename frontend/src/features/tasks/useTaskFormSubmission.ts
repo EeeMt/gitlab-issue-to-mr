@@ -29,7 +29,6 @@ interface TaskFormSubmissionOptions {
   startFreshSession: Ref<boolean>
   taskModeErrorVisible: Ref<boolean>
   selectedProviderId: Ref<number | null>
-  selectedWorkerProfileId: Ref<number | null>
   scheduleType: Ref<TaskScheduleType>
   scheduledAt: Ref<number | null>
   runInstructionTemplate: Ref<string>
@@ -84,7 +83,6 @@ export function useTaskFormSubmission(options: TaskFormSubmissionOptions) {
         taskMode,
         sessionMode: options.startFreshSession.value ? 'fresh' : 'continue',
         selectedProviderId: options.selectedProviderId.value,
-        selectedWorkerProfileId: options.selectedWorkerProfileId.value,
         scheduleType: options.scheduleType.value,
         scheduledAt: options.scheduledAt.value,
         runInstructionTemplate: options.runInstructionTemplate.value,
@@ -95,7 +93,6 @@ export function useTaskFormSubmission(options: TaskFormSubmissionOptions) {
       options.prompt.value = ''
       options.scheduledAt.value = null
       options.selectedProviderId.value = null
-      options.selectedWorkerProfileId.value = null
       options.startFreshSession.value = false
       options.scheduleType.value = 'now'
       options.clearScheduledTasks()
@@ -130,7 +127,6 @@ export function useTaskFormSubmission(options: TaskFormSubmissionOptions) {
       taskMode: options.taskMode.value ?? 'execute',
       sessionMode: 'continue',
       selectedProviderId: options.selectedProviderId.value,
-      selectedWorkerProfileId: options.selectedWorkerProfileId.value,
       runInstructionTemplate: options.runInstructionTemplate.value,
       runInstructionDirty: options.runInstructionDirty.value,
     }, options.initialRunInstructionTemplate.value)

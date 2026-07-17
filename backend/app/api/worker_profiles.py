@@ -11,7 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -22,6 +22,7 @@ from app.core.task_prompt import (
     BUILT_IN_EXECUTE_RUN_INSTRUCTION_TEMPLATE,
     BUILT_IN_PLAN_RUN_INSTRUCTION_TEMPLATE,
 )
+from app.core.worker_docker_targets import docker_daemon_key
 from app.core.worker_kit import (
     BAKED_IMAGE_MODE,
     WorkerKitValidationError,
@@ -48,7 +49,7 @@ from app.core.worker_profiles import (
 )
 from app.database import get_db
 from app.dependencies.auth import require_admin_user
-from app.models import WorkerProfile, WorkerProfileEnvironmentVariable
+from app.models import Issue, IssueStatus, WorkerProfile, WorkerProfileEnvironmentVariable
 
 router = APIRouter()
 
@@ -118,11 +119,17 @@ def _http_profile_error(exc: WorkerProfileValidationError) -> HTTPException:
     return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc))
 
 
-async def _load_profile_or_404(db: AsyncSession, profile_id: int) -> WorkerProfile:
+async def _load_profile_or_404(
+    db: AsyncSession,
+    profile_id: int,
+    *,
+    for_update: bool = False,
+) -> WorkerProfile:
     profile = await db.get(
         WorkerProfile,
         profile_id,
         options=[selectinload(WorkerProfile.environment_variables)],
+        with_for_update=for_update,
     )
     if profile is None:
         raise HTTPException(
@@ -144,6 +151,30 @@ async def _ensure_profile_name_available(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Worker profile with name '{name}' already exists",
+        )
+
+
+async def _retained_issue_assignment_count(db: AsyncSession, profile_id: int) -> int:
+    result = await db.execute(
+        select(func.count(Issue.id)).where(
+            Issue.worker_profile_id == profile_id,
+            or_(
+                Issue.status != IssueStatus.CLOSED.value,
+                Issue.workspace_deleted_at.is_(None),
+            ),
+        )
+    )
+    return int(result.scalar_one())
+
+
+async def _ensure_profile_can_stop_serving_issues(
+    db: AsyncSession,
+    profile: WorkerProfile,
+) -> None:
+    count = await _retained_issue_assignment_count(db, profile.id)
+    if count:
+        raise WorkerProfileValidationError(
+            f"Worker profile '{profile.name}' is assigned to {count} active or retained issue(s)"
         )
 
 
@@ -309,7 +340,7 @@ async def verify_worker_profile_runtime(
         finally:
             if container is not None:
                 with contextlib.suppress(Exception):
-                    container.remove(force=True)
+                    container.remove(force=True, v=True)
             with contextlib.suppress(Exception):
                 client.close()
 
@@ -428,7 +459,7 @@ async def update_worker_profile(
     _admin=Depends(require_admin_user),
 ):
     """Update a worker profile."""
-    profile = await _load_profile_or_404(db, profile_id)
+    profile = await _load_profile_or_404(db, profile_id, for_update=True)
     try:
         fields = request.model_fields_set
         if "name" in fields and request.name is not None:
@@ -444,6 +475,8 @@ async def update_worker_profile(
                 raise WorkerProfileValidationError(
                     "Default worker profile cannot be disabled"
                 )
+            if request.enabled is False:
+                await _ensure_profile_can_stop_serving_issues(db, profile)
             profile.enabled = request.enabled
         if "image" in fields and request.image is not None:
             profile.image = request.image.strip()
@@ -498,6 +531,25 @@ async def update_worker_profile(
                     else profile.docker_tls_key
                 ),
             )
+            settings = get_effective_settings()
+            current_target = resolve_docker_connection(
+                settings,
+                docker_host=profile.docker_host,
+                docker_tls_ca=profile.docker_tls_ca,
+                docker_tls_cert=profile.docker_tls_cert,
+                docker_tls_key=profile.docker_tls_key,
+            )
+            next_target = resolve_docker_connection(
+                settings,
+                docker_host=docker_host,
+                docker_tls_ca=tls_ca,
+                docker_tls_cert=tls_cert,
+                docker_tls_key=tls_key,
+            )
+            # Issue affinity protects the physical daemon, not one certificate
+            # filename. Credential rotation on the same endpoint must remain possible.
+            if docker_daemon_key(next_target) != docker_daemon_key(current_target):
+                await _ensure_profile_can_stop_serving_issues(db, profile)
             profile.docker_host = docker_host
             profile.docker_tls_ca = tls_ca
             profile.docker_tls_cert = tls_cert
@@ -564,7 +616,7 @@ async def set_default_worker_profile_endpoint(
     _admin=Depends(require_admin_user),
 ):
     """Set one enabled worker profile as the system default."""
-    profile = await _load_profile_or_404(db, profile_id)
+    profile = await _load_profile_or_404(db, profile_id, for_update=True)
     try:
         await set_default_worker_profile(db, profile)
         await db.commit()
@@ -582,8 +634,11 @@ async def disable_worker_profile(
     _admin=Depends(require_admin_user),
 ):
     """Disable a non-default worker profile."""
-    profile = await _load_profile_or_404(db, profile_id)
+    profile = await _load_profile_or_404(db, profile_id, for_update=True)
     try:
+        if profile.is_default:
+            raise WorkerProfileValidationError("Default worker profile cannot be disabled")
+        await _ensure_profile_can_stop_serving_issues(db, profile)
         await disable_worker_profile_domain(db, profile)
         await db.commit()
         await db.refresh(profile, attribute_names=["environment_variables"])

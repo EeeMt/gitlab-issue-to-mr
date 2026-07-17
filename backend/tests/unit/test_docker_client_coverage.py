@@ -161,7 +161,7 @@ class TestCreateContainerCoverage:
         )
 
         wrapper.client.containers.get.assert_called_once_with("my-worker")
-        stale.remove.assert_called_once_with(force=True)
+        stale.remove.assert_called_once_with(force=True, v=True)
         assert result.id == "new-456"
 
     def test_create_container_name_not_found(self):

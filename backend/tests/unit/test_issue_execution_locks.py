@@ -75,8 +75,8 @@ class IssueExecutionLockHelperTests(unittest.IsolatedAsyncioTestCase):
 
         active_lock = MagicMock(issue_id=1, task_id=101)
         terminal_lock = MagicMock(issue_id=2, task_id=102)
-        running_task = MagicMock(id=101, status=TaskStatus.RUNNING)
-        failed_task = MagicMock(id=102, status=TaskStatus.FAILED)
+        running_task = MagicMock(id=101, status=TaskStatus.RUNNING, container_id="running-101")
+        failed_task = MagicMock(id=102, status=TaskStatus.FAILED, container_id=None)
 
         locks_result = MagicMock()
         locks_result.scalars.return_value.all.return_value = [active_lock, terminal_lock]
@@ -90,3 +90,24 @@ class IssueExecutionLockHelperTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(removed, 1)
         self.assertEqual(db.execute.await_count, 3)
+
+    async def test_cleanup_keeps_terminal_task_lock_until_container_is_reaped(self):
+        from app.core.issue_execution_locks import cleanup_inactive_issue_execution_locks
+
+        retained_lock = MagicMock(issue_id=2, task_id=102)
+        failed_task = MagicMock(
+            id=102,
+            status=TaskStatus.FAILED,
+            container_id="container-102",
+        )
+        locks_result = MagicMock()
+        locks_result.scalars.return_value.all.return_value = [retained_lock]
+        task_result = MagicMock()
+        task_result.scalars.return_value.all.return_value = [failed_task]
+        db = MagicMock()
+        db.execute = AsyncMock(side_effect=[locks_result, task_result])
+
+        removed = await cleanup_inactive_issue_execution_locks(db)
+
+        self.assertEqual(removed, 0)
+        self.assertEqual(db.execute.await_count, 2)

@@ -13,9 +13,8 @@ interface TaskExecutionOptions {
   mode: Readonly<Ref<'create' | 'edit'>>
   task: Readonly<Ref<Task | undefined>>
   defaultProviderId: Readonly<Ref<number | null | undefined>>
-  defaultWorkerProfileId: Readonly<Ref<number | null | undefined>>
+  workerProfileId: Readonly<Ref<number | null | undefined>>
   selectedProviderId: Ref<number | null>
-  selectedWorkerProfileId: Ref<number | null>
 }
 
 export function useTaskExecutionOptions(options: TaskExecutionOptions) {
@@ -45,13 +44,6 @@ export function useTaskExecutionOptions(options: TaskExecutionOptions) {
       )
     )
   )
-  const workerProfileOptions = computed(() =>
-    selectableWorkerProfiles.value.map(profile => ({
-      label: profile.name,
-      value: profile.id,
-      disabled: !profile.enabled,
-    }))
-  )
 
   const effectiveProvider = computed(() => {
     if (options.selectedProviderId.value !== null) {
@@ -70,19 +62,13 @@ export function useTaskExecutionOptions(options: TaskExecutionOptions) {
   })
 
   const effectiveWorkerProfile = computed(() => {
-    if (options.selectedWorkerProfileId.value !== null) {
+    const workerProfileId = options.workerProfileId.value ?? options.task.value?.worker_profile_id
+    if (workerProfileId != null) {
       return selectableWorkerProfiles.value.find(
-        profile => profile.id === options.selectedWorkerProfileId.value,
+        profile => profile.id === workerProfileId,
       ) ?? null
     }
-    if (options.defaultWorkerProfileId.value != null) {
-      return selectableWorkerProfiles.value.find(
-        profile => profile.id === options.defaultWorkerProfileId.value,
-      ) ?? null
-    }
-    return selectableWorkerProfiles.value.find(
-      profile => profile.is_default && profile.enabled,
-    ) ?? null
+    return null
   })
 
   async function loadProviders() {
@@ -109,7 +95,6 @@ export function useTaskExecutionOptions(options: TaskExecutionOptions) {
     providerOptions,
     selectableProviders,
     selectableWorkerProfiles,
-    workerProfileOptions,
     workerProfiles,
   }
 }

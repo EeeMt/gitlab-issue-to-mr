@@ -21,6 +21,13 @@ class RetryTaskRequest(BaseModel):
 
     scheduled_datetime: datetime | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def reject_worker_switch(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "worker_profile_id" in data:
+            raise ValueError("worker_profile_id is fixed by the parent issue")
+        return data
+
 
 class RescheduleTaskRequest(BaseModel):
     """Request model for updating an existing task's scheduled time."""
@@ -48,9 +55,6 @@ class UpdateTaskRequest(BaseModel):
         provider_id: AI provider ID. Pass ``null`` / ``None`` to restore the
             issue default (or system default when the issue has none). Omit the
             key entirely to leave the current value unchanged.
-        worker_profile_id: Worker profile ID. Pass ``null`` / ``None`` to restore
-            the issue default (or system default when the issue has none). Omit
-            the key entirely to leave the current value unchanged.
         require_changes: Whether the task must produce file changes.
             Cannot be null — omit the key to leave unchanged.
         task_mode: Execution mode — 'execute' (default) or 'plan'.
@@ -61,12 +65,18 @@ class UpdateTaskRequest(BaseModel):
     user_prompt: str | None = None
     priority: int | None = None
     provider_id: int | None = None
-    worker_profile_id: int | None = None
     require_changes: bool | None = None
     task_mode: Literal["execute", "plan"] | None = None
     run_instruction_template: str | None = Field(
         default=None, max_length=MAX_RUN_INSTRUCTION_TEMPLATE_LENGTH
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_worker_switch(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "worker_profile_id" in data:
+            raise ValueError("worker_profile_id is fixed by the parent issue")
+        return data
 
     @field_validator("user_prompt", mode="before")
     @classmethod
@@ -108,13 +118,19 @@ class CreateTaskRequest(BaseModel):
     delay_seconds: int | None = None
     scheduled_datetime: datetime | None = None
     provider_id: int | None = None
-    worker_profile_id: int | None = None
     require_changes: bool | None = False
     task_mode: Literal["execute", "plan"] = "execute"
     session_mode: Literal["continue", "fresh"] = "continue"
     run_instruction_template: str | None = Field(
         default=None, max_length=MAX_RUN_INSTRUCTION_TEMPLATE_LENGTH
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_worker_switch(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "worker_profile_id" in data:
+            raise ValueError("worker_profile_id is fixed by the parent issue")
+        return data
 
     @model_validator(mode="after")
     def validate_schedule_is_future(self) -> "CreateTaskRequest":

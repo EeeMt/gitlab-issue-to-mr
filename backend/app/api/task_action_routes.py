@@ -228,11 +228,13 @@ async def cancel_task(
         raw_logs_finalized = task.raw_logs_finalized_at is not None
     if raw_logs_finalized and task.raw_logs_finalized_at is None:
         task.raw_logs_finalized_at = utcnow()
+    if container_absent and raw_logs_finalized:
+        task.container_id = None
     await db.commit()
 
     if container is not None and raw_logs_finalized:
         try:
-            await asyncio.to_thread(container.remove, force=True)
+            await asyncio.to_thread(container.remove, force=True, v=True)
             logger.info(
                 "Removed container %s for cancelled task %s",
                 container_reference,
@@ -244,6 +246,9 @@ async def cancel_task(
                 task_id,
                 remove_error,
             )
+        else:
+            task.container_id = None
+            await db.commit()
     elif container is not None:
         logger.error(
             "Retaining container %s for cancelled task %s because raw logs were not finalized",
@@ -251,9 +256,21 @@ async def cancel_task(
             task_id,
         )
 
-    await release_issue_execution_lock(db, issue_id=task.issue_id)
-    await db.commit()
-    logger.info("Released issue %s execution lock for cancelled task %s", task.issue_id, task_id)
+    if task.container_id is None:
+        await release_issue_execution_lock(db, issue_id=task.issue_id)
+        await db.commit()
+        logger.info(
+            "Released issue %s execution lock for cancelled task %s",
+            task.issue_id,
+            task_id,
+        )
+    else:
+        logger.warning(
+            "Keeping issue %s locked because cancelled task %s retains container %s",
+            task.issue_id,
+            task_id,
+            task.container_id,
+        )
     await notify_task_cancelled(task)
     logger.info(f"Task {task_id} cancelled via API")
 

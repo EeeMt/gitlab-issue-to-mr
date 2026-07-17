@@ -4,9 +4,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.api.task_schemas import UpdateTaskRequest
+from app.api.task_schemas import RetryTaskRequest, UpdateTaskRequest
 from app.api.tasks import CreateTaskRequest, create_task, update_task
 from app.core.worker_profiles import WorkerProfileValidationError
 from app.dependencies.project_access import ProjectAccessScope
@@ -22,7 +23,7 @@ from app.models import (
 
 
 @pytest.mark.asyncio
-async def test_create_task_uses_issue_default_worker_and_provider_when_omitted():
+async def test_create_task_uses_issue_pinned_worker_and_default_provider():
     request = CreateTaskRequest(
         issue_id=1,
         user_prompt="Implement worker profiles",
@@ -33,7 +34,7 @@ async def test_create_task_uses_issue_default_worker_and_provider_when_omitted()
     issue.project_id = 101
     issue.description = "Implement worker profiles"
     issue.status = "open"
-    issue.default_worker_profile_id = 33
+    issue.worker_profile_id = 33
     issue.default_provider_id = 44
 
     worker_profile = MagicMock()
@@ -129,7 +130,7 @@ async def test_create_task_loads_worker_profile_environment_from_existing_identi
                 project_id=101,
                 status="open",
                 description="Implement worker profiles",
-                default_worker_profile=worker_profile,
+                worker_profile=worker_profile,
                 default_provider=provider,
             )
             db.add_all([provider, worker_profile, issue])
@@ -139,7 +140,6 @@ async def test_create_task_loads_worker_profile_environment_from_existing_identi
                 issue_id=issue.id,
                 user_prompt="Implement worker profiles",
                 priority=1,
-                worker_profile_id=worker_profile.id,
                 provider_id=provider.id,
             )
 
@@ -162,7 +162,7 @@ async def test_create_task_loads_worker_profile_environment_from_existing_identi
 
 
 @pytest.mark.asyncio
-async def test_create_task_rejects_disabled_issue_default_worker():
+async def test_create_task_rejects_disabled_issue_worker():
     request = CreateTaskRequest(issue_id=1, user_prompt="x", priority=1)
     issue = MagicMock(id=1, project_id=101, description="x", status="open")
     db = MagicMock()
@@ -186,78 +186,20 @@ async def test_create_task_rejects_disabled_issue_default_worker():
     assert "disabled" in exc.value.detail
 
 
-@pytest.mark.asyncio
-async def test_update_task_worker_profile_rebuilds_snapshot_prompt_from_snapshot_template():
-    task = Task(
-        id=88,
-        issue_id=1,
-        project_id=101,
-        user_prompt="Implement worker profiles",
-        priority=1,
-        status=TaskStatus.PENDING,
-        provider_id=44,
-        worker_profile_id=33,
-        task_mode="execute",
-        run_instruction_template="Old {{user_prompt}}",
-        require_changes=True,
-        trigger_source="manual",
-        created_at=datetime(2026, 6, 25, 9, 0, 0),
-        updated_at=datetime(2026, 6, 25, 9, 0, 0),
-    )
-    issue = Issue(
-        id=1,
-        title="Worker defaults",
-        project_id=101,
-        status="open",
-        description="Implement worker profiles",
-        created_at=datetime(2026, 6, 25, 9, 0, 0),
-        updated_at=datetime(2026, 6, 25, 9, 0, 0),
-    )
-    worker_profile = SimpleNamespace(id=77)
-    snapshot = TaskWorkerProfileSnapshot(
-        task_id=88,
-        worker_profile_id=77,
-        profile_name="Java Worker",
-        image="codify-worker:java",
-        volume_mounts=[],
-        environment_variables=[],
-        pre_script="",
-        post_script="",
-        default_execute_run_instruction_template="Snapshot {{user_prompt}}",
-        default_plan_run_instruction_template="Plan {{user_prompt}}",
-        ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
-        created_at=datetime(2026, 6, 25, 9, 0, 0),
-    )
-
-    db = MagicMock()
-    db.get = AsyncMock(return_value=issue)
-    db.commit = AsyncMock()
-    db.rollback = AsyncMock()
-    db.refresh = AsyncMock()
-    access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
-
-    with (
-        patch("app.api.tasks.get_task_with_access_check", new=AsyncMock(return_value=task)),
-        patch(
-            "app.api.tasks.resolve_worker_profile_for_issue",
-            new=AsyncMock(return_value=worker_profile),
-        ),
-        patch("app.api.tasks.replace_task_worker_snapshot", new=AsyncMock(return_value=snapshot)),
-        patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
-    ):
-        response = await update_task(
-            88,
-            UpdateTaskRequest(worker_profile_id=77),
-            db=db,
-            current_user=SimpleNamespace(id=7),
-            access_scope=access_scope,
-        )
-
-    assert task.worker_profile_id == 77
-    assert task.run_instruction_template == "Snapshot {{user_prompt}}"
-    assert task.rendered_prompt == "Snapshot Implement worker profiles"
-    assert response["worker_profile_id"] == 77
-    assert response["worker_profile_name"] == "Java Worker"
+def test_task_request_schemas_do_not_expose_worker_switching():
+    assert "worker_profile_id" not in CreateTaskRequest.model_fields
+    assert "worker_profile_id" not in RetryTaskRequest.model_fields
+    assert "worker_profile_id" not in UpdateTaskRequest.model_fields
+    with pytest.raises(ValidationError, match="fixed by the parent issue"):
+        CreateTaskRequest.model_validate({
+            "issue_id": 1,
+            "user_prompt": "x",
+            "worker_profile_id": 7,
+        })
+    with pytest.raises(ValidationError, match="fixed by the parent issue"):
+        UpdateTaskRequest.model_validate({"worker_profile_id": 7})
+    with pytest.raises(ValidationError, match="fixed by the parent issue"):
+        RetryTaskRequest.model_validate({"worker_profile_id": 7})
 
 
 @pytest.mark.asyncio

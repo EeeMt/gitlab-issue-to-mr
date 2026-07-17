@@ -12,14 +12,17 @@ from app.api.worker_profiles import (
     DockerConnectionTestRequest,
     WorkerProfileCreateRequest,
     WorkerProfileEnvironmentVariableRequest,
+    WorkerProfileUpdateRequest,
     WorkerRuntimeVerificationRequest,
     create_worker_profile,
     set_default_worker_profile_endpoint,
+    update_worker_profile,
     verify_worker_profile_runtime,
 )
 from app.api.worker_profiles import (
     test_worker_profile_docker_connection as run_docker_connection_test,
 )
+from app.core.worker_profiles import parse_worker_profile_mounts
 from app.database import get_db
 from app.dependencies.auth import (
     require_admin_user,
@@ -185,6 +188,60 @@ async def test_create_mounted_worker_profile_rejects_kit_mount_collision():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "container_path",
+    [
+        "/workspace",
+        "/opt",
+        "/opt/codify-issue-meta/owner",
+        "/tmp/codify-runtime/ci-failure",
+    ],
+)
+async def test_create_worker_profile_rejects_system_mount_collision(container_path):
+    db = MagicMock()
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = None
+    db.execute = AsyncMock(return_value=result)
+    db.rollback = AsyncMock()
+
+    request = WorkerProfileCreateRequest(
+        name="Invalid Mount",
+        image="codify-worker:latest",
+        volume_mounts=[
+            {
+                "host_path": "/srv/override",
+                "container_path": container_path,
+                "mode": "rw",
+            }
+        ],
+        environment_variables=[],
+        default_execute_run_instruction_template="Execute {{user_prompt}}",
+        default_plan_run_instruction_template="Plan {{user_prompt}}",
+        ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await create_worker_profile(request, db=db)
+
+    assert exc.value.status_code == 422
+    assert "conflicts with Codify system path" in str(exc.value.detail)
+
+
+def test_worker_profile_allows_workspace_cache_subdirectory_mount():
+    mounts = parse_worker_profile_mounts(
+        [
+            {
+                "host_path": "/srv/cache",
+                "container_path": "/workspace/.cache",
+                "mode": "rw",
+            }
+        ]
+    )
+
+    assert mounts[0]["container_path"] == "/workspace/.cache"
+
+
+@pytest.mark.asyncio
 async def test_set_default_rejects_disabled_profile():
     profile = _make_profile(id=10, name="Disabled Worker", enabled=False)
 
@@ -199,6 +256,79 @@ async def test_set_default_rejects_disabled_profile():
         )
     assert exc.value.status_code == 422
     assert "Disabled worker profiles cannot be default" in str(exc.value.detail)
+    assert db.get.await_args.kwargs["with_for_update"] is True
+
+
+@pytest.mark.asyncio
+async def test_update_assigned_worker_allows_unchanged_docker_target_fields():
+    profile = _make_profile(id=11)
+    db = MagicMock()
+    db.get = AsyncMock(return_value=profile)
+    db.execute = AsyncMock()
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+
+    response = await update_worker_profile(
+        11,
+        WorkerProfileUpdateRequest(
+            description="Updated description",
+            docker_host=profile.docker_host,
+            docker_tls_ca=profile.docker_tls_ca,
+            docker_tls_cert=profile.docker_tls_cert,
+            docker_tls_key=profile.docker_tls_key,
+        ),
+        db=db,
+    )
+
+    assert response["description"] == "Updated description"
+    db.execute.assert_not_awaited()
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_update_assigned_worker_rejects_actual_docker_target_change():
+    profile = _make_profile(id=11)
+    count_result = MagicMock()
+    count_result.scalar_one.return_value = 1
+    db = MagicMock()
+    db.get = AsyncMock(return_value=profile)
+    db.execute = AsyncMock(return_value=count_result)
+    db.rollback = AsyncMock()
+
+    with pytest.raises(HTTPException) as exc:
+        await update_worker_profile(
+            11,
+            WorkerProfileUpdateRequest(docker_host="tcp://other-worker:2376"),
+            db=db,
+        )
+
+    assert exc.value.status_code == 422
+    assert "assigned to 1 active or retained issue" in str(exc.value.detail)
+    assert profile.docker_host == "tcp://worker:2376"
+
+
+@pytest.mark.asyncio
+async def test_update_assigned_worker_allows_tls_credential_rotation_on_same_daemon():
+    profile = _make_profile(id=11)
+    db = MagicMock()
+    db.get = AsyncMock(return_value=profile)
+    db.execute = AsyncMock()
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+
+    response = await update_worker_profile(
+        11,
+        WorkerProfileUpdateRequest(
+            docker_tls_ca="/certs-v2/ca.pem",
+            docker_tls_cert="/certs-v2/cert.pem",
+            docker_tls_key="/certs-v2/key.pem",
+        ),
+        db=db,
+    )
+
+    assert response["docker_tls_ca"] == "/certs-v2/ca.pem"
+    db.execute.assert_not_awaited()
+    db.commit.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -268,7 +398,7 @@ async def test_verify_mounted_worker_profile_runs_preflight_on_profile_target():
         "bind": "/nix/store",
         "mode": "ro",
     }
-    container.remove.assert_called_once_with(force=True)
+    container.remove.assert_called_once_with(force=True, v=True)
     client.close.assert_called_once()
 
 
@@ -478,3 +608,4 @@ def test_disable_default_worker_profile_returns_422():
 
     assert response.status_code == 422
     assert response.json()["detail"] == "Default worker profile cannot be disabled"
+    assert db.get.await_args.kwargs["with_for_update"] is True

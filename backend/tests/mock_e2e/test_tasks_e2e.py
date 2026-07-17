@@ -49,7 +49,7 @@ from app.dependencies.project_access import (
     require_project_access_scope,
 )
 from app.main import app
-from app.models import AIProvider, Base, Issue, Task, TaskLog, TaskStatus
+from app.models import AIProvider, Base, Issue, Task, TaskLog, TaskStatus, WorkerProfile
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -105,7 +105,7 @@ def _mock_admin_user():
 
 
 @pytest.fixture
-async def client(session_factory, _mock_admin_user, _default_provider):
+async def client(session_factory, _mock_admin_user, _default_provider, _default_worker):
     """httpx.AsyncClient wired to the FastAPI app with auth overrides.
 
     * ``get_db`` → yields sessions from the in-memory test database
@@ -157,6 +157,27 @@ async def _default_provider(session_factory):
         return provider.id
 
 
+@pytest.fixture
+async def _default_worker(session_factory):
+    """Seed the Worker that every test Issue must select explicitly."""
+    async with session_factory() as session:
+        worker = WorkerProfile(
+            name="Test Worker",
+            enabled=True,
+            is_default=True,
+            image="codify-worker:test",
+            volume_mounts=[],
+            pre_script="",
+            post_script="",
+            default_execute_run_instruction_template="{{user_prompt}}",
+            default_plan_run_instruction_template="{{user_prompt}}",
+            ci_auto_repair_run_instruction_template="{{user_prompt}}",
+        )
+        session.add(worker)
+        await session.commit()
+        return worker.id
+
+
 @pytest.fixture(autouse=True)
 def _isolate_runtime_config():
     """Save / restore module-level _runtime_config between tests."""
@@ -184,7 +205,10 @@ def _mock_docker():
     mock_docker = MagicMock()
     mock_container = MagicMock()
     mock_docker.client.containers.get.return_value = mock_container
-    with patch("app.api.tasks.get_docker_client", return_value=mock_docker):
+    with patch(
+        "app.api.task_action_routes.get_docker_client_async",
+        new=AsyncMock(return_value=mock_docker),
+    ):
         yield mock_docker
 
 
@@ -225,6 +249,7 @@ async def _seed_issue(db_session: AsyncSession, **overrides) -> Issue:
         branch_name="codify/issue-10",
         target_branch="main",
         status="open",
+        worker_profile_id=1,
     )
     defaults.update(overrides)
     issue = Issue(**defaults)
@@ -290,6 +315,7 @@ class TestCreateTask:
             "project_id": 1,
             "title": "Test issue",
             "target_branch": "main",
+            "worker_profile_id": 1,
         })
         assert issue_resp.status_code == 200
         issue_id = issue_resp.json()["id"]
@@ -319,6 +345,7 @@ class TestCreateTask:
             "title": "Full test issue",
             "base_branch": "develop",
             "target_branch": "main",
+            "worker_profile_id": 1,
         })
         assert issue_resp.status_code == 200
         issue_id = issue_resp.json()["id"]
@@ -347,6 +374,7 @@ class TestCreateTask:
             "project_id": 1,
             "title": "Disabled provider issue",
             "target_branch": "main",
+            "worker_profile_id": 1,
         })
         assert issue_resp.status_code == 200
         issue_id = issue_resp.json()["id"]
@@ -356,8 +384,8 @@ class TestCreateTask:
             "provider_id": 1,
             "user_prompt": "Should not start",
         })
-        assert resp.status_code == 409
-        assert resp.json()["detail"] == "Provider is disabled"
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "AI provider 'Test Provider' is disabled"
 
     async def test_create_task_with_delay_seconds(self, client):
         """Create a task with delay_seconds → scheduled_at is set in the future."""
@@ -366,6 +394,7 @@ class TestCreateTask:
             "project_id": 1,
             "title": "Delayed issue",
             "target_branch": "main",
+            "worker_profile_id": 1,
         })
         assert issue_resp.status_code == 200
         issue_id = issue_resp.json()["id"]
@@ -392,6 +421,7 @@ class TestCreateTask:
             "project_id": 1,
             "title": "Scheduled issue",
             "target_branch": "main",
+            "worker_profile_id": 1,
         })
         assert issue_resp.status_code == 200
         issue_id = issue_resp.json()["id"]
@@ -414,6 +444,7 @@ class TestCreateTask:
             "project_id": 1,
             "title": "Past issue",
             "target_branch": "main",
+            "worker_profile_id": 1,
         })
         assert issue_resp.status_code == 200
         issue_id = issue_resp.json()["id"]
@@ -439,6 +470,7 @@ class TestCreateTask:
             "project_id": 1,
             "title": "No description",
             "target_branch": "main",
+            "worker_profile_id": 1,
         })
         assert issue_resp.status_code == 200
         issue_id = issue_resp.json()["id"]
@@ -457,6 +489,7 @@ class TestCreateTask:
             "project_id": 1,
             "title": "Priority 0 issue",
             "target_branch": "main",
+            "worker_profile_id": 1,
         })
         assert issue_resp.status_code == 200
         issue_id = issue_resp.json()["id"]
@@ -478,6 +511,7 @@ class TestCreateTask:
             "project_id": 1,
             "title": "Bad delay issue",
             "target_branch": "main",
+            "worker_profile_id": 1,
         })
         assert issue_resp.status_code == 200
         issue_id = issue_resp.json()["id"]
@@ -497,6 +531,7 @@ class TestCreateTask:
             "project_id": 1,
             "title": "Issue A",
             "target_branch": "main",
+            "worker_profile_id": 1,
         })
         assert issue1_resp.status_code == 200
         issue1_id = issue1_resp.json()["id"]
@@ -505,6 +540,7 @@ class TestCreateTask:
             "project_id": 1,
             "title": "Issue B",
             "target_branch": "main",
+            "worker_profile_id": 1,
         })
         assert issue2_resp.status_code == 200
         issue2_id = issue2_resp.json()["id"]

@@ -164,6 +164,12 @@ def _make_worker(mock_gitlab=None, mock_docker=None):
     """Build a WorkerExecutor with mock clients."""
     mock_gitlab = mock_gitlab or MagicMock()
     mock_docker = mock_docker or MagicMock()
+    for container in (
+        mock_docker.create_container.return_value,
+        mock_docker.client.containers.get.return_value,
+    ):
+        if not isinstance(getattr(container, "status", None), str):
+            container.status = "exited"
     return WorkerExecutor(docker_client=mock_docker, gitlab_client=mock_gitlab)
 
 
@@ -663,7 +669,9 @@ class TestResumeTaskContainerNotFound(unittest.TestCase):
         """resume_task sets FAILED when container is not found — lines 1075-1081."""
         mock_get_settings.return_value = _make_settings()
         mock_docker = MagicMock()
-        mock_docker.client.containers.get.side_effect = Exception("Container not found")
+        from docker.errors import NotFound
+
+        mock_docker.client.containers.get.side_effect = NotFound("Container not found")
 
         worker = _make_worker(mock_docker=mock_docker)
         task = _make_task(status=TaskStatus.RUNNING)
@@ -674,7 +682,27 @@ class TestResumeTaskContainerNotFound(unittest.TestCase):
         self.assertFalse(result)
         self.assertEqual(task.status, TaskStatus.FAILED)
         self.assertIn("Container disappeared", task.error_message)
+        self.assertIsNone(task.container_id)
         self.assertIsNotNone(task.completed_at)
+
+    @patch('app.core.worker.get_settings')
+    def test_inconclusive_container_lookup_is_retryable(self, mock_get_settings):
+        """A daemon/API error must not be converted into confirmed container absence."""
+        from app.core.worker_docker_targets import TaskContainerLookupError
+
+        mock_get_settings.return_value = _make_settings()
+        mock_docker = MagicMock()
+        mock_docker.client.containers.get.side_effect = RuntimeError("Docker timed out")
+
+        worker = _make_worker(mock_docker=mock_docker)
+        task = _make_task(status=TaskStatus.RUNNING)
+        db = _make_db(task)
+
+        with self.assertRaises(TaskContainerLookupError):
+            asyncio.run(worker.resume_task(db, task_id=task.id, container_name="codify-1"))
+
+        self.assertEqual(task.status, TaskStatus.RUNNING)
+        self.assertIsNone(task.completed_at)
 
 
 class TestResumeTaskSuccess(unittest.TestCase):
@@ -951,8 +979,8 @@ class TestResumeTaskException(unittest.TestCase):
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
-    def test_exception_sets_failed_and_cleans_up(self, mock_notify, mock_get_settings):
-        """Exception during resume sets FAILED and cleans up container — lines 1127-1137."""
+    def test_exception_sets_failed_and_retains_logs(self, mock_notify, mock_get_settings):
+        """Resume exceptions retain the stopped container until raw logs are finalized."""
         mock_get_settings.return_value = _make_settings()
         mock_container = MagicMock(id="ctr-resume-exc")
         mock_docker = MagicMock()
@@ -972,7 +1000,7 @@ class TestResumeTaskException(unittest.TestCase):
         self.assertFalse(result)
         self.assertEqual(task.status, TaskStatus.FAILED)
         self.assertIn("Docker exploded", task.error_message)
-        mock_docker.remove_container.assert_called_with(mock_container, force=True)
+        mock_docker.remove_container.assert_not_called()
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
@@ -991,7 +1019,7 @@ class TestResumeTaskException(unittest.TestCase):
         worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
         task = _make_task(status=TaskStatus.RUNNING, initiator_user_id=7, merge_request_iid=None)
         db = _make_db(task)
-        db.commit = AsyncMock(side_effect=[RuntimeError("post-parse commit failed"), None])
+        db.commit = AsyncMock(side_effect=[RuntimeError("post-parse commit failed"), None, None])
 
         fake_logs = (
             "http://gitlab.example.com/project/-/merge_requests/42\n"
@@ -1156,11 +1184,22 @@ class TestExecuteTaskContainerRemovalException(unittest.TestCase):
         task = _make_task(target_branch="main", merge_request_iid=None)
         db = _make_db(task)
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1, False))):
+        with (
+            patch.object(
+                worker,
+                '_stream_logs_to_db',
+                new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1, False)),
+            ),
+            patch(
+                "app.core.worker_task_lifecycle.finalize_task_raw_logs",
+                new=AsyncMock(),
+            ),
+        ):
             result = asyncio.run(worker.execute_task(db, task.id))
 
         # Should still return True (success) despite cleanup failure
         self.assertTrue(result)
+        self.assertEqual(task.container_id, "ctr-rm-err")
 
 
 class TestExecuteTaskExceptionNotificationFailures(unittest.TestCase):

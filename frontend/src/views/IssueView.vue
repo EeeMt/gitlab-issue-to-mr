@@ -280,13 +280,8 @@
             </span>
           </n-space>
         </n-form-item>
-        <n-form-item :label="t('createTask.defaultWorkerProfile')">
-          <n-select
-            v-model:value="editForm.default_worker_profile_id"
-            :options="workerProfileOptions"
-            clearable
-            :placeholder="t('createTask.selectDefaultWorkerProfile')"
-          />
+        <n-form-item :label="t('createTask.workerProfile')">
+          <n-input :value="issue?.worker_profile_name ?? t('common.unavailable')" disabled />
         </n-form-item>
         <n-form-item :label="t('createTask.defaultProvider')">
           <n-select
@@ -313,7 +308,7 @@
       :issue-id="issueId"
       :issue-description="issue?.description ?? undefined"
       :has-claude-session="Boolean(issue?.claude_session_id)"
-      :default-worker-profile-id="issue?.default_worker_profile_id ?? null"
+      :worker-profile-id="issue?.worker_profile_id ?? null"
       :default-provider-id="issue?.default_provider_id ?? null"
       data-testid="issue-create-task-drawer"
       @created="fetchIssue"
@@ -454,9 +449,8 @@ import RescheduleDrawer from '../components/RescheduleDrawer.vue'
 import {
   getIssue, updateIssue, closeIssue, retryTask, deleteIssueBranch,
   getProjects, getIssueCIFailures, getIssueWebhookEvents,
-  getProviders, getWorkerProfiles,
+  getProviders,
   type AIProvider, type Issue, type Task, type Project, type CIFailureRun, type WebhookEvent,
-  type WorkerProfile
 } from '../api'
 import PageHeader from '../components/PageHeader.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
@@ -511,7 +505,6 @@ const showCloseModal = ref(false)
 let pollTimer: number | null = null
 const projects = ref<Project[]>([])
 const providers = ref<AIProvider[]>([])
-const workerProfiles = ref<WorkerProfile[]>([])
 const ciFailures = ref<CIFailureRun[]>([])
 const issueWebhookEvents = ref<WebhookEvent[]>([])
 const ciFailuresLoading = ref(false)
@@ -580,16 +573,6 @@ const projectUrl = computed(() => {
   return project?.web_url ?? null
 })
 
-const workerProfileOptions = computed(() =>
-  workerProfiles.value
-    .filter(profile => profile.enabled || profile.id === issue.value?.default_worker_profile_id)
-    .map(profile => ({
-      label: profile.name,
-      value: profile.id,
-      disabled: !profile.enabled,
-    }))
-)
-
 const providerOptions = computed(() =>
   providers.value
     .filter(provider => !provider.is_disabled || provider.id === issue.value?.default_provider_id)
@@ -626,7 +609,6 @@ const editForm = reactive({
   title: '',
   description: '',
   ci_auto_repair_enabled: false,
-  default_worker_profile_id: null as number | null,
   default_provider_id: null as number | null,
 })
 
@@ -801,7 +783,6 @@ async function handleSaveEdit() {
       title: editForm.title,
       description: editForm.description,
       ci_auto_repair_enabled: editForm.ci_auto_repair_enabled,
-      default_worker_profile_id: editForm.default_worker_profile_id,
       default_provider_id: editForm.default_provider_id,
     })
     showEditModal.value = false
@@ -863,21 +844,15 @@ function openEditModal() {
   editForm.title = issue.value.title
   editForm.description = issue.value.description || ''
   editForm.ci_auto_repair_enabled = issue.value.ci_auto_repair_enabled
-  editForm.default_worker_profile_id = issue.value.default_worker_profile_id
   editForm.default_provider_id = issue.value.default_provider_id
   showEditModal.value = true
 }
 
 async function loadExecutionDefaults() {
-  const [workerResult, providerResult] = await Promise.allSettled([
-    getWorkerProfiles(),
-    getProviders(),
-  ])
-  if (workerResult.status === 'fulfilled') {
-    workerProfiles.value = Array.isArray(workerResult.value) ? workerResult.value : []
-  }
-  if (providerResult.status === 'fulfilled') {
-    providers.value = Array.isArray(providerResult.value) ? providerResult.value : []
+  const providerResult = await Promise.allSettled([getProviders()])
+  const result = providerResult[0]
+  if (result.status === 'fulfilled') {
+    providers.value = Array.isArray(result.value) ? result.value : []
   }
 }
 

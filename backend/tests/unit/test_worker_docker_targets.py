@@ -156,7 +156,53 @@ async def test_list_known_targets_can_include_retained_terminal_snapshots():
 
     assert "http://retained-worker:2376" in {target.daemon_key for target in targets}
     snapshot_query = db.execute.await_args_list[1].args[0]
-    assert "raw_logs_finalized_at IS NULL" in str(snapshot_query)
+    assert "container_id IS NOT NULL" in str(snapshot_query)
+
+
+@pytest.mark.asyncio
+async def test_crash_recovery_clears_finalized_missing_container_reference():
+    connection = DockerConnectionConfig(host="tcp://arm-worker:2376")
+    task = SimpleNamespace(
+        id=9,
+        issue_id=90,
+        status=TaskStatus.COMPLETED,
+        container_id="finished-container-9",
+        raw_logs_finalized_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+    task_result = MagicMock()
+    task_result.scalars.return_value.all.return_value = [task]
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=task_result)
+    db.commit = AsyncMock()
+    db_context = MagicMock()
+    db_context.__aenter__ = AsyncMock(return_value=db)
+    db_context.__aexit__ = AsyncMock(return_value=False)
+    docker = MagicMock()
+    docker.client.containers.list.return_value = []
+
+    scheduler = Scheduler()
+    with (
+        patch("app.scheduler.AsyncSessionLocal", return_value=db_context),
+        patch(
+            "app.scheduler.cleanup_inactive_issue_execution_locks",
+            new=AsyncMock(return_value=0),
+        ),
+        patch(
+            "app.scheduler.list_known_docker_targets",
+            new=AsyncMock(return_value=[KnownDockerTarget(connection, ("ARM Worker",))]),
+        ),
+        patch("app.scheduler.connection_for_task", new=AsyncMock(return_value=connection)),
+        patch("app.scheduler._get_recovery_docker_client", return_value=docker),
+        patch(
+            "app.scheduler.find_task_container",
+            new=AsyncMock(side_effect=TaskContainerNotFoundError("missing")),
+        ) as find_container,
+    ):
+        await scheduler._crash_recovery()
+
+    find_container.assert_awaited_once()
+    assert task.container_id is None
+    db.commit.assert_awaited()
 
 
 @pytest.mark.asyncio
@@ -633,6 +679,7 @@ async def test_deferred_recovery_honors_cancel_intent_when_container_is_absent()
 
     assert task.status == TaskStatus.CANCELLED
     assert task.error_message == "Cancelled by user; worker container is confirmed absent"
+    assert task.container_id is None
     release_lock.assert_awaited_once_with(db, issue_id=task.issue_id)
     db.commit.assert_awaited_once()
     assert task.id not in scheduler._running_tasks
@@ -688,10 +735,13 @@ async def test_deferred_recovery_keeps_cancelled_outcome_for_non_runnable_contai
         cancel_requested_at=datetime.now(UTC).replace(tzinfo=None),
         completed_at=None,
         error_message=None,
+        raw_logs_finalized_at=None,
     )
     container = MagicMock()
     container.name = "codify-34-issue304"
     container.status = "dead"
+    docker = MagicMock()
+    docker.read_file_from_container.return_value = b"worker stopped\n"
     db = MagicMock()
     db.get = AsyncMock(return_value=task)
     db.refresh = AsyncMock()
@@ -706,16 +756,27 @@ async def test_deferred_recovery_keeps_cancelled_outcome_for_non_runnable_contai
         patch("app.scheduler.AsyncSessionLocal", return_value=db_context),
         patch(
             "app.scheduler.find_task_container",
-            new=AsyncMock(return_value=(MagicMock(), container, connection)),
+            new=AsyncMock(return_value=(docker, container, connection)),
         ),
+        patch(
+            "app.scheduler.persist_raw_log_snapshot",
+            new=AsyncMock(),
+        ) as persist_snapshot,
         patch.object(scheduler, "_resume_task_background", new=AsyncMock()) as resume,
         patch("app.scheduler.release_issue_execution_lock", new=AsyncMock()) as release_lock,
     ):
         await scheduler._coordinate_unavailable_recovery(task.id)
 
-    container.remove.assert_called_once_with(force=True)
+    container.remove.assert_called_once_with(force=True, v=True)
     assert task.status == TaskStatus.CANCELLED
     assert task.error_message == "Cancelled by user; recovered worker container was removed"
+    assert task.container_id is None
+    assert task.raw_logs_finalized_at is not None
+    persist_snapshot.assert_awaited_once_with(
+        db,
+        task_id=task.id,
+        content=b"worker stopped\n",
+    )
     release_lock.assert_awaited_once_with(db, issue_id=task.issue_id)
     resume.assert_not_awaited()
 
@@ -798,7 +859,8 @@ async def test_worker_finalization_honors_persisted_cancellation_intent():
     assert result is False
     assert task.status == TaskStatus.CANCELLED
     assert task.error_message == "Cancelled by user"
-    db.commit.assert_awaited_once()
+    assert task.container_id is None
+    assert db.commit.await_count == 2
     worker._parse_task_result.assert_not_awaited()
     worker.docker.remove_container.assert_called_once_with(container, force=True)
 

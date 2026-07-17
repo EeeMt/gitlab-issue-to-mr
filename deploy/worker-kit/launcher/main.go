@@ -67,6 +67,15 @@ func main() {
 	os.Setenv("LANG", "C.UTF-8")
 	os.Unsetenv("LANGUAGE")
 
+	if len(os.Args) > 1 && os.Args[1] == "--maintenance-shell" {
+		if len(os.Args) != 3 {
+			fail("--maintenance-shell requires exactly one command")
+		}
+		if err := syscall.Exec(m.Bash, []string{m.Bash, "-c", os.Args[2]}, os.Environ()); err != nil {
+			fail("exec maintenance shell: %v", err)
+		}
+	}
+
 	argv := []string{m.Bash, m.Entrypoint}
 	argv = append(argv, os.Args[1:]...)
 	if err := syscall.Exec(m.Bash, argv, os.Environ()); err != nil {

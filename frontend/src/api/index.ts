@@ -122,9 +122,9 @@ export interface Issue {
   delete_branch_on_close: boolean
   branch_deleted: boolean
   ci_auto_repair_enabled: boolean
-  default_worker_profile_id: number | null
+  worker_profile_id: number
   default_provider_id: number | null
-  default_worker_profile_name?: string | null
+  worker_profile_name?: string | null
   default_provider_name?: string | null
 }
 
@@ -137,7 +137,7 @@ export interface CreateIssueRequest {
   // Option to delete branch when a webhook auto-closes the issue
   delete_branch_on_close?: boolean
   ci_auto_repair_enabled?: boolean
-  default_worker_profile_id?: number | null
+  worker_profile_id: number
   default_provider_id?: number | null
 }
 
@@ -1309,7 +1309,6 @@ export async function updateIssue(id: number, data: Partial<{
   description: string
   status: string
   ci_auto_repair_enabled: boolean
-  default_worker_profile_id: number | null
   default_provider_id: number | null
 }>): Promise<Issue> {
   const response = await api.patch(`/issues/${id}`, data)

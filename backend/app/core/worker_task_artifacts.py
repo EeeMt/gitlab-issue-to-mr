@@ -3,7 +3,6 @@
 import asyncio
 import json
 import logging
-import os
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -145,19 +144,8 @@ def save_task_metadata_from_container(
     task: Task,
     issue: Any,
 ) -> None:
-    """Extract task-metadata.json via the Docker API and persist it locally."""
+    """Extract task-metadata.json via the Docker API and persist it on the Task row."""
     try:
-        from app.config import get_effective_settings
-        from app.core.worker_workspace import build_issue_workspace_paths
-
-        paths = build_issue_workspace_paths(get_effective_settings(), issue, task)
-        if paths is None:
-            logger.debug(
-                f"[Task {task.id}] Skipping metadata extraction: "
-                "worker_workspace_host_path not configured"
-            )
-            return
-
         raw = worker.docker.read_file_from_container(container, _CONTAINER_METADATA_PATH)
         if not raw:
             logger.info(
@@ -174,11 +162,8 @@ def save_task_metadata_from_container(
             )
             return
 
-        destination = os.path.join(paths.runtime_path, "task-metadata.json")
-        os.makedirs(paths.runtime_path, exist_ok=True)
-        with open(destination, "w", encoding="utf-8") as file_handle:
-            json.dump(data, file_handle, ensure_ascii=False)
-        logger.info(f"[Task {task.id}] task-metadata.json extracted from container → {destination}")
+        task.worker_metadata = data
+        logger.info(f"[Task {task.id}] task-metadata.json persisted on task row")
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             f"[Task {task.id}] Could not extract task-metadata.json from container: {exc}"
@@ -228,7 +213,18 @@ async def finalize_task_raw_logs(
             _CONTAINER_CONSOLE_LOG_PATH,
         )
         if not isinstance(raw_console_log, bytes):
-            raise RuntimeError(f"Could not read {_CONTAINER_CONSOLE_LOG_PATH} from task container")
+            # The launcher or image entrypoint can fail before bootstrap creates
+            # console.log. Docker's captured stdout/stderr is then the only durable
+            # source and must be persisted so the failed container can still be reaped.
+            raw_console_log = await asyncio.to_thread(
+                worker.docker.get_container_logs,
+                container,
+            )
+        if not isinstance(raw_console_log, bytes):
+            raise RuntimeError(
+                f"Could not read {_CONTAINER_CONSOLE_LOG_PATH} or Docker logs "
+                "from task container"
+            )
         await persist_raw_log_snapshot(
             artifact_db,
             task_id=task.id,

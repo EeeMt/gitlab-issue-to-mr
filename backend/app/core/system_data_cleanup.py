@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
@@ -20,6 +19,7 @@ from app.core.worker_docker_targets import (
     find_task_container,
     list_known_docker_targets,
 )
+from app.core.worker_workspace_remote import remove_issue_workspace_remote
 from app.models import (
     Issue,
     IssueExecutionLock,
@@ -72,10 +72,6 @@ def _status_value(status: TaskStatus | str) -> str:
     return status.value if isinstance(status, TaskStatus) else str(status)
 
 
-def _issue_workspace_path(workspace_root: str, *, project_id: int, issue_id: int) -> str:
-    return os.path.join(workspace_root, f"project-{project_id}", f"issue-{issue_id}")
-
-
 def _container_name(task: Task, settings: Any) -> str:
     prefix = settings.worker_container_prefix
     return f"{prefix}-{task.id}-issue{task.issue_id}"
@@ -90,8 +86,7 @@ async def _remove_task_containers(
     container_tasks = [
         task
         for task in tasks
-        if _status_value(task.status) == TaskStatus.RUNNING.value
-        or bool(task.container_id)
+        if _status_value(task.status) == TaskStatus.RUNNING.value or bool(task.container_id)
     ]
     if not container_tasks:
         return set()
@@ -120,7 +115,7 @@ async def _remove_task_containers(
                 except Exception as exc:  # noqa: BLE001
                     stop_error = exc
             try:
-                await asyncio.to_thread(container.remove, force=True)
+                await asyncio.to_thread(container.remove, force=True, v=True)
             except Exception as exc:  # noqa: BLE001
                 if stop_error is not None:
                     raise RuntimeError(
@@ -129,11 +124,13 @@ async def _remove_task_containers(
                 raise
         except Exception as exc:
             failed_task_ids.add(task.id)
-            result.container_cleanup_errors.append({
-                "task_id": task.id,
-                "container_name": container_name,
-                "error": str(exc),
-            })
+            result.container_cleanup_errors.append(
+                {
+                    "task_id": task.id,
+                    "container_name": container_name,
+                    "error": str(exc),
+                }
+            )
     return failed_task_ids
 
 
@@ -146,26 +143,13 @@ def _cleanup_archive_files(paths: list[str], result: SystemDataCleanupResult) ->
             os.remove(archive_path)
             result.deleted_archives += 1
         except Exception as exc:  # noqa: BLE001
-            result.file_cleanup_errors.append({
-                "kind": "archive",
-                "path": archive_path,
-                "error": str(exc),
-            })
-
-
-def _cleanup_workspaces(paths: list[str], result: SystemDataCleanupResult) -> None:
-    for workspace_path in paths:
-        if not workspace_path or not os.path.exists(workspace_path):
-            continue
-        try:
-            shutil.rmtree(workspace_path)
-            result.deleted_workspaces += 1
-        except Exception as exc:  # noqa: BLE001
-            result.file_cleanup_errors.append({
-                "kind": "workspace",
-                "path": workspace_path,
-                "error": str(exc),
-            })
+            result.file_cleanup_errors.append(
+                {
+                    "kind": "archive",
+                    "path": archive_path,
+                    "error": str(exc),
+                }
+            )
 
 
 async def cleanup_system_data(
@@ -183,108 +167,113 @@ async def cleanup_system_data(
     if older_than_days is not None:
         cutoff = (now or utcnow()) - timedelta(days=older_than_days)
 
-    issue_stmt = select(Issue)
+    issue_stmt = select(Issue.id)
     if cutoff is not None:
         issue_stmt = issue_stmt.where(Issue.created_at < cutoff)
-    issues = list((await db.execute(issue_stmt)).scalars().all())
-    if not issues:
+    candidate_issue_ids = list((await db.execute(issue_stmt)).scalars().all())
+    if not candidate_issue_ids:
         return result
 
-    issue_ids = [issue.id for issue in issues]
-    task_result = await db.execute(select(Task).where(Task.issue_id.in_(issue_ids)))
-    tasks = list(task_result.scalars().all())
-    tasks_by_issue: dict[int, list[Task]] = {}
-    for task in tasks:
-        tasks_by_issue.setdefault(task.issue_id, []).append(task)
+    for issue_id in candidate_issue_ids:
+        issue = (
+            await db.execute(
+                select(Issue)
+                .where(Issue.id == issue_id)
+                .with_for_update(skip_locked=True)
+            )
+        ).scalar_one_or_none()
+        if issue is None:
+            # Even an unsuccessful SELECT starts a transaction. Release it before
+            # proceeding to another issue so a skipped row cannot keep a stale
+            # snapshot or lock alive.
+            await db.rollback()
+            continue
 
-    selected_issues: list[Issue] = []
-    for issue in issues:
-        issue_tasks = tasks_by_issue.get(issue.id, [])
+        issue_tasks = list(
+            (await db.execute(select(Task).where(Task.issue_id == issue.id)))
+            .scalars()
+            .all()
+        )
         active_tasks = [
             task
             for task in issue_tasks
             if _status_value(task.status) in ACTIVE_TASK_STATUS_VALUES
-            or (task.container_id and task.raw_logs_finalized_at is None)
+            or bool(task.container_id)
         ]
         if active_tasks and not force:
             result.skipped_active_issues += 1
             result.skipped_active_tasks += len(active_tasks)
+            await db.rollback()
             continue
-        selected_issues.append(issue)
 
-    if not selected_issues:
-        return result
+        if force:
+            failed_task_ids = await _remove_task_containers(db, issue_tasks, result, settings)
+            if failed_task_ids:
+                await db.rollback()
+                continue
 
-    selected_tasks = [
-        task for task in tasks
-        if task.issue_id in {issue.id for issue in selected_issues}
-    ]
+        workspace_deleted = False
+        if workspace_root and issue.workspace_deleted_at is None:
+            try:
+                removed = await remove_issue_workspace_remote(db, settings, issue)
+                if removed:
+                    workspace_deleted = True
+            except Exception as exc:  # noqa: BLE001
+                issue.workspace_delete_attempted_at = utcnow()
+                issue.workspace_delete_error = str(exc)[:4000]
+                result.file_cleanup_errors.append(
+                    {
+                        "kind": "workspace",
+                        "path": os.path.join(
+                            workspace_root,
+                            f"project-{issue.project_id}",
+                            f"issue-{issue.id}",
+                        ),
+                        "error": str(exc),
+                    }
+                )
+                await db.commit()
+                continue
 
-    if force:
-        failed_task_ids = await _remove_task_containers(db, selected_tasks, result, settings)
-        if failed_task_ids:
-            blocked_issue_ids = {
-                task.issue_id for task in selected_tasks if task.id in failed_task_ids
-            }
-            selected_issues = [
-                issue for issue in selected_issues if issue.id not in blocked_issue_ids
-            ]
-            selected_tasks = [
-                task for task in selected_tasks if task.issue_id not in blocked_issue_ids
-            ]
-
-    selected_issue_ids = [issue.id for issue in selected_issues]
-    selected_task_ids = [task.id for task in selected_tasks]
-    result.deleted_issues = len(selected_issue_ids)
-    result.deleted_tasks = len(selected_task_ids)
-    if not selected_issue_ids:
-        return result
-
-    archive_paths: list[str] = []
-    if selected_task_ids:
-        archives = list((
-            await db.execute(
-                select(TaskRunArchive).where(TaskRunArchive.task_id.in_(selected_task_ids))
+        task_ids = [task.id for task in issue_tasks]
+        archive_paths: list[str] = []
+        if task_ids:
+            archives = list(
+                (
+                    await db.execute(
+                        select(TaskRunArchive).where(TaskRunArchive.task_id.in_(task_ids))
+                    )
+                )
+                .scalars()
+                .all()
             )
-        ).scalars().all())
-        archive_paths = [archive.archive_path for archive in archives]
+            archive_paths = [archive.archive_path for archive in archives]
 
-    workspace_paths: list[str] = []
-    if workspace_root:
-        workspace_paths = [
-            _issue_workspace_path(
-                workspace_root,
-                project_id=issue.project_id,
-                issue_id=issue.id,
-            )
-            for issue in selected_issues
-        ]
+        await db.execute(delete(IssueExecutionLock).where(IssueExecutionLock.issue_id == issue.id))
+        await db.execute(
+            update(WebhookEvent).where(WebhookEvent.issue_id == issue.id).values(issue_id=None)
+        )
 
-    await db.execute(
-        delete(IssueExecutionLock).where(IssueExecutionLock.issue_id.in_(selected_issue_ids))
-    )
-    await db.execute(
-        update(WebhookEvent)
-        .where(WebhookEvent.issue_id.in_(selected_issue_ids))
-        .values(issue_id=None)
-    )
+        if task_ids:
+            for model in (
+                TaskLog,
+                TaskPayload,
+                TaskRawLogChunk,
+                TaskIngestCursor,
+                TaskRunArchive,
+                TaskUsageLedger,
+                MattermostNotificationDelivery,
+            ):
+                await db.execute(delete(model).where(model.task_id.in_(task_ids)))
+            await db.execute(delete(Task).where(Task.id.in_(task_ids)))
 
-    if selected_task_ids:
-        for model in (
-            TaskLog,
-            TaskPayload,
-            TaskRawLogChunk,
-            TaskIngestCursor,
-            TaskRunArchive,
-            TaskUsageLedger,
-            MattermostNotificationDelivery,
-        ):
-            await db.execute(delete(model).where(model.task_id.in_(selected_task_ids)))
-        await db.execute(delete(Task).where(Task.id.in_(selected_task_ids)))
+        await db.execute(delete(Issue).where(Issue.id == issue.id))
+        await db.commit()
 
-    await db.execute(delete(Issue).where(Issue.id.in_(selected_issue_ids)))
-    await db.commit()
+        result.deleted_issues += 1
+        result.deleted_tasks += len(task_ids)
+        if workspace_deleted:
+            result.deleted_workspaces += 1
+        _cleanup_archive_files(archive_paths, result)
 
-    _cleanup_archive_files(archive_paths, result)
-    _cleanup_workspaces(workspace_paths, result)
     return result

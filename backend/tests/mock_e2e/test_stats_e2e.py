@@ -239,6 +239,7 @@ async def _seed_issue(db_session: AsyncSession, **overrides) -> Issue:
         branch_name="codify/test",
         target_branch="main",
         status="open",
+        worker_profile_id=1,
     )
     defaults.update(overrides)
     issue = Issue(**defaults)

@@ -534,12 +534,20 @@ def api_create_issue(backend_url: str, cookies: dict, project_id: int, title: st
     if description is None:
         description = f"E2E test issue: {title}"
     with _httpx.Client(base_url=backend_url, timeout=15, cookies=cookies) as client:
+        workers_resp = client.get("/api/worker-profiles")
+        assert workers_resp.status_code == 200, (
+            f"Failed to list workers: {workers_resp.status_code} {workers_resp.text}"
+        )
+        workers = [worker for worker in workers_resp.json() if worker.get("enabled")]
+        assert workers, "No enabled Worker profile is available for E2E tests"
+        worker = next((item for item in workers if item.get("is_default")), workers[0])
         resp = client.post(
             "/api/issues",
             json={
                 "title": title,
                 "description": description,
                 "project_id": project_id,
+                "worker_profile_id": worker["id"],
             },
         )
         assert resp.status_code in (200, 201), f"Failed to create issue: {resp.status_code} {resp.text}"

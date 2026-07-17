@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -23,6 +23,7 @@ from app.models import (
     TaskStatus,
     TaskUsageLedger,
     WebhookEvent,
+    WorkerProfile,
 )
 
 
@@ -38,6 +39,23 @@ class SystemDataCleanupServiceTests(unittest.IsolatedAsyncioTestCase):
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         self.Session = async_sessionmaker(self.engine, expire_on_commit=False)
+        async with self.Session() as session:
+            session.add(
+                WorkerProfile(
+                    id=1,
+                    name="Test Worker",
+                    enabled=True,
+                    is_default=True,
+                    image="codify-worker:test",
+                    volume_mounts=[],
+                    pre_script="",
+                    post_script="",
+                    default_execute_run_instruction_template="{{user_prompt}}",
+                    default_plan_run_instruction_template="{{user_prompt}}",
+                    ci_auto_repair_run_instruction_template="{{user_prompt}}",
+                )
+            )
+            await session.commit()
 
     async def asyncTearDown(self):
         await self.engine.dispose()
@@ -57,6 +75,7 @@ class SystemDataCleanupServiceTests(unittest.IsolatedAsyncioTestCase):
             title=f"Issue {issue_id}",
             project_id=100 + issue_id,
             status="open",
+            worker_profile_id=1,
             created_at=created_at,
             updated_at=created_at,
         )
@@ -157,24 +176,25 @@ class SystemDataCleanupServiceTests(unittest.IsolatedAsyncioTestCase):
                 archive_dir=self.temp_path,
             )
             workspace_root = self.temp_path / "workspaces"
-            issue_workspace = workspace_root / "project-101" / "issue-1"
-            issue_workspace.mkdir(parents=True)
-            (issue_workspace / "repo.txt").write_text("workspace", encoding="utf-8")
             await session.commit()
 
-            result = await cleanup_system_data(
-                session,
-                older_than_days=30,
-                force=False,
-                workspace_root=str(workspace_root),
-            )
+            with patch(
+                "app.core.system_data_cleanup.remove_issue_workspace_remote",
+                new=AsyncMock(return_value=True),
+            ) as remove_workspace:
+                result = await cleanup_system_data(
+                    session,
+                    older_than_days=30,
+                    force=False,
+                    workspace_root=str(workspace_root),
+                )
 
             self.assertEqual(result.deleted_issues, 1)
             self.assertEqual(result.deleted_tasks, 1)
             self.assertEqual(result.skipped_active_issues, 0)
             self.assertEqual(result.deleted_archives, 1)
             self.assertEqual(result.deleted_workspaces, 1)
-            self.assertFalse(issue_workspace.exists())
+            remove_workspace.assert_awaited_once()
             self.assertEqual(await self._count(session, Issue), 0)
             self.assertEqual(await self._count(session, Task), 0)
             self.assertEqual(await self._count(session, TaskLog), 0)
@@ -215,6 +235,38 @@ class SystemDataCleanupServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await self._count(session, Issue), 1)
             self.assertEqual(await self._count(session, Task), 2)
 
+    async def test_cleanup_commits_each_issue_before_processing_the_next_one(self):
+        from app.core.system_data_cleanup import cleanup_system_data
+
+        async with self.Session() as session:
+            old = utcnow() - timedelta(days=40)
+            await self._seed_issue(
+                session,
+                issue_id=20,
+                created_at=old,
+                task_statuses=[TaskStatus.COMPLETED],
+            )
+            await self._seed_issue(
+                session,
+                issue_id=21,
+                created_at=old,
+                task_statuses=[TaskStatus.COMPLETED],
+            )
+            await session.commit()
+
+            original_commit = session.commit
+            with patch.object(session, "commit", new=AsyncMock(wraps=original_commit)) as commit:
+                result = await cleanup_system_data(
+                    session,
+                    older_than_days=30,
+                    force=False,
+                    workspace_root="",
+                )
+
+            self.assertEqual(result.deleted_issues, 2)
+            self.assertEqual(commit.await_count, 2)
+            self.assertEqual(await self._count(session, Issue), 0)
+
     async def test_force_cleanup_includes_active_issues_and_stops_running_containers(self):
         from app.core.system_data_cleanup import cleanup_system_data
 
@@ -244,7 +296,7 @@ class SystemDataCleanupServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result.skipped_active_issues, 0)
             docker.client.containers.get.assert_called_once_with("codify-301-issue3")
             container.stop.assert_called_once_with(timeout=5)
-            container.remove.assert_called_once_with(force=True)
+            container.remove.assert_called_once_with(force=True, v=True)
 
     async def test_force_cleanup_removes_retained_terminal_container_by_id(self):
         from app.core.system_data_cleanup import cleanup_system_data
@@ -281,7 +333,7 @@ class SystemDataCleanupServiceTests(unittest.IsolatedAsyncioTestCase):
                 "retained-container-id"
             )
             container.stop.assert_not_called()
-            container.remove.assert_called_once_with(force=True)
+            container.remove.assert_called_once_with(force=True, v=True)
 
     async def test_non_force_cleanup_skips_retained_terminal_container(self):
         from app.core.system_data_cleanup import cleanup_system_data
@@ -365,7 +417,7 @@ class SystemDataCleanupServiceTests(unittest.IsolatedAsyncioTestCase):
                     workspace_root="",
                 )
 
-            container.remove.assert_called_once_with(force=True)
+            container.remove.assert_called_once_with(force=True, v=True)
             self.assertEqual(result.container_cleanup_errors, [])
             self.assertEqual(result.deleted_issues, 1)
 

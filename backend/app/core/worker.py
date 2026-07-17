@@ -23,12 +23,12 @@ from app.core.worker_event_projector import WorkerEventProjector
 from app.core.worker_gitlab import (
     build_initial_mr_description,
     build_initial_mr_title,
+    build_previous_task_summaries,
     create_mr_if_needed,
     create_new_mr,
     find_existing_mr,
     remove_mr_draft_status_for_issue,
     update_mr_description_for_issue,
-    write_previous_task_summaries_file,
 )
 from app.core.worker_log_stream import WorkerLogStreamer
 from app.core.worker_profiles import TaskWorkerRuntime
@@ -353,14 +353,13 @@ class WorkerExecutor:
             sudo_gl=sudo_gl,
         )
 
-    async def _write_previous_task_summaries_file(
+    async def _build_previous_task_summaries(
         self,
         db: AsyncSession,
-        settings,
         issue: Issue,
         task: Task,
-    ) -> str | None:
-        return await write_previous_task_summaries_file(db, settings, issue, task)
+    ) -> str:
+        return await build_previous_task_summaries(db, issue, task)
 
     @property
     def _run_is_resumed(self):

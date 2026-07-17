@@ -882,6 +882,7 @@ class TestUpdateIssueEdgeCases(unittest.IsolatedAsyncioTestCase):
 
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(return_value=result_mock)
+        mock_db.get = AsyncMock(return_value=MagicMock(enabled=True))
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock()
 

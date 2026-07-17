@@ -7,6 +7,7 @@ Tests:
 3. Concurrency limiting - respects max_concurrency setting
 """
 
+import asyncio
 import json
 import os
 import sys
@@ -99,6 +100,35 @@ class SchedulerPriorityQueueTests(unittest.IsolatedAsyncioTestCase):
         mock_db.execute.assert_called_once()
         # Result should be None since no tasks available
         self.assertIsNone(result)
+
+    async def test_get_next_task_excludes_busy_issue_without_starving_others(self) -> None:
+        """Busy Issue tasks are filtered in SQL before priority ordering."""
+        from sqlalchemy.dialects import postgresql
+
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        scheduler._running_issues.add(10)
+        runnable = self._create_mock_task(20, priority=1)
+        captured = []
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = runnable
+        mock_db = MagicMock()
+
+        async def capture_execute(statement):
+            captured.append(statement)
+            return mock_result
+
+        mock_db.execute = capture_execute
+
+        result = await scheduler._get_next_task(mock_db)
+
+        compiled = captured[0].compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+        self.assertIn("tasks.issue_id NOT IN (10)", str(compiled))
+        self.assertIs(result, runnable)
 
 
 class SchedulerIssueMutexTests(unittest.IsolatedAsyncioTestCase):
@@ -781,25 +811,123 @@ class SchedulerCleanupWithDeletesTests(unittest.IsolatedAsyncioTestCase):
 
         mock_db.commit.assert_not_called()
 
-    async def test_maybe_cleanup_workspaces_invokes_helper_when_configured(self) -> None:
+    async def test_workspace_cleanup_invokes_local_bundle_helper_when_configured(
+        self,
+    ) -> None:
         from types import SimpleNamespace
 
         from app.scheduler import Scheduler
 
         scheduler = Scheduler()
-        scheduler._last_workspace_cleanup_at = 0.0
         mock_db = MagicMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = []
+        mock_db.execute = AsyncMock(return_value=mock_result)
 
         settings = SimpleNamespace(
             worker_workspace_host_path="/opt/codify-workspaces",
             worker_workspace_retention_days=14,
         )
 
-        with patch("app.scheduler.get_settings", return_value=settings):
-            with patch("app.scheduler.cleanup_expired_workspaces", return_value=3) as mock_cleanup:
-                await scheduler._maybe_cleanup_workspaces(mock_db)
+        with patch(
+            "app.scheduler.cleanup_expired_ci_failure_bundles", return_value=3
+        ) as mock_cleanup:
+            await scheduler._cleanup_workspace_batch(mock_db, settings)
 
         mock_cleanup.assert_called_once_with("/opt/codify-workspaces", retention_days=14)
+        candidate_query = mock_db.execute.await_args.args[0]
+        self.assertIn(
+            "workspace_delete_attempted_at ASC NULLS FIRST",
+            str(candidate_query),
+        )
+
+    async def test_maybe_cleanup_workspaces_runs_batch_in_background(self) -> None:
+        from types import SimpleNamespace
+
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        scheduler._last_workspace_cleanup_at = 0.0
+        settings = SimpleNamespace(
+            worker_workspace_host_path="/opt/codify-workspaces",
+            worker_workspace_retention_days=14,
+        )
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def slow_cleanup(_settings):
+            started.set()
+            await release.wait()
+
+        with (
+            patch("app.scheduler.get_settings", return_value=settings),
+            patch.object(scheduler, "_run_workspace_cleanup", side_effect=slow_cleanup),
+        ):
+            await scheduler._maybe_cleanup_workspaces(MagicMock())
+            cleanup_task = scheduler._workspace_cleanup_task
+            self.assertIsNotNone(cleanup_task)
+            await started.wait()
+            self.assertFalse(cleanup_task.done())
+            release.set()
+            await cleanup_task
+
+    async def test_workspace_cleanup_rotates_failed_candidates_by_attempt_time(self) -> None:
+        from types import SimpleNamespace
+
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        scheduler._last_workspace_cleanup_at = 0.0
+        failed_issue = SimpleNamespace(
+            id=1,
+            project_id=10,
+            worker_profile_id=7,
+            workspace_delete_attempted_at=None,
+            workspace_deleted_at=None,
+            workspace_delete_error=None,
+        )
+        removed_issue = SimpleNamespace(
+            id=2,
+            project_id=10,
+            worker_profile_id=7,
+            workspace_delete_attempted_at=None,
+            workspace_deleted_at=None,
+            workspace_delete_error=None,
+        )
+        candidate_result = MagicMock()
+        candidate_result.scalars.return_value.all.return_value = [1, 2]
+        failed_result = MagicMock()
+        failed_result.scalar_one_or_none.return_value = failed_issue
+        removed_result = MagicMock()
+        removed_result.scalar_one_or_none.return_value = removed_issue
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(
+            side_effect=[candidate_result, failed_result, removed_result]
+        )
+        mock_db.commit = AsyncMock()
+        settings = SimpleNamespace(
+            worker_workspace_host_path="/opt/codify-workspaces",
+            worker_workspace_retention_days=14,
+        )
+        attempted_at = datetime(2026, 7, 16, 12, 0, 0)
+
+        with (
+            patch("app.scheduler.utcnow", return_value=attempted_at),
+            patch(
+                "app.scheduler.remove_issue_workspace_remote",
+                new=AsyncMock(side_effect=[RuntimeError("offline"), True]),
+            ) as remove_workspace,
+            patch("app.scheduler.cleanup_expired_ci_failure_bundles", return_value=0),
+        ):
+            await scheduler._cleanup_workspace_batch(mock_db, settings)
+
+        self.assertEqual(remove_workspace.await_count, 2)
+        self.assertEqual(failed_issue.workspace_delete_attempted_at, attempted_at)
+        self.assertEqual(failed_issue.workspace_delete_error, "offline")
+        self.assertIsNone(failed_issue.workspace_deleted_at)
+        self.assertEqual(removed_issue.workspace_delete_attempted_at, attempted_at)
+        self.assertEqual(removed_issue.workspace_deleted_at, attempted_at)
+        self.assertEqual(mock_db.commit.await_count, 2)
 
 
 # ---------------------------------------------------------------------------
@@ -1049,15 +1177,23 @@ class SchedulerReconcileRunningStateTests(unittest.IsolatedAsyncioTestCase):
         from app.scheduler import Scheduler
         return Scheduler()
 
+    def _mock_db(self, running_rows):
+        retained_result = MagicMock()
+        retained_result.fetchall.return_value = []
+        running_result = MagicMock()
+        running_result.fetchall.return_value = running_rows
+        db = MagicMock()
+        db.execute = AsyncMock(side_effect=[retained_result, running_result])
+        return db
+
     async def test_early_return_when_both_sets_empty(self):
-        """No DB query when both tracking sets are empty."""
+        """The retained-container audit still runs when local sets are empty."""
         scheduler = self._make_scheduler()
-        mock_db = MagicMock()
-        mock_db.execute = AsyncMock()
+        mock_db = self._mock_db([])
 
         await scheduler._reconcile_running_state(mock_db)
 
-        mock_db.execute.assert_not_called()
+        mock_db.execute.assert_awaited_once()
 
     async def test_all_tasks_running_nothing_discarded(self):
         """When all tracked tasks are genuinely RUNNING, nothing is removed."""
@@ -1065,10 +1201,7 @@ class SchedulerReconcileRunningStateTests(unittest.IsolatedAsyncioTestCase):
         scheduler._running_tasks.add(1)
         scheduler._running_issues.add(10)
 
-        mock_result = MagicMock()
-        mock_result.fetchall.return_value = [(1, 10)]
-        mock_db = MagicMock()
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db = self._mock_db([(1, 10)])
 
         await scheduler._reconcile_running_state(mock_db)
 
@@ -1081,10 +1214,7 @@ class SchedulerReconcileRunningStateTests(unittest.IsolatedAsyncioTestCase):
         scheduler._running_tasks.add(2)
         scheduler._running_issues.add(20)
 
-        mock_result = MagicMock()
-        mock_result.fetchall.return_value = []  # task 2 is no longer RUNNING
-        mock_db = MagicMock()
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db = self._mock_db([])  # task 2 is no longer RUNNING
 
         await scheduler._reconcile_running_state(mock_db)
 
@@ -1102,12 +1232,7 @@ class SchedulerReconcileRunningStateTests(unittest.IsolatedAsyncioTestCase):
         worker_handle.done.return_value = False
         scheduler._worker_tasks[2] = worker_handle
 
-        mock_result = MagicMock()
-        mock_result.fetchall.return_value = [
-            (2, 20, TaskStatus.COMPLETED),
-        ]
-        mock_db = MagicMock()
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db = self._mock_db([(2, 20, TaskStatus.COMPLETED)])
 
         with (
             patch("app.scheduler.time.monotonic", return_value=100.0),
@@ -1131,12 +1256,7 @@ class SchedulerReconcileRunningStateTests(unittest.IsolatedAsyncioTestCase):
         worker_handle.done.return_value = False
         scheduler._worker_tasks[2] = worker_handle
 
-        mock_result = MagicMock()
-        mock_result.fetchall.return_value = [
-            (2, 20, TaskStatus.CANCELLED),
-        ]
-        mock_db = MagicMock()
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db = self._mock_db([(2, 20, TaskStatus.CANCELLED)])
 
         await scheduler._reconcile_running_state(mock_db)
 
@@ -1155,12 +1275,7 @@ class SchedulerReconcileRunningStateTests(unittest.IsolatedAsyncioTestCase):
         worker_handle.done.return_value = True
         scheduler._worker_tasks[2] = worker_handle
 
-        mock_result = MagicMock()
-        mock_result.fetchall.return_value = [
-            (2, 20, TaskStatus.COMPLETED),
-        ]
-        mock_db = MagicMock()
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db = self._mock_db([(2, 20, TaskStatus.COMPLETED)])
 
         await scheduler._reconcile_running_state(mock_db)
 
@@ -1180,12 +1295,7 @@ class SchedulerReconcileRunningStateTests(unittest.IsolatedAsyncioTestCase):
         worker_handle.done.return_value = False
         scheduler._worker_tasks[2] = worker_handle
 
-        mock_result = MagicMock()
-        mock_result.fetchall.return_value = [
-            (2, 20, TaskStatus.COMPLETED),
-        ]
-        mock_db = MagicMock()
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db = self._mock_db([(2, 20, TaskStatus.COMPLETED)])
 
         with patch("app.scheduler.time.monotonic", return_value=221.0):
             await scheduler._reconcile_running_state(mock_db)
@@ -1202,10 +1312,7 @@ class SchedulerReconcileRunningStateTests(unittest.IsolatedAsyncioTestCase):
         scheduler._running_issues.add(30)
 
         # Task 3 still RUNNING; task 4 is not
-        mock_result = MagicMock()
-        mock_result.fetchall.return_value = [(3, 30)]
-        mock_db = MagicMock()
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db = self._mock_db([(3, 30)])
 
         await scheduler._reconcile_running_state(mock_db)
 
@@ -1219,10 +1326,7 @@ class SchedulerReconcileRunningStateTests(unittest.IsolatedAsyncioTestCase):
         scheduler._running_tasks.add(5)
         # _running_issues is empty (task has no issue)
 
-        mock_result = MagicMock()
-        mock_result.fetchall.return_value = [(5, None)]  # task 5 RUNNING, issue_id=None
-        mock_db = MagicMock()
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db = self._mock_db([(5, None)])  # task 5 RUNNING, issue_id=None
 
         await scheduler._reconcile_running_state(mock_db)
 
@@ -1236,10 +1340,7 @@ class SchedulerReconcileRunningStateTests(unittest.IsolatedAsyncioTestCase):
         scheduler._running_issues.update({60, 99})  # 99 is orphaned
 
         # DB: only task 6 is RUNNING for issue 60; nothing for issue 99
-        mock_result = MagicMock()
-        mock_result.fetchall.return_value = [(6, 60)]
-        mock_db = MagicMock()
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db = self._mock_db([(6, 60)])
 
         await scheduler._reconcile_running_state(mock_db)
 
@@ -1252,12 +1353,9 @@ class SchedulerReconcileRunningStateTests(unittest.IsolatedAsyncioTestCase):
         # _running_tasks is empty (already discarded by finally block)
         scheduler._running_issues.add(99)
 
-        mock_result = MagicMock()
-        mock_result.fetchall.return_value = []  # no RUNNING task for issue 99
-        mock_db = MagicMock()
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db = self._mock_db([])  # no RUNNING task for issue 99
 
         await scheduler._reconcile_running_state(mock_db)
 
-        mock_db.execute.assert_called_once()  # fallback query was made
+        self.assertEqual(mock_db.execute.await_count, 2)  # retained audit + fallback query
         self.assertNotIn(99, scheduler._running_issues)

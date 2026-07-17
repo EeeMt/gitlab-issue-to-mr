@@ -104,7 +104,7 @@ async def load_runtime_config_from_db(db: AsyncSession | None = None) -> dict[st
 
 
 async def _handoff_workspace_path_override(db: AsyncSession) -> None:
-    """Safely retire the legacy DB workspace path after deployment adopts the bind mount."""
+    """Retire the legacy DB override after deployment pins the daemon-local path."""
     result = await db.execute(
         select(SystemConfig).where(SystemConfig.key == _DEPLOYMENT_WORKSPACE_KEY)
     )
@@ -116,7 +116,7 @@ async def _handoff_workspace_path_override(db: AsyncSession) -> None:
     deployment_path = get_settings().worker_workspace_host_path
     if stored_path and stored_path != deployment_path:
         raise RuntimeError(
-            "Legacy worker_workspace_host_path does not match the deployment bind mount: "
+            "Legacy worker_workspace_host_path does not match the deployment setting: "
             f"database={stored_path!r}, WORKER_WORKSPACE_HOST_PATH={deployment_path!r}. "
             "Set WORKER_WORKSPACE_HOST_PATH to the database value and recreate Backend "
             "and Scheduler before upgrading."

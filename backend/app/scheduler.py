@@ -1,16 +1,18 @@
 """Task scheduler for queue management."""
+
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from docker.errors import NotFound
-from sqlalchemy import and_, case, func, or_, select, update
+from sqlalchemy import case, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_effective_settings as get_settings
@@ -26,6 +28,7 @@ from app.core.issue_execution_locks import (
 )
 from app.core.session import cleanup_stale_sessions
 from app.core.task_helpers import maybe_update_issue_status
+from app.core.task_log_payloads import persist_raw_log_snapshot
 from app.core.usage_limits import (
     UsageLimitExceeded,
     get_usage_quota_service,
@@ -41,7 +44,8 @@ from app.core.worker_docker_targets import (
     find_task_container,
     list_known_docker_targets,
 )
-from app.core.worker_workspace import cleanup_expired_workspaces
+from app.core.worker_workspace import cleanup_expired_ci_failure_bundles
+from app.core.worker_workspace_remote import remove_issue_workspace_remote
 from app.database import AsyncSessionLocal
 from app.models import Issue, IssueExecutionLock, IssueStatus, Task, TaskStatus
 from app.runtime_config import load_runtime_config_from_db
@@ -49,12 +53,16 @@ from app.runtime_config import load_runtime_config_from_db
 logger = logging.getLogger(__name__)
 _SESSION_CLEANUP_INTERVAL_SECONDS = 3600
 _WORKSPACE_CLEANUP_INTERVAL_SECONDS = 21600
+_WORKSPACE_CLEANUP_BATCH_SIZE = 50
+_RETAINED_CONTAINER_CLEANUP_INTERVAL_SECONDS = 60
+_RETAINED_CONTAINER_CLEANUP_BATCH_SIZE = 20
 _LOCK_CLEANUP_INTERVAL_SECONDS = 300
 _TERMINAL_WORKER_STUCK_SECONDS = 120
 _RECOVERY_RETRY_OFFSETS_SECONDS = (0.0, 10.0, 20.0)
 _RECOVERY_REQUEST_TIMEOUT_SECONDS = 5
 _RECOVERY_PROBE_TIMEOUT_SECONDS = 11
 _RECOVERY_UNAVAILABLE_RETRY_SECONDS = 30
+_QUIESCENT_CONTAINER_STATUSES = {"created", "exited", "dead", "removing"}
 
 # Thread pool for running worker tasks (to avoid blocking the event loop)
 _worker_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="worker-")
@@ -104,9 +112,11 @@ def _inspect_recovery_container(connection, container_reference: str) -> tuple[s
 
 
 async def _stop_recovered_cancelled_container(container, task_id: int) -> None:
-    """Stop a recovered container so durable cancellation intent is actually enforced."""
+    """Stop a recovered container before releasing its Issue execution slot."""
     try:
         await asyncio.to_thread(container.stop, timeout=10)
+    except NotFound:
+        return
     except Exception as stop_error:  # noqa: BLE001
         logger.warning(
             "Graceful stop failed for recovered cancelled task %s: %s; forcing stop",
@@ -115,11 +125,46 @@ async def _stop_recovered_cancelled_container(container, task_id: int) -> None:
         )
         try:
             await asyncio.to_thread(container.kill)
+        except NotFound:
+            return
         except Exception as kill_error:  # noqa: BLE001
             raise RuntimeError(
                 f"could not stop recovered cancelled container: graceful={stop_error}; "
                 f"force={kill_error}"
             ) from kill_error
+
+
+async def _finalize_recovered_raw_logs(
+    db: AsyncSession,
+    docker: DockerClientWrapper,
+    task: Task,
+    container,
+) -> None:
+    """Persist stable raw logs before a recovered non-runnable container is removed."""
+    if task.raw_logs_finalized_at is not None:
+        return
+    try:
+        raw_console_log = await asyncio.to_thread(
+            docker.read_file_from_container,
+            container,
+            "/tmp/codify-runtime/console.log",
+        )
+    except Exception:  # noqa: BLE001
+        raw_console_log = None
+    if not isinstance(raw_console_log, bytes):
+        raw_console_log = await asyncio.to_thread(
+            docker.get_container_logs,
+            container,
+        )
+    if not isinstance(raw_console_log, bytes):
+        raise RuntimeError(f"Could not finalize recovered task {task.id} raw logs")
+    await persist_raw_log_snapshot(
+        db,
+        task_id=task.id,
+        content=raw_console_log,
+    )
+    task.raw_logs_finalized_at = utcnow()
+    await db.commit()
 
 
 class Scheduler:
@@ -129,23 +174,40 @@ class Scheduler:
         self.running = False
         self._running_tasks: set[int] = set()  # task_ids currently running
         self._running_issues: set[int] = set()  # issue_ids with running tasks
+        self._retained_container_blocked_issues: set[int] = set()
         self._worker_tasks: dict[int, asyncio.Task] = {}  # scheduler task handles by task_id
         self._terminal_worker_seen_at: dict[int, float] = {}
-        self._active_worker_threads: int = 0   # thread pool tasks in-flight (submitted but not done)
+        self._active_worker_threads: int = 0  # thread pool tasks in-flight (submitted but not done)
         self._last_session_cleanup_at = 0.0
         self._last_workspace_cleanup_at = 0.0
+        self._last_retained_container_cleanup_at = 0.0
         self._last_lock_cleanup_at = 0.0
+        self._workspace_cleanup_task: asyncio.Task | None = None
+        self._retained_container_cleanup_task: asyncio.Task | None = None
 
     async def start(self) -> None:
         """Start the scheduler loop."""
         logger.info("Starting scheduler...")
         self.running = True
 
-        # Run recovery on startup
-        try:
-            await self._crash_recovery()
-        except Exception as e:
-            logger.warning(f"Skipping crash recovery on startup: {e}")
+        # Never dispatch new work after an inconclusive startup audit. Per-daemon
+        # outages are handled inside _crash_recovery with deferred ownership; an
+        # unexpected top-level failure means we cannot safely prove that old
+        # containers are not still mutating daemon-local Issue workspaces.
+        while self.running:
+            try:
+                await self._crash_recovery()
+                break
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "Crash recovery failed; retrying before task dispatch: %s",
+                    exc,
+                )
+                await asyncio.sleep(get_settings().scheduler_interval)
+
+        if not self.running:
+            logger.info("Scheduler stopped before startup recovery completed")
+            return
 
         while self.running:
             try:
@@ -161,6 +223,16 @@ class Scheduler:
         """Stop the scheduler."""
         logger.info("Stopping scheduler...")
         self.running = False
+        cleanup_task = self._workspace_cleanup_task
+        if cleanup_task is not None and not cleanup_task.done():
+            cleanup_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cleanup_task
+        retained_cleanup_task = self._retained_container_cleanup_task
+        if retained_cleanup_task is not None and not retained_cleanup_task.done():
+            retained_cleanup_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await retained_cleanup_task
 
     async def _run_cycle(self) -> None:
         """Run one scheduler cycle."""
@@ -168,6 +240,7 @@ class Scheduler:
             await load_runtime_config_from_db(db)
             await self._maybe_cleanup_sessions(db)
             await self._maybe_cleanup_workspaces(db)
+            await self._maybe_cleanup_retained_containers(db)
             await self._maybe_cleanup_issue_locks(db)
 
             # Reconcile in-memory tracking sets against DB and local worker handles.
@@ -183,7 +256,9 @@ class Scheduler:
             running_count = await self._get_running_count(db)
 
             if running_count >= settings.max_concurrency:
-                logger.debug(f"Max concurrency reached ({running_count}/{settings.max_concurrency})")
+                logger.debug(
+                    f"Max concurrency reached ({running_count}/{settings.max_concurrency})"
+                )
                 return
 
             # Get next task
@@ -210,6 +285,7 @@ class Scheduler:
         keeps normal post-run cleanup active by checking the local asyncio task handle,
         and corrects real drift every cycle.
         """
+        await self._reconcile_retained_issue_blocks(db)
         if not self._running_tasks and not self._running_issues:
             return
 
@@ -249,6 +325,7 @@ class Scheduler:
                     task_id,
                 )
 
+            active_issue_ids.update(self._retained_container_blocked_issues)
             stale_issues = self._running_issues - active_issue_ids
             for issue_id in stale_issues:
                 self._running_issues.discard(issue_id)
@@ -262,12 +339,15 @@ class Scheduler:
             # _running_tasks is empty but _running_issues has entries — possible when a
             # thread's finally block could not release the issue slot.  Query independently.
             result = await db.execute(
-                select(Task.issue_id).distinct().where(
+                select(Task.issue_id)
+                .distinct()
+                .where(
                     Task.issue_id.in_(list(self._running_issues)),
                     Task.status == TaskStatus.RUNNING,
                 )
             )
             active_issue_ids = {row[0] for row in result.fetchall() if row[0] is not None}
+            active_issue_ids.update(self._retained_container_blocked_issues)
             for issue_id in self._running_issues - active_issue_ids:
                 self._running_issues.discard(issue_id)
                 logger.warning(
@@ -275,6 +355,92 @@ class Scheduler:
                     "(no RUNNING task found in DB)",
                     issue_id,
                 )
+
+    async def _reconcile_retained_issue_blocks(self, db: AsyncSession) -> None:
+        """Discover retained containers and release blocks after they are gone."""
+        result = await db.execute(
+            select(Task.issue_id)
+            .distinct()
+            .where(
+                Task.status.in_(
+                    (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED)
+                ),
+                Task.container_id.is_not(None),
+            )
+        )
+        still_retained = {row[0] for row in result.fetchall() if row[0] is not None}
+        discovered = still_retained - self._retained_container_blocked_issues
+        if discovered:
+            self._retained_container_blocked_issues.update(discovered)
+            logger.warning(
+                "Blocked %s Issue(s) whose terminal tasks retain worker containers",
+                len(discovered),
+            )
+        self._running_issues.update(still_retained)
+        released = self._retained_container_blocked_issues - still_retained
+        if released:
+            self._retained_container_blocked_issues.difference_update(released)
+            logger.info(
+                "Released %s Issue container-recovery block(s)",
+                len(released),
+            )
+
+    def _block_issue_for_retained_container(self, task: Task) -> bool:
+        """Keep one Issue unavailable while a durable container reference exists."""
+        container_reference = getattr(task, "container_id", None)
+        issue_id = getattr(task, "issue_id", None)
+        if (
+            not isinstance(container_reference, str)
+            or not container_reference.strip()
+            or not isinstance(issue_id, int)
+        ):
+            return False
+        self._retained_container_blocked_issues.add(issue_id)
+        self._running_issues.add(issue_id)
+        return True
+
+    async def _clear_retained_container_reference(
+        self,
+        db: AsyncSession,
+        task: Task,
+    ) -> None:
+        """Clear one container reference and release its lock if it is the last one."""
+        task.container_id = None
+        other_container_exists = (
+            select(Task.id)
+            .where(
+                Task.issue_id == task.issue_id,
+                Task.id != task.id,
+                Task.container_id.is_not(None),
+            )
+            .exists()
+        )
+        terminal_lock_owner_exists = (
+            select(Task.id)
+            .where(
+                Task.id == IssueExecutionLock.task_id,
+                Task.status.in_(
+                    (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED)
+                ),
+            )
+            .exists()
+        )
+        release_result = await db.execute(
+            delete(IssueExecutionLock).where(
+                IssueExecutionLock.issue_id == task.issue_id,
+                ~other_container_exists,
+                terminal_lock_owner_exists,
+            )
+        )
+        await db.commit()
+        if release_result.rowcount:
+            self._retained_container_blocked_issues.discard(task.issue_id)
+            self._running_issues.discard(task.issue_id)
+            logger.info(
+                "Released Issue %s after task %s retained container was reconciled",
+                task.issue_id,
+                task.id,
+            )
 
     def _worker_handle_is_active(self, task_id: int, status) -> bool:
         """Return True while the local worker coroutine is still doing cleanup."""
@@ -329,9 +495,12 @@ class Scheduler:
         self._last_session_cleanup_at = now
 
     async def _maybe_cleanup_workspaces(self, db: AsyncSession) -> None:
-        """Periodically delete expired persistent worker workspaces."""
+        """Start periodic workspace cleanup without blocking the scheduler cycle."""
+        del db
         now = time.time()
         if now - self._last_workspace_cleanup_at < _WORKSPACE_CLEANUP_INTERVAL_SECONDS:
+            return
+        if self._workspace_cleanup_task is not None and not self._workspace_cleanup_task.done():
             return
 
         settings = get_settings()
@@ -344,15 +513,340 @@ class Scheduler:
         if not isinstance(retention_days, int):
             self._last_workspace_cleanup_at = now
             return
+        if retention_days <= 0:
+            self._last_workspace_cleanup_at = now
+            return
 
-        removed = await asyncio.to_thread(
-            cleanup_expired_workspaces,
+        self._last_workspace_cleanup_at = now
+        cleanup_task = asyncio.create_task(
+            self._run_workspace_cleanup(settings),
+            name="codify-workspace-cleanup",
+        )
+        self._workspace_cleanup_task = cleanup_task
+
+        def cleanup_done(task: asyncio.Task) -> None:
+            if self._workspace_cleanup_task is task:
+                self._workspace_cleanup_task = None
+            if task.cancelled():
+                return
+            try:
+                task.result()
+            except Exception:  # noqa: BLE001
+                logger.exception("Workspace cleanup background task failed")
+
+        cleanup_task.add_done_callback(cleanup_done)
+
+    async def _run_workspace_cleanup(self, settings) -> None:
+        """Run one workspace cleanup batch in a session owned by the background task."""
+        async with AsyncSessionLocal() as db:
+            await self._cleanup_workspace_batch(db, settings)
+
+    async def _maybe_cleanup_retained_containers(self, db: AsyncSession) -> None:
+        """Start bounded terminal-container reconciliation without blocking scheduling."""
+        del db
+        now = time.time()
+        if (
+            now - self._last_retained_container_cleanup_at
+            < _RETAINED_CONTAINER_CLEANUP_INTERVAL_SECONDS
+        ):
+            return
+        if (
+            self._retained_container_cleanup_task is not None
+            and not self._retained_container_cleanup_task.done()
+        ):
+            return
+
+        self._last_retained_container_cleanup_at = now
+        cleanup_task = asyncio.create_task(
+            self._run_retained_container_cleanup(get_settings()),
+            name="codify-retained-container-cleanup",
+        )
+        self._retained_container_cleanup_task = cleanup_task
+
+        def cleanup_done(task: asyncio.Task) -> None:
+            if self._retained_container_cleanup_task is task:
+                self._retained_container_cleanup_task = None
+            if task.cancelled():
+                return
+            try:
+                task.result()
+            except Exception:  # noqa: BLE001
+                logger.exception("Retained container cleanup background task failed")
+
+        cleanup_task.add_done_callback(cleanup_done)
+
+    async def _run_retained_container_cleanup(self, settings) -> None:
+        async with AsyncSessionLocal() as db:
+            await self._cleanup_retained_container_batch(db, settings)
+
+    async def _cleanup_retained_container_batch(self, db: AsyncSession, settings) -> None:
+        """Finalize logs and reap terminal task containers left by transient failures."""
+        terminal_statuses = (
+            TaskStatus.COMPLETED,
+            TaskStatus.FAILED,
+            TaskStatus.CANCELLED,
+        )
+        active_worker_ids = {
+            task_id
+            for task_id, handle in self._worker_tasks.items()
+            if not handle.done()
+        }
+        candidate_stmt = (
+            select(Task.id)
+            .where(
+                Task.status.in_(terminal_statuses),
+                Task.container_id.is_not(None),
+            )
+            .order_by(Task.updated_at.asc(), Task.id.asc())
+            .limit(_RETAINED_CONTAINER_CLEANUP_BATCH_SIZE)
+        )
+        if active_worker_ids:
+            candidate_stmt = candidate_stmt.where(Task.id.not_in(active_worker_ids))
+        candidate_ids = list((await db.execute(candidate_stmt)).scalars().all())
+
+        finalized = 0
+        removed = 0
+        deferred = 0
+        for task_id in candidate_ids:
+            handle = self._worker_tasks.get(task_id)
+            if handle is not None and not handle.done():
+                continue
+            task = (
+                await db.execute(
+                    select(Task)
+                    .where(
+                        Task.id == task_id,
+                        Task.status.in_(terminal_statuses),
+                        Task.container_id.is_not(None),
+                    )
+                    .with_for_update(skip_locked=True)
+                )
+            ).scalar_one_or_none()
+            if task is None:
+                await db.rollback()
+                continue
+            container_reference = task.container_id
+            try:
+                docker, container, _connection = await find_task_container(
+                    db,
+                    task,
+                    settings,
+                    container_reference,
+                )
+            except TaskContainerNotFoundError:
+                task.raw_logs_finalized_at = (
+                    getattr(task, "raw_logs_finalized_at", None) or utcnow()
+                )
+                await self._clear_retained_container_reference(db, task)
+                finalized += 1
+                continue
+            except (DockerConnectionsUnavailableError, TaskContainerLookupError) as exc:
+                deferred += 1
+                await db.rollback()
+                logger.debug(
+                    "Retained container cleanup deferred for task %s: %s",
+                    task_id,
+                    exc,
+                )
+                continue
+            except Exception as exc:  # noqa: BLE001
+                deferred += 1
+                await db.rollback()
+                logger.warning(
+                    "Retained container lookup failed for task %s: %s",
+                    task_id,
+                    exc,
+                )
+                continue
+
+            try:
+                await asyncio.to_thread(container.reload)
+            except NotFound:
+                task.raw_logs_finalized_at = (
+                    getattr(task, "raw_logs_finalized_at", None) or utcnow()
+                )
+                await self._clear_retained_container_reference(db, task)
+                finalized += 1
+                continue
+            except Exception as exc:  # noqa: BLE001
+                deferred += 1
+                await db.rollback()
+                logger.warning(
+                    "Could not inspect retained container %s for task %s: %s",
+                    container_reference,
+                    task_id,
+                    exc,
+                )
+                continue
+
+            if getattr(container, "status", None) not in _QUIESCENT_CONTAINER_STATUSES:
+                try:
+                    await _stop_recovered_cancelled_container(container, task_id)
+                except Exception as exc:  # noqa: BLE001
+                    deferred += 1
+                    await db.rollback()
+                    logger.warning(
+                        "Could not stop retained container %s for task %s: %s",
+                        container_reference,
+                        task_id,
+                        exc,
+                    )
+                    continue
+
+            if task.raw_logs_finalized_at is None:
+                try:
+                    raw_console_log = await asyncio.to_thread(
+                        docker.read_file_from_container,
+                        container,
+                        "/tmp/codify-runtime/console.log",
+                    )
+                except Exception:  # noqa: BLE001
+                    raw_console_log = None
+                if not isinstance(raw_console_log, bytes):
+                    try:
+                        raw_console_log = await asyncio.to_thread(
+                            docker.get_container_logs,
+                            container,
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        deferred += 1
+                        await db.rollback()
+                        logger.warning(
+                            "Could not finalize retained task %s raw logs: %s",
+                            task_id,
+                            exc,
+                        )
+                        continue
+                if not isinstance(raw_console_log, bytes):
+                    deferred += 1
+                    await db.rollback()
+                    continue
+                await persist_raw_log_snapshot(
+                    db,
+                    task_id=task.id,
+                    content=raw_console_log,
+                )
+                task.raw_logs_finalized_at = utcnow()
+                await db.commit()
+                finalized += 1
+
+            try:
+                await asyncio.to_thread(container.remove, force=True, v=True)
+            except Exception as exc:  # noqa: BLE001
+                deferred += 1
+                await db.rollback()
+                logger.warning(
+                    "Could not remove retained container %s for task %s: %s",
+                    container_reference,
+                    task_id,
+                    exc,
+                )
+                continue
+            await self._clear_retained_container_reference(db, task)
+            removed += 1
+
+        if candidate_ids:
+            logger.info(
+                "Retained container cleanup finalized %s task(s), removed %s "
+                "container(s), deferred %s",
+                finalized,
+                removed,
+                deferred,
+            )
+
+    async def _cleanup_workspace_batch(self, db: AsyncSession, settings) -> None:
+        """Delete stale workspaces, locking and committing one Issue at a time."""
+        root = str(settings.worker_workspace_host_path).strip()
+        retention_days = settings.worker_workspace_retention_days
+
+        cutoff = utcnow() - timedelta(days=retention_days)
+        active_task_exists = (
+            select(Task.id)
+            .where(
+                Task.issue_id == Issue.id,
+                or_(
+                    Task.status.in_(
+                        (TaskStatus.PENDING, TaskStatus.QUEUED, TaskStatus.RUNNING)
+                    ),
+                    Task.container_id.is_not(None),
+                ),
+            )
+            .exists()
+        )
+        candidate_ids = list(
+            (
+                await db.execute(
+                    select(Issue.id)
+                    .where(
+                        func.coalesce(Issue.workspace_last_used_at, Issue.created_at) < cutoff,
+                        Issue.workspace_deleted_at.is_(None),
+                        ~active_task_exists,
+                    )
+                    .order_by(
+                        Issue.workspace_delete_attempted_at.asc().nulls_first(),
+                        Issue.id.asc(),
+                    )
+                    .limit(_WORKSPACE_CLEANUP_BATCH_SIZE)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        removed_issue_workspaces = 0
+        failed_issue_workspaces = 0
+        checked_issue_workspaces = 0
+        for issue_id in candidate_ids:
+            # Task creation takes the same row lock. Re-checking after acquisition
+            # prevents a task created after the candidate scan from losing its workspace.
+            issue = (
+                await db.execute(
+                    select(Issue)
+                    .where(
+                        Issue.id == issue_id,
+                        func.coalesce(Issue.workspace_last_used_at, Issue.created_at) < cutoff,
+                        Issue.workspace_deleted_at.is_(None),
+                        ~active_task_exists,
+                    )
+                    .with_for_update(skip_locked=True)
+                )
+            ).scalar_one_or_none()
+            if issue is None:
+                await db.rollback()
+                continue
+            checked_issue_workspaces += 1
+            attempted_at = utcnow()
+            try:
+                if await remove_issue_workspace_remote(db, settings, issue):
+                    removed_issue_workspaces += 1
+                issue.workspace_delete_attempted_at = attempted_at
+                issue.workspace_deleted_at = attempted_at
+                issue.workspace_delete_error = None
+            except Exception as exc:  # noqa: BLE001
+                failed_issue_workspaces += 1
+                issue.workspace_delete_attempted_at = attempted_at
+                issue.workspace_delete_error = str(exc)[:4000]
+                logger.warning(
+                    "Failed to clean issue %s workspace on worker %s: %s",
+                    issue.id,
+                    issue.worker_profile_id,
+                    exc,
+                )
+            await db.commit()
+
+        removed_ci_bundles = await asyncio.to_thread(
+            cleanup_expired_ci_failure_bundles,
             root,
             retention_days=retention_days,
         )
-        if removed:
-            logger.info("Cleaned up %s expired worker workspace(s)", removed)
-        self._last_workspace_cleanup_at = now
+        if candidate_ids or removed_ci_bundles:
+            logger.info(
+                "Workspace cleanup checked %s issue(s), removed %s workspace(s), "
+                "failed %s, and removed %s CI bundle(s)",
+                checked_issue_workspaces,
+                removed_issue_workspaces,
+                failed_issue_workspaces,
+                removed_ci_bundles,
+            )
 
     async def _maybe_cleanup_issue_locks(self, db: AsyncSession) -> None:
         """Periodically delete locks for completed/failed/cancelled tasks."""
@@ -386,19 +880,19 @@ class Scheduler:
             .values(status=TaskStatus.QUEUED)
         )
         if blocked_issue_ids:
-            stmt = stmt.where(
-                (Task.issue_id == None) | (~Task.issue_id.in_(blocked_issue_ids))
-            )
+            stmt = stmt.where((Task.issue_id == None) | (~Task.issue_id.in_(blocked_issue_ids)))
         result = await db.execute(stmt)
         if result.rowcount > 0:
             await db.commit()
             logger.debug(f"Marked {result.rowcount} eligible task(s) as QUEUED")
             # Transition issues to in_progress for all newly queued tasks
             queued_issue_result = await db.execute(
-                select(Task.issue_id).where(
+                select(Task.issue_id)
+                .where(
                     Task.status == TaskStatus.QUEUED,
                     Task.issue_id != None,
-                ).distinct()
+                )
+                .distinct()
             )
             issue_ids = [row[0] for row in queued_issue_result]
             if issue_ids:
@@ -411,7 +905,9 @@ class Scheduler:
                     .values(status=IssueStatus.IN_PROGRESS.value)
                 )
                 await db.commit()
-                logger.debug(f"Transitioned {len(issue_ids)} issue(s) to IN_PROGRESS for queued tasks")
+                logger.debug(
+                    f"Transitioned {len(issue_ids)} issue(s) to IN_PROGRESS for queued tasks"
+                )
 
     async def _get_running_count(self, db: AsyncSession) -> int:
         """Get count of currently running tasks."""
@@ -433,16 +929,18 @@ class Scheduler:
         3. scheduled_at ASC — earlier due times first
         4. created_at ASC — FIFO tiebreaker
         """
+        stmt = select(Task).where(Task.status == TaskStatus.QUEUED)
+        if self._running_issues:
+            # Filtering in SQL avoids a queued task for a busy Issue sitting at the
+            # head of the priority order and starving runnable tasks from other Issues.
+            stmt = stmt.where(Task.issue_id.not_in(self._running_issues))
         result = await db.execute(
-            select(Task)
-            .where(Task.status == TaskStatus.QUEUED)
-            .order_by(
+            stmt.order_by(
                 Task.priority.asc(),
                 case((Task.scheduled_at.is_not(None), 0), else_=1),
                 Task.scheduled_at.asc(),
                 Task.created_at.asc(),
-            )
-            .limit(1)
+            ).limit(1)
         )
         return result.scalar_one_or_none()
 
@@ -474,6 +972,9 @@ class Scheduler:
                     task.status = TaskStatus.FAILED
                     task.error_message = json.dumps(usage_limit_exceeded_detail(exc))
                     task.completed_at = utcnow()
+                    task.raw_logs_finalized_at = (
+                        getattr(task, "raw_logs_finalized_at", None) or utcnow()
+                    )
                     await db.commit()
                     await release_issue_execution_lock(db, issue_id=issue_id)
                     await db.commit()
@@ -502,6 +1003,10 @@ class Scheduler:
             task.status = TaskStatus.FAILED
             task.error_message = str(e)[:500]
             task.completed_at = utcnow()
+            if getattr(task, "container_id", None) is None:
+                task.raw_logs_finalized_at = (
+                    getattr(task, "raw_logs_finalized_at", None) or utcnow()
+                )
             await release_issue_execution_lock(db, issue_id=issue_id)
             try:
                 await db.commit()
@@ -526,6 +1031,7 @@ class Scheduler:
     async def _run_task_background(self, task_id: int) -> None:
         """Run task in background thread pool."""
         self._active_worker_threads += 1
+        defer_recovery = False
         t_submit = time.time()
         logger.info(
             f"Task {task_id} submitted to thread pool "
@@ -551,41 +1057,70 @@ class Scheduler:
                     f"active_threads={self._active_worker_threads})"
                 )
 
+        except (DockerConnectionsUnavailableError, TaskContainerLookupError) as exc:
+            defer_recovery = True
+            logger.warning(
+                "Task %s lost a conclusive Docker view during startup; returning it "
+                "to deferred recovery: %s",
+                task_id,
+                exc,
+            )
         except Exception as exc:
             logger.exception(f"Task {task_id} failed with exception in background")
             await self._mark_worker_bootstrap_failed(task_id, exc)
 
         finally:
             self._active_worker_threads -= 1
-            # Clean up tracking
-            self._worker_tasks.pop(task_id, None)
-            self._terminal_worker_seen_at.pop(task_id, None)
-            self._running_tasks.discard(task_id)
-            try:
-                async with AsyncSessionLocal() as db:
-                    result = await db.execute(
-                        select(Task).where(Task.id == task_id)
-                    )
-                    task = result.scalar_one_or_none()
-                    if task:
-                        # Guard: only release the DB lock and in-memory slot if WE still hold it.
-                        # If _reconcile_running_state already cleared us and a replacement task
-                        # re-acquired the lock for this issue, releasing here would corrupt the
-                        # new task's execution slot.
-                        lock_result = await db.execute(
-                            select(IssueExecutionLock).where(
-                                IssueExecutionLock.issue_id == task.issue_id
+            if defer_recovery:
+                recovery_task = asyncio.create_task(
+                    self._coordinate_unavailable_recovery(task_id)
+                )
+                self._worker_tasks[task_id] = recovery_task
+                self._terminal_worker_seen_at.pop(task_id, None)
+                logger.info(
+                    "Deferred recovery coordinator started for task %s after startup lookup",
+                    task_id,
+                )
+            else:
+                # Clean up tracking
+                self._worker_tasks.pop(task_id, None)
+                self._terminal_worker_seen_at.pop(task_id, None)
+                self._running_tasks.discard(task_id)
+                try:
+                    async with AsyncSessionLocal() as db:
+                        result = await db.execute(select(Task).where(Task.id == task_id))
+                        task = result.scalar_one_or_none()
+                        if task:
+                            # Guard: only release the DB lock and in-memory slot if WE still hold it.
+                            # If _reconcile_running_state already cleared us and a replacement task
+                            # re-acquired the lock for this issue, releasing here would corrupt the
+                            # new task's execution slot.
+                            lock_result = await db.execute(
+                                select(IssueExecutionLock).where(
+                                    IssueExecutionLock.issue_id == task.issue_id
+                                )
                             )
-                        )
-                        lock = lock_result.scalar_one_or_none()
-                        if lock is None or lock.task_id == task_id:
-                            self._running_issues.discard(task.issue_id)
-                            await release_issue_execution_lock(db, issue_id=task.issue_id)
-                            await db.commit()
-                            # Auto-transition issue to COMPLETED if all tasks done
-                            await self._maybe_complete_issue(db, task.issue_id)
-            except Exception:
-                logger.exception("Failed to release lock for task %s", task_id)
+                            lock = lock_result.scalar_one_or_none()
+                            if lock is None or lock.task_id == task_id:
+                                if self._block_issue_for_retained_container(task):
+                                    logger.warning(
+                                        "Keeping Issue %s locked because terminal task %s "
+                                        "retains container %s",
+                                        task.issue_id,
+                                        task_id,
+                                        task.container_id,
+                                    )
+                                else:
+                                    self._running_issues.discard(task.issue_id)
+                                    await release_issue_execution_lock(
+                                        db,
+                                        issue_id=task.issue_id,
+                                    )
+                                    await db.commit()
+                                    # Auto-transition issue to COMPLETED if all tasks done
+                                    await self._maybe_complete_issue(db, task.issue_id)
+                except Exception:
+                    logger.exception("Failed to release lock for task %s", task_id)
 
     async def _mark_worker_bootstrap_failed(self, task_id: int, exc: Exception) -> None:
         """Persist failures that happen before WorkerExecutor can own task state."""
@@ -602,18 +1137,29 @@ class Scheduler:
                     getattr(task, "cancel_requested_at", None),
                     datetime,
                 )
-                task.status = (
-                    TaskStatus.CANCELLED if cancellation_requested else TaskStatus.FAILED
-                )
+                task.status = TaskStatus.CANCELLED if cancellation_requested else TaskStatus.FAILED
                 task.error_message = (
                     "Cancelled by user before worker startup completed"
                     if cancellation_requested
                     else sanitize_sensitive_data(f"Worker failed to start: {exc}")[:2000]
                 )
                 task.completed_at = utcnow()
-                await release_issue_execution_lock(db, issue_id=task.issue_id)
+                if getattr(task, "container_id", None) is None:
+                    task.raw_logs_finalized_at = (
+                        getattr(task, "raw_logs_finalized_at", None) or utcnow()
+                    )
+                if self._block_issue_for_retained_container(task):
+                    logger.warning(
+                        "Keeping Issue %s locked after worker bootstrap failure because "
+                        "task %s retains container %s",
+                        task.issue_id,
+                        task.id,
+                        task.container_id,
+                    )
+                else:
+                    await release_issue_execution_lock(db, issue_id=task.issue_id)
+                    self._running_issues.discard(task.issue_id)
                 await db.commit()
-                self._running_issues.discard(task.issue_id)
         except Exception:
             logger.exception("Failed to persist worker bootstrap failure for task %s", task_id)
 
@@ -637,16 +1183,14 @@ class Scheduler:
             if removed_locks:
                 logger.warning("Cleaned up %s inactive issue execution lock(s)", removed_locks)
 
-            # Running tasks must be resumed; terminal tasks with unfinished raw-log
-            # finalization still own their retained containers and must not be reaped.
+            # Running tasks must be resumed. Any terminal task with a durable
+            # container reference must either retain it for raw-log finalization or
+            # have the stale/failed-cleanup reference reconciled before data cleanup.
             result = await db.execute(
                 select(Task).where(
                     or_(
                         Task.status == TaskStatus.RUNNING,
-                        and_(
-                            Task.container_id.is_not(None),
-                            Task.raw_logs_finalized_at.is_(None),
-                        ),
+                        Task.container_id.is_not(None),
                     )
                 )
             )
@@ -660,15 +1204,22 @@ class Scheduler:
                 task.id
                 for task in owned_tasks
                 if getattr(task.status, "value", task.status) != TaskStatus.RUNNING.value
+                and getattr(task, "raw_logs_finalized_at", None) is None
             }
+            finalized_reference_tasks = [
+                task
+                for task in owned_tasks
+                if getattr(task.status, "value", task.status) != TaskStatus.RUNNING.value
+                and getattr(task, "raw_logs_finalized_at", None) is not None
+            ]
+            running_task_ids = {task.id for task in stuck_tasks}
             if stuck_tasks:
                 logger.warning(f"Found {len(stuck_tasks)} tasks in RUNNING status")
 
             settings = get_settings()
             targets = await list_known_docker_targets(db, settings, include_retained=True)
             task_connections = {
-                task.id: await connection_for_task(db, task, settings)
-                for task in owned_tasks
+                task.id: await connection_for_task(db, task, settings) for task in owned_tasks
             }
             task_daemon_keys = {
                 task_id: docker_daemon_key(connection)
@@ -677,7 +1228,7 @@ class Scheduler:
 
             async def enumerate_target(target):
                 has_running_tasks = any(
-                    task_id not in retained_task_ids and daemon_key == target.daemon_key
+                    task_id in running_task_ids and daemon_key == target.daemon_key
                     for task_id, daemon_key in task_daemon_keys.items()
                 )
                 retry_offsets = (
@@ -691,6 +1242,7 @@ class Scheduler:
                     delay = started_at + retry_offset - asyncio.get_running_loop().time()
                     if delay > 0:
                         await asyncio.sleep(delay)
+
                     async def try_connections():
                         nonlocal last_error
                         for connection in target.connections:
@@ -722,10 +1274,21 @@ class Scheduler:
                         last_error = exc
                 return target, [], None, last_error
 
-            target_results = await asyncio.gather(
-                *(enumerate_target(target) for target in targets)
-            )
-            resumed_task_ids: set[int] = set()
+            target_results = await asyncio.gather(*(enumerate_target(target) for target in targets))
+            resumed_task_ids: set[int] = {
+                task.id
+                for task in stuck_tasks
+                if (handle := self._worker_tasks.get(task.id)) is not None and not handle.done()
+            }
+            for task in stuck_tasks:
+                if task.id not in resumed_task_ids:
+                    continue
+                self._running_tasks.add(task.id)
+                self._running_issues.add(task.issue_id)
+                logger.info(
+                    "Task %s is already owned by a local recovery worker; skipping duplicate resume",
+                    task.id,
+                )
             unavailable_task_ids: set[int] = set()
             successful_connections: dict[str, DockerConnectionConfig] = {}
             pattern = _get_container_pattern()
@@ -735,7 +1298,7 @@ class Scheduler:
                     for task_id, daemon_key in task_daemon_keys.items()
                     if daemon_key == target.daemon_key
                 }
-                target_running_task_ids = target_owned_task_ids - retained_task_ids
+                target_running_task_ids = target_owned_task_ids & running_task_ids
                 target_retained_task_ids = target_owned_task_ids & retained_task_ids
                 if target_error is not None:
                     unavailable_task_ids.update(target_running_task_ids)
@@ -794,13 +1357,14 @@ class Scheduler:
                                 )
                             )
                         else:
+                            unavailable_task_ids.add(task_id)
                             logger.warning(
-                                f"Removing {c_status} container for task {task_id}: {container.name}"
+                                "Deferring recovery for task %s container %s in status %s "
+                                "until its raw logs can be finalized",
+                                task_id,
+                                container.name,
+                                c_status,
                             )
-                            try:
-                                container.remove(force=True)
-                            except Exception as e:
-                                logger.warning(f"Failed to remove container {container.name}: {e}")
                     elif task_id is not None and task_id in target_retained_task_ids:
                         logger.info(
                             "Retaining owned container %s for task %s until raw logs finalize",
@@ -813,11 +1377,63 @@ class Scheduler:
                             f"(task_id={task_id}, target={target.connection.host})"
                         )
                         try:
-                            container.remove(force=(c_status == "running"))
+                            container.remove(force=(c_status == "running"), v=True)
                         except Exception as e:
-                            logger.warning(
-                                f"Failed to remove container {container.name}: {e}"
-                            )
+                            logger.warning(f"Failed to remove container {container.name}: {e}")
+
+            cleared_finalized_references = 0
+            for task in finalized_reference_tasks:
+                container_reference = getattr(task, "container_id", None)
+                if not isinstance(container_reference, str) or not container_reference.strip():
+                    continue
+                daemon_key = task_daemon_keys[task.id]
+                if daemon_key not in successful_connections:
+                    logger.warning(
+                        "Keeping finalized task %s container reference because Docker "
+                        "daemon %s is unavailable",
+                        task.id,
+                        task_connections[task.id].host,
+                    )
+                    continue
+                try:
+                    _docker, container, _connection = await find_task_container(
+                        db,
+                        task,
+                        settings,
+                        container_reference,
+                        known_targets=targets,
+                    )
+                except TaskContainerNotFoundError:
+                    pass
+                except (DockerConnectionsUnavailableError, TaskContainerLookupError) as exc:
+                    logger.warning(
+                        "Keeping finalized task %s container reference after inconclusive "
+                        "lookup of %s: %s",
+                        task.id,
+                        container_reference,
+                        exc,
+                    )
+                    continue
+                else:
+                    try:
+                        await asyncio.to_thread(container.remove, force=True, v=True)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "Keeping finalized task %s container reference because %s "
+                            "could not be removed: %s",
+                            task.id,
+                            container_reference,
+                            exc,
+                        )
+                        continue
+                task.container_id = None
+                cleared_finalized_references += 1
+            if cleared_finalized_references:
+                await db.commit()
+                logger.info(
+                    "Cleared %s finalized task container reference(s)",
+                    cleared_finalized_references,
+                )
 
             # Prefix-based enumeration is retained for orphan cleanup, but task recovery
             # uses the immutable container ID so a deployment-time prefix change cannot
@@ -881,8 +1497,7 @@ class Scheduler:
                             )
                             continue
                     logger.info(
-                        "Recovered task %s by stable container ID %s on %s "
-                        "(name=%s, status=%s)",
+                        "Recovered task %s by stable container ID %s on %s (name=%s, status=%s)",
                         task.id,
                         container_id,
                         successful_connection.host,
@@ -928,21 +1543,47 @@ class Scheduler:
                     getattr(task, "cancel_requested_at", None),
                     datetime,
                 )
-                task.status = (
-                    TaskStatus.CANCELLED if cancellation_requested else TaskStatus.FAILED
-                )
+                task.status = TaskStatus.CANCELLED if cancellation_requested else TaskStatus.FAILED
                 task.error_message = (
                     "Cancelled by user; worker container is confirmed absent"
                     if cancellation_requested
                     else "Task was running when scheduler restarted (container not found)"
                 )
+                task.container_id = None
                 task.completed_at = utcnow()
+                task.raw_logs_finalized_at = (
+                    getattr(task, "raw_logs_finalized_at", None) or utcnow()
+                )
                 await release_issue_execution_lock(db, issue_id=task.issue_id)
                 logger.warning(
                     "Marked task %s as %s after reachable Docker daemon confirmed "
                     "that its container is absent",
                     task.id,
                     task.status.value,
+                )
+
+            retained_issue_result = await db.execute(
+                select(Task.issue_id)
+                .distinct()
+                .where(
+                    Task.status.in_(
+                        (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED)
+                    ),
+                    Task.container_id.is_not(None),
+                )
+            )
+            retained_issue_ids = {
+                row[0] for row in retained_issue_result.fetchall() if row[0] is not None
+            }
+            if retained_issue_ids:
+                # A terminal task can still own a running container after a crash or
+                # failed cancellation. Do not schedule another task for the Issue until
+                # the retained-container reconciler has stopped and removed it.
+                self._retained_container_blocked_issues.update(retained_issue_ids)
+                self._running_issues.update(retained_issue_ids)
+                logger.warning(
+                    "Blocked %s Issue(s) until retained worker containers are reconciled",
+                    len(retained_issue_ids),
                 )
 
             await db.commit()
@@ -987,7 +1628,7 @@ class Scheduler:
                     container_reference = task.container_id or container_name
                     attempt += 1
                     try:
-                        _docker, container, connection = await find_task_container(
+                        docker, container, connection = await find_task_container(
                             db,
                             task,
                             settings,
@@ -1003,9 +1644,7 @@ class Scheduler:
                             datetime,
                         )
                         task.status = (
-                            TaskStatus.CANCELLED
-                            if cancellation_requested
-                            else TaskStatus.FAILED
+                            TaskStatus.CANCELLED if cancellation_requested else TaskStatus.FAILED
                         )
                         task.error_message = (
                             "Cancelled by user; worker container is confirmed absent"
@@ -1015,7 +1654,11 @@ class Scheduler:
                                 "became reachable and confirmed that its container is absent"
                             )
                         )
+                        task.container_id = None
                         task.completed_at = utcnow()
+                        task.raw_logs_finalized_at = (
+                            getattr(task, "raw_logs_finalized_at", None) or utcnow()
+                        )
                         await release_issue_execution_lock(db, issue_id=task.issue_id)
                         await db.commit()
                         self._running_tasks.discard(task_id)
@@ -1074,44 +1717,86 @@ class Scheduler:
                         if cancellation_stop_failed:
                             pass
                         elif container.status not in ("running", "exited"):
-                            try:
-                                await asyncio.to_thread(container.remove, force=True)
-                            except Exception as exc:  # noqa: BLE001
-                                should_retry = True
-                                logger.warning(
-                                    "Deferred recovery found task %s container %s in "
-                                    "status %s but could not remove it: %s",
-                                    task_id,
-                                    container_reference,
-                                    container.status,
-                                    exc,
-                                )
-                            else:
-                                task.status = (
-                                    TaskStatus.CANCELLED
-                                    if cancellation_requested
-                                    else TaskStatus.FAILED
-                                )
-                                task.error_message = (
-                                    "Cancelled by user; recovered worker container was removed"
-                                    if cancellation_requested
-                                    else (
-                                        "Task worker container was not runnable after scheduler "
-                                        f"recovery (status={container.status})"
+                            recovered_status = container.status
+                            cleanup_ready = True
+                            if recovered_status not in _QUIESCENT_CONTAINER_STATUSES:
+                                try:
+                                    await _stop_recovered_cancelled_container(container, task_id)
+                                except Exception as exc:  # noqa: BLE001
+                                    should_retry = True
+                                    cleanup_ready = False
+                                    logger.warning(
+                                        "Deferred recovery could not stop non-runnable "
+                                        "container %s for task %s: %s",
+                                        container_reference,
+                                        task_id,
+                                        exc,
                                     )
-                                )
-                                task.completed_at = utcnow()
-                                await release_issue_execution_lock(db, issue_id=task.issue_id)
-                                await db.commit()
-                                self._running_tasks.discard(task_id)
-                                self._running_issues.discard(task.issue_id)
-                                logger.error(
-                                    "Deferred recovery removed non-runnable container %s "
-                                    "and marked task %s failed",
-                                    container_reference,
-                                    task_id,
-                                )
-                                return
+                            if cleanup_ready:
+                                try:
+                                    await _finalize_recovered_raw_logs(
+                                        db,
+                                        docker,
+                                        task,
+                                        container,
+                                    )
+                                except Exception as exc:  # noqa: BLE001
+                                    should_retry = True
+                                    cleanup_ready = False
+                                    logger.warning(
+                                        "Deferred recovery could not finalize raw logs for "
+                                        "task %s container %s: %s",
+                                        task_id,
+                                        container_reference,
+                                        exc,
+                                    )
+                            if cleanup_ready:
+                                try:
+                                    await asyncio.to_thread(
+                                        container.remove,
+                                        force=True,
+                                        v=True,
+                                    )
+                                except Exception as exc:  # noqa: BLE001
+                                    should_retry = True
+                                    logger.warning(
+                                        "Deferred recovery found task %s container %s in "
+                                        "status %s but could not remove it: %s",
+                                        task_id,
+                                        container_reference,
+                                        container.status,
+                                        exc,
+                                    )
+                                else:
+                                    task.status = (
+                                        TaskStatus.CANCELLED
+                                        if cancellation_requested
+                                        else TaskStatus.FAILED
+                                    )
+                                    task.error_message = (
+                                        "Cancelled by user; recovered worker container was removed"
+                                        if cancellation_requested
+                                        else (
+                                            "Task worker container was not runnable after scheduler "
+                                            f"recovery (status={recovered_status})"
+                                        )
+                                    )
+                                    task.container_id = None
+                                    task.completed_at = utcnow()
+                                    await release_issue_execution_lock(
+                                        db,
+                                        issue_id=task.issue_id,
+                                    )
+                                    await db.commit()
+                                    self._running_tasks.discard(task_id)
+                                    self._running_issues.discard(task.issue_id)
+                                    logger.error(
+                                        "Deferred recovery removed non-runnable container %s "
+                                        "and marked task %s failed",
+                                        container_reference,
+                                        task_id,
+                                    )
+                                    return
                         else:
                             resume_context = (container.name, connection)
                             logger.info(
@@ -1149,6 +1834,7 @@ class Scheduler:
             f"(active_threads={self._active_worker_threads}, "
             f"max_workers={_worker_executor._max_workers})"
         )
+        defer_recovery = False
         try:
             loop = asyncio.get_event_loop()
             success = await loop.run_in_executor(
@@ -1160,41 +1846,66 @@ class Scheduler:
             )
             elapsed = time.time() - t_submit
             if success:
-                logger.info(
-                    f"Resumed task {task_id} completed successfully (total={elapsed:.0f}s)"
-                )
+                logger.info(f"Resumed task {task_id} completed successfully (total={elapsed:.0f}s)")
             else:
-                logger.error(
-                    f"Resumed task {task_id} failed (total={elapsed:.0f}s)"
-                )
+                logger.error(f"Resumed task {task_id} failed (total={elapsed:.0f}s)")
+        except (DockerConnectionsUnavailableError, TaskContainerLookupError) as e:
+            defer_recovery = True
+            logger.warning(
+                "Resumed task %s lost a conclusive Docker view; returning it to "
+                "deferred recovery: %s",
+                task_id,
+                e,
+            )
         except Exception as e:
             logger.exception(f"Resumed task {task_id} failed with exception: {e}")
             await self._mark_worker_bootstrap_failed(task_id, e)
         finally:
             self._active_worker_threads -= 1
-            self._worker_tasks.pop(task_id, None)
-            self._terminal_worker_seen_at.pop(task_id, None)
-            self._running_tasks.discard(task_id)
-            try:
-                async with AsyncSessionLocal() as db:
-                    result = await db.execute(
-                        select(Task).where(Task.id == task_id)
-                    )
-                    task = result.scalar_one_or_none()
-                    if task:
-                        lock_result = await db.execute(
-                            select(IssueExecutionLock).where(
-                                IssueExecutionLock.issue_id == task.issue_id
+            if defer_recovery:
+                recovery_task = asyncio.create_task(
+                    self._coordinate_unavailable_recovery(task_id)
+                )
+                self._worker_tasks[task_id] = recovery_task
+                self._terminal_worker_seen_at.pop(task_id, None)
+                logger.info(
+                    "Deferred recovery coordinator restarted for task %s after resume lookup",
+                    task_id,
+                )
+            else:
+                self._worker_tasks.pop(task_id, None)
+                self._terminal_worker_seen_at.pop(task_id, None)
+                self._running_tasks.discard(task_id)
+                try:
+                    async with AsyncSessionLocal() as db:
+                        result = await db.execute(select(Task).where(Task.id == task_id))
+                        task = result.scalar_one_or_none()
+                        if task:
+                            lock_result = await db.execute(
+                                select(IssueExecutionLock).where(
+                                    IssueExecutionLock.issue_id == task.issue_id
+                                )
                             )
-                        )
-                        lock = lock_result.scalar_one_or_none()
-                        if lock is None or lock.task_id == task_id:
-                            self._running_issues.discard(task.issue_id)
-                            await release_issue_execution_lock(db, issue_id=task.issue_id)
-                            await db.commit()
-                            await self._maybe_complete_issue(db, task.issue_id)
-            except Exception:
-                logger.exception("Failed to release lock for resumed task %s", task_id)
+                            lock = lock_result.scalar_one_or_none()
+                            if lock is None or lock.task_id == task_id:
+                                if self._block_issue_for_retained_container(task):
+                                    logger.warning(
+                                        "Keeping Issue %s locked because terminal resumed "
+                                        "task %s retains container %s",
+                                        task.issue_id,
+                                        task_id,
+                                        task.container_id,
+                                    )
+                                else:
+                                    self._running_issues.discard(task.issue_id)
+                                    await release_issue_execution_lock(
+                                        db,
+                                        issue_id=task.issue_id,
+                                    )
+                                    await db.commit()
+                                    await self._maybe_complete_issue(db, task.issue_id)
+                except Exception:
+                    logger.exception("Failed to release lock for resumed task %s", task_id)
 
 
 # Singleton scheduler instance

@@ -196,16 +196,15 @@ class TestListTemplates:
         assert resp.status_code == 200
         assert len(resp.json()) == 3
 
-    async def test_ordered_by_created_at_desc(self, client):
-        """Templates are returned newest-first (created_at DESC)."""
+    async def test_new_templates_append_in_display_order(self, client):
+        """New templates append in their persisted display order."""
         await _create_template(client, {"name": "First", "content": "1"})
         await _create_template(client, {"name": "Second", "content": "2"})
         await _create_template(client, {"name": "Third", "content": "3"})
 
         data = (await client.get(BASE_URL)).json()
         names = [t["name"] for t in data]
-        # newest first → Third, Second, First
-        assert names == ["Third", "Second", "First"]
+        assert names == ["First", "Second", "Third"]
 
     async def test_response_contains_all_fields(self, client):
         """Each template in the list has all expected fields."""

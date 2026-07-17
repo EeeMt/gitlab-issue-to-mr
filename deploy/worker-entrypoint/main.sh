@@ -49,8 +49,8 @@ write_delivery_summary_artifacts "${FINAL_SUMMARY_CONTENT}"
 # Plan mode: discard any accidental workspace changes and exit successfully
 if [ "${TASK_MODE}" = "plan" ]; then
     echo "Plan mode: discarding any workspace changes..."
-    git checkout -- . 2>/dev/null || true
-    git clean -fd 2>/dev/null || true
+    codify_run_shell 'cd /workspace && git checkout -- .' 2>/dev/null || true
+    codify_run_shell 'cd /workspace && git clean -fd' 2>/dev/null || true
     write_plan_task_metadata "${FINAL_SUMMARY_CONTENT}"
     create_runtime_archive
     echo "========================================"
@@ -61,7 +61,7 @@ fi
 
 # Now commit and push the changes
 # Check if any changes were made (excluding result.md)
-CHANGES=$(git status --porcelain || true)
+CHANGES=$(codify_run_shell 'cd /workspace && git status --porcelain' || true)
 if [ -n "$CHANGES" ]; then
     echo "Changes detected:"
     while IFS= read -r line; do
@@ -81,14 +81,14 @@ if [ -n "$CHANGES" ]; then
 
     # Remove result.md if it exists from prior runs
     rm -f /workspace/result.md
-    git rm -f result.md 2>/dev/null || true
+    codify_run_shell 'cd /workspace && git rm -f result.md' 2>/dev/null || true
 
     # Add all changed files
-    git add -A
+    codify_run_shell 'cd /workspace && git add -A'
 
     # Calculate change statistics from staged changes before committing.
     echo "Calculating change statistics..."
-    DIFF_STATS=$(git diff --cached --stat || echo "0 files changed")
+    DIFF_STATS=$(codify_run_shell 'cd /workspace && git diff --cached --stat' || echo "0 files changed")
     echo "Diff stats: ${DIFF_STATS}"
 
     # Parse additions, deletions from git diff --stat output
@@ -114,7 +114,7 @@ if [ -n "$CHANGES" ]; then
     NEW_FILES=""
     MODIFIED_FILES=""
     DELETED_FILES=""
-    STAGED_NAME_STATUS=$(git diff --cached --name-status --no-renames || true)
+    STAGED_NAME_STATUS=$(codify_run_shell 'cd /workspace && git diff --cached --name-status --no-renames' || true)
     while IFS= read -r line; do
         [ -z "$line" ] && continue
         status=$(printf '%s' "$line" | awk '{print $1}')
@@ -140,7 +140,7 @@ if [ -n "$CHANGES" ]; then
 删除: ${DELETED_FILES:-无}"
     FINAL_CHANGED_FILES_TEXT="$(build_changed_files_table "${NEW_FILES}" "${MODIFIED_FILES}" "${DELETED_FILES}" "${FINAL_SUMMARY_CONTENT}")"
 
-    COMMIT_DIFF_STATS=$(git diff --cached --stat || echo "0 files changed")
+    COMMIT_DIFF_STATS=$(codify_run_shell 'cd /workspace && git diff --cached --stat' || echo "0 files changed")
     echo "Generating commit message with Claude..."
     COMMIT_MESSAGE_PROMPT=$(build_commit_message_prompt "${CHANGED_FILES_TEXT}" "${COMMIT_DIFF_STATS}" "${FINAL_SUMMARY_CONTENT}")
     printf '%s\n' "${COMMIT_MESSAGE_PROMPT}" > /tmp/commit_message_prompt.txt
@@ -220,16 +220,16 @@ AI-Generated: true"
     # Create commit
     GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME_VALUE}" \
     GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL_VALUE}" \
-    git commit -F /tmp/commit_message.txt
+    codify_run_shell 'cd /workspace && git commit -F /tmp/commit_message.txt'
 
     # Push to remote using git push
     echo "Pushing to remote..."
-    git remote set-url origin "${GITLAB_SCHEME}://${GITLAB_HOST}/${PROJECT_PATH}.git"
-    git config --local http.extraHeader "PRIVATE-TOKEN: ${GITLAB_TOKEN}"
-    GIT_TERMINAL_PROMPT=0 git push -u origin "${BRANCH_NAME}"
+    codify_run_shell 'cd /workspace && git remote set-url origin "${GIT_REPO_URL}"'
+    codify_run_shell 'cd /workspace && git config --local http.extraHeader "PRIVATE-TOKEN: ${GITLAB_TOKEN}"'
+    codify_run_shell 'cd /workspace && GIT_TERMINAL_PROMPT=0 git push -u origin "${BRANCH_NAME}"'
 
     # Get commit SHA
-    COMMIT_SHA=$(git rev-parse HEAD)
+    COMMIT_SHA=$(codify_run_shell 'cd /workspace && git rev-parse HEAD')
     echo "Committed: ${COMMIT_SHA}"
 
     # MR was already created by backend before worker started.
