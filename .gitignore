@@ -65,6 +65,10 @@ temporary/*.png
 .agents/
 .codex/
 
+# Offline bundle archives (large binaries)
+deploy/codify-offline-bundle.*.tar.gz
+deploy/offline-bundle/images/*.tar.xz
+
 # Logs
 logs/
 scripts/demo/.env
