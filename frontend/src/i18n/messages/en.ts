@@ -850,7 +850,7 @@ const en = {
     scheduleAtDesc: 'Enter the queue at a specific time',
     sessionContext: 'Session Context',
     startFreshSession: 'Run in a new session',
-    startFreshSessionHint: 'Do not inherit the current Claude conversation. The workspace, Git branch, and previous session records are preserved.',
+    startFreshSessionHint: 'Do not inherit the current conversation context. The workspace, Git branch, and previous session records are preserved.',
     startFreshSessionNoCurrent: 'This issue has no recorded session. Enable this to also ignore any legacy session left in the workspace.',
     delaySeconds: 'seconds',
     delayMinutes: 'minutes',

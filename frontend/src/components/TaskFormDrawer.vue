@@ -434,21 +434,24 @@
         >
           <div
             class="session-context-row"
+            :class="{ 'session-context-row--active': startFreshSession }"
             data-testid="task-session-mode"
           >
             <span class="session-context-row__copy">
-              <span class="session-context-row__title">{{ t('createTask.startFreshSession') }}</span>
+              <span class="session-context-row__heading">
+                <span class="session-context-row__title">{{ t('createTask.startFreshSession') }}</span>
+                <n-switch
+                  v-model:value="startFreshSession"
+                  size="small"
+                  data-testid="task-session-mode-switch"
+                />
+              </span>
               <span class="session-context-row__description">
                 {{ t(hasClaudeSession
                   ? 'createTask.startFreshSessionHint'
                   : 'createTask.startFreshSessionNoCurrent') }}
               </span>
             </span>
-            <n-switch
-              v-model:value="startFreshSession"
-              size="small"
-              data-testid="task-session-mode-switch"
-            />
           </div>
         </n-form-item>
           </div>
@@ -1469,29 +1472,46 @@ onMounted(() => {
 }
 
 .session-context-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
   width: 100%;
   min-width: 0;
+  box-sizing: border-box;
   padding: 10px 12px;
   border: 1px solid var(--n-border-color);
   border-radius: 8px;
-  background: var(--n-color-modal, var(--n-color, #fff));
+  background: rgba(128, 128, 128, 0.035);
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.session-context-row--active {
+  border-color: var(--n-primary-color);
+  background: rgba(99, 226, 183, 0.06);
 }
 
 .session-context-row__copy {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  width: 100%;
   min-width: 0;
+}
+
+.session-context-row__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.session-context-row__heading :deep(.n-switch) {
+  flex: 0 0 auto;
 }
 
 .session-context-row__title {
   color: var(--n-text-color-1);
   font-size: 13px;
   font-weight: 600;
+  line-height: 20px;
 }
 
 .session-context-row__description {

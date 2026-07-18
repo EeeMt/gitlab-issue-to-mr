@@ -438,11 +438,13 @@ describe('TaskFormDrawer', () => {
       await openDrawer()
 
       const switchButton = wrapper.find('[data-testid="task-session-mode-switch"]')
+      const sessionMode = wrapper.find('[data-testid="task-session-mode"]')
       expect(switchButton.attributes('disabled')).toBeUndefined()
-      expect(wrapper.find('[data-testid="task-session-mode"]').text())
-        .toContain('createTask.startFreshSessionNoCurrent')
+      expect(sessionMode.text()).toContain('createTask.startFreshSessionNoCurrent')
+      expect(sessionMode.classes()).not.toContain('session-context-row--active')
 
       await switchButton.trigger('click')
+      expect(sessionMode.classes()).toContain('session-context-row--active')
       wrapper.vm.taskMode = 'execute'
       await submitCreate()
 
