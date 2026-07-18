@@ -29,7 +29,8 @@ build: ## Build all images (backend, nginx, worker)
 .PHONY: offline-bundle-export
 offline-bundle-export: ## Build images, export offline bundle images, and package deploy/offline-bundle
 	$(MAKE) build
-	WORKER_KIT_VERSION=$(WORKER_KIT_VERSION) WORKER_KIT_PLATFORM=$(WORKER_KIT_PLATFORM) $(PROJECT_ROOT)/deploy/worker-kit/export.sh
+	WORKER_KIT_VERSION=$(WORKER_KIT_VERSION) WORKER_KIT_PLATFORM=linux/amd64 $(PROJECT_ROOT)/deploy/worker-kit/export.sh
+	WORKER_KIT_VERSION=$(WORKER_KIT_VERSION) WORKER_KIT_PLATFORM=linux/arm64 $(PROJECT_ROOT)/deploy/worker-kit/export.sh
 	cd $(PROJECT_ROOT)/deploy/offline-bundle && ./scripts/export-images.sh
 	cd $(PROJECT_ROOT)/deploy/offline-bundle && ./scripts/package-bundle.sh
 
