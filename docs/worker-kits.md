@@ -42,7 +42,7 @@ Mermaid npm bundle, or ci-claude script.
 On a connected build machine:
 
 ```bash
-make worker-kit-export WORKER_KIT_VERSION=0.1.0 WORKER_KIT_PLATFORM=linux/amd64
+make worker-kit-export WORKER_KIT_VERSION=0.2.0 WORKER_KIT_PLATFORM=linux/amd64
 ```
 
 This creates an archive and checksum under `deploy/offline-bundle/kits/`. Kit versions are
@@ -94,13 +94,13 @@ can execute mounted-kit profiles:
 
 ```bash
 sudo ./scripts/install-worker-kit.sh \
-  kits/codify-worker-kit-0.1.0-linux-amd64.tar.gz
+  kits/codify-worker-kit-0.2.0-linux-amd64.tar.gz
 ```
 
 The default installation path is:
 
 ```text
-/opt/codify/worker-kits/0.1.0-linux-amd64
+/opt/codify/worker-kits/0.2.0-linux-amd64
 ```
 
 For remote Docker targets, this is a path on the Docker Engine host, not on the Backend or
@@ -115,7 +115,7 @@ Verify the kit and one project runtime image before creating a profile:
 
 ```bash
 ./scripts/verify-worker-runtime.sh \
-  --kit /opt/codify/worker-kits/0.1.0-linux-amd64 \
+  --kit /opt/codify/worker-kits/0.2.0-linux-amd64 \
   --claude-host-path /opt/codify/overrides/claude-2.1.200 \
   --image team/java21-maven:2026.07 \
   --smoke 'java -version && mvn -version'
@@ -148,8 +148,8 @@ No UI is required. Create or update a Worker Profile through the existing admin 
   "name": "Java 21 and Maven",
   "image": "codify-worker/java21-maven:2026.07",
   "runtime_mode": "mounted_kit",
-  "worker_kit_version": "0.1.0",
-  "worker_kit_path": "/opt/codify/worker-kits/0.1.0-linux-amd64",
+  "worker_kit_version": "0.2.0",
+  "worker_kit_path": "/opt/codify/worker-kits/0.2.0-linux-amd64",
   "codegraph_enabled": true,
   "volume_mounts": [
     {
