@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.providers import _decrypt_provider_api_key
 from app.config import get_effective_settings as get_settings
+from app.core.utcnow import utcnow
 from app.core.worker_environment_variables import (
     validate_worker_environment_variable_key as validate_worker_environment_key,
 )
@@ -65,6 +66,21 @@ async def resolve_provider(db: AsyncSession, task: Task) -> AIProvider:
         max_turns=settings.claude_max_turns,
         system_prompt=None,
     )
+
+
+def capture_provider_runtime_snapshot(task: Task, provider: AIProvider) -> None:
+    """Capture the non-secret model-service configuration passed to the worker."""
+    provider_id = getattr(provider, "id", None)
+    task.provider_runtime_snapshot = {
+        "provider_id": provider_id if isinstance(provider_id, int) else None,
+        "provider_name": provider.name,
+        "base_url": provider.base_url,
+        "configured_model": provider.model,
+        "max_turns": provider.max_turns,
+        "system_prompt": provider.system_prompt,
+        "api_key_configured": bool(provider.api_key),
+        "captured_at": utcnow().isoformat(),
+    }
 
 
 async def resolve_commit_author(db: AsyncSession, task: Task) -> tuple[str, str]:

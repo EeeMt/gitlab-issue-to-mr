@@ -208,6 +208,7 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
     assert worker.docker.create_container.call_args.kwargs["start"] is False
     worker.docker.put_archive.assert_called_once()
     worker.docker.start_container.assert_called_once_with(container)
+    assert db.commit.await_count == 2
     assert worker.docker.create_container.call_args.kwargs["image"] == "custom-worker:latest"
     assert worker.docker.create_container.call_args.kwargs["entrypoint"] == (
         "/opt/codify-kit/launcher"
@@ -224,7 +225,17 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
 @pytest.mark.asyncio
 async def test_prepare_container_inputs_uses_only_snapshot_custom_environment():
     worker = MagicMock()
-    worker._resolve_provider = AsyncMock(return_value=SimpleNamespace(id=1, system_prompt=None))
+    worker._resolve_provider = AsyncMock(
+        return_value=SimpleNamespace(
+            id=1,
+            name="Test provider",
+            base_url="https://ai.example.com",
+            model="claude-sonnet-4-6",
+            max_turns=32,
+            system_prompt=None,
+            api_key="encrypted-secret",
+        )
+    )
     worker._resolve_commit_author = AsyncMock(return_value=("Author", "author@example.com"))
     worker._build_container_env = MagicMock(return_value={"TASK_ID": "12"})
     task = SimpleNamespace(id=12, project_id=100)
@@ -261,6 +272,10 @@ async def test_prepare_container_inputs_uses_only_snapshot_custom_environment():
     assert worker._build_container_env.call_args.kwargs["custom_environment"] == {
         "SNAPSHOT_ENV": "snapshot"
     }
+    assert task.provider_runtime_snapshot["provider_name"] == "Test provider"
+    assert task.provider_runtime_snapshot["configured_model"] == "claude-sonnet-4-6"
+    assert task.provider_runtime_snapshot["api_key_configured"] is True
+    assert "api_key" not in task.provider_runtime_snapshot
     legacy_env_loader.assert_not_awaited()
     legacy_env_builder.assert_not_called()
 

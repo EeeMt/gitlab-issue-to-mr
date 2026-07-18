@@ -216,6 +216,11 @@ class Task(Base):
     )
     input_session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     output_session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    provider_runtime_snapshot: Mapped[dict | None] = mapped_column(
+        JSON,
+        nullable=True,
+        deferred=True,
+    )
     worker_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     initiator_user_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True

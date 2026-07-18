@@ -20,8 +20,14 @@
           {{ t('common.project') }}
         </span>
         <span class="metadata-value">
-          <a v-if="task.project_url" :href="task.project_url" target="_blank" rel="noopener noreferrer" class="app-link">
-            {{ projectDisplayName }}
+          <a
+            v-if="task.project_url"
+            :href="task.project_url"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="app-link metadata-reference-link project-reference-link"
+          >
+            <span class="metadata-reference-link__title">{{ projectDisplayName }}</span>
           </a>
           <span v-else>{{ projectDisplayName }}</span>
         </span>
@@ -38,9 +44,14 @@
         </span>
         <span class="metadata-value">
           <template v-if="task.issue">
-            <router-link :to="`/issues/${task.issue.id}`" class="app-link task-issue-link">
+            <router-link
+              :to="`/issues/${task.issue.id}`"
+              class="app-link metadata-reference-link task-issue-link"
+            >
               <span class="task-issue-link__id">#{{ task.issue.id }}</span>
-              <span class="task-issue-link__title">{{ task.issue.title }}</span>
+              <span class="metadata-reference-link__title task-issue-link__title">
+                {{ task.issue.title }}
+              </span>
             </router-link>
             <n-tag v-if="triggerSourceMeta" size="small" round :type="triggerSourceMeta.type" class="trigger-source-tag">
               {{ triggerSourceMeta.label }}
@@ -77,37 +88,7 @@
         </span>
       </div>
 
-      <!-- Provider -->
-      <div v-if="task.provider_name || task.provider_id" class="metadata-row">
-        <span class="metadata-label">
-          <n-icon size="14" class="metadata-label-icon"><ServerOutline /></n-icon>
-          {{ t('taskView.provider') }}
-        </span>
-        <span class="metadata-value">
-          {{ task.provider_name || t('config.providers.systemDefault') }}
-        </span>
-      </div>
-
-      <!-- Worker -->
-      <div v-if="task.worker_profile_name || task.worker_profile_id" class="metadata-row">
-        <span class="metadata-label">
-          <n-icon size="14" class="metadata-label-icon"><ServerOutline /></n-icon>
-          {{ t('taskView.workerProfile') }}
-        </span>
-        <span class="metadata-value">
-          {{ task.worker_profile_name || `#${task.worker_profile_id}` }}
-        </span>
-      </div>
-
-      <div v-if="task.worker_image" class="metadata-row">
-        <span class="metadata-label">
-          <n-icon size="14" class="metadata-label-icon"><ServerOutline /></n-icon>
-          {{ t('taskView.workerImage') }}
-        </span>
-        <span class="metadata-value">
-          {{ task.worker_image }}
-        </span>
-      </div>
+      <TaskRuntimeSummaryRows :task="task" />
 
       <!-- Task mode -->
       <div class="metadata-row">
@@ -120,6 +101,17 @@
             <n-icon :component="taskModeMeta.icon" size="15" class="task-mode-chip__icon" />
             <span>{{ taskModeMeta.label }}</span>
           </span>
+        </span>
+      </div>
+
+      <!-- Session mode -->
+      <div class="metadata-row">
+        <span class="metadata-label">
+          <n-icon size="14" class="metadata-label-icon"><ChatbubbleEllipsesOutline /></n-icon>
+          {{ t('taskView.sessionMode') }}
+        </span>
+        <span class="metadata-value">
+          <n-tag size="small" :bordered="false">{{ sessionModeText }}</n-tag>
         </span>
       </div>
 
@@ -227,7 +219,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { NCard, NTag, NIcon } from 'naive-ui'
+import { NCard, NIcon, NTag } from 'naive-ui'
 import {
   FolderOpenOutline,
   GitMergeOutline,
@@ -236,15 +228,15 @@ import {
   TimeOutline,
   GitPullRequest,
   RefreshOutline,
-  ServerOutline,
+  ChatbubbleEllipsesOutline,
   CodeSlashOutline,
   BulbOutline
 } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import type { Task } from '../api'
+import TaskRuntimeSummaryRows from './TaskRuntimeSummaryRows.vue'
 import { formatPriority } from '../utils/format'
 import { formatDateTimeUtc8 } from '../utils/datetime'
-
 
 const props = defineProps<{
   task: Task
@@ -276,6 +268,12 @@ const taskModeMeta = computed(() => {
     modifierClass: isPlan ? 'task-mode-chip--plan' : 'task-mode-chip--execute'
   }
 })
+
+const sessionModeText = computed(() =>
+  props.task.session_mode === 'fresh'
+    ? t('taskView.sessionModeFresh')
+    : t('taskView.sessionModeContinue')
+)
 
 const triggerSourceMeta = computed(() => {
   const source = props.task.trigger_source || 'manual'
@@ -376,14 +374,19 @@ function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean 
 }
 
 .metadata-value {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
   min-width: 0;
   font-size: 14px;
   color: var(--n-text-color-1);
   word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .trigger-source-tag {
-  margin-left: 8px;
+  margin-left: 0;
   vertical-align: middle;
 }
 
@@ -581,9 +584,35 @@ function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean 
 }
 
 @media (max-width: 600px) {
+  .metadata-body {
+    grid-template-columns: minmax(74px, max-content) minmax(0, 1fr);
+    column-gap: 8px;
+    row-gap: 10px;
+  }
+
   .time-point__content {
     grid-template-columns: 1fr;
     gap: 1px;
+  }
+}
+
+@media (max-width: 420px) {
+  .metadata-body {
+    grid-template-columns: 1fr;
+  }
+
+  .metadata-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+
+  .metadata-label--top {
+    padding-top: 0;
+  }
+
+  .metadata-value {
+    width: 100%;
   }
 }
 
@@ -591,40 +620,44 @@ function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean 
   color: var(--n-primary-color, #18a058);
   text-decoration: none;
 }
+
+.metadata-value > .app-link {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
 .app-link:hover {
   text-decoration: underline;
 }
 
-.task-issue-link {
-  --task-issue-link-color: #3b82f6;
-  --task-issue-link-border: rgba(37, 99, 235, 0.28);
-  --task-issue-link-bg: rgba(37, 99, 235, 0.12);
-  --task-issue-link-hover-border: rgba(37, 99, 235, 0.44);
-  --task-issue-link-hover-bg: rgba(37, 99, 235, 0.18);
-
+.metadata-reference-link {
   display: inline-flex;
   align-items: baseline;
   gap: 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+  width: fit-content;
   max-width: 100%;
   padding: 2px 0;
-  border: 1px solid var(--task-issue-link-border);
-  border-width: 0 0 1px;
-  border-radius: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--n-primary-color, #18a058) 28%, transparent);
   background: transparent;
-  color: var(--task-issue-link-color);
+  color: var(--n-primary-color, #18a058);
   font-weight: 400;
   line-height: 1.45;
   vertical-align: middle;
-  transition:
-    background 0.15s ease,
-    border-color 0.15s ease,
-    color 0.15s ease;
+  text-decoration: none;
+  transition: border-color 0.15s ease, color 0.15s ease;
 }
 
-.task-issue-link:hover {
-  border-color: var(--task-issue-link-hover-border);
-  background: transparent;
+.metadata-reference-link:hover {
+  border-color: color-mix(in srgb, var(--n-primary-color, #18a058) 56%, transparent);
   text-decoration: none;
+}
+
+.metadata-reference-link__title {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .task-issue-link__id {
@@ -635,8 +668,7 @@ function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean 
 }
 
 .task-issue-link__title {
-  min-width: 0;
-  overflow-wrap: anywhere;
+  color: inherit;
 }
 
 .metadata-label-icon {

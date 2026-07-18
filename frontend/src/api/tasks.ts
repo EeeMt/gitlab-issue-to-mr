@@ -2,6 +2,49 @@ import { api } from './client'
 
 export type TaskStatus = 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
 
+export interface TaskModelServiceSummary {
+  configuration_source: 'execution_snapshot' | 'current_provider' | 'unavailable'
+  provider_config_available: boolean
+  provider_id: number | null
+  provider_name: string | null
+  base_url: string | null
+  configured_model: string | null
+  actual_model: string | null
+  max_turns: number | null
+  system_prompt: string | null
+  api_key_configured: boolean
+  configuration_captured_at: string | null
+}
+
+export interface TaskWorkerRuntimeMount {
+  source: 'worker_kit' | 'profile'
+  host_path: string
+  container_path: string
+  mode: string
+}
+
+export interface TaskWorkerRuntimeEnvironmentVariable {
+  key: string
+  is_secret: boolean
+  value_configured: boolean
+}
+
+export interface TaskWorkerRuntimeSummary {
+  snapshot_available: boolean
+  worker_profile_id: number | null
+  worker_profile_name: string | null
+  image: string | null
+  runtime_mode: 'baked_image' | 'mounted_kit' | string | null
+  worker_kit_version: string | null
+  worker_kit_path: string | null
+  codegraph_enabled: boolean
+  mounts: TaskWorkerRuntimeMount[]
+  environment_variables: TaskWorkerRuntimeEnvironmentVariable[]
+  pre_script_configured: boolean
+  post_script_configured: boolean
+  snapshot_created_at: string | null
+}
+
 export interface Task {
   id: number
   issue_id: number
@@ -264,6 +307,16 @@ export async function getSlotCapacity(scheduledAt: string): Promise<SlotCapacity
 
 export async function getTask(id: number): Promise<Task> {
   const response = await api.get(`/tasks/${id}`)
+  return response.data
+}
+
+export async function getTaskModelServiceSummary(id: number): Promise<TaskModelServiceSummary> {
+  const response = await api.get(`/tasks/${id}/model-service-summary`)
+  return response.data
+}
+
+export async function getTaskWorkerRuntimeSummary(id: number): Promise<TaskWorkerRuntimeSummary> {
+  const response = await api.get(`/tasks/${id}/worker-runtime-summary`)
   return response.data
 }
 

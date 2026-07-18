@@ -9,6 +9,10 @@ import pytest
 from fastapi.routing import APIRoute
 
 import app.api.tasks as tasks_module
+from app.api.task_runtime_summary_routes import (
+    serialize_model_service_summary,
+    serialize_worker_runtime_summary,
+)
 from app.api.task_schemas import CreateTaskRequest
 from app.api.tasks import (
     _serialize_task,
@@ -17,6 +21,7 @@ from app.api.tasks import (
     get_task_payload,
     router,
 )
+from app.core.worker_runtime import capture_provider_runtime_snapshot
 from app.dependencies.project_access import ProjectAccessScope
 from app.models import Task, TaskStatus
 
@@ -28,6 +33,8 @@ EXPECTED_TASK_ROUTES = {
     ("GET", "/tasks/run-instruction-template-defaults"),
     ("POST", "/tasks/render-run-instruction-template-preview"),
     ("GET", "/tasks/{task_id}"),
+    ("GET", "/tasks/{task_id}/model-service-summary"),
+    ("GET", "/tasks/{task_id}/worker-runtime-summary"),
     ("PATCH", "/tasks/{task_id}"),
     ("GET", "/tasks/{task_id}/logs"),
     ("GET", "/tasks/{task_id}/log-stream"),
@@ -224,3 +231,141 @@ def test_task_response_preserves_required_frontend_fields() -> None:
     assert response["session_mode"] == "fresh"
     assert response["output_session_id"] == "session-new"
     assert response["project_url"] == "https://gitlab.example.com/team/codify"
+
+
+def test_model_service_summary_exposes_runtime_config_without_api_key() -> None:
+    task = SimpleNamespace(
+        provider_id=7,
+        model_name="claude-sonnet-4-6",
+        provider_runtime_snapshot=None,
+        provider=SimpleNamespace(
+            name="Production AI Service",
+            base_url="https://ai.example.com",
+            model="claude-sonnet-4-5",
+            max_turns=64,
+            system_prompt="Follow the repository instructions.",
+            api_key="encrypted-secret",
+        ),
+    )
+
+    response = serialize_model_service_summary(task)
+
+    assert response == {
+        "configuration_source": "current_provider",
+        "provider_config_available": True,
+        "provider_id": 7,
+        "provider_name": "Production AI Service",
+        "base_url": "https://ai.example.com",
+        "configured_model": "claude-sonnet-4-5",
+        "actual_model": "claude-sonnet-4-6",
+        "max_turns": 64,
+        "system_prompt": "Follow the repository instructions.",
+        "api_key_configured": True,
+        "configuration_captured_at": None,
+    }
+    assert "api_key" not in response
+    assert "encrypted-secret" not in repr(response)
+
+
+def test_model_service_summary_prefers_execution_snapshot_over_mutated_provider() -> None:
+    now = datetime(2026, 7, 18, 10, 0, 0)
+    provider = SimpleNamespace(
+        id=7,
+        name="Production AI Service",
+        base_url="https://ai.example.com",
+        model="claude-sonnet-4-5",
+        max_turns=64,
+        system_prompt="Follow the repository instructions.",
+        api_key="encrypted-secret",
+    )
+    task = SimpleNamespace(
+        provider_id=7,
+        model_name="claude-sonnet-4-6",
+        provider=provider,
+        provider_runtime_snapshot=None,
+    )
+
+    with patch("app.core.worker_runtime.utcnow", return_value=now):
+        capture_provider_runtime_snapshot(task, provider)
+
+    provider.name = "Renamed service"
+    provider.model = "claude-sonnet-5"
+    provider.system_prompt = "Changed after execution."
+    response = serialize_model_service_summary(task)
+
+    assert response["configuration_source"] == "execution_snapshot"
+    assert response["provider_name"] == "Production AI Service"
+    assert response["configured_model"] == "claude-sonnet-4-5"
+    assert response["system_prompt"] == "Follow the repository instructions."
+    assert response["configuration_captured_at"] == now.isoformat()
+    assert response["actual_model"] == "claude-sonnet-4-6"
+    assert "api_key" not in response
+    assert "encrypted-secret" not in repr(response)
+
+
+def test_worker_runtime_summary_uses_snapshot_and_never_returns_environment_values() -> None:
+    now = datetime(2026, 7, 18, 9, 30, 0)
+    task = SimpleNamespace(
+        worker_profile_id=3,
+        worker_profile_snapshot=SimpleNamespace(
+            worker_profile_id=3,
+            profile_name="Java 21 Maven Worker",
+            image="registry.example.com/codify/worker-java21:2026.07",
+            runtime_mode="mounted_kit",
+            worker_kit_version="2026.07.18",
+            worker_kit_path="/srv/codify/worker-kits/2026.07.18",
+            docker_host="ssh://sensitive-host",
+            docker_tls_key="/sensitive/client.key",
+            codegraph_enabled=True,
+            volume_mounts=[
+                {
+                    "host_path": "/srv/maven-cache",
+                    "container_path": "/root/.m2",
+                    "mode": "rw",
+                }
+            ],
+            environment_variables=[
+                {"key": "JAVA_HOME", "value": "/opt/java", "is_secret": False},
+                {"key": "NPM_TOKEN", "value": "top-secret", "is_secret": True},
+            ],
+            pre_script="npm ci",
+            post_script="",
+            created_at=now,
+        ),
+    )
+
+    response = serialize_worker_runtime_summary(task)
+
+    assert response["snapshot_available"] is True
+    assert response["runtime_mode"] == "mounted_kit"
+    assert response["worker_kit_version"] == "2026.07.18"
+    assert response["mounts"] == [
+        {
+            "source": "worker_kit",
+            "host_path": "/srv/codify/worker-kits/2026.07.18",
+            "container_path": "/opt/codify-kit",
+            "mode": "ro",
+        },
+        {
+            "source": "worker_kit",
+            "host_path": "/srv/codify/worker-kits/2026.07.18/nix/store",
+            "container_path": "/nix/store",
+            "mode": "ro",
+        },
+        {
+            "source": "profile",
+            "host_path": "/srv/maven-cache",
+            "container_path": "/root/.m2",
+            "mode": "rw",
+        },
+    ]
+    assert response["environment_variables"] == [
+        {"key": "JAVA_HOME", "is_secret": False, "value_configured": True},
+        {"key": "NPM_TOKEN", "is_secret": True, "value_configured": True},
+    ]
+    assert response["pre_script_configured"] is True
+    assert response["post_script_configured"] is False
+    assert "docker_host" not in response
+    assert "docker_tls_key" not in response
+    assert "/opt/java" not in repr(response)
+    assert "top-secret" not in repr(response)

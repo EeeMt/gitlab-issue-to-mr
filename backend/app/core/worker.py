@@ -41,6 +41,7 @@ from app.core.worker_results import (
 from app.core.worker_runtime import (
     build_container_env,
     build_container_volumes,
+    capture_provider_runtime_snapshot,
     get_container_name,
     materialize_ci_failure_bundle,
     resolve_commit_author,
@@ -92,6 +93,7 @@ async def prepare_container_inputs(
 ):
     target_branch = issue.target_branch if issue else None
     provider = await worker._resolve_provider(db, task)
+    capture_provider_runtime_snapshot(task, provider)
     author_name, author_email = await worker._resolve_commit_author(db, task)
     environment = worker._build_container_env(
         task,

@@ -34,6 +34,7 @@ def _make_task(task_id=1, project_id=1, status=TaskStatus.PENDING):
     task.priority = 1
     task.require_changes = True
     task.provider_id = None
+    task.provider_runtime_snapshot = {"configured_model": "stale-model"}
     task.worker_profile_id = 12
     task.worker_profile = None
     task.worker_profile_snapshot = None
@@ -211,6 +212,7 @@ class UpdateTaskHappyPathTests(unittest.TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(task.provider_id, 8)
+        self.assertIsNone(task.provider_runtime_snapshot)
 
     def test_update_provider_id_to_valid_sets_provider(self):
         """provider_id: <int> sets the provider after existence check passes."""
@@ -233,6 +235,7 @@ class UpdateTaskHappyPathTests(unittest.TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(task.provider_id, 7)
+        self.assertIsNone(task.provider_runtime_snapshot)
 
     def test_queued_task_can_be_edited(self):
         task = _make_task(status=TaskStatus.QUEUED)

@@ -52,6 +52,9 @@ from app.api.task_queries import TaskListFilters, build_task_list_query
 from app.api.task_responses import (
     serialize_task as _serialize_task,
 )
+from app.api.task_runtime_summary_routes import (
+    router as task_runtime_summary_router,
+)
 from app.api.task_schemas import (
     CreateTaskRequest,
     RetryTaskRequest,
@@ -99,10 +102,13 @@ from app.dependencies.project_access import (
     require_project_access_scope,
 )
 from app.models import (
+    AIProvider,
     Issue,
     Task,
     TaskStatus,
+    TaskWorkerProfileSnapshot,
     User,
+    WorkerProfile,
 )
 
 logger = logging.getLogger(__name__)
@@ -110,6 +116,7 @@ router = APIRouter()
 router.include_router(task_action_router)
 router.include_router(task_log_router)
 router.include_router(task_stats_router)
+router.include_router(task_runtime_summary_router)
 
 
 def _task_creation_services() -> TaskCreationServices:
@@ -400,9 +407,17 @@ async def get_task(
         select(Task)
         .options(
             selectinload(Task.issue),
-            selectinload(Task.provider),
-            selectinload(Task.worker_profile),
-            selectinload(Task.worker_profile_snapshot),
+            selectinload(Task.provider).load_only(AIProvider.id, AIProvider.name),
+            selectinload(Task.worker_profile).load_only(
+                WorkerProfile.id,
+                WorkerProfile.name,
+            ),
+            selectinload(Task.worker_profile_snapshot).load_only(
+                TaskWorkerProfileSnapshot.worker_profile_id,
+                TaskWorkerProfileSnapshot.profile_name,
+                TaskWorkerProfileSnapshot.image,
+                TaskWorkerProfileSnapshot.created_at,
+            ),
         )
         .where(Task.id == task_id)
     )

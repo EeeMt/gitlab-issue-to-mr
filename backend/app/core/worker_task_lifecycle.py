@@ -18,6 +18,7 @@ from app.core.worker_docker_targets import TaskContainerLookupError
 from app.core.worker_profiles import load_task_worker_runtime
 from app.core.worker_runtime import (
     build_task_runtime_archive,
+    capture_provider_runtime_snapshot,
     worker_custom_scripts_configured,
 )
 from app.core.worker_task_artifacts import (
@@ -77,6 +78,7 @@ async def prepare_container_inputs(
 ):
     target_branch = issue.target_branch if issue else None
     provider = await worker._resolve_provider(db, task)
+    capture_provider_runtime_snapshot(task, provider)
     author_name, author_email = await worker._resolve_commit_author(db, task)
     environment = worker._build_container_env(
         task,
@@ -319,6 +321,10 @@ async def create_execute_container(
     environment["CODIFY_CODEGRAPH_ENABLED"] = (
         "true" if worker_runtime.codegraph_enabled else "false"
     )
+    # Persist the exact provider/session choices before the Docker side effect. If the
+    # scheduler crashes after container creation, recovery can still report the runtime
+    # configuration that was used to build the container environment.
+    await db.commit()
     container_overrides = worker_runtime.container_overrides()
     environment.update(container_overrides["environment"])
     volumes = worker._build_container_volumes(

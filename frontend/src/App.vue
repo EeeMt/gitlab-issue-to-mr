@@ -719,6 +719,10 @@ onBeforeUnmount(() => {
   --app-summary-card-background: linear-gradient(180deg, rgba(32, 128, 240, 0.06), rgba(32, 128, 240, 0.02));
 }
 
+html {
+  scrollbar-gutter: stable;
+}
+
 html, body, #app {
   margin: 0;
   padding: 0;

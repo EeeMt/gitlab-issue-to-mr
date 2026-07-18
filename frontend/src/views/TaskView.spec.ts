@@ -9,6 +9,8 @@ import { createMockTask, createMockTaskLog } from '../test/mocks/api'
 const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
   const mock = {
     getTask: vi.fn<() => Promise<any>>(),
+    getTaskModelServiceSummary: vi.fn<() => Promise<any>>(),
+    getTaskWorkerRuntimeSummary: vi.fn<() => Promise<any>>(),
     getTaskLogs: vi.fn<() => Promise<any[]>>(),
     getTaskContainerLogs: vi.fn<() => Promise<any>>(),
     getTaskStats: vi.fn<() => Promise<any>>(),
@@ -64,6 +66,8 @@ vi.mock('../auth', () => ({
 // Mock dependencies
 vi.mock('../api', () => ({
   getTask: mockApi.getTask,
+  getTaskModelServiceSummary: mockApi.getTaskModelServiceSummary,
+  getTaskWorkerRuntimeSummary: mockApi.getTaskWorkerRuntimeSummary,
   getTaskLogs: mockApi.getTaskLogs,
   getTaskContainerLogs: mockApi.getTaskContainerLogs,
   getTaskStats: mockApi.getTaskStats,
@@ -106,7 +110,10 @@ vi.mock('../utils/slotError', () => ({
 }))
 
 vi.mock('@vueuse/core', () => ({
-  useWindowSize: vi.fn(() => ({ width: { value: 1200 } }))
+  useWindowSize: vi.fn(() => ({
+    width: { value: 1200 },
+    height: { value: 900 }
+  }))
 }))
 
 // Mock EventSource - create once, reuse
@@ -270,9 +277,21 @@ vi.mock('naive-ui', () => ({
   },
   NPopover: {
     name: 'NPopover',
-    props: ['trigger', 'placement', 'width', 'keep-alive-on-hover'],
-    setup(_props: any, { slots }: any) {
-      return () => h('div', { class: 'n-popover' }, [slots.trigger?.(), slots.default?.()])
+    props: ['show', 'trigger', 'placement', 'width', 'scrollable', 'style'],
+    emits: ['update:show'],
+    setup(props: any, { slots, emit }: any) {
+      return () => h('div', {
+        class: 'n-popover',
+        'data-show': String(Boolean(props.show)),
+        'data-placement': props.placement,
+        'data-max-height': props.style?.maxHeight,
+        onClick: (event: MouseEvent) => {
+          const target = event.target as HTMLElement
+          if (target.closest('.metadata-summary-trigger')) {
+            emit('update:show', !props.show)
+          }
+        }
+      }, [slots.trigger?.(), props.show ? slots.default?.() : null])
     },
     template: '<div class="n-popover"><slot name="trigger" /><slot /></div>'
   },
@@ -438,6 +457,7 @@ vi.mock('@vicons/ionicons5', () => {
     ChatbubbleEllipsesOutline: icon('ChatbubbleEllipsesOutline'),
     ChatbubbleOutline: icon('ChatbubbleOutline'),
     CheckmarkCircleOutline: icon('CheckmarkCircleOutline'),
+    ChevronForwardOutline: icon('ChevronForwardOutline'),
     CloseCircleOutline: icon('CloseCircleOutline'),
     CloseOutline: icon('CloseOutline'),
     CodeSlashOutline: icon('CodeSlashOutline'),
@@ -630,6 +650,49 @@ describe('TaskView', () => {
     expect(mockApi.getTaskLogs).toHaveBeenCalledWith(2)
   })
 
+  it('closes an open runtime summary when routing to another task', async () => {
+    ;(mockApi.getTaskModelServiceSummary as Mock).mockResolvedValue({
+      configuration_source: 'execution_snapshot',
+      provider_config_available: true,
+      provider_id: 7,
+      provider_name: 'Production AI Service',
+      base_url: 'https://ai.example.com',
+      configured_model: 'claude-sonnet-4-5',
+      actual_model: 'claude-sonnet-4-6',
+      max_turns: 64,
+      system_prompt: 'Task 1 prompt',
+      api_key_configured: true,
+      configuration_captured_at: '2026-04-01T09:00:00Z',
+    })
+    await mountComponent({
+      provider_id: 7,
+      provider_name: 'Production AI Service',
+      model_name: 'claude-sonnet-4-6',
+    })
+
+    await wrapper.find('.metadata-summary-trigger--provider').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="provider-summary-popover"]').exists()).toBe(true)
+    expect(wrapper.findAll('.n-popover')[0].attributes('data-show')).toBe('true')
+
+    ;(mockApi.getTask as Mock).mockImplementation((id: number) =>
+      Promise.resolve(createMockTaskWithStatus('pending', {
+        id,
+        provider_id: 8,
+        provider_name: 'Task 2 Service',
+        model_name: 'claude-sonnet-4-7',
+      }))
+    )
+    await router.push('/tasks/2')
+    await vi.waitFor(() => {
+      expect(wrapper.vm.task?.id).toBe(2)
+    })
+    await nextTick()
+
+    expect(wrapper.find('[data-testid="provider-summary-popover"]').exists()).toBe(false)
+    expect(wrapper.findAll('.n-popover')[0].attributes('data-show')).toBe('false')
+  })
+
   it('switches the existing prompt card to the persisted final prompt', async () => {
     await mountComponent({ rendered_prompt: 'Final **rendered** prompt' })
     const card = wrapper.find('[data-testid="task-prompt-card"]')
@@ -691,6 +754,187 @@ describe('TaskView', () => {
       expect(wrapper.find('.task-metadata-panel').text()).toContain('taskView.taskModePlan')
       expect(wrapper.find('[data-testid="task-actions"]').exists()).toBe(true)
       expect(wrapper.find('[data-testid="task-actions-card"]').exists()).toBe(false)
+    })
+
+    it('loads worker and model-service runtime summaries only after each popover is opened', async () => {
+      ;(mockApi.getTaskModelServiceSummary as Mock).mockResolvedValue({
+        configuration_source: 'execution_snapshot',
+        provider_config_available: true,
+        provider_id: 7,
+        provider_name: 'Production AI Service',
+        base_url: 'https://ai.example.com/anthropic',
+        configured_model: 'claude-sonnet-4-5',
+        actual_model: 'claude-sonnet-4-6',
+        max_turns: 64,
+        system_prompt: 'Follow the repository instructions and keep changes scoped.',
+        api_key_configured: true,
+        configuration_captured_at: '2026-04-01T09:00:00Z',
+      })
+      ;(mockApi.getTaskWorkerRuntimeSummary as Mock).mockResolvedValue({
+        snapshot_available: true,
+        worker_profile_id: 3,
+        worker_profile_name: 'Java 21 Maven Worker',
+        image: 'registry.example.com/codify/worker-java21-maven:2026.07',
+        runtime_mode: 'mounted_kit',
+        worker_kit_version: '2026.07.18',
+        worker_kit_path: '/srv/codify/worker-kits/2026.07.18',
+        codegraph_enabled: true,
+        mounts: [
+          {
+            source: 'worker_kit',
+            host_path: '/srv/codify/worker-kits/2026.07.18',
+            container_path: '/opt/codify-kit',
+            mode: 'ro',
+          },
+          {
+            source: 'profile',
+            host_path: '/srv/maven-cache',
+            container_path: '/root/.m2',
+            mode: 'rw',
+          },
+        ],
+        environment_variables: [
+          { key: 'JAVA_HOME', is_secret: false, value_configured: true },
+          { key: 'NPM_TOKEN', is_secret: true, value_configured: true },
+        ],
+        pre_script_configured: true,
+        post_script_configured: false,
+        snapshot_created_at: '2026-04-01T10:00:00Z',
+      })
+
+      await mountComponent({
+        provider_id: 7,
+        provider_name: 'Production AI Service',
+        model_name: 'claude-sonnet-4-6',
+        worker_profile_id: 3,
+        worker_profile_name: 'Java 21 Maven Worker',
+        worker_image: 'registry.example.com/codify/worker-java21-maven:2026.07',
+        worker_snapshot_created_at: '2026-04-01T10:00:00Z',
+      })
+
+      expect(mockApi.getTaskModelServiceSummary).not.toHaveBeenCalled()
+      expect(mockApi.getTaskWorkerRuntimeSummary).not.toHaveBeenCalled()
+
+      await wrapper.find('.metadata-summary-trigger--provider').trigger('click')
+      await flushPromises()
+
+      const providerPopover = wrapper.find('[data-testid="provider-summary-popover"]')
+      expect(mockApi.getTaskModelServiceSummary).toHaveBeenCalledOnce()
+      expect(mockApi.getTaskModelServiceSummary).toHaveBeenCalledWith(1)
+      expect(mockApi.getTaskWorkerRuntimeSummary).not.toHaveBeenCalled()
+      expect(providerPopover.text()).toContain('claude-sonnet-4-5')
+      expect(providerPopover.text()).toContain('claude-sonnet-4-6')
+      expect(providerPopover.text()).toContain('https://ai.example.com/anthropic')
+      expect(providerPopover.text()).toContain('Follow the repository instructions')
+      expect(providerPopover.text()).toContain('taskView.providerSourceExecutionSnapshot')
+      expect(providerPopover.text()).not.toContain('taskView.tokenUsage')
+      expect(providerPopover.text()).not.toContain('taskView.sessionMode')
+      expect(wrapper.find('.task-metadata-panel').text()).toContain('taskView.sessionMode')
+
+      await wrapper.find('.metadata-summary-trigger--provider').trigger('click')
+      await flushPromises()
+      expect(mockApi.getTaskModelServiceSummary).toHaveBeenCalledOnce()
+
+      await wrapper.find('.metadata-summary-trigger--provider').trigger('click')
+      await flushPromises()
+      expect(mockApi.getTaskModelServiceSummary).toHaveBeenCalledTimes(2)
+
+      const workerTrigger = wrapper.find('.metadata-summary-trigger--worker')
+      vi.spyOn(workerTrigger.element, 'getBoundingClientRect').mockReturnValue({
+        top: 500,
+        bottom: 532,
+      } as DOMRect)
+      await workerTrigger.trigger('click')
+      await flushPromises()
+
+      const workerPopover = wrapper.find('[data-testid="worker-summary-popover"]')
+      const workerPopoverShell = wrapper.findAll('.n-popover')
+        .find(popover => popover.find('.metadata-summary-trigger--worker').exists())
+      expect(mockApi.getTaskWorkerRuntimeSummary).toHaveBeenCalledOnce()
+      expect(mockApi.getTaskWorkerRuntimeSummary).toHaveBeenCalledWith(1)
+      expect(workerPopoverShell?.attributes('data-placement')).toBe('left-end')
+      expect(workerPopoverShell?.attributes('data-max-height')).toBe('508px')
+      expect(workerPopover.text()).toContain('worker-java21-maven:2026.07')
+      expect(workerPopover.text()).toContain('2026.07.18')
+      expect(workerPopover.text()).toContain('/opt/codify-kit')
+      expect(workerPopover.text()).toContain('/root/.m2')
+      expect(workerPopover.text()).toContain('JAVA_HOME')
+      expect(workerPopover.text()).toContain('NPM_TOKEN')
+      expect(workerPopover.text()).not.toContain('taskView.taskModePlan')
+      expect(workerPopover.text()).not.toContain('codify-1-issue1')
+      expect(wrapper.find('.metadata-summary-trigger--provider').attributes('aria-label')).toBe('taskView.openProviderSummary')
+      expect(wrapper.find('.metadata-summary-trigger--worker').attributes('aria-label')).toBe('taskView.openWorkerSummary')
+
+      await workerTrigger.trigger('click')
+      await workerTrigger.trigger('click')
+      await flushPromises()
+      expect(mockApi.getTaskWorkerRuntimeSummary).toHaveBeenCalledOnce()
+    })
+
+    it('keeps a failed model-service summary request retryable inside the popover', async () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+      ;(mockApi.getTaskModelServiceSummary as Mock)
+        .mockRejectedValueOnce(new Error('summary unavailable'))
+        .mockResolvedValueOnce({
+          configuration_source: 'execution_snapshot',
+          provider_config_available: true,
+          provider_id: 7,
+          provider_name: 'Production AI Service',
+          base_url: 'https://ai.example.com',
+          configured_model: 'claude-sonnet-4-5',
+          actual_model: 'claude-sonnet-4-6',
+          max_turns: 64,
+          system_prompt: null,
+          api_key_configured: true,
+          configuration_captured_at: null,
+        })
+
+      await mountComponent({
+        provider_id: 7,
+        provider_name: 'Production AI Service',
+        model_name: 'claude-sonnet-4-6',
+      })
+
+      await wrapper.find('.metadata-summary-trigger--provider').trigger('click')
+      await flushPromises()
+      const providerPopover = wrapper.find('[data-testid="provider-summary-popover"]')
+      expect(providerPopover.text()).toContain('taskView.providerSummaryLoadFailed')
+
+      await providerPopover.find('.metadata-summary-popover__state--error button').trigger('click')
+      await flushPromises()
+
+      expect(mockApi.getTaskModelServiceSummary).toHaveBeenCalledTimes(2)
+      expect(providerPopover.text()).toContain('claude-sonnet-4-5')
+      consoleError.mockRestore()
+    })
+
+    it('shows an explicit empty state when a task has no worker snapshot', async () => {
+      ;(mockApi.getTaskWorkerRuntimeSummary as Mock).mockResolvedValue({
+        snapshot_available: false,
+        worker_profile_id: 3,
+        worker_profile_name: null,
+        image: null,
+        runtime_mode: null,
+        worker_kit_version: null,
+        worker_kit_path: null,
+        codegraph_enabled: false,
+        mounts: [],
+        environment_variables: [],
+        pre_script_configured: false,
+        post_script_configured: false,
+        snapshot_created_at: null,
+      })
+
+      await mountComponent({
+        worker_profile_id: 3,
+        worker_profile_name: 'Legacy Worker',
+      })
+
+      await wrapper.find('.metadata-summary-trigger--worker').trigger('click')
+      await flushPromises()
+
+      expect(wrapper.find('[data-testid="worker-summary-popover"]').text())
+        .toContain('taskView.workerSnapshotUnavailable')
     })
 
     it('should display error message for failed tasks', async () => {

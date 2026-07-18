@@ -36,6 +36,12 @@ ISSUE_WORKER_AFFINITY_MIGRATION = (
     / "versions"
     / "058_issue_worker_affinity.py"
 )
+PROVIDER_RUNTIME_SNAPSHOT_MIGRATION = (
+    Path(__file__).resolve().parents[2]
+    / "alembic"
+    / "versions"
+    / "059_provider_runtime_snapshot.py"
+)
 
 
 def test_worker_profiles_migration_defines_expected_tables_and_columns():
@@ -161,3 +167,14 @@ def test_issue_worker_affinity_migration_pins_worker_and_tracks_remote_workspace
         "worker_metadata",
     ):
         assert field in content
+
+
+def test_provider_runtime_snapshot_migration_adds_task_json_snapshot():
+    content = PROVIDER_RUNTIME_SNAPSHOT_MIGRATION.read_text(encoding="utf-8")
+
+    assert 'revision: str = "059_provider_runtime_snapshot"' in content
+    assert 'down_revision: Union[str, None] = "058_issue_worker_affinity"' in content
+    assert 'op.add_column(' in content
+    assert '"provider_runtime_snapshot"' in content
+    assert "sa.JSON()" in content
+    assert 'op.drop_column("tasks", "provider_runtime_snapshot")' in content

@@ -93,6 +93,7 @@ async def update_task_record(
         except WorkerProfileValidationError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         task.provider_id = provider.id
+        task.provider_runtime_snapshot = None
 
     if "require_changes" in updated_fields:
         task.require_changes = request.require_changes

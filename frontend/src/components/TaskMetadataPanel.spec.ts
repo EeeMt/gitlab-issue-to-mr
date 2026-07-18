@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import taskMetadataPanelSource from './TaskMetadataPanel.vue?raw'
+import taskRuntimeSummaryRowsSource from './TaskRuntimeSummaryRows.vue?raw'
 
 describe('TaskMetadataPanel', () => {
   it('aligns metadata values after the widest field label', () => {
@@ -22,14 +23,44 @@ describe('TaskMetadataPanel', () => {
     expect(taskMetadataPanelSource).not.toContain('min-width: 90px;')
   })
 
-  it('styles the issue link as a compact inline reference', () => {
-    expect(taskMetadataPanelSource).toContain('class="app-link task-issue-link"')
-    expect(taskMetadataPanelSource).toContain('.task-issue-link {')
-    expect(taskMetadataPanelSource).toContain('--task-issue-link-color: #3b82f6;')
-    expect(taskMetadataPanelSource).toContain('border-width: 0 0 1px;')
-    expect(taskMetadataPanelSource).toContain('border-radius: 0;')
+  it('uses the same compact reference style for project and source links', () => {
+    expect(taskMetadataPanelSource).toContain('class="app-link metadata-reference-link project-reference-link"')
+    expect(taskMetadataPanelSource).toContain('class="app-link metadata-reference-link task-issue-link"')
+    expect(taskMetadataPanelSource).toContain('.metadata-reference-link {')
+    expect(taskMetadataPanelSource).toContain('flex: 0 1 auto;')
+    expect(taskMetadataPanelSource).toContain('width: fit-content;')
+    expect(taskMetadataPanelSource).toContain('border-bottom: 1px solid color-mix(')
+    expect(taskMetadataPanelSource).not.toContain('flex: 1 1 auto;')
+    expect(taskMetadataPanelSource).not.toContain('--task-issue-link-color')
     expect(taskMetadataPanelSource).toContain('font-weight: 400;')
     expect(taskMetadataPanelSource).toContain('.task-issue-link__id {\n  flex: 0 0 auto;\n  font-family: var(--n-font-family-mono, \'JetBrains Mono\', monospace);\n  font-size: 12px;\n  font-weight: 500;')
+  })
+
+  it('keeps long values inside the metadata column and summarizes runtime services in popovers', () => {
+    expect(taskMetadataPanelSource).toContain('<TaskRuntimeSummaryRows :task="task" />')
+    expect(taskRuntimeSummaryRowsSource).toContain('class="metadata-summary-trigger metadata-summary-trigger--provider"')
+    expect(taskRuntimeSummaryRowsSource).toContain('class="metadata-summary-trigger metadata-summary-trigger--worker"')
+    expect(taskRuntimeSummaryRowsSource).toContain('data-testid="provider-summary-popover"')
+    expect(taskRuntimeSummaryRowsSource).toContain('data-testid="worker-summary-popover"')
+    expect(taskRuntimeSummaryRowsSource).toContain(':show="providerPopoverVisible"')
+    expect(taskRuntimeSummaryRowsSource).toContain(':show="workerPopoverVisible"')
+    expect(taskRuntimeSummaryRowsSource.match(/\n        scrollable\n/g)).toHaveLength(2)
+    expect(taskRuntimeSummaryRowsSource).not.toContain('overflow-y: auto;')
+    expect(taskRuntimeSummaryRowsSource).toContain(':placement="providerPopoverLayout.placement"')
+    expect(taskRuntimeSummaryRowsSource).toContain(':placement="workerPopoverLayout.placement"')
+    expect(taskRuntimeSummaryRowsSource).toContain('resolveRuntimePopoverLayout(providerTriggerRef.value)')
+    expect(taskRuntimeSummaryRowsSource).toContain('resolveRuntimePopoverLayout(workerTriggerRef.value)')
+    expect(taskRuntimeSummaryRowsSource).toContain('getTaskModelServiceSummary')
+    expect(taskRuntimeSummaryRowsSource).toContain('getTaskWorkerRuntimeSummary')
+    expect(taskRuntimeSummaryRowsSource).toContain('providerSummary.system_prompt')
+    expect(taskRuntimeSummaryRowsSource).toContain('workerSummary.environment_variables')
+    expect(taskRuntimeSummaryRowsSource).toContain("configuration_source === 'execution_snapshot'")
+    expect(taskRuntimeSummaryRowsSource).not.toContain('sessionMode')
+    expect(taskRuntimeSummaryRowsSource).not.toContain('task.container_name || task.container_id')
+    expect(taskRuntimeSummaryRowsSource).not.toContain('formatTokenValue')
+    expect(taskMetadataPanelSource).toContain('overflow-wrap: anywhere;')
+    expect(taskRuntimeSummaryRowsSource).toContain('text-overflow: ellipsis;')
+    expect(taskRuntimeSummaryRowsSource).toContain('grid-template-columns: 1fr;')
   })
 
   it('renders task mode as a chip with the same mode icons used by task creation', () => {

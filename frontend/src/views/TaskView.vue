@@ -1052,6 +1052,11 @@ onBeforeUnmount(() => {
   line-height: 1.45;
 }
 
+.task-view__context > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .app-link {
   color: var(--n-primary-color, #18a058);
   text-decoration: none;

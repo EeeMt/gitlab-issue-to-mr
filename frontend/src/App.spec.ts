@@ -3,6 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { h } from 'vue'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import App from './App.vue'
+import appSource from './App.vue?raw'
 
 function makeUsageSummary(overrides: Partial<Record<string, any>> = {}) {
   return {
@@ -28,6 +29,12 @@ function makeUsageSummary(overrides: Partial<Record<string, any>> = {}) {
     ...overrides,
   }
 }
+
+describe('App layout stability', () => {
+  it('reserves the root scrollbar gutter so teleported overlays do not shift the page', () => {
+    expect(appSource).toContain('html {\n  scrollbar-gutter: stable;\n}')
+  })
+})
 
 const {
   mockAuthState,
