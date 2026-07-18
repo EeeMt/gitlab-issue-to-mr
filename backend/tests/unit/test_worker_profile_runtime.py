@@ -9,6 +9,7 @@ from app.core.worker_runtime import build_container_volumes
 from app.core.worker_task_artifacts import finalize_task_raw_logs
 from app.core.worker_task_lifecycle import (
     _create_stopped_container,
+    _persist_created_container_reference,
     _remove_created_container,
     _start_created_container,
     create_execute_container,
@@ -77,6 +78,42 @@ def test_create_stopped_container_defers_when_create_outcome_is_unknown():
             image="worker:latest",
             command="",
         )
+
+
+@pytest.mark.asyncio
+async def test_container_reference_commit_failure_removes_created_container():
+    worker = MagicMock()
+    container = SimpleNamespace(id="container-1")
+    task = SimpleNamespace(id=12, container_id=None)
+    db = MagicMock()
+    db.commit = AsyncMock(side_effect=RuntimeError("database unavailable"))
+    db.rollback = AsyncMock()
+    db.refresh = AsyncMock()
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        await _persist_created_container_reference(worker, db, task, container)
+
+    db.rollback.assert_awaited_once()
+    db.refresh.assert_awaited_once_with(task)
+    worker.docker.remove_container.assert_called_once_with(container, force=True)
+    assert task.container_id is None
+
+
+@pytest.mark.asyncio
+async def test_container_reference_cleanup_failure_defers_scheduler_recovery():
+    worker = MagicMock()
+    worker.docker.remove_container.side_effect = RuntimeError("daemon unavailable")
+    container = SimpleNamespace(id="container-1")
+    task = SimpleNamespace(id=12, container_id=None)
+    db = MagicMock()
+    db.commit = AsyncMock(side_effect=RuntimeError("database unavailable"))
+    db.rollback = AsyncMock()
+
+    with pytest.raises(TaskContainerLookupError, match="Could not clean up task 12 container"):
+        await _persist_created_container_reference(worker, db, task, container)
+
+    db.rollback.assert_awaited_once()
+    worker.docker.remove_container.assert_called_once_with(container, force=True)
 
 
 @pytest.mark.asyncio

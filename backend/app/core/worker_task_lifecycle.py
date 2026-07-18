@@ -349,8 +349,7 @@ async def create_execute_container(
         },
     )
 
-    task.container_id = container.id
-    await db.commit()
+    await _persist_created_container_reference(worker, db, task, container)
     if await finalize_pre_container_cancellation(db, task, phase="container start"):
         await _remove_created_container(worker, db, task, container)
         return None
@@ -399,6 +398,47 @@ def _create_stopped_container(
             getattr(container, "id", container_name),
         )
         return container
+
+
+async def _persist_created_container_reference(
+    worker,
+    db: AsyncSession,
+    task: Task,
+    container: Any,
+) -> None:
+    """Persist a new container ID or remove the otherwise unreachable container."""
+    task_id = task.id
+    task.container_id = container.id
+    try:
+        await db.commit()
+    except Exception:
+        try:
+            await db.rollback()
+        except Exception as rollback_error:  # noqa: BLE001
+            logger.warning(
+                "[Task %s] Failed to roll back container reference transaction: %s",
+                task_id,
+                rollback_error,
+            )
+
+        try:
+            worker.docker.remove_container(container, force=True)
+        except Exception as cleanup_error:  # noqa: BLE001
+            raise TaskContainerLookupError(
+                f"Could not clean up task {task_id} container after its reference "
+                "failed to persist"
+            ) from cleanup_error
+
+        try:
+            await db.refresh(task)
+        except Exception as refresh_error:  # noqa: BLE001
+            logger.warning(
+                "[Task %s] Failed to refresh task after container cleanup: %s",
+                task_id,
+                refresh_error,
+            )
+        task.container_id = None
+        raise
 
 
 async def _remove_created_container(worker, db: AsyncSession, task: Task, container: Any) -> bool:
