@@ -87,6 +87,8 @@ fi
 
 for module in \
     bootstrap \
+    repository-helpers \
+    repository \
     gitlab \
     delivery \
     task-environment \

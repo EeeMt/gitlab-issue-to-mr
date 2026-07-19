@@ -1,6 +1,52 @@
 # Execute Claude, validate delivery, commit/push changes, and persist metadata.
 
-trap create_runtime_archive EXIT
+write_existing_commit_delivery_metadata() {
+    COMMIT_SHA=$(codify_run_shell 'cd /workspace && git rev-parse HEAD')
+    FINAL_COMMIT_MESSAGE=$(codify_run_shell 'cd /workspace && git log -1 --pretty=%B')
+    echo "Delivered existing local commit: ${COMMIT_SHA}"
+
+    local finalization_event
+    finalization_event=$(jq -nc \
+        --arg commit_sha "${COMMIT_SHA}" \
+        --arg commit_message "${FINAL_COMMIT_MESSAGE}" \
+        '{
+            type:"codify_worker",
+            subtype:"finalization",
+            commit_sha:$commit_sha,
+            diff:{additions:0,deletions:0,total:0},
+            commit_message:$commit_message,
+            reused_local_commit:true
+        }')
+    append_runtime_event "${finalization_event}"
+
+    local summary_truncated task_metadata
+    summary_truncated="${FINAL_SUMMARY_CONTENT:0:3000}"
+    task_metadata=$(jq -nc \
+        --argjson task_id "${TASK_ID:-0}" \
+        --arg prompt "${USER_PROMPT:-}" \
+        --arg commit_sha "${COMMIT_SHA}" \
+        --arg commit_message "${FINAL_COMMIT_MESSAGE}" \
+        --arg overall_summary "${FINAL_OVERALL_SUMMARY:-}" \
+        --arg execution_summary "${summary_truncated}" \
+        --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        '{
+            task_id: $task_id,
+            prompt: $prompt,
+            commit_sha: $commit_sha,
+            commit_message: $commit_message,
+            overall_summary: $overall_summary,
+            execution_summary: $execution_summary,
+            new_files: [],
+            modified_files: [],
+            deleted_files: [],
+            additions: 0,
+            deletions: 0,
+            reused_local_commit: true,
+            timestamp: $timestamp
+        }')
+    printf '%s\n' "${task_metadata}" > "${CODIFY_RUNTIME_DIR}/task-metadata.json"
+    echo "Task metadata written to ${CODIFY_RUNTIME_DIR}/task-metadata.json for existing local commit"
+}
 
 run_worker_script "pre" "${CODIFY_WORKER_PRE_SCRIPT_FILE}"
 
@@ -222,11 +268,8 @@ AI-Generated: true"
     GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL_VALUE}" \
     codify_run_shell 'cd /workspace && git commit -F /tmp/commit_message.txt'
 
-    # Push to remote using git push
-    echo "Pushing to remote..."
-    codify_run_shell 'cd /workspace && git remote set-url origin "${GIT_REPO_URL}"'
-    codify_run_shell 'cd /workspace && git config --local http.extraHeader "PRIVATE-TOKEN: ${GITLAB_TOKEN}"'
-    codify_run_shell 'cd /workspace && GIT_TERMINAL_PROMPT=0 git push -u origin "${BRANCH_NAME}"'
+    # Push to remote using the exact branch tip observed during repository preparation.
+    repo_push_work_branch_with_lease
 
     # Get commit SHA
     COMMIT_SHA=$(codify_run_shell 'cd /workspace && git rev-parse HEAD')
@@ -319,6 +362,15 @@ AI-Generated: true"
 
     create_runtime_archive
 
+    echo "========================================"
+    echo "Task completed successfully!"
+    echo "========================================"
+elif repo_has_unpublished_local_head; then
+    echo "No new workspace changes; publishing the preserved local commit"
+    repo_log "delivery work_branch=${BRANCH_NAME} relation=${REPO_WORK_BRANCH_RELATION} action=push_existing_head"
+    repo_push_work_branch_with_lease
+    write_existing_commit_delivery_metadata
+    create_runtime_archive
     echo "========================================"
     echo "Task completed successfully!"
     echo "========================================"

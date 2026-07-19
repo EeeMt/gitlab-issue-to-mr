@@ -18,6 +18,30 @@ ISSUE_TITLE="${ISSUE_TITLE:-}"
 # BASE_BRANCH - base branch to create new branch from (defaults to TARGET_BRANCH if not set)
 BASE_BRANCH="${BASE_BRANCH:-}"
 TARGET_BRANCH="${TARGET_BRANCH:-}"
+CODIFY_GIT_CLONE_DEPTH="${CODIFY_GIT_CLONE_DEPTH:-}"
+CODIFY_GIT_CLONE_FILTER="${CODIFY_GIT_CLONE_FILTER:-}"
+
+if [ -n "${CODIFY_GIT_CLONE_DEPTH}" ]; then
+    case "${CODIFY_GIT_CLONE_DEPTH}" in
+        *[!0-9]* | 0)
+            echo "ERROR: CODIFY_GIT_CLONE_DEPTH must be an integer between 1 and 10000"
+            exit 1
+            ;;
+    esac
+    if [ "${CODIFY_GIT_CLONE_DEPTH}" -gt 10000 ]; then
+        echo "ERROR: CODIFY_GIT_CLONE_DEPTH must be an integer between 1 and 10000"
+        exit 1
+    fi
+fi
+
+case "${CODIFY_GIT_CLONE_FILTER}" in
+    "" | "blob:none") ;;
+    *)
+        echo "ERROR: CODIFY_GIT_CLONE_FILTER must be empty or blob:none"
+        exit 1
+        ;;
+esac
+export CODIFY_GIT_CLONE_DEPTH CODIFY_GIT_CLONE_FILTER
 
 ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-http://localhost:11434/v1}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
@@ -87,9 +111,50 @@ prepare_worker_script_file "${CODIFY_WORKER_POST_SCRIPT_FILE}"
 CONSOLE_LOG="${CODIFY_RUNTIME_DIR}/console.log"
 DELIVERY_SUMMARY_FILE="${CODIFY_RUNTIME_DIR}/delivery-summary.md"
 DELIVERY_SUMMARY_VALIDATION_FILE="${CODIFY_RUNTIME_DIR}/delivery-summary-validation.json"
+REPOSITORY_PREPARATION_FILE="${CODIFY_RUNTIME_DIR}/repository-preparation.json"
 MERMAID_SUMMARY_VALIDATE="${MERMAID_SUMMARY_VALIDATE:-true}"
 MERMAID_SUMMARY_REPAIR_ATTEMPTS="${MERMAID_SUMMARY_REPAIR_ATTEMPTS:-2}"
 MERMAID_SUMMARY_STRICT="${MERMAID_SUMMARY_STRICT:-false}"
+RUNTIME_ARCHIVE_CREATED=0
+
+create_runtime_archive() {
+    if [ "${RUNTIME_ARCHIVE_CREATED}" -eq 1 ]; then
+        return 0
+    fi
+
+    local archive_name="task-${TASK_ID:-0}-runtime-archive.tar.gz"
+    local archive_path="${CODIFY_RUNTIME_DIR}/${archive_name}"
+    local archive_files=()
+    local candidate
+    for candidate in \
+        event.jsonl \
+        runtime.json \
+        console.log \
+        delivery-summary.md \
+        delivery-summary-validation.json \
+        repository-preparation.json
+    do
+        [ -f "${CODIFY_RUNTIME_DIR}/${candidate}" ] && archive_files+=("${candidate}")
+    done
+    if [ "${#archive_files[@]}" -eq 0 ]; then
+        return 0
+    fi
+
+    if tar -czf "${archive_path}" -C "${CODIFY_RUNTIME_DIR}" "${archive_files[@]}" 2>/dev/null; then
+        echo "Archive created: ${archive_path}"
+        RUNTIME_ARCHIVE_CREATED=1
+    fi
+}
+
+codify_finalize_on_exit() {
+    local exit_code="${1:-0}"
+    if declare -F repo_finalize_preparation_on_exit >/dev/null 2>&1; then
+        repo_finalize_preparation_on_exit "${exit_code}" || true
+    fi
+    create_runtime_archive || true
+}
+
+trap 'codify_finalize_on_exit "$?"' EXIT
 touch "${CONSOLE_LOG}"
 codify_chown "${CONSOLE_LOG}"
 
@@ -218,75 +283,3 @@ git config --file "${CODIFY_GIT_CONFIG}" credential.helper store
 
 # Mark /workspace as safe before any git operations on reused workspaces
 git config --global --add safe.directory /workspace
-
-# Clone or reuse repository with authentication.
-if [ -d /workspace/.git ]; then
-    echo "Reusing existing workspace..."
-    codify_run_shell 'cd /workspace && git remote set-url origin "${GIT_REPO_URL}"'
-    codify_run_shell 'cd /workspace && git fetch origin'
-else
-    echo "Cloning repository..."
-    codify_run_shell 'git clone "${GIT_REPO_URL}" /workspace'
-fi
-cd /workspace
-
-# Configure git
-git config --global user.email "bot@codify.local"
-git config --global user.name "Codify Bot"
-git config --global --add safe.directory /workspace
-git config --file "${CODIFY_GIT_CONFIG}" user.email "bot@codify.local"
-git config --file "${CODIFY_GIT_CONFIG}" user.name "Codify Bot"
-git config --file "${CODIFY_GIT_CONFIG}" --add safe.directory /workspace
-codify_chown "${CODIFY_GIT_CONFIG}"
-
-GIT_AUTHOR_NAME_VALUE="${GIT_AUTHOR_NAME:-${CODIFY_AUTHOR_NAME:-Codify User}}"
-GIT_AUTHOR_EMAIL_VALUE="${GIT_AUTHOR_EMAIL:-${CODIFY_AUTHOR_EMAIL:-codify-task@codify.local}}"
-CODIFY_COAUTHOR_NAME_VALUE="${CODIFY_COAUTHOR_NAME:-Codify}"
-CODIFY_COAUTHOR_EMAIL_VALUE="${CODIFY_COAUTHOR_EMAIL:-codify@codify.local}"
-
-# Checkout/create branch
-WORKSPACE_CURRENT_BRANCH=$(codify_run_shell 'cd /workspace && git rev-parse --abbrev-ref HEAD' 2>/dev/null || echo "")
-if [ -n "${WORKSPACE_CURRENT_BRANCH}" ] && [ "${WORKSPACE_CURRENT_BRANCH}" != "HEAD" ] && [ "${WORKSPACE_CURRENT_BRANCH}" != "${BRANCH_NAME}" ]; then
-    WORKSPACE_DIRTY=$(codify_run_shell 'cd /workspace && git status --porcelain' || true)
-    if [ -n "${WORKSPACE_DIRTY}" ]; then
-        echo "ERROR: Workspace has uncommitted changes on branch ${WORKSPACE_CURRENT_BRANCH}, cannot switch to ${BRANCH_NAME}"
-        exit 1
-    fi
-fi
-
-echo "Checking out branch: ${BRANCH_NAME}"
-codify_run_shell 'cd /workspace && git fetch origin'
-
-# Verify BASE_BRANCH exists on remote; if not, fall back to the remote's actual default branch
-if ! codify_run_shell 'cd /workspace && git rev-parse --verify "origin/${BASE_BRANCH}"' > /dev/null 2>&1; then
-    echo "Warning: origin/${BASE_BRANCH} not found. Detecting remote default branch..."
-    DETECTED=$(codify_run_shell 'cd /workspace && git ls-remote --symref origin HEAD' 2>/dev/null | grep '^ref:' | sed 's|ref: refs/heads/||;s|	HEAD||')
-    if [ -n "${DETECTED}" ]; then
-        echo "Detected remote default branch: ${DETECTED} (was: ${BASE_BRANCH})"
-        BASE_BRANCH="${DETECTED}"
-    else
-        echo "ERROR: Cannot resolve base branch 'origin/${BASE_BRANCH}' and could not detect default branch"
-        exit 1
-    fi
-fi
-
-if codify_run_shell 'cd /workspace && git checkout "${BRANCH_NAME}"' 2>/dev/null; then
-    echo "Branch ${BRANCH_NAME} exists locally, checking for uncommitted changes..."
-    BRANCH_DIRTY=$(codify_run_shell 'cd /workspace && git status --porcelain' || true)
-    if [ -n "${BRANCH_DIRTY}" ]; then
-        echo "Warning: Workspace has uncommitted changes from a previous task, skipping pull to preserve work"
-    elif codify_run_shell 'cd /workspace && git ls-remote --exit-code --heads origin "${BRANCH_NAME}"' > /dev/null 2>&1; then
-        echo "Remote branch found, pulling latest..."
-        codify_run_shell 'cd /workspace && git pull origin "${BRANCH_NAME}"'
-    else
-        echo "Branch exists locally but not on remote yet (prior task may not have pushed), continuing with local state"
-    fi
-else
-    echo "Creating new branch from ${BASE_BRANCH}..."
-    codify_run_shell 'cd /workspace && git checkout -b "${BRANCH_NAME}" "origin/${BASE_BRANCH}"'
-fi
-
-# Run Claude Code CLI in direct execution mode
-echo "Running Claude Code CLI in direct execution mode..."
-echo "Prompt: ${USER_PROMPT}"
-echo ""

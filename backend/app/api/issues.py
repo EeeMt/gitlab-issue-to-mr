@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import false, func, or_, select
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +15,7 @@ from app.config import get_effective_settings
 from app.core.gitlab_client import get_gitlab_client
 from app.core.task_helpers import _require_issue_operator
 from app.core.utcnow import utcnow
+from app.core.worker_kit import MOUNTED_KIT_MODE
 from app.core.worker_profiles import get_default_provider
 from app.core.worker_workspace import build_issue_workspace_paths
 from app.core.worker_workspace_remote import remove_issue_workspace_remote
@@ -29,6 +30,8 @@ from app.models import AIProvider, Issue, IssueStatus, Task, TaskStatus, User, W
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/issues", tags=["issues"])
+
+_REPOSITORY_POLICY_MIN_WORKER_KIT_VERSION = (0, 3, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +51,8 @@ class CreateIssueRequest(BaseModel):
     ci_auto_repair_enabled: bool = False
     worker_profile_id: int
     default_provider_id: int | None = None
+    git_clone_depth: int | None = Field(default=None, ge=1, le=10_000, strict=True)
+    git_clone_filter: Literal["blob:none"] | None = None
 
 
 class UpdateIssueRequest(BaseModel):
@@ -61,9 +66,13 @@ class UpdateIssueRequest(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def reject_worker_switch(cls, data):
-        if isinstance(data, dict) and "worker_profile_id" in data:
-            raise ValueError("worker_profile_id cannot be changed after issue creation")
+    def reject_immutable_execution_settings(cls, data):
+        immutable_fields = {"worker_profile_id", "git_clone_depth", "git_clone_filter"}
+        if isinstance(data, dict) and immutable_fields.intersection(data):
+            raise ValueError(
+                "worker profile and repository clone settings cannot be changed "
+                "after issue creation"
+            )
         return data
 
 
@@ -107,6 +116,8 @@ def _serialize_issue(issue: Issue, task_count: int | None = None) -> dict:
         "ci_auto_repair_enabled": issue.ci_auto_repair_enabled,
         "worker_profile_id": issue.worker_profile_id,
         "default_provider_id": issue.default_provider_id,
+        "git_clone_depth": issue.git_clone_depth,
+        "git_clone_filter": issue.git_clone_filter,
         "worker_profile_name": worker_profile.name if worker_profile is not None else None,
         "default_provider_name": default_provider.name if default_provider is not None else None,
         "claude_session_id": issue.claude_session_id,
@@ -137,6 +148,8 @@ def _loaded_issue_relationship(issue: Issue, name: str):
 async def _resolve_issue_worker_id(
     db: AsyncSession,
     explicit_id: int,
+    *,
+    requires_repository_policy: bool = False,
 ) -> int:
     # Serialize affinity creation with profile disable / Docker-target updates.
     # Otherwise both transactions can observe the old state and commit an Issue
@@ -144,7 +157,31 @@ async def _resolve_issue_worker_id(
     profile = await db.get(WorkerProfile, explicit_id, with_for_update=True)
     if profile is None or not profile.enabled:
         raise HTTPException(status_code=422, detail="Worker profile is not available")
+    if requires_repository_policy and not _supports_repository_policy(profile):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Repository clone settings require worker-kit 0.3.0 or newer "
+                "for mounted-kit worker profiles"
+            ),
+        )
     return profile.id
+
+
+def _supports_repository_policy(profile: WorkerProfile) -> bool:
+    if getattr(profile, "runtime_mode", "baked_image") != MOUNTED_KIT_MODE:
+        return True
+
+    raw_version = getattr(profile, "worker_kit_version", None)
+    if not isinstance(raw_version, str):
+        return False
+    release = raw_version.strip().split("+", 1)[0]
+    if "-" in release:
+        return False
+    parts = release.split(".")
+    if len(parts) != 3 or not all(part.isdecimal() for part in parts):
+        return False
+    return tuple(int(part) for part in parts) >= _REPOSITORY_POLICY_MIN_WORKER_KIT_VERSION
 
 
 async def _resolve_issue_default_provider_id(
@@ -257,6 +294,9 @@ async def create_issue(
     worker_profile_id = await _resolve_issue_worker_id(
         db,
         body.worker_profile_id,
+        requires_repository_policy=(
+            body.git_clone_depth is not None or body.git_clone_filter is not None
+        ),
     )
     default_provider_id = await _resolve_issue_default_provider_id(
         db,
@@ -273,6 +313,8 @@ async def create_issue(
         ci_auto_repair_enabled=body.ci_auto_repair_enabled,
         worker_profile_id=worker_profile_id,
         default_provider_id=default_provider_id,
+        git_clone_depth=body.git_clone_depth,
+        git_clone_filter=body.git_clone_filter,
         initiator_user_id=current_user.id if current_user else None,
         initiator_username=current_user.username if current_user else None,
     )

@@ -132,6 +132,21 @@
             </n-tag>
           </div>
         </div>
+        <div class="overview-metadata__row" data-testid="issue-clone-policy-row">
+          <span><n-icon size="14"><GitBranchOutline /></n-icon>{{ t('issue.repositoryCloneMode') }}</span>
+          <div class="overview-metadata__tags">
+            <n-tag size="tiny" round>
+              {{
+                issue.git_clone_depth
+                  ? t('issue.repositoryCloneShallowBadge', { depth: issue.git_clone_depth })
+                  : t('issue.repositoryCloneFullBadge')
+              }}
+            </n-tag>
+            <n-tag v-if="issue.git_clone_filter" size="tiny" round>
+              {{ issue.git_clone_filter }}
+            </n-tag>
+          </div>
+        </div>
         <div v-if="issue.status === 'closed' && issue.closed_via" class="overview-metadata__row">
           <span><n-icon size="14"><InformationCircleOutline /></n-icon>{{ t('issue.closedViaLabel') }}</span>
           <strong>{{ issue.closed_via === 'webhook_mr_merged' ? t('issue.closedViaWebhookMrMerged') : t('issue.closedViaManual') }}</strong>

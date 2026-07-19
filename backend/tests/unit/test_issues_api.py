@@ -47,6 +47,8 @@ def _make_issue(
     branch_deleted=False,
     worker_profile_id=7,
     workspace_deleted_at=None,
+    git_clone_depth=None,
+    git_clone_filter=None,
 ):
     """Build a mock Issue ORM object."""
     issue = MagicMock()
@@ -71,6 +73,8 @@ def _make_issue(
     issue.branch_deleted = branch_deleted
     issue.worker_profile_id = worker_profile_id
     issue.workspace_deleted_at = workspace_deleted_at
+    issue.git_clone_depth = git_clone_depth
+    issue.git_clone_filter = git_clone_filter
     return issue
 
 
@@ -167,6 +171,8 @@ class CreateIssueTests(unittest.IsolatedAsyncioTestCase):
             project_id=10,
             base_branch="main",
             worker_profile_id=7,
+            git_clone_depth=50,
+            git_clone_filter="blob:none",
         )
 
         with patch(
@@ -190,6 +196,8 @@ class CreateIssueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(created.initiator_user_id, 1)
         self.assertEqual(created.initiator_username, "alice")
         self.assertEqual(created.branch_name, "codify/issue-42")
+        self.assertEqual(created.git_clone_depth, 50)
+        self.assertEqual(created.git_clone_filter, "blob:none")
         self.assertEqual(
             created.session_storage_path,
             "/opt/codify-workspaces/project-10/issue-42/claude",

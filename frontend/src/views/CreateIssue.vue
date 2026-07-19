@@ -222,6 +222,60 @@
 
               <!-- Row 2: Worker profile + Provider + options -->
               <div class="branch-extra-row">
+                <div class="repository-clone-options" data-testid="repository-clone-options">
+                  <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+                    <n-gi>
+                      <n-form-item :label="t('issue.repositoryCloneMode')">
+                        <n-select
+                          :value="cloneMode"
+                          :options="cloneModeOptions"
+                          data-testid="git-clone-mode-select"
+                          @update:value="handleCloneModeChange"
+                        />
+                      </n-form-item>
+                    </n-gi>
+                    <n-gi v-if="cloneMode === 'shallow'">
+                      <n-form-item
+                        :label="t('issue.repositoryCloneDepth')"
+                        path="git_clone_depth"
+                      >
+                        <n-input-number
+                          v-model:value="formValue.git_clone_depth"
+                          :min="1"
+                          :max="10000"
+                          :step="10"
+                          data-testid="git-clone-depth-input"
+                        />
+                      </n-form-item>
+                    </n-gi>
+                  </n-grid>
+                  <div class="field-hint repository-clone-options__hint">
+                    {{
+                      cloneMode === 'shallow'
+                        ? t('issue.repositoryCloneShallowHint')
+                        : t('issue.repositoryCloneFullHint')
+                    }}
+                  </div>
+                  <n-form-item
+                    :label="t('issue.repositoryCloneFilter')"
+                    path="git_clone_filter"
+                  >
+                    <n-space align="center" :size="8">
+                      <n-switch
+                        :value="formValue.git_clone_filter === 'blob:none'"
+                        data-testid="git-clone-filter-switch"
+                        @update:value="handleCloneFilterChange"
+                      />
+                      <span class="repository-clone-options__status">
+                        {{
+                          formValue.git_clone_filter === 'blob:none'
+                            ? t('issue.repositoryCloneFilterEnabled')
+                            : t('issue.repositoryCloneFilterDisabled')
+                        }}
+                      </span>
+                    </n-space>
+                  </n-form-item>
+                </div>
                 <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
                   <n-gi>
                     <n-form-item :label="t('createTask.workerProfile')" required>
@@ -246,7 +300,10 @@
                 </n-grid>
                 <n-form-item :label="t('issue.deleteBranchOnClose')" path="delete_branch_on_close">
                   <n-space align="center" :size="8">
-                    <n-switch v-model:value="formValue.delete_branch_on_close" />
+                    <n-switch
+                      v-model:value="formValue.delete_branch_on_close"
+                      data-testid="delete-branch-on-close-switch"
+                    />
                     <span style="font-size: 13px; color: var(--n-text-color-2)">
                       {{ formValue.delete_branch_on_close ? t('issue.deleteBranchOnCloseEnabled') : t('issue.deleteBranchOnCloseDisabled') }}
                     </span>
@@ -373,6 +430,7 @@ import {
   NGi,
   NGrid,
   NInput,
+  NInputNumber,
   NSelect,
   NSpace,
   NSpin,
@@ -472,6 +530,8 @@ function createInitialFormValue(): {
   create_mr: boolean
   delete_branch_on_close: boolean
   ci_auto_repair_enabled: boolean
+  git_clone_depth: number | null
+  git_clone_filter: 'blob:none' | null
 } {
   return {
     title: '',
@@ -482,10 +542,14 @@ function createInitialFormValue(): {
     create_mr: true,
     delete_branch_on_close: true,
     ci_auto_repair_enabled: false,
+    git_clone_depth: null,
+    git_clone_filter: null,
   }
 }
 
 const formValue = ref(createInitialFormValue())
+const DEFAULT_GIT_CLONE_DEPTH = 50
+const cloneMode = ref<'full' | 'shallow'>('full')
 
 // Validation rules
 const rules: FormRules = {
@@ -503,6 +567,23 @@ const rules: FormRules = {
   base_branch: {
     required: true,
     message: t('createTask.selectBaseBranch'),
+    trigger: 'change',
+  },
+  git_clone_depth: {
+    validator: (_rule, value) => {
+      if (
+        (cloneMode.value === 'full' && value === null)
+        || (
+          cloneMode.value === 'shallow'
+          && Number.isInteger(value)
+          && value >= 1
+          && value <= 10000
+        )
+      ) {
+        return true
+      }
+      return new Error(t('issue.repositoryCloneDepthInvalid'))
+    },
     trigger: 'change',
   },
 }
@@ -527,6 +608,23 @@ const providerOptions = computed(() =>
     value: provider.id,
   }))
 )
+
+const cloneModeOptions = computed(() => [
+  { label: t('issue.repositoryCloneFull'), value: 'full' },
+  { label: t('issue.repositoryCloneShallow'), value: 'shallow' },
+])
+
+function handleCloneModeChange(mode: 'full' | 'shallow') {
+  cloneMode.value = mode
+  formValue.value.git_clone_depth =
+    mode === 'shallow'
+      ? formValue.value.git_clone_depth ?? DEFAULT_GIT_CLONE_DEPTH
+      : null
+}
+
+function handleCloneFilterChange(enabled: boolean) {
+  formValue.value.git_clone_filter = enabled ? 'blob:none' : null
+}
 
 const selectedProject = computed(() =>
   projects.value.find(project => project.id === formValue.value.project_id) ?? null
@@ -832,6 +930,7 @@ async function handleReset() {
   branches.value = []
   projectSearch.value = ''
   Object.assign(formValue.value, createInitialFormValue())
+  cloneMode.value = 'full'
   workerProfileId.value = null
   defaultProviderId.value =
     providers.value.find(provider => provider.is_default)?.id ?? null
@@ -872,6 +971,8 @@ async function handleSubmit() {
           : false,
       worker_profile_id: workerProfileId.value,
       default_provider_id: defaultProviderId.value,
+      git_clone_depth: formValue.value.git_clone_depth,
+      git_clone_filter: formValue.value.git_clone_filter,
     }
 
     const issue = await createIssue(request)
@@ -880,7 +981,11 @@ async function handleSubmit() {
     message.success(t('issue.create'))
     router.push(`/issues/${issue.id}`)
   } catch (error: any) {
-    const msg = error?.message || error?.response?.data?.message || String(error)
+    const detail = error?.response?.data?.detail
+    const msg =
+      (typeof detail === 'string' ? detail : error?.response?.data?.message)
+      || error?.message
+      || String(error)
     message.error(msg)
   } finally {
     submitting.value = false
@@ -1076,6 +1181,24 @@ onMounted(() => {
 .branch-extra-row {
   margin-top: 4px;
   padding-top: 4px;
+}
+
+.repository-clone-options {
+  margin-bottom: 12px;
+  padding: 12px 14px 2px;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  border-radius: 10px;
+  background: rgba(248, 250, 252, 0.65);
+}
+
+.repository-clone-options__hint {
+  margin-top: -8px;
+  margin-bottom: 10px;
+}
+
+.repository-clone-options__status {
+  color: var(--n-text-color-2);
+  font-size: 13px;
 }
 
 .description-hint {

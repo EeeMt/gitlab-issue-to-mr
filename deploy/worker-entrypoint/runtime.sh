@@ -12,25 +12,6 @@ FINAL_SUMMARY_CONTENT=""
 FINAL_CHANGED_FILES_TEXT=""
 FINAL_COMMIT_MESSAGE=""
 FINAL_OVERALL_SUMMARY=""
-RUNTIME_ARCHIVE_CREATED=0
-
-create_runtime_archive() {
-    if [ "${RUNTIME_ARCHIVE_CREATED}" -eq 1 ]; then
-        return 0
-    fi
-
-    local archive_name="task-${TASK_ID:-0}-runtime-archive.tar.gz"
-    local archive_path="${CODIFY_RUNTIME_DIR}/${archive_name}"
-
-    if [ -f "${CODIFY_RUNTIME_DIR}/event.jsonl" ] && [ -f "${CODIFY_RUNTIME_DIR}/runtime.json" ]; then
-        local archive_files=(event.jsonl runtime.json console.log)
-        [ -f "${DELIVERY_SUMMARY_FILE}" ] && archive_files+=(delivery-summary.md)
-        [ -f "${DELIVERY_SUMMARY_VALIDATION_FILE}" ] && archive_files+=(delivery-summary-validation.json)
-        tar -czf "${archive_path}" -C "${CODIFY_RUNTIME_DIR}" "${archive_files[@]}" 2>/dev/null || true
-        echo "Archive created: ${archive_path}"
-        RUNTIME_ARCHIVE_CREATED=1
-    fi
-}
 
 append_runtime_event() {
     local event_json="$1"

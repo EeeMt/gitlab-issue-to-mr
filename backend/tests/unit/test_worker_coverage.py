@@ -45,6 +45,8 @@ from app.models import Task, TaskLog, TaskStatus
 
 _WORKER_ENTRYPOINT_MODULES = (
     "bootstrap",
+    "repository-helpers",
+    "repository",
     "gitlab",
     "delivery",
     "task-environment",
@@ -724,7 +726,12 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         content = entrypoint.read_text()
         self.assertLessEqual(len(content.splitlines()), 120)
         module_list = content.split("for module in", 1)[1].split("do", 1)[0]
-        previous_index = -1
+        listed_modules = []
+        for line in module_list.splitlines():
+            module_name = line.strip().removesuffix("\\").strip()
+            if module_name:
+                listed_modules.append(module_name)
+        self.assertEqual(listed_modules, list(_WORKER_ENTRYPOINT_MODULES))
         for module_name in _WORKER_ENTRYPOINT_MODULES:
             module_path = module_dir / f"{module_name}.sh"
             self.assertTrue(module_path.is_file(), f"missing entrypoint module: {module_path}")
@@ -733,9 +740,6 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
                 450,
                 f"entrypoint module grew too large: {module_path}",
             )
-            module_index = module_list.index(f"    {module_name}")
-            self.assertGreater(module_index, previous_index)
-            previous_index = module_index
 
         dockerfile = (root / "deploy" / "Dockerfile.worker-java21-maven").read_text()
         test_dockerfile = (
@@ -789,7 +793,10 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         result, loaded_modules = self._run_entrypoint_loader(failing_module="delivery")
 
         self.assertEqual(result.returncode, 23, result.stderr)
-        self.assertEqual(loaded_modules, ["bootstrap", "gitlab", "delivery"])
+        self.assertEqual(
+            loaded_modules,
+            ["bootstrap", "repository-helpers", "repository", "gitlab", "delivery"],
+        )
 
     def test_runtime_worker_image_delegates_codify_tools_to_worker_kit(self):
         root = Path(__file__).resolve().parents[3]
@@ -1084,9 +1091,8 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn('CI_CLAUDE_DISABLE_CONSOLE_TEE=1', content)
         self.assertIn('ARTIFACT_DIR="${CODIFY_RUNTIME_DIR}" CI_CLAUDE_DISABLE_CONSOLE_TEE=1 PROMPT_FILE=/tmp/claude_prompt.txt', content)
         self.assertIn('local archive_path="${CODIFY_RUNTIME_DIR}/${archive_name}"', content)
-        self.assertIn('local archive_files=(event.jsonl runtime.json console.log)', content)
-        self.assertIn('[ -f "${DELIVERY_SUMMARY_FILE}" ] && archive_files+=(delivery-summary.md)', content)
-        self.assertIn('[ -f "${DELIVERY_SUMMARY_VALIDATION_FILE}" ] && archive_files+=(delivery-summary-validation.json)', content)
+        self.assertIn('local archive_files=()', content)
+        self.assertIn('repository-preparation.json', content)
         self.assertIn('tar -czf "${archive_path}" -C "${CODIFY_RUNTIME_DIR}" "${archive_files[@]}"', content)
         self.assertNotIn('[ -f "/workspace/event.jsonl" ]', content)
         self.assertNotIn('/workspace/.codify-archive', content)
@@ -1129,7 +1135,61 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
             "codify_run_shell 'cd /workspace && git remote set-url origin \"${GIT_REPO_URL}\"'",
             content,
         )
-        self.assertIn("codify_run_shell 'cd /workspace && git fetch origin'", content)
+
+    def test_entrypoint_supports_observable_shallow_partial_clone(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = _read_worker_entrypoint_sources(script)
+
+        self.assertIn('--depth "${CODIFY_GIT_CLONE_DEPTH}"', content)
+        self.assertIn('--filter="${CODIFY_GIT_CLONE_FILTER}"', content)
+        self.assertIn('--single-branch --branch "${BASE_BRANCH}"', content)
+        self.assertIn(
+            '"+refs/heads/${BRANCH_NAME}:refs/remotes/origin/${BRANCH_NAME}"',
+            content,
+        )
+        self.assertIn(
+            'git checkout --no-track -b "${BRANCH_NAME}" "origin/${BRANCH_NAME}"',
+            content,
+        )
+        self.assertIn(
+            'git ls-remote --symref "${GIT_REPO_URL}" HEAD '
+            '"refs/heads/${BASE_BRANCH}" "refs/heads/${BRANCH_NAME}"',
+            content,
+        )
+        self.assertIn(
+            'git merge --ff-only "refs/remotes/origin/${BRANCH_NAME}"',
+            content,
+        )
+        self.assertIn('relation=diverged', content)
+        self.assertIn('reason=remote_changed', content)
+        self.assertIn('reason=local_history_rewritten', content)
+        self.assertIn('push_recovered result=remote_matches_local', content)
+        self.assertIn('elif repo_has_unpublished_local_head; then', content)
+        self.assertIn('action=push_existing_head', content)
+        self.assertIn('write_existing_commit_delivery_metadata', content)
+        self.assertIn(
+            '--force-with-lease="refs/heads/${BRANCH_NAME}:${REPO_REMOTE_WORK_SHA}"',
+            content,
+        )
+        self.assertIn(
+            "export REPO_REMOTE_WORK_SHA REPO_PREVIOUS_REMOTE_WORK_SHA",
+            content,
+        )
+        self.assertNotIn('git pull origin "${BRANCH_NAME}"', content)
+        self.assertNotIn('git pull --depth "${CODIFY_GIT_CLONE_DEPTH}"', content)
+        self.assertIn("workspace=nonempty git_metadata=missing; refusing clone", content)
+        self.assertIn("ignored_by_server; continuing with full objects", content)
+        self.assertIn("git config --unset-all remote.origin.promisor", content)
+        self.assertIn("fallback retrying clone without object filter", content)
+        self.assertIn("[repo] %s", content)
+        self.assertIn("repository-preparation.json", content)
+        self.assertIn('status: $status', content)
+        self.assertIn('phase: $phase', content)
+        self.assertIn('exit_code: $exit_code', content)
+        self.assertIn(
+            'git fetch origin "+refs/heads/${BASE_BRANCH}:refs/remotes/origin/${BASE_BRANCH}"',
+            content,
+        )
         self.assertIn(
             "WORKSPACE_CURRENT_BRANCH=$(codify_run_shell 'cd /workspace && git rev-parse --abbrev-ref HEAD'",
             content,

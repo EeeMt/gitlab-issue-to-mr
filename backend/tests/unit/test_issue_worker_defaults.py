@@ -6,7 +6,13 @@ import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from app.api.issues import CreateIssueRequest, UpdateIssueRequest, create_issue, update_issue
+from app.api.issues import (
+    CreateIssueRequest,
+    UpdateIssueRequest,
+    _resolve_issue_worker_id,
+    create_issue,
+    update_issue,
+)
 from app.models import Issue, WorkerProfile
 
 
@@ -15,6 +21,90 @@ def test_issue_worker_is_required_and_cannot_be_changed():
         CreateIssueRequest(title="Pinned", project_id=100)
     with pytest.raises(ValidationError, match="cannot be changed"):
         UpdateIssueRequest.model_validate({"worker_profile_id": 7})
+    with pytest.raises(ValidationError, match="cannot be changed"):
+        UpdateIssueRequest.model_validate({"git_clone_depth": 50})
+    with pytest.raises(ValidationError, match="cannot be changed"):
+        UpdateIssueRequest.model_validate({"git_clone_filter": "blob:none"})
+
+
+def test_issue_git_clone_options_are_validated():
+    full = CreateIssueRequest(title="Full", project_id=100, worker_profile_id=11)
+    assert full.git_clone_depth is None
+    assert full.git_clone_filter is None
+
+    optimized = CreateIssueRequest(
+        title="Optimized",
+        project_id=100,
+        worker_profile_id=11,
+        git_clone_depth=50,
+        git_clone_filter="blob:none",
+    )
+    assert optimized.git_clone_depth == 50
+    assert optimized.git_clone_filter == "blob:none"
+
+    with pytest.raises(ValidationError):
+        CreateIssueRequest(
+            title="Invalid depth",
+            project_id=100,
+            worker_profile_id=11,
+            git_clone_depth=0,
+        )
+    with pytest.raises(ValidationError):
+        CreateIssueRequest(
+            title="Boolean depth",
+            project_id=100,
+            worker_profile_id=11,
+            git_clone_depth=True,
+        )
+    with pytest.raises(ValidationError):
+        CreateIssueRequest.model_validate(
+            {
+                "title": "Invalid filter",
+                "project_id": 100,
+                "worker_profile_id": 11,
+                "git_clone_filter": "tree:0",
+            }
+        )
+
+
+@pytest.mark.asyncio
+async def test_repository_clone_options_require_a_compatible_mounted_worker_kit():
+    db = MagicMock()
+    old_profile = SimpleNamespace(
+        id=11,
+        enabled=True,
+        runtime_mode="mounted_kit",
+        worker_kit_version="0.2.0",
+    )
+    db.get = AsyncMock(return_value=old_profile)
+
+    with pytest.raises(HTTPException, match="worker-kit 0.3.0 or newer") as exc_info:
+        await _resolve_issue_worker_id(
+            db,
+            11,
+            requires_repository_policy=True,
+        )
+
+    assert exc_info.value.status_code == 422
+
+    # Full-clone Issues preserve compatibility with an older mounted kit.
+    assert await _resolve_issue_worker_id(db, 11) == 11
+
+    compatible_profile = SimpleNamespace(
+        id=12,
+        enabled=True,
+        runtime_mode="mounted_kit",
+        worker_kit_version="0.3.0",
+    )
+    db.get = AsyncMock(return_value=compatible_profile)
+    assert (
+        await _resolve_issue_worker_id(
+            db,
+            12,
+            requires_repository_policy=True,
+        )
+        == 12
+    )
 
 
 @pytest.mark.asyncio

@@ -100,6 +100,9 @@ class Issue(Base):
         nullable=True,
         index=True,
     )
+    # Repository bootstrap policy. ``None`` keeps the existing full-clone behavior.
+    git_clone_depth: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    git_clone_filter: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # Claude session persistence
     claude_session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -147,6 +150,14 @@ class Issue(Base):
     )
 
     __table_args__ = (
+        CheckConstraint(
+            "git_clone_depth IS NULL OR git_clone_depth BETWEEN 1 AND 10000",
+            name="ck_issues_git_clone_depth",
+        ),
+        CheckConstraint(
+            "git_clone_filter IS NULL OR git_clone_filter = 'blob:none'",
+            name="ck_issues_git_clone_filter",
+        ),
         Index("ix_issues_status_created", "status", "created_at"),
         Index("ix_issues_project_status", "project_id", "status"),
     )

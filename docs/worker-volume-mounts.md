@@ -120,27 +120,59 @@ NPM_CONFIG_CACHE=/opt/codify-issue-shared/cache/npm
 
 ### 容器内行为（`entrypoint.worker.sh`）
 
-```bash
-# 如果 /workspace/.git 已存在则复用，否则 clone
-if [ -d /workspace/.git ]; then
-    cd /workspace
-    git remote set-url origin "${GIT_REPO_URL}"
-    git fetch origin
-else
-    git clone "${GIT_REPO_URL}" /workspace
-    cd /workspace
-fi
+Issue 创建时可以固定仓库初始化策略：
 
-# 脏分支保护：如果有未提交变更且分支不匹配，拒绝切换
-WORKSPACE_CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-if [ -n "${WORKSPACE_CURRENT_BRANCH}" ] && [ "${WORKSPACE_CURRENT_BRANCH}" != "${BRANCH_NAME}" ]; then
-    WORKSPACE_DIRTY=$(git status --porcelain)
-    if [ -n "${WORKSPACE_DIRTY}" ]; then
-        echo "ERROR: Workspace has uncommitted changes on branch ${WORKSPACE_CURRENT_BRANCH}"
-        exit 1
-    fi
-fi
+- `git_clone_depth = null`：完整历史克隆，保持兼容行为
+- `git_clone_depth = 1..10000`：按指定深度浅克隆；初次克隆只取 base branch
+- `git_clone_filter = "blob:none"`：启用 partial clone，先取提交和目录结构，按需下载文件内容；
+  可与完整历史或浅历史独立组合
+
+这些字段创建后不可修改，确保同一 Issue 的持久化 workspace 和重试任务使用一致策略。
+Worker Profile 自定义环境变量不能覆盖对应的 `CODIFY_GIT_CLONE_DEPTH` 和
+`CODIFY_GIT_CLONE_FILTER`。使用 mounted-kit 的 Worker Profile 必须先升级到
+worker-kit `0.3.0` 或更高版本；Backend 会拒绝把优化策略绑定到旧版 kit。
+
+浅克隆使用 `--single-branch --branch "${BASE_BRANCH}"`，但 checkout 前会额外探测远端
+Issue 分支；如果分支已经由早期任务推送，则通过显式 refspec 拉取并基于该分支继续，
+不会错误地从 base branch 重新创建。复用 workspace 时会在一次远端探测后，用一次
+定向 fetch 同步 base/work 两个精确 ref，并继续保留深度限制，不再执行重复 pull。
+本地和远端工作分支相同时直接继续；远端仅追加提交时使用 `merge --ff-only`；本地仅
+领先时保留未推送提交。双方历史分叉、浅历史无法证明关系，或脏 workspace 遇到远端
+推进时，Worker 会明确失败并记录双方 SHA，不会自动 merge、rebase 或 force-push。
+如果本地领先但接续任务没有产生新的工作区修改，Worker 仍会把已经保留的本地提交
+推送到远端，并把该提交写入任务 finalization 和 task metadata，不会把“无新增修改”
+误判成“无需交付”。
+Worker 还会比较 fetch 前后的 remote-tracking SHA；远端分支被删除或被强制回退时会
+停止任务，避免自动重建分支或重新推回人工移除的提交。
+最终 push 会先确认本地历史仍包含任务启动时的远端 SHA，再用该 SHA 作为精确 lease
+执行原子更新。lease 不用于允许非 fast-forward 覆盖，只用于拒绝任务执行期间发生的
+远端追加、删除或回退；失败日志会记录任务启动时、当前远端和本地 SHA。若 push
+命令返回非零，但复查发现远端已经等于本地提交，则按幂等成功继续，覆盖“服务端完成
+更新后连接中断”的不确定结果。
+如果 `/workspace` 不含 `.git` 但已有其他文件，Worker 会拒绝 clone，不会把持久化内容
+当作失败残留删除。`blob:none` 初次 clone 失败时只会在已确认初始目录为空后清理该次
+失败留下的内容，并自动回退为不带 filter 的同深度 clone。服务端返回成功但明确提示
+忽略 filter 时，不会重复 clone；Worker 会清除误导性的 promisor 配置，将
+`fallback` 记录为 `filter_ignored`，并把 `effective_filter` 记录为空。
+
+控制台以 `[repo]` 前缀记录请求策略、workspace 新建/复用、已有 Issue 分支恢复、
+filter 回退、实际 shallow/filter 状态、耗时、当前提交和 pack 大小。例如：
+
+```text
+[repo] prepare workspace=new strategy=shallow depth=50 filter=blob:none
+[repo] remote_refs base=9f01... work=13ac... default=main
+[repo] fetching existing work branch=codify/issue-123 depth=50 requested_filter=blob:none
+[repo] sync work_branch=codify/issue-123 relation=remote_ahead action=fast_forward dirty=false local=8b21... remote=13ac...
+[repo] actual_state shallow=true effective_filter=blob:none
+[repo] ready action=clone elapsed_ms=842 branch=codify/issue-123 commit=1a2b3c4 pack_size=18.4 MiB fallback=none
 ```
+
+同一组结构化数据写入 `/tmp/codify-runtime/repository-preparation.json`，并随任务
+runtime archive 下载，便于对大型仓库初始化耗时、实际生效策略和回退情况进行审计。
+产物包含 `status`、`phase` 和 `exit_code`；clone/fetch/checkout 失败时也会在退出
+钩子中生成。即使 Claude 尚未启动、`event.jsonl` 和 `runtime.json` 尚不存在，也会
+归档 `console.log` 与该结构化产物。
+仍保留脏分支保护：当前 workspace 在其他分支且存在未提交修改时，任务会拒绝切换。
 
 ### 清理机制
 
@@ -381,3 +413,5 @@ build_task_runtime_archive(...)
 | `backend/app/scheduler.py` | 按数据库状态调度远程 workspace 清理 |
 | `deploy/docker-compose.yml` | Backend 宿主目录挂载 |
 | `deploy/worker-entrypoint/bootstrap.sh` | 容器内 workspace 初始化和归属标记 |
+| `deploy/worker-entrypoint/repository-helpers.sh` | 仓库交付、准备阶段失败产物和计时辅助 |
+| `deploy/worker-entrypoint/repository.sh` | clone/fetch、分支关系判定和 checkout |

@@ -188,6 +188,18 @@ def _build_container_env_with_settings(
     if issue.base_branch:
         environment["BASE_BRANCH"] = issue.base_branch
 
+    git_clone_depth = getattr(issue, "git_clone_depth", None)
+    if (
+        isinstance(git_clone_depth, int)
+        and not isinstance(git_clone_depth, bool)
+        and 1 <= git_clone_depth <= 10_000
+    ):
+        environment["CODIFY_GIT_CLONE_DEPTH"] = str(git_clone_depth)
+
+    git_clone_filter = getattr(issue, "git_clone_filter", None)
+    if git_clone_filter == "blob:none":
+        environment["CODIFY_GIT_CLONE_FILTER"] = git_clone_filter
+
     if mr_iid:
         environment["MR_IID"] = str(mr_iid)
 

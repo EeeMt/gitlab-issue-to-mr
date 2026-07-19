@@ -476,6 +476,8 @@ function createMockIssue(overrides: Record<string, any> = {}): any {
     ci_auto_repair_enabled: false,
 	    worker_profile_id: 2,
 	    worker_profile_name: 'Default Worker',
+    git_clone_depth: null,
+    git_clone_filter: null,
 	    claude_session_id: 'session-abc',
     initiator_user_id: null,
     initiator_username: 'testuser',
@@ -691,6 +693,19 @@ describe('IssueView', () => {
       expect(text).toContain('codify/issue-1')
       expect(text).toContain('!42')
       expect(text).toContain('session-abc')
+    })
+
+    it('renders the immutable shallow and blobless repository policy', async () => {
+      setupDefaultMocks({
+        git_clone_depth: 50,
+        git_clone_filter: 'blob:none',
+      })
+      wrapper = await mountComponent()
+
+      const clonePolicy = wrapper.find('[data-testid="issue-clone-policy-row"]')
+      expect(clonePolicy.exists()).toBe(true)
+      expect(clonePolicy.text()).toContain('issue.repositoryCloneShallowBadge')
+      expect(clonePolicy.text()).toContain('blob:none')
     })
 
     it('uses a responsive workbench with a sticky overview column', () => {

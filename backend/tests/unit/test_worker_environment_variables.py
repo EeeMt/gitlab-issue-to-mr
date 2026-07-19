@@ -168,6 +168,56 @@ class WorkerEnvironmentVariableHelperTests(unittest.TestCase):
             validate_worker_environment_variable_key("CODIFY_CODEGRAPH_ENABLED")
 
     @patch("app.core.worker.get_settings")
+    def test_repository_clone_policy_is_emitted_and_reserved(self, mock_get_settings) -> None:
+        worker = WorkerExecutor(docker_client=MagicMock(), gitlab_client=MagicMock())
+        task = SimpleNamespace(
+            project_id=123,
+            user_prompt="Implement the task",
+            id=456,
+            initiator_display_name=None,
+            initiator_email=None,
+            initiator_username="alice",
+            task_mode="execute",
+            worker_profile_id=8,
+        )
+        issue = SimpleNamespace(
+            branch_name="codify/issue-789",
+            id=789,
+            title="Task title",
+            claude_session_id=None,
+            base_branch="main",
+            git_clone_depth=50,
+            git_clone_filter="blob:none",
+        )
+        settings = SimpleNamespace(
+            gitlab_url="http://gitlab.example.com",
+            gitlab_bot_token="test-token",
+            anthropic_base_url="http://localhost:11434/v1",
+            anthropic_api_key="test-key",
+            anthropic_model="claude-sonnet-4-20250514",
+            claude_max_turns=20,
+            task_timeout=1800,
+            custom_ca_bundle="",
+        )
+        mock_get_settings.return_value = settings
+
+        env = worker._build_container_env(
+            task,
+            issue,
+            mr_iid=None,
+            target_branch="main",
+        )
+
+        self.assertEqual(env["CODIFY_GIT_CLONE_DEPTH"], "50")
+        self.assertEqual(env["CODIFY_GIT_CLONE_FILTER"], "blob:none")
+        self.assertIn("CODIFY_GIT_CLONE_DEPTH", RESERVED_WORKER_ENVIRONMENT_KEYS)
+        self.assertIn("CODIFY_GIT_CLONE_FILTER", RESERVED_WORKER_ENVIRONMENT_KEYS)
+        with self.assertRaises(ValueError):
+            validate_worker_environment_variable_key("CODIFY_GIT_CLONE_DEPTH")
+        with self.assertRaises(ValueError):
+            validate_worker_environment_variable_key("CODIFY_GIT_CLONE_FILTER")
+
+    @patch("app.core.worker.get_settings")
     def test_plan_mode_resumes_existing_issue_session(self, mock_get_settings) -> None:
         mock_get_settings.return_value = SimpleNamespace(
             gitlab_url="http://gitlab.example.com",

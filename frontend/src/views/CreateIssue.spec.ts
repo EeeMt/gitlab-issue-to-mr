@@ -116,6 +116,27 @@ vi.mock('naive-ui', () => ({
       })
     }
   },
+  NInputNumber: {
+    name: 'NInputNumber',
+    props: ['value', 'min', 'max', 'step'],
+    emits: ['update:value'],
+    setup(props: any, { emit, attrs }: any) {
+      return () => h('input', {
+        ...attrs,
+        class: 'n-input-number',
+        type: 'number',
+        min: props.min,
+        max: props.max,
+        step: props.step,
+        value: props.value ?? '',
+        onInput: (e: Event) => {
+          const rawValue = (e.target as HTMLInputElement).value
+          const value = rawValue === '' ? null : Number(rawValue)
+          emit('update:value', Number.isNaN(value) ? null : value)
+        }
+      })
+    }
+  },
   NButton: {
     name: 'NButton',
     props: ['type', 'secondary', 'strong', 'round', 'loading', 'disabled', 'size'],
@@ -731,6 +752,60 @@ describe('CreateIssue', () => {
     })
   })
 
+  // ── Repository Clone Policy ───────────────────────────────────
+
+  describe('repository clone policy', () => {
+    it('defaults to a full clone without an object filter', async () => {
+      await mountComponent()
+
+      expect(wrapper.vm.cloneMode).toBe('full')
+      expect(wrapper.vm.formValue.git_clone_depth).toBeNull()
+      expect(wrapper.vm.formValue.git_clone_filter).toBeNull()
+    })
+
+    it('uses depth 50 when shallow clone is selected and clears it for full clone', async () => {
+      await mountComponent()
+
+      wrapper.vm.handleCloneModeChange('shallow')
+      expect(wrapper.vm.cloneMode).toBe('shallow')
+      expect(wrapper.vm.formValue.git_clone_depth).toBe(50)
+
+      wrapper.vm.handleCloneModeChange('full')
+      expect(wrapper.vm.cloneMode).toBe('full')
+      expect(wrapper.vm.formValue.git_clone_depth).toBeNull()
+    })
+
+    it('keeps shallow mode and reports an invalid depth when the input is cleared', async () => {
+      await mountComponent()
+
+      wrapper.vm.handleCloneModeChange('shallow')
+      await nextTick()
+      const depthInput = wrapper.find('[data-testid="git-clone-depth-input"]')
+      expect(depthInput.exists()).toBe(true)
+
+      await depthInput.setValue('')
+      await nextTick()
+
+      expect(wrapper.vm.cloneMode).toBe('shallow')
+      expect(wrapper.vm.formValue.git_clone_depth).toBeNull()
+      expect(wrapper.find('[data-testid="git-clone-depth-input"]').exists()).toBe(true)
+      expect(
+        wrapper.vm.rules.git_clone_depth.validator({}, null)
+      ).toBeInstanceOf(Error)
+    })
+
+    it('allows blobless clone independently from history depth', async () => {
+      await mountComponent()
+
+      wrapper.vm.handleCloneFilterChange(true)
+      expect(wrapper.vm.formValue.git_clone_filter).toBe('blob:none')
+      expect(wrapper.vm.formValue.git_clone_depth).toBeNull()
+
+      wrapper.vm.handleCloneFilterChange(false)
+      expect(wrapper.vm.formValue.git_clone_filter).toBeNull()
+    })
+  })
+
   // ── Successful Submission ──────────────────────────────────────
 
   describe('successful form submission', () => {
@@ -753,6 +828,27 @@ describe('CreateIssue', () => {
       expect(call.project_id).toBe(1)
       expect(call.description).toBe('Issue description')
       expect(call.base_branch).toBe('main')
+      expect(call.git_clone_depth).toBeNull()
+      expect(call.git_clone_filter).toBeNull()
+    })
+
+    it('should include shallow and blobless clone settings in the create request', async () => {
+      await mountComponent()
+
+      wrapper.vm.formValue.title = 'Large repository'
+      wrapper.vm.formValue.project_id = 1
+      wrapper.vm.formValue.base_branch = 'main'
+      wrapper.vm.handleCloneModeChange('shallow')
+      wrapper.vm.formValue.git_clone_depth = 100
+      wrapper.vm.formValue.git_clone_filter = 'blob:none'
+      wrapper.vm.workerProfileId = 3
+
+      await wrapper.vm.handleSubmit()
+      await flushPromises()
+
+      const call = (mockApi.createIssue as Mock).mock.calls[0][0]
+      expect(call.git_clone_depth).toBe(100)
+      expect(call.git_clone_filter).toBe('blob:none')
     })
 
     it('should show success message after creation', async () => {
@@ -934,6 +1030,33 @@ describe('CreateIssue', () => {
       expect(mockMessage.error).toHaveBeenCalledWith('Server validation failed')
     })
 
+    it('should show API validation detail before the generic request error', async () => {
+      await mountComponent()
+
+      const apiError = {
+        message: 'Request failed with status code 422',
+        response: {
+          data: {
+            detail: 'Repository clone settings require worker-kit 0.3.0 or newer',
+          },
+        },
+      }
+      ;(mockApi.createIssue as Mock).mockRejectedValue(apiError)
+
+      wrapper.vm.formValue.title = 'Large repository'
+      wrapper.vm.formValue.project_id = 1
+      wrapper.vm.formValue.base_branch = 'main'
+      wrapper.vm.handleCloneModeChange('shallow')
+      wrapper.vm.workerProfileId = 3
+
+      await wrapper.vm.handleSubmit()
+      await flushPromises()
+
+      expect(mockMessage.error).toHaveBeenCalledWith(
+        'Repository clone settings require worker-kit 0.3.0 or newer'
+      )
+    })
+
     it('should stringify non-Error objects', async () => {
       await mountComponent()
 
@@ -976,21 +1099,25 @@ describe('CreateIssue', () => {
       wrapper.vm.formValue.description = 'Some desc'
       wrapper.vm.formValue.project_id = 1
       wrapper.vm.formValue.base_branch = 'main'
-	      wrapper.vm.formValue.target_branch = 'develop'
-	      wrapper.vm.formValue.create_mr = true
-	      wrapper.vm.formValue.ci_auto_repair_enabled = true
-	      wrapper.vm.workerProfileId = 3
+      wrapper.vm.formValue.target_branch = 'develop'
+      wrapper.vm.formValue.create_mr = true
+      wrapper.vm.formValue.ci_auto_repair_enabled = true
+      wrapper.vm.handleCloneModeChange('shallow')
+      wrapper.vm.workerProfileId = 3
 
-	      await wrapper.vm.handleReset()
+      await wrapper.vm.handleReset()
 
       expect(wrapper.vm.formValue.title).toBe('')
       expect(wrapper.vm.formValue.description).toBe('')
       expect(wrapper.vm.formValue.project_id).toBeUndefined()
       expect(wrapper.vm.formValue.base_branch).toBeUndefined()
 	      expect(wrapper.vm.formValue.target_branch).toBeUndefined()
-	      expect(wrapper.vm.formValue.create_mr).toBe(true)
-	      expect(wrapper.vm.formValue.ci_auto_repair_enabled).toBe(false)
-	      expect(wrapper.vm.workerProfileId).toBeNull()
+      expect(wrapper.vm.formValue.create_mr).toBe(true)
+      expect(wrapper.vm.formValue.ci_auto_repair_enabled).toBe(false)
+      expect(wrapper.vm.formValue.git_clone_depth).toBeNull()
+      expect(wrapper.vm.formValue.git_clone_filter).toBeNull()
+      expect(wrapper.vm.cloneMode).toBe('full')
+      expect(wrapper.vm.workerProfileId).toBeNull()
 	    })
 
     it('should clear branches on reset', async () => {
@@ -1390,9 +1517,8 @@ describe('CreateIssue', () => {
     it('should toggle delete_branch_on_close when switch clicked', async () => {
       await mountComponent()
 
-      const switches = wrapper.findAll('button.n-switch')
-      const deleteSwitch = switches[1]
-      expect(deleteSwitch).toBeTruthy()
+      const deleteSwitch = wrapper.find('[data-testid="delete-branch-on-close-switch"]')
+      expect(deleteSwitch.exists()).toBe(true)
 
       await deleteSwitch.trigger('click')
       await nextTick()
@@ -1436,8 +1562,8 @@ describe('CreateIssue', () => {
         await flushPromises()
 
         expect(mockApi.getProjectCIAutoRepairAvailability).toHaveBeenCalledWith(1)
-        const switches = wrapper.findAllComponents({ name: 'NSwitch' })
-        expect(switches[2].props('disabled')).toBe(false)
+        const ciSwitch = wrapper.find('[data-testid="ci-auto-repair-switch"]')
+        expect(ciSwitch.attributes('disabled')).toBeUndefined()
       })
 
       it('should disable CI auto-repair and show the webhook reason', async () => {
@@ -1451,8 +1577,8 @@ describe('CreateIssue', () => {
         wrapper.vm.selectProject(mockProjects[1])
         await flushPromises()
 
-        const switches = wrapper.findAllComponents({ name: 'NSwitch' })
-        expect(switches[2].props('disabled')).toBe(true)
+        const ciSwitch = wrapper.find('[data-testid="ci-auto-repair-switch"]')
+        expect(ciSwitch.attributes('disabled')).toBeDefined()
         expect(wrapper.vm.formValue.ci_auto_repair_enabled).toBe(false)
         expect(wrapper.vm.ciAutoRepairUnavailableReason).toContain(
           'issue.ciAutoRepairWebhookIssues.pipeline_events_disabled'
