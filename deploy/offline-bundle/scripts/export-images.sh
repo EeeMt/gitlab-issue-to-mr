@@ -7,7 +7,6 @@ ARCHIVE="${ROOT_DIR}/images/codify-offline-images.tar.gz"
 IMAGES=(
   "codify-backend:latest"
   "codify-nginx:latest"
-  "codify-worker/java21-maven:2026.07"
   "postgres:16-alpine"
 )
 

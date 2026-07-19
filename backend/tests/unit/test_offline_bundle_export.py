@@ -56,7 +56,9 @@ def test_make_offline_bundle_export_target_builds_exports_and_packages():
     )
 
     assert result.returncode == 0, result.stderr
-    assert "make build" in result.stdout
+    assert "docker-compose --env-file .env.test build" in result.stdout
+    assert "Dockerfile.worker-java21-maven" not in result.stdout
+    assert "codify-worker/java21-maven:2026.07" not in result.stdout
     assert "deploy/worker-kit/export.sh" in result.stdout
     assert "deploy/offline-bundle && ./scripts/export-images.sh" in result.stdout
     assert "deploy/offline-bundle && ./scripts/package-bundle.sh" in result.stdout
@@ -86,14 +88,17 @@ def test_export_images_script_creates_missing_output_directory():
 
         fake_bin = root / "bin"
         fake_bin.mkdir()
+        docker_args_log = root / "docker-args.log"
         docker = fake_bin / "docker"
         docker.write_text(
-            "#!/bin/sh\nprintf 'fake image archive'\n",
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$DOCKER_ARGS_LOG\"\n"
+            "printf 'fake image archive'\n",
             encoding="utf-8",
         )
         docker.chmod(docker.stat().st_mode | stat.S_IEXEC)
         env = {
             **os.environ,
+            "DOCKER_ARGS_LOG": str(docker_args_log),
             "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
         }
 
@@ -111,6 +116,40 @@ def test_export_images_script_creates_missing_output_directory():
         archive = images_dir / "codify-offline-images.tar.gz"
         assert gzip.decompress(archive.read_bytes()) == b"fake image archive"
         assert (images_dir / "SHA256SUMS").is_file()
+        assert docker_args_log.read_text(encoding="utf-8").splitlines() == [
+            "save",
+            "codify-backend:latest",
+            "codify-nginx:latest",
+            "postgres:16-alpine",
+        ]
+
+        config_dir = root / "offline-bundle" / "config"
+        config_dir.mkdir()
+        (config_dir / "worker-images.txt").write_text(
+            "# Explicit project runtimes\n"
+            "codify-worker/java21-maven:2026.07\n"
+            "team/node22-pnpm:2026.07  # frontend runtime\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [str(script_copy)],
+            cwd=root,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert docker_args_log.read_text(encoding="utf-8").splitlines() == [
+            "save",
+            "codify-backend:latest",
+            "codify-nginx:latest",
+            "postgres:16-alpine",
+            "codify-worker/java21-maven:2026.07",
+            "team/node22-pnpm:2026.07",
+        ]
 
 
 def test_verify_runtime_scripts_mount_claude_without_breaking_docker_args():

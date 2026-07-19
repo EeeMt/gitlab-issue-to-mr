@@ -17,9 +17,12 @@ JAVA21_MAVEN_WORKER_DOCKERFILE := $(PROJECT_ROOT)/deploy/Dockerfile.worker-java2
 # Development Environment
 # ============================================
 
-.PHONY: build
-build: ## Build all images (backend, nginx, worker)
+.PHONY: build-app-images
+build-app-images: ## Build Codify application images (backend and nginx)
 	cd $(PROJECT_ROOT)/deploy && docker-compose --env-file .env.test build
+
+.PHONY: build
+build: build-app-images ## Build all images (backend, nginx, worker)
 	docker build -f $(JAVA21_MAVEN_WORKER_DOCKERFILE) -t codify-worker/java21-maven:2026.07 $(PROJECT_ROOT)
 	@printf "\nBuild summary:\n"
 	@printf "  - codify-backend:latest\n"
@@ -27,8 +30,7 @@ build: ## Build all images (backend, nginx, worker)
 	@printf "  - codify-worker/java21-maven:2026.07\n"
 
 .PHONY: offline-bundle-export
-offline-bundle-export: ## Build images, export offline bundle images, and package deploy/offline-bundle
-	$(MAKE) build
+offline-bundle-export: build-app-images ## Build app images, export kits/images, and package deploy/offline-bundle
 	WORKER_KIT_VERSION=$(WORKER_KIT_VERSION) WORKER_KIT_PLATFORM=linux/amd64 $(PROJECT_ROOT)/deploy/worker-kit/export.sh
 	WORKER_KIT_VERSION=$(WORKER_KIT_VERSION) WORKER_KIT_PLATFORM=linux/arm64 $(PROJECT_ROOT)/deploy/worker-kit/export.sh
 	cd $(PROJECT_ROOT)/deploy/offline-bundle && ./scripts/export-images.sh
@@ -535,7 +537,8 @@ help:
 	@echo ""
 	@echo "Development Environment:"
 	@echo "  make build              Build all images (backend, nginx, worker)"
-	@echo "  make offline-bundle-export  Build images, export offline bundle, and package it"
+	@echo "  make build-app-images   Build backend and nginx images"
+	@echo "  make offline-bundle-export  Build app images, export kits/images, and package them"
 	@echo "  make up                Start development environment"
 	@echo "  make down              Stop development environment"
 	@echo "  make restart           Restart development environment"

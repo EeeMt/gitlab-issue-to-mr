@@ -110,8 +110,11 @@ The default installation path is:
 For remote Docker targets, this is a path on the Docker Engine host, not on the Backend or
 Scheduler container. Install the kit at the profile's configured absolute path on each target.
 
-List all project runtime images in `config/worker-images.txt` before running
-`make offline-bundle-export`; those images are then included in the offline Docker archive.
+Runtime images are not included in the offline Docker archive by default. List all project
+runtime images in `config/worker-images.txt` before running `make offline-bundle-export`; those
+images are then included explicitly. This also applies to the reference
+`codify-worker/java21-maven:2026.07` image built from
+`deploy/Dockerfile.worker-java21-maven`.
 
 ## Runtime verification
 
