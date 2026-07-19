@@ -2261,9 +2261,19 @@ class TestExecuteTask(unittest.TestCase):
         worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
         task = _make_task(target_branch=None, merge_request_iid=None, initiator_user_id=7)
         db = _make_db(task)
-        db.commit = AsyncMock(
-            side_effect=[None, None, RuntimeError("post-parse commit failed"), None, None]
-        )
+        post_parse_commit_failed = False
+
+        async def fail_first_post_parse_commit():
+            nonlocal post_parse_commit_failed
+            if (
+                not post_parse_commit_failed
+                and task.status == TaskStatus.COMPLETED
+                and task.completed_at is not None
+            ):
+                post_parse_commit_failed = True
+                raise RuntimeError("post-parse commit failed")
+
+        db.commit = AsyncMock(side_effect=fail_first_post_parse_commit)
 
         fake_logs = (
             "http://gitlab.example.com/project/-/merge_requests/42\n"
@@ -2278,7 +2288,9 @@ class TestExecuteTask(unittest.TestCase):
             result = asyncio.run(worker.execute_task(db, task.id))
 
         self.assertFalse(result)
+        self.assertTrue(post_parse_commit_failed)
         self.assertEqual(task.status, TaskStatus.FAILED)
+        self.assertEqual(task.error_message, "post-parse commit failed")
         mock_upsert.assert_awaited_once_with(db, task)
 
     @patch('app.core.worker.get_settings')
