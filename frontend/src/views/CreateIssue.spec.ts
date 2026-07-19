@@ -466,6 +466,16 @@ describe('CreateIssue', () => {
       expect(wrapper.find('.variable-editor').exists()).toBe(true)
     })
 
+    it('should use a content section heading without duplicating the title field label', async () => {
+      await mountComponent()
+
+      expect(wrapper.get('[data-testid="issue-content-heading"]').text()).toBe(
+        'issue.contentSection'
+      )
+      expect(wrapper.find('.description-form-item').exists()).toBe(true)
+      expect(wrapper.find('.prompt-label-row').exists()).toBe(false)
+    })
+
     it('should render submit button', async () => {
       await mountComponent()
 
@@ -502,6 +512,18 @@ describe('CreateIssue', () => {
       const selects = wrapper.findAll('select.n-select')
       // base branch select + target branch select (project is now card picker, not select)
       expect(selects.length).toBeGreaterThanOrEqual(2)
+    })
+
+    it('should group the branch flow and its three controls in one strategy panel', async () => {
+      await mountComponent()
+
+      const panel = wrapper.get('[data-testid="branch-strategy-panel"]')
+      const controls = panel.get('[data-testid="branch-strategy-controls"]')
+
+      expect(panel.find('.branch-flow-viz').exists()).toBe(true)
+      expect(controls.findAll('.branch-strategy-controls__cell')).toHaveLength(3)
+      expect(controls.find('[data-testid="branch-strategy-control-mr"]').exists()).toBe(true)
+      expect(controls.find('[data-form-path="base_branch"]').exists()).toBe(true)
     })
   })
 
@@ -618,6 +640,27 @@ describe('CreateIssue', () => {
   // ── MR Toggle ─────────────────────────────────────────────────
 
   describe('MR toggle (create_mr)', () => {
+    it('should keep the branch strategy structure stable when MR is toggled off', async () => {
+      await mountComponent()
+
+      const panel = wrapper.get('[data-testid="branch-strategy-panel"]')
+      const initialControlCount = panel.findAll('.branch-strategy-controls__cell').length
+      const initialNodeCount = panel.findAll('.branch-flow-viz__node').length
+
+      wrapper.vm.formValue.target_branch = 'develop'
+      wrapper.vm.formValue.create_mr = false
+      await nextTick()
+
+      const targetSelect = panel.get('[data-testid="target-branch-select"]')
+      const targetNode = panel.get('[data-testid="branch-flow-target"]')
+
+      expect(panel.findAll('.branch-strategy-controls__cell')).toHaveLength(initialControlCount)
+      expect(panel.findAll('.branch-flow-viz__node')).toHaveLength(initialNodeCount)
+      expect(targetSelect.attributes('disabled')).toBeDefined()
+      expect(targetNode.classes()).toContain('branch-flow-viz__node--inactive')
+      expect(wrapper.vm.formValue.target_branch).toBe('develop')
+    })
+
     it('should show target branch select by default when create_mr is true', async () => {
       await mountComponent()
 
@@ -807,6 +850,38 @@ describe('CreateIssue', () => {
       expect(mockApi.createIssue).not.toHaveBeenCalled()
     })
 
+    it('should open advanced settings before scrolling to an invalid advanced field', async () => {
+      await mountComponent()
+
+      wrapper.vm.handleCloneModeChange('shallow')
+      await nextTick()
+
+      const advancedSettings = wrapper.get('[data-testid="advanced-settings"]')
+      const depthField = wrapper.get('[data-form-path="git_clone_depth"]')
+      const depthInput = depthField.get('[data-testid="git-clone-depth-input"]')
+      const scrollIntoView = vi.fn()
+      const focus = vi.spyOn(depthInput.element as HTMLElement, 'focus')
+      Object.defineProperty(depthField.element, 'scrollIntoView', {
+        configurable: true,
+        value: scrollIntoView,
+      })
+      wrapper.vm.formRef.validate.mockRejectedValue([
+        [{ field: 'git_clone_depth', message: 'Depth is required' }],
+      ])
+
+      expect((advancedSettings.element as HTMLDetailsElement).open).toBe(false)
+
+      await wrapper.vm.handleSubmit()
+
+      expect((advancedSettings.element as HTMLDetailsElement).open).toBe(true)
+      expect(scrollIntoView).toHaveBeenCalledWith({
+        behavior: 'smooth',
+        block: 'center',
+      })
+      expect(focus).toHaveBeenCalledWith({ preventScroll: true })
+      expect(mockApi.createIssue).not.toHaveBeenCalled()
+    })
+
     it('should return early when formRef is null', async () => {
       await mountComponent()
 
@@ -821,6 +896,24 @@ describe('CreateIssue', () => {
   // ── Repository Clone Policy ───────────────────────────────────
 
   describe('repository clone policy', () => {
+    it('keeps low-frequency settings collapsed while showing the current clone summary', async () => {
+      await mountComponent()
+
+      const advancedSettings = wrapper.get('[data-testid="advanced-settings"]')
+      const summary = wrapper.get('[data-testid="advanced-settings-summary"]')
+      const workerSelect = wrapper.get('[data-testid="worker-profile-select"]')
+
+      expect((advancedSettings.element as HTMLDetailsElement).open).toBe(false)
+      expect(summary.text()).toContain('issue.advancedSettings')
+      expect(summary.text()).toContain('issue.repositoryCloneSummaryLabel')
+      expect(summary.text()).toContain('issue.repositoryCloneFull')
+      expect(summary.text()).toContain('issue.branchCleanupSummaryLabel')
+      expect(summary.text()).toContain('issue.branchCleanupSummaryDelete')
+      expect(summary.text()).toContain('issue.ciAutoRepairSummaryLabel')
+      expect(summary.text()).toContain('issue.settingSummaryDisabled')
+      expect(workerSelect.element.closest('details')).toBeNull()
+    })
+
     it('defaults to a full clone without an object filter', async () => {
       await mountComponent()
 
@@ -864,8 +957,15 @@ describe('CreateIssue', () => {
       await mountComponent()
 
       wrapper.vm.handleCloneFilterChange(true)
+      await nextTick()
       expect(wrapper.vm.formValue.git_clone_filter).toBe('blob:none')
       expect(wrapper.vm.formValue.git_clone_depth).toBeNull()
+      expect(wrapper.get('[data-testid="advanced-settings-summary"]').text()).toContain(
+        'issue.repositoryCloneContentLabel'
+      )
+      expect(wrapper.get('[data-testid="advanced-settings-summary"]').text()).toContain(
+        'issue.repositoryCloneContentOnDemand'
+      )
 
       wrapper.vm.handleCloneFilterChange(false)
       expect(wrapper.vm.formValue.git_clone_filter).toBeNull()
@@ -1690,6 +1790,9 @@ describe('CreateIssue', () => {
       await nextTick()
 
       expect(wrapper.vm.formValue.delete_branch_on_close).toBe(false)
+      expect(wrapper.get('[data-testid="advanced-settings-summary"]').text()).toContain(
+        'issue.branchCleanupSummaryKeep'
+      )
     })
 
     it('should include delete_branch_on_close in createIssue payload', async () => {
@@ -1730,6 +1833,13 @@ describe('CreateIssue', () => {
         expect(mockApi.getProjectCIAutoRepairAvailability).toHaveBeenCalledWith(1)
         const ciSwitch = wrapper.find('[data-testid="ci-auto-repair-switch"]')
         expect(ciSwitch.attributes('disabled')).toBeUndefined()
+
+        wrapper.vm.formValue.ci_auto_repair_enabled = true
+        await nextTick()
+
+        expect(wrapper.get('[data-testid="advanced-settings-summary"]').text()).toContain(
+          'issue.settingSummaryEnabled'
+        )
       })
 
       it('should disable CI auto-repair and show the webhook reason', async () => {
@@ -1751,6 +1861,9 @@ describe('CreateIssue', () => {
         )
         expect(wrapper.find('[data-testid="ci-auto-repair-status"]').text()).toBe(
           'issue.ciAutoRepairUnavailable'
+        )
+        expect(wrapper.get('[data-testid="advanced-settings-summary"]').text()).toContain(
+          'issue.settingSummaryUnavailable'
         )
       })
 

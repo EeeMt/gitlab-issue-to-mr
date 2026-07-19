@@ -108,7 +108,12 @@
             </div>
 
             <div class="create-issue-form__section">
-              <div class="create-issue-form__section-title">{{ t('issue.field.title') }}</div>
+              <div
+                class="create-issue-form__section-title"
+                data-testid="issue-content-heading"
+              >
+                {{ t('issue.contentSection') }}
+              </div>
               <n-form-item
                 :label="t('issue.field.title')"
                 path="title"
@@ -122,32 +127,35 @@
                 />
               </n-form-item>
 
-              <div class="prompt-label-row">
-                <div>
-                  <span class="prompt-label">{{ t('issue.field.description') }}</span>
-                  <div class="description-hint">
-                    {{ t('issue.field.descriptionHint') }}
+              <n-form-item
+                :label="t('issue.field.description')"
+                path="description"
+                class="description-form-item"
+              >
+                <div class="description-field">
+                  <div class="description-toolbar">
+                    <div class="description-hint">
+                      {{ t('issue.field.descriptionHint') }}
+                    </div>
+                    <n-button
+                      size="small"
+                      :disabled="promptTemplatesLoading || activePromptTemplates.length === 0"
+                      :loading="promptTemplatesLoading"
+                      type="primary"
+                      ghost
+                      @click="showTemplateDrawer = true"
+                    >
+                      <template #icon>
+                        <n-icon :component="DocumentTextOutline" />
+                      </template>
+                      {{ t('createTask.useTemplate') }}
+                    </n-button>
                   </div>
+                  <VariableEditor
+                    v-model="formValue.description"
+                    :variable-tips="promptVariableTips"
+                  />
                 </div>
-                <n-button
-                  size="small"
-                  :disabled="promptTemplatesLoading || activePromptTemplates.length === 0"
-                  :loading="promptTemplatesLoading"
-                  type="primary"
-                  ghost
-                  @click="showTemplateDrawer = true"
-                >
-                  <template #icon>
-                    <n-icon :component="DocumentTextOutline" />
-                  </template>
-                  {{ t('createTask.useTemplate') }}
-                </n-button>
-              </div>
-              <n-form-item path="description" :show-label="false">
-                <VariableEditor
-                  v-model="formValue.description"
-                  :variable-tips="promptVariableTips"
-                />
                 <template #feedback>
                   <div v-if="unreplacedVariables.length > 0" class="prompt-variable-warning">
                     <n-icon :component="WarningOutline" size="14" />
@@ -160,162 +168,134 @@
             <div class="create-issue-form__section">
               <div class="create-issue-form__section-title">{{ t('issue.field.branchStrategy') }}</div>
 
-              <!-- Branch Strategy Visual Flow -->
-              <div class="branch-flow-viz">
-                <div class="branch-flow-viz__node branch-flow-viz__node--base">
-                  <n-icon :component="GitBranchOutline" size="14" class="branch-flow-viz__node-icon" />
-                  <span class="branch-flow-viz__node-type">{{ t('issue.field.baseBranch') }}</span>
-                  <span class="branch-flow-viz__node-name">{{ formValue.base_branch || '—' }}</span>
-                </div>
+              <div class="branch-strategy-panel" data-testid="branch-strategy-panel">
+                <!-- Branch Strategy Visual Flow -->
+                <div class="branch-flow-viz">
+                  <div class="branch-flow-viz__node branch-flow-viz__node--base">
+                    <n-icon :component="GitBranchOutline" size="14" class="branch-flow-viz__node-icon" />
+                    <span class="branch-flow-viz__node-type">{{ t('issue.field.baseBranch') }}</span>
+                    <span class="branch-flow-viz__node-name">{{ formValue.base_branch || '—' }}</span>
+                  </div>
 
-                <div class="branch-flow-viz__connector">
-                  <span class="branch-flow-viz__connector-label">{{ t('createTask.branchFlowAiCreates') }}</span>
-                  <div class="branch-flow-viz__connector-arrow" />
-                </div>
-
-                <div class="branch-flow-viz__node branch-flow-viz__node--work">
-                  <n-icon :component="SparklesOutline" size="14" class="branch-flow-viz__node-icon" />
-                  <span class="branch-flow-viz__node-type">{{ t('createTask.branchFlowWorkBranch') }}</span>
-                  <span class="branch-flow-viz__node-name">codify/issue-{id}</span>
-                </div>
-
-                <template v-if="formValue.create_mr">
                   <div class="branch-flow-viz__connector">
-                    <span class="branch-flow-viz__connector-label">{{ t('createTask.branchFlowMrMerge') }}</span>
+                    <span class="branch-flow-viz__connector-label">{{ t('createTask.branchFlowAiCreates') }}</span>
                     <div class="branch-flow-viz__connector-arrow" />
                   </div>
-                  <div class="branch-flow-viz__node branch-flow-viz__node--target">
+
+                  <div class="branch-flow-viz__node branch-flow-viz__node--work">
+                    <n-icon :component="SparklesOutline" size="14" class="branch-flow-viz__node-icon" />
+                    <span class="branch-flow-viz__node-type">{{ t('createTask.branchFlowWorkBranch') }}</span>
+                    <span class="branch-flow-viz__node-name">codify/issue-{id}</span>
+                  </div>
+
+                  <div
+                    class="branch-flow-viz__connector"
+                    :class="{ 'branch-flow-viz__connector--inactive': !formValue.create_mr }"
+                  >
+                    <span class="branch-flow-viz__connector-label">
+                      {{ t('createTask.branchFlowMrMerge') }}
+                    </span>
+                    <div class="branch-flow-viz__connector-arrow" />
+                  </div>
+                  <div
+                    class="branch-flow-viz__node branch-flow-viz__node--target"
+                    :class="{ 'branch-flow-viz__node--inactive': !formValue.create_mr }"
+                    data-testid="branch-flow-target"
+                  >
                     <n-icon :component="GitMergeOutline" size="14" class="branch-flow-viz__node-icon" />
                     <span class="branch-flow-viz__node-type">{{ t('issue.field.targetBranch') }}</span>
-                    <span class="branch-flow-viz__node-name">{{ formValue.target_branch || '—' }}</span>
+                    <span class="branch-flow-viz__node-name">
+                      {{
+                        formValue.create_mr
+                          ? formValue.target_branch || '—'
+                          : t('issue.mrDisabled')
+                      }}
+                    </span>
                   </div>
-                </template>
-              </div>
+                </div>
 
-              <!-- Row 1: Starting Branch | Create MR | Merge Target -->
-              <n-grid :cols="isMobile ? 1 : 3" :x-gap="16" :y-gap="8" style="margin-top: 16px;">
-                <n-gi>
-                  <n-form-item
-                    :label="t('issue.field.baseBranch')"
-                    path="base_branch"
-                    data-form-path="base_branch"
-                  >
-                    <n-select
-                      v-model:value="formValue.base_branch"
-                      :options="branchOptions"
-                      :loading="branchesLoading"
-                      :disabled="!formValue.project_id"
-                      :placeholder="t('createTask.selectBaseBranch')"
-                      filterable
-                    />
-                  </n-form-item>
-                  <div class="field-hint">{{ t('createTask.baseBranchHint') }}</div>
-                </n-gi>
-                <n-gi>
-                  <n-form-item :label="t('issue.createMergeRequest')" path="create_mr">
-                    <n-space align="center" :size="8">
-                      <n-switch v-model:value="formValue.create_mr" :disabled="!formValue.project_id" />
-                      <span style="font-size: 13px; color: var(--n-text-color-2)">
-                        {{ formValue.create_mr ? t('issue.mrEnabled') : t('issue.mrDisabled') }}
-                      </span>
-                    </n-space>
-                  </n-form-item>
-                </n-gi>
-                <n-gi v-if="formValue.create_mr">
-                  <n-form-item :label="t('issue.field.targetBranch')" path="target_branch">
-                    <n-select
-                      v-model:value="formValue.target_branch"
-                      :options="branchOptions"
-                      :loading="branchesLoading"
-                      :disabled="!formValue.project_id"
-                      :placeholder="t('createTask.selectTargetBranch')"
-                      filterable
-                    />
-                  </n-form-item>
-                  <div class="field-hint">{{ t('createTask.targetBranchHint') }}</div>
-                </n-gi>
-              </n-grid>
-
-              <!-- Row 2: Worker profile + Provider + options -->
-              <div class="branch-extra-row">
-                <div class="repository-clone-options" data-testid="repository-clone-options">
-                  <div class="repository-clone-options__controls">
+                <div
+                  class="branch-strategy-controls"
+                  data-testid="branch-strategy-controls"
+                >
+                  <div class="branch-strategy-controls__grid">
                     <div
-                      class="repository-clone-options__field repository-clone-options__field--mode"
+                      class="branch-strategy-controls__cell"
+                      data-testid="branch-strategy-control-base"
                     >
-                      <n-form-item :label="t('issue.repositoryCloneMode')">
+                      <n-form-item
+                        :label="t('issue.field.baseBranch')"
+                        path="base_branch"
+                        data-form-path="base_branch"
+                      >
                         <n-select
-                          :value="cloneMode"
-                          :options="cloneModeOptions"
-                          class="repository-clone-options__mode-select"
-                          data-testid="git-clone-mode-select"
-                          @update:value="handleCloneModeChange"
+                          v-model:value="formValue.base_branch"
+                          :options="branchOptions"
+                          :loading="branchesLoading"
+                          :disabled="!formValue.project_id"
+                          :placeholder="t('createTask.selectBaseBranch')"
+                          filterable
                         />
                       </n-form-item>
-                      <div class="field-hint repository-clone-options__hint">
-                        {{
-                          cloneMode === 'shallow'
-                            ? t('issue.repositoryCloneShallowHint')
-                            : t('issue.repositoryCloneFullHint')
-                        }}
-                      </div>
+                      <div class="field-hint">{{ t('createTask.baseBranchHint') }}</div>
                     </div>
                     <div
-                      v-if="cloneMode === 'shallow'"
-                      class="repository-clone-options__field repository-clone-options__field--depth"
+                      class="branch-strategy-controls__cell"
+                      data-testid="branch-strategy-control-mr"
                     >
-                      <n-form-item
-                        :label="t('issue.repositoryCloneDepth')"
-                        path="git_clone_depth"
-                        data-form-path="git_clone_depth"
-                      >
-                        <n-input-number
-                          v-model:value="formValue.git_clone_depth"
-                          :min="1"
-                          :max="10000"
-                          :step="10"
-                          data-testid="git-clone-depth-input"
-                        />
-                      </n-form-item>
-                    </div>
-                    <div
-                      class="repository-clone-options__field repository-clone-options__field--filter"
-                    >
-                      <n-form-item
-                        :label="t('issue.repositoryCloneFilter')"
-                        path="git_clone_filter"
-                        data-form-path="git_clone_filter"
-                      >
+                      <n-form-item :label="t('issue.createMergeRequest')" path="create_mr">
                         <n-space align="center" :size="8">
-                          <n-switch
-                            :value="formValue.git_clone_filter === 'blob:none'"
-                            :disabled="
-                              repositoryCloneSettingsUnavailable
-                              && formValue.git_clone_filter === null
-                            "
-                            data-testid="git-clone-filter-switch"
-                            @update:value="handleCloneFilterChange"
-                          />
-                          <span class="repository-clone-options__status">
-                            {{
-                              formValue.git_clone_filter === 'blob:none'
-                                ? t('issue.repositoryCloneFilterEnabled')
-                                : t('issue.repositoryCloneFilterDisabled')
-                            }}
+                          <n-switch v-model:value="formValue.create_mr" :disabled="!formValue.project_id" />
+                          <span class="branch-strategy-controls__status">
+                            {{ formValue.create_mr ? t('issue.mrEnabled') : t('issue.mrDisabled') }}
                           </span>
                         </n-space>
                       </n-form-item>
                     </div>
-                  </div>
-                  <div
-                    v-if="repositoryCloneCompatibilityMessage"
-                    class="repository-clone-options__compatibility"
-                    data-testid="repository-clone-compatibility"
-                  >
-                    <n-icon :component="WarningOutline" size="14" />
-                    <span>{{ repositoryCloneCompatibilityMessage }}</span>
+                    <div
+                      class="branch-strategy-controls__cell"
+                      data-testid="branch-strategy-control-target"
+                    >
+                      <div
+                        class="branch-strategy-controls__target"
+                        :class="{
+                          'branch-strategy-controls__target--inactive': !formValue.create_mr,
+                        }"
+                      >
+                        <n-form-item :label="t('issue.field.targetBranch')" path="target_branch">
+                          <n-select
+                            v-model:value="formValue.target_branch"
+                            :options="branchOptions"
+                            :loading="branchesLoading"
+                            :disabled="!formValue.project_id || !formValue.create_mr"
+                            :placeholder="
+                              formValue.create_mr
+                                ? t('createTask.selectTargetBranch')
+                                : t('issue.mrDisabled')
+                            "
+                            filterable
+                            data-testid="target-branch-select"
+                          />
+                        </n-form-item>
+                        <div class="field-hint">{{ t('createTask.targetBranchHint') }}</div>
+                      </div>
+                    </div>
                   </div>
                 </div>
+              </div>
+            </div>
+
+            <div class="create-issue-form__section">
+              <div class="create-issue-form__section-heading">
+                <div class="create-issue-form__section-title">
+                  {{ t('issue.executionEnvironment') }}
+                </div>
+                <div class="create-issue-form__section-hint">
+                  {{ t('issue.executionEnvironmentHint') }}
+                </div>
+              </div>
+
+              <div class="execution-environment-panel">
                 <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
                   <n-gi>
                     <n-form-item
@@ -343,37 +323,228 @@
                     </n-form-item>
                   </n-gi>
                 </n-grid>
-                <n-form-item :label="t('issue.deleteBranchOnClose')" path="delete_branch_on_close">
-                  <n-space align="center" :size="8">
-                    <n-switch
-                      v-model:value="formValue.delete_branch_on_close"
-                      data-testid="delete-branch-on-close-switch"
-                    />
-                    <span style="font-size: 13px; color: var(--n-text-color-2)">
-                      {{ formValue.delete_branch_on_close ? t('issue.deleteBranchOnCloseEnabled') : t('issue.deleteBranchOnCloseDisabled') }}
-                    </span>
-                  </n-space>
-                </n-form-item>
-                <n-form-item :label="t('issue.ciAutoRepair')" path="ci_auto_repair_enabled">
-                  <n-space align="center" :size="8">
-                    <n-switch
-                      v-model:value="formValue.ci_auto_repair_enabled"
-                      :disabled="!formValue.create_mr || !ciAutoRepairAvailable"
-                      data-testid="ci-auto-repair-switch"
-                    />
-                    <span
-                      class="ci-auto-repair-status"
-                      :class="{
-                        'ci-auto-repair-status--unavailable':
-                          selectedProject && !ciAutoRepairStatusLoading && !ciAutoRepairAvailable,
-                      }"
-                      data-testid="ci-auto-repair-status"
-                    >
-                      {{ ciAutoRepairStatusText }}
-                    </span>
-                  </n-space>
-                </n-form-item>
               </div>
+            </div>
+
+            <div class="create-issue-form__section create-issue-form__section--advanced">
+              <details
+                ref="advancedSettingsRef"
+                class="advanced-settings"
+                data-testid="advanced-settings"
+              >
+                <summary
+                  class="advanced-settings__summary"
+                  data-testid="advanced-settings-summary"
+                >
+                  <span class="advanced-settings__summary-copy">
+                    <span class="advanced-settings__title">
+                      {{ t('issue.advancedSettings') }}
+                    </span>
+                    <span class="advanced-settings__hint">
+                      {{ t('issue.advancedSettingsHint') }}
+                    </span>
+                  </span>
+                  <span class="advanced-settings__summary-meta">
+                    <span class="advanced-settings__summary-state">
+                      <span class="advanced-settings__summary-state-label">
+                        {{ t('issue.repositoryCloneSummaryLabel') }}
+                      </span>
+                      <span class="advanced-settings__summary-state-value">
+                        {{
+                          cloneMode === 'shallow'
+                            ? t('issue.repositoryCloneShallowBadge', {
+                                depth: formValue.git_clone_depth ?? DEFAULT_GIT_CLONE_DEPTH,
+                              })
+                            : t('issue.repositoryCloneFull')
+                        }}
+                      </span>
+                    </span>
+                    <span
+                      v-if="formValue.git_clone_filter === 'blob:none'"
+                      class="advanced-settings__summary-state"
+                    >
+                      <span class="advanced-settings__summary-state-label">
+                        {{ t('issue.repositoryCloneContentLabel') }}
+                      </span>
+                      <span class="advanced-settings__summary-state-value">
+                        {{ t('issue.repositoryCloneContentOnDemand') }}
+                      </span>
+                    </span>
+                    <span class="advanced-settings__summary-state">
+                      <span class="advanced-settings__summary-state-label">
+                        {{ t('issue.branchCleanupSummaryLabel') }}
+                      </span>
+                      <span class="advanced-settings__summary-state-value">
+                        {{
+                          formValue.delete_branch_on_close
+                            ? t('issue.branchCleanupSummaryDelete')
+                            : t('issue.branchCleanupSummaryKeep')
+                        }}
+                      </span>
+                    </span>
+                    <span class="advanced-settings__summary-state">
+                      <span class="advanced-settings__summary-state-label">
+                        {{ t('issue.ciAutoRepairSummaryLabel') }}
+                      </span>
+                      <span class="advanced-settings__summary-state-value">
+                        {{
+                          selectedProject && ciAutoRepairStatusLoading
+                            ? t('issue.settingSummaryChecking')
+                            : selectedProject && !ciAutoRepairAvailable
+                              ? t('issue.settingSummaryUnavailable')
+                              : formValue.ci_auto_repair_enabled
+                                ? t('issue.settingSummaryEnabled')
+                                : t('issue.settingSummaryDisabled')
+                        }}
+                      </span>
+                    </span>
+                  </span>
+                  <span class="advanced-settings__chevron" aria-hidden="true" />
+                </summary>
+
+                <div class="advanced-settings__body">
+                  <div class="repository-clone-options" data-testid="repository-clone-options">
+                    <div class="advanced-settings__group-heading">
+                      <span class="advanced-settings__group-title">
+                        {{ t('issue.repositoryPreparation') }}
+                      </span>
+                      <span class="advanced-settings__group-hint">
+                        {{ t('issue.repositoryPreparationHint') }}
+                      </span>
+                    </div>
+                    <div class="repository-clone-options__controls">
+                      <div
+                        class="repository-clone-options__field repository-clone-options__field--mode"
+                      >
+                        <n-form-item :label="t('issue.repositoryCloneMode')">
+                          <n-select
+                            :value="cloneMode"
+                            :options="cloneModeOptions"
+                            class="repository-clone-options__mode-select"
+                            data-testid="git-clone-mode-select"
+                            @update:value="handleCloneModeChange"
+                          />
+                        </n-form-item>
+                        <div class="field-hint repository-clone-options__hint">
+                          {{
+                            cloneMode === 'shallow'
+                              ? t('issue.repositoryCloneShallowHint')
+                              : t('issue.repositoryCloneFullHint')
+                          }}
+                        </div>
+                      </div>
+                      <div
+                        v-if="cloneMode === 'shallow'"
+                        class="repository-clone-options__field repository-clone-options__field--depth"
+                      >
+                        <n-form-item
+                          :label="t('issue.repositoryCloneDepth')"
+                          path="git_clone_depth"
+                          data-form-path="git_clone_depth"
+                        >
+                          <n-input-number
+                            v-model:value="formValue.git_clone_depth"
+                            :min="1"
+                            :max="10000"
+                            :step="10"
+                            data-testid="git-clone-depth-input"
+                          />
+                        </n-form-item>
+                      </div>
+                      <div
+                        class="repository-clone-options__field repository-clone-options__field--filter"
+                      >
+                        <n-form-item
+                          :label="t('issue.repositoryCloneFilter')"
+                          path="git_clone_filter"
+                          data-form-path="git_clone_filter"
+                        >
+                          <n-space align="center" :size="8">
+                            <n-switch
+                              :value="formValue.git_clone_filter === 'blob:none'"
+                              :disabled="
+                                repositoryCloneSettingsUnavailable
+                                && formValue.git_clone_filter === null
+                              "
+                              data-testid="git-clone-filter-switch"
+                              @update:value="handleCloneFilterChange"
+                            />
+                            <span class="repository-clone-options__status">
+                              {{
+                                formValue.git_clone_filter === 'blob:none'
+                                  ? t('issue.repositoryCloneFilterEnabled')
+                                  : t('issue.repositoryCloneFilterDisabled')
+                              }}
+                            </span>
+                          </n-space>
+                        </n-form-item>
+                      </div>
+                    </div>
+                    <div
+                      v-if="repositoryCloneCompatibilityMessage"
+                      class="repository-clone-options__compatibility"
+                      data-testid="repository-clone-compatibility"
+                    >
+                      <n-icon :component="WarningOutline" size="14" />
+                      <span>{{ repositoryCloneCompatibilityMessage }}</span>
+                    </div>
+                  </div>
+
+                  <div class="advanced-settings__automation-grid">
+                    <n-form-item
+                      path="delete_branch_on_close"
+                      :show-label="false"
+                      :show-feedback="false"
+                      class="advanced-setting-card"
+                    >
+                      <div class="advanced-setting-card__header">
+                        <span class="advanced-setting-card__title">
+                          {{ t('issue.deleteBranchOnClose') }}
+                        </span>
+                        <n-switch
+                          v-model:value="formValue.delete_branch_on_close"
+                          data-testid="delete-branch-on-close-switch"
+                        />
+                      </div>
+                      <div class="advanced-setting-card__description">
+                        {{
+                          formValue.delete_branch_on_close
+                            ? t('issue.deleteBranchOnCloseEnabled')
+                            : t('issue.deleteBranchOnCloseDisabled')
+                        }}
+                      </div>
+                    </n-form-item>
+
+                    <n-form-item
+                      path="ci_auto_repair_enabled"
+                      :show-label="false"
+                      :show-feedback="false"
+                      class="advanced-setting-card"
+                    >
+                      <div class="advanced-setting-card__header">
+                        <span class="advanced-setting-card__title">
+                          {{ t('issue.ciAutoRepair') }}
+                        </span>
+                        <n-switch
+                          v-model:value="formValue.ci_auto_repair_enabled"
+                          :disabled="!formValue.create_mr || !ciAutoRepairAvailable"
+                          data-testid="ci-auto-repair-switch"
+                        />
+                      </div>
+                      <div
+                        class="advanced-setting-card__description ci-auto-repair-status"
+                        :class="{
+                          'ci-auto-repair-status--unavailable':
+                            selectedProject && !ciAutoRepairStatusLoading && !ciAutoRepairAvailable,
+                        }"
+                        data-testid="ci-auto-repair-status"
+                      >
+                        {{ ciAutoRepairStatusText }}
+                      </div>
+                    </n-form-item>
+                  </div>
+                </div>
+              </details>
             </div>
 
             <div class="create-issue-form__actions">
@@ -565,6 +736,7 @@ const unreplacedVariables = computed(() => {
 // Form
 const formRef = ref<FormInst | null>(null)
 const createIssuePageRef = ref<HTMLElement | null>(null)
+const advancedSettingsRef = ref<HTMLDetailsElement | null>(null)
 const formFieldPaths = new Set([
   'project_id',
   'title',
@@ -609,6 +781,12 @@ async function scrollToFormField(path: string | null) {
       ?.closest<HTMLElement>('[data-form-path]') ?? null
   }
   if (!field) return
+
+  const disclosure = field.closest<HTMLDetailsElement>('details.advanced-settings')
+  if (disclosure && !disclosure.open) {
+    disclosure.open = true
+    await nextTick()
+  }
 
   if (typeof field.scrollIntoView === 'function') {
     const reduceMotion =
@@ -1128,6 +1306,9 @@ async function handleReset() {
   workerProfileId.value = null
   defaultProviderId.value =
     providers.value.find(provider => provider.is_default)?.id ?? null
+  if (advancedSettingsRef.value) {
+    advancedSettingsRef.value.open = false
+  }
   formRef.value?.restoreValidation()
 }
 
@@ -1258,21 +1439,48 @@ onMounted(() => {
   margin-bottom: 12px;
 }
 
+.create-issue-form__section-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.create-issue-form__section-heading .create-issue-form__section-title {
+  flex: 0 0 auto;
+  margin-bottom: 0;
+}
+
+.create-issue-form__section-hint {
+  min-width: 0;
+  color: rgba(15, 23, 42, 0.42);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.create-issue-form__section + .create-issue-form__section--advanced {
+  margin-top: 14px;
+}
+
 .create-issue-form__actions {
   padding-top: 16px;
   border-top: 1px solid rgba(15, 23, 42, 0.06);
 }
 
-.prompt-label-row {
+.description-field {
+  width: 100%;
+}
+
+.description-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   margin-bottom: 8px;
 }
 
-.prompt-label {
-  font-size: 14px;
-  font-weight: 500;
+.description-toolbar :deep(.n-button) {
+  flex: 0 0 auto;
 }
 
 .prompt-variable-warning {
@@ -1414,17 +1622,156 @@ onMounted(() => {
   line-height: 1.5;
 }
 
-.branch-extra-row {
-  margin-top: 4px;
-  padding-top: 4px;
-}
-
-.repository-clone-options {
-  margin-bottom: 12px;
-  padding: 12px 14px;
+.execution-environment-panel {
+  padding: 12px 14px 4px;
   border: 1px solid rgba(15, 23, 42, 0.07);
   border-radius: 10px;
   background: rgba(248, 250, 252, 0.65);
+}
+
+.advanced-settings {
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 11px;
+  background: rgba(248, 250, 252, 0.45);
+}
+
+.advanced-settings__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 56px;
+  padding: 10px 14px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  transition: background-color 0.16s ease;
+}
+
+.advanced-settings__summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced-settings__summary::marker {
+  content: '';
+}
+
+.advanced-settings__summary:hover {
+  background: rgba(15, 23, 42, 0.025);
+}
+
+.advanced-settings__summary:focus-visible {
+  outline: 2px solid rgba(32, 128, 240, 0.55);
+  outline-offset: -2px;
+}
+
+.advanced-settings__summary-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.advanced-settings__title {
+  color: rgba(15, 23, 42, 0.82);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.advanced-settings__hint {
+  overflow: hidden;
+  color: rgba(15, 23, 42, 0.42);
+  font-size: 12px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.advanced-settings__summary-meta {
+  display: flex;
+  flex: 0 0 auto;
+  max-width: 72%;
+  margin-left: auto;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.advanced-settings__summary-state {
+  display: inline-flex;
+  max-width: 230px;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.055);
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.advanced-settings__summary-state-label {
+  flex: 0 0 auto;
+  color: rgba(15, 23, 42, 0.42);
+}
+
+.advanced-settings__summary-state-value {
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(15, 23, 42, 0.68);
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
+.advanced-settings__chevron {
+  width: 7px;
+  height: 7px;
+  margin: -3px 3px 0 5px;
+  border-right: 1.5px solid rgba(15, 23, 42, 0.45);
+  border-bottom: 1.5px solid rgba(15, 23, 42, 0.45);
+  transform: rotate(45deg);
+  transition: transform 0.16s ease;
+}
+
+.advanced-settings[open] .advanced-settings__chevron {
+  margin-top: 3px;
+  transform: rotate(225deg);
+}
+
+.advanced-settings__body {
+  padding: 14px;
+  border-top: 1px solid rgba(15, 23, 42, 0.07);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.advanced-settings__group-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.advanced-settings__group-title {
+  flex: 0 0 auto;
+  color: rgba(15, 23, 42, 0.76);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.advanced-settings__group-hint {
+  color: rgba(15, 23, 42, 0.42);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.repository-clone-options {
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.07);
 }
 
 .repository-clone-options__controls {
@@ -1487,7 +1834,85 @@ onMounted(() => {
   margin-top: 2px;
 }
 
+.advanced-settings__automation-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.advanced-setting-card {
+  min-width: 0;
+  margin-bottom: 0;
+  padding: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  border-radius: 9px;
+  background: rgba(248, 250, 252, 0.72);
+}
+
+.advanced-setting-card :deep(.n-form-item-blank) {
+  display: block;
+}
+
+.advanced-setting-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.advanced-setting-card__title {
+  min-width: 0;
+  color: rgba(15, 23, 42, 0.76);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.advanced-setting-card__description {
+  margin-top: 6px;
+  color: rgba(15, 23, 42, 0.45);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 640px) {
+  .create-issue-form__section-heading,
+  .advanced-settings__group-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .advanced-settings__summary {
+    position: relative;
+    display: block;
+    padding: 11px 36px 11px 12px;
+  }
+
+  .advanced-settings__hint {
+    white-space: normal;
+  }
+
+  .advanced-settings__summary-meta {
+    max-width: none;
+    justify-content: flex-end;
+    margin-top: 8px;
+    padding-top: 0;
+  }
+
+  .advanced-settings__chevron,
+  .advanced-settings[open] .advanced-settings__chevron {
+    position: absolute;
+    top: 23px;
+    right: 15px;
+    margin: 0;
+  }
+
+  .advanced-settings__body {
+    padding: 12px;
+  }
+
   .repository-clone-options__controls {
     flex-direction: column;
   }
@@ -1498,27 +1923,73 @@ onMounted(() => {
     flex-basis: auto;
     width: 100%;
   }
+
+  .advanced-settings__automation-grid {
+    grid-template-columns: 1fr;
+  }
+
 }
 
 .description-hint {
   display: flex;
   align-items: center;
+  min-width: 0;
   gap: 4px;
   font-size: 12px;
   color: rgba(15, 23, 42, 0.45);
-  margin-top: 3px;
   line-height: 1.5;
+}
+
+.branch-strategy-panel {
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 11px;
+  background: rgba(248, 250, 252, 0.6);
+}
+
+.branch-strategy-controls {
+  border-top: 1px solid rgba(15, 23, 42, 0.07);
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.branch-strategy-controls__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.branch-strategy-controls__cell {
+  min-width: 0;
+  padding: 12px 14px 4px;
+}
+
+.branch-strategy-controls__cell + .branch-strategy-controls__cell {
+  border-left: 1px solid rgba(15, 23, 42, 0.065);
+}
+
+.branch-strategy-controls__status {
+  color: var(--n-text-color-2);
+  font-size: 13px;
+}
+
+.branch-strategy-controls__target,
+.branch-flow-viz__node,
+.branch-flow-viz__connector {
+  transition: opacity 0.16s ease;
+}
+
+.branch-strategy-controls__target--inactive,
+.branch-flow-viz__node--inactive,
+.branch-flow-viz__connector--inactive {
+  opacity: 0.45;
 }
 
 .branch-flow-viz {
   display: flex;
   align-items: center;
-  margin-top: 16px;
-  padding: 12px 16px;
-  background: rgba(15, 23, 42, 0.025);
-  border: 1px solid rgba(15, 23, 42, 0.07);
-  border-radius: 10px;
+  min-height: 84px;
+  padding: 10px 14px;
   overflow-x: auto;
+  background: rgba(15, 23, 42, 0.025);
   gap: 0;
 }
 
@@ -1527,7 +1998,7 @@ onMounted(() => {
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  padding: 8px 14px;
+  padding: 7px 12px;
   border-radius: 8px;
   min-width: 120px;
   text-align: center;
@@ -1604,6 +2075,22 @@ onMounted(() => {
   border-top: 5px solid transparent;
   border-bottom: 5px solid transparent;
   border-left: 7px solid rgba(15, 23, 42, 0.22);
+}
+
+@media (max-width: 767px) {
+  .branch-strategy-controls__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .branch-strategy-controls__cell {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .branch-strategy-controls__cell + .branch-strategy-controls__cell {
+    border-top: 1px solid rgba(15, 23, 42, 0.065);
+    border-left: 0;
+  }
 }
 
 /* ── Project picker ──────────────────────────────────── */
