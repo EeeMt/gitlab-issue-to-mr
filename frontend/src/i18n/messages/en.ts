@@ -933,7 +933,7 @@ const en = {
     pleaseSelectScheduledTime: 'Please select a scheduled date and time',
     scheduledTimeFuture: 'Scheduled time must be in the future',
     workerProfile: 'Worker',
-    selectWorkerProfile: 'Worker fixed by issue',
+    selectWorkerProfile: 'Please select a worker',
     selectDefaultWorkerProfile: 'Select a worker',
     defaultWorkerProfile: 'Worker',
     defaultProvider: 'Default AI Provider',

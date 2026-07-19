@@ -711,6 +711,31 @@ describe('CreateIssue', () => {
       expect(mockApi.createIssue).not.toHaveBeenCalled()
     })
 
+    it('should scroll to and focus the first invalid field', async () => {
+      await mountComponent()
+
+      const titleField = wrapper.get('[data-form-path="title"]')
+      const titleInput = titleField.get('.n-auto-complete')
+      const scrollIntoView = vi.fn()
+      const focus = vi.spyOn(titleInput.element as HTMLElement, 'focus')
+      Object.defineProperty(titleField.element, 'scrollIntoView', {
+        configurable: true,
+        value: scrollIntoView,
+      })
+      wrapper.vm.formRef.validate.mockRejectedValue([
+        [{ field: 'title', message: 'Title is required' }],
+      ])
+
+      await wrapper.vm.handleSubmit()
+
+      expect(scrollIntoView).toHaveBeenCalledWith({
+        behavior: 'smooth',
+        block: 'center',
+      })
+      expect(focus).toHaveBeenCalledWith({ preventScroll: true })
+      expect(mockApi.createIssue).not.toHaveBeenCalled()
+    })
+
     it('should require base_branch before submitting', async () => {
       await mountComponent()
 
@@ -739,6 +764,44 @@ describe('CreateIssue', () => {
       await mountComponent()
 
       expect(wrapper.vm.formValue.title).toBe('')
+    })
+
+    it('should validate Worker as a required form field', async () => {
+      await mountComponent()
+
+      expect(wrapper.vm.formValue.worker_profile_id).toBeNull()
+      expect(wrapper.vm.rules.worker_profile_id).toMatchObject({
+        required: true,
+        type: 'number',
+        message: 'createTask.selectWorkerProfile',
+        trigger: 'change',
+      })
+    })
+
+    it('should scroll to and focus Worker when Worker validation fails', async () => {
+      await mountComponent()
+
+      const workerField = wrapper.get('[data-form-path="worker_profile_id"]')
+      const workerSelect = workerField.get('[data-testid="worker-profile-select"]')
+      const scrollIntoView = vi.fn()
+      const focus = vi.spyOn(workerSelect.element as HTMLElement, 'focus')
+      Object.defineProperty(workerField.element, 'scrollIntoView', {
+        configurable: true,
+        value: scrollIntoView,
+      })
+      wrapper.vm.formRef.validate.mockRejectedValue([
+        [{ field: 'worker_profile_id', message: 'Worker is required' }],
+      ])
+
+      await wrapper.vm.handleSubmit()
+
+      expect(scrollIntoView).toHaveBeenCalledWith({
+        behavior: 'smooth',
+        block: 'center',
+      })
+      expect(focus).toHaveBeenCalledWith({ preventScroll: true })
+      expect(mockMessage.error).not.toHaveBeenCalled()
+      expect(mockApi.createIssue).not.toHaveBeenCalled()
     })
 
     it('should return early when formRef is null', async () => {

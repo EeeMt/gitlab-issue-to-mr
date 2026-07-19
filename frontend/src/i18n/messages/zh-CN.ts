@@ -921,7 +921,7 @@ const zhCN = {
     pleaseSelectScheduledTime: '请选择定时执行时间',
     scheduledTimeFuture: '定时执行时间必须晚于当前时间',
     workerProfile: 'Worker',
-    selectWorkerProfile: '需求固定 Worker',
+    selectWorkerProfile: '请选择 Worker',
     selectDefaultWorkerProfile: '请选择 Worker',
     defaultWorkerProfile: 'Worker',
     defaultProvider: '默认 AI Provider',

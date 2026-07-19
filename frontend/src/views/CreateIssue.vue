@@ -1,5 +1,9 @@
 <template>
-  <div class="create-issue-page" data-testid="create-issue-page">
+  <div
+    ref="createIssuePageRef"
+    class="create-issue-page"
+    data-testid="create-issue-page"
+  >
     <n-space vertical :size="16">
       <PageHeader
         data-testid="create-issue-header"
@@ -28,7 +32,11 @@
           >
             <div class="create-issue-form__section">
               <div class="create-issue-form__section-title">{{ t('issue.field.project') }}</div>
-              <n-form-item path="project_id" :show-label="false">
+              <n-form-item
+                path="project_id"
+                :show-label="false"
+                data-form-path="project_id"
+              >
                 <!-- Search box -->
                 <div class="project-picker">
                   <n-input
@@ -101,7 +109,11 @@
 
             <div class="create-issue-form__section">
               <div class="create-issue-form__section-title">{{ t('issue.field.title') }}</div>
-              <n-form-item :label="t('issue.field.title')" path="title">
+              <n-form-item
+                :label="t('issue.field.title')"
+                path="title"
+                data-form-path="title"
+              >
                 <n-auto-complete
                   v-model:value="formValue.title"
                   :options="recentTitleOptions"
@@ -183,7 +195,11 @@
               <!-- Row 1: Starting Branch | Create MR | Merge Target -->
               <n-grid :cols="isMobile ? 1 : 3" :x-gap="16" :y-gap="8" style="margin-top: 16px;">
                 <n-gi>
-                  <n-form-item :label="t('issue.field.baseBranch')" path="base_branch">
+                  <n-form-item
+                    :label="t('issue.field.baseBranch')"
+                    path="base_branch"
+                    data-form-path="base_branch"
+                  >
                     <n-select
                       v-model:value="formValue.base_branch"
                       :options="branchOptions"
@@ -223,21 +239,35 @@
               <!-- Row 2: Worker profile + Provider + options -->
               <div class="branch-extra-row">
                 <div class="repository-clone-options" data-testid="repository-clone-options">
-                  <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
-                    <n-gi>
+                  <div class="repository-clone-options__controls">
+                    <div
+                      class="repository-clone-options__field repository-clone-options__field--mode"
+                    >
                       <n-form-item :label="t('issue.repositoryCloneMode')">
                         <n-select
                           :value="cloneMode"
                           :options="cloneModeOptions"
+                          class="repository-clone-options__mode-select"
                           data-testid="git-clone-mode-select"
                           @update:value="handleCloneModeChange"
                         />
                       </n-form-item>
-                    </n-gi>
-                    <n-gi v-if="cloneMode === 'shallow'">
+                      <div class="field-hint repository-clone-options__hint">
+                        {{
+                          cloneMode === 'shallow'
+                            ? t('issue.repositoryCloneShallowHint')
+                            : t('issue.repositoryCloneFullHint')
+                        }}
+                      </div>
+                    </div>
+                    <div
+                      v-if="cloneMode === 'shallow'"
+                      class="repository-clone-options__field repository-clone-options__field--depth"
+                    >
                       <n-form-item
                         :label="t('issue.repositoryCloneDepth')"
                         path="git_clone_depth"
+                        data-form-path="git_clone_depth"
                       >
                         <n-input-number
                           v-model:value="formValue.git_clone_depth"
@@ -247,43 +277,45 @@
                           data-testid="git-clone-depth-input"
                         />
                       </n-form-item>
-                    </n-gi>
-                  </n-grid>
-                  <div class="field-hint repository-clone-options__hint">
-                    {{
-                      cloneMode === 'shallow'
-                        ? t('issue.repositoryCloneShallowHint')
-                        : t('issue.repositoryCloneFullHint')
-                    }}
+                    </div>
+                    <div
+                      class="repository-clone-options__field repository-clone-options__field--filter"
+                    >
+                      <n-form-item
+                        :label="t('issue.repositoryCloneFilter')"
+                        path="git_clone_filter"
+                      >
+                        <n-space align="center" :size="8">
+                          <n-switch
+                            :value="formValue.git_clone_filter === 'blob:none'"
+                            data-testid="git-clone-filter-switch"
+                            @update:value="handleCloneFilterChange"
+                          />
+                          <span class="repository-clone-options__status">
+                            {{
+                              formValue.git_clone_filter === 'blob:none'
+                                ? t('issue.repositoryCloneFilterEnabled')
+                                : t('issue.repositoryCloneFilterDisabled')
+                            }}
+                          </span>
+                        </n-space>
+                      </n-form-item>
+                    </div>
                   </div>
-                  <n-form-item
-                    :label="t('issue.repositoryCloneFilter')"
-                    path="git_clone_filter"
-                  >
-                    <n-space align="center" :size="8">
-                      <n-switch
-                        :value="formValue.git_clone_filter === 'blob:none'"
-                        data-testid="git-clone-filter-switch"
-                        @update:value="handleCloneFilterChange"
-                      />
-                      <span class="repository-clone-options__status">
-                        {{
-                          formValue.git_clone_filter === 'blob:none'
-                            ? t('issue.repositoryCloneFilterEnabled')
-                            : t('issue.repositoryCloneFilterDisabled')
-                        }}
-                      </span>
-                    </n-space>
-                  </n-form-item>
                 </div>
                 <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
                   <n-gi>
-                    <n-form-item :label="t('createTask.workerProfile')" required>
+                    <n-form-item
+                      :label="t('createTask.workerProfile')"
+                      path="worker_profile_id"
+                      data-form-path="worker_profile_id"
+                    >
                       <n-select
                         v-model:value="workerProfileId"
                         :options="workerProfileOptions"
                         clearable
                         :placeholder="t('createTask.selectDefaultWorkerProfile')"
+                        data-testid="worker-profile-select"
                       />
                     </n-form-item>
                   </n-gi>
@@ -418,7 +450,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, nextTick, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
@@ -488,7 +520,6 @@ const ciAutoRepairAvailability = ref<ProjectCIAutoRepairAvailability | null>(nul
 const promptTemplates = ref<PromptTemplate[]>([])
 const workerProfiles = ref<WorkerProfile[]>([])
 const providers = ref<AIProvider[]>([])
-const workerProfileId = ref<number | null>(null)
 const defaultProviderId = ref<number | null>(null)
 
 // Template picker state
@@ -520,6 +551,71 @@ const unreplacedVariables = computed(() => {
 
 // Form
 const formRef = ref<FormInst | null>(null)
+const createIssuePageRef = ref<HTMLElement | null>(null)
+const formFieldPaths = new Set([
+  'project_id',
+  'title',
+  'base_branch',
+  'git_clone_depth',
+  'worker_profile_id',
+])
+
+function findValidationPath(validationErrors: unknown): string | null {
+  if (Array.isArray(validationErrors)) {
+    for (const error of validationErrors) {
+      const path = findValidationPath(error)
+      if (path) return path
+    }
+    return null
+  }
+  if (
+    validationErrors
+    && typeof validationErrors === 'object'
+    && 'field' in validationErrors
+    && typeof validationErrors.field === 'string'
+    && formFieldPaths.has(validationErrors.field)
+  ) {
+    return validationErrors.field
+  }
+  return null
+}
+
+async function scrollToFormField(path: string | null) {
+  await nextTick()
+
+  const page = createIssuePageRef.value
+  if (!page) return
+
+  let field = path
+    ? page.querySelector<HTMLElement>(`[data-form-path="${path}"]`)
+    : null
+  if (!field) {
+    field = page
+      .querySelector<HTMLElement>('.n-form-item-blank--error')
+      ?.closest<HTMLElement>('[data-form-path]') ?? null
+  }
+  if (!field) return
+
+  if (typeof field.scrollIntoView === 'function') {
+    const reduceMotion =
+      typeof window.matchMedia === 'function'
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    field.scrollIntoView({
+      behavior: reduceMotion ? 'auto' : 'smooth',
+      block: 'center',
+    })
+  }
+
+  const focusTarget = field.querySelector<HTMLElement>(
+    'input:not([type="hidden"]):not([disabled]), '
+    + 'textarea:not([disabled]), '
+    + 'select:not([disabled]), '
+    + '[role="combobox"]:not([aria-disabled="true"]), '
+    + 'button:not([disabled]), '
+    + '[tabindex]:not([tabindex="-1"])'
+  )
+  focusTarget?.focus({ preventScroll: true })
+}
 
 function createInitialFormValue(): {
   title: string
@@ -530,6 +626,7 @@ function createInitialFormValue(): {
   create_mr: boolean
   delete_branch_on_close: boolean
   ci_auto_repair_enabled: boolean
+  worker_profile_id: number | null
   git_clone_depth: number | null
   git_clone_filter: 'blob:none' | null
 } {
@@ -542,12 +639,19 @@ function createInitialFormValue(): {
     create_mr: true,
     delete_branch_on_close: true,
     ci_auto_repair_enabled: false,
+    worker_profile_id: null,
     git_clone_depth: null,
     git_clone_filter: null,
   }
 }
 
 const formValue = ref(createInitialFormValue())
+const workerProfileId = computed({
+  get: () => formValue.value.worker_profile_id,
+  set: value => {
+    formValue.value.worker_profile_id = value
+  },
+})
 const DEFAULT_GIT_CLONE_DEPTH = 50
 const cloneMode = ref<'full' | 'shallow'>('full')
 
@@ -567,6 +671,12 @@ const rules: FormRules = {
   base_branch: {
     required: true,
     message: t('createTask.selectBaseBranch'),
+    trigger: 'change',
+  },
+  worker_profile_id: {
+    required: true,
+    type: 'number',
+    message: t('createTask.selectWorkerProfile'),
     trigger: 'change',
   },
   git_clone_depth: {
@@ -942,16 +1052,18 @@ async function handleSubmit() {
 
   try {
     await formRef.value.validate()
-  } catch {
+  } catch (validationErrors) {
+    await scrollToFormField(findValidationPath(validationErrors))
     return
   }
 
   if (!formValue.value.base_branch) {
+    await scrollToFormField('base_branch')
     message.error(t('createTask.selectBaseBranch'))
     return
   }
   if (workerProfileId.value === null) {
-    message.error(t('createTask.selectWorkerProfile'))
+    await scrollToFormField('worker_profile_id')
     return
   }
 
@@ -1185,20 +1297,66 @@ onMounted(() => {
 
 .repository-clone-options {
   margin-bottom: 12px;
-  padding: 12px 14px 2px;
+  padding: 12px 14px;
   border: 1px solid rgba(15, 23, 42, 0.07);
   border-radius: 10px;
   background: rgba(248, 250, 252, 0.65);
 }
 
+.repository-clone-options__controls {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+}
+
+.repository-clone-options__field {
+  min-width: 0;
+}
+
+.repository-clone-options__field--mode {
+  flex: 0 1 240px;
+}
+
+.repository-clone-options__field--depth {
+  flex: 0 0 150px;
+}
+
+.repository-clone-options__field--filter {
+  flex: 1 1 280px;
+}
+
+.repository-clone-options__field :deep(.n-form-item) {
+  margin-bottom: 0;
+}
+
+.repository-clone-options__mode-select,
+.repository-clone-options__field--depth :deep(.n-input-number) {
+  width: 100%;
+}
+
 .repository-clone-options__hint {
-  margin-top: -8px;
-  margin-bottom: 10px;
+  margin: 4px 0 0;
 }
 
 .repository-clone-options__status {
   color: var(--n-text-color-2);
   font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .repository-clone-options__controls {
+    flex-direction: column;
+  }
+
+  .repository-clone-options__field--mode,
+  .repository-clone-options__field--depth,
+  .repository-clone-options__field--filter {
+    flex-basis: auto;
+    width: 100%;
+  }
 }
 
 .description-hint {
