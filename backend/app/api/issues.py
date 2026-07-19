@@ -32,6 +32,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/issues", tags=["issues"])
 
 _REPOSITORY_POLICY_MIN_WORKER_KIT_VERSION = (0, 3, 0)
+_REPOSITORY_POLICY_REQUIRES_MOUNTED_KIT = "repository_clone_requires_mounted_kit"
+_REPOSITORY_POLICY_REQUIRES_WORKER_KIT_VERSION = (
+    "repository_clone_worker_kit_version_required"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -157,21 +161,31 @@ async def _resolve_issue_worker_id(
     profile = await db.get(WorkerProfile, explicit_id, with_for_update=True)
     if profile is None or not profile.enabled:
         raise HTTPException(status_code=422, detail="Worker profile is not available")
-    if requires_repository_policy and not _supports_repository_policy(profile):
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "Repository clone settings require worker-kit 0.3.0 or newer "
-                "for mounted-kit worker profiles"
-            ),
-        )
+    if requires_repository_policy:
+        repository_policy_error = _repository_policy_error_detail(profile)
+        if repository_policy_error is not None:
+            raise HTTPException(status_code=422, detail=repository_policy_error)
     return profile.id
 
 
-def _supports_repository_policy(profile: WorkerProfile) -> bool:
+def _repository_policy_error_detail(profile: WorkerProfile) -> dict[str, str] | None:
     if getattr(profile, "runtime_mode", "baked_image") != MOUNTED_KIT_MODE:
-        return True
+        return {
+            "code": _REPOSITORY_POLICY_REQUIRES_MOUNTED_KIT,
+            "message": "Repository clone settings require a mounted-kit worker profile",
+        }
+    if not _supports_repository_policy(profile):
+        return {
+            "code": _REPOSITORY_POLICY_REQUIRES_WORKER_KIT_VERSION,
+            "message": (
+                "Repository clone settings require worker-kit 0.3.0 or newer "
+                "for mounted-kit worker profiles"
+            ),
+        }
+    return None
 
+
+def _supports_repository_policy(profile: WorkerProfile) -> bool:
     raw_version = getattr(profile, "worker_kit_version", None)
     if not isinstance(raw_version, str):
         return False

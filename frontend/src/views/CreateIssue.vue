@@ -284,10 +284,15 @@
                       <n-form-item
                         :label="t('issue.repositoryCloneFilter')"
                         path="git_clone_filter"
+                        data-form-path="git_clone_filter"
                       >
                         <n-space align="center" :size="8">
                           <n-switch
                             :value="formValue.git_clone_filter === 'blob:none'"
+                            :disabled="
+                              repositoryCloneSettingsUnavailable
+                              && formValue.git_clone_filter === null
+                            "
                             data-testid="git-clone-filter-switch"
                             @update:value="handleCloneFilterChange"
                           />
@@ -301,6 +306,14 @@
                         </n-space>
                       </n-form-item>
                     </div>
+                  </div>
+                  <div
+                    v-if="repositoryCloneCompatibilityMessage"
+                    class="repository-clone-options__compatibility"
+                    data-testid="repository-clone-compatibility"
+                  >
+                    <n-icon :component="WarningOutline" size="14" />
+                    <span>{{ repositoryCloneCompatibilityMessage }}</span>
                   </div>
                 </div>
                 <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
@@ -557,6 +570,7 @@ const formFieldPaths = new Set([
   'title',
   'base_branch',
   'git_clone_depth',
+  'git_clone_filter',
   'worker_profile_id',
 ])
 
@@ -653,7 +667,60 @@ const workerProfileId = computed({
   },
 })
 const DEFAULT_GIT_CLONE_DEPTH = 50
+const REPOSITORY_POLICY_MIN_WORKER_KIT_VERSION = [0, 3, 0] as const
 const cloneMode = ref<'full' | 'shallow'>('full')
+
+const selectedWorkerProfile = computed(() =>
+  workerProfiles.value.find(profile => profile.id === workerProfileId.value) ?? null
+)
+
+function supportsRepositoryCloneSettings(profile: WorkerProfile): boolean {
+  if (profile.runtime_mode !== 'mounted_kit') return false
+
+  const rawVersion = profile.worker_kit_version
+  if (typeof rawVersion !== 'string') return false
+  const release = rawVersion.trim().split('+', 1)[0]
+  if (release.includes('-')) return false
+  const parts = release.split('.')
+  if (parts.length !== 3 || parts.some(part => !/^\d+$/.test(part))) return false
+
+  const version = parts.map(Number)
+  for (let index = 0; index < REPOSITORY_POLICY_MIN_WORKER_KIT_VERSION.length; index += 1) {
+    if (version[index] > REPOSITORY_POLICY_MIN_WORKER_KIT_VERSION[index]) return true
+    if (version[index] < REPOSITORY_POLICY_MIN_WORKER_KIT_VERSION[index]) return false
+  }
+  return true
+}
+
+const repositoryCloneCompatibilityIssue = computed<
+  'requires_mounted_kit' | 'requires_worker_kit_version' | null
+>(() => {
+  const profile = selectedWorkerProfile.value
+  if (!profile) return null
+  if (profile.runtime_mode !== 'mounted_kit') return 'requires_mounted_kit'
+  if (!supportsRepositoryCloneSettings(profile)) return 'requires_worker_kit_version'
+  return null
+})
+
+const repositoryCloneSettingsUnavailable = computed(
+  () => repositoryCloneCompatibilityIssue.value !== null
+)
+
+const repositoryCloneCompatibilityMessage = computed(() => {
+  if (repositoryCloneCompatibilityIssue.value === 'requires_mounted_kit') {
+    return t('issue.repositoryCloneRequiresMountedKit')
+  }
+  if (repositoryCloneCompatibilityIssue.value === 'requires_worker_kit_version') {
+    return t('issue.repositoryCloneRequiresWorkerKitVersion')
+  }
+  return ''
+})
+
+function repositoryCloneCompatibilityError(): Error | null {
+  return repositoryCloneCompatibilityMessage.value
+    ? new Error(repositoryCloneCompatibilityMessage.value)
+    : null
+}
 
 // Validation rules
 const rules: FormRules = {
@@ -681,6 +748,10 @@ const rules: FormRules = {
   },
   git_clone_depth: {
     validator: (_rule, value) => {
+      if (cloneMode.value === 'shallow') {
+        const compatibilityError = repositoryCloneCompatibilityError()
+        if (compatibilityError) return compatibilityError
+      }
       if (
         (cloneMode.value === 'full' && value === null)
         || (
@@ -693,6 +764,13 @@ const rules: FormRules = {
         return true
       }
       return new Error(t('issue.repositoryCloneDepthInvalid'))
+    },
+    trigger: 'change',
+  },
+  git_clone_filter: {
+    validator: (_rule, value) => {
+      if (value === null) return true
+      return repositoryCloneCompatibilityError() ?? true
     },
     trigger: 'change',
   },
@@ -721,10 +799,15 @@ const providerOptions = computed(() =>
 
 const cloneModeOptions = computed(() => [
   { label: t('issue.repositoryCloneFull'), value: 'full' },
-  { label: t('issue.repositoryCloneShallow'), value: 'shallow' },
+  {
+    label: t('issue.repositoryCloneShallow'),
+    value: 'shallow',
+    disabled: repositoryCloneSettingsUnavailable.value,
+  },
 ])
 
 function handleCloneModeChange(mode: 'full' | 'shallow') {
+  if (mode === 'shallow' && repositoryCloneSettingsUnavailable.value) return
   cloneMode.value = mode
   formValue.value.git_clone_depth =
     mode === 'shallow'
@@ -733,6 +816,7 @@ function handleCloneModeChange(mode: 'full' | 'shallow') {
 }
 
 function handleCloneFilterChange(enabled: boolean) {
+  if (enabled && repositoryCloneSettingsUnavailable.value) return
   formValue.value.git_clone_filter = enabled ? 'blob:none' : null
 }
 
@@ -1047,6 +1131,36 @@ async function handleReset() {
   formRef.value?.restoreValidation()
 }
 
+function localizedRepositoryCloneError(detail: unknown): string | null {
+  let code: unknown
+  let fallbackMessage: unknown
+  if (detail && typeof detail === 'object') {
+    code = 'code' in detail ? detail.code : undefined
+    fallbackMessage = 'message' in detail ? detail.message : undefined
+  }
+
+  if (code === 'repository_clone_requires_mounted_kit') {
+    return t('issue.repositoryCloneRequiresMountedKit')
+  }
+  if (code === 'repository_clone_worker_kit_version_required') {
+    return t('issue.repositoryCloneRequiresWorkerKitVersion')
+  }
+
+  const legacyMessage =
+    typeof detail === 'string'
+      ? detail
+      : typeof fallbackMessage === 'string'
+        ? fallbackMessage
+        : ''
+  if (legacyMessage.includes('require worker-kit 0.3.0 or newer')) {
+    return t('issue.repositoryCloneRequiresWorkerKitVersion')
+  }
+  if (legacyMessage.includes('require a mounted-kit worker profile')) {
+    return t('issue.repositoryCloneRequiresMountedKit')
+  }
+  return null
+}
+
 async function handleSubmit() {
   if (!formRef.value) return
 
@@ -1094,8 +1208,18 @@ async function handleSubmit() {
     router.push(`/issues/${issue.id}`)
   } catch (error: any) {
     const detail = error?.response?.data?.detail
+    const detailMessage =
+      typeof detail === 'string'
+        ? detail
+        : detail
+          && typeof detail === 'object'
+          && 'message' in detail
+          && typeof detail.message === 'string'
+          ? detail.message
+          : error?.response?.data?.message
     const msg =
-      (typeof detail === 'string' ? detail : error?.response?.data?.message)
+      localizedRepositoryCloneError(detail)
+      || detailMessage
       || error?.message
       || String(error)
     message.error(msg)
@@ -1344,6 +1468,23 @@ onMounted(() => {
   font-size: 13px;
   line-height: 1.45;
   overflow-wrap: anywhere;
+}
+
+.repository-clone-options__compatibility {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(240, 160, 32, 0.2);
+  color: #d97706;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.repository-clone-options__compatibility :deep(.n-icon) {
+  flex: 0 0 auto;
+  margin-top: 2px;
 }
 
 @media (max-width: 640px) {

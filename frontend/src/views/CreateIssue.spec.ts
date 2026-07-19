@@ -344,6 +344,9 @@ const mockWorkerProfiles = [
     enabled: true,
     is_default: true,
     image: 'codify-worker/java21-maven:2026.07',
+    runtime_mode: 'mounted_kit',
+    worker_kit_version: '0.3.0',
+    worker_kit_path: '/opt/codify/worker-kits/0.3.0-linux-amd64',
     codegraph_enabled: false,
     volume_mounts: [],
     environment_variables: [],
@@ -867,6 +870,77 @@ describe('CreateIssue', () => {
       wrapper.vm.handleCloneFilterChange(false)
       expect(wrapper.vm.formValue.git_clone_filter).toBeNull()
     })
+
+    it('disables repository clone optimizations for baked-image workers', async () => {
+      await mountComponent()
+
+      wrapper.vm.workerProfiles.splice(0, wrapper.vm.workerProfiles.length, {
+        ...mockWorkerProfiles[0],
+        runtime_mode: 'baked_image',
+        worker_kit_version: null,
+        worker_kit_path: null,
+      })
+      wrapper.vm.workerProfileId = 3
+      await nextTick()
+
+      expect(
+        wrapper.vm.cloneModeOptions.find(
+          (option: { value: string }) => option.value === 'shallow'
+        )?.disabled
+      ).toBe(true)
+      expect(wrapper.get('[data-testid="repository-clone-compatibility"]').text()).toContain(
+        'issue.repositoryCloneRequiresMountedKit'
+      )
+
+      wrapper.vm.handleCloneModeChange('shallow')
+      wrapper.vm.handleCloneFilterChange(true)
+      expect(wrapper.vm.cloneMode).toBe('full')
+      expect(wrapper.vm.formValue.git_clone_depth).toBeNull()
+      expect(wrapper.vm.formValue.git_clone_filter).toBeNull()
+    })
+
+    it('reports conflicts when an incompatible Worker replaces an optimized clone setup', async () => {
+      await mountComponent()
+
+      wrapper.vm.workerProfileId = 3
+      wrapper.vm.handleCloneModeChange('shallow')
+      wrapper.vm.handleCloneFilterChange(true)
+      wrapper.vm.workerProfiles.splice(0, wrapper.vm.workerProfiles.length, {
+        ...mockWorkerProfiles[0],
+        runtime_mode: 'baked_image',
+        worker_kit_version: null,
+        worker_kit_path: null,
+      })
+      await nextTick()
+
+      expect(
+        wrapper.vm.rules.git_clone_depth.validator({}, wrapper.vm.formValue.git_clone_depth)
+      ).toEqual(new Error('issue.repositoryCloneRequiresMountedKit'))
+      expect(
+        wrapper.vm.rules.git_clone_filter.validator({}, wrapper.vm.formValue.git_clone_filter)
+      ).toEqual(new Error('issue.repositoryCloneRequiresMountedKit'))
+
+      wrapper.vm.handleCloneModeChange('full')
+      wrapper.vm.handleCloneFilterChange(false)
+      expect(wrapper.vm.formValue.git_clone_depth).toBeNull()
+      expect(wrapper.vm.formValue.git_clone_filter).toBeNull()
+    })
+
+    it('requires worker-kit 0.3.0 or newer for mounted-kit workers', async () => {
+      await mountComponent()
+
+      wrapper.vm.workerProfiles.splice(0, wrapper.vm.workerProfiles.length, {
+        ...mockWorkerProfiles[0],
+        worker_kit_version: '0.2.0',
+      })
+      wrapper.vm.workerProfileId = 3
+      await nextTick()
+
+      expect(wrapper.vm.repositoryCloneSettingsUnavailable).toBe(true)
+      expect(wrapper.get('[data-testid="repository-clone-compatibility"]').text()).toContain(
+        'issue.repositoryCloneRequiresWorkerKitVersion'
+      )
+    })
   })
 
   // ── Successful Submission ──────────────────────────────────────
@@ -1093,7 +1167,7 @@ describe('CreateIssue', () => {
       expect(mockMessage.error).toHaveBeenCalledWith('Server validation failed')
     })
 
-    it('should show API validation detail before the generic request error', async () => {
+    it('should localize the legacy worker-kit compatibility error', async () => {
       await mountComponent()
 
       const apiError = {
@@ -1116,7 +1190,36 @@ describe('CreateIssue', () => {
       await flushPromises()
 
       expect(mockMessage.error).toHaveBeenCalledWith(
-        'Repository clone settings require worker-kit 0.3.0 or newer'
+        'issue.repositoryCloneRequiresWorkerKitVersion'
+      )
+    })
+
+    it('should localize a structured baked-image compatibility error', async () => {
+      await mountComponent()
+
+      const apiError = {
+        response: {
+          data: {
+            detail: {
+              code: 'repository_clone_requires_mounted_kit',
+              message: 'Repository clone settings require a mounted-kit worker profile',
+            },
+          },
+        },
+      }
+      ;(mockApi.createIssue as Mock).mockRejectedValue(apiError)
+
+      wrapper.vm.formValue.title = 'Large repository'
+      wrapper.vm.formValue.project_id = 1
+      wrapper.vm.formValue.base_branch = 'main'
+      wrapper.vm.handleCloneModeChange('shallow')
+      wrapper.vm.workerProfileId = 3
+
+      await wrapper.vm.handleSubmit()
+      await flushPromises()
+
+      expect(mockMessage.error).toHaveBeenCalledWith(
+        'issue.repositoryCloneRequiresMountedKit'
       )
     })
 

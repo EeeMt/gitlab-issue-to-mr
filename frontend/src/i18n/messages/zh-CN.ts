@@ -501,6 +501,10 @@ const zhCN = {
     repositoryCloneFilter: '延迟下载历史文件内容',
     repositoryCloneFilterEnabled: '启用 blob:none；按需获取未下载的文件内容',
     repositoryCloneFilterDisabled: '关闭；clone 时直接获取所需文件内容',
+    repositoryCloneRequiresMountedKit:
+      '浅克隆和延迟下载历史文件内容仅支持“挂载 Worker Kit”的 Worker；镜像内置 Worker 不支持。',
+    repositoryCloneRequiresWorkerKitVersion:
+      '当前 Worker Kit 版本不支持浅克隆或延迟下载历史文件内容，请升级到 0.3.0 或更高版本。',
     repositoryCloneFullBadge: '完整历史',
     repositoryCloneShallowBadge: '浅克隆 · depth {depth}',
     deleteBranch: '删除分支',

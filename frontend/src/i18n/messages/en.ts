@@ -503,6 +503,10 @@ const en = {
     repositoryCloneFilter: 'Defer historical file contents',
     repositoryCloneFilterEnabled: 'Use blob:none and download missing file contents on demand',
     repositoryCloneFilterDisabled: 'Disabled; fetch required file contents during clone',
+    repositoryCloneRequiresMountedKit:
+      'Shallow clone and deferred file contents require a mounted worker kit; baked-image workers are not supported.',
+    repositoryCloneRequiresWorkerKitVersion:
+      'This worker kit does not support shallow clone or deferred file contents. Upgrade to worker-kit 0.3.0 or newer.',
     repositoryCloneFullBadge: 'Full history',
     repositoryCloneShallowBadge: 'Shallow · depth {depth}',
     deleteBranch: 'Delete Branch',

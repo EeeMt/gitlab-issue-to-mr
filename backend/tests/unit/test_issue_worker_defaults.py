@@ -86,9 +86,31 @@ async def test_repository_clone_options_require_a_compatible_mounted_worker_kit(
         )
 
     assert exc_info.value.status_code == 422
+    assert exc_info.value.detail["code"] == (
+        "repository_clone_worker_kit_version_required"
+    )
 
     # Full-clone Issues preserve compatibility with an older mounted kit.
     assert await _resolve_issue_worker_id(db, 11) == 11
+
+    baked_profile = SimpleNamespace(
+        id=13,
+        enabled=True,
+        runtime_mode="baked_image",
+        worker_kit_version=None,
+    )
+    db.get = AsyncMock(return_value=baked_profile)
+    with pytest.raises(HTTPException, match="mounted-kit worker profile") as exc_info:
+        await _resolve_issue_worker_id(
+            db,
+            13,
+            requires_repository_policy=True,
+        )
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail["code"] == "repository_clone_requires_mounted_kit"
+
+    # Full-clone Issues remain valid for baked-image workers.
+    assert await _resolve_issue_worker_id(db, 13) == 13
 
     compatible_profile = SimpleNamespace(
         id=12,
