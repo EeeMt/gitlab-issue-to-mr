@@ -7,7 +7,6 @@
       rel="noopener noreferrer"
       class="powered-by-footer__link"
     >
-      <n-icon size="13" :component="LogoGithub" />
       Codify
     </a>
     <span class="powered-by-footer__separator" aria-hidden="true">·</span>
@@ -18,9 +17,6 @@
 </template>
 
 <script setup lang="ts">
-import { NIcon } from 'naive-ui'
-import { LogoGithub } from '@vicons/ionicons5'
-
 const gitCommit = __GIT_COMMIT__
 const shortGitCommit = gitCommit === 'unknown' ? gitCommit : gitCommit.slice(0, 7)
 </script>
@@ -48,7 +44,6 @@ const shortGitCommit = gitCommit === 'unknown' ? gitCommit : gitCommit.slice(0, 
   text-decoration: none;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
   transition: color 0.2s ease;
 }
 

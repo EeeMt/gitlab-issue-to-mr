@@ -10,6 +10,7 @@ describe('PoweredByFooter', () => {
       : __GIT_COMMIT__.slice(0, 7)
 
     expect(wrapper.text()).toContain('Powered by Codify')
+    expect(wrapper.find('.n-icon').exists()).toBe(false)
     expect(wrapper.get('.powered-by-footer__version').text()).toBe(expectedVersion)
     expect(wrapper.get('.powered-by-footer__version').attributes('title')).toBeUndefined()
   })
