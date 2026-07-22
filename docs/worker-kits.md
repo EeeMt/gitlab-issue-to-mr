@@ -42,17 +42,19 @@ Mermaid npm bundle, or ci-claude script.
 On a connected build machine:
 
 ```bash
-make worker-kit-export WORKER_KIT_VERSION=0.3.1 WORKER_KIT_PLATFORM=linux/amd64
+make worker-kit-export WORKER_KIT_VERSION=0.3.2 WORKER_KIT_PLATFORM=linux/amd64
 ```
 
 This creates an archive and checksum under `deploy/offline-bundle/kits/`. Kit versions are
 immutable. The manifest records the actual nixpkgs version used by the build.
 Version `0.3.0` adds the Issue-level shallow/partial repository preparation module and its
 `[repo]` telemetry. Version `0.3.1` keeps the mounted kit on `PATH` inside the unprivileged
-login shell, including for project runtime images that do not provide Git themselves. Existing
-mounted-kit profiles remain pinned to their configured path: install `0.3.1` on every eligible
-Docker host, verify it, and then update the profile version and path. Merely deploying the
-Backend does not replace an already installed kit.
+login shell, including for project runtime images that do not provide Git themselves. Version
+`0.3.2` bounds Claude CLI shutdown after a final stream result and records process diagnostics
+when the CLI or one of its descendants keeps the stream open. Existing mounted-kit profiles
+remain pinned to their configured path: install `0.3.2` on every eligible Docker host, verify it,
+and then update the profile version and path. Merely deploying the Backend does not replace an
+already installed kit.
 The nixpkgs source is locked by revision and Nix content hash in
 `deploy/worker-kit/nixpkgs.json`; builds do not follow a mutable Nix channel. Update both values
 deliberately when upgrading nixpkgs, then publish a new worker-kit version. The manifest records
@@ -93,6 +95,14 @@ This delivery is operationally mutable: an existing task snapshot stores the mou
 file content. Update the host file deliberately on every Docker Engine host that can run the
 profile.
 
+For headless runs, the kit defaults `CLAUDE_CODE_EXIT_AFTER_STOP_DELAY` to 5000 milliseconds and
+uses a 30-second grace period for the output stream to close after receiving a final result. A
+Worker Profile can override `CLAUDE_CODE_EXIT_AFTER_STOP_DELAY` and
+`CI_CLAUDE_RESULT_EXIT_GRACE_SECONDS` when SessionEnd hooks need a longer shutdown window. A
+shutdown timeout records the CLI PID and process group, Linux process state, parent PID, thread
+count, direct child PIDs, process-group members, event count, and last event type in `console.log`
+before terminating the CLI process group and stopping the stream processor.
+
 ## Offline installation
 
 Copy the bundle into the offline environment, then run this on every Docker Engine host that
@@ -100,13 +110,13 @@ can execute mounted-kit profiles:
 
 ```bash
 sudo ./scripts/install-worker-kit.sh \
-  kits/codify-worker-kit-0.3.1-linux-amd64.tar.gz
+  kits/codify-worker-kit-0.3.2-linux-amd64.tar.gz
 ```
 
 The default installation path is:
 
 ```text
-/opt/codify/worker-kits/0.3.1-linux-amd64
+/opt/codify/worker-kits/0.3.2-linux-amd64
 ```
 
 For remote Docker targets, this is a path on the Docker Engine host, not on the Backend or
@@ -124,7 +134,7 @@ Verify the kit and one project runtime image before creating a profile:
 
 ```bash
 ./scripts/verify-worker-runtime.sh \
-  --kit /opt/codify/worker-kits/0.3.1-linux-amd64 \
+  --kit /opt/codify/worker-kits/0.3.2-linux-amd64 \
   --claude-host-path /opt/codify/overrides/claude-2.1.200 \
   --image team/java21-maven:2026.07 \
   --smoke 'java -version && mvn -version'
@@ -157,8 +167,8 @@ No UI is required. Create or update a Worker Profile through the existing admin 
   "name": "Java 21 and Maven",
   "image": "codify-worker/java21-maven:2026.07",
   "runtime_mode": "mounted_kit",
-  "worker_kit_version": "0.3.1",
-  "worker_kit_path": "/opt/codify/worker-kits/0.3.1-linux-amd64",
+  "worker_kit_version": "0.3.2",
+  "worker_kit_path": "/opt/codify/worker-kits/0.3.2-linux-amd64",
   "codegraph_enabled": true,
   "volume_mounts": [
     {

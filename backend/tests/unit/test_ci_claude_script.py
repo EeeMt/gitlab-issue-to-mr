@@ -1,8 +1,10 @@
 import json
 import os
+import signal
 import stat
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -413,6 +415,195 @@ def test_ci_claude_emits_failure_json_when_claude_exits_nonzero():
         }
 
 
+def test_ci_claude_stops_cli_that_does_not_exit_after_final_result(tmp_path):
+    script_copy = _prepare_script_copy(
+        tmp_path,
+        "#!/usr/bin/env bash\n"
+        "printf '%s' \"$CLAUDE_CODE_EXIT_AFTER_STOP_DELAY\" > claude_idle_exit_delay.txt\n"
+        "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"done\",\"session_id\":\"session-hung\",\"usage\":{\"input_tokens\":5,\"output_tokens\":3}}'\n"
+        "exec sleep 30\n",
+    )
+    env = {
+        **os.environ,
+        "SANDBOX_MODE": "1",
+        "CI_CLAUDE_RESULT_EXIT_GRACE_SECONDS": "1",
+    }
+    env.pop("CLAUDE_CODE_EXIT_AFTER_STOP_DELAY", None)
+
+    started_at = time.monotonic()
+    process = subprocess.Popen(
+        [str(script_copy), "test prompt"],
+        cwd=str(tmp_path),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=8)
+    finally:
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait()
+
+    assert process.returncode == 0, stderr
+    assert time.monotonic() - started_at < 7
+    assert json.loads(stdout)["session_id"] == "session-hung"
+    assert (tmp_path / "claude_idle_exit_delay.txt").read_text(encoding="utf-8") == "5000"
+    assert "Final result received; waiting up to 1s for Claude CLI stream shutdown" in stderr
+    assert "Claude CLI stream did not close within 1s after final result" in stderr
+    assert "Sending SIGTERM to Claude CLI process group" in stderr
+
+
+def test_ci_claude_preserves_json_line_split_across_slow_writes(tmp_path):
+    script_copy = _prepare_script_copy(
+        tmp_path,
+        "#!/usr/bin/env bash\n"
+        "printf '%s' '{\"type\":\"result\",\"subtype\":\"success\",'\n"
+        "sleep 2\n"
+        "printf '%s\\n' '\"result\":\"slow result\",\"session_id\":\"session-slow\",\"usage\":{\"input_tokens\":8,\"output_tokens\":5}}'\n",
+    )
+
+    result = subprocess.run(
+        [str(script_copy), "test prompt"],
+        cwd=str(tmp_path),
+        env={**os.environ, "SANDBOX_MODE": "1"},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=8,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["result"] == "slow result"
+    assert payload["session_id"] == "session-slow"
+    assert json.loads((tmp_path / "event.jsonl").read_text(encoding="utf-8"))["type"] == "result"
+
+
+def test_ci_claude_enforces_final_result_deadline_during_continuous_output(tmp_path):
+    script_copy = _prepare_script_copy(
+        tmp_path,
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"done\",\"session_id\":\"session-chatty\",\"usage\":{\"input_tokens\":5,\"output_tokens\":3}}'\n"
+        "sequence=0\n"
+        "while true; do\n"
+        "  printf '{\"type\":\"system\",\"subtype\":\"heartbeat\",\"sequence\":%s}\\n' \"$sequence\"\n"
+        "  sequence=$((sequence + 1))\n"
+        "  sleep 0.05\n"
+        "done\n",
+    )
+
+    started_at = time.monotonic()
+    result = subprocess.run(
+        [str(script_copy), "test prompt"],
+        cwd=str(tmp_path),
+        env={
+            **os.environ,
+            "SANDBOX_MODE": "1",
+            "CI_CLAUDE_RESULT_EXIT_GRACE_SECONDS": "1",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=8,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert time.monotonic() - started_at < 7
+    assert json.loads(result.stdout)["session_id"] == "session-chatty"
+    assert "did not close within 1s after final result" in result.stderr
+    assert "last_type=system" in result.stderr
+
+
+def test_ci_claude_stops_descendant_that_inherits_stream_after_cli_exits(tmp_path):
+    script_copy = _prepare_script_copy(
+        tmp_path,
+        "#!/usr/bin/env bash\n"
+        "sleep 30 &\n"
+        "child_pid=$!\n"
+        "printf '%s' \"$child_pid\" > descendant.pid\n"
+        "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"done\",\"session_id\":\"session-descendant\",\"usage\":{\"input_tokens\":5,\"output_tokens\":3}}'\n",
+    )
+
+    result = subprocess.run(
+        [str(script_copy), "test prompt"],
+        cwd=str(tmp_path),
+        env={
+            **os.environ,
+            "SANDBOX_MODE": "1",
+            "CI_CLAUDE_RESULT_EXIT_GRACE_SECONDS": "1",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=8,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["session_id"] == "session-descendant"
+    assert "Sending SIGTERM to Claude CLI process group" in result.stderr
+
+    descendant_pid = int((tmp_path / "descendant.pid").read_text(encoding="utf-8"))
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        try:
+            os.kill(descendant_pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError(f"Claude descendant {descendant_pid} is still running")
+
+
+def test_ci_claude_stops_descendant_that_closes_stream_and_ignores_sigterm(tmp_path):
+    script_copy = _prepare_script_copy(
+        tmp_path,
+        "#!/usr/bin/env bash\n"
+        "(\n"
+        "  trap '' TERM\n"
+        "  exec >/dev/null 2>&1\n"
+        "  while true; do sleep 1; done\n"
+        ") &\n"
+        "child_pid=$!\n"
+        "printf '%s' \"$child_pid\" > detached_output_descendant.pid\n"
+        "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"done\",\"session_id\":\"session-detached-output\",\"usage\":{\"input_tokens\":5,\"output_tokens\":3}}'\n",
+    )
+
+    result = subprocess.run(
+        [str(script_copy), "test prompt"],
+        cwd=str(tmp_path),
+        env={
+            **os.environ,
+            "SANDBOX_MODE": "1",
+            "CI_CLAUDE_RESULT_EXIT_GRACE_SECONDS": "1",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=8,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["session_id"] == "session-detached-output"
+    assert "Sending SIGTERM to Claude CLI process group" in result.stderr
+    assert "sending SIGKILL" in result.stderr
+
+    descendant_pid = int(
+        (tmp_path / "detached_output_descendant.pid").read_text(encoding="utf-8")
+    )
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        try:
+            os.kill(descendant_pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError(f"Claude descendant {descendant_pid} is still running")
+
+
 def test_ci_claude_accepts_prompt_file_and_pipes_prompt_to_claude():
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
@@ -438,6 +629,30 @@ def test_ci_claude_accepts_prompt_file_and_pipes_prompt_to_claude():
         assert result.returncode == 0, result.stderr
         payload = json.loads(result.stdout)
         assert payload["result"] == "prompt from file"
+
+
+def test_ci_claude_reuses_stream_runner_for_resume_fallback(tmp_path):
+    script_copy = _prepare_script_copy(
+        tmp_path,
+        "#!/usr/bin/env bash\n"
+        "for arg in \"$@\"; do\n"
+        "  if [[ \"$arg\" == \"--resume\" ]]; then exit 1; fi\n"
+        "done\n"
+        "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"fallback\",\"session_id\":\"session-new\",\"usage\":{\"input_tokens\":2,\"output_tokens\":1}}'\n",
+    )
+    result = subprocess.run(
+        [str(script_copy), "test prompt"],
+        cwd=str(tmp_path),
+        env={**os.environ, "SANDBOX_MODE": "1", "RESUME_SESSION": "session-missing"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["result"] == "fallback"
+    assert "Retrying without --resume" in result.stderr
+    assert json.loads((tmp_path / "runtime.json").read_text(encoding="utf-8"))["resume_session"] == ""
 
 
 def test_ci_claude_redacts_append_system_prompt_from_logs(tmp_path):

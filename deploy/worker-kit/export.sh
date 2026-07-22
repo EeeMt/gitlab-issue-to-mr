@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-VERSION="${WORKER_KIT_VERSION:-0.3.1}"
+VERSION="${WORKER_KIT_VERSION:-0.3.2}"
 PLATFORM="${WORKER_KIT_PLATFORM:-linux/amd64}"
 ARCH="${PLATFORM#linux/}"
 OUTPUT_DIR="${WORKER_KIT_OUTPUT_DIR:-${PROJECT_ROOT}/deploy/offline-bundle/kits}"

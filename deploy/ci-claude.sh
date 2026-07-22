@@ -23,6 +23,10 @@
 #   CONTINUE_SESSION       "1" → --continue the most recent conversation
 #   CLAUDE_MAX_TURNS       Max agent turns (default: unlimited)
 #   CLAUDE_MODEL           Model to use (e.g. claude-sonnet-4-20250514)
+#   CLAUDE_CODE_EXIT_AFTER_STOP_DELAY
+#                          Claude CLI idle-exit delay in milliseconds (default: 5000)
+#   CI_CLAUDE_RESULT_EXIT_GRACE_SECONDS
+#                          Max wait for stream EOF after a final result (default: 30)
 #   NO_COLOR               "1" → disable ANSI colors in stderr output
 
 set -euo pipefail
@@ -94,7 +98,23 @@ CONTINUE_SESSION="${CONTINUE_SESSION:-0}"
 START_FRESH_SESSION="${START_FRESH_SESSION:-0}"
 MAX_TURNS="${CLAUDE_MAX_TURNS:-}"
 CLAUDE_MODEL="${CLAUDE_MODEL:-}"
+CLAUDE_CODE_EXIT_AFTER_STOP_DELAY="${CLAUDE_CODE_EXIT_AFTER_STOP_DELAY:-5000}"
+RESULT_EXIT_GRACE_SECONDS="${CI_CLAUDE_RESULT_EXIT_GRACE_SECONDS:-30}"
 SESSION_ID_FILE=".claude_session_id"
+
+if ! [[ "$CLAUDE_CODE_EXIT_AFTER_STOP_DELAY" =~ ^[0-9]+$ ]] \
+  || [[ "$CLAUDE_CODE_EXIT_AFTER_STOP_DELAY" == "0" ]]; then
+  printf "CLAUDE_CODE_EXIT_AFTER_STOP_DELAY must be a positive integer: %s\n" \
+    "$CLAUDE_CODE_EXIT_AFTER_STOP_DELAY" >&2
+  exit 1
+fi
+if ! [[ "$RESULT_EXIT_GRACE_SECONDS" =~ ^[0-9]+$ ]] \
+  || [[ "$RESULT_EXIT_GRACE_SECONDS" == "0" ]]; then
+  printf "CI_CLAUDE_RESULT_EXIT_GRACE_SECONDS must be a positive integer: %s\n" \
+    "$RESULT_EXIT_GRACE_SECONDS" >&2
+  exit 1
+fi
+export CLAUDE_CODE_EXIT_AFTER_STOP_DELAY
 
 if [[ -n "$APPEND_SYSTEM_FILE" && ! -f "$APPEND_SYSTEM_FILE" ]]; then
   printf "APPEND_SYSTEM_PROMPT_FILE not found: %s\n" "$APPEND_SYSTEM_FILE" >&2
@@ -183,9 +203,10 @@ fi
 
 # Print full CLI args (prompt is piped via stdin/file, not argv)
 print_claude_args "${CLAUDE_ARGS[@]}"
+log "Exit guard: CLI idle=${CLAUDE_CODE_EXIT_AFTER_STOP_DELAY}ms, final-result stream=${RESULT_EXIT_GRACE_SECONDS}s"
 
 # ── Temp files for accumulating structured data ───────────────────────────────
-# Needed because process_stream runs in a pipe subshell and can't set outer vars.
+# Files keep the processor independent from the CLI subprocess lifecycle.
 
 # Write initial runtime.json; model field is updated when system init event arrives.
 jq -n \
@@ -195,23 +216,71 @@ jq -n \
   '{model: $model, cwd: $cwd, resume_session: $resume}' > "$RUNTIME_JSON"
 
 WORK_DIR=$(mktemp -d)
-trap 'rm -rf "$WORK_DIR"' EXIT
+ACTIVE_CLAUDE_PID=""
+ACTIVE_CLAUDE_PGID=""
+ACTIVE_STREAM_PID=""
+ACTIVE_WATCHDOG_PID=""
+
+process_is_running() {
+  local process_pid="$1"
+  local state=""
+
+  kill -0 "$process_pid" 2>/dev/null || return 1
+  if [[ -r "/proc/${process_pid}/status" ]]; then
+    state=$(awk '/^State:/{print $2; exit}' "/proc/${process_pid}/status" 2>/dev/null || true)
+    [[ "$state" == "Z" ]] && return 1
+  fi
+  return 0
+}
+
+process_group_is_running() {
+  local process_group_id="$1"
+
+  [[ "$process_group_id" =~ ^[1-9][0-9]*$ ]] || return 1
+  kill -0 -- "-${process_group_id}" 2>/dev/null
+}
+
+cleanup() {
+  if [[ -n "$ACTIVE_WATCHDOG_PID" ]] && process_is_running "$ACTIVE_WATCHDOG_PID"; then
+    kill -TERM "$ACTIVE_WATCHDOG_PID" 2>/dev/null || true
+  fi
+  if [[ -n "$ACTIVE_STREAM_PID" ]] && process_is_running "$ACTIVE_STREAM_PID"; then
+    kill -TERM "$ACTIVE_STREAM_PID" 2>/dev/null || true
+  fi
+  if [[ -n "$ACTIVE_CLAUDE_PGID" ]] \
+    && process_group_is_running "$ACTIVE_CLAUDE_PGID"; then
+    kill -TERM -- "-${ACTIVE_CLAUDE_PGID}" 2>/dev/null || true
+    kill -KILL -- "-${ACTIVE_CLAUDE_PGID}" 2>/dev/null || true
+  elif [[ -n "$ACTIVE_CLAUDE_PID" ]] && process_is_running "$ACTIVE_CLAUDE_PID"; then
+    kill -TERM "$ACTIVE_CLAUDE_PID" 2>/dev/null || true
+    kill -KILL "$ACTIVE_CLAUDE_PID" 2>/dev/null || true
+  fi
+  rm -rf "$WORK_DIR"
+}
+trap cleanup EXIT
 
 TOOL_CALLS_FILE="$WORK_DIR/tool_calls.jsonl"   # one JSON object per line
 RESULT_FILE="$WORK_DIR/result.json"
+RESULT_SIGNAL_FIFO="$WORK_DIR/final-result.signal"
 touch "$TOOL_CALLS_FILE" "$RESULT_FILE"
+mkfifo "$RESULT_SIGNAL_FIFO"
 
 # ── Stream processor ──────────────────────────────────────────────────────────
 process_stream() {
+  local claude_pid="$1"
   local prev_block=""
   local cur_tool_name=""
   local cur_tool_id=""
   local cur_tool_input=""
   local cur_thinking_buf=""
   local cur_text_buf=""
+  local final_result_seen=0
+  local event_count=0
+  local line
 
-  while IFS= read -r line; do
+  while IFS= read -r line || [[ -n "$line" ]]; do
     [[ -z "$line" ]] && continue
+    event_count=$((event_count + 1))
 
     # Mirror every raw stream-json line verbatim to event.jsonl
     printf '%s\n' "$line" >> "$EVENT_JSONL"
@@ -227,7 +296,6 @@ process_stream() {
       _e "%s\n" "$line"
       continue
     fi
-
     case "$type" in
 
       # ── Streaming events from the Anthropic API ─────────────────────────────
@@ -451,6 +519,11 @@ process_stream() {
         else
           fail "Task failed: $subtype"
         fi
+        if [[ "$final_result_seen" == "0" ]]; then
+          final_result_seen=1
+          printf '%s\n' "$event_count" > "$RESULT_SIGNAL_FIFO"
+          log "Final result received; waiting up to ${RESULT_EXIT_GRACE_SECONDS}s for Claude CLI stream shutdown (pid=$claude_pid, events=$event_count)"
+        fi
         ;;
 
       *)
@@ -459,12 +532,178 @@ process_stream() {
   done
 }
 
+log_claude_process_snapshot() {
+  local claude_pid="$1"
+  local claude_pgid="$2"
+  local state="unavailable"
+  local parent_pid="unavailable"
+  local threads="unavailable"
+  local children="none"
+  local group_members="unavailable"
+  local status_file member_fields member_pid member_ppid member_state member_pgid
+
+  if [[ -r "/proc/${claude_pid}/status" ]]; then
+    state=$(awk '/^State:/{print $2 $3}' "/proc/${claude_pid}/status" 2>/dev/null || true)
+    parent_pid=$(awk '/^PPid:/{print $2}' "/proc/${claude_pid}/status" 2>/dev/null || true)
+    threads=$(awk '/^Threads:/{print $2}' "/proc/${claude_pid}/status" 2>/dev/null || true)
+    if [[ -r "/proc/${claude_pid}/task/${claude_pid}/children" ]]; then
+      children=$(< "/proc/${claude_pid}/task/${claude_pid}/children")
+      children="${children:-none}"
+    fi
+  elif process_is_running "$claude_pid"; then
+    state="running"
+  else
+    state="exited"
+  fi
+
+  if [[ -d /proc ]]; then
+    group_members=""
+    for status_file in /proc/[0-9]*/status; do
+      [[ -r "$status_file" ]] || continue
+      member_fields=$(awk '
+        /^Pid:/ { pid = $2 }
+        /^PPid:/ { ppid = $2 }
+        /^State:/ { state = $2 }
+        /^NSpgid:/ { nspgid = $2 }
+        /^Pgid:/ { pgid = $2 }
+        END {
+          if (nspgid != "") pgid = nspgid
+          printf "%s %s %s %s", pid, ppid, state, pgid
+        }
+      ' "$status_file" 2>/dev/null || true)
+      read -r member_pid member_ppid member_state member_pgid <<< "$member_fields"
+      [[ "$member_pgid" == "$claude_pgid" ]] || continue
+      [[ -n "$group_members" ]] && group_members+=","
+      group_members+="${member_pid:-unknown}(ppid=${member_ppid:-unknown},state=${member_state:-unknown})"
+    done
+    group_members="${group_members:-none}"
+  fi
+
+  log "Claude CLI process snapshot: pid=$claude_pid pgid=$claude_pgid state=${state:-unknown} ppid=${parent_pid:-unknown} threads=${threads:-unknown} children=$children group_members=$group_members"
+}
+
+terminate_claude_process_group() {
+  local claude_pid="$1"
+  local claude_pgid="$2"
+  local attempt
+
+  if ! process_group_is_running "$claude_pgid"; then
+    log "Claude CLI process group already exited (pid=$claude_pid, pgid=$claude_pgid)"
+    return
+  fi
+
+  log "Sending SIGTERM to Claude CLI process group (pid=$claude_pid, pgid=$claude_pgid) after final-result shutdown timeout"
+  kill -TERM -- "-${claude_pgid}" 2>/dev/null || true
+  for attempt in 1 2; do
+    sleep 1
+    if ! process_group_is_running "$claude_pgid"; then
+      return
+    fi
+  done
+
+  log "Claude CLI process group did not stop after SIGTERM; sending SIGKILL (pid=$claude_pid, pgid=$claude_pgid)"
+  kill -KILL -- "-${claude_pgid}" 2>/dev/null || true
+}
+
+watch_final_result_shutdown() {
+  local claude_pid="$1"
+  local claude_pgid="$2"
+  local stream_pid="$3"
+  local result_event_count="unknown"
+  local event_count="unknown"
+  local last_event_type="none"
+  local grace_check
+
+  IFS= read -r result_event_count < "$RESULT_SIGNAL_FIFO" || return
+
+  for (( grace_check=0; grace_check<RESULT_EXIT_GRACE_SECONDS * 10; grace_check++ )); do
+    if ! process_is_running "$stream_pid" && ! process_group_is_running "$claude_pgid"; then
+      return
+    fi
+    sleep 0.1
+  done
+
+  event_count=$(wc -l < "$EVENT_JSONL" | tr -d '[:space:]')
+  event_count="${event_count:-$result_event_count}"
+  if [[ -s "$EVENT_JSONL" ]]; then
+    last_event_type=$(tail -n 1 "$EVENT_JSONL" | jq -r '.type // "unknown"' 2>/dev/null || printf 'invalid_json')
+  fi
+  log "Claude CLI stream did not close within ${RESULT_EXIT_GRACE_SECONDS}s after final result (pid=$claude_pid, pgid=$claude_pgid, events=${event_count:-unknown}, last_type=${last_event_type:-unknown})"
+  log_claude_process_snapshot "$claude_pid" "$claude_pgid"
+  terminate_claude_process_group "$claude_pid" "$claude_pgid"
+
+  if process_is_running "$stream_pid"; then
+    log "Stopping Claude CLI stream processor after final-result shutdown timeout (pid=$stream_pid)"
+    kill -TERM "$stream_pid" 2>/dev/null || true
+  fi
+}
+
 run_claude_stream() {
+  local stream_fifo="$WORK_DIR/claude-stream.fifo"
+  local prompt_input="$WORK_DIR/prompt.txt"
+  local claude_pid claude_pgid stream_pid watchdog_pid stream_status cli_status
+
+  rm -f "$stream_fifo" "$prompt_input"
+  mkfifo "$stream_fifo"
+  printf '%s' "$PROMPT" > "$prompt_input"
+  chmod 600 "$prompt_input"
+
   set +e
-  printf '%s' "$PROMPT" | "${CODIFY_CLAUDE_BIN:-/usr/local/bin/claude}" "$@" 2>&1 | process_stream
-  local pipe_status=("${PIPESTATUS[@]}")
+  # Job control gives this background command its own process group without a
+  # platform-specific setsid dependency. Descendants inherit the group.
+  set -m
+  "${CODIFY_CLAUDE_BIN:-/usr/local/bin/claude}" "$@" \
+    < "$prompt_input" > "$stream_fifo" 2>&1 &
+  claude_pid=$!
+  set +m
+  claude_pgid="$claude_pid"
+  ACTIVE_CLAUDE_PID="$claude_pid"
+  ACTIVE_CLAUDE_PGID="$claude_pgid"
+  if ! process_group_is_running "$claude_pgid"; then
+    log "Claude CLI did not start in the expected process group (pid=$claude_pid, expected_pgid=$claude_pgid)"
+    kill -TERM "$claude_pid" 2>/dev/null || true
+    wait "$claude_pid" 2>/dev/null || true
+    ACTIVE_CLAUDE_PID=""
+    ACTIVE_CLAUDE_PGID=""
+    rm -f "$stream_fifo" "$prompt_input"
+    set -e
+    return 1
+  fi
+  log "Claude CLI process started (pid=$claude_pid, pgid=$claude_pgid)"
+
+  process_stream "$claude_pid" < "$stream_fifo" &
+  stream_pid=$!
+  ACTIVE_STREAM_PID="$stream_pid"
+  watch_final_result_shutdown "$claude_pid" "$claude_pgid" "$stream_pid" &
+  watchdog_pid=$!
+  ACTIVE_WATCHDOG_PID="$watchdog_pid"
+
+  wait "$stream_pid"
+  stream_status=$?
+  ACTIVE_STREAM_PID=""
+  if [[ "$stream_status" -ne 0 && "$stream_status" -ne 143 ]]; then
+    log "Claude CLI stream processor stopped unexpectedly (status=$stream_status, pid=$claude_pid)"
+  fi
+
+  wait "$claude_pid"
+  cli_status=$?
+  if [[ -s "$RESULT_FILE" ]] && process_group_is_running "$claude_pgid"; then
+    # The direct CLI and stream can finish while a detached-output descendant
+    # remains in the group. Let the watchdog finish the group cleanup.
+    wait "$watchdog_pid" 2>/dev/null || true
+  else
+    if process_is_running "$watchdog_pid"; then
+      kill -TERM "$watchdog_pid" 2>/dev/null || true
+    fi
+    wait "$watchdog_pid" 2>/dev/null || true
+  fi
+  ACTIVE_CLAUDE_PID=""
+  ACTIVE_CLAUDE_PGID=""
+  ACTIVE_WATCHDOG_PID=""
+  log "Claude CLI process reaped (pid=$claude_pid, pgid=$claude_pgid, exit_code=$cli_status, stream_status=$stream_status)"
+  rm -f "$stream_fifo" "$prompt_input"
   set -e
-  return "${pipe_status[1]}"
+  return "$cli_status"
 }
 
 # ── Run claude and stream-process its output ──────────────────────────────────
