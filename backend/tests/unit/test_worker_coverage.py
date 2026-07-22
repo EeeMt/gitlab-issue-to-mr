@@ -789,6 +789,52 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
             content,
         )
 
+    def test_runtime_user_shell_restores_kit_path_after_login_profile(self):
+        root = Path(__file__).resolve().parents[3]
+        entrypoint = (root / "deploy" / "entrypoint.worker.sh").read_text()
+        run_shell = self._extract_shell_function(entrypoint, "codify_run_shell")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            runtime_bin = temp_path / "runtime-bin"
+            runtime_bin.mkdir()
+            kit_command = runtime_bin / "kit-only-command"
+            kit_command.write_text("#!/bin/sh\nprintf 'kit-path-ok\\n'\n")
+            kit_command.chmod(0o755)
+
+            fake_bash = temp_path / "login-bash"
+            fake_bash.write_text(
+                "#!/bin/sh\n"
+                "PATH=/usr/bin:/bin\n"
+                "export PATH\n"
+                "exec /bin/bash \"$@\"\n"
+            )
+            fake_bash.chmod(0o755)
+
+            fake_run_as = temp_path / "codify-run-as"
+            fake_run_as.write_text(
+                "#!/bin/sh\n"
+                "[ \"$1\" = \"--\" ] && shift\n"
+                "exec \"$@\"\n"
+            )
+            fake_run_as.chmod(0o755)
+
+            result = subprocess.run(
+                ["bash", "-c", f"{run_shell}\ncodify_run_shell 'kit-only-command'"],
+                env={
+                    **os.environ,
+                    "CODIFY_BASH": str(fake_bash),
+                    "CODIFY_RUN_AS": str(fake_run_as),
+                    "CODIFY_RUNTIME_PATH": f"{runtime_bin}:/usr/bin:/bin",
+                },
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "kit-path-ok")
+
     def test_entrypoint_propagates_module_failure_and_stops_loading(self):
         result, loaded_modules = self._run_entrypoint_loader(failing_module="delivery")
 

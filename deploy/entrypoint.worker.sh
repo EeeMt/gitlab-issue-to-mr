@@ -31,6 +31,10 @@ codify_chown() {
 
 codify_run_shell() {
     local command="$1"
+    # Login shells may replace PATH from the runtime image's /etc/profile. Restore
+    # the composed project-runtime + mounted-kit PATH after profile loading so kit
+    # tools remain available when the project image does not provide them.
+    command='export PATH="${CODIFY_RUNTIME_PATH}"; '"${command}"
     if [ -n "${CODIFY_RUN_AS}" ]; then
         env HOME=/home/codify USER=codify LOGNAME=codify \
             "${CODIFY_RUN_AS}" -- "${CODIFY_BASH}" -lc "${command}"
@@ -44,10 +48,11 @@ if [ "${1:-}" = "--verify" ]; then
     echo "Codify worker kit ${CODIFY_KIT_VERSION:-unknown}"
     echo "Runtime image: ${CODIFY_RUNTIME_IMAGE:-unknown}"
     for command in bash git curl jq python3 node codegraph ssh rg tar; do
-        command -v "${command}" >/dev/null 2>&1 || {
+        if ! command -v "${command}" >/dev/null 2>&1 \
+            || ! codify_run_shell "command -v '${command}' >/dev/null 2>&1"; then
             echo "Required kit command is unavailable: ${command}" >&2
             exit 1
-        }
+        fi
     done
     case "${CODIFY_CLAUDE_BIN}" in
         /*) ;;
