@@ -372,8 +372,8 @@ class GetContainerLogsEndpointTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
 
-    def test_get_task_container_logs_returns_empty_when_no_container_id(self):
-        """Should return empty logs when task exists but has no container_id."""
+    def test_get_task_container_logs_returns_empty_when_no_container_or_archived_logs(self):
+        """Should return empty logs when neither a container nor archived logs exist."""
         from app.database import get_db
         from app.dependencies.auth import require_authenticated_context
         from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
@@ -388,8 +388,14 @@ class GetContainerLogsEndpointTests(unittest.TestCase):
 
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = task
+        empty_raw_chunks = MagicMock()
+        empty_raw_chunks.scalars.return_value.all.return_value = []
+        empty_legacy_logs = MagicMock()
+        empty_legacy_logs.scalars.return_value.all.return_value = []
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.execute = AsyncMock(
+            side_effect=[mock_result, empty_raw_chunks, empty_legacy_logs]
+        )
 
         async def override_db():
             yield mock_db
@@ -405,6 +411,7 @@ class GetContainerLogsEndpointTests(unittest.TestCase):
         data = response.json()
         self.assertIsNone(data["container_id"])
         self.assertEqual(data["logs"], "")
+        self.assertEqual(data["source"], "db")
 
 
 # ---------------------------------------------------------------------------
@@ -1170,6 +1177,43 @@ class TaskContainerLogsSourceDbTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["logs"], "first\nsecond\n")
         self.assertEqual(response.json()["last_sequence_no"], 5)
+
+    def test_source_db_returns_archived_logs_after_container_cleanup(self):
+        """Completed tasks keep raw logs readable after container_id is cleared."""
+        from app.models import TaskStatus
+
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+        task = MagicMock(
+            id=1,
+            container_id=None,
+            status=TaskStatus.COMPLETED,
+            raw_logs_finalized_at=object(),
+        )
+        task_result = MagicMock()
+        task_result.scalar_one_or_none.return_value = task
+
+        first_chunk = MagicMock(sequence_no=4, content=b"full raw output\n")
+        second_chunk = MagicMock(sequence_no=5, content=b"task finished\n")
+        raw_chunk_result = MagicMock()
+        raw_chunk_result.scalars.return_value.all.return_value = [first_chunk, second_chunk]
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[task_result, raw_chunk_result])
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/api/tasks/1/container-logs?source=db")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["container_id"])
+        self.assertEqual(response.json()["logs"], "full raw output\ntask finished\n")
+        self.assertEqual(response.json()["last_sequence_no"], 5)
+        self.assertTrue(response.json()["raw_logs_finalized"])
 
     def test_source_db_returns_db_chunks_directly(self):
         """When source=db, should fetch logs from DB without trying Docker."""

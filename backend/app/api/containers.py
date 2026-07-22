@@ -426,14 +426,6 @@ async def get_task_container_logs(
 
     raw_logs_finalized = task.raw_logs_finalized_at is not None
 
-    if not task.container_id:
-        return {
-            "container_id": None,
-            "logs": "",
-            "status": task.status,
-            "raw_logs_finalized": raw_logs_finalized,
-        }
-
     async def _fetch_db_chunks() -> tuple[str, int]:
         # New format: TaskRawLogChunk (written by the event archive system)
         chunk_result = await db.execute(
@@ -457,7 +449,11 @@ async def get_task_container_logs(
         chunks = log_result.scalars().all()
         return "".join(c.message or "" for c in chunks), 0
 
-    if source == "db":
+    # Completed tasks normally have their container reference cleared after the
+    # authoritative console snapshot is archived.  The DB snapshot must remain
+    # readable after that cleanup; otherwise the UI falls back to the sparse
+    # structured task log instead of showing the raw console output.
+    if source == "db" or not task.container_id:
         logs, last_sequence_no = await _fetch_db_chunks()
         return {
             "container_id": task.container_id,
