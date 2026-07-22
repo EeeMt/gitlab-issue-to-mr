@@ -15,6 +15,7 @@ from app.api.worker_profiles import (
     WorkerProfileUpdateRequest,
     WorkerRuntimeVerificationRequest,
     create_worker_profile,
+    disable_worker_profile,
     set_default_worker_profile_endpoint,
     update_worker_profile,
     verify_worker_profile_runtime,
@@ -29,7 +30,7 @@ from app.dependencies.auth import (
     require_authenticated_user,
 )
 from app.main import app
-from app.models import Base
+from app.models import Base, Issue, IssueStatus, WorkerProfile
 
 
 def _make_profile(
@@ -303,8 +304,90 @@ async def test_update_assigned_worker_rejects_actual_docker_target_change():
         )
 
     assert exc.value.status_code == 422
-    assert "assigned to 1 active or retained issue" in str(exc.value.detail)
+    assert "assigned to 1 active issue" in str(exc.value.detail)
     assert profile.docker_host == "tcp://worker:2376"
+
+
+@pytest.mark.asyncio
+async def test_disable_worker_profile_ignores_closed_issue_with_retained_workspace():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with session_factory() as db:
+        profile = WorkerProfile(
+            name="Closed Issue Worker",
+            enabled=True,
+            is_default=False,
+            image="codify-worker:test",
+            volume_mounts=[],
+            pre_script="",
+            post_script="",
+            default_execute_run_instruction_template="{{user_prompt}}",
+            default_plan_run_instruction_template="{{user_prompt}}",
+            ci_auto_repair_run_instruction_template="{{user_prompt}}",
+        )
+        db.add(profile)
+        await db.flush()
+        db.add(
+            Issue(
+                title="Closed issue",
+                project_id=100,
+                status=IssueStatus.CLOSED.value,
+                worker_profile_id=profile.id,
+                workspace_last_used_at=datetime(2026, 1, 1),
+                workspace_deleted_at=None,
+            )
+        )
+        await db.commit()
+
+        response = await disable_worker_profile(profile.id, db=db)
+
+    await engine.dispose()
+
+    assert response["enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_disable_worker_profile_still_rejects_active_issue():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with session_factory() as db:
+        profile = WorkerProfile(
+            name="Active Issue Worker",
+            enabled=True,
+            is_default=False,
+            image="codify-worker:test",
+            volume_mounts=[],
+            pre_script="",
+            post_script="",
+            default_execute_run_instruction_template="{{user_prompt}}",
+            default_plan_run_instruction_template="{{user_prompt}}",
+            ci_auto_repair_run_instruction_template="{{user_prompt}}",
+        )
+        db.add(profile)
+        await db.flush()
+        db.add(
+            Issue(
+                title="Open issue",
+                project_id=100,
+                status=IssueStatus.OPEN.value,
+                worker_profile_id=profile.id,
+            )
+        )
+        await db.commit()
+
+        with pytest.raises(HTTPException) as exc:
+            await disable_worker_profile(profile.id, db=db)
+
+    await engine.dispose()
+
+    assert exc.value.status_code == 422
+    assert "assigned to 1 active issue" in str(exc.value.detail)
 
 
 @pytest.mark.asyncio

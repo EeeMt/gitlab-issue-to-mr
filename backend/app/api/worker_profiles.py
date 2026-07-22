@@ -11,7 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -154,14 +154,11 @@ async def _ensure_profile_name_available(
         )
 
 
-async def _retained_issue_assignment_count(db: AsyncSession, profile_id: int) -> int:
+async def _active_issue_assignment_count(db: AsyncSession, profile_id: int) -> int:
     result = await db.execute(
         select(func.count(Issue.id)).where(
             Issue.worker_profile_id == profile_id,
-            or_(
-                Issue.status != IssueStatus.CLOSED.value,
-                Issue.workspace_deleted_at.is_(None),
-            ),
+            Issue.status != IssueStatus.CLOSED.value,
         )
     )
     return int(result.scalar_one())
@@ -171,10 +168,10 @@ async def _ensure_profile_can_stop_serving_issues(
     db: AsyncSession,
     profile: WorkerProfile,
 ) -> None:
-    count = await _retained_issue_assignment_count(db, profile.id)
+    count = await _active_issue_assignment_count(db, profile.id)
     if count:
         raise WorkerProfileValidationError(
-            f"Worker profile '{profile.name}' is assigned to {count} active or retained issue(s)"
+            f"Worker profile '{profile.name}' is assigned to {count} active issue(s)"
         )
 
 
