@@ -7,6 +7,8 @@ import {
   type TaskLog,
 } from '../../api'
 
+export const RAW_LOG_WINDOW_MAX_CHARS = 500_000
+
 export function isActiveTaskStatus(status?: string | null): boolean {
   return status === 'running' || status === 'pending' || status === 'queued'
 }
@@ -16,10 +18,47 @@ interface TaskLogStreamOptions {
   task: Ref<Task | null>
   taskLogs: Ref<TaskLog[]>
   containerLogs: Ref<string>
+  containerLogsTruncated: Ref<boolean>
   containerLogsLoading: Ref<boolean>
   translate: (key: string) => string
   onStructuredDone: () => void
   onRawDone: () => void
+}
+
+function boundRawLogWindow(text: string): { text: string, truncated: boolean } {
+  if (text.length <= RAW_LOG_WINDOW_MAX_CHARS) return { text, truncated: false }
+  return {
+    text: text.slice(-RAW_LOG_WINDOW_MAX_CHARS),
+    truncated: true,
+  }
+}
+
+function appendRawLogWindow(current: string, incoming: string): {
+  text: string
+  truncated: boolean
+} {
+  if (!incoming) return { text: current, truncated: false }
+  if (incoming.length >= RAW_LOG_WINDOW_MAX_CHARS) {
+    return {
+      text: incoming.slice(-RAW_LOG_WINDOW_MAX_CHARS),
+      truncated: current.length > 0 || incoming.length > RAW_LOG_WINDOW_MAX_CHARS,
+    }
+  }
+
+  const boundedCurrent = current.length > RAW_LOG_WINDOW_MAX_CHARS
+    ? current.slice(-RAW_LOG_WINDOW_MAX_CHARS)
+    : current
+  const overflow = boundedCurrent.length + incoming.length - RAW_LOG_WINDOW_MAX_CHARS
+  if (overflow > 0) {
+    return {
+      text: boundedCurrent.slice(overflow) + incoming,
+      truncated: true,
+    }
+  }
+  return {
+    text: boundedCurrent + incoming,
+    truncated: current.length > RAW_LOG_WINDOW_MAX_CHARS,
+  }
 }
 
 export function useTaskLogStreams(options: TaskLogStreamOptions) {
@@ -126,7 +165,7 @@ export function useTaskLogStreams(options: TaskLogStreamOptions) {
 
     source.addEventListener('batch', (event) => {
       if (rawLogSource !== source || options.taskId.value !== currentTaskId) return
-      let chunks: Array<{ sequence_no: number, content: string }>
+      let chunks: Array<{ sequence_no: number, content: string, truncated?: boolean }>
       try {
         chunks = JSON.parse((event as MessageEvent).data)
       } catch {
@@ -134,13 +173,18 @@ export function useTaskLogStreams(options: TaskLogStreamOptions) {
         options.containerLogsLoading.value = false
         return
       }
-      let appended = ''
+      let nextLogs = options.containerLogs.value
+      let truncated = options.containerLogsTruncated.value
       for (const chunk of chunks) {
         if (chunk.sequence_no <= rawLogSequenceNo) continue
         rawLogSequenceNo = chunk.sequence_no
-        appended += chunk.content
+        truncated = truncated || Boolean(chunk.truncated)
+        const nextWindow = appendRawLogWindow(nextLogs, chunk.content)
+        nextLogs = nextWindow.text
+        truncated = truncated || nextWindow.truncated
       }
-      if (appended) options.containerLogs.value += appended
+      options.containerLogs.value = nextLogs
+      options.containerLogsTruncated.value = truncated
       options.containerLogsLoading.value = false
     })
 
@@ -166,9 +210,15 @@ export function useTaskLogStreams(options: TaskLogStreamOptions) {
     const requestedTaskId = options.taskId.value
     if (showLoading) options.containerLogsLoading.value = true
     try {
-      const result = await getTaskContainerLogs(requestedTaskId, 'db')
+      const result = await getTaskContainerLogs(
+        requestedTaskId,
+        'db',
+        RAW_LOG_WINDOW_MAX_CHARS,
+      )
       if (requestId === rawLogSnapshotRequest && requestedTaskId === options.taskId.value) {
-        options.containerLogs.value = result.logs
+        const bounded = boundRawLogWindow(result.logs)
+        options.containerLogs.value = bounded.text
+        options.containerLogsTruncated.value = Boolean(result.logs_truncated) || bounded.truncated
         rawLogSequenceNo = result.last_sequence_no ?? 0
         rawLogsFinalized = result.raw_logs_finalized ?? false
         return true
@@ -177,6 +227,7 @@ export function useTaskLogStreams(options: TaskLogStreamOptions) {
       if (requestId === rawLogSnapshotRequest && requestedTaskId === options.taskId.value) {
         if (showLoading || !options.containerLogs.value) {
           options.containerLogs.value = options.translate('taskView.failedToFetchContainerLogs')
+          options.containerLogsTruncated.value = false
         }
       }
     } finally {
@@ -228,6 +279,7 @@ export function useTaskLogStreams(options: TaskLogStreamOptions) {
     rawLogSequenceNo = 0
     rawLogStreamFinished = false
     rawLogsFinalized = false
+    options.containerLogsTruncated.value = false
     rawLogSnapshotRequest += 1
     closeStructuredLogStream()
     closeRawLogStream()

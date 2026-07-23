@@ -203,6 +203,26 @@ describe('TaskProcessPanel', () => {
     expect(taskProcessPanelSource).toContain(':deep(.process-content .log-content)')
   })
 
+  it('warns when the raw log viewer is rendering only the latest output', async () => {
+    const wrapper = mount(TaskProcessPanel, {
+      props: {
+        task: createTask('running'),
+        taskLogs: [],
+        isActive: true,
+        terminalHtml: 'latest output',
+        rawLogTruncated: true,
+        taskStatus: 'running',
+      },
+    })
+
+    ;(wrapper.vm as any).activeTab = 'raw'
+    await nextTick()
+
+    expect(wrapper.get('.raw-log-window-notice').text()).toBe(
+      'taskView.rawLogsDisplayTruncated'
+    )
+  })
+
   it('shows the number of displayed events in the event stream tab', () => {
     const task = createTask('completed')
     const taskLogs: TaskLog[] = [

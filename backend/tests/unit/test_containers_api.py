@@ -975,6 +975,53 @@ class TaskRawLogStreamEndpointTests(unittest.TestCase):
         self.assertIn('"sequence_no": 2', response.text)
         self.assertIn("event: done", response.text)
 
+    def test_stream_batch_keeps_only_bounded_latest_content(self):
+        from datetime import datetime
+
+        from app.models import TaskStatus
+
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+        app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
+
+        task = MagicMock(id=7, project_id=12)
+        task_result = MagicMock()
+        task_result.scalar_one_or_none.return_value = task
+        init_session = MagicMock()
+        init_session.execute = AsyncMock(return_value=task_result)
+
+        first_chunk = MagicMock(sequence_no=1, content=b"older data")
+        second_chunk = MagicMock(sequence_no=2, content=b"latest-tail")
+        chunk_result = MagicMock()
+        chunk_result.scalars.return_value.all.return_value = [first_chunk, second_chunk]
+        status_result = MagicMock()
+        status_result.one_or_none.return_value = (
+            TaskStatus.COMPLETED,
+            datetime(2026, 6, 20),
+        )
+        poll_session = MagicMock()
+        poll_session.execute = AsyncMock(side_effect=[chunk_result, status_result])
+
+        session_factory = MagicMock(
+            side_effect=[
+                self._session_context(init_session),
+                self._session_context(poll_session),
+            ]
+        )
+        with (
+            patch("app.api.containers.AsyncSessionLocal", session_factory),
+            patch("app.api.containers._RAW_LOG_STREAM_MAX_CHARS", 10),
+            patch("app.main.refresh_runtime_config_if_stale", new=AsyncMock()),
+        ):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/api/tasks/7/raw-log-stream?since_sequence_no=0")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('"sequence_no": 1', response.text)
+        self.assertIn('"sequence_no": 2', response.text)
+        self.assertIn("atest-tail", response.text)
+        self.assertIn('"truncated": true', response.text)
+
     def test_completed_stream_waits_for_raw_log_finalization(self):
         from datetime import datetime
 
@@ -1177,6 +1224,80 @@ class TaskContainerLogsSourceDbTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["logs"], "first\nsecond\n")
         self.assertEqual(response.json()["last_sequence_no"], 5)
+
+    def test_source_db_tail_window_returns_only_latest_raw_characters(self):
+        from app.models import TaskStatus
+
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+        task = MagicMock(
+            id=1,
+            container_id="abc123",
+            status=TaskStatus.RUNNING,
+            raw_logs_finalized_at=None,
+        )
+        task_result = MagicMock()
+        task_result.scalar_one_or_none.return_value = task
+
+        newest_chunk = MagicMock(sequence_no=5, content=b"latest line\n")
+        older_chunk = MagicMock(sequence_no=4, content=b"old prefix\n")
+        raw_chunk_result = MagicMock()
+        raw_chunk_result.scalars.return_value.all.return_value = [newest_chunk, older_chunk]
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[task_result, raw_chunk_result])
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/api/tasks/1/container-logs?source=db&tail_chars=12")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["logs"], "latest line\n")
+        self.assertEqual(response.json()["last_sequence_no"], 5)
+        self.assertTrue(response.json()["logs_truncated"])
+
+    def test_source_db_tail_window_bounds_legacy_logs(self):
+        from app.models import TaskStatus
+
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+        task = MagicMock(
+            id=1,
+            container_id=None,
+            status=TaskStatus.COMPLETED,
+            raw_logs_finalized_at=object(),
+        )
+        task_result = MagicMock()
+        task_result.scalar_one_or_none.return_value = task
+
+        empty_raw_chunks = MagicMock()
+        empty_raw_chunks.scalars.return_value.all.return_value = []
+        newest_log = MagicMock(id=2, message="latest\n")
+        older_log = MagicMock(id=1, message="older\n")
+        legacy_result = MagicMock()
+        legacy_result.scalars.return_value.all.return_value = [newest_log, older_log]
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(
+            side_effect=[task_result, empty_raw_chunks, legacy_result]
+        )
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/api/tasks/1/container-logs?source=db&tail_chars=7")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["logs"], "latest\n")
+        self.assertEqual(response.json()["last_sequence_no"], 0)
+        self.assertTrue(response.json()["logs_truncated"])
 
     def test_source_db_returns_archived_logs_after_container_cleanup(self):
         """Completed tasks keep raw logs readable after container_id is cleared."""

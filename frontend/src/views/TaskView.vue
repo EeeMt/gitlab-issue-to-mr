@@ -320,6 +320,7 @@
                 :task-logs="taskLogs"
                 :is-active="isActiveTaskStatus(task?.status)"
                 :terminal-html="terminalLogHtml"
+                :raw-log-truncated="rawLogDisplayTruncated"
                 :task-status="task?.status ?? ''"
                 @raw-tab-open="onRawTabOpen"
                 @raw-tab-close="onRawTabClose"
@@ -529,6 +530,7 @@ import AnsiToHtml from 'ansi-to-html'
 import { formatDateTimeUtc8 } from '../utils/datetime'
 import { useTaskScheduleContext } from '../features/tasks/useTaskScheduleContext'
 import {
+  RAW_LOG_WINDOW_MAX_CHARS,
   isActiveTaskStatus,
   useTaskLogStreams,
 } from '../features/tasks/useTaskLogStreams'
@@ -564,6 +566,7 @@ function copyPromptSource() {
 const task = ref<Task | null>(null)
 const logs = ref('')
 const containerLogs = ref('')
+const containerLogsTruncated = ref(false)
 const loading = ref(false)
 const hasLoadedOnce = ref(false)
 const logsLoading = ref(false)
@@ -605,6 +608,7 @@ const {
   task,
   taskLogs,
   containerLogs,
+  containerLogsTruncated,
   containerLogsLoading,
   translate: t,
   onStructuredDone: () => {
@@ -652,10 +656,20 @@ watch(taskId, () => {
 })
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 
-const terminalLogHtml = computed(() => {
+const rawLogText = computed(() => containerLogs.value || logs.value)
+const rawLogDisplayTruncated = computed(() =>
+  containerLogsTruncated.value || rawLogText.value.length > RAW_LOG_WINDOW_MAX_CHARS
+)
+const renderedRawLogText = computed(() => {
   // For completed/failed tasks: use structured logs formatted as text
   // For active tasks: use live container logs streamed via SSE
-  const text = containerLogs.value || logs.value
+  const text = rawLogText.value
+  if (text.length <= RAW_LOG_WINDOW_MAX_CHARS) return text
+  return text.slice(-RAW_LOG_WINDOW_MAX_CHARS)
+})
+
+const terminalLogHtml = computed(() => {
+  const text = renderedRawLogText.value
   if (!text) return ''
   return ansiConverter.toHtml(text)
 })
@@ -965,6 +979,7 @@ function resetLogsState() {
   taskLogs.value = []
   logs.value = ''
   containerLogs.value = ''
+  containerLogsTruncated.value = false
   archiveMetadata.value = null
   resetLogStreams()
 }

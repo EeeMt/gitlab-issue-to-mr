@@ -762,6 +762,7 @@ const zhCN = {
     duration: '执行时长',
     mrTitle: 'MR 标题',
     rawLogs: '原始日志',
+    rawLogsDisplayTruncated: '日志过大，当前仅渲染最近的日志内容；任务结束后可从运行归档下载完整日志。',
     eventsTab: '事件流',
     rawLogsTab: '原始日志',
     thinkingLabel: '思考',

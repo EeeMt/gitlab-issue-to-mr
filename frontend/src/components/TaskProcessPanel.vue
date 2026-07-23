@@ -81,7 +81,11 @@
         </div>
       </template>
       <div v-else class="process-content__pane process-content__pane--raw">
-        <TaskProcessRawPane ref="rawPaneRef" :terminal-html="terminalHtml" />
+        <TaskProcessRawPane
+          ref="rawPaneRef"
+          :terminal-html="terminalHtml"
+          :truncated="rawLogTruncated"
+        />
       </div>
     </div>
 
@@ -115,9 +119,11 @@ const props = withDefaults(defineProps<{
   taskLogs: TaskLog[]
   isActive: boolean
   terminalHtml: string
+  rawLogTruncated?: boolean
   taskStatus: string
 }>(), {
   taskLogs: () => [],
+  rawLogTruncated: false,
 })
 
 const emit = defineEmits<{

@@ -7,7 +7,7 @@ import re
 import time
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,6 +41,10 @@ router = APIRouter()
 _CA_REPLACEMENT_LINE_RE = re.compile(r"^Replacing debian:[^\r\n]+\.pem\r?$")
 _TARGET_PROBE_REQUEST_TIMEOUT_SECONDS = 5
 _TARGET_PROBE_TIMEOUT_SECONDS = 11
+_RAW_LOG_TAIL_MAX_CHARS = 2_000_000
+_RAW_LOG_TAIL_PAGE_SIZE = 32
+_RAW_LOG_STREAM_BATCH_SIZE = 32
+_RAW_LOG_STREAM_MAX_CHARS = 500_000
 
 
 def _get_monitor_docker_client(connection):
@@ -89,6 +93,162 @@ def _compact_raw_log_noise(logs: str) -> str:
     if logs.endswith("\n"):
         compacted += "\n"
     return compacted
+
+
+async def _fetch_raw_log_chunks(
+    db: AsyncSession,
+    *,
+    task_id: int,
+    tail_chars: int | None,
+) -> tuple[str, int, bool, bool]:
+    """Return raw chunks, optionally bounded to a character tail window."""
+    if tail_chars is None:
+        chunk_result = await db.execute(
+            select(TaskRawLogChunk)
+            .where(TaskRawLogChunk.task_id == task_id)
+            .order_by(TaskRawLogChunk.sequence_no.asc())
+        )
+        chunks = chunk_result.scalars().all()
+        if not chunks:
+            return "", 0, False, False
+        return (
+            "".join(chunk.content.decode("utf-8", errors="replace") for chunk in chunks),
+            chunks[-1].sequence_no,
+            False,
+            True,
+        )
+
+    fragments_desc: list[str] = []
+    total_chars = 0
+    before_sequence_no: int | None = None
+    last_sequence_no = 0
+
+    while total_chars <= tail_chars:
+        query = select(TaskRawLogChunk).where(TaskRawLogChunk.task_id == task_id)
+        if before_sequence_no is not None:
+            query = query.where(TaskRawLogChunk.sequence_no < before_sequence_no)
+        chunk_result = await db.execute(
+            query.order_by(TaskRawLogChunk.sequence_no.desc()).limit(_RAW_LOG_TAIL_PAGE_SIZE)
+        )
+        chunks = chunk_result.scalars().all()
+        if not chunks:
+            break
+        if not last_sequence_no:
+            last_sequence_no = chunks[0].sequence_no
+
+        for chunk in chunks:
+            text = chunk.content.decode("utf-8", errors="replace")
+            fragments_desc.append(text)
+            total_chars += len(text)
+        before_sequence_no = chunks[-1].sequence_no
+
+        if total_chars > tail_chars or len(chunks) < _RAW_LOG_TAIL_PAGE_SIZE:
+            break
+
+    if not fragments_desc:
+        return "", 0, False, False
+    logs = "".join(reversed(fragments_desc))
+    truncated = len(logs) > tail_chars
+    if truncated:
+        logs = logs[-tail_chars:]
+    return logs, last_sequence_no, truncated, True
+
+
+async def _fetch_legacy_raw_logs(
+    db: AsyncSession,
+    *,
+    task_id: int,
+    tail_chars: int | None,
+) -> tuple[str, bool]:
+    """Return legacy TaskLog console output with the same optional tail bound."""
+    if tail_chars is None:
+        log_result = await db.execute(
+            select(TaskLog)
+            .where(TaskLog.task_id == task_id, TaskLog.log_type.is_(None))
+            .order_by(TaskLog.id.asc())
+        )
+        chunks = log_result.scalars().all()
+        return "".join(chunk.message or "" for chunk in chunks), False
+
+    fragments_desc: list[str] = []
+    total_chars = 0
+    before_id: int | None = None
+
+    while total_chars <= tail_chars:
+        query = select(TaskLog).where(TaskLog.task_id == task_id, TaskLog.log_type.is_(None))
+        if before_id is not None:
+            query = query.where(TaskLog.id < before_id)
+        log_result = await db.execute(
+            query.order_by(TaskLog.id.desc()).limit(_RAW_LOG_TAIL_PAGE_SIZE)
+        )
+        chunks = log_result.scalars().all()
+        if not chunks:
+            break
+        for chunk in chunks:
+            text = chunk.message or ""
+            fragments_desc.append(text)
+            total_chars += len(text)
+        before_id = chunks[-1].id
+
+        if total_chars > tail_chars or len(chunks) < _RAW_LOG_TAIL_PAGE_SIZE:
+            break
+
+    logs = "".join(reversed(fragments_desc))
+    truncated = len(logs) > tail_chars
+    if truncated:
+        logs = logs[-tail_chars:]
+    return logs, truncated
+
+
+async def _fetch_db_log_window(
+    db: AsyncSession,
+    *,
+    task_id: int,
+    tail_chars: int | None,
+) -> tuple[str, int, bool]:
+    logs, last_sequence_no, truncated, found_raw_chunks = await _fetch_raw_log_chunks(
+        db,
+        task_id=task_id,
+        tail_chars=tail_chars,
+    )
+    if found_raw_chunks:
+        return logs, last_sequence_no, truncated
+
+    legacy_logs, legacy_truncated = await _fetch_legacy_raw_logs(
+        db,
+        task_id=task_id,
+        tail_chars=tail_chars,
+    )
+    return legacy_logs, 0, legacy_truncated
+
+
+def _bounded_raw_log_stream_payload(chunks) -> list[dict[str, int | str | bool]]:
+    """Keep one SSE batch bounded while preserving its newest sequence cursor."""
+    payload_desc: list[dict[str, int | str | bool]] = []
+    remaining_chars = _RAW_LOG_STREAM_MAX_CHARS
+    truncated = False
+
+    for index, chunk in enumerate(reversed(chunks)):
+        content = chunk.content.decode("utf-8", errors="replace")
+        if len(content) > remaining_chars:
+            content = content[-remaining_chars:]
+            truncated = True
+        payload_desc.append(
+            {
+                "sequence_no": chunk.sequence_no,
+                "content": content,
+            }
+        )
+        remaining_chars -= len(content)
+        if remaining_chars <= 0:
+            if index < len(chunks) - 1:
+                truncated = True
+            break
+
+    payload = list(reversed(payload_desc))
+    if truncated and payload:
+        payload[0]["truncated"] = True
+    return payload
 
 
 def _get_container_pattern() -> re.Pattern:
@@ -333,7 +493,6 @@ async def stream_task_raw_logs(
 
     async def generate_raw_log_events():
         cursor = max(since_sequence_no, 0)
-        batch_size = 100
         idle_cycles = 0
 
         while True:
@@ -345,12 +504,12 @@ async def stream_task_raw_logs(
                         TaskRawLogChunk.sequence_no > cursor,
                     )
                     .order_by(TaskRawLogChunk.sequence_no.asc())
-                    .limit(batch_size)
+                    .limit(_RAW_LOG_STREAM_BATCH_SIZE)
                 )
                 chunks = chunk_result.scalars().all()
                 current_status = None
                 raw_logs_finalized_at = None
-                if len(chunks) < batch_size:
+                if len(chunks) < _RAW_LOG_STREAM_BATCH_SIZE:
                     status_result = await poll_db.execute(
                         select(Task.status, Task.raw_logs_finalized_at).where(Task.id == task_id)
                     )
@@ -359,18 +518,11 @@ async def stream_task_raw_logs(
                         current_status, raw_logs_finalized_at = status_row
 
             if chunks:
-                payload = []
-                for chunk in chunks:
-                    cursor = chunk.sequence_no
-                    payload.append(
-                        {
-                            "sequence_no": chunk.sequence_no,
-                            "content": chunk.content.decode("utf-8", errors="replace"),
-                        }
-                    )
+                cursor = chunks[-1].sequence_no
+                payload = _bounded_raw_log_stream_payload(chunks)
                 yield f"event: batch\ndata: {json.dumps(payload)}\n\n"
                 idle_cycles = 0
-                if len(chunks) == batch_size:
+                if len(chunks) == _RAW_LOG_STREAM_BATCH_SIZE:
                     continue
             else:
                 idle_cycles += 1
@@ -402,6 +554,7 @@ async def stream_task_raw_logs(
 async def get_task_container_logs(
     task_id: int,
     source: str = "auto",
+    tail_chars: int | None = Query(default=None, ge=1, le=_RAW_LOG_TAIL_MAX_CHARS),
     db: AsyncSession = Depends(get_db),
     current_user: Optional["User"] = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
@@ -411,6 +564,7 @@ async def get_task_container_logs(
     Args:
         task_id: Task ID
         source: 'auto' (try Docker, fall back to DB) or 'db' (always use DB chunks)
+        tail_chars: Optional maximum number of trailing characters returned from DB logs
         db: Database session
 
     Returns:
@@ -426,35 +580,16 @@ async def get_task_container_logs(
 
     raw_logs_finalized = task.raw_logs_finalized_at is not None
 
-    async def _fetch_db_chunks() -> tuple[str, int]:
-        # New format: TaskRawLogChunk (written by the event archive system)
-        chunk_result = await db.execute(
-            select(TaskRawLogChunk)
-            .where(TaskRawLogChunk.task_id == task_id)
-            .order_by(TaskRawLogChunk.sequence_no.asc())
-        )
-        new_chunks = chunk_result.scalars().all()
-        if new_chunks:
-            return (
-                "".join(c.content.decode("utf-8", errors="replace") for c in new_chunks),
-                new_chunks[-1].sequence_no,
-            )
-
-        # Legacy fallback: TaskLog with log_type IS NULL (old tasks without event archive)
-        log_result = await db.execute(
-            select(TaskLog)
-            .where(TaskLog.task_id == task_id, TaskLog.log_type.is_(None))
-            .order_by(TaskLog.id.asc())
-        )
-        chunks = log_result.scalars().all()
-        return "".join(c.message or "" for c in chunks), 0
-
     # Completed tasks normally have their container reference cleared after the
     # authoritative console snapshot is archived.  The DB snapshot must remain
     # readable after that cleanup; otherwise the UI falls back to the sparse
     # structured task log instead of showing the raw console output.
     if source == "db" or not task.container_id:
-        logs, last_sequence_no = await _fetch_db_chunks()
+        logs, last_sequence_no, logs_truncated = await _fetch_db_log_window(
+            db,
+            task_id=task_id,
+            tail_chars=tail_chars,
+        )
         return {
             "container_id": task.container_id,
             "logs": _compact_raw_log_noise(logs),
@@ -462,6 +597,7 @@ async def get_task_container_logs(
             "source": "db",
             "last_sequence_no": last_sequence_no,
             "raw_logs_finalized": raw_logs_finalized,
+            "logs_truncated": logs_truncated,
         }
 
     try:
@@ -483,7 +619,11 @@ async def get_task_container_logs(
         }
     except Exception as e:
         # Container is gone (completed/removed) — fall back to DB-stored raw log chunks
-        logs, last_sequence_no = await _fetch_db_chunks()
+        logs, last_sequence_no, logs_truncated = await _fetch_db_log_window(
+            db,
+            task_id=task_id,
+            tail_chars=tail_chars,
+        )
         if logs:
             return {
                 "container_id": task.container_id,
@@ -492,6 +632,7 @@ async def get_task_container_logs(
                 "source": "db",
                 "last_sequence_no": last_sequence_no,
                 "raw_logs_finalized": raw_logs_finalized,
+                "logs_truncated": logs_truncated,
             }
         logger.warning(f"Container gone and no DB chunks for task {task_id}: {e}")
         return {

@@ -951,8 +951,12 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn('delivery-summary-validation.json', content)
         self.assertIn('CODIFY_CODEGRAPH_ENABLED', content)
         self.assertIn('prepare_codegraph', content)
-        self.assertIn('export PATH="${CODIFY_RUNTIME_PATH}" && codegraph init /workspace', content)
-        self.assertIn('export PATH="${CODIFY_RUNTIME_PATH}" && codegraph sync /workspace', content)
+        self.assertIn('run_codegraph_index "init" "initialization"', content)
+        self.assertIn('run_codegraph_index "sync" "sync"', content)
+        self.assertIn('codegraph_command="codegraph init /workspace --verbose"', content)
+        self.assertIn('codegraph_command="codegraph sync /workspace --quiet"', content)
+        self.assertIn('codegraph status /workspace --json', content)
+        self.assertNotIn('CODEGRAPH_LOG', content)
         self.assertIn(
             'export PATH="${CODIFY_RUNTIME_PATH}" && codegraph install --target=claude --location=global --yes',
             content,
@@ -983,6 +987,49 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn('payload_kind="delivery_summary"', artifacts)
         self.assertIn('log_type="delivery_summary"', artifacts)
         self.assertIn('await _save_delivery_summary_from_container(worker, container, task, db)', lifecycle)
+
+    def test_codegraph_sync_failure_keeps_exit_code_and_prints_status_diagnostic(self):
+        script = (
+            Path(__file__).resolve().parents[3]
+            / "deploy"
+            / "worker-entrypoint"
+            / "codegraph.sh"
+        )
+        harness = textwrap.dedent(
+            """
+            set -u
+            codify_run_shell() {
+                printf 'CALL:%s\n' "$1"
+                case "$1" in
+                    *"codegraph sync /workspace --quiet"*) return 17 ;;
+                    *"codegraph status /workspace --json"*)
+                        printf '{"initialized":true}\n'
+                        return 0
+                        ;;
+                esac
+                return 0
+            }
+            . "$1"
+            set +e
+            run_codegraph_index sync sync
+            result=$?
+            set -e
+            printf 'RESULT:%s\n' "$result"
+            """
+        )
+
+        result = subprocess.run(
+            ["bash", "-c", harness, "--", str(script)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("CodeGraph sync failed with exit code 17", result.stdout)
+        self.assertIn("codegraph status /workspace --json", result.stdout)
+        self.assertIn('{"initialized":true}', result.stdout)
+        self.assertIn("RESULT:17", result.stdout)
 
     def test_entrypoint_writes_plan_task_metadata_for_previous_summaries(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"

@@ -220,6 +220,7 @@ export interface TaskContainerLogsResponse {
   source?: 'db'
   last_sequence_no?: number
   raw_logs_finalized?: boolean
+  logs_truncated?: boolean
 }
 
 export interface TaskArchive {
@@ -401,9 +402,12 @@ export function streamTaskLogs(
 
 export async function getTaskContainerLogs(
   id: number,
-  source?: 'db' | 'auto'
+  source?: 'db' | 'auto',
+  tailChars?: number,
 ): Promise<TaskContainerLogsResponse> {
-  const params = source ? { source } : {}
+  const params: { source?: 'db' | 'auto', tail_chars?: number } = {}
+  if (source) params.source = source
+  if (tailChars !== undefined) params.tail_chars = tailChars
   const response = await api.get(`/tasks/${id}/container-logs`, { params })
   return response.data
 }

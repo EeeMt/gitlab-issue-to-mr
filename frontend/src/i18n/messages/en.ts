@@ -772,6 +772,7 @@ const en = {
     duration: 'Duration',
     mrTitle: 'MR Title',
     rawLogs: 'Raw Logs',
+    rawLogsDisplayTruncated: 'This log is too large to render in full. Only the latest output is shown; download the run archive after completion for the complete logs.',
     eventsTab: 'Events',
     rawLogsTab: 'Raw Logs',
     thinkingLabel: 'Thinking',

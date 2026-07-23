@@ -1785,7 +1785,7 @@ describe('TaskView', () => {
 
       await wrapper.vm.onRawTabOpen()
 
-      expect(mockApi.getTaskContainerLogs).toHaveBeenCalledWith(1, 'db')
+      expect(mockApi.getTaskContainerLogs).toHaveBeenCalledWith(1, 'db', 500_000)
       expect(EventSource).toHaveBeenCalledWith(
         '/api/tasks/1/raw-log-stream?since_sequence_no=1'
       )
@@ -1853,6 +1853,103 @@ describe('TaskView', () => {
       await wrapper.vm.onRawTabOpen()
 
       expect(wrapper.vm.containerLogs).toHaveLength(300_000)
+    })
+
+    it('should render only the latest window when raw logs are very large', async () => {
+      await mountComponent({ status: 'running', container_id: 'container-123' })
+      const fullLog = `oldest line\n${'x'.repeat(600_000)}\nlatest line\n`
+      ;(mockApi.getTaskContainerLogs as Mock).mockResolvedValue({
+        container_id: 'container-123',
+        logs: fullLog,
+        status: 'running',
+        source: 'db',
+        last_sequence_no: 1,
+        raw_logs_finalized: false
+      })
+
+      await wrapper.vm.onRawTabOpen()
+      await nextTick()
+
+      const processPanel = wrapper.findComponent({ name: 'TaskProcessPanel' })
+      expect(wrapper.vm.containerLogs).toHaveLength(500_000)
+      expect(wrapper.vm.containerLogs).toBe(fullLog.slice(-500_000))
+      expect(processPanel.props('rawLogTruncated')).toBe(true)
+      expect(processPanel.props('terminalHtml')).not.toContain('oldest line')
+      expect(processPanel.props('terminalHtml')).toContain('latest line')
+    })
+
+    it('should preserve a bounded carriage-return progress tail ending in a newline', async () => {
+      await mountComponent({ status: 'running', container_id: 'container-123' })
+      const fullLog = `${'x'.repeat(600_000)}\n`
+      ;(mockApi.getTaskContainerLogs as Mock).mockResolvedValue({
+        container_id: 'container-123',
+        logs: fullLog,
+        status: 'running',
+        source: 'db',
+        last_sequence_no: 1,
+        raw_logs_finalized: false,
+        logs_truncated: true
+      })
+
+      await wrapper.vm.onRawTabOpen()
+      await nextTick()
+
+      const processPanel = wrapper.findComponent({ name: 'TaskProcessPanel' })
+      expect(wrapper.vm.containerLogs).toHaveLength(500_000)
+      expect(wrapper.vm.containerLogs.endsWith('\n')).toBe(true)
+      expect(processPanel.props('rawLogTruncated')).toBe(true)
+      expect(processPanel.props('terminalHtml')).not.toBe('')
+    })
+
+    it('should keep streamed raw logs in the bounded client window', async () => {
+      await mountComponent({ status: 'running', container_id: 'container-123' })
+      ;(mockApi.getTaskContainerLogs as Mock).mockResolvedValue({
+        container_id: 'container-123',
+        logs: 'a'.repeat(499_990),
+        status: 'running',
+        source: 'db',
+        last_sequence_no: 1,
+        raw_logs_finalized: false,
+        logs_truncated: false
+      })
+      await wrapper.vm.onRawTabOpen()
+
+      mockEventSourceListeners.batch?.({
+        data: JSON.stringify([
+          { sequence_no: 2, content: 'b'.repeat(20) }
+        ])
+      })
+      await nextTick()
+
+      const processPanel = wrapper.findComponent({ name: 'TaskProcessPanel' })
+      expect(wrapper.vm.containerLogs).toHaveLength(500_000)
+      expect(wrapper.vm.containerLogs.endsWith('b'.repeat(20))).toBe(true)
+      expect(processPanel.props('rawLogTruncated')).toBe(true)
+    })
+
+    it('should preserve a server-side stream truncation marker', async () => {
+      await mountComponent({ status: 'running', container_id: 'container-123' })
+      ;(mockApi.getTaskContainerLogs as Mock).mockResolvedValue({
+        container_id: 'container-123',
+        logs: '',
+        status: 'running',
+        source: 'db',
+        last_sequence_no: 0,
+        raw_logs_finalized: false,
+        logs_truncated: false
+      })
+      await wrapper.vm.onRawTabOpen()
+
+      mockEventSourceListeners.batch?.({
+        data: JSON.stringify([
+          { sequence_no: 2, content: 'latest tail', truncated: true }
+        ])
+      })
+      await nextTick()
+
+      const processPanel = wrapper.findComponent({ name: 'TaskProcessPanel' })
+      expect(wrapper.vm.containerLogs).toBe('latest tail')
+      expect(processPanel.props('rawLogTruncated')).toBe(true)
     })
 
     it('should replace streamed content with the final DB snapshot without duplication', async () => {
@@ -1967,7 +2064,7 @@ describe('TaskView', () => {
 
       await wrapper.vm.onRawTabOpen()
 
-      expect(mockApi.getTaskContainerLogs).toHaveBeenCalledWith(1, 'db')
+      expect(mockApi.getTaskContainerLogs).toHaveBeenCalledWith(1, 'db', 500_000)
       expect(wrapper.vm.containerLogs).toBe('Container log content')
     })
 
@@ -1977,7 +2074,7 @@ describe('TaskView', () => {
       await wrapper.vm.onRawTabOpen()
 
       // Verify it always uses 'db' source for completed tasks
-      expect(mockApi.getTaskContainerLogs).toHaveBeenCalledWith(1, 'db')
+      expect(mockApi.getTaskContainerLogs).toHaveBeenCalledWith(1, 'db', 500_000)
     })
 
     it('should close log stream on onRawTabClose', async () => {
