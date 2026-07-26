@@ -11,6 +11,7 @@ import type { Issue } from '../api'
 // ---------------------------------------------------------------------------
 const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
   const mock = {
+    getIssueFilterOptions: vi.fn<() => Promise<any>>(),
     getProjects: vi.fn<() => Promise<any>>(),
     getIssues: vi.fn<() => Promise<any>>(),
     getStats: vi.fn<() => Promise<any>>(),
@@ -48,6 +49,7 @@ vi.mock('../utils/datetime', () => ({
 }))
 
 vi.mock('../api', () => ({
+  getIssueFilterOptions: mockApi.getIssueFilterOptions,
   getProjects: mockApi.getProjects,
   getIssues: mockApi.getIssues,
   getStats: mockApi.getStats,
@@ -153,7 +155,7 @@ vi.mock('naive-ui', () => ({
 vi.mock('../components/filter/FilterToolbar.vue', () => ({
   default: {
     name: 'FilterToolbar',
-    props: ['config', 'filters', 'sort', 'visibleColumns', 'activeFilterCount', 'hasActiveFilters', 'resultCount', 'searchPlaceholder'],
+    props: ['config', 'filters', 'sort', 'visibleColumns', 'activeFilterCount', 'hasActiveFilters', 'resultCount', 'searchPlaceholder', 'searchValue', 'searchMinLength'],
     setup() {
       return () => h('div', { class: 'filter-toolbar-mock', 'data-testid': 'filter-toolbar' })
     },
@@ -292,6 +294,13 @@ const mockStats = {
 // Helpers
 // ---------------------------------------------------------------------------
 function setupDefaultMocks() {
+  mockApi.getIssueFilterOptions.mockResolvedValue({
+    initiators: [
+      { value: 'user:1', kind: 'user', user_id: 1, username: 'alice', display_name: 'Alice', count: 10 },
+      { value: 'user:2', kind: 'user', user_id: 2, username: 'bob', display_name: null, count: 8 },
+      { value: 'user:3', kind: 'user', user_id: 3, username: 'charlie', display_name: null, count: 2 },
+    ],
+  })
   mockApi.getProjects.mockResolvedValue(mockProjects)
   mockApi.getIssues.mockResolvedValue({ items: mockIssues, total: mockIssues.length })
   mockApi.getStats.mockResolvedValue(mockStats)
@@ -740,7 +749,7 @@ describe('IssueList', () => {
       expect(wrapper.vm.statsCompleted).toBe(0)
     })
 
-    it('handles getProjects failure silently', async () => {
+    it('exposes project option loading failure and supports retry', async () => {
       setupDefaultMocks()
       mockApi.getProjects.mockRejectedValue(new Error('Projects down'))
 
@@ -748,47 +757,59 @@ describe('IssueList', () => {
       await flushPromises()
 
       expect(mockMessage.error).not.toHaveBeenCalled()
-      // Issues still load fine
       expect(wrapper.vm.issues).toHaveLength(3)
+      expect(wrapper.vm.projectOptionsError).toBe(true)
+
+      mockApi.getProjects.mockResolvedValue(mockProjects)
+      const projectField = wrapper.vm.filterConfig.filterFields.find(
+        (field: any) => field.key === 'project_id',
+      )
+      await projectField.optionsRetry()
+      expect(wrapper.vm.projectOptionsError).toBe(false)
+      expect(projectField.options()).toHaveLength(2)
     })
   })
 
   // -----------------------------------------------------------------------
-  // 10. fetchIssues guard
+  // 10. fetchIssues concurrency
   // -----------------------------------------------------------------------
-  describe('fetchIssues guard', () => {
-    it('skips fetch when already loading', async () => {
+  describe('fetchIssues concurrency', () => {
+    it('keeps the latest response when requests overlap', async () => {
       setupDefaultMocks()
-      let resolveIssues!: (v: any) => void
-      mockApi.getIssues.mockReturnValue(new Promise(r => { resolveIssues = r }) as any)
+      let resolveFirst!: (v: any) => void
+      let resolveSecond!: (v: any) => void
+      mockApi.getIssues
+        .mockReturnValueOnce(new Promise(r => { resolveFirst = r }) as any)
+        .mockReturnValueOnce(new Promise(r => { resolveSecond = r }) as any)
 
       wrapper = mount(IssueList, { global: { plugins: [router] } })
       await nextTick()
 
       expect(wrapper.vm.loading).toBe(true)
-      const countBefore = mockApi.getIssues.mock.calls.length
-
-      // Attempt another fetch while loading — should be blocked by the guard
       wrapper.vm.$.setupState.fetchIssues()
       await nextTick()
+      expect(mockApi.getIssues).toHaveBeenCalledTimes(2)
 
-      expect(mockApi.getIssues.mock.calls.length).toBe(countBefore)
-
-      resolveIssues({ items: [], total: 0 })
+      const latestIssue = createMockIssue({ id: 99, title: 'Latest' })
+      resolveSecond({ items: [latestIssue], total: 1 })
       await flushPromises()
+      expect(wrapper.vm.issues[0].id).toBe(99)
+
+      resolveFirst({ items: mockIssues, total: mockIssues.length })
+      await flushPromises()
+      expect(wrapper.vm.issues[0].id).toBe(99)
     })
   })
 
   // -----------------------------------------------------------------------
-  // 11. Creator accumulation
+  // 11. Creator filter options
   // -----------------------------------------------------------------------
-  describe('creator accumulation', () => {
-    it('accumulates unique creator usernames from fetched issues', async () => {
+  describe('creator filter options', () => {
+    it('loads complete creator options independently from the current page', async () => {
       await mountComponent()
-      // mockIssues have 'alice' (x2) and 'bob' (x1) — set should have 2 entries
-      expect(wrapper.vm.knownCreators.size).toBe(2)
-      expect(wrapper.vm.knownCreators.has('alice')).toBe(true)
-      expect(wrapper.vm.knownCreators.has('bob')).toBe(true)
+      expect(mockApi.getIssueFilterOptions).toHaveBeenCalledTimes(1)
+      expect(wrapper.vm.initiatorFilterOptions).toHaveLength(3)
+      expect(wrapper.vm.initiatorFilterOptions[2].username).toBe('charlie')
     })
   })
 
@@ -997,13 +1018,13 @@ describe('IssueList', () => {
       expect(options[1]).toEqual({ label: 'group/project-2', value: 2 })
     })
 
-    it('creator filter maps known creators sorted alphabetically', async () => {
+    it('creator filter maps scoped options with stable user values and counts', async () => {
       await mountComponent()
-      const creatorField = (wrapper.vm as any).filterConfig.filterFields.find((f: any) => f.key === 'initiator_username')
+      const creatorField = (wrapper.vm as any).filterConfig.filterFields.find((f: any) => f.key === 'initiator')
       const options = creatorField.options()
-      expect(options).toHaveLength(2)
-      expect(options[0]).toEqual({ label: 'alice', value: 'alice' })
-      expect(options[1]).toEqual({ label: 'bob', value: 'bob' })
+      expect(options).toHaveLength(3)
+      expect(options[0]).toEqual({ label: 'Alice (@alice)', value: 'user:1', count: 10 })
+      expect(options[2]).toEqual({ label: 'charlie', value: 'user:3', count: 2 })
     })
 
     it('has_mr filter returns yes/no options', async () => {
@@ -1013,6 +1034,15 @@ describe('IssueList', () => {
       expect(options).toHaveLength(2)
       expect(options[0].value).toBe('true')
       expect(options[1].value).toBe('false')
+    })
+
+    it('rejects invalid URL values for status, project, and MR filters', async () => {
+      await mountComponent()
+      const fields = (wrapper.vm as any).filterConfig.filterFields
+
+      expect(fields.find((field: any) => field.key === 'status').parseValue('bogus')).toBeUndefined()
+      expect(fields.find((field: any) => field.key === 'project_id').parseValue('0')).toBeUndefined()
+      expect(fields.find((field: any) => field.key === 'has_mr').parseValue('yes')).toBeUndefined()
     })
   })
 

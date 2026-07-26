@@ -2,6 +2,7 @@ import { api } from './client'
 import type { Task, TaskStatus } from './tasks'
 
 export * from './client'
+export * from './filterOptions'
 export * from './tasks'
 
 // Status union types
@@ -1284,8 +1285,11 @@ export async function deletePromptTemplate(templateId: number): Promise<void> {
 // Issue APIs
 export async function getIssues(params?: {
   status?: string
-  project_id?: number
-  initiator_user_id?: number
+  project_id?: string | number
+  initiator?: string
+  initiator_user_id?: string | number
+  initiator_username?: string
+  has_mr?: boolean | string
   search?: string
   created_after?: string
   created_before?: string

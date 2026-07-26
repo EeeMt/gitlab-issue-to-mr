@@ -155,6 +155,7 @@ describe('FilterToolbar', () => {
   let wrapper: ReturnType<typeof mount> | null = null
 
   afterEach(() => {
+    vi.useRealTimers()
     if (wrapper) {
       wrapper.unmount()
       wrapper = null
@@ -250,6 +251,79 @@ describe('FilterToolbar', () => {
     vi.useRealTimers()
   })
 
+  it('keeps a short search draft visible without applying it', async () => {
+    vi.useFakeTimers()
+    wrapper = mountComponent({ searchValue: '', searchMinLength: 2 })
+    const vm = wrapper.vm as any
+
+    vm.onSearchInput(' a ')
+    await nextTick()
+    vi.advanceTimersByTime(300)
+    await nextTick()
+
+    expect(wrapper.emitted('search')).toBeFalsy()
+    expect(wrapper.find('input').element.value).toBe(' a ')
+    expect(wrapper.find('[data-testid="filter-toolbar-search-hint"]').exists()).toBe(true)
+    vi.useRealTimers()
+  })
+
+  it('trims an eligible search and does not replace the draft on its state echo', async () => {
+    vi.useFakeTimers()
+    wrapper = mountComponent({ searchValue: 'old', searchMinLength: 2 })
+    const vm = wrapper.vm as any
+
+    vm.onSearchInput('  new term  ')
+    vi.advanceTimersByTime(300)
+    await nextTick()
+
+    expect(wrapper.emitted('search')![0]).toEqual(['new term'])
+    await wrapper.setProps({ searchValue: 'new term' })
+    await nextTick()
+    expect(wrapper.find('input').element.value).toBe('  new term  ')
+    vi.useRealTimers()
+  })
+
+  it('clears an active search when the replacement draft is too short', async () => {
+    vi.useFakeTimers()
+    wrapper = mountComponent({ searchValue: 'active', searchMinLength: 2 })
+    const vm = wrapper.vm as any
+
+    vm.onSearchInput('x')
+    vi.advanceTimersByTime(300)
+    await nextTick()
+
+    expect(wrapper.emitted('search')![0]).toEqual([''])
+    await wrapper.setProps({ searchValue: '' })
+    await nextTick()
+    expect(wrapper.find('input').element.value).toBe('x')
+    vi.useRealTimers()
+  })
+
+  it('updates the search input when URL-owned search state changes', async () => {
+    wrapper = mountComponent({ searchValue: 'initial' })
+    const input = wrapper.find('input')
+    expect(input.element.value).toBe('initial')
+
+    await wrapper.setProps({ searchValue: 'from-history' })
+    await nextTick()
+    expect(wrapper.find('input').element.value).toBe('from-history')
+  })
+
+  it('cancels a pending search when URL-owned state changes', async () => {
+    vi.useFakeTimers()
+    wrapper = mountComponent({ searchValue: 'initial' })
+    const vm = wrapper.vm as any
+    vm.onSearchInput('stale-draft')
+
+    await wrapper.setProps({ searchValue: 'from-history' })
+    vi.advanceTimersByTime(300)
+    await nextTick()
+
+    expect(wrapper.emitted('search')).toBeFalsy()
+    expect(wrapper.find('input').element.value).toBe('from-history')
+    vi.useRealTimers()
+  })
+
   // 10
   it('sort label shows current sort field and direction arrow (desc)', () => {
     wrapper = mountComponent({ sort: { field: 'created_at', order: 'desc' } })
@@ -314,6 +388,20 @@ describe('FilterToolbar', () => {
     const fmt2 = new Date(ts2).toLocaleDateString()
     expect(chipText).toContain(fmt1)
     expect(chipText).toContain(fmt2)
+  })
+
+  it('renders open-ended date ranges without a 1970 placeholder', () => {
+    const ts = new Date('2024-01-15').getTime()
+    wrapper = mountComponent({
+      hasActiveFilters: true,
+      filters: { created: [ts, null] },
+      activeFilterCount: 1
+    })
+
+    const chipText = wrapper.find('.n-tag').text()
+    expect(chipText).toContain(new Date(ts).toLocaleDateString())
+    expect(chipText).toContain('…')
+    expect(chipText).not.toContain(new Date(0).toLocaleDateString())
   })
 
   // 15

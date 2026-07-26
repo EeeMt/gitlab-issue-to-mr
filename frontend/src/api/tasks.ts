@@ -272,12 +272,16 @@ export async function getTasksPaginated(params: {
   page: number
   page_size?: number
   status?: string
-  project_id?: number
+  project_id?: string | number
+  initiator?: string
   initiator_username?: string
   priority?: string
+  has_mr?: boolean | string
   search?: string
   created_after?: string
   created_before?: string
+  scheduled_after?: string
+  scheduled_before?: string
   sort_by?: string
   sort_order?: string
 }): Promise<PaginatedResponse<Task>> {

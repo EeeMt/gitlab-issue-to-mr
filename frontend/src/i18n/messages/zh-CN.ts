@@ -139,6 +139,7 @@ const zhCN = {
   },
   filter: {
     search: '搜索...',
+    searchMinChars: '请至少输入 {count} 个字符',
     filter: '筛选',
     sort: '排序',
     columns: '列',
@@ -154,6 +155,7 @@ const zhCN = {
     priority: '优先级',
     initiator: '发起人',
     creator: '创建者',
+    unknownInitiator: '未知或系统发起',
     hasMr: '合并请求',
     hasMrYes: '有 MR',
     hasMrNo: '无 MR',
@@ -477,7 +479,7 @@ const zhCN = {
       sessionId: '会话 ID',
       createdAt: '创建时间',
       updatedAt: '更新时间',
-      creator: '创建人',
+      creator: '发起人',
       tasks: '任务数',
     },
     totals: {

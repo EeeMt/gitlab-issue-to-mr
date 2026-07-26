@@ -138,7 +138,18 @@ import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { NSpace, NCard, NGrid, NGi, NSpin, NIcon, NTooltip, NButton, NSwitch, NSelect, NDivider, useMessage } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { getIssues, getTasksPaginated, getStats, getAnalytics, getActivityHeatmap, type Issue, type Task, type ActivityHeatmapEntry, type AnalyticsTrendPoint } from '../api'
+import {
+  getIssues,
+  getTasksPaginated,
+  getStats,
+  getAnalytics,
+  getActivityHeatmap,
+  snapshotInitiatorValue,
+  type Issue,
+  type Task,
+  type ActivityHeatmapEntry,
+  type AnalyticsTrendPoint,
+} from '../api'
 import {
   CalendarOutline,
   CodeSlashOutline,
@@ -292,11 +303,14 @@ const taskChartData = computed(() => {
   ].filter((d) => d.value > 0)
 })
 
-const currentUsername = computed(() => authState.user?.username ?? '')
+const currentInitiatorValue = computed(() => {
+  if (authState.user?.id) return `user:${authState.user.id}`
+  return authState.user?.username ? snapshotInitiatorValue(authState.user.username) : ''
+})
 
 function boardViewMoreRoute(base: string, statusFilter: string): string {
   const params = new URLSearchParams({ status: statusFilter })
-  if (currentUsername.value) params.set('initiator_username', currentUsername.value)
+  if (currentInitiatorValue.value) params.set('initiator', currentInitiatorValue.value)
   return `${base}?${params.toString()}`
 }
 
@@ -340,19 +354,18 @@ async function fetchData() {
   if (loading.value) return
   loading.value = true
   try {
-    const userId = authState.user?.id
-    const username = authState.user?.username
+    const initiator = currentInitiatorValue.value || undefined
 
     const [issuesRes, tasksRes] = await Promise.all([
       getIssues({
         page: 1,
         page_size: boardVisibleLimit,
-        ...(userId ? { initiator_user_id: userId } : {}),
+        ...(initiator ? { initiator } : {}),
       }),
       getTasksPaginated({
         page: 1,
         page_size: boardVisibleLimit,
-        ...(username ? { initiator_username: username } : {}),
+        ...(initiator ? { initiator } : {}),
       }),
     ])
 

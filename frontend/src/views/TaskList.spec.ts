@@ -12,6 +12,7 @@ const mockIsMobileRef = vi.hoisted(() => ({ value: false }))
 
 const { mockApi, resetMockApi, mockMessage, mockStartPolling, mockStopPolling } = vi.hoisted(() => {
   const mock = {
+    getTaskFilterOptions: vi.fn<() => Promise<any>>(),
     getProjects: vi.fn<() => Promise<any>>(),
     getTasksPaginated: vi.fn<() => Promise<any>>(),
     getStats: vi.fn<() => Promise<any>>(),
@@ -60,6 +61,7 @@ vi.mock('../utils/format', () => ({
 }))
 
 vi.mock('../api', () => ({
+  getTaskFilterOptions: mockApi.getTaskFilterOptions,
   getProjects: mockApi.getProjects,
   getTasksPaginated: mockApi.getTasksPaginated,
   getStats: mockApi.getStats,
@@ -165,7 +167,7 @@ vi.mock('naive-ui', () => ({
 vi.mock('../components/filter/FilterToolbar.vue', () => ({
   default: {
     name: 'FilterToolbar',
-    props: ['config', 'filters', 'sort', 'visibleColumns', 'activeFilterCount', 'hasActiveFilters', 'resultCount', 'searchPlaceholder'],
+    props: ['config', 'filters', 'sort', 'visibleColumns', 'activeFilterCount', 'hasActiveFilters', 'resultCount', 'searchPlaceholder', 'searchValue', 'searchMinLength'],
     setup() {
       return () => h('div', { class: 'filter-toolbar-mock', 'data-testid': 'filter-toolbar' })
     },
@@ -273,6 +275,13 @@ const mockStats = {
 // Helpers
 // ---------------------------------------------------------------------------
 function setupDefaultMocks() {
+  mockApi.getTaskFilterOptions.mockResolvedValue({
+    initiators: [
+      { value: 'user:1', kind: 'user', user_id: 1, username: 'alice', display_name: 'Alice', count: 12 },
+      { value: 'user:2', kind: 'user', user_id: 2, username: 'bob', display_name: null, count: 6 },
+      { value: 'user:3', kind: 'user', user_id: 3, username: 'charlie', display_name: null, count: 1 },
+    ],
+  })
   mockApi.getProjects.mockResolvedValue(mockProjects)
   mockApi.getTasksPaginated.mockResolvedValue({ items: mockTasks, total: mockTasks.length })
   mockApi.getStats.mockResolvedValue(mockStats)
@@ -690,56 +699,85 @@ describe('TaskList', () => {
       expect(wrapper.vm.statsCompleted).toBe(0)
     })
 
-    it('handles getProjects failure silently', async () => {
+    it('exposes project option loading failure and supports retry', async () => {
       setupDefaultMocks()
       mockApi.getProjects.mockRejectedValue(new Error('Projects down'))
 
       wrapper = mount(TaskList, { global: { plugins: [router] } })
       await flushPromises()
 
-      // No error message for projects failure
       expect(mockMessage.error).not.toHaveBeenCalled()
-      // Tasks still load fine
       expect(wrapper.vm.tasks).toHaveLength(3)
+      expect(wrapper.vm.projectOptionsError).toBe(true)
+
+      mockApi.getProjects.mockResolvedValue(mockProjects)
+      const projectField = wrapper.vm.filterConfig.filterFields.find(
+        (field: any) => field.key === 'project_id',
+      )
+      await projectField.optionsRetry()
+      expect(wrapper.vm.projectOptionsError).toBe(false)
+      expect(projectField.options()).toHaveLength(2)
     })
   })
 
   // -----------------------------------------------------------------------
-  // 9. fetchTasks guard
+  // 9. fetchTasks concurrency
   // -----------------------------------------------------------------------
-  describe('fetchTasks guard', () => {
-    it('skips fetch when already loading', async () => {
+  describe('fetchTasks concurrency', () => {
+    it('keeps the latest response when requests overlap', async () => {
       setupDefaultMocks()
-      let resolveTasks!: (v: any) => void
-      mockApi.getTasksPaginated.mockReturnValue(new Promise(r => { resolveTasks = r }) as any)
+      let resolveFirst!: (v: any) => void
+      let resolveSecond!: (v: any) => void
+      mockApi.getTasksPaginated
+        .mockReturnValueOnce(new Promise(r => { resolveFirst = r }) as any)
+        .mockReturnValueOnce(new Promise(r => { resolveSecond = r }) as any)
 
       wrapper = mount(TaskList, { global: { plugins: [router] } })
       await nextTick()
 
       expect(wrapper.vm.loading).toBe(true)
-      const countBefore = mockApi.getTasksPaginated.mock.calls.length
-
-      // Attempt another fetch while loading — should be blocked by the guard
       wrapper.vm.$.setupState.fetchTasks()
       await nextTick()
+      expect(mockApi.getTasksPaginated).toHaveBeenCalledTimes(2)
 
-      expect(mockApi.getTasksPaginated.mock.calls.length).toBe(countBefore)
+      const latestTask = createMockTask({ id: 99, user_prompt: 'Latest' })
+      resolveSecond({ items: [latestTask], total: 1 })
+      await flushPromises()
+      expect(wrapper.vm.tasks[0].id).toBe(99)
 
-      resolveTasks({ items: [], total: 0 })
+      resolveFirst({ items: mockTasks, total: mockTasks.length })
+      await flushPromises()
+      expect(wrapper.vm.tasks[0].id).toBe(99)
+    })
+
+    it('skips a background poll while the current request is still loading', async () => {
+      setupDefaultMocks()
+      let resolveTasks!: (v: any) => void
+      mockApi.getTasksPaginated.mockReturnValue(
+        new Promise(r => { resolveTasks = r }) as any,
+      )
+
+      wrapper = mount(TaskList, { global: { plugins: [router] } })
+      await nextTick()
+      expect(mockApi.getTasksPaginated).toHaveBeenCalledTimes(1)
+
+      await wrapper.vm.$.setupState.fetchTasks({ skipIfLoading: true })
+      expect(mockApi.getTasksPaginated).toHaveBeenCalledTimes(1)
+
+      resolveTasks({ items: mockTasks, total: mockTasks.length })
       await flushPromises()
     })
   })
 
   // -----------------------------------------------------------------------
-  // 10. Initiator accumulation
+  // 10. Initiator filter options
   // -----------------------------------------------------------------------
-  describe('initiator accumulation', () => {
-    it('accumulates unique initiator usernames from fetched tasks', async () => {
+  describe('initiator filter options', () => {
+    it('loads complete initiator options independently from the current page', async () => {
       await mountComponent()
-      // mockTasks have 'alice' (x2) and 'bob' (x1) — set should have 2 entries
-      expect(wrapper.vm.knownInitiators.size).toBe(2)
-      expect(wrapper.vm.knownInitiators.has('alice')).toBe(true)
-      expect(wrapper.vm.knownInitiators.has('bob')).toBe(true)
+      expect(mockApi.getTaskFilterOptions).toHaveBeenCalledTimes(1)
+      expect(wrapper.vm.initiatorFilterOptions).toHaveLength(3)
+      expect(wrapper.vm.initiatorFilterOptions[2].username).toBe('charlie')
     })
   })
 
@@ -1126,14 +1164,14 @@ describe('TaskList', () => {
       expect(options.map((o: any) => o.value)).toEqual(['0', '1', '2'])
     })
 
-    it('initiator options maps known usernames', async () => {
+    it('initiator options use stable user values and counts', async () => {
       await mountComponent()
       const config = (wrapper.vm as any).filterConfig
-      const field = config.filterFields.find((f: any) => f.key === 'initiator_username')
+      const field = config.filterFields.find((f: any) => f.key === 'initiator')
       const options = field.options()
-      expect(options).toHaveLength(2)
-      expect(options.map((o: any) => o.value)).toContain('alice')
-      expect(options.map((o: any) => o.value)).toContain('bob')
+      expect(options).toHaveLength(3)
+      expect(options[0]).toEqual({ label: 'Alice (@alice)', value: 'user:1', count: 12 })
+      expect(options[2]).toEqual({ label: 'charlie', value: 'user:3', count: 1 })
     })
 
     it('has_mr options returns true/false', async () => {
@@ -1143,6 +1181,16 @@ describe('TaskList', () => {
       const options = field.options()
       expect(options).toHaveLength(2)
       expect(options.map((o: any) => o.value)).toEqual(['true', 'false'])
+    })
+
+    it('rejects invalid URL values for status, project, priority, and MR filters', async () => {
+      await mountComponent()
+      const fields = (wrapper.vm as any).filterConfig.filterFields
+
+      expect(fields.find((field: any) => field.key === 'status').parseValue('bogus')).toBeUndefined()
+      expect(fields.find((field: any) => field.key === 'project_id').parseValue('-1')).toBeUndefined()
+      expect(fields.find((field: any) => field.key === 'priority').parseValue('3')).toBeUndefined()
+      expect(fields.find((field: any) => field.key === 'has_mr').parseValue('yes')).toBeUndefined()
     })
   })
 

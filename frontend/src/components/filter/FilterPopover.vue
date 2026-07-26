@@ -29,9 +29,36 @@
 
         <!-- Multi-select: checkboxes -->
         <template v-if="selectedCategory.type === 'multi-select'">
-          <n-checkbox-group v-model:value="tempMultiValue" class="filter-popover__checkbox-group">
+          <n-input
+            v-if="selectedCategory.searchable || categoryOptions.length > SEARCH_THRESHOLD"
+            v-model:value="optionSearch"
+            :placeholder="t('filter.search')"
+            size="small"
+            clearable
+            class="filter-popover__search"
+          />
+          <div v-if="optionsLoading" class="filter-popover__state">
+            <n-spin size="small" />
+          </div>
+          <div v-else-if="optionsError" class="filter-popover__state filter-popover__state--error">
+            <span>{{ t('filter.loadFailed') }}</span>
+            <n-button
+              v-if="selectedCategory.optionsRetry"
+              text
+              type="primary"
+              size="tiny"
+              class="filter-popover__retry"
+              @click="selectedCategory.optionsRetry()"
+            >
+              {{ t('common.retry') }}
+            </n-button>
+          </div>
+          <div v-else-if="filteredOptions.length === 0" class="filter-popover__state">
+            {{ t('filter.noResults') }}
+          </div>
+          <n-checkbox-group v-else v-model:value="tempMultiValue" class="filter-popover__checkbox-group">
             <div
-              v-for="opt in categoryOptions"
+              v-for="opt in filteredOptions"
               :key="opt.value"
               class="filter-popover__option-row"
             >
@@ -97,7 +124,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { NIcon, NCheckboxGroup, NCheckbox, NInput, NDatePicker } from 'naive-ui'
+import { NIcon, NCheckboxGroup, NCheckbox, NInput, NDatePicker, NSpin, NButton } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import type { FilterField } from '../../composables/useFilterSort'
 
@@ -136,13 +163,21 @@ const filteredOptions = computed(() => {
   return categoryOptions.value.filter((o) => o.label.toLowerCase().includes(q))
 })
 
+const optionsLoading = computed(() => selectedCategory.value?.optionsLoading?.() ?? false)
+const optionsError = computed(() => selectedCategory.value?.optionsError?.() ?? false)
+
 function selectCategory(field: FilterField) {
   selectedCategory.value = field
   optionSearch.value = ''
   if (field.type === 'multi-select') {
     tempMultiValue.value = props.filters[field.key] ? [...props.filters[field.key]] : []
   } else if (field.type === 'date-range') {
-    tempDateRange.value = props.filters[field.key] ?? null
+    const value = props.filters[field.key]
+    tempDateRange.value = Array.isArray(value)
+      && typeof value[0] === 'number'
+      && typeof value[1] === 'number'
+      ? [value[0], value[1]]
+      : null
   }
 }
 
@@ -289,6 +324,20 @@ function clearCurrent() {
 }
 .filter-popover__search {
   margin: 4px 8px 8px;
+}
+.filter-popover__state {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 72px;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  color: var(--n-text-color-3, #888);
+  font-size: 12px;
+}
+.filter-popover__state--error {
+  color: var(--n-color-error, #d03050);
 }
 .filter-popover__date-picker {
   margin: 8px;

@@ -11,6 +11,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.api.initiator_filters import list_initiator_filter_options
 from app.api.task_action_routes import (
     OverrideStatusRequest as OverrideStatusRequest,
 )
@@ -156,6 +157,7 @@ async def list_tasks(
     status: str | None = None,
     project_id: str | None = None,
     issue_id: int | None = None,
+    initiator: str | None = None,
     initiator_username: str | None = None,
     priority: str | None = None,
     has_mr: bool | None = None,
@@ -181,6 +183,7 @@ async def list_tasks(
             status=status,
             project_id=project_id,
             issue_id=issue_id,
+            initiator=initiator,
             initiator_username=initiator_username,
             priority=priority,
             has_mr=has_mr,
@@ -210,7 +213,9 @@ async def list_tasks(
         page_size = max(1, min(100, page_size))
         offset = (page - 1) * page_size
 
-        count_result = await db.execute(select(func.count()).select_from(query.subquery()))
+        count_result = await db.execute(
+            select(func.count()).select_from(query.order_by(None).subquery())
+        )
         total = count_result.scalar() or 0
 
         result = await db.execute(query.limit(page_size).offset(offset))
@@ -231,6 +236,15 @@ async def list_tasks(
     tasks = result.scalars().all()
 
     return [_serialize_task(task, project_lookup.get(task.project_id), settings) for task in tasks]
+
+
+@router.get("/tasks/filter-options")
+async def get_task_filter_options(
+    db: AsyncSession = Depends(get_db),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
+    """Return complete task-list filter options within the caller's access scope."""
+    return await list_initiator_filter_options(db, Task, access_scope)
 
 
 @router.get("/tasks/scheduled")

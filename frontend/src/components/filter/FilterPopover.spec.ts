@@ -19,6 +19,24 @@ vi.mock('vue-i18n', () => ({
 }))
 
 vi.mock('naive-ui', () => ({
+  NSpin: {
+    name: 'NSpin',
+    setup() {
+      return () => h('span', { class: 'n-spin' })
+    }
+  },
+  NButton: {
+    name: 'NButton',
+    props: ['text', 'type', 'size'],
+    emits: ['click'],
+    setup(_props: any, { slots, emit, attrs }: any) {
+      return () => h('button', {
+        ...attrs,
+        class: ['n-button', attrs.class],
+        onClick: () => emit('click'),
+      }, slots.default?.())
+    }
+  },
   NIcon: {
     name: 'NIcon',
     props: ['size', 'component'],
@@ -304,6 +322,59 @@ describe('FilterPopover', () => {
     expect(wrapper.find('.filter-popover__search').exists()).toBe(false)
   })
 
+  it('searches explicitly searchable multi-select options', async () => {
+    const searchableField: FilterField = {
+      ...multiSelectField,
+      searchable: true,
+    }
+    wrapper = mountComponent({ fields: [searchableField] })
+    await wrapper.find('.filter-popover__item').trigger('click')
+    await nextTick()
+
+    expect(wrapper.find('.filter-popover__search').exists()).toBe(true)
+    const vm = wrapper.vm as any
+    vm.optionSearch = 'run'
+    await nextTick()
+
+    const rows = wrapper.findAll('.filter-popover__option-row')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].text()).toContain('Running')
+  })
+
+  it('shows loading, error, and empty states for async multi-select options', async () => {
+    const loadingField: FilterField = {
+      ...multiSelectField,
+      optionsLoading: () => true,
+    }
+    wrapper = mountComponent({ fields: [loadingField] })
+    await wrapper.find('.filter-popover__item').trigger('click')
+    await nextTick()
+    expect(wrapper.find('.n-spin').exists()).toBe(true)
+    wrapper.unmount()
+
+    const errorField: FilterField = {
+      ...multiSelectField,
+      optionsError: () => true,
+      optionsRetry: vi.fn(),
+    }
+    wrapper = mountComponent({ fields: [errorField] })
+    await wrapper.find('.filter-popover__item').trigger('click')
+    await nextTick()
+    expect(wrapper.find('.filter-popover__state--error').text()).toContain('filter.loadFailed')
+    await wrapper.find('.filter-popover__retry').trigger('click')
+    expect(errorField.optionsRetry).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+
+    const emptyField: FilterField = {
+      ...multiSelectField,
+      options: () => [],
+    }
+    wrapper = mountComponent({ fields: [emptyField] })
+    await wrapper.find('.filter-popover__item').trigger('click')
+    await nextTick()
+    expect(wrapper.find('.filter-popover__state').text()).toBe('filter.noResults')
+  })
+
   // 13. Single-select: clear emits removeFilter
   it('single-select clear emits removeFilter', async () => {
     wrapper = mountComponent()
@@ -391,6 +462,15 @@ describe('FilterPopover', () => {
 
     const vm = wrapper.vm as any
     expect(vm.tempDateRange).toEqual([ts1, ts2])
+  })
+
+  it('does not pass a partial URL date range to the range picker', async () => {
+    const ts = 1700000000000
+    wrapper = mountComponent({ filters: { created: [ts, null] } })
+    await wrapper.findAll('.filter-popover__item')[2].trigger('click')
+    await nextTick()
+
+    expect((wrapper.vm as any).tempDateRange).toBeNull()
   })
 
   // 19. hasFilter returns false for undefined/null/empty array values

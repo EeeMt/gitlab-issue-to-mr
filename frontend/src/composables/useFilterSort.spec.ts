@@ -121,6 +121,34 @@ describe('useFilterSort', () => {
     expect(sort.value).toEqual({ field: 'created_at', order: 'desc' })
   })
 
+  it('can persist only column preferences while URL state owns filters and sort', () => {
+    localStorage.setItem('codify:filters:test', JSON.stringify({
+      filters: { status: ['closed'] },
+      sort: { field: 'status', order: 'asc' },
+      visibleColumns: ['title', 'creator'],
+    }))
+    const urlOwnedConfig: FilterSortConfig = {
+      ...mockConfig,
+      persistence: { filters: false, sort: false, columns: true },
+    }
+
+    const state = useFilterSort(
+      urlOwnedConfig,
+      { status: ['open'] },
+      { field: 'created_at', order: 'desc' },
+    )
+
+    expect(state.filters.value).toEqual({ status: ['open'] })
+    expect(state.sort.value).toEqual({ field: 'created_at', order: 'desc' })
+    expect(state.visibleColumns.value).toEqual(['title', 'creator'])
+
+    state.addFilter('status', ['closed'])
+    state.setSort('status', 'asc')
+    state.toggleColumn('creator')
+    const persisted = JSON.parse(localStorage.getItem('codify:filters:test')!)
+    expect(persisted).toEqual({ visibleColumns: ['title'] })
+  })
+
   it('omits default sort from apiParams', () => {
     const { apiParams } = useFilterSort(mockConfig)
     // Default sort should still be present for API clarity
@@ -140,5 +168,37 @@ describe('useFilterSort', () => {
     addFilter('created', [1704067200000, 1704153600000])
     expect(apiParams.value.created_after).toBeDefined()
     expect(apiParams.value.created_before).toBeDefined()
+  })
+
+  it('includes the full selected end day in date-range API params', () => {
+    const configWithDate: FilterSortConfig = {
+      ...mockConfig,
+      filterFields: [
+        { key: 'created', label: 'Created', type: 'date-range', apiParam: 'created_after,created_before' },
+      ],
+    }
+    const { apiParams, addFilter } = useFilterSort(configWithDate)
+    const selectedEnd = new Date(2026, 0, 31).getTime()
+    const expectedEnd = new Date(selectedEnd)
+    expectedEnd.setHours(23, 59, 59, 999)
+
+    addFilter('created', [new Date(2026, 0, 1).getTime(), selectedEnd])
+
+    expect(apiParams.value.created_before).toBe(expectedEnd.toISOString())
+  })
+
+  it('preserves epoch-zero boundaries for URL-owned date filters', () => {
+    const configWithDate: FilterSortConfig = {
+      ...mockConfig,
+      filterFields: [
+        { key: 'created', label: 'Created', type: 'date-range', apiParam: 'created_after,created_before' },
+      ],
+    }
+    const { apiParams, addFilter } = useFilterSort(configWithDate)
+
+    addFilter('created', [0, null])
+
+    expect(apiParams.value.created_after).toBe('1970-01-01T00:00:00.000Z')
+    expect(apiParams.value.created_before).toBeUndefined()
   })
 })

@@ -6,7 +6,12 @@ export interface FilterField {
   icon?: Component
   type: 'multi-select' | 'single-select' | 'date-range'
   options?: () => { label: string; value: any; color?: string; count?: number }[]
+  optionsLoading?: () => boolean
+  optionsError?: () => boolean
+  optionsRetry?: () => void | Promise<void>
+  searchable?: boolean
   apiParam?: string
+  parseValue?: (value: string) => any
 }
 
 export interface SortField {
@@ -27,12 +32,17 @@ export interface FilterSortConfig {
   sortFields: SortField[]
   columns: ColumnDef[]
   defaultSort: { field: string; order: 'asc' | 'desc' }
+  persistence?: {
+    filters?: boolean
+    sort?: boolean
+    columns?: boolean
+  }
 }
 
 interface PersistedState {
-  filters: Record<string, any>
-  sort: { field: string; order: 'asc' | 'desc' }
-  visibleColumns: string[]
+  filters?: Record<string, any>
+  sort?: { field: string; order: 'asc' | 'desc' }
+  visibleColumns?: string[]
 }
 
 function loadFromStorage(key: string): PersistedState | null {
@@ -40,7 +50,7 @@ function loadFromStorage(key: string): PersistedState | null {
     const raw = localStorage.getItem(key)
     if (!raw) return null
     const parsed = JSON.parse(raw)
-    if (parsed && typeof parsed === 'object' && 'filters' in parsed) {
+    if (parsed && typeof parsed === 'object') {
       return parsed as PersistedState
     }
     return null
@@ -61,29 +71,39 @@ function saveToStorage(key: string, state: PersistedState) {
  * @param config - Filter/sort/column configuration
  * @param initialFilters - Optional seed values that take precedence over localStorage.
  *   Use this for URL query params so they win over persisted state on first load.
+ * @param initialSort - Optional URL-owned sort state that takes precedence over localStorage.
  */
-export function useFilterSort(config: FilterSortConfig, initialFilters?: Record<string, any>) {
+export function useFilterSort(
+  config: FilterSortConfig,
+  initialFilters?: Record<string, any>,
+  initialSort?: { field: string; order: 'asc' | 'desc' },
+) {
   const saved = loadFromStorage(config.storageKey)
+  const persistFilters = config.persistence?.filters ?? true
+  const persistSort = config.persistence?.sort ?? true
+  const persistColumns = config.persistence?.columns ?? true
 
   const filters: Ref<Record<string, any>> = ref({
-    ...(saved?.filters ?? {}),
+    ...(persistFilters ? saved?.filters ?? {} : {}),
     ...(initialFilters ?? {}),
   })
   const sort: Ref<{ field: string; order: 'asc' | 'desc' }> = ref(
-    saved?.sort ?? { ...config.defaultSort }
+    initialSort ?? (persistSort ? saved?.sort : undefined) ?? { ...config.defaultSort }
   )
 
   const defaultVisibleColumns = config.columns
     .filter((c) => c.defaultVisible)
     .map((c) => c.key)
-  const visibleColumns: Ref<string[]> = ref(saved?.visibleColumns ?? [...defaultVisibleColumns])
+  const visibleColumns: Ref<string[]> = ref(
+    (persistColumns ? saved?.visibleColumns : undefined) ?? [...defaultVisibleColumns]
+  )
 
   function persist() {
-    saveToStorage(config.storageKey, {
-      filters: filters.value,
-      sort: sort.value,
-      visibleColumns: visibleColumns.value,
-    })
+    const state: PersistedState = {}
+    if (persistFilters) state.filters = filters.value
+    if (persistSort) state.sort = sort.value
+    if (persistColumns) state.visibleColumns = visibleColumns.value
+    saveToStorage(config.storageKey, state)
   }
 
   function addFilter(key: string, value: any) {
@@ -149,8 +169,14 @@ export function useFilterSort(config: FilterSortConfig, initialFilters?: Record<
       if (field.type === 'date-range' && field.apiParam) {
         const [afterKey, beforeKey] = field.apiParam.split(',').map((s) => s.trim())
         if (Array.isArray(val) && val.length === 2) {
-          if (val[0]) params[afterKey] = new Date(val[0]).toISOString()
-          if (val[1]) params[beforeKey] = new Date(val[1]).toISOString()
+          if (val[0] !== null && val[0] !== undefined) {
+            params[afterKey] = new Date(val[0]).toISOString()
+          }
+          if (val[1] !== null && val[1] !== undefined) {
+            const endOfDay = new Date(val[1])
+            endOfDay.setHours(23, 59, 59, 999)
+            params[beforeKey] = endOfDay.toISOString()
+          }
         }
       } else if (field.type === 'multi-select' && Array.isArray(val)) {
         if (val.length > 0) {

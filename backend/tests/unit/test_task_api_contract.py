@@ -28,6 +28,7 @@ from app.models import Task, TaskStatus
 EXPECTED_TASK_ROUTES = {
     ("GET", "/tasks"),
     ("POST", "/tasks"),
+    ("GET", "/tasks/filter-options"),
     ("GET", "/tasks/scheduled"),
     ("GET", "/tasks/slot-capacity"),
     ("GET", "/tasks/run-instruction-template-defaults"),

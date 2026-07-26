@@ -1,12 +1,19 @@
 """Query construction for task list endpoints."""
 
 from dataclasses import dataclass
-from datetime import datetime
+from typing import Any
 
 from fastapi import HTTPException
 from sqlalchemy import false, func, select
 from sqlalchemy.orm import selectinload
 
+from app.api.initiator_filters import apply_initiator_filter
+from app.api.list_filter_values import (
+    normalize_search_term,
+    parse_csv_integers,
+    parse_datetime_filter,
+    validate_datetime_range,
+)
 from app.dependencies.project_access import ProjectAccessScope
 from app.models import Issue, Task, TaskStatus
 
@@ -27,6 +34,7 @@ class TaskListFilters:
     status: str | None = None
     project_id: str | None = None
     issue_id: int | None = None
+    initiator: str | None = None
     initiator_username: str | None = None
     priority: str | None = None
     has_mr: bool | None = None
@@ -37,13 +45,6 @@ class TaskListFilters:
     scheduled_before: str | None = None
     sort_by: str | None = None
     sort_order: str | None = None
-
-
-def _parse_datetime_filter(value: str, field: str) -> datetime:
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=None)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid {field}: {value}") from exc
 
 
 def _restrict_to_accessible_projects(query, access_scope: ProjectAccessScope):
@@ -88,6 +89,7 @@ def build_task_list_query(
             else sort_column.desc().nullslast()
         )
 
+    tie_breaker = Task.id.asc() if sort_order == "asc" else Task.id.desc()
     query = (
         select(Task)
         .options(
@@ -96,7 +98,7 @@ def build_task_list_query(
             selectinload(Task.worker_profile),
             selectinload(Task.worker_profile_snapshot),
         )
-        .order_by(order_clause)
+        .order_by(order_clause, tie_breaker)
     )
 
     if filters.status:
@@ -122,12 +124,7 @@ def build_task_list_query(
             query = query.where(Task.status.in_(valid))
 
     if filters.project_id:
-        project_ids: list[int] = []
-        for value in filters.project_id.split(","):
-            try:
-                project_ids.append(int(value.strip()))
-            except ValueError:
-                pass
+        project_ids = parse_csv_integers(filters.project_id, "project_id", minimum=1)
         if project_ids:
             if not access_scope.is_unrestricted:
                 project_ids = [
@@ -141,12 +138,12 @@ def build_task_list_query(
                 query = query.where(Task.project_id.in_(project_ids))
             else:
                 query = query.where(false())
-        elif not access_scope.is_unrestricted:
-            query = _restrict_to_accessible_projects(query, access_scope)
     elif not access_scope.is_unrestricted:
         query = _restrict_to_accessible_projects(query, access_scope)
 
-    if filters.initiator_username:
+    if filters.initiator:
+        query = apply_initiator_filter(query, Task, filters.initiator)
+    elif filters.initiator_username:
         usernames = [
             value.strip()
             for value in filters.initiator_username.split(",")
@@ -161,12 +158,7 @@ def build_task_list_query(
         query = query.where(Task.issue_id == filters.issue_id)
 
     if filters.priority:
-        priorities: list[int] = []
-        for value in filters.priority.split(","):
-            try:
-                priorities.append(int(value.strip()))
-            except ValueError:
-                pass
+        priorities = parse_csv_integers(filters.priority, "priority", allowed={0, 1, 2})
         if len(priorities) == 1:
             query = query.where(Task.priority == priorities[0])
         elif priorities:
@@ -181,11 +173,10 @@ def build_task_list_query(
         query = query.where(Task.issue.has(condition))
 
     if filters.search:
-        if len(filters.search) > 200:
-            raise HTTPException(status_code=400, detail="search too long (max 200 characters)")
-        if len(filters.search) >= 2:
+        search_term = normalize_search_term(filters.search)
+        if search_term:
             escaped = (
-                filters.search
+                search_term
                 .replace("\\", "\\\\")
                 .replace("%", "\\%")
                 .replace("_", "\\_")
@@ -198,10 +189,26 @@ def build_task_list_query(
         ("scheduled_after", Task.scheduled_at, True),
         ("scheduled_before", Task.scheduled_at, False),
     )
+    parsed_dates: dict[str, tuple[Any, Any, bool]] = {}
     for field, column, is_lower_bound in date_filters:
         value = getattr(filters, field)
         if value:
-            parsed = _parse_datetime_filter(value, field)
-            query = query.where(column >= parsed if is_lower_bound else column <= parsed)
+            parsed = parse_datetime_filter(value, field)
+            parsed_dates[field] = (parsed, column, is_lower_bound)
+
+    validate_datetime_range(
+        parsed_dates.get("created_after", (None, None, False))[0],
+        parsed_dates.get("created_before", (None, None, False))[0],
+        "created_after",
+        "created_before",
+    )
+    validate_datetime_range(
+        parsed_dates.get("scheduled_after", (None, None, False))[0],
+        parsed_dates.get("scheduled_before", (None, None, False))[0],
+        "scheduled_after",
+        "scheduled_before",
+    )
+    for parsed, column, is_lower_bound in parsed_dates.values():
+        query = query.where(column >= parsed if is_lower_bound else column <= parsed)
 
     return query

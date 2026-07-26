@@ -139,6 +139,7 @@ const en = {
   },
   filter: {
     search: 'Search...',
+    searchMinChars: 'Enter at least {count} characters',
     filter: 'Filter',
     sort: 'Sort',
     columns: 'Columns',
@@ -154,6 +155,7 @@ const en = {
     priority: 'Priority',
     initiator: 'Initiator',
     creator: 'Creator',
+    unknownInitiator: 'Unknown or system initiated',
     hasMr: 'Merge Request',
     hasMrYes: 'Has MR',
     hasMrNo: 'No MR',
@@ -479,7 +481,7 @@ const en = {
       sessionId: 'Session ID',
       createdAt: 'Created',
       updatedAt: 'Updated',
-      creator: 'Creator',
+      creator: 'Initiator',
       tasks: 'Tasks',
     },
     totals: {

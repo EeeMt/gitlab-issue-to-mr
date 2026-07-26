@@ -12,6 +12,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.api.projects import list_projects
+from app.api.task_queries import TaskListFilters, build_task_list_query
 from app.api.tasks import list_tasks
 from app.core.projects import build_project_lookup
 from app.dependencies.project_access import ProjectAccessScope
@@ -109,6 +110,18 @@ async def test_list_tasks_applies_project_and_initiator_filters():
     assert len(result) == 1
     assert "tasks.project_id =" in str(executed_query)
     assert "tasks.initiator_username =" in str(executed_query)
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_applies_stable_initiator_user_filter():
+    db = AsyncMock()
+    db.execute.return_value = SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: []))
+    access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+    with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+        await list_tasks(initiator="user:7", db=db, access_scope=access_scope)
+
+    assert "tasks.initiator_user_id IN" in str(db.execute.await_args.args[0])
 
 
 @pytest.mark.asyncio
@@ -280,6 +293,10 @@ class TestListTasksSortParams(unittest.IsolatedAsyncioTestCase):
                 access_scope=scope,
             )
         self.assertIn("items", result)
+        count_sql = str(db.execute.await_args_list[0].args[0])
+        main_sql = str(db.execute.await_args_list[1].args[0])
+        self.assertNotIn("ORDER BY", count_sql)
+        self.assertIn("tasks.status ASC NULLS LAST, tasks.id ASC", main_sql)
 
     async def test_valid_sort_by_priority(self):
         db = _mock_paginated_db([], total=0)
@@ -350,19 +367,21 @@ class TestListTasksSortParams(unittest.IsolatedAsyncioTestCase):
 class TestListTasksSearchParam(unittest.IsolatedAsyncioTestCase):
     """Test search param on GET /api/tasks."""
 
-    async def test_search_param_accepted(self):
+    async def test_search_param_is_trimmed(self):
         db = _mock_paginated_db([], total=0)
         scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
         with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
             result = await list_tasks(
-                search="auth",
+                search="  auth  ",
                 page=1,
                 page_size=20,
                 db=db,
                 access_scope=scope,
             )
         self.assertIn("items", result)
+        main_query = db.execute.await_args_list[1].args[0]
+        self.assertIn("%auth%", main_query.compile().params.values())
 
     async def test_short_search_ignored(self):
         """Search strings < 2 chars should be silently ignored."""
@@ -411,35 +430,116 @@ class TestListTasksPriorityFilter(unittest.IsolatedAsyncioTestCase):
             )
         self.assertIn("items", result)
 
-    async def test_invalid_priority_silently_skipped(self):
-        """Invalid priority values are silently skipped, not 400."""
+    async def test_invalid_priority_returns_400(self):
+        from fastapi import HTTPException
+
         db = _mock_paginated_db([])
         scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
         with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
-            result = await list_tasks(
-                priority="abc",
-                page=1,
-                page_size=20,
-                db=db,
-                access_scope=scope,
-            )
-        self.assertIn("items", result)
+            with self.assertRaises(HTTPException) as ctx:
+                await list_tasks(
+                    priority="abc",
+                    page=1,
+                    page_size=20,
+                    db=db,
+                    access_scope=scope,
+                )
+        self.assertEqual(ctx.exception.status_code, 400)
 
-    async def test_mixed_valid_invalid_priority(self):
-        """Mixed valid/invalid priority: valid kept, invalid silently dropped."""
+    async def test_mixed_valid_invalid_priority_returns_400(self):
+        from fastapi import HTTPException
+
         db = _mock_paginated_db([])
         scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
         with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
-            result = await list_tasks(
-                priority="0,abc,1",
-                page=1,
-                page_size=20,
-                db=db,
-                access_scope=scope,
-            )
-        self.assertIn("items", result)
+            with self.assertRaises(HTTPException) as ctx:
+                await list_tasks(
+                    priority="0,abc,1",
+                    page=1,
+                    page_size=20,
+                    db=db,
+                    access_scope=scope,
+                )
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    async def test_out_of_range_priority_returns_400(self):
+        from fastapi import HTTPException
+
+        db = _mock_paginated_db([])
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            with self.assertRaises(HTTPException) as ctx:
+                await list_tasks(
+                    priority="3",
+                    page=1,
+                    page_size=20,
+                    db=db,
+                    access_scope=scope,
+                )
+        self.assertEqual(ctx.exception.status_code, 400)
+
+
+class TestListTasksProjectFilter(unittest.IsolatedAsyncioTestCase):
+    """Project filters reject malformed identifiers instead of returning all tasks."""
+
+    async def test_invalid_project_id_returns_400(self):
+        from fastapi import HTTPException
+
+        db = _mock_paginated_db([])
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            with self.assertRaises(HTTPException) as ctx:
+                await list_tasks(
+                    project_id="12,abc",
+                    page=1,
+                    page_size=20,
+                    db=db,
+                    access_scope=scope,
+                )
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    async def test_non_positive_project_id_returns_400(self):
+        from fastapi import HTTPException
+
+        db = _mock_paginated_db([])
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            with self.assertRaises(HTTPException) as ctx:
+                await list_tasks(
+                    project_id="0",
+                    page=1,
+                    page_size=20,
+                    db=db,
+                    access_scope=scope,
+                )
+        self.assertEqual(ctx.exception.status_code, 400)
+
+
+class TestTaskHasMrQuery(unittest.TestCase):
+    """MR filtering follows the task's required Issue relationship."""
+
+    def test_has_mr_false_requires_an_issue_without_an_mr(self):
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        query = build_task_list_query(TaskListFilters(has_mr=False), scope)
+        sql = str(query)
+
+        self.assertIn("EXISTS", sql)
+        self.assertIn("issues.merge_request_iid IS NULL", sql)
+
+    def test_has_mr_true_requires_an_issue_with_an_mr(self):
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        query = build_task_list_query(TaskListFilters(has_mr=True), scope)
+        sql = str(query)
+
+        self.assertIn("EXISTS", sql)
+        self.assertIn("issues.merge_request_iid IS NOT NULL", sql)
 
 
 class TestListTasksDateRange(unittest.IsolatedAsyncioTestCase):
@@ -500,6 +600,42 @@ class TestListTasksDateRange(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(HTTPException) as ctx:
                 await list_tasks(
                     created_before="garbage",
+                    page=1,
+                    page_size=20,
+                    db=db,
+                    access_scope=scope,
+                )
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    async def test_reversed_created_range_returns_400(self):
+        from fastapi import HTTPException
+
+        db = _mock_paginated_db([])
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            with self.assertRaises(HTTPException) as ctx:
+                await list_tasks(
+                    created_after="2026-02-01T00:00:00",
+                    created_before="2026-01-01T00:00:00",
+                    page=1,
+                    page_size=20,
+                    db=db,
+                    access_scope=scope,
+                )
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    async def test_reversed_scheduled_range_returns_400(self):
+        from fastapi import HTTPException
+
+        db = _mock_paginated_db([])
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            with self.assertRaises(HTTPException) as ctx:
+                await list_tasks(
+                    scheduled_after="2026-02-01T00:00:00",
+                    scheduled_before="2026-01-01T00:00:00",
                     page=1,
                     page_size=20,
                     db=db,

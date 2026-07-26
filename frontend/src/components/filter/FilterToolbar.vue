@@ -4,7 +4,7 @@
     <div class="filter-toolbar__row">
       <!-- Search -->
       <n-input
-        :value="searchValue"
+        :value="inputSearchValue"
         :placeholder="searchPlaceholder || t('filter.search')"
         size="small"
         clearable
@@ -16,6 +16,13 @@
           <n-icon size="16"><SearchOutline /></n-icon>
         </template>
       </n-input>
+      <span
+        v-if="searchTooShort"
+        class="filter-toolbar__search-hint"
+        data-testid="filter-toolbar-search-hint"
+      >
+        {{ t('filter.searchMinChars', { count: searchMinLength }) }}
+      </span>
 
       <!-- Filter button -->
       <n-popover trigger="click" placement="bottom-start" :show-arrow="false" raw :style="{ boxShadow: 'none' }">
@@ -104,7 +111,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, computed, onUnmounted, watch } from 'vue'
 import { NInput, NButton, NIcon, NPopover, NTag } from 'naive-ui'
 import { SearchOutline, FunnelOutline, SwapVerticalOutline, SettingsOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
@@ -122,6 +129,8 @@ const props = defineProps<{
   hasActiveFilters: boolean
   resultCount?: number
   searchPlaceholder?: string
+  searchValue?: string
+  searchMinLength?: number
 }>()
 
 const emit = defineEmits<{
@@ -136,14 +145,41 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const searchValue = ref('')
+const inputSearchValue = ref(props.searchValue ?? '')
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
+let pendingSearchEcho: string | undefined
+
+const searchMinLength = computed(() => Math.max(1, props.searchMinLength ?? 1))
+const searchTooShort = computed(() => {
+  const length = inputSearchValue.value.trim().length
+  return length > 0 && length < searchMinLength.value
+})
+
+watch(() => props.searchValue, (value) => {
+  if (pendingSearchEcho !== undefined && value === pendingSearchEcho) {
+    pendingSearchEcho = undefined
+    return
+  }
+  pendingSearchEcho = undefined
+  if (value !== undefined && value !== inputSearchValue.value) {
+    if (debounceTimer) {
+      clearTimeout(debounceTimer)
+      debounceTimer = null
+    }
+    inputSearchValue.value = value
+  }
+})
 
 function onSearchInput(val: string) {
-  searchValue.value = val
+  inputSearchValue.value = val
   if (debounceTimer) clearTimeout(debounceTimer)
   debounceTimer = setTimeout(() => {
-    emit('search', val)
+    debounceTimer = null
+    const trimmedValue = val.trim()
+    const effectiveValue = trimmedValue.length >= searchMinLength.value ? trimmedValue : ''
+    if (effectiveValue === (props.searchValue ?? '')) return
+    pendingSearchEcho = effectiveValue
+    emit('search', effectiveValue)
   }, 300)
 }
 
@@ -173,7 +209,8 @@ const filterChips = computed(() => {
       const opts = field.options?.() ?? []
       displayValue = opts.find((o) => o.value === val)?.label ?? String(val)
     } else if (field.type === 'date-range' && Array.isArray(val)) {
-      const fmt = (ts: number) => new Date(ts).toLocaleDateString()
+      const fmt = (ts: number | null | undefined) =>
+        ts === null || ts === undefined ? '…' : new Date(ts).toLocaleDateString()
       displayValue = `${fmt(val[0])} – ${fmt(val[1])}`
     } else {
       displayValue = String(val)
@@ -200,6 +237,11 @@ const filterChips = computed(() => {
 .filter-toolbar__search {
   width: 200px;
   flex-shrink: 0;
+}
+.filter-toolbar__search-hint {
+  margin-left: -2px;
+  font-size: 11px;
+  color: var(--n-warning-color, #f0a020);
 }
 .filter-toolbar__sort-label {
   font-size: 11px;

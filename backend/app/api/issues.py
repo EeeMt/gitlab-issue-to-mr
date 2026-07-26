@@ -11,6 +11,13 @@ from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.api.initiator_filters import apply_initiator_filter, list_initiator_filter_options
+from app.api.list_filter_values import (
+    normalize_search_term,
+    parse_csv_integers,
+    parse_datetime_filter,
+    validate_datetime_range,
+)
 from app.config import get_effective_settings
 from app.core.gitlab_client import get_gitlab_client
 from app.core.task_helpers import _require_issue_operator
@@ -370,7 +377,8 @@ SORT_ORDERS = {"asc", "desc"}
 async def list_issues(
     status: str | None = None,
     project_id: str | None = None,
-    initiator_user_id: int | None = None,
+    initiator: str | None = None,
+    initiator_user_id: str | None = None,
     initiator_username: str | None = None,
     has_mr: bool | None = None,
     search: str | None = None,
@@ -440,6 +448,7 @@ async def list_issues(
     else:
         sort_column = getattr(Issue, effective_sort_by)
     order_clause = sort_column.asc() if effective_sort_order == "asc" else sort_column.desc()
+    tie_breaker = Issue.id.asc() if effective_sort_order == "asc" else Issue.id.desc()
 
     query = (
         select(
@@ -457,7 +466,7 @@ async def list_issues(
             selectinload(Issue.default_provider),
         )
         .outerjoin(task_agg_subq, Issue.id == task_agg_subq.c.issue_id)
-        .order_by(order_clause)
+        .order_by(order_clause, tie_breaker)
     )
 
     # Multi-status filter (comma-separated)
@@ -483,14 +492,7 @@ async def list_issues(
 
     # Project filter (comma-separated integers for multi-select)
     if project_id:
-        project_ids = []
-        for p in project_id.split(","):
-            p = p.strip()
-            if p:
-                try:
-                    project_ids.append(int(p))
-                except ValueError:
-                    pass
+        project_ids = parse_csv_integers(project_id, "project_id", minimum=1)
         if project_ids:
             if not access_scope.is_unrestricted:
                 project_ids = [pid for pid in project_ids if pid in access_scope.accessible_project_ids]
@@ -500,12 +502,6 @@ async def list_issues(
                 query = query.where(Issue.project_id.in_(project_ids))
             else:
                 query = query.where(false())
-        elif not access_scope.is_unrestricted:
-            allowed_project_ids = access_scope.accessible_project_ids
-            if not allowed_project_ids:
-                query = query.where(false())
-            else:
-                query = query.where(Issue.project_id.in_(allowed_project_ids))
     elif not access_scope.is_unrestricted:
         allowed_project_ids = access_scope.accessible_project_ids
         if not allowed_project_ids:
@@ -513,15 +509,38 @@ async def list_issues(
         else:
             query = query.where(Issue.project_id.in_(allowed_project_ids))
 
-    if initiator_user_id is not None:
-        query = query.where(Issue.initiator_user_id == initiator_user_id)
-
-    if initiator_username:
-        usernames = [u.strip() for u in initiator_username.split(",") if u.strip()]
-        if len(usernames) == 1:
-            query = query.where(Issue.initiator_username == usernames[0])
-        elif len(usernames) > 1:
-            query = query.where(Issue.initiator_username.in_(usernames))
+    if initiator:
+        query = apply_initiator_filter(query, Issue, initiator)
+    else:
+        # Preserve the legacy API's AND semantics when callers provide both
+        # the user-id and username parameters.
+        if initiator_user_id:
+            user_ids = []
+            for raw_user_id in str(initiator_user_id).split(","):
+                raw_user_id = raw_user_id.strip()
+                if not raw_user_id:
+                    continue
+                try:
+                    user_id = int(raw_user_id)
+                except ValueError as exc:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Invalid initiator_user_id: {raw_user_id}",
+                    ) from exc
+                if user_id <= 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Invalid initiator_user_id: {raw_user_id}",
+                    )
+                user_ids.append(user_id)
+            if user_ids:
+                query = query.where(Issue.initiator_user_id.in_(user_ids))
+        if initiator_username:
+            usernames = [u.strip() for u in initiator_username.split(",") if u.strip()]
+            if len(usernames) == 1:
+                query = query.where(Issue.initiator_username == usernames[0])
+            elif len(usernames) > 1:
+                query = query.where(Issue.initiator_username.in_(usernames))
 
     # Has MR filter
     if has_mr is not None:
@@ -532,29 +551,32 @@ async def list_issues(
 
     # Text search on title (min 2, max 200 chars)
     if search:
-        if len(search) > 200:
-            raise HTTPException(status_code=400, detail="search too long (max 200 characters)")
-        if len(search) >= 2:
-            escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        search_term = normalize_search_term(search)
+        if search_term:
+            escaped = search_term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             query = query.where(Issue.title.ilike(f"%{escaped}%", escape="\\"))
 
     # Date range filters
-    if created_after:
-        try:
-            dt = datetime.fromisoformat(created_after.replace("Z", "+00:00")).replace(tzinfo=None)
-            query = query.where(Issue.created_at >= dt)
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid created_after: {created_after}")
-    if created_before:
-        try:
-            dt = datetime.fromisoformat(created_before.replace("Z", "+00:00")).replace(tzinfo=None)
-            query = query.where(Issue.created_at <= dt)
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid created_before: {created_before}")
+    created_after_dt = (
+        parse_datetime_filter(created_after, "created_after") if created_after else None
+    )
+    created_before_dt = (
+        parse_datetime_filter(created_before, "created_before") if created_before else None
+    )
+    validate_datetime_range(
+        created_after_dt,
+        created_before_dt,
+        "created_after",
+        "created_before",
+    )
+    if created_after_dt:
+        query = query.where(Issue.created_at >= created_after_dt)
+    if created_before_dt:
+        query = query.where(Issue.created_at <= created_before_dt)
 
     # Total count
     count_q = select(func.count()).select_from(
-        query.with_only_columns(Issue.id).subquery()
+        query.order_by(None).with_only_columns(Issue.id).subquery()
     )
     total = (await db.execute(count_q)).scalar() or 0
 
@@ -582,6 +604,16 @@ async def list_issues(
         "page": page,
         "page_size": page_size,
     }
+
+
+@router.get("/filter-options")
+async def get_issue_filter_options(
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(require_authenticated_user),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
+    """Return complete issue-list filter options within the caller's access scope."""
+    return await list_initiator_filter_options(db, Issue, access_scope)
 
 
 @router.get("/{issue_id}")

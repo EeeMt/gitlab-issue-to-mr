@@ -51,6 +51,8 @@
           :has-active-filters="filterState.hasActiveFilters.value"
           :result-count="totalIssues"
           :search-placeholder="t('filter.search')"
+          :search-value="searchTerm"
+          :search-min-length="2"
           @add-filter="filterState.addFilter"
           @remove-filter="filterState.removeFilter"
           @clear-all-filters="filterState.clearAllFilters"
@@ -60,7 +62,7 @@
           @reset-columns="filterState.resetColumns"
           @search="onSearch"
         >
-          <template v-if="currentUsername" #quick-filters>
+          <template v-if="currentInitiatorValue" #quick-filters>
             <n-button
               size="small"
               :type="isMyFilterActive ? 'primary' : 'default'"
@@ -97,16 +99,33 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, h, watch, computed } from 'vue'
+import { ref, onMounted, h, watch, computed, nextTick } from 'vue'
 import { NButton, NSpace, NCard, NDataTable, NTag, NGrid, NGi, NSpin, NIcon, useMessage, type DataTableColumns } from 'naive-ui'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { getIssues, getProjects, getStats, type Issue, type IssueStatus, type Project } from '../api'
+import {
+  getIssueFilterOptions,
+  getIssues,
+  getProjects,
+  getStats,
+  snapshotInitiatorValue,
+  type InitiatorFilterOption,
+  type Issue,
+  type IssueStatus,
+  type Project,
+} from '../api'
 import { authState } from '../auth'
 import PageHeader from '../components/PageHeader.vue'
 import SummaryCard from '../components/SummaryCard.vue'
 import FilterToolbar from '../components/filter/FilterToolbar.vue'
 import { useFilterSort, type FilterSortConfig } from '../composables/useFilterSort'
+import {
+  buildListRouteQuery,
+  parseAllowedQueryValue,
+  parsePositiveIntegerQueryValue,
+  readListQueryState,
+  routeQueriesEqual,
+} from '../composables/listQueryState'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeUtc8Compact } from '../utils/datetime'
 import { formatDurationSec } from '../utils/format'
@@ -120,7 +139,11 @@ const { isMobile } = useBreakpoints()
 
 const issues = ref<Issue[]>([])
 const projects = ref<Project[]>([])
-const knownCreators = ref<Set<string>>(new Set())
+const projectOptionsLoading = ref(false)
+const projectOptionsError = ref(false)
+const initiatorFilterOptions = ref<InitiatorFilterOption[]>([])
+const initiatorOptionsLoading = ref(false)
+const initiatorOptionsError = ref(false)
 const loading = ref(false)
 const hasLoadedOnce = ref(false)
 
@@ -140,10 +163,33 @@ const currentPage = ref(1)
 const pageSize = ref(20)
 const totalIssues = ref(0)
 
-const creatorOptions = computed(() => {
-  const values = Array.from(knownCreators.value).sort((a, b) => a.localeCompare(b))
-  return values.map((username) => ({ label: username, value: username }))
-})
+const ISSUE_STATUS_VALUES = ['open', 'in_progress', 'in_review', 'closed'] as const
+const BOOLEAN_FILTER_VALUES = ['true', 'false'] as const
+
+function initiatorOptionLabel(option: InitiatorFilterOption): string {
+  if (option.kind === 'unknown') return t('filter.unknownInitiator')
+  if (option.display_name && option.username && option.display_name !== option.username) {
+    return `${option.display_name} (@${option.username})`
+  }
+  return option.username || t('filter.unknownInitiator')
+}
+
+function creatorOptions() {
+  const options: { label: string; value: string; count?: number }[] = initiatorFilterOptions.value.map((option) => ({
+    label: initiatorOptionLabel(option),
+    value: option.value,
+    count: option.count,
+  }))
+  const selected = filterState.filters.value.initiator
+  if (Array.isArray(selected)) {
+    for (const value of selected) {
+      if (!options.some((option) => option.value === value)) {
+        options.push({ label: String(value).replace(/^(?:username|snapshot):/, ''), value })
+      }
+    }
+  }
+  return options
+}
 
 const filterConfig: FilterSortConfig = {
   storageKey: 'codify:filters:issues',
@@ -153,6 +199,7 @@ const filterConfig: FilterSortConfig = {
       label: 'filter.status',
       icon: EllipseOutline,
       type: 'multi-select',
+      parseValue: (value) => parseAllowedQueryValue(value, ISSUE_STATUS_VALUES),
       options: () => [
         { label: t('issue.status.open'), value: 'open', color: '#18a058' },
         { label: t('issue.status.in_progress'), value: 'in_progress', color: '#4080ff' },
@@ -165,20 +212,30 @@ const filterConfig: FilterSortConfig = {
       label: 'filter.project',
       icon: FolderOpenOutline,
       type: 'multi-select',
+      parseValue: parsePositiveIntegerQueryValue,
+      searchable: true,
       options: () => projects.value.map((p) => ({ label: p.path_with_namespace, value: p.id })),
+      optionsLoading: () => projectOptionsLoading.value,
+      optionsError: () => projectOptionsError.value,
+      optionsRetry: fetchProjects,
     },
     {
-      key: 'initiator_username',
-      label: 'filter.creator',
+      key: 'initiator',
+      label: 'filter.initiator',
       icon: PersonOutline,
       type: 'multi-select',
-      options: () => creatorOptions.value,
+      searchable: true,
+      options: creatorOptions,
+      optionsLoading: () => initiatorOptionsLoading.value,
+      optionsError: () => initiatorOptionsError.value,
+      optionsRetry: fetchInitiatorOptions,
     },
     {
       key: 'has_mr',
       label: 'filter.hasMr',
       icon: GitMergeOutline,
       type: 'single-select',
+      parseValue: (value) => parseAllowedQueryValue(value, BOOLEAN_FILTER_VALUES),
       options: () => [
         { label: t('filter.hasMrYes'), value: 'true' },
         { label: t('filter.hasMrNo'), value: 'false' },
@@ -214,43 +271,102 @@ const filterConfig: FilterSortConfig = {
     { key: 'created_at', label: 'issue.field.createdAt', defaultVisible: true },
   ],
   defaultSort: { field: 'created_at', order: 'desc' },
+  persistence: { filters: false, sort: false, columns: true },
 }
 
-function getInitialFiltersFromQuery(): Record<string, any> {
-  const filters: Record<string, any> = {}
-  const { status, initiator_username, project_id } = route.query
-  if (status) filters.status = String(status).split(',')
-  if (initiator_username) filters.initiator_username = String(initiator_username).split(',')
-  if (project_id) filters.project_id = String(project_id).split(',').map(Number)
-  return filters
+function getIssueQueryState() {
+  const state = readListQueryState(filterConfig, route.query, { pageSize: 20, searchMinLength: 2 })
+  if (!state.filters.initiator) {
+    if (route.query.initiator_user_id) {
+      const userInitiators = String(route.query.initiator_user_id)
+        .split(',')
+        .map(parsePositiveIntegerQueryValue)
+        .filter((userId): userId is number => userId !== undefined)
+        .map((userId) => `user:${userId}`)
+      if (userInitiators.length) state.filters.initiator = userInitiators
+    } else if (route.query.initiator_username) {
+      state.filters.initiator = String(route.query.initiator_username)
+        .split(',')
+        .map((username) => username.trim())
+        .filter(Boolean)
+        .map(snapshotInitiatorValue)
+    }
+  }
+  return state
 }
 
-const filterState = useFilterSort(filterConfig, getInitialFiltersFromQuery())
-const searchTerm = ref('')
+const initialQueryState = getIssueQueryState()
+currentPage.value = initialQueryState.page
+pageSize.value = initialQueryState.pageSize
+const filterState = useFilterSort(
+  filterConfig,
+  initialQueryState.filters,
+  initialQueryState.sort,
+)
+const searchTerm = ref(initialQueryState.search)
 
-const currentUsername = computed(() => authState.user?.username ?? null)
+const currentInitiatorValue = computed(() => {
+  if (authState.user?.id) return `user:${authState.user.id}`
+  return authState.user?.username ? snapshotInitiatorValue(authState.user.username) : null
+})
 
 const isMyFilterActive = computed(() => {
-  const val = filterState.filters.value['initiator_username']
-  return Array.isArray(val) && val.length === 1 && val[0] === currentUsername.value
+  const val = filterState.filters.value.initiator
+  return Array.isArray(val) && val.length === 1 && val[0] === currentInitiatorValue.value
 })
 
 function toggleMyFilter() {
   if (isMyFilterActive.value) {
-    filterState.removeFilter('initiator_username')
-  } else if (currentUsername.value) {
-    filterState.addFilter('initiator_username', [currentUsername.value])
+    filterState.removeFilter('initiator')
+  } else if (currentInitiatorValue.value) {
+    filterState.addFilter('initiator', [currentInitiatorValue.value])
+  }
+}
+
+let applyingRouteQuery = false
+
+function currentRouteQuery() {
+  return buildListRouteQuery(
+    filterState.apiParams.value,
+    searchTerm.value,
+    currentPage.value,
+    pageSize.value,
+  )
+}
+
+function syncRouteQuery() {
+  const query = currentRouteQuery()
+  if (!routeQueriesEqual(route.query, query)) {
+    void router.replace({ query })
   }
 }
 
 function onSearch(term: string) {
   searchTerm.value = term
   currentPage.value = 1
+  syncRouteQuery()
   fetchIssues()
 }
 
 watch([() => filterState.filters.value, () => filterState.sort.value], () => {
+  if (applyingRouteQuery) return
   currentPage.value = 1
+  syncRouteQuery()
+  fetchIssues()
+}, { deep: true })
+
+watch(() => route.query, async () => {
+  if (routeQueriesEqual(route.query, currentRouteQuery())) return
+  applyingRouteQuery = true
+  const state = getIssueQueryState()
+  filterState.filters.value = state.filters
+  filterState.sort.value = state.sort
+  searchTerm.value = state.search
+  currentPage.value = state.page
+  pageSize.value = state.pageSize
+  await nextTick()
+  applyingRouteQuery = false
+  syncRouteQuery()
   fetchIssues()
 }, { deep: true })
 
@@ -262,11 +378,13 @@ const pagination = computed(() => ({
   pageSizes: [20, 50, 100],
   'onUpdate:page': (page: number) => {
     currentPage.value = page
+    syncRouteQuery()
     fetchIssues()
   },
   'onUpdate:pageSize': (size: number) => {
     pageSize.value = size
     currentPage.value = 1
+    syncRouteQuery()
     fetchIssues()
   },
 }))
@@ -465,38 +583,58 @@ const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 const tableLoading = computed(() => loading.value && hasLoadedOnce.value)
 
 async function fetchIssues() {
-  if (loading.value) return
+  const requestId = ++latestIssueRequestId
   loading.value = true
+  const params: Record<string, any> = {
+    page: currentPage.value,
+    page_size: pageSize.value,
+    ...filterState.apiParams.value,
+  }
+  if (searchTerm.value && searchTerm.value.length >= 2) {
+    params.search = searchTerm.value
+  }
   try {
-    const params: Record<string, any> = {
-      page: currentPage.value,
-      page_size: pageSize.value,
-      ...filterState.apiParams.value,
-    }
-    if (searchTerm.value && searchTerm.value.length >= 2) {
-      params.search = searchTerm.value
-    }
-    const result = await getIssues(params as Parameters<typeof getIssues>[0])
+    const result = await getIssues(params)
+    if (requestId !== latestIssueRequestId) return
     issues.value = result.items
     totalIssues.value = result.total
-    // Accumulate known creators for filter options (don't shrink on filter)
-    for (const issue of result.items) {
-      const username = issue.initiator_username?.trim()
-      if (username) knownCreators.value.add(username)
-    }
   } catch {
-    message.error(t('issue.loadFailed'))
+    if (requestId === latestIssueRequestId) {
+      message.error(t('issue.loadFailed'))
+    }
   } finally {
-    hasLoadedOnce.value = true
-    loading.value = false
+    if (requestId === latestIssueRequestId) {
+      hasLoadedOnce.value = true
+      loading.value = false
+    }
+  }
+}
+
+let latestIssueRequestId = 0
+
+async function fetchInitiatorOptions() {
+  initiatorOptionsLoading.value = true
+  initiatorOptionsError.value = false
+  try {
+    const result = await getIssueFilterOptions()
+    initiatorFilterOptions.value = result.initiators
+  } catch {
+    initiatorOptionsError.value = true
+  } finally {
+    initiatorOptionsLoading.value = false
   }
 }
 
 async function fetchProjects() {
+  if (projectOptionsLoading.value) return
+  projectOptionsLoading.value = true
+  projectOptionsError.value = false
   try {
     projects.value = await getProjects()
   } catch {
-    // Keep the issue list usable even if the optional filter options fail to load.
+    projectOptionsError.value = true
+  } finally {
+    projectOptionsLoading.value = false
   }
 }
 
@@ -516,7 +654,9 @@ async function fetchStats() {
 }
 
 onMounted(() => {
+  syncRouteQuery()
   fetchProjects()
+  fetchInitiatorOptions()
   fetchIssues()
   fetchStats()
 })

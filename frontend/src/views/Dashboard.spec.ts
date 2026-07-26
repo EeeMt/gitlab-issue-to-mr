@@ -5,6 +5,7 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 import Dashboard from './Dashboard.vue'
 import { createMockTask } from '../test/mocks/api'
 import type { Issue, Task } from '../api'
+import { authState } from '../auth'
 
 const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
   const mock = {
@@ -256,6 +257,7 @@ describe('Dashboard', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     resetMockApi()
+    authState.user = null
     router.push('/')
     await router.isReady()
 
@@ -331,6 +333,34 @@ describe('Dashboard', () => {
       await mountDashboard()
       expect(mockApi.getTasksPaginated).toHaveBeenCalledWith({ page: 1, page_size: 20 })
       expect(mockApi.getTasksPaginated).toHaveBeenCalledTimes(1)
+    })
+
+    it('uses the stable user initiator for both board queries', async () => {
+      authState.user = {
+        id: 7,
+        gitlab_user_id: 70,
+        username: 'alice',
+        display_name: 'Alice',
+        email: null,
+        avatar_url: null,
+        platform_role: 'user',
+      }
+
+      await mountDashboard()
+
+      expect(mockApi.getIssues).toHaveBeenCalledWith({
+        page: 1,
+        page_size: 20,
+        initiator: 'user:7',
+      })
+      expect(mockApi.getTasksPaginated).toHaveBeenCalledWith({
+        page: 1,
+        page_size: 20,
+        initiator: 'user:7',
+      })
+      expect(wrapper.vm.boardViewMoreRoute('/tasks', 'completed')).toBe(
+        '/tasks?status=completed&initiator=user%3A7',
+      )
     })
 
     it('calls getStats on mount', async () => {
