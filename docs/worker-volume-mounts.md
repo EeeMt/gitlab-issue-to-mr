@@ -253,6 +253,18 @@ Session Storage 归属于 issue workspace：
 
 Archive 目录用于将容器内的运行时文件打包后持久化到宿主机，供用户下载。
 
+Worker Kit `0.3.4` 起可将 Playwright 报告、截图、Trace、覆盖率和诊断文件写入
+`/tmp/codify-runtime/artifacts`。有效产物会封存到同一 runtime archive；旧 Kit 保持
+原行为。目录契约、限制和安全校验见
+[Generic Task Runtime Artifacts Design](superpowers/specs/2026-07-27-task-runtime-artifacts-design.md)。
+
+| 配置项 | 默认值 |
+|--------|--------|
+| `worker_artifacts_max_total_bytes` | 200 MiB |
+| `worker_artifacts_max_file_bytes` | 100 MiB |
+| `worker_artifacts_max_entries` | 5,000 |
+| `worker_runtime_archive_retention_days` | 30 天 |
+
 ### 容器内运行时代理
 
 容器内的 entrypoint 在 `/tmp/codify-runtime/` 下生成三个文件：
@@ -263,20 +275,20 @@ Archive 目录用于将容器内的运行时文件打包后持久化到宿主机
 | `runtime.json` | 运行时元数据 |
 | `console.log` | 控制台输出 |
 
-任务完成后，`ci-claude.sh` 将其打包为 `task-{task_id}-runtime-archive.tar.gz`。
+任务完成后，Worker entrypoint 将其打包为 `task-{task_id}-runtime-archive.tar.gz`。
 
 ### 归档拉取与存储
 
-Worker 的 `finalize_archive()`（`worker_results.py:33`）从容器内拉取归档文件：
+Backend 的 `finalize_archive()` 通过 Docker API 流式拉取归档：
 
 ```python
-stream, _stat_info = await asyncio.to_thread(
-    container.get_archive,
-    f"/tmp/codify-runtime/{archive_name}",
+final_path, size = await asyncio.to_thread(
+    _stream_runtime_archive_from_container,
+    container,
+    container_path=f"/tmp/codify-runtime/{archive_name}",
+    archive_name=archive_name,
+    archive_store="/opt/codify-archives",
 )
-# 解包外层 tar，写到宿主机
-archive_store = "/opt/codify-archives"
-final_path = os.path.join(archive_store, archive_name)
 ```
 
 ### Compose 挂载

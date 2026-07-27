@@ -298,6 +298,7 @@ async def create_execute_container(
         post_script=worker_runtime.post_script,
         previous_task_summaries=previous_task_summaries,
         ci_failure_bundle_path=ci_failure_bundle_path,
+        artifact_policy_settings=settings,
     )
 
     session_mode = getattr(task, "session_mode", "continue")

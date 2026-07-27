@@ -212,6 +212,8 @@ class WorkerEnvironmentVariableHelperTests(unittest.TestCase):
         self.assertEqual(env["CODIFY_GIT_CLONE_FILTER"], "blob:none")
         self.assertIn("CODIFY_GIT_CLONE_DEPTH", RESERVED_WORKER_ENVIRONMENT_KEYS)
         self.assertIn("CODIFY_GIT_CLONE_FILTER", RESERVED_WORKER_ENVIRONMENT_KEYS)
+        self.assertIn("CODIFY_RUNTIME_DIR", RESERVED_WORKER_ENVIRONMENT_KEYS)
+        self.assertIn("CODIFY_ARTIFACT_DIR", RESERVED_WORKER_ENVIRONMENT_KEYS)
         with self.assertRaises(ValueError):
             validate_worker_environment_variable_key("CODIFY_GIT_CLONE_DEPTH")
         with self.assertRaises(ValueError):

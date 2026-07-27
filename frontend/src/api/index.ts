@@ -525,6 +525,10 @@ export interface RuntimeConfig {
   worker_environment_variables: WorkerEnvironmentVariable[]
   worker_workspace_host_path: string
   worker_workspace_retention_days: number
+  worker_artifacts_max_total_bytes: number
+  worker_artifacts_max_file_bytes: number
+  worker_artifacts_max_entries: number
+  worker_runtime_archive_retention_days: number
   slot_max_tasks: number
   slot_max_tasks_enforce: boolean
   ci_auto_repair_max_attempts: number

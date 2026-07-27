@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import PurePosixPath
@@ -47,6 +48,12 @@ from app.models import (
     TaskWorkerProfileSnapshot,
     WorkerProfile,
     WorkerProfileEnvironmentVariable,
+)
+
+logger = logging.getLogger(__name__)
+
+_LEGACY_IGNORED_RUNTIME_ENVIRONMENT_KEYS = frozenset(
+    {"CODIFY_RUNTIME_DIR", "CODIFY_ARTIFACT_DIR"}
 )
 
 
@@ -363,7 +370,11 @@ def build_worker_profile_environment_map(
     """Build runtime env from snapshot environment rows."""
     env: dict[str, str] = {}
     for row in rows:
-        key = _validate_environment_key(str(_profile_value(row, "key")))
+        raw_key = str(_profile_value(row, "key"))
+        if raw_key in _LEGACY_IGNORED_RUNTIME_ENVIRONMENT_KEYS:
+            logger.warning("Ignoring legacy reserved worker environment variable %s", raw_key)
+            continue
+        key = _validate_environment_key(raw_key)
         value = str(_profile_value(row, "value") or "")
         is_secret = bool(_profile_value(row, "is_secret"))
         if is_secret and not include_secrets:

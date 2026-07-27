@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -47,11 +48,14 @@ from app.core.worker_docker_targets import (
 from app.core.worker_workspace import cleanup_expired_ci_failure_bundles
 from app.core.worker_workspace_remote import remove_issue_workspace_remote
 from app.database import AsyncSessionLocal
-from app.models import Issue, IssueExecutionLock, IssueStatus, Task, TaskStatus
+from app.models import Issue, IssueExecutionLock, IssueStatus, Task, TaskRunArchive, TaskStatus
 from app.runtime_config import load_runtime_config_from_db
 
 logger = logging.getLogger(__name__)
 _SESSION_CLEANUP_INTERVAL_SECONDS = 3600
+_RUNTIME_ARCHIVE_CLEANUP_INTERVAL_SECONDS = 3600
+_RUNTIME_ARCHIVE_CLEANUP_RETRY_SECONDS = 3600
+_RUNTIME_ARCHIVE_CLEANUP_BATCH_SIZE = 100
 _WORKSPACE_CLEANUP_INTERVAL_SECONDS = 21600
 _WORKSPACE_CLEANUP_BATCH_SIZE = 50
 _RETAINED_CONTAINER_CLEANUP_INTERVAL_SECONDS = 60
@@ -179,6 +183,7 @@ class Scheduler:
         self._terminal_worker_seen_at: dict[int, float] = {}
         self._active_worker_threads: int = 0  # thread pool tasks in-flight (submitted but not done)
         self._last_session_cleanup_at = 0.0
+        self._last_runtime_archive_cleanup_at = time.time()
         self._last_workspace_cleanup_at = 0.0
         self._last_retained_container_cleanup_at = 0.0
         self._last_lock_cleanup_at = 0.0
@@ -239,6 +244,7 @@ class Scheduler:
         async with AsyncSessionLocal() as db:
             await load_runtime_config_from_db(db)
             await self._maybe_cleanup_sessions(db)
+            await self._maybe_cleanup_runtime_archives(db)
             await self._maybe_cleanup_workspaces(db)
             await self._maybe_cleanup_retained_containers(db)
             await self._maybe_cleanup_issue_locks(db)
@@ -493,6 +499,63 @@ class Scheduler:
             await db.commit()
             logger.info("Cleaned up %s stale dashboard sessions", deleted_count)
         self._last_session_cleanup_at = now
+
+    async def _maybe_cleanup_runtime_archives(self, db: AsyncSession) -> None:
+        """Delete expired runtime archive files without deleting their Tasks."""
+        now = time.time()
+        if (
+            now - self._last_runtime_archive_cleanup_at
+            < _RUNTIME_ARCHIVE_CLEANUP_INTERVAL_SECONDS
+        ):
+            return
+
+        retention_days = get_settings().worker_runtime_archive_retention_days
+        current_time = utcnow()
+        cutoff = current_time - timedelta(days=retention_days)
+        archives = list(
+            (
+                await db.execute(
+                    select(TaskRunArchive)
+                    .where(
+                        TaskRunArchive.created_at < cutoff,
+                        or_(
+                            TaskRunArchive.cleanup_next_attempt_at.is_(None),
+                            TaskRunArchive.cleanup_next_attempt_at <= current_time,
+                        ),
+                    )
+                    .order_by(TaskRunArchive.created_at.asc(), TaskRunArchive.id.asc())
+                    .limit(_RUNTIME_ARCHIVE_CLEANUP_BATCH_SIZE)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        deleted = 0
+        failed = 0
+        retry_at = current_time + timedelta(seconds=_RUNTIME_ARCHIVE_CLEANUP_RETRY_SECONDS)
+        for archive in archives:
+            try:
+                await asyncio.to_thread(os.remove, archive.archive_path)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                logger.warning(
+                    "Could not delete expired runtime archive %s: %s",
+                    archive.archive_path,
+                    exc,
+                )
+                archive.cleanup_next_attempt_at = retry_at
+                failed += 1
+                continue
+            await db.delete(archive)
+            deleted += 1
+
+        if deleted or failed:
+            await db.commit()
+        if deleted:
+            logger.info("Deleted %s expired runtime archive(s)", deleted)
+        if len(archives) < _RUNTIME_ARCHIVE_CLEANUP_BATCH_SIZE:
+            self._last_runtime_archive_cleanup_at = now
 
     async def _maybe_cleanup_workspaces(self, db: AsyncSession) -> None:
         """Start periodic workspace cleanup without blocking the scheduler cycle."""

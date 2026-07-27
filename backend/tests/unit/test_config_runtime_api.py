@@ -12,6 +12,7 @@ from starlette.requests import Request
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from app.config import get_settings, reset_runtime_config, set_runtime_config
 from app.database import get_db
@@ -85,6 +86,74 @@ class ConfigRuntimeAPITests(unittest.TestCase):
         self.assertIn("worker_workspace_host_path", data)
         self.assertIn("worker_workspace_retention_days", data)
         self.assertIn("worker_failed_workspace_retention_days", data)
+        self.assertEqual(data["worker_artifacts_max_total_bytes"], 200 * 1024 * 1024)
+        self.assertEqual(data["worker_artifacts_max_file_bytes"], 100 * 1024 * 1024)
+        self.assertEqual(data["worker_artifacts_max_entries"], 5000)
+        self.assertEqual(data["worker_runtime_archive_retention_days"], 30)
+
+    def test_artifact_runtime_config_rejects_invalid_bounds_and_relationship(self):
+        for payload in (
+            {"worker_artifacts_max_total_bytes": True},
+            {"worker_artifacts_max_total_bytes": 1024},
+            {"worker_artifacts_max_entries": 0},
+            {"worker_runtime_archive_retention_days": 3651},
+            {"worker_artifacts_max_file_bytes": 201 * 1024 * 1024},
+        ):
+            with self.subTest(payload=payload):
+                response = self.client.patch("/api/config/runtime", json=payload)
+                self.assertIn(response.status_code, {400, 422})
+
+    def test_artifact_settings_reject_invalid_deployment_values(self):
+        from app.config import Settings
+
+        invalid_values = (
+            {
+                "worker_artifacts_max_total_bytes": 0,
+                "worker_artifacts_max_file_bytes": 1024 * 1024,
+            },
+            {"worker_artifacts_max_entries": 0},
+            {"worker_runtime_archive_retention_days": -1},
+            {"worker_runtime_archive_retention_days": True},
+            {
+                "worker_artifacts_max_total_bytes": 1024 * 1024,
+                "worker_artifacts_max_file_bytes": 2 * 1024 * 1024,
+            },
+        )
+        for values in invalid_values:
+            with self.subTest(values=values), self.assertRaises(ValidationError):
+                Settings(**values)
+
+    def test_artifact_settings_reject_invalid_environment_retention(self):
+        from app.config import Settings
+
+        with patch.dict(
+            os.environ,
+            {"WORKER_RUNTIME_ARCHIVE_RETENTION_DAYS": "-1"},
+        ), self.assertRaises(ValidationError):
+            Settings(_env_file=None)
+
+    def test_artifact_runtime_config_accepts_transactionally_valid_limits(self):
+        with patch(
+            "app.api.config_runtime.save_runtime_config_override",
+            new=AsyncMock(),
+        ) as mock_save:
+            response = self.client.patch(
+                "/api/config/runtime",
+                json={
+                    "worker_artifacts_max_total_bytes": 256 * 1024 * 1024,
+                    "worker_artifacts_max_file_bytes": 128 * 1024 * 1024,
+                    "worker_artifacts_max_entries": 6000,
+                    "worker_runtime_archive_retention_days": 60,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_save.assert_any_await(
+            self.mock_db, "worker_artifacts_max_total_bytes", 256 * 1024 * 1024
+        )
+        mock_save.assert_any_await(
+            self.mock_db, "worker_artifacts_max_file_bytes", 128 * 1024 * 1024
+        )
 
     def test_runtime_config_includes_run_instruction_defaults(self):
         from app.core.task_prompt import BUILT_IN_EXECUTE_RUN_INSTRUCTION_TEMPLATE

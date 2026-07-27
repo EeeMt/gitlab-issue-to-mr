@@ -7,10 +7,12 @@ import logging
 import os as _os
 import re
 import tarfile as _tarfile
+import tempfile
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import WORKER_RUNTIME_ARCHIVE_MAX_BYTES
 from app.core.task_event_archive import archive_bundle_name
 from app.core.usage_limits import upsert_task_usage_ledger
 from app.core.utcnow import utcnow
@@ -23,28 +25,103 @@ _THINK_BLOCK_RE = re.compile(r'<think\b[^>]*>.*?</think>', re.IGNORECASE | re.DO
 _OPEN_THINK_RE = re.compile(r'<think\b[^>]*>', re.IGNORECASE)
 
 
+class _IteratorReader(io.RawIOBase):
+    """Expose Docker's chunk iterator as a bounded file-like stream."""
+
+    def __init__(self, chunks) -> None:
+        super().__init__()
+        self._chunks = iter(chunks)
+        self._pending = memoryview(b"")
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, target) -> int:
+        view = memoryview(target)
+        written = 0
+        while written < len(view):
+            if not self._pending:
+                try:
+                    chunk = next(self._chunks)
+                except StopIteration:
+                    break
+                if not chunk:
+                    continue
+                self._pending = memoryview(chunk)
+            copied = min(len(view) - written, len(self._pending))
+            view[written : written + copied] = self._pending[:copied]
+            self._pending = self._pending[copied:]
+            written += copied
+        return written
+
+
+def _stream_runtime_archive_from_container(
+    container,
+    *,
+    container_path: str,
+    archive_name: str,
+    archive_store: str,
+) -> tuple[str, int]:
+    stream, _stat_info = container.get_archive(container_path)
+    _os.makedirs(archive_store, exist_ok=True)
+    final_path = _os.path.join(archive_store, archive_name)
+    temp_file = tempfile.NamedTemporaryFile(
+        mode="wb",
+        dir=archive_store,
+        prefix=f".{archive_name}.",
+        suffix=".part",
+        delete=False,
+    )
+    temp_path = temp_file.name
+    try:
+        with temp_file:
+            with io.BufferedReader(_IteratorReader(stream)) as outer_stream:
+                with _tarfile.open(fileobj=outer_stream, mode="r|") as outer_tar:
+                    member = outer_tar.next()
+                    if member is None or not member.isreg() or member.name != archive_name:
+                        raise RuntimeError("Docker runtime archive response has an unexpected member")
+                    if member.size > WORKER_RUNTIME_ARCHIVE_MAX_BYTES:
+                        raise RuntimeError("Runtime archive exceeds the 640 MiB hard limit")
+                    source = outer_tar.extractfile(member)
+                    if source is None:
+                        raise RuntimeError("Docker runtime archive member is unreadable")
+                    copied = 0
+                    while True:
+                        chunk = source.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        copied += len(chunk)
+                        if copied > WORKER_RUNTIME_ARCHIVE_MAX_BYTES:
+                            raise RuntimeError("Runtime archive exceeds the 640 MiB hard limit")
+                        temp_file.write(chunk)
+                    if copied != member.size:
+                        raise RuntimeError("Docker runtime archive member was truncated")
+                    if outer_tar.next() is not None:
+                        raise RuntimeError("Docker runtime archive response has extra members")
+            temp_file.flush()
+            _os.fsync(temp_file.fileno())
+        _os.replace(temp_path, final_path)
+        return final_path, copied
+    except Exception:
+        try:
+            _os.remove(temp_path)
+        except FileNotFoundError:
+            pass
+        raise
+
+
 async def finalize_archive(*, task_id: int, container, db: AsyncSession) -> None:
     """Package the three runtime artifacts into an archive and record its metadata."""
     archive_name = archive_bundle_name(task_id=task_id)
     try:
-        stream, _stat_info = await asyncio.to_thread(
-            container.get_archive,
-            f"{_CONTAINER_RUNTIME_DIR}/{archive_name}",
-        )
-        raw_bytes = b"".join(stream)
-        outer_tar_buf = io.BytesIO(raw_bytes)
-
         archive_store = "/opt/codify-archives"
-        _os.makedirs(archive_store, exist_ok=True)
-        final_path = _os.path.join(archive_store, archive_name)
-
-        with _tarfile.open(fileobj=outer_tar_buf, mode="r|") as tf:
-            member = tf.next()
-            if member:
-                with tf.extractfile(member) as src, open(final_path, "wb") as dst:
-                    dst.write(src.read())
-
-        size = _os.path.getsize(final_path) if _os.path.exists(final_path) else 0
+        final_path, size = await asyncio.to_thread(
+            _stream_runtime_archive_from_container,
+            container,
+            container_path=f"{_CONTAINER_RUNTIME_DIR}/{archive_name}",
+            archive_name=archive_name,
+            archive_store=archive_store,
+        )
         db.add(TaskRunArchive(
             task_id=task_id,
             archive_name=archive_name,

@@ -907,6 +907,73 @@ def test_runtime_archive_can_be_created_before_claude_outputs(
         }
 
 
+def test_runtime_archive_fallback_removes_output_over_hard_limit(tmp_path: Path):
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir()
+    (runtime_dir / "console.log").write_bytes(os.urandom(32 * 1024))
+    bootstrap = BOOTSTRAP_SCRIPT.read_text()
+    match = re.search(r"(?ms)^create_runtime_archive\(\) \{\n.*?^\}\n", bootstrap)
+    assert match is not None
+    bounded_function = match.group(0).replace(
+        "local archive_max_bytes=$((640 * 1024 * 1024))",
+        "local archive_max_bytes=1024",
+    )
+
+    harness = (
+        "set -e\n"
+        f"CODIFY_RUNTIME_DIR={runtime_dir!s}\n"
+        "CODIFY_ARTIFACT_HELPER=\n"
+        "TASK_ID=78\n"
+        "RUNTIME_ARCHIVE_CREATED=0\n"
+        f"{bounded_function}\n"
+        "create_runtime_archive\n"
+    )
+    result = subprocess.run(
+        ["bash", "-c", harness],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    archive_path = runtime_dir / "task-78-runtime-archive.tar.gz"
+    assert not archive_path.exists()
+    assert not archive_path.with_suffix(".gz.part").exists()
+    assert "exceeds the 640 MiB hard limit" in result.stdout
+
+
+def test_runtime_archive_fallback_never_publishes_partial_tar_output(tmp_path: Path):
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir()
+    (runtime_dir / "console.log").write_text("base\n", encoding="utf-8")
+    bootstrap = BOOTSTRAP_SCRIPT.read_text()
+    match = re.search(r"(?ms)^create_runtime_archive\(\) \{\n.*?^\}\n", bootstrap)
+    assert match is not None
+
+    harness = (
+        "set -e\n"
+        f"CODIFY_RUNTIME_DIR={runtime_dir!s}\n"
+        "CODIFY_ARTIFACT_HELPER=\n"
+        "TASK_ID=79\n"
+        "RUNTIME_ARCHIVE_CREATED=0\n"
+        "tar() { printf partial; return 2; }\n"
+        f"{match.group(0)}\n"
+        "create_runtime_archive\n"
+    )
+    result = subprocess.run(
+        ["bash", "-c", harness],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    archive_path = runtime_dir / "task-79-runtime-archive.tar.gz"
+    assert not archive_path.exists()
+    assert not archive_path.with_suffix(".gz.part").exists()
+    assert "creation failed; archive omitted" in result.stdout
+
+
 @pytest.mark.skipif(shutil.which("jq") is None, reason="repository module requires jq")
 def test_server_ignored_filter_is_reported_as_ineffective_without_retry(
     tmp_path: Path,

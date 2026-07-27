@@ -6,12 +6,19 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api._validators import _is_valid_http_url
-from app.config import Settings, get_effective_settings, get_runtime_config_types, get_settings
+from app.config import (
+    WORKER_ARTIFACTS_HARD_MAX_ENTRIES,
+    WORKER_ARTIFACTS_HARD_MAX_TOTAL_BYTES,
+    Settings,
+    get_effective_settings,
+    get_runtime_config_types,
+    get_settings,
+)
 from app.core.config_crypto import ConfigEncryptionError
 from app.core.task_prompt import TaskPromptValidationError, validate_run_instruction_template
 from app.core.worker_environment_variables import (
@@ -75,6 +82,10 @@ class RuntimeConfigSection(BaseModel):
     worker_workspace_host_path: str
     worker_workspace_retention_days: int
     worker_failed_workspace_retention_days: int
+    worker_artifacts_max_total_bytes: int
+    worker_artifacts_max_file_bytes: int
+    worker_artifacts_max_entries: int
+    worker_runtime_archive_retention_days: int
     slot_max_tasks: int
     slot_max_tasks_enforce: bool
     ci_auto_repair_max_attempts: int
@@ -115,6 +126,10 @@ class RuntimeConfigUpdate(BaseModel):
     worker_workspace_host_path: str | None = None
     worker_workspace_retention_days: int | None = None
     worker_failed_workspace_retention_days: int | None = None
+    worker_artifacts_max_total_bytes: StrictInt | None = None
+    worker_artifacts_max_file_bytes: StrictInt | None = None
+    worker_artifacts_max_entries: StrictInt | None = None
+    worker_runtime_archive_retention_days: StrictInt | None = None
     slot_max_tasks: int | None = None
     slot_max_tasks_enforce: bool | None = None
     ci_auto_repair_max_attempts: int | None = None
@@ -154,6 +169,10 @@ def _serialize_runtime_config(
         worker_workspace_host_path=settings.worker_workspace_host_path,
         worker_workspace_retention_days=settings.worker_workspace_retention_days,
         worker_failed_workspace_retention_days=settings.worker_failed_workspace_retention_days,
+        worker_artifacts_max_total_bytes=settings.worker_artifacts_max_total_bytes,
+        worker_artifacts_max_file_bytes=settings.worker_artifacts_max_file_bytes,
+        worker_artifacts_max_entries=settings.worker_artifacts_max_entries,
+        worker_runtime_archive_retention_days=settings.worker_runtime_archive_retention_days,
         slot_max_tasks=settings.slot_max_tasks,
         slot_max_tasks_enforce=settings.slot_max_tasks_enforce,
         ci_auto_repair_max_attempts=settings.ci_auto_repair_max_attempts,
@@ -301,6 +320,46 @@ def _validate_config_value(key: str, value: object) -> object:
             )
         return value
 
+    if key in {"worker_artifacts_max_total_bytes", "worker_artifacts_max_file_bytes"}:
+        minimum = 1024 * 1024
+        if (
+            not isinstance(value, int)
+            or isinstance(value, bool)
+            or value < minimum
+            or value > WORKER_ARTIFACTS_HARD_MAX_TOTAL_BYTES
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{key} must be between 1 MiB and 512 MiB",
+            )
+        return value
+
+    if key == "worker_artifacts_max_entries":
+        if (
+            not isinstance(value, int)
+            or isinstance(value, bool)
+            or value < 1
+            or value > WORKER_ARTIFACTS_HARD_MAX_ENTRIES
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{key} must be between 1 and {WORKER_ARTIFACTS_HARD_MAX_ENTRIES}",
+            )
+        return value
+
+    if key == "worker_runtime_archive_retention_days":
+        if (
+            not isinstance(value, int)
+            or isinstance(value, bool)
+            or value < 1
+            or value > 3650
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{key} must be between 1 and 3650 days",
+            )
+        return value
+
     if key in {"anthropic_base_url", "alert_webhook_url"}:
         if not isinstance(value, str) or not value.strip() or not _is_valid_http_url(value.strip()):
             raise HTTPException(
@@ -387,6 +446,28 @@ def _normalize_runtime_updates(raw_updates: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def _validate_artifact_config_relationship(
+    runtime_updates: dict[str, Any],
+    base_settings: Settings,
+) -> None:
+    max_total_bytes = runtime_updates.get(
+        "worker_artifacts_max_total_bytes",
+        base_settings.worker_artifacts_max_total_bytes,
+    )
+    max_file_bytes = runtime_updates.get(
+        "worker_artifacts_max_file_bytes",
+        base_settings.worker_artifacts_max_file_bytes,
+    )
+    if max_file_bytes > max_total_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "worker_artifacts_max_file_bytes must not exceed "
+                "worker_artifacts_max_total_bytes"
+            ),
+        )
+
+
 async def _sync_anthropic_to_default_provider(
     db: AsyncSession,
     updates: dict,
@@ -455,6 +536,9 @@ async def apply_runtime_config_update(
         exclude={"worker_environment_variables", "worker_workspace_host_path"},
     )
     runtime_updates = _normalize_runtime_updates(raw_runtime_updates)
+    effective_settings = get_effective_settings()
+    _validate_artifact_config_relationship(runtime_updates, effective_settings)
+    _build_preview_settings(runtime_updates, effective_settings)
     worker_environment_variables_provided = (
         "worker_environment_variables" in runtime_update.model_fields_set
     )

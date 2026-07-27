@@ -57,6 +57,70 @@
             </n-grid>
           </div>
 
+          <div class="config-form__section">
+            <div class="config-form__section-header">
+              <div class="config-form__section-title">{{ t('config.taskArtifacts') }}</div>
+              <n-button
+                size="small"
+                type="primary"
+                :loading="artifactSaving"
+                :disabled="isWorkerBusy || !isArtifactDirty || !artifactLimitsValid"
+                @click="handleSaveArtifacts"
+              >
+                {{ t('config.saveArtifactSettings') }}
+              </n-button>
+            </div>
+            <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+              <n-gi>
+                <n-form-item :label="t('config.artifactMaxTotalMiB')">
+                  <n-input-number
+                    v-model:value="artifactFormValue.maxTotalMiB"
+                    :min="1"
+                    :max="512"
+                    class="config-form__input"
+                  />
+                </n-form-item>
+              </n-gi>
+              <n-gi>
+                <n-form-item
+                  :label="t('config.artifactMaxFileMiB')"
+                  :validation-status="artifactLimitsValid ? undefined : 'error'"
+                  :feedback="artifactLimitsValid ? undefined : t('config.artifactFileLimitError')"
+                >
+                  <n-input-number
+                    v-model:value="artifactFormValue.maxFileMiB"
+                    :min="1"
+                    :max="artifactFormValue.maxTotalMiB"
+                    class="config-form__input"
+                  />
+                </n-form-item>
+              </n-gi>
+              <n-gi>
+                <n-form-item :label="t('config.artifactMaxEntries')">
+                  <n-input-number
+                    v-model:value="artifactFormValue.maxEntries"
+                    :min="1"
+                    :max="100000"
+                    class="config-form__input"
+                  />
+                </n-form-item>
+              </n-gi>
+              <n-gi>
+                <n-form-item :label="t('config.runtimeArchiveRetentionDays')">
+                  <n-input-number
+                    v-model:value="artifactFormValue.retentionDays"
+                    :min="1"
+                    :max="3650"
+                    class="config-form__input"
+                  />
+                  <template #feedback>
+                    {{ t('config.runtimeArchiveRetentionDaysHint') }}
+                  </template>
+                </n-form-item>
+              </n-gi>
+            </n-grid>
+          </div>
+
           <div class="worker-profile-layout">
             <aside class="worker-profile-list">
               <div class="worker-profile-list__header">
@@ -161,7 +225,7 @@
                   <n-input
                     v-model:value="workerFormValue.worker_kit_version"
                     class="config-form__input"
-                    placeholder="0.3.3"
+                    placeholder="0.3.4"
                   />
                 </n-form-item>
               </n-gi>
@@ -170,7 +234,7 @@
                   <n-input
                     v-model:value="workerFormValue.worker_kit_path"
                     class="config-form__input"
-                    placeholder="/opt/codify/worker-kits/0.3.3-linux-amd64"
+                    placeholder="/opt/codify/worker-kits/0.3.4-linux-amd64"
                   />
                   <template #feedback>
                     {{ t('config.workerKitPathHint') }}
@@ -600,6 +664,13 @@ type EnvironmentVariableFormItem = {
   value_configured: boolean
 }
 
+type ArtifactFormValue = {
+  maxTotalMiB: number
+  maxFileMiB: number
+  maxEntries: number
+  retentionDays: number
+}
+
 const props = defineProps<{
   isMobile: boolean
   reloadKey?: number
@@ -672,6 +743,15 @@ const lastLoadedWorkspace = ref({
   worker_workspace_host_path: '/opt/codify-workspaces'
 })
 const workspaceSaving = ref(false)
+const artifactSaving = ref(false)
+const MEBIBYTE = 1024 * 1024
+const artifactFormValue = ref<ArtifactFormValue>({
+  maxTotalMiB: 200,
+  maxFileMiB: 100,
+  maxEntries: 5000,
+  retentionDays: 30
+})
+const lastLoadedArtifacts = ref<ArtifactFormValue>({ ...artifactFormValue.value })
 
 const isWorkerDirty = computed(() =>
   JSON.stringify(workerProfileComparable(workerFormValue.value)) !==
@@ -681,9 +761,19 @@ const isWorkspaceDirty = computed(() =>
   workerFormValue.value.worker_workspace_retention_days !==
     lastLoadedWorkspace.value.worker_workspace_retention_days
 )
+const isArtifactDirty = computed(
+  () => JSON.stringify(artifactFormValue.value) !== JSON.stringify(lastLoadedArtifacts.value)
+)
+const artifactLimitsValid = computed(
+  () => artifactFormValue.value.maxFileMiB <= artifactFormValue.value.maxTotalMiB
+)
 
 const isWorkerBusy = computed(() =>
-  loading.value || workerSaving.value || workspaceSaving.value || dockerTesting.value
+  loading.value ||
+  workerSaving.value ||
+  workspaceSaving.value ||
+  artifactSaving.value ||
+  dockerTesting.value
 )
 const insecureRemoteDocker = computed(() =>
   !workerFormValue.value.use_system_docker &&
@@ -865,6 +955,13 @@ async function fetchConfig() {
       worker_workspace_retention_days: workerFormValue.value.worker_workspace_retention_days,
       worker_workspace_host_path: workerFormValue.value.worker_workspace_host_path
     }
+    artifactFormValue.value = {
+      maxTotalMiB: (config.runtime?.worker_artifacts_max_total_bytes ?? 200 * MEBIBYTE) / MEBIBYTE,
+      maxFileMiB: (config.runtime?.worker_artifacts_max_file_bytes ?? 100 * MEBIBYTE) / MEBIBYTE,
+      maxEntries: config.runtime?.worker_artifacts_max_entries ?? 5000,
+      retentionDays: config.runtime?.worker_runtime_archive_retention_days ?? 30
+    }
+    lastLoadedArtifacts.value = { ...artifactFormValue.value }
   } catch {
     message.error(t('config.loadError'))
   } finally {
@@ -1049,6 +1146,47 @@ async function handleSaveWorkspace() {
     message.error(error?.response?.data?.detail || t('config.saveError'))
   } finally {
     workspaceSaving.value = false
+  }
+}
+
+async function handleSaveArtifacts() {
+  if (!artifactLimitsValid.value) {
+    message.error(t('config.artifactFileLimitError'))
+    return
+  }
+  artifactSaving.value = true
+  try {
+    const savedConfig = await updateConfig({
+      runtime: {
+        worker_artifacts_max_total_bytes: Math.round(
+          artifactFormValue.value.maxTotalMiB * MEBIBYTE
+        ),
+        worker_artifacts_max_file_bytes: Math.round(
+          artifactFormValue.value.maxFileMiB * MEBIBYTE
+        ),
+        worker_artifacts_max_entries: artifactFormValue.value.maxEntries,
+        worker_runtime_archive_retention_days: artifactFormValue.value.retentionDays
+      }
+    })
+    artifactFormValue.value = {
+      maxTotalMiB:
+        (savedConfig.runtime?.worker_artifacts_max_total_bytes ??
+          artifactFormValue.value.maxTotalMiB * MEBIBYTE) / MEBIBYTE,
+      maxFileMiB:
+        (savedConfig.runtime?.worker_artifacts_max_file_bytes ??
+          artifactFormValue.value.maxFileMiB * MEBIBYTE) / MEBIBYTE,
+      maxEntries:
+        savedConfig.runtime?.worker_artifacts_max_entries ?? artifactFormValue.value.maxEntries,
+      retentionDays:
+        savedConfig.runtime?.worker_runtime_archive_retention_days ??
+        artifactFormValue.value.retentionDays
+    }
+    lastLoadedArtifacts.value = { ...artifactFormValue.value }
+    message.success(t('config.saved'))
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || t('config.saveError'))
+  } finally {
+    artifactSaving.value = false
   }
 }
 

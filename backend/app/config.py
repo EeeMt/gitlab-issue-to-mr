@@ -6,7 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Union
 
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.task_prompt import (
@@ -18,6 +18,13 @@ from app.core.task_prompt import (
 logger = logging.getLogger(__name__)
 
 RuntimeConfigValue = Union[int, str, bool]
+
+WORKER_ARTIFACTS_DEFAULT_MAX_TOTAL_BYTES = 200 * 1024 * 1024
+WORKER_ARTIFACTS_DEFAULT_MAX_FILE_BYTES = 100 * 1024 * 1024
+WORKER_ARTIFACTS_DEFAULT_MAX_ENTRIES = 5_000
+WORKER_ARTIFACTS_HARD_MAX_TOTAL_BYTES = 512 * 1024 * 1024
+WORKER_ARTIFACTS_HARD_MAX_ENTRIES = 100_000
+WORKER_RUNTIME_ARCHIVE_MAX_BYTES = 640 * 1024 * 1024
 
 PERSISTED_CONFIG_TYPES: dict[str, type[RuntimeConfigValue]] = {
     "gitlab_url": str,
@@ -59,6 +66,10 @@ PERSISTED_CONFIG_TYPES: dict[str, type[RuntimeConfigValue]] = {
     "worker_ca_cert_host_path": str,  # Absolute path to CA cert on Docker host; auto-added to volume mounts
     "worker_workspace_retention_days": int,
     "worker_failed_workspace_retention_days": int,
+    "worker_artifacts_max_total_bytes": int,
+    "worker_artifacts_max_file_bytes": int,
+    "worker_artifacts_max_entries": int,
+    "worker_runtime_archive_retention_days": int,
     "slot_max_tasks": int,  # Max tasks per 1-hour slot (0 = unlimited)
     "slot_max_tasks_enforce": bool,  # Enforce slot limit (True = hard reject, False = soft warning)
     "ci_auto_repair_max_attempts": int,
@@ -168,6 +179,22 @@ class Settings(BaseSettings):
     )
     worker_workspace_retention_days: int = Field(default=14)
     worker_failed_workspace_retention_days: int = Field(default=30)
+    worker_artifacts_max_total_bytes: int = Field(
+        default=WORKER_ARTIFACTS_DEFAULT_MAX_TOTAL_BYTES,
+        ge=1024 * 1024,
+        le=WORKER_ARTIFACTS_HARD_MAX_TOTAL_BYTES,
+    )
+    worker_artifacts_max_file_bytes: int = Field(
+        default=WORKER_ARTIFACTS_DEFAULT_MAX_FILE_BYTES,
+        ge=1024 * 1024,
+        le=WORKER_ARTIFACTS_HARD_MAX_TOTAL_BYTES,
+    )
+    worker_artifacts_max_entries: int = Field(
+        default=WORKER_ARTIFACTS_DEFAULT_MAX_ENTRIES,
+        ge=1,
+        le=WORKER_ARTIFACTS_HARD_MAX_ENTRIES,
+    )
+    worker_runtime_archive_retention_days: int = Field(default=30, ge=1, le=3650)
     default_execute_run_instruction_template: str = Field(
         default=BUILT_IN_EXECUTE_RUN_INSTRUCTION_TEMPLATE
     )
@@ -177,6 +204,28 @@ class Settings(BaseSettings):
     ci_auto_repair_run_instruction_template: str = Field(
         default=BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE
     )
+
+    @field_validator(
+        "worker_artifacts_max_total_bytes",
+        "worker_artifacts_max_file_bytes",
+        "worker_artifacts_max_entries",
+        "worker_runtime_archive_retention_days",
+        mode="before",
+    )
+    @classmethod
+    def _reject_boolean_artifact_settings(cls, value: object) -> object:
+        if isinstance(value, bool):
+            raise ValueError("artifact limits and retention must be integers")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_artifact_limit_relationship(self) -> "Settings":
+        if self.worker_artifacts_max_file_bytes > self.worker_artifacts_max_total_bytes:
+            raise ValueError(
+                "worker_artifacts_max_file_bytes must not exceed "
+                "worker_artifacts_max_total_bytes"
+            )
+        return self
 
     # Session storage for Claude session persistence (Issue→Task model)
     session_storage_root: str = Field(default="/var/codify/sessions")

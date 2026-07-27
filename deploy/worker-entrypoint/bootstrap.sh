@@ -47,16 +47,32 @@ ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-http://localhost:11434/v1}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-claude-sonnet-4-20250514}"
 APPEND_SYSTEM_PROMPT="${APPEND_SYSTEM_PROMPT:-}"
-CODIFY_RUNTIME_DIR="${CODIFY_RUNTIME_DIR:-/tmp/codify-runtime}"
+CODIFY_RUNTIME_DIR="/tmp/codify-runtime"
+CODIFY_ARTIFACT_DIR="${CODIFY_RUNTIME_DIR}/artifacts"
 CODIFY_WORKER_PRE_SCRIPT_FILE="${CODIFY_RUNTIME_DIR}/worker-pre-script.sh"
 CODIFY_WORKER_POST_SCRIPT_FILE="${CODIFY_RUNTIME_DIR}/worker-post-script.sh"
-export CODIFY_RUNTIME_DIR
+CODIFY_ARTIFACT_HELPER="${ENTRYPOINT_LIB_DIR}/artifacts.py"
+export CODIFY_RUNTIME_DIR CODIFY_ARTIFACT_DIR
 mkdir -p "${CODIFY_RUNTIME_DIR}" /workspace /home/codify /root
 codify_chown /workspace /home/codify
+if [ -r "${CODIFY_ARTIFACT_HELPER}" ] && command -v python3 >/dev/null 2>&1; then
+    if ! python3 "${CODIFY_ARTIFACT_HELPER}" prepare \
+        --uid "${CODIFY_RUN_UID}" --gid "${CODIFY_RUN_GID}"; then
+        echo "WARNING: Could not prepare task artifact policy; using base archive behavior"
+        rm -f "${CODIFY_RUNTIME_DIR}/artifact-policy.json"
+    fi
+else
+    echo "WARNING: Task artifact helper is unavailable; using base archive behavior"
+    rm -f "${CODIFY_RUNTIME_DIR}/artifact-policy.json"
+fi
 # The uploaded bundle may inherit a restrictive control-plane umask. It is
 # task-local and bounded, so normalize it once before the unprivileged runtime
 # reads CI inputs or custom scripts.
 codify_chown -R "${CODIFY_RUNTIME_DIR}"
+# Keep the fixed runtime path non-replaceable while allowing task-local files
+# to be created. The EXIT helper removes write access before sealing.
+chown 0:0 "${CODIFY_RUNTIME_DIR}"
+chmod 1777 "${CODIFY_RUNTIME_DIR}"
 if [ -d /opt/codify-issue-meta ]; then
     printf '{"project_id":%s,"issue_id":%s,"worker_profile_id":%s}\n' \
         "${PROJECT_ID}" "${ISSUE_ID}" "${CODIFY_WORKER_PROFILE_ID:-null}" \
@@ -124,6 +140,17 @@ create_runtime_archive() {
 
     local archive_name="task-${TASK_ID:-0}-runtime-archive.tar.gz"
     local archive_path="${CODIFY_RUNTIME_DIR}/${archive_name}"
+    local archive_part_path="${archive_path}.part"
+    local archive_max_bytes=$((640 * 1024 * 1024))
+    if [ -r "${CODIFY_ARTIFACT_HELPER}" ] && command -v python3 >/dev/null 2>&1; then
+        if python3 "${CODIFY_ARTIFACT_HELPER}" archive --task-id "${TASK_ID:-0}"; then
+            echo "Archive created: ${archive_path}"
+            RUNTIME_ARCHIVE_CREATED=1
+            return 0
+        fi
+        echo "WARNING: Artifact-aware archive creation failed; creating base runtime archive"
+    fi
+
     local archive_files=()
     local candidate
     for candidate in \
@@ -132,7 +159,8 @@ create_runtime_archive() {
         console.log \
         delivery-summary.md \
         delivery-summary-validation.json \
-        repository-preparation.json
+        repository-preparation.json \
+        artifacts-validation.json
     do
         [ -f "${CODIFY_RUNTIME_DIR}/${candidate}" ] && archive_files+=("${candidate}")
     done
@@ -140,10 +168,38 @@ create_runtime_archive() {
         return 0
     fi
 
-    if tar -czf "${archive_path}" -C "${CODIFY_RUNTIME_DIR}" "${archive_files[@]}" 2>/dev/null; then
-        echo "Archive created: ${archive_path}"
-        RUNTIME_ARCHIVE_CREATED=1
+    rm -f "${archive_part_path}" 2>/dev/null || true
+    local -a archive_pipeline_status=()
+    if tar -czf - -C "${CODIFY_RUNTIME_DIR}" "${archive_files[@]}" 2>/dev/null \
+        | head -c "$((archive_max_bytes + 1))" > "${archive_part_path}"; then
+        archive_pipeline_status=("${PIPESTATUS[@]}")
+    else
+        archive_pipeline_status=("${PIPESTATUS[@]}")
     fi
+    local archive_status="${archive_pipeline_status[0]:-1}"
+    local limiter_status="${archive_pipeline_status[1]:-1}"
+    local archive_size=0
+    if [ -f "${archive_part_path}" ]; then
+        archive_size=$(wc -c < "${archive_part_path}")
+    fi
+    if [ "${archive_status}" -eq 0 ] \
+        && [ "${limiter_status}" -eq 0 ] \
+        && [ "${archive_size}" -le "${archive_max_bytes}" ]; then
+        if python3 -c 'import os,sys; os.replace(sys.argv[1], sys.argv[2])' \
+            "${archive_part_path}" "${archive_path}" 2>/dev/null; then
+            echo "Archive created: ${archive_path}"
+            RUNTIME_ARCHIVE_CREATED=1
+            return 0
+        fi
+    fi
+    rm -f "${archive_part_path}" "${archive_path}" 2>/dev/null || true
+    if [ "${archive_size}" -gt "${archive_max_bytes}" ]; then
+        echo "WARNING: Base runtime archive exceeds the 640 MiB hard limit; archive omitted"
+    else
+        echo "WARNING: Base runtime archive creation failed; archive omitted"
+    fi
+    RUNTIME_ARCHIVE_CREATED=1
+    return 0
 }
 
 codify_finalize_on_exit() {

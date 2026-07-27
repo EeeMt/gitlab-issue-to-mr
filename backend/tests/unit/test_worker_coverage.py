@@ -1177,7 +1177,10 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
         content = _read_worker_entrypoint_sources(script)
 
-        self.assertIn('CODIFY_RUNTIME_DIR="${CODIFY_RUNTIME_DIR:-/tmp/codify-runtime}"', content)
+        self.assertIn('CODIFY_RUNTIME_DIR="/tmp/codify-runtime"', content)
+        self.assertIn('CODIFY_ARTIFACT_DIR="${CODIFY_RUNTIME_DIR}/artifacts"', content)
+        self.assertIn('chown 0:0 "${CODIFY_RUNTIME_DIR}"', content)
+        self.assertIn('chmod 1777 "${CODIFY_RUNTIME_DIR}"', content)
         self.assertIn('CONSOLE_LOG="${CODIFY_RUNTIME_DIR}/console.log"', content)
         self.assertIn('tee -a "${CONSOLE_LOG}"', content)
         self.assertIn('exec > "${CONSOLE_TEE_PIPE}" 2>&1', content)
@@ -1186,7 +1189,9 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn('local archive_path="${CODIFY_RUNTIME_DIR}/${archive_name}"', content)
         self.assertIn('local archive_files=()', content)
         self.assertIn('repository-preparation.json', content)
-        self.assertIn('tar -czf "${archive_path}" -C "${CODIFY_RUNTIME_DIR}" "${archive_files[@]}"', content)
+        self.assertIn('tar -czf - -C "${CODIFY_RUNTIME_DIR}" "${archive_files[@]}"', content)
+        self.assertIn('head -c "$((archive_max_bytes + 1))"', content)
+        self.assertIn('os.replace(sys.argv[1], sys.argv[2])', content)
         self.assertNotIn('[ -f "/workspace/event.jsonl" ]', content)
         self.assertNotIn('/workspace/.codify-archive', content)
 

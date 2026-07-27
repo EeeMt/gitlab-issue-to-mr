@@ -6,7 +6,11 @@ import WorkerSettingsPanel from './WorkerSettingsPanel.vue'
 function createRuntimeConfig() {
   return {
     worker_workspace_host_path: '/opt/codify-workspaces',
-    worker_workspace_retention_days: 14
+    worker_workspace_retention_days: 14,
+    worker_artifacts_max_total_bytes: 200 * 1024 * 1024,
+    worker_artifacts_max_file_bytes: 100 * 1024 * 1024,
+    worker_artifacts_max_entries: 5000,
+    worker_runtime_archive_retention_days: 30
   }
 }
 
@@ -675,6 +679,63 @@ describe('WorkerSettingsPanel', () => {
         worker_workspace_retention_days: 30
       }
     })
+  })
+
+  it('loads, validates, and saves global task artifact settings', async () => {
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: { isMobile: false, reloadKey: 0 }
+    })
+    await flushPromises()
+    const vm = wrapper.vm as any
+
+    expect(vm.artifactFormValue).toEqual({
+      maxTotalMiB: 200,
+      maxFileMiB: 100,
+      maxEntries: 5000,
+      retentionDays: 30
+    })
+    expect(wrapper.text()).toContain('config.taskArtifacts')
+
+    vm.artifactFormValue.maxTotalMiB = 256
+    vm.artifactFormValue.maxFileMiB = 128
+    vm.artifactFormValue.maxEntries = 6000
+    vm.artifactFormValue.retentionDays = 60
+    mockUpdateConfig.mockResolvedValueOnce({
+      runtime: {
+        ...createRuntimeConfig(),
+        worker_artifacts_max_total_bytes: 256 * 1024 * 1024,
+        worker_artifacts_max_file_bytes: 128 * 1024 * 1024,
+        worker_artifacts_max_entries: 6000,
+        worker_runtime_archive_retention_days: 60
+      }
+    })
+
+    await vm.handleSaveArtifacts()
+
+    expect(mockUpdateConfig).toHaveBeenCalledWith({
+      runtime: {
+        worker_artifacts_max_total_bytes: 256 * 1024 * 1024,
+        worker_artifacts_max_file_bytes: 128 * 1024 * 1024,
+        worker_artifacts_max_entries: 6000,
+        worker_runtime_archive_retention_days: 60
+      }
+    })
+    expect(vm.isArtifactDirty).toBe(false)
+  })
+
+  it('does not save when the artifact file limit exceeds the total limit', async () => {
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: { isMobile: false, reloadKey: 0 }
+    })
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.artifactFormValue.maxTotalMiB = 50
+    vm.artifactFormValue.maxFileMiB = 51
+
+    await vm.handleSaveArtifacts()
+
+    expect(mockUpdateConfig).not.toHaveBeenCalled()
+    expect(mockMessage.error).toHaveBeenCalledWith('config.artifactFileLimitError')
   })
 
   it('opens a local worker profile draft without posting when create is clicked', async () => {

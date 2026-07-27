@@ -1,6 +1,7 @@
 """Runtime and container setup helpers for worker execution."""
 
 import io
+import json
 import logging
 import os
 import shutil
@@ -13,7 +14,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.providers import _decrypt_provider_api_key
-from app.config import get_effective_settings as get_settings
+from app.config import (
+    WORKER_ARTIFACTS_DEFAULT_MAX_ENTRIES,
+    WORKER_ARTIFACTS_DEFAULT_MAX_FILE_BYTES,
+    WORKER_ARTIFACTS_DEFAULT_MAX_TOTAL_BYTES,
+)
+from app.config import (
+    get_effective_settings as get_settings,
+)
 from app.core.utcnow import utcnow
 from app.core.worker_environment_variables import (
     validate_worker_environment_variable_key as validate_worker_environment_key,
@@ -32,7 +40,13 @@ _META_CONTAINER_PATH = "/opt/codify-issue-meta"
 _WORKER_PRE_SCRIPT_FILENAME = "worker-pre-script.sh"
 _WORKER_POST_SCRIPT_FILENAME = "worker-post-script.sh"
 _TASK_PROMPT_FILENAME = "task-prompt.md"
+_ARTIFACT_POLICY_FILENAME = "artifact-policy.json"
 _TASK_PROMPT_CONTAINER_PATH = f"{_RUNTIME_CONTAINER_PATH}/{_TASK_PROMPT_FILENAME}"
+
+
+def _artifact_policy_int(settings: Any, name: str, default: int) -> int:
+    value = getattr(settings, name, default)
+    return value if isinstance(value, int) and not isinstance(value, bool) else default
 
 
 def _legacy_session_storage_path(issue: Issue | None) -> str | None:
@@ -286,6 +300,7 @@ def build_task_runtime_archive(
     post_script: str = "",
     previous_task_summaries: str = "",
     ci_failure_bundle_path: str | os.PathLike[str] | None = None,
+    artifact_policy_settings: Any | None = None,
 ) -> bytes:
     """Build the immutable runtime input bundle uploaded through the Docker API."""
     rendered_prompt = getattr(task, "rendered_prompt", None)
@@ -310,6 +325,30 @@ def build_task_runtime_archive(
         runtime_dir.mtime = now
         archive.addfile(runtime_dir)
         add_bytes(archive, _TASK_PROMPT_FILENAME, rendered_prompt, 0o600)
+        settings = artifact_policy_settings or get_settings()
+        artifact_policy = json.dumps(
+            {
+                "schema_version": 1,
+                "max_total_bytes": _artifact_policy_int(
+                    settings,
+                    "worker_artifacts_max_total_bytes",
+                    WORKER_ARTIFACTS_DEFAULT_MAX_TOTAL_BYTES,
+                ),
+                "max_file_bytes": _artifact_policy_int(
+                    settings,
+                    "worker_artifacts_max_file_bytes",
+                    WORKER_ARTIFACTS_DEFAULT_MAX_FILE_BYTES,
+                ),
+                "max_entries": _artifact_policy_int(
+                    settings,
+                    "worker_artifacts_max_entries",
+                    WORKER_ARTIFACTS_DEFAULT_MAX_ENTRIES,
+                ),
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        add_bytes(archive, _ARTIFACT_POLICY_FILENAME, artifact_policy, 0o600)
         if isinstance(pre_script, str) and pre_script.strip():
             add_bytes(
                 archive,

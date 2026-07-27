@@ -978,9 +978,12 @@ class CIFailureRunLog(Base):
 
 
 class TaskRunArchive(Base):
-    """One-row-per-task compressed runtime archive (event.jsonl + runtime.json + console.log)."""
+    """One-row-per-task compressed runtime archive."""
 
     __tablename__ = "task_run_archives"
+    __table_args__ = (
+        Index("ix_task_run_archives_created_id", "created_at", "id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     task_id: Mapped[int] = mapped_column(
@@ -990,6 +993,7 @@ class TaskRunArchive(Base):
     archive_path: Mapped[str] = mapped_column(Text, nullable=False)
     archive_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    cleanup_next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class TaskIngestCursor(Base):

@@ -47,7 +47,7 @@ if [ "${1:-}" = "--verify" ]; then
     shift
     echo "Codify worker kit ${CODIFY_KIT_VERSION:-unknown}"
     echo "Runtime image: ${CODIFY_RUNTIME_IMAGE:-unknown}"
-    for command in bash git curl jq python3 node codegraph ssh rg tar; do
+    for command in bash git curl head jq python3 node codegraph ssh rg tar wc; do
         if ! command -v "${command}" >/dev/null 2>&1 \
             || ! codify_run_shell "command -v '${command}' >/dev/null 2>&1"; then
             echo "Required kit command is unavailable: ${command}" >&2
@@ -69,6 +69,13 @@ if [ "${1:-}" = "--verify" ]; then
     echo "${claude_version}"
     node --version
     python3 --version
+    artifact_helper="${ENTRYPOINT_LIB_DIR}/artifacts.py"
+    [ -r "${artifact_helper}" ] || {
+        echo "Task artifact helper is missing: ${artifact_helper}" >&2
+        exit 1
+    }
+    python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]); compile(p.read_text(), str(p), "exec")' \
+        "${artifact_helper}"
     git --version
     codegraph --version
     printf '# worker-kit smoke\n' > /tmp/codify-worker-kit-summary.md

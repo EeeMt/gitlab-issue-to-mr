@@ -137,6 +137,16 @@ def test_build_worker_profile_environment_map_reuses_worker_env_key_validation()
         build_worker_profile_environment_map(rows)
 
 
+def test_build_worker_profile_environment_map_ignores_legacy_runtime_path_overrides():
+    rows = [
+        {"key": "CODIFY_RUNTIME_DIR", "value": "/unsafe", "is_secret": False},
+        {"key": "CODIFY_ARTIFACT_DIR", "value": "/unsafe/artifacts", "is_secret": False},
+        {"key": "SAFE_VALUE", "value": "kept", "is_secret": False},
+    ]
+
+    assert build_worker_profile_environment_map(rows) == {"SAFE_VALUE": "kept"}
+
+
 def test_serialize_secret_profile_environment_variable_hides_plaintext():
     row = SimpleNamespace(
         id=7,
