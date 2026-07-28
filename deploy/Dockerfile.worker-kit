@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 ARG NIX_IMAGE=nixos/nix:2.24.11
-ARG WORKER_KIT_VERSION=0.3.4
+ARG WORKER_KIT_VERSION=0.3.5
 
 FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS launcher-builder
 ARG TARGETOS
@@ -32,7 +32,7 @@ RUN nix-build default.nix -o /tmp/codify-worker-kit-runtime \
     && cp -a --parents $(nix-store -qR /tmp/codify-worker-kit-runtime) /out
 
 FROM alpine:3.21 AS artifact
-ARG WORKER_KIT_VERSION=0.3.4
+ARG WORKER_KIT_VERSION=0.3.5
 ARG TARGETARCH
 RUN apk add --no-cache jq
 COPY --from=launcher-builder /out/launcher /worker-kit/launcher
@@ -66,10 +66,11 @@ ARG WORKER_KIT_VERSION
 COPY --from=artifact /worker-kit /opt/codify-kit
 COPY --from=artifact /worker-kit/nix/store /nix/store
 RUN mkdir -p /workspace \
-    && printf '#!/bin/sh\nprintf "claude smoke stub\\n"\n' > /usr/local/bin/claude \
+    && printf '#!/bin/sh\nprintf "2.1.33 (Claude Code smoke stub)\\n"\n' > /usr/local/bin/claude \
     && chmod 755 /usr/local/bin/claude \
     && chmod 0777 /workspace \
     && CODIFY_KIT_VERSION="${WORKER_KIT_VERSION}" /opt/codify-kit/launcher --verify \
+      --require-skill-support \
       --smoke 'test "$(command -v sh)" = /bin/sh' \
     && touch /worker-kit-smoke-passed
 

@@ -218,6 +218,7 @@ from app.api import (
     projects,
     prompt_templates,
     providers,
+    skills,
     stats,
     tasks,
     usage_limits,
@@ -320,6 +321,12 @@ app.include_router(
     worker_profiles.router,
     prefix="/api",
     tags=["worker-profiles"],
+    dependencies=[Depends(require_authenticated_user)],
+)
+app.include_router(
+    skills.router,
+    prefix="/api",
+    tags=["skills"],
     dependencies=[Depends(require_authenticated_user)],
 )
 app.include_router(

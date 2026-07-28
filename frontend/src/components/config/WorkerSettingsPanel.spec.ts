@@ -53,6 +53,7 @@ function createWorkerProfile(overrides: Record<string, any> = {}) {
         value_configured: true
       }
     ],
+    default_skill_ids: [],
     pre_script: 'echo pre',
     post_script: 'echo post',
     default_execute_run_instruction_template: 'Execute {{user_prompt}}',
@@ -68,6 +69,7 @@ const {
   mockGetConfig,
   mockGetBuiltIns,
   mockGetAdminWorkerProfiles,
+  mockGetAdminSkills,
   mockTestWorkerDockerConnection,
   mockUpdateConfig,
   mockUpdateWorkerProfile,
@@ -80,6 +82,7 @@ const {
   mockGetConfig: vi.fn(),
   mockGetBuiltIns: vi.fn(),
   mockGetAdminWorkerProfiles: vi.fn(),
+  mockGetAdminSkills: vi.fn(),
   mockTestWorkerDockerConnection: vi.fn(),
   mockUpdateConfig: vi.fn(),
   mockUpdateWorkerProfile: vi.fn(),
@@ -315,6 +318,7 @@ vi.mock('../../api', () => ({
   getConfig: mockGetConfig,
   getRunInstructionTemplateBuiltIns: mockGetBuiltIns,
   getAdminWorkerProfiles: mockGetAdminWorkerProfiles,
+  getAdminSkills: mockGetAdminSkills,
   testWorkerDockerConnection: mockTestWorkerDockerConnection,
   updateConfig: mockUpdateConfig,
   updateWorkerProfile: mockUpdateWorkerProfile,
@@ -331,6 +335,7 @@ describe('WorkerSettingsPanel', () => {
       runtime: createRuntimeConfig()
     })
     mockGetAdminWorkerProfiles.mockResolvedValue([createWorkerProfile()])
+    mockGetAdminSkills.mockResolvedValue([])
     mockTestWorkerDockerConnection.mockResolvedValue({
       docker_host: 'tcp://arm-worker:2376',
       server_version: '27.1.0',
@@ -642,6 +647,7 @@ describe('WorkerSettingsPanel', () => {
 
     const vm = wrapper.vm as any
     vm.workerFormValue.runtime_mode = 'baked_image'
+    vm.workerFormValue.default_skill_ids = [11]
     await vm.handleSaveWorker()
 
     expect(mockUpdateWorkerProfile).toHaveBeenCalledWith(
@@ -649,7 +655,8 @@ describe('WorkerSettingsPanel', () => {
       expect.objectContaining({
         runtime_mode: 'baked_image',
         worker_kit_version: null,
-        worker_kit_path: null
+        worker_kit_path: null,
+        default_skill_ids: []
       })
     )
   })

@@ -254,6 +254,7 @@ export interface WorkerProfile {
   codegraph_enabled: boolean
   volume_mounts: WorkerProfileMount[]
   environment_variables: WorkerProfileEnvironmentVariable[]
+  default_skill_ids: number[]
   pre_script: string
   post_script: string
   default_execute_run_instruction_template: string
@@ -278,6 +279,7 @@ export interface WorkerProfilePayload {
   codegraph_enabled?: boolean
   volume_mounts?: WorkerProfileMount[]
   environment_variables?: WorkerProfileEnvironmentVariableUpdate[]
+  default_skill_ids?: number[]
   pre_script?: string
   post_script?: string
   default_execute_run_instruction_template?: string
@@ -291,6 +293,37 @@ export interface DockerConnectionTestResult {
   architecture: string | null
   operating_system: string | null
   elapsed_ms: number
+}
+
+export interface SkillSummary {
+  id: number
+  name: string
+  description: string
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface SkillFile {
+  path: string
+  content_base64: string
+  executable: boolean
+}
+
+export interface Skill extends SkillSummary {
+  skill_md: string
+  files: SkillFile[]
+}
+
+export type SkillOption = Pick<SkillSummary, 'id' | 'name' | 'description'> & {
+  version_id: number
+}
+
+export interface SkillPayload {
+  name: string
+  skill_md: string
+  files: SkillFile[]
+  enabled?: boolean
 }
 
 export interface Container {
@@ -1415,6 +1448,44 @@ export async function disableWorkerProfile(profileId: number): Promise<WorkerPro
 export async function duplicateWorkerProfile(profileId: number): Promise<WorkerProfile> {
   const { data } = await api.post(`/worker-profiles/${profileId}/duplicate`)
   return data
+}
+
+export async function getSkills(): Promise<SkillOption[]> {
+  const { data } = await api.get('/skills')
+  return data
+}
+
+export async function getAdminSkills(): Promise<SkillSummary[]> {
+  const { data } = await api.get('/skills/admin')
+  return data
+}
+
+export async function getAdminSkill(skillId: number): Promise<Skill> {
+  const { data } = await api.get(`/skills/${skillId}/admin`)
+  return data
+}
+
+export async function createSkill(payload: SkillPayload): Promise<Skill> {
+  const { data } = await api.post('/skills', payload)
+  return data
+}
+
+export async function updateSkill(
+  skillId: number,
+  payload: Partial<SkillPayload>
+): Promise<Skill> {
+  const { data } = await api.patch(`/skills/${skillId}`, payload)
+  return data
+}
+
+export async function setSkillEnabled(skillId: number, enabled: boolean): Promise<SkillSummary> {
+  const action = enabled ? 'enable' : 'disable'
+  const { data } = await api.post(`/skills/${skillId}/${action}`)
+  return data
+}
+
+export async function deleteSkill(skillId: number): Promise<void> {
+  await api.delete(`/skills/${skillId}`)
 }
 
 export async function getMyUsageSummary(): Promise<CurrentUserUsageSummary> {

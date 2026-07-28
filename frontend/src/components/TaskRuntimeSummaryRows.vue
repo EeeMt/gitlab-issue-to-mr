@@ -229,6 +229,29 @@
 
               <section class="metadata-summary-popover__section">
                 <div class="metadata-summary-popover__section-title">
+                  <span>{{ t('taskView.workerSkills') }}</span>
+                  <span class="metadata-summary-popover__count">{{ (workerSummary.skills ?? []).length }}</span>
+                </div>
+                <div v-if="(workerSummary.skills ?? []).length" class="metadata-summary-popover__entries metadata-summary-popover__entries--compact">
+                  <div v-for="skill in workerSummary.skills ?? []" :key="skill.name" class="metadata-summary-popover__entry">
+                    <div class="metadata-summary-popover__entry-heading">
+                      <code>{{ skill.name }}</code>
+                      <n-tag size="tiny" :bordered="false">
+                        {{ workerSummary.skill_selection_source === 'task'
+                          ? t('taskView.workerSkillsTaskOverride')
+                          : t('taskView.workerSkillsProfileDefault') }}
+                      </n-tag>
+                    </div>
+                    <div class="metadata-summary-popover__entry-detail">{{ skill.description }}</div>
+                  </div>
+                </div>
+                <div v-else class="metadata-summary-popover__empty">
+                  {{ t('taskView.workerSkillsEmpty') }}
+                </div>
+              </section>
+
+              <section class="metadata-summary-popover__section">
+                <div class="metadata-summary-popover__section-title">
                   <span>{{ t('taskView.workerMounts') }}</span>
                   <span class="metadata-summary-popover__count">{{ workerSummary.mounts.length }}</span>
                 </div>

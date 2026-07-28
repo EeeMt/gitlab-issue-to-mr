@@ -21,6 +21,9 @@ export interface TaskFormDraft {
   scheduledAt: number | null
   runInstructionTemplate: string
   runInstructionDirty: boolean
+  inheritProfileSkills: boolean
+  selectedSkillIds: number[]
+  skillSelectionDirty: boolean
 }
 
 export function buildCreateTaskRequest(
@@ -44,6 +47,9 @@ export function buildCreateTaskRequest(
   }
   if (draft.selectedProviderId !== null) {
     request.provider_id = draft.selectedProviderId
+  }
+  if (!draft.inheritProfileSkills) {
+    request.skill_ids = [...draft.selectedSkillIds]
   }
   return request
 }
@@ -72,6 +78,24 @@ export function buildUpdateTaskRequest(
   }
   if (draft.runInstructionTemplate !== initialRunInstructionTemplate) {
     request.run_instruction_template = draft.runInstructionTemplate
+  }
+  if (draft.inheritProfileSkills) {
+    if (
+      draft.skillSelectionDirty
+      || (original.skill_selection_source ?? 'profile') !== 'profile'
+    ) {
+      request.skill_ids = null
+    }
+  } else {
+    const originalSkillIds = original.skill_ids ?? []
+    if (
+      draft.skillSelectionDirty
+      ||
+      (original.skill_selection_source ?? 'profile') !== 'task'
+      || JSON.stringify(draft.selectedSkillIds) !== JSON.stringify(originalSkillIds)
+    ) {
+      request.skill_ids = [...draft.selectedSkillIds]
+    }
   }
 
   return request

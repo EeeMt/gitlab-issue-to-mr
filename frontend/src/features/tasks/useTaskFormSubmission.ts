@@ -34,6 +34,9 @@ interface TaskFormSubmissionOptions {
   runInstructionTemplate: Ref<string>
   initialRunInstructionTemplate: Ref<string>
   runInstructionDirty: Ref<boolean>
+  inheritProfileSkills: Ref<boolean>
+  selectedSkillIds: Ref<number[]>
+  skillSelectionDirty: Ref<boolean>
   defaultsError: Readonly<Ref<string>>
   getDefaultRunInstructionTemplate: (mode: TaskMode) => string
   clearScheduledTasks: () => void
@@ -87,6 +90,9 @@ export function useTaskFormSubmission(options: TaskFormSubmissionOptions) {
         scheduledAt: options.scheduledAt.value,
         runInstructionTemplate: options.runInstructionTemplate.value,
         runInstructionDirty: options.runInstructionDirty.value,
+        inheritProfileSkills: options.inheritProfileSkills.value,
+        selectedSkillIds: options.selectedSkillIds.value,
+        skillSelectionDirty: options.skillSelectionDirty.value,
       })
       const created = await createTask(request)
       message.success(t('issue.taskCreated'))
@@ -95,6 +101,9 @@ export function useTaskFormSubmission(options: TaskFormSubmissionOptions) {
       options.selectedProviderId.value = null
       options.startFreshSession.value = false
       options.scheduleType.value = 'now'
+      options.inheritProfileSkills.value = true
+      options.selectedSkillIds.value = []
+      options.skillSelectionDirty.value = false
       options.clearScheduledTasks()
       options.close()
       options.created(created)
@@ -129,6 +138,9 @@ export function useTaskFormSubmission(options: TaskFormSubmissionOptions) {
       selectedProviderId: options.selectedProviderId.value,
       runInstructionTemplate: options.runInstructionTemplate.value,
       runInstructionDirty: options.runInstructionDirty.value,
+      inheritProfileSkills: options.inheritProfileSkills.value,
+      selectedSkillIds: options.selectedSkillIds.value,
+      skillSelectionDirty: options.skillSelectionDirty.value,
     }, options.initialRunInstructionTemplate.value)
 
     if (Object.keys(request).length === 0) {

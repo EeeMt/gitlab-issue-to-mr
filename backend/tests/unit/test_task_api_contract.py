@@ -23,7 +23,12 @@ from app.api.tasks import (
 )
 from app.core.worker_runtime import capture_provider_runtime_snapshot
 from app.dependencies.project_access import ProjectAccessScope
-from app.models import Task, TaskStatus
+from app.models import (
+    Task,
+    TaskSkillVersionReference,
+    TaskStatus,
+    TaskWorkerProfileSnapshot,
+)
 
 EXPECTED_TASK_ROUTES = {
     ("GET", "/tasks"),
@@ -189,6 +194,32 @@ def test_task_response_preserves_required_frontend_fields() -> None:
         is_manually_overridden=False,
         override_reason=None,
     )
+    task.worker_profile_snapshot = TaskWorkerProfileSnapshot(
+        task_id=12,
+        profile_name="Deleted profile",
+        image="worker:latest",
+        runtime_mode="mounted_kit",
+        worker_kit_version="0.3.5",
+        worker_kit_path="/opt/codify/worker-kits/0.3.5-linux-amd64",
+        volume_mounts=[],
+        environment_variables=[],
+        skill_selection_source="task",
+        skill_references=[
+            TaskSkillVersionReference(
+                position=0,
+                skill_id=None,
+                skill_version_id=71,
+                name="deleted-review",
+                description="Review the frozen task input.",
+            )
+        ],
+        pre_script="",
+        post_script="",
+        default_execute_run_instruction_template="{{user_prompt}}",
+        default_plan_run_instruction_template="{{user_prompt}}",
+        ci_auto_repair_run_instruction_template="{{user_prompt}}",
+        created_at=now,
+    )
 
     response = _serialize_task(
         task,
@@ -219,6 +250,8 @@ def test_task_response_preserves_required_frontend_fields() -> None:
         "worker_profile_id",
         "worker_profile_name",
         "worker_image",
+        "worker_runtime_mode",
+        "worker_kit_version",
         "worker_snapshot_created_at",
         "created_at",
         "updated_at",
@@ -232,6 +265,15 @@ def test_task_response_preserves_required_frontend_fields() -> None:
     assert response["session_mode"] == "fresh"
     assert response["output_session_id"] == "session-new"
     assert response["project_url"] == "https://gitlab.example.com/team/codify"
+    assert response["skill_ids"] == []
+    assert response["skill_snapshots"] == [
+        {
+            "id": None,
+            "name": "deleted-review",
+            "description": "Review the frozen task input.",
+            "version_id": 71,
+        }
+    ]
 
 
 def test_model_service_summary_exposes_runtime_config_without_api_key() -> None:

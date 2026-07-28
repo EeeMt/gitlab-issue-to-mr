@@ -34,6 +34,18 @@ docker image inspect "${IMAGE}" >/dev/null
 VERSION="$(sed -n 's/.*"kit_version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${KIT_PATH}/manifest.json")"
 [ -n "${VERSION}" ] || { echo "Could not read kit version" >&2; exit 1; }
 
+skill_capable_kit=0
+if [[ "${VERSION}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+    version_major=$((10#${BASH_REMATCH[1]}))
+    version_minor=$((10#${BASH_REMATCH[2]}))
+    version_patch=$((10#${BASH_REMATCH[3]}))
+    if (( version_major > 0 \
+        || version_minor > 3 \
+        || (version_minor == 3 && version_patch >= 5) )); then
+        skill_capable_kit=1
+    fi
+fi
+
 ARGS=(
     --rm
     --user 0:0
@@ -53,6 +65,9 @@ if [ -n "${CLAUDE_HOST_PATH}" ]; then
     ARGS+=(--env "CODIFY_CLAUDE_BIN=${CLAUDE_CONTAINER_PATH}")
 fi
 ARGS+=("${IMAGE}" --verify)
+if [ "${skill_capable_kit}" -eq 1 ]; then
+    ARGS+=(--require-skill-support)
+fi
 if [ -n "${SMOKE}" ]; then
     ARGS+=(--smoke "${SMOKE}")
 fi

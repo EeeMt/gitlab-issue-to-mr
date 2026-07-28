@@ -5,6 +5,7 @@ import os
 import sys
 import unittest
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -511,6 +512,9 @@ def _make_mock_worker_profile(id=12):
     profile.id = id
     profile.name = "Default Worker"
     profile.enabled = True
+    profile.runtime_mode = "mounted_kit"
+    profile.worker_kit_version = "0.3.5"
+    profile.worker_kit_path = "/opt/codify/worker-kits/0.3.5-linux-amd64"
     return profile
 
 
@@ -834,6 +838,17 @@ class RetryTaskAPITests(unittest.TestCase):
         task.project_id = 1
         task.session_mode = "fresh"
         task.output_session_id = None
+        task.worker_profile_snapshot = MagicMock(
+            skill_references=[
+                SimpleNamespace(
+                    skill_id=17,
+                    name="review-changes",
+                    description="Review changes before delivery.",
+                    skill_version_id=71,
+                )
+            ],
+            skill_selection_source="task",
+        )
 
         # First execute returns the task; second returns None (no existing retry);
         # third fetches the Issue used for worker/provider resolution and serialization.
@@ -889,6 +904,8 @@ class RetryTaskAPITests(unittest.TestCase):
         data = response.json()
         self.assertTrue(data["is_retry"])
         self.assertEqual(data["retry_source_task_id"], 5)
+        self.assertEqual(data["skill_names"], ["review-changes"])
+        self.assertEqual(data["skill_selection_source"], "task")
         created_task = mock_db.add.call_args_list[0].args[0]
         self.assertEqual(created_task.session_mode, "fresh")
 

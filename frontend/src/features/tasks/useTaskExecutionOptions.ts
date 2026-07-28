@@ -3,9 +3,11 @@ import { useI18n } from 'vue-i18n'
 
 import {
   getProviders,
+  getSkills,
   getWorkerProfiles,
   type AIProvider,
   type Task,
+  type SkillOption,
   type WorkerProfile,
 } from '../../api'
 
@@ -21,6 +23,8 @@ export function useTaskExecutionOptions(options: TaskExecutionOptions) {
   const { t } = useI18n()
   const providers = ref<AIProvider[]>([])
   const workerProfiles = ref<WorkerProfile[]>([])
+  const skills = ref<SkillOption[]>([])
+  const skillsLoadSucceeded = ref(false)
 
   const selectableProviders = computed(() =>
     providers.value.filter(provider =>
@@ -33,6 +37,13 @@ export function useTaskExecutionOptions(options: TaskExecutionOptions) {
       label: `${provider.name} (${provider.model})${provider.is_default ? ' ★' : ''}${provider.is_disabled ? ` - ${t('config.providers.disabled')}` : ''}`,
       value: provider.id,
       disabled: provider.is_disabled,
+    }))
+  )
+  const skillOptions = computed(() =>
+    skills.value.map(skill => ({
+      label: skill.name,
+      value: skill.id,
+      disabled: false,
     }))
   )
   const selectableWorkerProfiles = computed(() =>
@@ -87,12 +98,26 @@ export function useTaskExecutionOptions(options: TaskExecutionOptions) {
     }
   }
 
+  async function loadSkills() {
+    skillsLoadSucceeded.value = false
+    try {
+      skills.value = await getSkills()
+      skillsLoadSucceeded.value = true
+    } catch {
+      skills.value = []
+    }
+  }
+
   return {
     effectiveProvider,
     effectiveWorkerProfile,
     loadProviders,
+    loadSkills,
     loadWorkerProfiles,
     providerOptions,
+    skillOptions,
+    skills,
+    skillsLoadSucceeded,
     selectableProviders,
     selectableWorkerProfiles,
     workerProfiles,

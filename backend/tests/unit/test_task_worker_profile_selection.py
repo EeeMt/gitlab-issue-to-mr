@@ -9,12 +9,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.api.task_schemas import RetryTaskRequest, UpdateTaskRequest
 from app.api.tasks import CreateTaskRequest, create_task, update_task
-from app.core.worker_profiles import WorkerProfileValidationError
+from app.core.skills import skill_snapshots_from_task_snapshot
+from app.core.worker_profiles import WorkerProfileValidationError, load_task_worker_runtime
 from app.dependencies.project_access import ProjectAccessScope
 from app.models import (
     AIProvider,
     Base,
     Issue,
+    Skill,
+    SkillVersion,
     Task,
     TaskStatus,
     TaskWorkerProfileSnapshot,
@@ -118,12 +121,36 @@ async def test_create_task_loads_worker_profile_environment_from_existing_identi
                 enabled=True,
                 is_default=True,
                 image="codify-worker/java21-maven:2026.07",
+                runtime_mode="mounted_kit",
+                worker_kit_version="0.3.5",
+                worker_kit_path="/opt/codify/worker-kits/0.3.5-linux-amd64",
                 volume_mounts=[],
                 pre_script="",
                 post_script="",
                 default_execute_run_instruction_template="Execute {{user_prompt}}",
                 default_plan_run_instruction_template="Plan {{user_prompt}}",
                 ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+                default_skills=[
+                    Skill(
+                        name="review-changes",
+                        description="Review changes before delivery.",
+                        current_version=SkillVersion(
+                            name="review-changes",
+                            description="Review changes before delivery.",
+                            skill_md=(
+                                "---\n"
+                                "name: review-changes\n"
+                                "description: Review changes before delivery.\n"
+                                "---\n\n"
+                                "Inspect the final diff.\n"
+                            ),
+                            files=[],
+                            package_size_bytes=23,
+                            digest="a" * 64,
+                        ),
+                        enabled=True,
+                    )
+                ],
             )
             issue = Issue(
                 title="Worker defaults",
@@ -153,10 +180,66 @@ async def test_create_task_loads_worker_profile_environment_from_existing_identi
                         accessible_projects=[],
                     ),
                 )
+                override_response = await create_task(
+                    request=CreateTaskRequest(
+                        issue_id=issue.id,
+                        user_prompt="Implement without managed skills",
+                        priority=1,
+                        provider_id=provider.id,
+                        skill_ids=[],
+                    ),
+                    db=db,
+                    current_user=None,
+                    access_scope=ProjectAccessScope(
+                        is_unrestricted=True,
+                        accessible_projects=[],
+                    ),
+                )
+                restored_response = await update_task(
+                    override_response["id"],
+                    UpdateTaskRequest(skill_ids=None),
+                    db=db,
+                    current_user=None,
+                    access_scope=ProjectAccessScope(
+                        is_unrestricted=True,
+                        accessible_projects=[],
+                    ),
+                )
+            snapshot = await db.get(TaskWorkerProfileSnapshot, response["id"])
+            await db.refresh(snapshot, attribute_names=["skill_references"])
+            assert skill_snapshots_from_task_snapshot(snapshot) == [
+                {
+                    "id": worker_profile.default_skills[0].id,
+                    "name": "review-changes",
+                    "description": "Review changes before delivery.",
+                    "version_id": worker_profile.default_skills[0].current_version_id,
+                }
+            ]
+            runtime = await load_task_worker_runtime(
+                db,
+                SimpleNamespace(id=response["id"]),
+            )
+            assert "Inspect the final diff." in runtime.skills[0]["skill_md"]
 
         assert response["worker_profile_id"] == worker_profile.id
         assert response["worker_profile_name"] == "Default Worker"
         assert response["worker_image"] == "codify-worker/java21-maven:2026.07"
+        assert response["worker_runtime_mode"] == "mounted_kit"
+        assert response["worker_kit_version"] == "0.3.5"
+        assert response["skill_names"] == ["review-changes"]
+        assert response["skill_snapshots"] == [
+            {
+                "id": worker_profile.default_skills[0].id,
+                "name": "review-changes",
+                "description": "Review changes before delivery.",
+                "version_id": worker_profile.default_skills[0].current_version_id,
+            }
+        ]
+        assert response["skill_selection_source"] == "profile"
+        assert override_response["skill_ids"] == []
+        assert override_response["skill_selection_source"] == "task"
+        assert restored_response["skill_names"] == ["review-changes"]
+        assert restored_response["skill_selection_source"] == "profile"
     finally:
         await engine.dispose()
 
@@ -200,6 +283,12 @@ def test_task_request_schemas_do_not_expose_worker_switching():
         UpdateTaskRequest.model_validate({"worker_profile_id": 7})
     with pytest.raises(ValidationError, match="fixed by the parent issue"):
         RetryTaskRequest.model_validate({"worker_profile_id": 7})
+
+
+@pytest.mark.parametrize("skill_ids", [[True], ["1"], [0], [1, 1]])
+def test_task_request_schemas_reject_invalid_skill_ids(skill_ids):
+    with pytest.raises(ValidationError):
+        CreateTaskRequest(issue_id=1, skill_ids=skill_ids)
 
 
 @pytest.mark.asyncio

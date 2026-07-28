@@ -5,6 +5,7 @@ from typing import Any
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.skills import skill_snapshots_from_task_snapshot
 from app.core.task_helpers import _serialize_task as _serialize_task_base
 from app.models import Task, TaskWorkerProfileSnapshot
 
@@ -14,6 +15,9 @@ SNAPSHOT_RESPONSE_REFRESH_ATTRIBUTES = [
     "worker_profile_id",
     "profile_name",
     "image",
+    "runtime_mode",
+    "worker_kit_version",
+    "skill_selection_source",
     "created_at",
 ]
 
@@ -41,6 +45,15 @@ def serialize_task(*args, **kwargs) -> dict:
     worker_profile_id = getattr(task, "worker_profile_id", None)
     if not isinstance(worker_profile_id, int):
         worker_profile_id = None
+    skill_snapshots: list[dict[str, Any]] | None = []
+    if snapshot is not None:
+        try:
+            if "skill_references" in sa_inspect(snapshot).unloaded:
+                skill_snapshots = None
+            else:
+                skill_snapshots = skill_snapshots_from_task_snapshot(snapshot)
+        except Exception:
+            skill_snapshots = skill_snapshots_from_task_snapshot(snapshot)
     data.update(
         {
             "worker_profile_id": worker_profile_id,
@@ -50,13 +63,40 @@ def serialize_task(*args, **kwargs) -> dict:
                 else (worker_profile.name if worker_profile is not None else None)
             ),
             "worker_image": snapshot.image if snapshot is not None else None,
+            "worker_runtime_mode": (
+                getattr(snapshot, "runtime_mode", None) if snapshot is not None else None
+            ),
+            "worker_kit_version": (
+                getattr(snapshot, "worker_kit_version", None) if snapshot is not None else None
+            ),
             "worker_snapshot_created_at": (
                 snapshot.created_at.isoformat()
                 if snapshot is not None and snapshot.created_at
                 else None
             ),
+            "skill_selection_source": (
+                getattr(snapshot, "skill_selection_source", "profile")
+                if snapshot is not None
+                else "profile"
+            ),
         }
     )
+    if skill_snapshots is not None:
+        data.update(
+            {
+                "skill_ids": [
+                    item.get("id")
+                    for item in skill_snapshots
+                    if isinstance(item, dict) and isinstance(item.get("id"), int)
+                ],
+                "skill_names": [
+                    str(item.get("name"))
+                    for item in skill_snapshots
+                    if isinstance(item, dict) and item.get("name")
+                ],
+                "skill_snapshots": skill_snapshots,
+            }
+        )
     return data
 
 

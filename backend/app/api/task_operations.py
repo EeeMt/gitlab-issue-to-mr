@@ -16,7 +16,7 @@ from app.core.mattermost_notifications import (
 from app.core.scheduling import normalize_scheduled_datetime
 from app.core.utcnow import utcnow
 from app.dependencies.project_access import ProjectAccessScope, require_project_access
-from app.models import Task, TaskStatus
+from app.models import Task, TaskStatus, TaskWorkerProfileSnapshot, WorkerProfile
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,8 +56,10 @@ async def get_task_with_access_check(
     query = (
         select(Task)
         .options(
-            selectinload(Task.worker_profile),
-            selectinload(Task.worker_profile_snapshot),
+            selectinload(Task.worker_profile).selectinload(WorkerProfile.default_skills),
+            selectinload(Task.worker_profile_snapshot).selectinload(
+                TaskWorkerProfileSnapshot.skill_references
+            ),
         )
         .where(Task.id == task_id)
     )

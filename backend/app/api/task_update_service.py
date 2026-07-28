@@ -16,6 +16,13 @@ from app.api.task_responses import (
     serialize_task,
 )
 from app.api.task_schemas import UpdateTaskRequest
+from app.core.skills import (
+    SkillValidationError,
+    delete_unreferenced_skill_versions,
+    load_enabled_skill_snapshots,
+    replace_task_skill_references,
+    validate_runtime_supports_skills,
+)
 from app.core.task_prompt import TaskPromptValidationError
 from app.core.worker_profiles import WorkerProfileValidationError
 from app.dependencies.project_access import ProjectAccessScope
@@ -102,6 +109,41 @@ async def update_task_record(
     if "run_instruction_template" in updated_fields:
         task.run_instruction_template = request.run_instruction_template
 
+    if "skill_ids" in updated_fields:
+        if snapshot is None:
+            snapshot = await db.get(TaskWorkerProfileSnapshot, task.id)
+        if snapshot is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Task has no worker profile snapshot",
+            )
+        requested_skill_ids = request.skill_ids
+        if requested_skill_ids is None:
+            profile = loaded_task_relationship(task, "worker_profile")
+            if profile is None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="Task worker profile is no longer available",
+                )
+            requested_skill_ids = [
+                skill.id
+                for skill in (getattr(profile, "default_skills", None) or [])
+                if bool(getattr(skill, "enabled", False))
+            ]
+            selection_source = "profile"
+        else:
+            selection_source = "task"
+        try:
+            selected_skills = await load_enabled_skill_snapshots(db, requested_skill_ids)
+            validate_runtime_supports_skills(snapshot, selected_skills)
+        except SkillValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+        replace_task_skill_references(snapshot, selected_skills)
+        snapshot.skill_selection_source = selection_source
+
     if task.task_mode == "plan":
         task.require_changes = False
 
@@ -159,6 +201,9 @@ async def update_task_record(
                 detail=str(exc),
             ) from exc
 
+    if "skill_ids" in updated_fields:
+        await db.flush()
+        await delete_unreferenced_skill_versions(db)
     await db.commit()
     await refresh_task_response_state(db, task, snapshot)
     attach_task_worker_snapshot(task, snapshot)

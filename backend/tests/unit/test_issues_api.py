@@ -576,10 +576,13 @@ class DeleteIssueTests(unittest.IsolatedAsyncioTestCase):
         # Active task count = 0
         count_result = MagicMock()
         count_result.scalar.return_value = 0
+        cleanup_result = MagicMock()
+        cleanup_result.rowcount = 0
 
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[issue_result, count_result])
+        mock_db.execute = AsyncMock(side_effect=[issue_result, count_result, cleanup_result])
         mock_db.delete = AsyncMock()
+        mock_db.flush = AsyncMock()
         mock_db.commit = AsyncMock()
         mock_user = MagicMock()
 

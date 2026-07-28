@@ -763,16 +763,93 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
             'CODIFY_CLAUDE_BIN="${CODIFY_CLAUDE_BIN:-/usr/local/bin/claude}"',
             content,
         )
-        self.assertIn('CODIFY_CLAUDE_BIN must be an absolute path', content)
+        verification = (
+            root / "deploy" / "worker-entrypoint" / "verification.sh"
+        ).read_text()
+        self.assertIn('CODIFY_CLAUDE_BIN must be an absolute path', verification)
         self.assertIn(
             'claude_version="$(codify_run_shell \'"${CODIFY_CLAUDE_BIN}" --version\')"',
-            content,
+            verification,
         )
-        self.assertIn(
-            "codify_run_shell 'touch /workspace/.codify-worker-kit-write-test",
-            content,
-        )
+        self.assertIn("--require-skill-support", verification)
+        self.assertIn("Task skills require Claude Code 2.1.33 or newer", verification)
+        self.assertIn("touch /workspace/.codify-worker-kit-write-test", verification)
         self.assertNotIn("CODIFY_KIT_CLAUDE_BIN", content)
+
+    def test_worker_kit_verification_rejects_claude_too_old_for_skills(self):
+        root = Path(__file__).resolve().parents[3]
+        verification_dir = root / "deploy" / "worker-entrypoint"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_bin = Path(tmpdir) / "bin"
+            fake_bin.mkdir()
+            for command in (
+                "bash",
+                "git",
+                "curl",
+                "head",
+                "jq",
+                "python3",
+                "node",
+                "codegraph",
+                "ssh",
+                "rg",
+                "tar",
+                "wc",
+            ):
+                executable = fake_bin / command
+                executable.write_text("#!/bin/sh\nexit 0\n")
+                executable.chmod(0o755)
+            claude = Path(tmpdir) / "claude"
+            claude.write_text("#!/bin/sh\nexit 0\n")
+            claude.chmod(0o755)
+            validator = fake_bin / "validate-mermaid"
+            validator.write_text("#!/bin/sh\nexit 0\n")
+            validator.chmod(0o755)
+
+            def run_verification(version):
+                return subprocess.run(
+                    [
+                        "/bin/bash",
+                        "-c",
+                        textwrap.dedent(
+                            """
+                            CODIFY_CLAUDE_BIN="$1"
+                            ENTRYPOINT_LIB_DIR="$2"
+                            CODIFY_MERMAID_VALIDATOR="$3"
+                            CLAUDE_TEST_VERSION="$4"
+                            CODIFY_RUN_UID=1000
+                            CODIFY_RUNTIME_PATH=/usr/local/bin:/usr/bin:/bin
+                            codify_run_shell() {
+                                if [[ "$1" == *'--version'* ]]; then
+                                    printf '%s (Claude Code)\n' "${CLAUDE_TEST_VERSION}"
+                                elif [[ "$1" == *'id -u'* ]]; then
+                                    printf '1000\n'
+                                fi
+                                return 0
+                            }
+                            source "${ENTRYPOINT_LIB_DIR}/verification.sh"
+                            codify_verify_runtime --require-skill-support
+                            """
+                        ),
+                        "verify-test",
+                        str(claude),
+                        str(verification_dir),
+                        str(validator),
+                        version,
+                    ],
+                    env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+
+            result = run_verification("2.1.32")
+            success = run_verification("2.1.33")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("require Claude Code 2.1.33 or newer", result.stderr)
+        self.assertEqual(success.returncode, 0, success.stderr)
+        self.assertIn("Worker kit verification passed", success.stdout)
 
     def test_worker_kit_launcher_preserves_runtime_path_and_stable_locale(self):
         root = Path(__file__).resolve().parents[3]

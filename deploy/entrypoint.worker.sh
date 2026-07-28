@@ -45,55 +45,9 @@ codify_run_shell() {
 
 if [ "${1:-}" = "--verify" ]; then
     shift
-    echo "Codify worker kit ${CODIFY_KIT_VERSION:-unknown}"
-    echo "Runtime image: ${CODIFY_RUNTIME_IMAGE:-unknown}"
-    for command in bash git curl head jq python3 node codegraph ssh rg tar wc; do
-        if ! command -v "${command}" >/dev/null 2>&1 \
-            || ! codify_run_shell "command -v '${command}' >/dev/null 2>&1"; then
-            echo "Required kit command is unavailable: ${command}" >&2
-            exit 1
-        fi
-    done
-    case "${CODIFY_CLAUDE_BIN}" in
-        /*) ;;
-        *)
-            echo "CODIFY_CLAUDE_BIN must be an absolute path: ${CODIFY_CLAUDE_BIN}" >&2
-            exit 1
-            ;;
-    esac
-    if [ ! -x "${CODIFY_CLAUDE_BIN}" ]; then
-        echo "Claude CLI is unavailable or not executable: ${CODIFY_CLAUDE_BIN}" >&2
-        exit 1
-    fi
-    claude_version="$(codify_run_shell '"${CODIFY_CLAUDE_BIN}" --version')"
-    echo "${claude_version}"
-    node --version
-    python3 --version
-    artifact_helper="${ENTRYPOINT_LIB_DIR}/artifacts.py"
-    [ -r "${artifact_helper}" ] || {
-        echo "Task artifact helper is missing: ${artifact_helper}" >&2
-        exit 1
-    }
-    python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]); compile(p.read_text(), str(p), "exec")' \
-        "${artifact_helper}"
-    git --version
-    codegraph --version
-    printf '# worker-kit smoke\n' > /tmp/codify-worker-kit-summary.md
-    "${CODIFY_MERMAID_VALIDATOR}" /tmp/codify-worker-kit-summary.md >/tmp/codify-worker-kit-mermaid.json
-    jq -e '.ok == true' /tmp/codify-worker-kit-mermaid.json >/dev/null
-    test "$(codify_run_shell 'id -u')" = "${CODIFY_RUN_UID}"
-    codify_run_shell 'touch /workspace/.codify-worker-kit-write-test && rm -f /workspace/.codify-worker-kit-write-test'
-    if [ "${1:-}" = "--smoke" ]; then
-        [ "$#" -eq 2 ] || {
-            echo "--smoke requires exactly one shell command" >&2
-            exit 2
-        }
-        codify_run_shell "export PATH=\"${CODIFY_RUNTIME_PATH}\"; cd /workspace; ${2}"
-    elif [ "$#" -ne 0 ]; then
-        echo "Unknown worker-kit verify arguments: $*" >&2
-        exit 2
-    fi
-    echo "Worker kit verification passed"
+    # shellcheck source=deploy/worker-entrypoint/verification.sh
+    source "${ENTRYPOINT_LIB_DIR}/verification.sh"
+    codify_verify_runtime "$@"
     exit 0
 fi
 

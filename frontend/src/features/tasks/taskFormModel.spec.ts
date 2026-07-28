@@ -19,6 +19,9 @@ const baseDraft: TaskFormDraft = {
   scheduledAt: null,
   runInstructionTemplate: 'Execute {{user_prompt}}',
   runInstructionDirty: false,
+  inheritProfileSkills: true,
+  selectedSkillIds: [],
+  skillSelectionDirty: false,
 }
 
 const existingTask = {
@@ -29,6 +32,9 @@ const existingTask = {
   task_mode: 'execute',
   provider_id: 3,
   worker_profile_id: 4,
+  skill_ids: [2],
+  skill_names: ['review'],
+  skill_selection_source: 'profile',
 } as Task
 
 describe('task form request contracts', () => {
@@ -77,6 +83,60 @@ describe('task form request contracts', () => {
       ...baseDraft,
       sessionMode: 'fresh',
     }).session_mode).toBe('fresh')
+  })
+
+  it('sends a complete task-level skill override including an explicit empty selection', () => {
+    expect(buildCreateTaskRequest(7, {
+      ...baseDraft,
+      inheritProfileSkills: false,
+      selectedSkillIds: [],
+    }).skill_ids).toEqual([])
+
+    expect(buildCreateTaskRequest(7, {
+      ...baseDraft,
+      inheritProfileSkills: false,
+      selectedSkillIds: [3, 5],
+    }).skill_ids).toEqual([3, 5])
+  })
+
+  it('restores profile skill inheritance with an explicit null update', () => {
+    expect(buildUpdateTaskRequest({
+      ...existingTask,
+      skill_selection_source: 'task',
+    }, {
+      ...baseDraft,
+      requireChanges: true,
+      selectedProviderId: 3,
+      inheritProfileSkills: true,
+    }, baseDraft.runInstructionTemplate)).toEqual({ skill_ids: null })
+  })
+
+  it('refreshes or clears a frozen task Skill snapshot after explicit user action', () => {
+    expect(buildUpdateTaskRequest({
+      ...existingTask,
+      skill_selection_source: 'task',
+      skill_ids: [2],
+    }, {
+      ...baseDraft,
+      requireChanges: true,
+      selectedProviderId: 3,
+      inheritProfileSkills: false,
+      selectedSkillIds: [2],
+      skillSelectionDirty: true,
+    }, baseDraft.runInstructionTemplate)).toEqual({ skill_ids: [2] })
+
+    expect(buildUpdateTaskRequest({
+      ...existingTask,
+      skill_selection_source: 'task',
+      skill_ids: [],
+    }, {
+      ...baseDraft,
+      requireChanges: true,
+      selectedProviderId: 3,
+      inheritProfileSkills: false,
+      selectedSkillIds: [],
+      skillSelectionDirty: true,
+    }, baseDraft.runInstructionTemplate)).toEqual({ skill_ids: [] })
   })
 
   it('builds a minimal edit patch', () => {

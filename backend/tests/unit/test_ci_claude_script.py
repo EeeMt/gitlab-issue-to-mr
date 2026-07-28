@@ -722,6 +722,65 @@ def test_ci_claude_prefers_append_system_prompt_file_when_set(tmp_path):
     assert "file policy: keep this private" not in result.stderr
 
 
+def test_ci_claude_adds_task_skill_scope_to_claude_arguments(tmp_path):
+    skills_root = tmp_path / "skill-scope"
+    (skills_root / ".claude" / "skills" / "review-changes").mkdir(parents=True)
+    script_copy = _prepare_script_copy(
+        tmp_path,
+        "#!/usr/bin/env bash\n"
+        "if [[ ${1:-} == --version ]]; then echo '2.1.33 (Claude Code)'; exit 0; fi\n"
+        "printf '%s\\n' \"$@\" > claude_args.txt\n"
+        "cat <<'EOF'\n"
+        '{"type":"result","subtype":"success","result":"done","session_id":"s1","usage":{"input_tokens":1,"output_tokens":1}}\n'
+        "EOF\n",
+    )
+
+    env = os.environ.copy()
+    env["SANDBOX_MODE"] = "1"
+    env["CODIFY_TASK_SKILLS_DIR"] = str(skills_root)
+
+    result = subprocess.run(
+        [str(script_copy), "normal prompt"],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    args = (tmp_path / "claude_args.txt").read_text(encoding="utf-8").splitlines()
+    add_dir_index = args.index("--add-dir")
+    assert result.returncode == 0, result.stderr
+    assert args[add_dir_index + 1] == str(skills_root)
+
+
+def test_ci_claude_rejects_cli_too_old_for_task_skills(tmp_path):
+    skills_root = tmp_path / "skill-scope"
+    (skills_root / ".claude" / "skills" / "review-changes").mkdir(parents=True)
+    script_copy = _prepare_script_copy(
+        tmp_path,
+        "#!/usr/bin/env bash\n"
+        "if [[ ${1:-} == --version ]]; then echo '2.1.32 (Claude Code)'; exit 0; fi\n"
+        "exit 99\n",
+    )
+
+    env = os.environ.copy()
+    env["SANDBOX_MODE"] = "1"
+    env["CODIFY_TASK_SKILLS_DIR"] = str(skills_root)
+
+    result = subprocess.run(
+        [str(script_copy), "normal prompt"],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "require Claude Code 2.1.33 or newer" in result.stderr
+
+
 def test_ci_claude_fresh_session_ignores_every_resume_source(tmp_path):
     (tmp_path / ".claude_session_id").write_text("session-from-file", encoding="utf-8")
     script_copy = _prepare_script_copy(

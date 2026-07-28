@@ -470,7 +470,7 @@
             class="execution-environment"
             :class="{
               'execution-environment--open': executionEnvironmentOpen,
-              'execution-environment--warning': executionEnvironmentMissing
+              'execution-environment--warning': executionEnvironmentNeedsAttention
             }"
           >
             <button
@@ -485,10 +485,10 @@
                   class="execution-environment__status"
                   :class="{
                     'execution-environment__status--override': executionEnvironmentOverridden,
-                    'execution-environment__status--warning': executionEnvironmentMissing
+                    'execution-environment__status--warning': executionEnvironmentNeedsAttention
                   }"
                 >
-                  {{ executionEnvironmentMissing
+                  {{ executionEnvironmentNeedsAttention
                     ? t('createTask.executionEnvironmentNeedsAttention')
                     : executionEnvironmentOverridden
                       ? t('createTask.executionEnvironmentOverride')
@@ -508,7 +508,7 @@
                 </span>
               </span>
               <span class="execution-environment__action">
-                <span>{{ executionEnvironmentMissing
+                <span>{{ executionEnvironmentNeedsAttention
                   ? t('createTask.executionEnvironmentConfigure')
                   : executionEnvironmentOpen
                     ? t('createTask.executionEnvironmentCollapse')
@@ -544,6 +544,67 @@
                           :placeholder="t('createTask.selectProvider')"
                         />
                       </label>
+                    </div>
+                    <div class="execution-environment__skills" data-testid="task-skill-selection">
+                      <div class="execution-environment__skills-header">
+                        <span>{{ t('createTask.skills') }}</span>
+                        <label class="execution-environment__skills-inherit">
+                          <span>{{ t('createTask.inheritProfileSkills') }}</span>
+                          <n-switch
+                            :value="inheritProfileSkills"
+                            size="small"
+                            :disabled="!taskSkillSelectionSupported"
+                            @update:value="handleSkillInheritanceUpdate"
+                          />
+                        </label>
+                      </div>
+                      <n-select
+                        :value="selectedSkillIds"
+                        multiple
+                        clearable
+                        filterable
+                        :disabled="inheritProfileSkills || !taskSkillSelectionSupported"
+                        :options="taskSkillOptions"
+                        :placeholder="t('createTask.selectSkills')"
+                        @update:value="handleSelectedSkillIdsUpdate"
+                      />
+                      <div
+                        v-if="taskSkillSelectionNeedsAttention"
+                        class="execution-environment__skills-snapshot-warning"
+                        data-testid="task-skill-snapshot-warning"
+                      >
+                        <span v-if="changedTaskSkillSnapshots.length">
+                          {{ t('createTask.skillSnapshotChangedHint') }}
+                        </span>
+                        <span v-if="profileDefaultSkillSelectionChanged">
+                          {{ t('createTask.profileSkillSelectionChangedHint') }}
+                        </span>
+                        <div class="execution-environment__skills-snapshot-list">
+                          <n-tag
+                            v-for="snapshot in changedTaskSkillSnapshots"
+                            :key="`${snapshot.version_id}-${snapshot.name}`"
+                            size="small"
+                            type="warning"
+                            :bordered="false"
+                          >
+                            {{ snapshot.name }} · {{ t(
+                              snapshot.unavailable
+                                ? 'createTask.skillSnapshotUnavailable'
+                                : 'createTask.skillSnapshotUpdated'
+                            ) }}
+                          </n-tag>
+                        </div>
+                        <n-button size="tiny" secondary @click="applyCurrentSkillSelection">
+                          {{ t('createTask.applyCurrentSkillSelection') }}
+                        </n-button>
+                      </div>
+                      <span class="execution-environment__skills-hint">
+                        {{ !taskSkillSelectionSupported
+                          ? t('createTask.skillsUnsupportedHint')
+                          : inheritProfileSkills
+                            ? t('createTask.profileSkillsHint')
+                            : t('createTask.taskSkillsOverrideHint') }}
+                      </span>
                     </div>
                     <div v-if="executionEnvironmentOverridden" class="execution-environment__footer">
                       <n-button size="tiny" quaternary @click="restoreExecutionEnvironmentDefaults">
@@ -642,7 +703,7 @@ import HeatmapChart from './HeatmapChart.vue'
 import RunInstructionTemplateEditor from './RunInstructionTemplateEditor.vue'
 import {
   getRunInstructionTemplateDefaults,
-  type Task, type RunInstructionTemplateDefaults
+  type Task, type TaskSkillSnapshot, type RunInstructionTemplateDefaults
 } from '../api'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeUtc8Compact, formatTimeUtc8 } from '../utils/datetime'
@@ -708,6 +769,11 @@ const executionEnvironmentExpanded = ref(false)
 const executionEnvironmentContentId = `${useId()}-execution-environment-content`
 const executionOptionsReady = ref(false)
 const selectedProviderId = ref<number | null>(null)
+const inheritProfileSkills = ref(true)
+const selectedSkillIds = ref<number[]>([])
+const skillSelectionDirty = ref(false)
+const taskSkillSnapshots = ref<TaskSkillSnapshot[]>([])
+const skillSnapshotResolutionApplied = ref(false)
 const scheduleType = ref<'now' | 'scheduled'>('now')
 const scheduledAt = ref<number | null>(null)
 const runInstructionTemplate = ref('')
@@ -753,8 +819,12 @@ const {
   effectiveProvider,
   effectiveWorkerProfile,
   loadProviders,
+  loadSkills,
   loadWorkerProfiles,
   providerOptions,
+  skillOptions,
+  skills,
+  skillsLoadSucceeded,
 } = useTaskExecutionOptions({
   mode: toRef(props, 'mode'),
   task: toRef(props, 'task'),
@@ -767,10 +837,96 @@ const executionEnvironmentMissing = computed(() =>
   && (!effectiveWorkerProfile.value || !effectiveProvider.value)
 )
 const executionEnvironmentOverridden = computed(() =>
-  selectedProviderId.value !== null
+  selectedProviderId.value !== null || !inheritProfileSkills.value
+)
+function isSkillCapableWorkerKitVersion(value: string | null | undefined): boolean {
+  const match = value?.trim().match(/^(\d+)\.(\d+)\.(\d+)$/)
+  if (!match) return false
+  const [major, minor, patch] = match.slice(1).map(Number)
+  return major > 0 || minor > 3 || (minor === 3 && patch >= 5)
+}
+const taskSkillSelectionSupported = computed(() => {
+  const profile = effectiveWorkerProfile.value
+  const runtimeMode = props.mode === 'edit'
+    ? props.task?.worker_runtime_mode
+    : profile?.runtime_mode
+  const workerKitVersion = props.mode === 'edit'
+    ? props.task?.worker_kit_version
+    : profile?.worker_kit_version
+  if (runtimeMode !== 'mounted_kit') return false
+  return isSkillCapableWorkerKitVersion(workerKitVersion)
+})
+const enabledProfileDefaultSkillIds = computed(() => {
+  const enabledIds = new Set(skills.value.map(skill => skill.id))
+  return (effectiveWorkerProfile.value?.default_skill_ids ?? []).filter(skillId =>
+    enabledIds.has(skillId)
+  )
+})
+const selectableProfileDefaultSkillIds = computed(() =>
+  taskSkillSelectionSupported.value ? enabledProfileDefaultSkillIds.value : []
+)
+const taskSkillOptions = computed(() => {
+  const options = [...skillOptions.value]
+  const optionIds = new Set(options.map(option => option.value))
+  for (const snapshot of taskSkillSnapshots.value) {
+    if (typeof snapshot.id !== 'number' || optionIds.has(snapshot.id)) continue
+    options.push({
+      label: `${snapshot.name} (${t('createTask.skillSnapshotUnavailable')})`,
+      value: snapshot.id,
+      disabled: true,
+    })
+    optionIds.add(snapshot.id)
+  }
+  return options
+})
+const changedTaskSkillSnapshots = computed(() => {
+  if (
+    props.mode !== 'edit'
+    || !skillsLoadSucceeded.value
+    || skillSnapshotResolutionApplied.value
+  ) return []
+  const currentById = new Map(skills.value.map(skill => [skill.id, skill]))
+  return taskSkillSnapshots.value.flatMap(snapshot => {
+    const current = typeof snapshot.id === 'number'
+      ? currentById.get(snapshot.id)
+      : undefined
+    if (current && current.version_id === snapshot.version_id) return []
+    return [{
+      ...snapshot,
+      unavailable: !current,
+    }]
+  })
+})
+const profileDefaultSkillSelectionChanged = computed(() => {
+  if (
+    props.mode !== 'edit'
+    || (props.task?.skill_selection_source ?? 'profile') !== 'profile'
+    || !skillsLoadSucceeded.value
+    || !effectiveWorkerProfile.value
+    || skillSnapshotResolutionApplied.value
+  ) return false
+
+  const currentDefaultIds = new Set(enabledProfileDefaultSkillIds.value)
+  const snapshotIds = new Set(
+    taskSkillSnapshots.value.flatMap(snapshot =>
+      typeof snapshot.id === 'number' ? [snapshot.id] : []
+    )
+  )
+  return currentDefaultIds.size !== snapshotIds.size
+    || [...currentDefaultIds].some(skillId => !snapshotIds.has(skillId))
+})
+const taskSkillSelectionNeedsAttention = computed(() =>
+  taskSkillSelectionSupported.value
+  && (
+    changedTaskSkillSnapshots.value.length > 0
+    || profileDefaultSkillSelectionChanged.value
+  )
+)
+const executionEnvironmentNeedsAttention = computed(() =>
+  executionEnvironmentMissing.value || taskSkillSelectionNeedsAttention.value
 )
 const executionEnvironmentOpen = computed(() =>
-  executionEnvironmentExpanded.value || executionEnvironmentMissing.value
+  executionEnvironmentExpanded.value || executionEnvironmentNeedsAttention.value
 )
 
 // Schedule heatmap state (create mode)
@@ -839,6 +995,19 @@ watch([prompt, requireChanges], () => {
   invalidateRunInstructionPreview()
 }, { flush: 'sync' })
 
+watch(
+  [effectiveWorkerProfile, skills],
+  () => {
+    if (props.mode === 'create' && !taskSkillSelectionSupported.value) {
+      inheritProfileSkills.value = true
+      selectedSkillIds.value = []
+    } else if (props.mode === 'create' && inheritProfileSkills.value) {
+      selectedSkillIds.value = [...selectableProfileDefaultSkillIds.value]
+    }
+  },
+  { immediate: true },
+)
+
 watch(() => props.show, (val) => {
   invalidateRunInstructionPreview()
   runInstructionExpanded.value = false
@@ -850,6 +1019,12 @@ watch(() => props.show, (val) => {
       requireChanges.value = props.task.require_changes ?? true
       taskMode.value = (props.task.task_mode as 'execute' | 'plan') ?? 'execute'
       selectedProviderId.value = props.task.provider_id ?? null
+      inheritProfileSkills.value =
+        (props.task.skill_selection_source ?? 'profile') === 'profile'
+      selectedSkillIds.value = [...(props.task.skill_ids ?? [])]
+      taskSkillSnapshots.value = [...(props.task.skill_snapshots ?? [])]
+      skillSelectionDirty.value = false
+      skillSnapshotResolutionApplied.value = false
       const snapshot = props.task.run_instruction_template
         ?? getDefaultRunInstructionTemplate(taskMode.value)
         ?? ''
@@ -862,6 +1037,11 @@ watch(() => props.show, (val) => {
       }
       taskMode.value = null
       selectedProviderId.value = null
+      inheritProfileSkills.value = true
+      selectedSkillIds.value = [...selectableProfileDefaultSkillIds.value]
+      taskSkillSnapshots.value = []
+      skillSelectionDirty.value = false
+      skillSnapshotResolutionApplied.value = false
       runInstructionTemplate.value = ''
       initialRunInstructionTemplate.value = ''
       runInstructionDirty.value = false
@@ -952,7 +1132,7 @@ function getDefaultRunInstructionTemplate(mode: 'execute' | 'plan' | null): stri
 }
 
 function toggleExecutionEnvironment() {
-  if (executionEnvironmentMissing.value) {
+  if (executionEnvironmentNeedsAttention.value) {
     executionEnvironmentExpanded.value = true
     return
   }
@@ -961,14 +1141,50 @@ function toggleExecutionEnvironment() {
 
 function restoreExecutionEnvironmentDefaults() {
   selectedProviderId.value = null
+  handleSkillInheritanceUpdate(true)
   if (!executionEnvironmentMissing.value) {
     executionEnvironmentExpanded.value = false
   }
 }
 
+function handleSkillInheritanceUpdate(value: boolean) {
+  if (props.mode === 'edit' && inheritProfileSkills.value !== value) {
+    skillSelectionDirty.value = true
+    skillSnapshotResolutionApplied.value = true
+  }
+  inheritProfileSkills.value = value
+  if (value) {
+    selectedSkillIds.value = [...selectableProfileDefaultSkillIds.value]
+  }
+}
+
+function handleSelectedSkillIdsUpdate(value: number[]) {
+  selectedSkillIds.value = [...value]
+  if (props.mode === 'edit') {
+    skillSelectionDirty.value = true
+    skillSnapshotResolutionApplied.value = true
+  }
+}
+
+function applyCurrentSkillSelection() {
+  executionEnvironmentExpanded.value = true
+  skillSelectionDirty.value = true
+  skillSnapshotResolutionApplied.value = true
+  if (inheritProfileSkills.value) {
+    selectedSkillIds.value = [...selectableProfileDefaultSkillIds.value]
+    return
+  }
+  const enabledIds = new Set(skills.value.map(skill => skill.id))
+  selectedSkillIds.value = taskSkillSnapshots.value.flatMap(snapshot =>
+    typeof snapshot.id === 'number' && enabledIds.has(snapshot.id)
+      ? [snapshot.id]
+      : []
+  )
+}
+
 async function loadExecutionOptions() {
   executionOptionsReady.value = false
-  await Promise.all([loadProviders(), loadWorkerProfiles()])
+  await Promise.all([loadProviders(), loadWorkerProfiles(), loadSkills()])
   executionOptionsReady.value = true
 }
 
@@ -1006,6 +1222,9 @@ const {
   runInstructionTemplate,
   initialRunInstructionTemplate,
   runInstructionDirty,
+  inheritProfileSkills,
+  selectedSkillIds,
+  skillSelectionDirty,
   defaultsError,
   getDefaultRunInstructionTemplate,
   clearScheduledTasks,
@@ -1889,6 +2108,46 @@ onMounted(() => {
   color: var(--n-text-color-3);
   font-size: 11px;
   line-height: 16px;
+}
+
+.execution-environment__skills {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.execution-environment__skills-header,
+.execution-environment__skills-inherit {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.execution-environment__skills-header > span,
+.execution-environment__skills-inherit,
+.execution-environment__skills-hint {
+  color: var(--n-text-color-3);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.execution-environment__skills-snapshot-warning {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  color: var(--n-warning-color);
+  font-size: 11px;
+  line-height: 16px;
+  background: color-mix(in srgb, var(--n-warning-color) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--n-warning-color) 28%, transparent);
+  border-radius: 6px;
+}
+
+.execution-environment__skills-snapshot-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .execution-environment__footer {

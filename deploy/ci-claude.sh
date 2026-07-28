@@ -19,6 +19,7 @@
 #   APPEND_SYSTEM_PROMPT   Extra system instructions appended to default prompt
 #   APPEND_SYSTEM_PROMPT_FILE
 #                          Read extra system instructions from a file
+#   CODIFY_TASK_SKILLS_DIR Task-local directory containing .claude/skills
 #   RESUME_SESSION         Session ID to resume a specific conversation
 #   CONTINUE_SESSION       "1" → --continue the most recent conversation
 #   CLAUDE_MAX_TURNS       Max agent turns (default: unlimited)
@@ -100,6 +101,8 @@ MAX_TURNS="${CLAUDE_MAX_TURNS:-}"
 CLAUDE_MODEL="${CLAUDE_MODEL:-}"
 CLAUDE_CODE_EXIT_AFTER_STOP_DELAY="${CLAUDE_CODE_EXIT_AFTER_STOP_DELAY:-5000}"
 RESULT_EXIT_GRACE_SECONDS="${CI_CLAUDE_RESULT_EXIT_GRACE_SECONDS:-30}"
+TASK_SKILLS_DIR="${CODIFY_TASK_SKILLS_DIR:-}"
+CLAUDE_BIN="${CODIFY_CLAUDE_BIN:-/usr/local/bin/claude}"
 SESSION_ID_FILE=".claude_session_id"
 
 if ! [[ "$CLAUDE_CODE_EXIT_AFTER_STOP_DELAY" =~ ^[0-9]+$ ]] \
@@ -119,6 +122,34 @@ export CLAUDE_CODE_EXIT_AFTER_STOP_DELAY
 if [[ -n "$APPEND_SYSTEM_FILE" && ! -f "$APPEND_SYSTEM_FILE" ]]; then
   printf "APPEND_SYSTEM_PROMPT_FILE not found: %s\n" "$APPEND_SYSTEM_FILE" >&2
   exit 1
+fi
+if [[ -n "$TASK_SKILLS_DIR" ]]; then
+  if [[ "$TASK_SKILLS_DIR" != /* || ! -d "$TASK_SKILLS_DIR/.claude/skills" ]]; then
+    printf "CODIFY_TASK_SKILLS_DIR must be an absolute directory containing .claude/skills: %s\n" \
+      "$TASK_SKILLS_DIR" >&2
+    exit 1
+  fi
+  if ! CLAUDE_VERSION_OUTPUT=$("$CLAUDE_BIN" --version 2>&1); then
+    printf "Could not determine Claude Code version required for task skills: %s\n" \
+      "$CLAUDE_VERSION_OUTPUT" >&2
+    exit 1
+  fi
+  if [[ ! "$CLAUDE_VERSION_OUTPUT" =~ ([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+    printf "Could not parse Claude Code version required for task skills: %s\n" \
+      "$CLAUDE_VERSION_OUTPUT" >&2
+    exit 1
+  fi
+  CLAUDE_VERSION_MAJOR=$((10#${BASH_REMATCH[1]}))
+  CLAUDE_VERSION_MINOR=$((10#${BASH_REMATCH[2]}))
+  CLAUDE_VERSION_PATCH=$((10#${BASH_REMATCH[3]}))
+  if (( CLAUDE_VERSION_MAJOR < 2 \
+      || (CLAUDE_VERSION_MAJOR == 2 && CLAUDE_VERSION_MINOR < 1) \
+      || (CLAUDE_VERSION_MAJOR == 2 && CLAUDE_VERSION_MINOR == 1 \
+          && CLAUDE_VERSION_PATCH < 33) )); then
+    printf "Task skills require Claude Code 2.1.33 or newer; detected: %s\n" \
+      "$CLAUDE_VERSION_OUTPUT" >&2
+    exit 1
+  fi
 fi
 
 RESUME="${RESUME_SESSION:-}"
@@ -151,6 +182,7 @@ elif [[ -n "$APPEND_SYSTEM" ]]; then
 fi
 [[ -n "$MAX_TURNS" ]]                && CLAUDE_ARGS+=(--max-turns "$MAX_TURNS")
 [[ -n "$CLAUDE_MODEL" ]]             && CLAUDE_ARGS+=(--model "$CLAUDE_MODEL")
+[[ -n "$TASK_SKILLS_DIR" ]]           && CLAUDE_ARGS+=(--add-dir "$TASK_SKILLS_DIR")
 [[ "$CONTINUE_SESSION" == "1" ]]     && CLAUDE_ARGS+=(--continue)
 [[ -n "$RESUME" && "$CONTINUE_SESSION" != "1" ]] && CLAUDE_ARGS+=(--resume "$RESUME")
 
@@ -198,6 +230,7 @@ else
 fi
 [[ -n "$CLAUDE_MODEL" ]]             && info "Model  : $CLAUDE_MODEL"
 [[ -n "$MAX_TURNS" ]]                && info "MaxTurns: $MAX_TURNS"
+[[ -n "$TASK_SKILLS_DIR" ]]          && info "Skills : $TASK_SKILLS_DIR"
 [[ -n "$RESUME" ]]               && info "Session: resuming $RESUME"
 [[ "$CONTINUE_SESSION" == "1" ]] && info "Session: continuing last conversation"
 
@@ -652,7 +685,7 @@ run_claude_stream() {
   # Job control gives this background command its own process group without a
   # platform-specific setsid dependency. Descendants inherit the group.
   set -m
-  "${CODIFY_CLAUDE_BIN:-/usr/local/bin/claude}" "$@" \
+  "$CLAUDE_BIN" "$@" \
     < "$prompt_input" > "$stream_fifo" 2>&1 &
   claude_pid=$!
   set +m

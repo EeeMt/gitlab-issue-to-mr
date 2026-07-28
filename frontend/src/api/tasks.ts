@@ -40,9 +40,22 @@ export interface TaskWorkerRuntimeSummary {
   codegraph_enabled: boolean
   mounts: TaskWorkerRuntimeMount[]
   environment_variables: TaskWorkerRuntimeEnvironmentVariable[]
+  skills: Array<{
+    id: number | null
+    name: string
+    description: string
+  }>
+  skill_selection_source: 'profile' | 'task'
   pre_script_configured: boolean
   post_script_configured: boolean
   snapshot_created_at: string | null
+}
+
+export interface TaskSkillSnapshot {
+  id: number | null
+  name: string
+  description: string
+  version_id: number
 }
 
 export interface Task {
@@ -87,7 +100,13 @@ export interface Task {
   worker_profile_id: number | null
   worker_profile_name?: string | null
   worker_image?: string | null
+  worker_runtime_mode?: 'baked_image' | 'mounted_kit' | string | null
+  worker_kit_version?: string | null
   worker_snapshot_created_at?: string | null
+  skill_ids?: number[]
+  skill_names?: string[]
+  skill_snapshots?: TaskSkillSnapshot[]
+  skill_selection_source: 'profile' | 'task'
   created_at: string
   updated_at: string
   started_at: string | null
@@ -116,6 +135,7 @@ export interface CreateTaskRequest {
   task_mode?: 'execute' | 'plan'
   session_mode?: 'continue' | 'fresh'
   run_instruction_template?: string
+  skill_ids?: number[]
 }
 
 export interface RescheduleTaskRequest {
@@ -129,6 +149,7 @@ export interface UpdateTaskRequest {
   require_changes?: boolean
   task_mode?: 'execute' | 'plan'
   run_instruction_template?: string
+  skill_ids?: number[] | null
 }
 
 export interface TaskLog {

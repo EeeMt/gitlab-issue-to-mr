@@ -3,13 +3,26 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, StrictInt, field_validator, model_validator
 
 from app.core.scheduling import normalize_scheduled_datetime
+from app.core.skills import MAX_SKILLS_PER_TASK
 from app.core.task_prompt import MAX_RUN_INSTRUCTION_TEMPLATE_LENGTH
 from app.core.utcnow import utcnow
 
 _VALID_TASK_MODES = ("execute", "plan")
+
+
+def _validate_skill_ids(value: list[int] | None) -> list[int] | None:
+    if value is None:
+        return None
+    if len(value) > MAX_SKILLS_PER_TASK:
+        raise ValueError(f"At most {MAX_SKILLS_PER_TASK} skills can be selected")
+    if len(set(value)) != len(value):
+        raise ValueError("Duplicate skill IDs are not allowed")
+    if any(skill_id <= 0 for skill_id in value):
+        raise ValueError("Skill IDs must be positive integers")
+    return value
 
 
 class RetryTaskRequest(BaseModel):
@@ -70,6 +83,12 @@ class UpdateTaskRequest(BaseModel):
     run_instruction_template: str | None = Field(
         default=None, max_length=MAX_RUN_INSTRUCTION_TEMPLATE_LENGTH
     )
+    skill_ids: list[StrictInt] | None = None
+
+    @field_validator("skill_ids")
+    @classmethod
+    def validate_skill_ids(cls, value: list[int] | None) -> list[int] | None:
+        return _validate_skill_ids(value)
 
     @model_validator(mode="before")
     @classmethod
@@ -124,6 +143,12 @@ class CreateTaskRequest(BaseModel):
     run_instruction_template: str | None = Field(
         default=None, max_length=MAX_RUN_INSTRUCTION_TEMPLATE_LENGTH
     )
+    skill_ids: list[StrictInt] | None = None
+
+    @field_validator("skill_ids")
+    @classmethod
+    def validate_skill_ids(cls, value: list[int] | None) -> list[int] | None:
+        return _validate_skill_ids(value)
 
     @model_validator(mode="before")
     @classmethod

@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any, Iterable, Mapping
 from urllib.parse import urlparse
 
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -20,6 +21,12 @@ from app.core.docker_client import (
     DockerConnectionConfig,
     canonicalize_docker_host,
     resolve_docker_connection,
+)
+from app.core.skills import (
+    SkillValidationError,
+    hydrate_skill_snapshots,
+    skill_snapshots_from_task_snapshot,
+    validate_runtime_supports_skills,
 )
 from app.core.task_prompt import (
     TaskPromptValidationError,
@@ -84,6 +91,7 @@ class TaskWorkerRuntime:
     environment: dict[str, str]
     pre_script: str
     post_script: str
+    skills: list[dict[str, Any]] = field(default_factory=list)
     runtime_mode: str = BAKED_IMAGE_MODE
     worker_kit_version: str | None = None
     worker_kit_path: str | None = None
@@ -330,6 +338,9 @@ def serialize_worker_profile_for_api(
             serialize_profile_environment_variable_for_api(row)
             for row in profile.environment_variables
         ],
+        "default_skill_ids": [
+            skill.id for skill in (getattr(profile, "default_skills", None) or [])
+        ],
         "pre_script": profile.pre_script,
         "post_script": profile.post_script,
         "default_execute_run_instruction_template": (
@@ -411,7 +422,10 @@ async def list_worker_profiles(db: AsyncSession) -> list[WorkerProfile]:
     """Load all worker profiles for management screens."""
     result = await db.execute(
         select(WorkerProfile)
-        .options(selectinload(WorkerProfile.environment_variables))
+        .options(
+            selectinload(WorkerProfile.environment_variables),
+            selectinload(WorkerProfile.default_skills),
+        )
         .order_by(WorkerProfile.is_default.desc(), WorkerProfile.name.asc())
     )
     return list(result.scalars().all())
@@ -421,7 +435,10 @@ async def get_default_worker_profile(db: AsyncSession) -> WorkerProfile | None:
     result = await db.execute(
         select(WorkerProfile)
         .where(WorkerProfile.is_default == True, WorkerProfile.enabled == True)
-        .options(selectinload(WorkerProfile.environment_variables))
+        .options(
+            selectinload(WorkerProfile.environment_variables),
+            selectinload(WorkerProfile.default_skills),
+        )
         .execution_options(populate_existing=True)
         .limit(1)
     )
@@ -458,7 +475,10 @@ async def resolve_worker_profile_for_issue(
         result = await db.execute(
             select(WorkerProfile)
             .where(WorkerProfile.id == candidate_id)
-            .options(selectinload(WorkerProfile.environment_variables))
+            .options(
+                selectinload(WorkerProfile.environment_variables),
+                selectinload(WorkerProfile.default_skills),
+            )
             .with_for_update()
             .execution_options(populate_existing=True)
         )
@@ -552,6 +572,8 @@ def snapshot_from_profile(
         environment_variables=[
             _profile_env_to_snapshot(row) for row in profile.environment_variables
         ],
+        skill_references=[],
+        skill_selection_source="profile",
         pre_script=profile.pre_script or "",
         post_script=profile.post_script or "",
         default_execute_run_instruction_template=profile.default_execute_run_instruction_template,
@@ -597,6 +619,20 @@ async def load_task_worker_runtime(db: AsyncSession, task: Task) -> TaskWorkerRu
     if snapshot is None:
         raise WorkerProfileValidationError(f"Task {task.id} has no worker profile snapshot")
     try:
+        skills_unloaded = "skill_references" in sa_inspect(snapshot).unloaded
+    except Exception:
+        # Lightweight test doubles do not expose SQLAlchemy inspection state.
+        skills_unloaded = False
+    if skills_unloaded:
+        await db.refresh(snapshot, attribute_names=["skill_references"])
+    try:
+        hydrated_skills = await hydrate_skill_snapshots(
+            db,
+            skill_snapshots_from_task_snapshot(snapshot),
+        )
+    except SkillValidationError as exc:
+        raise WorkerProfileValidationError(str(exc)) from exc
+    try:
         runtime_mode, kit_version, kit_path = validate_worker_kit_config(
             runtime_mode=getattr(snapshot, "runtime_mode", BAKED_IMAGE_MODE),
             worker_kit_version=getattr(snapshot, "worker_kit_version", None),
@@ -604,7 +640,8 @@ async def load_task_worker_runtime(db: AsyncSession, task: Task) -> TaskWorkerRu
         )
         mounts = parse_worker_profile_mounts(snapshot.volume_mounts)
         validate_worker_kit_mounts(runtime_mode, mounts)
-    except WorkerKitValidationError as exc:
+        validate_runtime_supports_skills(snapshot, hydrated_skills)
+    except (WorkerKitValidationError, SkillValidationError) as exc:
         raise WorkerProfileValidationError(str(exc)) from exc
     return TaskWorkerRuntime(
         image=snapshot.image,
@@ -616,6 +653,7 @@ async def load_task_worker_runtime(db: AsyncSession, task: Task) -> TaskWorkerRu
         environment=build_worker_profile_environment_map(snapshot.environment_variables),
         pre_script=snapshot.pre_script or "",
         post_script=snapshot.post_script or "",
+        skills=hydrated_skills,
         docker_host=getattr(snapshot, "docker_host", None),
         docker_tls_ca=getattr(snapshot, "docker_tls_ca", None),
         docker_tls_cert=getattr(snapshot, "docker_tls_cert", None),

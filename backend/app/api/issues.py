@@ -20,6 +20,7 @@ from app.api.list_filter_values import (
 )
 from app.config import get_effective_settings
 from app.core.gitlab_client import get_gitlab_client
+from app.core.skills import delete_unreferenced_skill_versions
 from app.core.task_helpers import _require_issue_operator
 from app.core.utcnow import utcnow
 from app.core.worker_kit import MOUNTED_KIT_MODE
@@ -850,5 +851,7 @@ async def delete_issue(
             ) from exc
 
     await db.delete(issue)
+    await db.flush()
+    await delete_unreferenced_skill_versions(db)
     await db.commit()
     return {"status": "deleted", "id": issue_id}

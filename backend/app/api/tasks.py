@@ -430,7 +430,13 @@ async def get_task(
                 TaskWorkerProfileSnapshot.worker_profile_id,
                 TaskWorkerProfileSnapshot.profile_name,
                 TaskWorkerProfileSnapshot.image,
+                TaskWorkerProfileSnapshot.runtime_mode,
+                TaskWorkerProfileSnapshot.worker_kit_version,
+                TaskWorkerProfileSnapshot.skill_selection_source,
                 TaskWorkerProfileSnapshot.created_at,
+            ),
+            selectinload(Task.worker_profile_snapshot).selectinload(
+                TaskWorkerProfileSnapshot.skill_references
             ),
         )
         .where(Task.id == task_id)

@@ -7,7 +7,7 @@ import os
 import shutil
 import tarfile
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from sqlalchemy import select
@@ -21,6 +21,11 @@ from app.config import (
 )
 from app.config import (
     get_effective_settings as get_settings,
+)
+from app.core.skills import (
+    decode_skill_file_content,
+    normalize_skill_snapshots,
+    render_skill_markdown,
 )
 from app.core.utcnow import utcnow
 from app.core.worker_environment_variables import (
@@ -42,6 +47,8 @@ _WORKER_POST_SCRIPT_FILENAME = "worker-post-script.sh"
 _TASK_PROMPT_FILENAME = "task-prompt.md"
 _ARTIFACT_POLICY_FILENAME = "artifact-policy.json"
 _TASK_PROMPT_CONTAINER_PATH = f"{_RUNTIME_CONTAINER_PATH}/{_TASK_PROMPT_FILENAME}"
+_TASK_SKILLS_ROOT_NAME = "skill-scope"
+TASK_SKILLS_CONTAINER_PATH = f"{_RUNTIME_CONTAINER_PATH}/{_TASK_SKILLS_ROOT_NAME}"
 
 
 def _artifact_policy_int(settings: Any, name: str, default: int) -> int:
@@ -301,6 +308,7 @@ def build_task_runtime_archive(
     previous_task_summaries: str = "",
     ci_failure_bundle_path: str | os.PathLike[str] | None = None,
     artifact_policy_settings: Any | None = None,
+    skills: list[dict[str, Any]] | None = None,
 ) -> bytes:
     """Build the immutable runtime input bundle uploaded through the Docker API."""
     rendered_prompt = getattr(task, "rendered_prompt", None)
@@ -310,13 +318,30 @@ def build_task_runtime_archive(
     buffer = io.BytesIO()
     now = int(time.time())
 
-    def add_bytes(archive: tarfile.TarFile, name: str, content: str, mode: int) -> None:
-        payload = content.encode("utf-8")
+    def add_bytes(
+        archive: tarfile.TarFile,
+        name: str,
+        content: str | bytes,
+        mode: int,
+    ) -> None:
+        payload = content.encode("utf-8") if isinstance(content, str) else content
         info = tarfile.TarInfo(name=f"codify-runtime/{name}")
         info.size = len(payload)
         info.mode = mode
         info.mtime = now
         archive.addfile(info, io.BytesIO(payload))
+
+    added_directories: set[str] = set()
+
+    def add_directory(archive: tarfile.TarFile, name: str) -> None:
+        if name in added_directories:
+            return
+        added_directories.add(name)
+        info = tarfile.TarInfo(name=f"codify-runtime/{name}")
+        info.type = tarfile.DIRTYPE
+        info.mode = 0o755
+        info.mtime = now
+        archive.addfile(info)
 
     with tarfile.open(fileobj=buffer, mode="w") as archive:
         runtime_dir = tarfile.TarInfo(name="codify-runtime")
@@ -370,6 +395,32 @@ def build_task_runtime_archive(
                 previous_task_summaries,
                 0o600,
             )
+
+        skill_snapshots = normalize_skill_snapshots(skills or [])
+        if skill_snapshots:
+            add_directory(archive, _TASK_SKILLS_ROOT_NAME)
+            add_directory(archive, f"{_TASK_SKILLS_ROOT_NAME}/.claude")
+            add_directory(archive, f"{_TASK_SKILLS_ROOT_NAME}/.claude/skills")
+            for skill in skill_snapshots:
+                skill_path = f"{_TASK_SKILLS_ROOT_NAME}/.claude/skills/{skill['name']}"
+                add_directory(archive, skill_path)
+                add_bytes(
+                    archive,
+                    f"{skill_path}/SKILL.md",
+                    render_skill_markdown(skill),
+                    0o644,
+                )
+                for package_file in skill["files"]:
+                    relative_path = PurePosixPath(package_file["path"])
+                    parents = list(relative_path.parents)[:-1]
+                    for parent in reversed(parents):
+                        add_directory(archive, f"{skill_path}/{parent.as_posix()}")
+                    add_bytes(
+                        archive,
+                        f"{skill_path}/{relative_path.as_posix()}",
+                        decode_skill_file_content(package_file),
+                        0o755 if package_file["executable"] else 0o644,
+                    )
 
         if ci_failure_bundle_path:
             bundle_path = Path(ci_failure_bundle_path)

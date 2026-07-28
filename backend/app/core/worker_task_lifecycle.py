@@ -17,6 +17,7 @@ from app.core.utcnow import utcnow
 from app.core.worker_docker_targets import TaskContainerLookupError
 from app.core.worker_profiles import load_task_worker_runtime
 from app.core.worker_runtime import (
+    TASK_SKILLS_CONTAINER_PATH,
     build_task_runtime_archive,
     capture_provider_runtime_snapshot,
     worker_custom_scripts_configured,
@@ -299,6 +300,7 @@ async def create_execute_container(
         previous_task_summaries=previous_task_summaries,
         ci_failure_bundle_path=ci_failure_bundle_path,
         artifact_policy_settings=settings,
+        skills=worker_runtime.skills,
     )
 
     session_mode = getattr(task, "session_mode", "continue")
@@ -322,6 +324,8 @@ async def create_execute_container(
     environment["CODIFY_CODEGRAPH_ENABLED"] = (
         "true" if worker_runtime.codegraph_enabled else "false"
     )
+    if worker_runtime.skills:
+        environment["CODIFY_TASK_SKILLS_DIR"] = TASK_SKILLS_CONTAINER_PATH
     # Persist the exact provider/session choices before the Docker side effect. If the
     # scheduler crashes after container creation, recovery can still report the runtime
     # configuration that was used to build the container environment.

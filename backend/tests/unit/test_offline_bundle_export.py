@@ -167,7 +167,7 @@ def test_verify_runtime_scripts_mount_claude_without_breaking_docker_args():
         launcher.write_text("#!/bin/sh\n", encoding="utf-8")
         launcher.chmod(launcher.stat().st_mode | stat.S_IEXEC)
         (kit / "manifest.json").write_text(
-            '{"schema_version":1,"kit_version":"0.1.0"}',
+            '{"schema_version":1,"kit_version":"0.3.5"}',
             encoding="utf-8",
         )
         claude = root / "claude"
@@ -235,13 +235,14 @@ def test_verify_runtime_scripts_mount_claude_without_breaking_docker_args():
                 "--entrypoint",
                 "/opt/codify-kit/launcher",
                 "--env",
-                "CODIFY_KIT_VERSION=0.1.0",
+                "CODIFY_KIT_VERSION=0.3.5",
                 "--env",
                 "CODIFY_RUNTIME_IMAGE=team/runtime:1",
                 "--env",
                 "CODIFY_CLAUDE_BIN=/usr/local/bin/claude",
                 "team/runtime:1",
                 "--verify",
+                "--require-skill-support",
                 "--smoke",
                 "java -version",
             ]

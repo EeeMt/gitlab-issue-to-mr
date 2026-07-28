@@ -2,7 +2,9 @@
 
 Codify supports two worker delivery modes:
 
-- `baked_image`: the legacy worker image contains both Codify tools and project runtimes.
+- `baked_image`: deprecated legacy mode where the image contains both Codify tools and project
+  runtimes. It remains available for existing non-Skill profiles, but Claude Skills are not
+  supported.
 - `mounted_kit`: the profile image contains only the project runtime. Codify mounts a
   versioned worker kit when each task container starts.
 
@@ -42,7 +44,7 @@ Mermaid npm bundle, or ci-claude script.
 On a connected build machine:
 
 ```bash
-make worker-kit-export WORKER_KIT_VERSION=0.3.4 WORKER_KIT_PLATFORM=linux/amd64
+make worker-kit-export WORKER_KIT_VERSION=0.3.5 WORKER_KIT_PLATFORM=linux/amd64
 ```
 
 This creates an archive and checksum under `deploy/offline-bundle/kits/`. Kit versions are
@@ -54,7 +56,23 @@ login shell, including for project runtime images that do not provide Git themse
 when the CLI or one of its descendants keeps the stream open. Version `0.3.3` makes CodeGraph
 initialization use bounded plain-text progress and makes incremental sync non-interactive while
 retaining a failure diagnostic. Version `0.3.4` adds bounded task-runtime artifact sealing and archive
-packaging. Existing mounted-kit profiles remain pinned to their configured path: install `0.3.4`
+packaging. Version `0.3.5` loads task-scoped Claude Skill directory packages from the Docker-API
+runtime bundle via `--add-dir`, without adding a host bind mount or modifying the persistent Claude
+home. Each package preserves its complete root `SKILL.md`, including supported Claude Code
+frontmatter, plus its configured relative-path scripts, references, templates, and other supporting
+files; executable files retain a controlled `0755` mode. Package paths reject absolute paths,
+traversal, symlinks, and conflicts with the root `SKILL.md`. Tasks retain foreign-key-backed
+immutable Skill version references, so later edits, disabling, or deletion do not change an
+already-created task, while unreferenced versions can be reclaimed safely.
+The root frontmatter must contain a Claude-compatible `name` matching the package directory and
+a non-empty `description`; remaining frontmatter is preserved without reconstruction.
+Task Skills also require Claude Code `2.1.33` or newer because earlier CLI releases do not discover
+`.claude/skills` from `--add-dir`; the worker exits with an explicit compatibility error instead of
+silently running without the selected Skills.
+
+Runtime verification for Worker Kit `0.3.5` and newer checks the Claude executable mounted into
+the actual project image and fails when its version is older than `2.1.33`.
+Existing mounted-kit profiles remain pinned to their configured path: install `0.3.5`
 on every eligible Docker host, verify it,
 and then update the profile version and path. Merely deploying the Backend does not replace an
 already installed kit.
@@ -113,13 +131,13 @@ can execute mounted-kit profiles:
 
 ```bash
 sudo ./scripts/install-worker-kit.sh \
-  kits/codify-worker-kit-0.3.4-linux-amd64.tar.gz
+  kits/codify-worker-kit-0.3.5-linux-amd64.tar.gz
 ```
 
 The default installation path is:
 
 ```text
-/opt/codify/worker-kits/0.3.4-linux-amd64
+/opt/codify/worker-kits/0.3.5-linux-amd64
 ```
 
 For remote Docker targets, this is a path on the Docker Engine host, not on the Backend or
@@ -137,7 +155,7 @@ Verify the kit and one project runtime image before creating a profile:
 
 ```bash
 ./scripts/verify-worker-runtime.sh \
-  --kit /opt/codify/worker-kits/0.3.4-linux-amd64 \
+  --kit /opt/codify/worker-kits/0.3.5-linux-amd64 \
   --claude-host-path /opt/codify/overrides/claude-2.1.200 \
   --image team/java21-maven:2026.07 \
   --smoke 'java -version && mvn -version'
@@ -170,8 +188,8 @@ No UI is required. Create or update a Worker Profile through the existing admin 
   "name": "Java 21 and Maven",
   "image": "codify-worker/java21-maven:2026.07",
   "runtime_mode": "mounted_kit",
-  "worker_kit_version": "0.3.4",
-  "worker_kit_path": "/opt/codify/worker-kits/0.3.4-linux-amd64",
+  "worker_kit_version": "0.3.5",
+  "worker_kit_path": "/opt/codify/worker-kits/0.3.5-linux-amd64",
   "codegraph_enabled": true,
   "volume_mounts": [
     {
@@ -204,6 +222,6 @@ that snapshot and are not silently moved to a newer kit.
   mounted mode Codify does not mutate the project image's JDK truststore; use a profile pre-script
   or a runtime image policy when Java tools require a private CA.
 - Runtime images that use Nix themselves are incompatible with the reserved `/nix/store` mount.
-  Keep those profiles in `baked_image` mode or provide a non-Nix runtime image.
+  Prefer a non-Nix runtime image. The deprecated `baked_image` fallback cannot use Claude Skills.
 - `codify-worker/java21-maven:2026.07` is a mounted-kit runtime image. Profiles that use it must set
   `runtime_mode=mounted_kit` and provide a worker kit path/version.

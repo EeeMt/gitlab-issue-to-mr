@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -16,6 +17,7 @@ from app.api.worker_profiles import (
     WorkerRuntimeVerificationRequest,
     create_worker_profile,
     disable_worker_profile,
+    duplicate_worker_profile,
     set_default_worker_profile_endpoint,
     update_worker_profile,
     verify_worker_profile_runtime,
@@ -30,7 +32,7 @@ from app.dependencies.auth import (
     require_authenticated_user,
 )
 from app.main import app
-from app.models import Base, Issue, IssueStatus, WorkerProfile
+from app.models import Base, Issue, IssueStatus, Skill, SkillVersion, WorkerProfile
 
 
 def _make_profile(
@@ -66,6 +68,23 @@ def _make_profile(
         created_at=datetime(2026, 1, 1),
         updated_at=datetime(2026, 1, 1),
     )
+
+
+@pytest.mark.parametrize(
+    ("request_type", "request_kwargs"),
+    [
+        (
+            WorkerProfileCreateRequest,
+            {"name": "Worker", "image": "worker:latest", "default_skill_ids": [True]},
+        ),
+        (WorkerProfileUpdateRequest, {"default_skill_ids": [True]}),
+        (WorkerProfileUpdateRequest, {"default_skill_ids": [0]}),
+        (WorkerProfileUpdateRequest, {"default_skill_ids": [1, 1]}),
+    ],
+)
+def test_worker_profile_requests_reject_invalid_skill_ids(request_type, request_kwargs):
+    with pytest.raises(ValidationError):
+        request_type(**request_kwargs)
 
 
 @pytest.mark.asyncio
@@ -105,14 +124,40 @@ async def test_create_worker_profile_returns_created_profile_after_commit_withou
 
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     async with session_factory() as db:
+        version = SkillVersion(
+            name="review-changes",
+            description="Review changes before delivery.",
+            skill_md=(
+                "---\n"
+                "name: review-changes\n"
+                "description: Review changes before delivery.\n"
+                "---\n\n"
+                "Inspect the final diff.\n"
+            ),
+            files=[],
+            package_size_bytes=23,
+            digest="a" * 64,
+        )
+        skill = Skill(
+            name=version.name,
+            description=version.description,
+            current_version=version,
+            enabled=True,
+        )
+        db.add(skill)
+        await db.flush()
         request = WorkerProfileCreateRequest(
             name="Java Worker",
             image="codify-worker-java:latest",
+            runtime_mode="mounted_kit",
+            worker_kit_version="0.3.5",
+            worker_kit_path="/opt/codify/worker-kits/0.3.5-linux-amd64",
             codegraph_enabled=True,
             volume_mounts=[],
             environment_variables=[
                 WorkerProfileEnvironmentVariableRequest(key="JAVA_OPTS", value="-Xmx1g")
             ],
+            default_skill_ids=[skill.id],
             default_execute_run_instruction_template="Execute {{user_prompt}}",
             default_plan_run_instruction_template="Plan {{user_prompt}}",
             ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
@@ -126,6 +171,252 @@ async def test_create_worker_profile_returns_created_profile_after_commit_withou
     assert response["image"] == "codify-worker-java:latest"
     assert response["codegraph_enabled"] is True
     assert response["environment_variables"][0]["key"] == "JAVA_OPTS"
+    assert response["default_skill_ids"] == [skill.id]
+
+
+@pytest.mark.asyncio
+async def test_create_baked_worker_profile_rejects_default_skills():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with session_factory() as db:
+            version = SkillVersion(
+                name="review-changes",
+                description="Review changes before delivery.",
+                skill_md=(
+                    "---\n"
+                    "name: review-changes\n"
+                    "description: Review changes before delivery.\n"
+                    "---\n\n"
+                    "Inspect the final diff.\n"
+                ),
+                files=[],
+                package_size_bytes=100,
+                digest="b" * 64,
+            )
+            skill = Skill(
+                name=version.name,
+                description=version.description,
+                current_version=version,
+                enabled=True,
+            )
+            db.add(skill)
+            await db.flush()
+
+            with pytest.raises(HTTPException, match="baked-image mode is deprecated") as exc:
+                await create_worker_profile(
+                    WorkerProfileCreateRequest(
+                        name="Legacy Worker",
+                        image="legacy-worker:latest",
+                        default_skill_ids=[skill.id],
+                    ),
+                    db=db,
+                )
+            assert exc.value.status_code == 422
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_duplicate_worker_profile_locks_and_revalidates_default_skills():
+    version = SkillVersion(
+        id=19,
+        name="review-changes",
+        description="Review changes before delivery.",
+        skill_md="---\nname: review-changes\ndescription: Review changes.\n---\n",
+        files=[],
+        package_size_bytes=100,
+        digest="c" * 64,
+    )
+    skill = Skill(
+        id=9,
+        name=version.name,
+        description=version.description,
+        current_version=version,
+        enabled=True,
+    )
+    source = _make_profile(id=3, name="Java Worker")
+    source.runtime_mode = "mounted_kit"
+    source.worker_kit_version = "0.3.5"
+    source.worker_kit_path = "/opt/codify/worker-kits/0.3.5-linux-amd64"
+    source.default_skills = [skill]
+    db = MagicMock()
+    db.add = MagicMock()
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+
+    with (
+        patch(
+            "app.api.worker_profiles._load_profile_or_404",
+            new=AsyncMock(return_value=source),
+        ) as load_profile,
+        patch(
+            "app.api.worker_profiles._unique_copy_name",
+            new=AsyncMock(return_value="Java Worker (copy)"),
+        ),
+        patch(
+            "app.api.worker_profiles.load_worker_profile_skills",
+            new=AsyncMock(return_value=[skill]),
+        ) as load_skills,
+        patch("app.api.worker_profiles.validate_runtime_supports_skills") as validate_runtime,
+        patch(
+            "app.api.worker_profiles.serialize_worker_profile_for_api",
+            return_value={"name": "Java Worker (copy)", "default_skill_ids": [9]},
+        ),
+    ):
+        response = await duplicate_worker_profile(3, db=db)
+
+    assert response["default_skill_ids"] == [9]
+    load_profile.assert_awaited_once_with(db, 3, for_update=True)
+    load_skills.assert_awaited_once_with(
+        db,
+        [9],
+        retained_disabled_skill_ids=[9],
+    )
+    validate_runtime.assert_called_once_with(source, [skill])
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_duplicate_worker_profile_preserves_disabled_default_skill():
+    version = SkillVersion(
+        id=19,
+        name="review-changes",
+        description="Review changes before delivery.",
+        skill_md="---\nname: review-changes\ndescription: Review changes.\n---\n",
+        files=[],
+        package_size_bytes=100,
+        digest="d" * 64,
+    )
+    disabled_skill = Skill(
+        id=9,
+        name=version.name,
+        description=version.description,
+        current_version=version,
+        enabled=False,
+    )
+    source = _make_profile(id=3, name="Java Worker")
+    source.default_skills = [disabled_skill]
+    db = MagicMock()
+    db.add = MagicMock()
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+
+    with (
+        patch(
+            "app.api.worker_profiles._load_profile_or_404",
+            new=AsyncMock(return_value=source),
+        ),
+        patch(
+            "app.api.worker_profiles.load_worker_profile_skills",
+            new=AsyncMock(return_value=[disabled_skill]),
+        ) as load_skills,
+        patch(
+            "app.api.worker_profiles._unique_copy_name",
+            new=AsyncMock(return_value="Java Worker Copy"),
+        ),
+        patch(
+            "app.api.worker_profiles.serialize_worker_profile_for_api",
+            return_value={"name": "Java Worker Copy", "default_skill_ids": [9]},
+        ),
+    ):
+        response = await duplicate_worker_profile(3, db=db)
+
+    assert response["default_skill_ids"] == [9]
+    load_skills.assert_awaited_once_with(
+        db,
+        [9],
+        retained_disabled_skill_ids=[9],
+    )
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_update_worker_profile_retains_but_cannot_add_disabled_default_skill():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with session_factory() as db:
+            version = SkillVersion(
+                name="review-changes",
+                description="Review changes before delivery.",
+                skill_md=(
+                    "---\n"
+                    "name: review-changes\n"
+                    "description: Review changes before delivery.\n"
+                    "---\n\n"
+                    "Inspect the final diff.\n"
+                ),
+                files=[],
+                package_size_bytes=100,
+                digest="e" * 64,
+            )
+            disabled_skill = Skill(
+                name=version.name,
+                description=version.description,
+                current_version=version,
+                enabled=False,
+            )
+            retained_profile = WorkerProfile(
+                name="Legacy Worker",
+                enabled=True,
+                is_default=False,
+                image="legacy-worker:latest",
+                runtime_mode="baked_image",
+                volume_mounts=[],
+                pre_script="",
+                post_script="",
+                default_execute_run_instruction_template="{{user_prompt}}",
+                default_plan_run_instruction_template="{{user_prompt}}",
+                ci_auto_repair_run_instruction_template="{{user_prompt}}",
+                default_skills=[disabled_skill],
+            )
+            new_profile = WorkerProfile(
+                name="Mounted Worker",
+                enabled=True,
+                is_default=False,
+                image="runtime:latest",
+                runtime_mode="mounted_kit",
+                worker_kit_version="0.3.5",
+                worker_kit_path="/opt/codify/worker-kits/0.3.5-linux-amd64",
+                volume_mounts=[],
+                pre_script="",
+                post_script="",
+                default_execute_run_instruction_template="{{user_prompt}}",
+                default_plan_run_instruction_template="{{user_prompt}}",
+                ci_auto_repair_run_instruction_template="{{user_prompt}}",
+            )
+            db.add_all([retained_profile, new_profile])
+            await db.commit()
+
+            response = await update_worker_profile(
+                retained_profile.id,
+                WorkerProfileUpdateRequest(
+                    description="Unrelated edit",
+                    default_skill_ids=[disabled_skill.id],
+                ),
+                db=db,
+            )
+            assert response["description"] == "Unrelated edit"
+            assert response["default_skill_ids"] == [disabled_skill.id]
+
+            with pytest.raises(HTTPException, match="disabled") as exc:
+                await update_worker_profile(
+                    new_profile.id,
+                    WorkerProfileUpdateRequest(default_skill_ids=[disabled_skill.id]),
+                    db=db,
+                )
+            assert exc.value.status_code == 422
+    finally:
+        await engine.dispose()
 
 
 @pytest.mark.asyncio
@@ -434,8 +725,8 @@ async def test_verify_mounted_worker_profile_runs_preflight_on_profile_target():
     )
     profile.image = "team/java21-maven:2026.07"
     profile.runtime_mode = "mounted_kit"
-    profile.worker_kit_version = "0.1.0"
-    profile.worker_kit_path = "/opt/codify/worker-kits/0.1.0-linux-amd64"
+    profile.worker_kit_version = "0.3.5"
+    profile.worker_kit_path = "/opt/codify/worker-kits/0.3.5-linux-amd64"
     profile.volume_mounts = [
         {
             "host_path": "/opt/codify/overrides/claude",
@@ -462,7 +753,12 @@ async def test_verify_mounted_worker_profile_runs_preflight_on_profile_target():
     assert response["image"] == "team/java21-maven:2026.07"
     client.client.images.get.assert_called_once_with("team/java21-maven:2026.07")
     create_kwargs = client.create_container.call_args.kwargs
-    assert create_kwargs["command"] == ["--verify", "--smoke", "java -version"]
+    assert create_kwargs["command"] == [
+        "--verify",
+        "--require-skill-support",
+        "--smoke",
+        "java -version",
+    ]
     assert create_kwargs["entrypoint"] == "/opt/codify-kit/launcher"
     assert create_kwargs["user"] == "0:0"
     assert create_kwargs["tmpfs"] == {"/workspace": "rw,exec,mode=1777"}

@@ -203,6 +203,9 @@
                     :options="workerRuntimeModeOptions"
                     class="config-form__input"
                   />
+                  <template v-if="workerFormValue.runtime_mode === 'baked_image'" #feedback>
+                    {{ t('config.workerRuntimeModeBakedImageHint') }}
+                  </template>
                 </n-form-item>
               </n-gi>
               <n-gi>
@@ -225,7 +228,7 @@
                   <n-input
                     v-model:value="workerFormValue.worker_kit_version"
                     class="config-form__input"
-                    placeholder="0.3.4"
+                    placeholder="0.3.5"
                   />
                 </n-form-item>
               </n-gi>
@@ -234,7 +237,7 @@
                   <n-input
                     v-model:value="workerFormValue.worker_kit_path"
                     class="config-form__input"
-                    placeholder="/opt/codify/worker-kits/0.3.4-linux-amd64"
+                    placeholder="/opt/codify/worker-kits/0.3.5-linux-amd64"
                   />
                   <template #feedback>
                     {{ t('config.workerKitPathHint') }}
@@ -242,6 +245,25 @@
                 </n-form-item>
               </n-gi>
             </n-grid>
+          </div>
+
+          <div class="config-form__section">
+            <div class="config-form__section-title">{{ t('config.defaultSkills') }}</div>
+            <n-form-item>
+              <n-select
+                v-model:value="workerFormValue.default_skill_ids"
+                multiple
+                clearable
+                filterable
+                :disabled="workerFormValue.runtime_mode !== 'mounted_kit'"
+                :options="skillOptions"
+                :placeholder="t('config.selectDefaultSkills')"
+                class="config-form__input"
+              />
+              <template #feedback>
+                {{ t('config.defaultSkillsHint') }}
+              </template>
+            </n-form-item>
           </div>
 
           <div class="config-form__section docker-target-section">
@@ -613,6 +635,7 @@ import {
   createWorkerProfile,
   disableWorkerProfile,
   duplicateWorkerProfile,
+  getAdminSkills,
   getConfig,
   getAdminWorkerProfiles,
   getRunInstructionTemplateBuiltIns,
@@ -621,6 +644,7 @@ import {
   updateConfig,
   updateWorkerProfile,
   type RunInstructionTemplateBuiltIns,
+  type SkillSummary,
   type DockerConnectionTestResult,
   type WorkerProfile,
   type WorkerProfileEnvironmentVariable,
@@ -647,6 +671,7 @@ type WorkerFormValue = {
   codegraph_enabled: boolean
   mounts: WorkerProfileMount[]
   environment_variables: EnvironmentVariableFormItem[]
+  default_skill_ids: number[]
   worker_workspace_retention_days: number
   worker_workspace_host_path: string
   worker_pre_script: string
@@ -685,6 +710,7 @@ const dockerTesting = ref(false)
 const dockerTestResult = ref<DockerConnectionTestResult | null>(null)
 const builtIns = ref<RunInstructionTemplateBuiltIns | null>(null)
 const workerProfiles = ref<WorkerProfile[]>([])
+const skills = ref<SkillSummary[]>([])
 const selectedProfileId = ref<number | null>(null)
 const creatingWorkerProfile = ref(false)
 const activeRunInstructionTab = ref<'execute' | 'plan' | 'ci_auto_repair'>('execute')
@@ -710,6 +736,15 @@ const environmentVariableTypeOptions = [
   { label: t('config.environmentVariablePlainText'), value: 'plain_text' },
   { label: t('config.environmentVariableSecret'), value: 'secret' }
 ]
+const skillOptions = computed(() =>
+  skills.value.map(skill => ({
+    label: skill.enabled
+      ? skill.name
+      : `${skill.name} (${t('config.disabled')})`,
+    value: skill.id,
+    disabled: !skill.enabled,
+  }))
+)
 
 const workerFormValue = ref<WorkerFormValue>({
   name: '',
@@ -728,6 +763,7 @@ const workerFormValue = ref<WorkerFormValue>({
   codegraph_enabled: false,
   mounts: [],
   environment_variables: [],
+  default_skill_ids: [],
   worker_workspace_retention_days: 14,
   worker_workspace_host_path: '/opt/codify-workspaces',
   worker_pre_script: '',
@@ -870,6 +906,7 @@ function mapProfileToWorkerFormValue(
     codegraph_enabled: profile?.codegraph_enabled ?? false,
     mounts: parseMounts(profile?.volume_mounts),
     environment_variables: parseEnvironmentVariables(profile?.environment_variables),
+    default_skill_ids: [...(profile?.default_skill_ids ?? [])],
     worker_workspace_retention_days: workerWorkspaceRetentionDays,
     worker_workspace_host_path: workerWorkspaceHostPath,
     worker_pre_script: profile?.pre_script || '',
@@ -903,6 +940,7 @@ function cloneWorkerFormValue(value: WorkerFormValue): WorkerFormValue {
     environment_variables: value.environment_variables.map((environmentVariable) => ({
       ...environmentVariable
     })),
+    default_skill_ids: [...value.default_skill_ids],
     worker_workspace_retention_days: value.worker_workspace_retention_days,
     worker_workspace_host_path: value.worker_workspace_host_path,
     worker_pre_script: value.worker_pre_script,
@@ -925,18 +963,21 @@ function workerProfileComparable(value: WorkerFormValue) {
 async function fetchConfig() {
   loading.value = true
   try {
-    const [configResult, builtInsResult, profilesResult] = await Promise.allSettled([
+    const [configResult, builtInsResult, profilesResult, skillsResult] = await Promise.allSettled([
       getConfig(),
       getRunInstructionTemplateBuiltIns(),
-      getAdminWorkerProfiles()
+      getAdminWorkerProfiles(),
+      getAdminSkills()
     ])
     if (configResult.status === 'rejected') throw configResult.reason
     if (profilesResult.status === 'rejected') throw profilesResult.reason
+    if (skillsResult.status === 'rejected') throw skillsResult.reason
     const config = configResult.value
     if (builtInsResult.status === 'fulfilled') {
       builtIns.value = builtInsResult.value
     }
     workerProfiles.value = profilesResult.value
+    skills.value = skillsResult.value
     const retentionDays = config.runtime?.worker_workspace_retention_days ?? 14
     const selectedProfile =
       workerProfiles.value.find((profile) => profile.is_default) ??
@@ -1004,6 +1045,7 @@ function createEmptyWorkerFormValue(): WorkerFormValue {
     codegraph_enabled: false,
     mounts: [],
     environment_variables: [],
+    default_skill_ids: [],
     worker_workspace_retention_days: 14,
     worker_workspace_host_path: '/opt/codify-workspaces',
     worker_pre_script: '',
@@ -1075,6 +1117,10 @@ function buildWorkerProfilePayload(): WorkerProfilePayload {
     environment_variables: serializeEnvironmentVariables(
       workerFormValue.value.environment_variables
     ),
+    default_skill_ids:
+      workerFormValue.value.runtime_mode === 'mounted_kit'
+        ? [...workerFormValue.value.default_skill_ids]
+        : [],
     pre_script: workerFormValue.value.worker_pre_script,
     post_script: workerFormValue.value.worker_post_script,
     default_execute_run_instruction_template:

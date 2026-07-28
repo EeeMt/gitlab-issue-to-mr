@@ -10,6 +10,7 @@ const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
     getPromptTemplates: vi.fn<() => Promise<any[]>>(),
     getProviders: vi.fn<() => Promise<any[]>>(),
     getWorkerProfiles: vi.fn<() => Promise<any[]>>(),
+    getSkills: vi.fn<() => Promise<any[]>>(),
     getScheduledTasks: vi.fn<() => Promise<any[]>>(),
     getSlotCapacity: vi.fn<() => Promise<any>>(),
     getConfig: vi.fn<() => Promise<any>>(),
@@ -48,6 +49,7 @@ vi.mock('../api', () => ({
   getPromptTemplates: mockApi.getPromptTemplates,
   getProviders: mockApi.getProviders,
   getWorkerProfiles: mockApi.getWorkerProfiles,
+  getSkills: mockApi.getSkills,
   getScheduledTasks: mockApi.getScheduledTasks,
   getSlotCapacity: mockApi.getSlotCapacity,
   getConfig: mockApi.getConfig,
@@ -212,12 +214,13 @@ vi.mock('naive-ui', () => ({
   },
   NSelect: {
     name: 'NSelect',
-    props: ['value', 'options', 'clearable', 'placeholder', 'multiple'],
+    props: ['value', 'options', 'clearable', 'placeholder', 'multiple', 'disabled'],
     emits: ['update:value'],
     setup(props: any, { emit }: any) {
       return () => h('select', {
         class: 'n-select',
         multiple: props.multiple,
+        disabled: props.disabled,
         value: props.value ?? '',
         onChange: (event: Event) => {
           const select = event.target as HTMLSelectElement
@@ -330,9 +333,13 @@ const mockWorkerProfiles = [
     enabled: true,
     is_default: true,
     image: 'worker-java:latest',
+    runtime_mode: 'mounted_kit',
+    worker_kit_version: '0.3.5',
+    worker_kit_path: '/opt/codify/worker-kits/0.3.5-linux-amd64',
     codegraph_enabled: false,
     volume_mounts: [],
     environment_variables: [],
+    default_skill_ids: [11],
     pre_script: '',
     post_script: '',
     default_execute_run_instruction_template: 'Worker execute {{user_prompt}}',
@@ -348,9 +355,13 @@ const mockWorkerProfiles = [
     enabled: true,
     is_default: false,
     image: 'worker-python:latest',
+    runtime_mode: 'baked_image',
+    worker_kit_version: null,
+    worker_kit_path: null,
     codegraph_enabled: false,
     volume_mounts: [],
     environment_variables: [],
+    default_skill_ids: [],
     pre_script: '',
     post_script: '',
     default_execute_run_instruction_template: 'Python execute {{user_prompt}}',
@@ -371,6 +382,9 @@ describe('TaskFormDrawer', () => {
     mockApi.getPromptTemplates.mockResolvedValue(mockTemplates)
     mockApi.getProviders.mockResolvedValue(mockProviders)
     mockApi.getWorkerProfiles.mockResolvedValue(mockWorkerProfiles)
+    mockApi.getSkills.mockResolvedValue([
+      { id: 11, name: 'review', description: 'Review changes', version_id: 101 }
+    ])
     mockApi.getScheduledTasks.mockResolvedValue([])
     mockApi.getSlotCapacity.mockResolvedValue(null)
     mockApi.getConfig.mockResolvedValue({ runtime: { slot_max_tasks: 5, slot_max_tasks_enforce: false } })
@@ -419,6 +433,64 @@ describe('TaskFormDrawer', () => {
   }
 
   describe('create mode', () => {
+    it('inherits skills for a capable mounted-kit profile without sending an override', async () => {
+      await mountDrawer()
+      await openDrawer()
+
+      expect(wrapper.vm.taskSkillSelectionSupported).toBe(true)
+      expect(wrapper.vm.inheritProfileSkills).toBe(true)
+      expect(wrapper.vm.selectedSkillIds).toEqual([11])
+      wrapper.vm.taskMode = 'execute'
+      await submitCreate()
+
+      expect(mockApi.createTask).toHaveBeenCalledWith(
+        expect.not.objectContaining({ skill_ids: expect.anything() })
+      )
+    })
+
+    it('excludes retained disabled Profile Skills when creating an explicit override', async () => {
+      mockApi.getWorkerProfiles.mockResolvedValue([
+        { ...mockWorkerProfiles[0], default_skill_ids: [11, 12] },
+        mockWorkerProfiles[1],
+      ])
+      await mountDrawer()
+      await openDrawer()
+
+      expect(wrapper.vm.selectedSkillIds).toEqual([11])
+      wrapper.vm.handleSkillInheritanceUpdate(false)
+      wrapper.vm.taskMode = 'execute'
+      await submitCreate()
+
+      expect(mockApi.createTask).toHaveBeenCalledWith(
+        expect.objectContaining({ skill_ids: [11] })
+      )
+    })
+
+    it('rejects malformed Worker Kit versions when enabling Skills', async () => {
+      mockApi.getWorkerProfiles.mockResolvedValue([
+        { ...mockWorkerProfiles[0], worker_kit_version: '1..0' },
+        mockWorkerProfiles[1],
+      ])
+      await mountDrawer()
+      await openDrawer()
+
+      expect(wrapper.vm.taskSkillSelectionSupported).toBe(false)
+      expect(wrapper.vm.selectedSkillIds).toEqual([])
+    })
+
+    it('disables skill selection for deprecated baked-image profiles', async () => {
+      await mountDrawer({ workerProfileId: 4 })
+      await openDrawer()
+
+      expect(wrapper.vm.taskSkillSelectionSupported).toBe(false)
+      expect(wrapper.vm.selectedSkillIds).toEqual([])
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      expect(wrapper.find('[data-testid="task-skill-selection"]').text())
+        .toContain('createTask.skillsUnsupportedHint')
+      const controls = wrapper.findAll('[data-testid="task-skill-selection"] .n-switch')
+      expect(controls[0].attributes('disabled')).toBeDefined()
+    })
+
     it('does not require code changes by default', async () => {
       await mountDrawer()
       await openDrawer()
@@ -1144,6 +1216,107 @@ describe('TaskFormDrawer', () => {
       expect(wrapper.vm.priority).toBe(1)
       expect(wrapper.vm.requireChanges).toBe(true)
       expect(wrapper.vm.selectedProviderId).toBe(7)
+    })
+
+    it('uses the immutable task runtime when checking skill support in edit mode', async () => {
+      await mountEditDrawer({
+        worker_profile_id: 4,
+        worker_runtime_mode: 'mounted_kit',
+        worker_kit_version: '0.3.5',
+        skill_selection_source: 'task',
+        skill_ids: [11],
+      })
+      await wrapper.setProps({ show: true })
+      await flushPromises()
+
+      expect(wrapper.vm.effectiveWorkerProfile.runtime_mode).toBe('baked_image')
+      expect(wrapper.vm.taskSkillSelectionSupported).toBe(true)
+      expect(wrapper.vm.selectedSkillIds).toEqual([11])
+    })
+
+    it('can explicitly clear a deleted frozen Skill snapshot', async () => {
+      await mountEditDrawer({
+        worker_profile_id: 3,
+        worker_runtime_mode: 'mounted_kit',
+        worker_kit_version: '0.3.5',
+        skill_selection_source: 'task',
+        skill_ids: [],
+        skill_snapshots: [{
+          id: null,
+          name: 'deleted-review',
+          description: 'Deleted after task creation',
+          version_id: 91,
+        }],
+      })
+      await wrapper.setProps({ show: true })
+      await flushPromises()
+
+      expect(wrapper.vm.changedTaskSkillSnapshots).toHaveLength(1)
+      expect(wrapper.vm.executionEnvironmentNeedsAttention).toBe(true)
+      expect(wrapper.vm.executionEnvironmentOpen).toBe(true)
+      expect(wrapper.find('[data-testid="task-skill-snapshot-warning"]').exists()).toBe(true)
+      wrapper.vm.applyCurrentSkillSelection()
+      await wrapper.find('[data-testid="task-form-save-button"]').trigger('click')
+      await flushPromises()
+
+      expect(mockApi.updateTask).toHaveBeenCalledWith(42, { skill_ids: [] })
+    })
+
+    it('warns when current Worker Profile defaults differ from the task snapshot', async () => {
+      mockApi.getWorkerProfiles.mockResolvedValue([
+        { ...mockWorkerProfiles[0], default_skill_ids: [11, 12] },
+        mockWorkerProfiles[1],
+      ])
+      mockApi.getSkills.mockResolvedValue([
+        { id: 11, name: 'review', description: 'Review changes', version_id: 101 },
+        { id: 12, name: 'test', description: 'Run focused tests', version_id: 102 },
+      ])
+      await mountEditDrawer({
+        worker_profile_id: 3,
+        worker_runtime_mode: 'mounted_kit',
+        worker_kit_version: '0.3.5',
+        skill_selection_source: 'profile',
+        skill_ids: [11],
+        skill_snapshots: [{
+          id: 11,
+          name: 'review',
+          description: 'Review changes',
+          version_id: 101,
+        }],
+      })
+      await wrapper.setProps({ show: true })
+      await flushPromises()
+
+      expect(wrapper.vm.changedTaskSkillSnapshots).toHaveLength(0)
+      expect(wrapper.vm.profileDefaultSkillSelectionChanged).toBe(true)
+      expect(wrapper.vm.executionEnvironmentNeedsAttention).toBe(true)
+      expect(wrapper.vm.executionEnvironmentOpen).toBe(true)
+      expect(wrapper.find('[data-testid="task-skill-snapshot-warning"]').text())
+        .toContain('createTask.profileSkillSelectionChangedHint')
+
+      wrapper.vm.applyCurrentSkillSelection()
+      await wrapper.find('[data-testid="task-form-save-button"]').trigger('click')
+      await flushPromises()
+
+      expect(mockApi.updateTask).toHaveBeenCalledWith(42, { skill_ids: null })
+    })
+
+    it('does not offer current Profile Skills to an immutable baked-image task', async () => {
+      await mountEditDrawer({
+        worker_profile_id: 3,
+        worker_runtime_mode: 'baked_image',
+        worker_kit_version: null,
+        skill_selection_source: 'profile',
+        skill_ids: [],
+        skill_snapshots: [],
+      })
+      await wrapper.setProps({ show: true })
+      await flushPromises()
+
+      expect(wrapper.vm.profileDefaultSkillSelectionChanged).toBe(true)
+      expect(wrapper.vm.taskSkillSelectionSupported).toBe(false)
+      expect(wrapper.vm.taskSkillSelectionNeedsAttention).toBe(false)
+      expect(wrapper.find('[data-testid="task-skill-snapshot-warning"]').exists()).toBe(false)
     })
 
     it('re-populates form from updated task on each open', async () => {

@@ -18,6 +18,7 @@ from app.api.task_responses import (
 )
 from app.api.task_schemas import CreateTaskRequest, RetryTaskRequest
 from app.core.scheduling import resolve_scheduled_at
+from app.core.skills import SkillValidationError, skill_snapshots_from_task_snapshot
 from app.core.task_prompt import TaskPromptValidationError
 from app.core.usage_limits import UsageLimitExceeded, usage_limit_exceeded_detail
 from app.core.utcnow import utcnow
@@ -194,8 +195,18 @@ async def retry_task_record(
             replace_snapshot=services.replace_task_worker_snapshot,
             select_template=services.select_snapshot_run_instruction_template,
             render_prompt=services.render_and_store_task_prompt,
+            skill_snapshots=(
+                skill_snapshots_from_task_snapshot(original_task.worker_profile_snapshot)
+                if original_task.worker_profile_snapshot is not None
+                else []
+            ),
+            skill_selection_source=getattr(
+                getattr(original_task, "worker_profile_snapshot", None),
+                "skill_selection_source",
+                "profile",
+            ),
         )
-    except TaskPromptValidationError as exc:
+    except (TaskPromptValidationError, SkillValidationError) as exc:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -310,8 +321,12 @@ async def create_task_record(
             replace_snapshot=services.replace_task_worker_snapshot,
             select_template=services.select_snapshot_run_instruction_template,
             render_prompt=services.render_and_store_task_prompt,
+            skill_ids=request.skill_ids,
+            skill_ids_provided=(
+                "skill_ids" in request.model_fields_set and request.skill_ids is not None
+            ),
         )
-    except TaskPromptValidationError as exc:
+    except (TaskPromptValidationError, SkillValidationError) as exc:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,

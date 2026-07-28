@@ -9,7 +9,7 @@ export GIT_COMMIT
 # Enable Docker BuildKit for faster builds
 export DOCKER_BUILDKIT := 1
 export COMPOSE_DOCKER_CLI_BUILD := 1
-WORKER_KIT_VERSION ?= 0.3.4
+WORKER_KIT_VERSION ?= 0.3.5
 WORKER_KIT_PLATFORM ?= linux/amd64
 JAVA21_MAVEN_WORKER_DOCKERFILE := $(PROJECT_ROOT)/deploy/Dockerfile.worker-java21-maven
 

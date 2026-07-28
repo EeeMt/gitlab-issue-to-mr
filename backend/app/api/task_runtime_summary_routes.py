@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, undefer
 
 from app.api.task_responses import loaded_task_relationship
+from app.core.skills import skill_snapshots_from_task_snapshot
 from app.core.worker_kit import MOUNTED_KIT_MODE, worker_kit_mounts
 from app.database import get_db
 from app.dependencies.project_access import (
@@ -15,7 +16,7 @@ from app.dependencies.project_access import (
     require_project_access,
     require_project_access_scope,
 )
-from app.models import Task
+from app.models import Task, TaskWorkerProfileSnapshot
 
 router = APIRouter()
 
@@ -147,6 +148,8 @@ def serialize_worker_runtime_summary(task: Task) -> dict[str, Any]:
             "codegraph_enabled": False,
             "mounts": [],
             "environment_variables": [],
+            "skills": [],
+            "skill_selection_source": "profile",
             "pre_script_configured": False,
             "post_script_configured": False,
             "snapshot_created_at": None,
@@ -163,6 +166,20 @@ def serialize_worker_runtime_summary(task: Task) -> dict[str, Any]:
         "codegraph_enabled": bool(snapshot.codegraph_enabled),
         "mounts": _serialize_worker_mounts(snapshot),
         "environment_variables": _serialize_worker_environment(snapshot),
+        "skills": [
+            {
+                "id": _snapshot_value(skill, "id"),
+                "name": str(_snapshot_value(skill, "name") or ""),
+                "description": str(_snapshot_value(skill, "description") or ""),
+            }
+            for skill in skill_snapshots_from_task_snapshot(snapshot)
+            if _snapshot_value(skill, "name")
+        ],
+        "skill_selection_source": getattr(
+            snapshot,
+            "skill_selection_source",
+            "profile",
+        ),
         "pre_script_configured": bool((snapshot.pre_script or "").strip()),
         "post_script_configured": bool((snapshot.post_script or "").strip()),
         "snapshot_created_at": (
@@ -199,6 +216,8 @@ async def get_task_worker_runtime_summary(
         task_id,
         db,
         access_scope,
-        selectinload(Task.worker_profile_snapshot),
+        selectinload(Task.worker_profile_snapshot).selectinload(
+            TaskWorkerProfileSnapshot.skill_references
+        ),
     )
     return serialize_worker_runtime_summary(task)

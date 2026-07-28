@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_effective_settings
 from app.core.docker_client import get_docker_client_async
+from app.core.skills import delete_unreferenced_skill_versions
 from app.core.utcnow import utcnow
 from app.core.worker_docker_targets import (
     TaskContainerNotFoundError,
@@ -266,6 +267,7 @@ async def cleanup_system_data(
             ):
                 await db.execute(delete(model).where(model.task_id.in_(task_ids)))
             await db.execute(delete(Task).where(Task.id.in_(task_ids)))
+            await delete_unreferenced_skill_versions(db)
 
         await db.execute(delete(Issue).where(Issue.id == issue.id))
         await db.commit()

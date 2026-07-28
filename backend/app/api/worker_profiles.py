@@ -10,13 +10,22 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import get_effective_settings
 from app.core.docker_client import DockerClientWrapper, resolve_docker_connection
+from app.core.skills import (
+    SkillValidationError,
+    acquire_worker_profile_skill_package_lock,
+    load_enabled_skills,
+    load_worker_profile_skills,
+    normalize_skill_ids,
+    runtime_uses_skill_capable_worker_kit,
+    validate_runtime_supports_skills,
+)
 from app.core.task_prompt import (
     BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE,
     BUILT_IN_EXECUTE_RUN_INSTRUCTION_TEMPLATE,
@@ -76,11 +85,22 @@ class WorkerProfileRequestBase(BaseModel):
     codegraph_enabled: bool | None = None
     volume_mounts: list[dict[str, Any]] | None = None
     environment_variables: list[WorkerProfileEnvironmentVariableRequest] | None = None
+    default_skill_ids: list[StrictInt] | None = None
     pre_script: str | None = None
     post_script: str | None = None
     default_execute_run_instruction_template: str | None = None
     default_plan_run_instruction_template: str | None = None
     ci_auto_repair_run_instruction_template: str | None = None
+
+    @field_validator("default_skill_ids")
+    @classmethod
+    def validate_default_skill_ids(cls, value: list[int] | None) -> list[int] | None:
+        if value is None:
+            return None
+        try:
+            return normalize_skill_ids(value)
+        except SkillValidationError as exc:
+            raise ValueError(str(exc)) from exc
 
 
 class WorkerProfileCreateRequest(WorkerProfileRequestBase):
@@ -128,7 +148,10 @@ async def _load_profile_or_404(
     profile = await db.get(
         WorkerProfile,
         profile_id,
-        options=[selectinload(WorkerProfile.environment_variables)],
+        options=[
+            selectinload(WorkerProfile.environment_variables),
+            selectinload(WorkerProfile.default_skills),
+        ],
         with_for_update=for_update,
     )
     if profile is None:
@@ -304,6 +327,8 @@ async def verify_worker_profile_runtime(
         )
 
     command = ["--verify"]
+    if runtime_uses_skill_capable_worker_kit(runtime):
+        command.append("--require-skill-support")
     smoke_command = (request.smoke_command or "").strip()
     if smoke_command:
         command.extend(["--smoke", smoke_command])
@@ -383,6 +408,7 @@ async def create_worker_profile(
 ):
     """Create a worker profile."""
     try:
+        await acquire_worker_profile_skill_package_lock(db)
         name = request.name.strip()
         if not name:
             raise WorkerProfileValidationError("Worker profile name cannot be blank")
@@ -429,21 +455,32 @@ async def create_worker_profile(
             default_execute_run_instruction_template=execute_template,
             default_plan_run_instruction_template=plan_template,
             ci_auto_repair_run_instruction_template=ci_template,
+            default_skills=[],
         )
         db.add(profile)
         await db.flush()
+        profile.default_skills.extend(
+            await load_enabled_skills(db, request.default_skill_ids or [])
+        )
+        validate_runtime_supports_skills(
+            profile,
+            getattr(profile, "default_skills", None) or [],
+        )
         await replace_profile_environment_variables(
             db,
             profile,
             [item.model_dump() for item in request.environment_variables],
         )
         await db.commit()
-        await db.refresh(profile, attribute_names=["environment_variables"])
+        await db.refresh(
+            profile,
+            attribute_names=["environment_variables", "default_skills"],
+        )
         return serialize_worker_profile_for_api(profile, include_docker_target=True)
     except HTTPException:
         await _rollback(db)
         raise
-    except (WorkerProfileValidationError, WorkerKitValidationError) as exc:
+    except (WorkerProfileValidationError, WorkerKitValidationError, SkillValidationError) as exc:
         await _rollback(db)
         raise _http_profile_error(exc) from exc
 
@@ -456,9 +493,11 @@ async def update_worker_profile(
     _admin=Depends(require_admin_user),
 ):
     """Update a worker profile."""
+    fields = request.model_fields_set
+    if "default_skill_ids" in fields:
+        await acquire_worker_profile_skill_package_lock(db)
     profile = await _load_profile_or_404(db, profile_id, for_update=True)
     try:
-        fields = request.model_fields_set
         if "name" in fields and request.name is not None:
             name = request.name.strip()
             if not name:
@@ -594,14 +633,32 @@ async def update_worker_profile(
                 profile,
                 [item.model_dump() for item in request.environment_variables],
             )
+        if "default_skill_ids" in fields and request.default_skill_ids is not None:
+            existing_skill_ids = {skill.id for skill in profile.default_skills}
+            profile.default_skills = await load_worker_profile_skills(
+                db,
+                request.default_skill_ids,
+                retained_disabled_skill_ids=existing_skill_ids,
+            )
+        validate_runtime_supports_skills(
+            profile,
+            [
+                skill
+                for skill in (getattr(profile, "default_skills", None) or [])
+                if skill.enabled
+            ],
+        )
 
         await db.commit()
-        await db.refresh(profile, attribute_names=["environment_variables"])
+        await db.refresh(
+            profile,
+            attribute_names=["environment_variables", "default_skills"],
+        )
         return serialize_worker_profile_for_api(profile, include_docker_target=True)
     except HTTPException:
         await _rollback(db)
         raise
-    except (WorkerProfileValidationError, WorkerKitValidationError) as exc:
+    except (WorkerProfileValidationError, WorkerKitValidationError, SkillValidationError) as exc:
         await _rollback(db)
         raise _http_profile_error(exc) from exc
 
@@ -617,7 +674,10 @@ async def set_default_worker_profile_endpoint(
     try:
         await set_default_worker_profile(db, profile)
         await db.commit()
-        await db.refresh(profile, attribute_names=["environment_variables"])
+        await db.refresh(
+            profile,
+            attribute_names=["environment_variables", "default_skills"],
+        )
         return serialize_worker_profile_for_api(profile, include_docker_target=True)
     except WorkerProfileValidationError as exc:
         await _rollback(db)
@@ -638,7 +698,10 @@ async def disable_worker_profile(
         await _ensure_profile_can_stop_serving_issues(db, profile)
         await disable_worker_profile_domain(db, profile)
         await db.commit()
-        await db.refresh(profile, attribute_names=["environment_variables"])
+        await db.refresh(
+            profile,
+            attribute_names=["environment_variables", "default_skills"],
+        )
         return serialize_worker_profile_for_api(profile, include_docker_target=True)
     except WorkerProfileValidationError as exc:
         await _rollback(db)
@@ -652,39 +715,59 @@ async def duplicate_worker_profile(
     _admin=Depends(require_admin_user),
 ):
     """Duplicate a worker profile, preserving encrypted secret values."""
-    source = await _load_profile_or_404(db, profile_id)
-    copy = WorkerProfile(
-        name=await _unique_copy_name(db, source.name),
-        description=source.description,
-        enabled=True,
-        is_default=False,
-        image=source.image,
-        runtime_mode=getattr(source, "runtime_mode", BAKED_IMAGE_MODE),
-        worker_kit_version=getattr(source, "worker_kit_version", None),
-        worker_kit_path=getattr(source, "worker_kit_path", None),
-        docker_host=getattr(source, "docker_host", None),
-        docker_tls_ca=getattr(source, "docker_tls_ca", None),
-        docker_tls_cert=getattr(source, "docker_tls_cert", None),
-        docker_tls_key=getattr(source, "docker_tls_key", None),
-        codegraph_enabled=bool(getattr(source, "codegraph_enabled", False)),
-        volume_mounts=list(source.volume_mounts or []),
-        pre_script=source.pre_script or "",
-        post_script=source.post_script or "",
-        default_execute_run_instruction_template=source.default_execute_run_instruction_template,
-        default_plan_run_instruction_template=source.default_plan_run_instruction_template,
-        ci_auto_repair_run_instruction_template=source.ci_auto_repair_run_instruction_template,
-    )
-    db.add(copy)
-    await db.flush()
-    for row in source.environment_variables:
-        db.add(
-            WorkerProfileEnvironmentVariable(
-                worker_profile_id=copy.id,
-                key=row.key,
-                value=row.value,
-                is_secret=row.is_secret,
-            )
+    await acquire_worker_profile_skill_package_lock(db)
+    source = await _load_profile_or_404(db, profile_id, for_update=True)
+    try:
+        source_skill_ids = [skill.id for skill in source.default_skills]
+        default_skills = await load_worker_profile_skills(
+            db,
+            source_skill_ids,
+            retained_disabled_skill_ids=source_skill_ids,
         )
-    await db.commit()
-    await db.refresh(copy, attribute_names=["environment_variables"])
-    return serialize_worker_profile_for_api(copy, include_docker_target=True)
+        validate_runtime_supports_skills(
+            source,
+            [skill for skill in default_skills if skill.enabled],
+        )
+        copy = WorkerProfile(
+            name=await _unique_copy_name(db, source.name),
+            description=source.description,
+            enabled=True,
+            is_default=False,
+            image=source.image,
+            runtime_mode=getattr(source, "runtime_mode", BAKED_IMAGE_MODE),
+            worker_kit_version=getattr(source, "worker_kit_version", None),
+            worker_kit_path=getattr(source, "worker_kit_path", None),
+            docker_host=getattr(source, "docker_host", None),
+            docker_tls_ca=getattr(source, "docker_tls_ca", None),
+            docker_tls_cert=getattr(source, "docker_tls_cert", None),
+            docker_tls_key=getattr(source, "docker_tls_key", None),
+            codegraph_enabled=bool(getattr(source, "codegraph_enabled", False)),
+            volume_mounts=list(source.volume_mounts or []),
+            pre_script=source.pre_script or "",
+            post_script=source.post_script or "",
+            default_execute_run_instruction_template=(
+                source.default_execute_run_instruction_template
+            ),
+            default_plan_run_instruction_template=source.default_plan_run_instruction_template,
+            ci_auto_repair_run_instruction_template=(
+                source.ci_auto_repair_run_instruction_template
+            ),
+        )
+        db.add(copy)
+        await db.flush()
+        for row in source.environment_variables:
+            db.add(
+                WorkerProfileEnvironmentVariable(
+                    worker_profile_id=copy.id,
+                    key=row.key,
+                    value=row.value,
+                    is_secret=row.is_secret,
+                )
+            )
+        copy.default_skills = default_skills
+        await db.commit()
+        await db.refresh(copy, attribute_names=["environment_variables", "default_skills"])
+        return serialize_worker_profile_for_api(copy, include_docker_target=True)
+    except (WorkerProfileValidationError, SkillValidationError) as exc:
+        await _rollback(db)
+        raise _http_profile_error(exc) from exc

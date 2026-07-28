@@ -541,6 +541,12 @@ class WorkerProfile(Base):
         back_populates="profile",
         cascade="all, delete-orphan",
     )
+    default_skills: Mapped[list["Skill"]] = relationship(
+        "Skill",
+        secondary="worker_profile_skills",
+        back_populates="worker_profiles",
+        order_by="Skill.name",
+    )
 
     __table_args__ = (
         Index(
@@ -550,6 +556,118 @@ class WorkerProfile(Base):
             postgresql_where=text("is_default = true"),
             sqlite_where=text("is_default = true"),
         ),
+    )
+
+
+class SkillVersion(Base):
+    """Immutable, task-referenceable contents of one Claude Code skill package."""
+
+    __tablename__ = "skill_versions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    skill_md: Mapped[str] = mapped_column(Text, nullable=False, deferred=True)
+    files: Mapped[list[dict[str, object]]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'"),
+        deferred=True,
+    )
+    package_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+
+class Skill(Base):
+    """Administrator-managed identity and current version of a Claude Code skill."""
+
+    __tablename__ = "skills"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    current_version_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("skill_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("true"),
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=utcnow,
+        onupdate=utcnow,
+    )
+    current_version: Mapped["SkillVersion"] = relationship("SkillVersion", lazy="raise")
+
+    worker_profiles: Mapped[list["WorkerProfile"]] = relationship(
+        "WorkerProfile",
+        secondary="worker_profile_skills",
+        back_populates="default_skills",
+    )
+
+
+class WorkerProfileSkill(Base):
+    """Many-to-many assignment of default skills to a worker profile."""
+
+    __tablename__ = "worker_profile_skills"
+
+    worker_profile_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("worker_profiles.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    skill_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("skills.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    __table_args__ = (Index("ix_worker_profile_skills_skill_id", "skill_id"),)
+
+
+class TaskSkillVersionReference(Base):
+    """Ordered immutable Skill version selected for one task snapshot."""
+
+    __tablename__ = "task_skill_version_references"
+
+    task_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("task_worker_profile_snapshots.task_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    position: Mapped[int] = mapped_column(Integer, primary_key=True)
+    skill_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("skills.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    skill_version_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("skill_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+
+    snapshot: Mapped["TaskWorkerProfileSnapshot"] = relationship(
+        "TaskWorkerProfileSnapshot",
+        back_populates="skill_references",
+    )
+
+    __table_args__ = (
+        CheckConstraint("position >= 0", name="ck_task_skill_version_reference_position"),
     )
 
 
@@ -616,6 +734,12 @@ class TaskWorkerProfileSnapshot(Base):
     codegraph_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     volume_mounts: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
     environment_variables: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+    skill_selection_source: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="profile",
+        server_default=text("'profile'"),
+    )
     pre_script: Mapped[str] = mapped_column(Text, nullable=False, default="")
     post_script: Mapped[str] = mapped_column(Text, nullable=False, default="")
     default_execute_run_instruction_template: Mapped[str] = mapped_column(Text, nullable=False)
@@ -631,6 +755,13 @@ class TaskWorkerProfileSnapshot(Base):
 
     task: Mapped[Task] = relationship("Task", back_populates="worker_profile_snapshot")
     worker_profile: Mapped[WorkerProfile | None] = relationship("WorkerProfile")
+    skill_references: Mapped[list[TaskSkillVersionReference]] = relationship(
+        "TaskSkillVersionReference",
+        back_populates="snapshot",
+        order_by="TaskSkillVersionReference.position",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
 
 class PromptTemplate(Base):

@@ -65,6 +65,10 @@
               <WorkerSettingsPanel :is-mobile="isMobile" />
             </n-tab-pane>
 
+            <n-tab-pane name="skills" :tab="t('config.skillsTab')">
+              <SkillSettingsPanel />
+            </n-tab-pane>
+
             <n-tab-pane name="notifications" :tab="t('config.notificationsTab')">
               <MattermostNotificationsPanel :is-mobile="isMobile" :reload-key="notificationReloadKey" />
             </n-tab-pane>
@@ -112,6 +116,7 @@ import GitLabSettingsPanel from './config/GitLabSettingsPanel.vue'
 import AuthSettingsPanel from './config/AuthSettingsPanel.vue'
 import MaintenancePanel from './config/MaintenancePanel.vue'
 import PromptTemplatesPanel from './config/PromptTemplatesPanel.vue'
+import SkillSettingsPanel from './config/SkillSettingsPanel.vue'
 import WebhookEventsPanel from './config/WebhookEventsPanel.vue'
 import AnnouncementPanel from './config/AnnouncementPanel.vue'
 
@@ -141,8 +146,8 @@ const gitlabPanelRef = ref<InstanceType<typeof GitLabSettingsPanel> | null>(null
 const promptTemplatesPanelRef = ref<InstanceType<typeof PromptTemplatesPanel> | null>(null)
 
 // Tab state
-const activeConfigTab = ref<'runtime' | 'auth' | 'gitlab' | 'ai-providers' | 'prompt-templates' | 'worker' | 'notifications' | 'announcement' | 'maintenance' | 'webhook-events'>('runtime')
-const configTabs = ['runtime', 'auth', 'gitlab', 'ai-providers', 'prompt-templates', 'worker', 'notifications', 'announcement', 'maintenance', 'webhook-events'] as const
+const activeConfigTab = ref<'runtime' | 'auth' | 'gitlab' | 'ai-providers' | 'prompt-templates' | 'worker' | 'skills' | 'notifications' | 'announcement' | 'maintenance' | 'webhook-events'>('runtime')
+const configTabs = ['runtime', 'auth', 'gitlab', 'ai-providers', 'prompt-templates', 'worker', 'skills', 'notifications', 'announcement', 'maintenance', 'webhook-events'] as const
 type ConfigTabKey = typeof configTabs[number]
 
 const notificationReloadKey = ref(0)
