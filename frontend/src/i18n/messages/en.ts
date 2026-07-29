@@ -1347,6 +1347,7 @@ const en = {
       'Manage scheduler behavior and GitLab OIDC login from one place. Saved values override env configuration and survive restarts.',
     unsavedChanges: 'Unsaved changes',
     saved: 'Settings saved',
+    saveError: 'Failed to save settings',
     inSync: 'In sync',
     dbOverride: 'DB override',
     envFallback: 'env fallback',

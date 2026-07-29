@@ -1328,6 +1328,7 @@ const zhCN = {
     subtitle: '在一个页面中管理调度器行为和 GitLab OIDC 登录。保存后的值会覆盖环境变量配置，并在重启后保留。',
     unsavedChanges: '有未保存修改',
     saved: '设置已保存',
+    saveError: '保存设置失败',
     inSync: '已同步',
     dbOverride: '数据库覆盖',
     envFallback: '环境变量回退',

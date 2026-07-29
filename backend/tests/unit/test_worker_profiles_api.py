@@ -33,7 +33,15 @@ from app.dependencies.auth import (
     require_authenticated_user,
 )
 from app.main import app
-from app.models import Base, Issue, IssueStatus, Skill, SkillVersion, WorkerProfile
+from app.models import (
+    Base,
+    Issue,
+    IssueStatus,
+    Skill,
+    SkillVersion,
+    WorkerProfile,
+    WorkerProfileEnvironmentVariable,
+)
 
 
 def _make_profile(
@@ -335,6 +343,80 @@ async def test_duplicate_worker_profile_preserves_disabled_default_skill():
         retained_disabled_skill_ids=[9],
     )
     db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_duplicate_worker_profile_persists_loaded_relationships_without_lazy_load():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with session_factory() as db:
+            version = SkillVersion(
+                name="review-changes",
+                description="Review changes before delivery.",
+                skill_md=(
+                    "---\n"
+                    "name: review-changes\n"
+                    "description: Review changes before delivery.\n"
+                    "---\n\n"
+                    "Inspect the final diff.\n"
+                ),
+                files=[],
+                package_size_bytes=100,
+                digest="f" * 64,
+            )
+            skill = Skill(
+                name=version.name,
+                description=version.description,
+                current_version=version,
+                enabled=True,
+            )
+            source = WorkerProfile(
+                name="Mounted Worker",
+                description="Profile to duplicate",
+                enabled=True,
+                is_default=False,
+                image="runtime:latest",
+                runtime_mode="mounted_kit",
+                worker_kit_version="0.3.5",
+                worker_kit_path="/opt/codify/worker-kits/0.3.5-linux-amd64",
+                volume_mounts=[],
+                pre_script="prepare",
+                post_script="cleanup",
+                default_execute_run_instruction_template="Execute {{user_prompt}}",
+                default_plan_run_instruction_template="Plan {{user_prompt}}",
+                ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+                default_skills=[skill],
+                environment_variables=[
+                    WorkerProfileEnvironmentVariable(
+                        key="RUNTIME_SECRET",
+                        value="encrypted-value",
+                        is_secret=True,
+                    )
+                ],
+            )
+            db.add(source)
+            await db.commit()
+
+            response = await duplicate_worker_profile(source.id, db=db)
+
+            assert response["name"] == "Mounted Worker Copy"
+            assert response["default_skill_ids"] == [skill.id]
+            assert len(response["environment_variables"]) == 1
+            response_variable = response["environment_variables"][0]
+            assert response_variable["key"] == "RUNTIME_SECRET"
+            assert response_variable["value"] is None
+            assert response_variable["is_secret"] is True
+            assert response_variable["value_configured"] is True
+
+            copied = await db.get(WorkerProfile, response["id"])
+            assert copied is not None
+            assert copied.environment_variables[0].value == "encrypted-value"
+    finally:
+        await engine.dispose()
 
 
 @pytest.mark.asyncio

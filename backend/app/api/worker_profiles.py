@@ -789,19 +789,17 @@ async def duplicate_worker_profile(
             ci_auto_repair_run_instruction_template=(
                 source.ci_auto_repair_run_instruction_template
             ),
-        )
-        db.add(copy)
-        await db.flush()
-        for row in source.environment_variables:
-            db.add(
+            environment_variables=[
                 WorkerProfileEnvironmentVariable(
-                    worker_profile_id=copy.id,
                     key=row.key,
                     value=row.value,
                     is_secret=row.is_secret,
                 )
-            )
-        copy.default_skills = default_skills
+                for row in source.environment_variables
+            ],
+            default_skills=default_skills,
+        )
+        db.add(copy)
         await db.commit()
         await db.refresh(copy, attribute_names=["environment_variables", "default_skills"])
         return serialize_worker_profile_for_api(copy, include_docker_target=True)
