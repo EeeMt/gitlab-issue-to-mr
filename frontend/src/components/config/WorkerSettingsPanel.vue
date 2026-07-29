@@ -270,7 +270,7 @@
                   <n-input
                     v-model:value="workerFormValue.worker_kit_version"
                     class="config-form__input"
-                    placeholder="0.3.5"
+                    placeholder="0.3.6"
                   />
                 </n-form-item>
               </n-gi>
@@ -279,7 +279,7 @@
                   <n-input
                     v-model:value="workerFormValue.worker_kit_path"
                     class="config-form__input"
-                    placeholder="/opt/codify/worker-kits/0.3.5-linux-amd64"
+                    placeholder="/opt/codify/worker-kits/0.3.6-linux-amd64"
                   />
                   <template #feedback>
                     {{ t('config.workerKitPathHint') }}

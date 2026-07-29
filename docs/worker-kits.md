@@ -44,7 +44,7 @@ Mermaid npm bundle, or ci-claude script.
 On a connected build machine:
 
 ```bash
-make worker-kit-export WORKER_KIT_VERSION=0.3.5 WORKER_KIT_PLATFORM=linux/amd64
+make worker-kit-export WORKER_KIT_VERSION=0.3.6 WORKER_KIT_PLATFORM=linux/amd64
 ```
 
 This creates an archive and checksum under `deploy/offline-bundle/kits/`. Kit versions are
@@ -69,10 +69,12 @@ a non-empty `description`; remaining frontmatter is preserved without reconstruc
 Task Skills also require Claude Code `2.1.33` or newer because earlier CLI releases do not discover
 `.claude/skills` from `--add-dir`; the worker exits with an explicit compatibility error instead of
 silently running without the selected Skills.
+Version `0.3.6` preserves a locally created Issue branch when an earlier analysis task did not push
+it, while continuing to reject deletion of a remote branch previously observed by the workspace.
 
 Runtime verification for Worker Kit `0.3.5` and newer checks the Claude executable mounted into
 the actual project image and fails when its version is older than `2.1.33`.
-Existing mounted-kit profiles remain pinned to their configured path: install `0.3.5`
+Existing mounted-kit profiles remain pinned to their configured path: install `0.3.6`
 on every eligible Docker host, verify it,
 and then update the profile version and path. Merely deploying the Backend does not replace an
 already installed kit.
@@ -131,13 +133,13 @@ can execute mounted-kit profiles:
 
 ```bash
 sudo ./scripts/install-worker-kit.sh \
-  kits/codify-worker-kit-0.3.5-linux-amd64.tar.gz
+  kits/codify-worker-kit-0.3.6-linux-amd64.tar.gz
 ```
 
 The default installation path is:
 
 ```text
-/opt/codify/worker-kits/0.3.5-linux-amd64
+/opt/codify/worker-kits/0.3.6-linux-amd64
 ```
 
 For remote Docker targets, this is a path on the Docker Engine host, not on the Backend or
@@ -155,7 +157,7 @@ Verify the kit and one project runtime image before creating a profile:
 
 ```bash
 ./scripts/verify-worker-runtime.sh \
-  --kit /opt/codify/worker-kits/0.3.5-linux-amd64 \
+  --kit /opt/codify/worker-kits/0.3.6-linux-amd64 \
   --claude-host-path /opt/codify/overrides/claude-2.1.200 \
   --image team/java21-maven:2026.07 \
   --smoke 'java -version && mvn -version'
@@ -188,8 +190,8 @@ No UI is required. Create or update a Worker Profile through the existing admin 
   "name": "Java 21 and Maven",
   "image": "codify-worker/java21-maven:2026.07",
   "runtime_mode": "mounted_kit",
-  "worker_kit_version": "0.3.5",
-  "worker_kit_path": "/opt/codify/worker-kits/0.3.5-linux-amd64",
+  "worker_kit_version": "0.3.6",
+  "worker_kit_path": "/opt/codify/worker-kits/0.3.6-linux-amd64",
   "codegraph_enabled": true,
   "volume_mounts": [
     {

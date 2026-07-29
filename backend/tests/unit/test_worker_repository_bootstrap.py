@@ -364,6 +364,54 @@ def test_reused_full_history_workspace_uses_the_same_safe_fast_forward(
 
 
 @pytest.mark.skipif(shutil.which("jq") is None, reason="repository module requires jq")
+def test_reused_workspace_preserves_a_local_branch_never_observed_on_remote(
+    tmp_path: Path,
+):
+    remote, branch_name = _create_remote_with_issue_branch(tmp_path)
+    remote_work_sha = _git(remote, "rev-parse", f"refs/heads/{branch_name}")
+    _git(remote, "update-ref", "-d", f"refs/heads/{branch_name}", remote_work_sha)
+    workspace = tmp_path / "workspace"
+
+    initial = _run_repository_script(
+        tmp_path,
+        remote=remote,
+        branch_name=branch_name,
+        workspace=workspace,
+        clone_depth=None,
+    )
+    assert initial.returncode == 0, initial.stdout + initial.stderr
+    initial_telemetry = json.loads(
+        (tmp_path / "runtime" / "repository-preparation.json").read_text()
+    )
+    assert initial_telemetry["remote_work_branch"] is False
+    assert initial_telemetry["previous_remote_work_sha"] is None
+    assert initial_telemetry["remote_work_sha"] is None
+    assert initial_telemetry["work_branch_relation"] == "new"
+    assert initial_telemetry["sync_action"] == "create_from_base"
+
+    resumed = _run_repository_script(
+        tmp_path,
+        remote=remote,
+        branch_name=branch_name,
+        workspace=workspace,
+        clone_depth=None,
+    )
+
+    assert resumed.returncode == 0, resumed.stdout + resumed.stderr
+    resumed_telemetry = json.loads(
+        (tmp_path / "runtime" / "repository-preparation.json").read_text()
+    )
+    assert resumed_telemetry["previous_remote_work_sha"] is None
+    assert resumed_telemetry["remote_work_sha"] is None
+    assert resumed_telemetry["work_branch_relation"] == "remote_missing"
+    assert resumed_telemetry["sync_action"] == "preserve_local"
+    assert (
+        f"[repo] warning work_branch={branch_name} remote=missing; preserving local branch"
+        in resumed.stdout
+    )
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="repository module requires jq")
 def test_reused_workspace_preserves_an_unpushed_local_commit(
     tmp_path: Path,
 ):

@@ -222,8 +222,11 @@ if [ -d /workspace/.git ]; then
     REPO_ACTION="fetch"
     repo_log "prepare workspace=reused strategy=${REPO_REQUESTED_STRATEGY} depth=${CODIFY_GIT_CLONE_DEPTH:-full} filter=${REPO_REQUESTED_FILTER}"
     codify_run_shell 'cd /workspace && git remote set-url origin "${GIT_REPO_URL}"'
+    # Unlike rev-parse, show-ref does not print an unresolved ref before returning failure.
+    # Keeping stdout empty is essential here: a non-empty value means this workspace really
+    # observed the remote work branch during an earlier run.
     REPO_PREVIOUS_REMOTE_WORK_SHA=$(
-        codify_run_shell 'cd /workspace && git rev-parse "refs/remotes/origin/${BRANCH_NAME}"' \
+        codify_run_shell 'cd /workspace && git show-ref --verify --hash "refs/remotes/origin/${BRANCH_NAME}"' \
             2>/dev/null || true
     )
     repo_read_remote_refs
