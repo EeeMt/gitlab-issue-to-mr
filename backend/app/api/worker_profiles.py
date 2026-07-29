@@ -187,6 +187,13 @@ async def _active_issue_assignment_count(db: AsyncSession, profile_id: int) -> i
     return int(result.scalar_one())
 
 
+async def _issue_assignment_count(db: AsyncSession, profile_id: int) -> int:
+    result = await db.execute(
+        select(func.count(Issue.id)).where(Issue.worker_profile_id == profile_id)
+    )
+    return int(result.scalar_one())
+
+
 async def _ensure_profile_can_stop_serving_issues(
     db: AsyncSession,
     profile: WorkerProfile,
@@ -703,6 +710,36 @@ async def disable_worker_profile(
             attribute_names=["environment_variables", "default_skills"],
         )
         return serialize_worker_profile_for_api(profile, include_docker_target=True)
+    except WorkerProfileValidationError as exc:
+        await _rollback(db)
+        raise _http_profile_error(exc) from exc
+
+
+@router.delete("/worker-profiles/{profile_id}")
+async def delete_worker_profile(
+    profile_id: int,
+    db: AsyncSession = Depends(get_db),
+    _admin=Depends(require_admin_user),
+):
+    """Delete one unused, disabled, non-default worker profile."""
+    profile = await _load_profile_or_404(db, profile_id, for_update=True)
+    try:
+        if profile.is_default:
+            raise WorkerProfileValidationError("Default worker profile cannot be deleted")
+        if profile.enabled:
+            raise WorkerProfileValidationError(
+                "Worker profile must be disabled before it can be deleted"
+            )
+        assignment_count = await _issue_assignment_count(db, profile.id)
+        if assignment_count:
+            raise WorkerProfileValidationError(
+                f"Worker profile '{profile.name}' is assigned to "
+                f"{assignment_count} issue(s) and cannot be deleted"
+            )
+
+        await db.delete(profile)
+        await db.commit()
+        return {"status": "deleted", "id": profile_id}
     except WorkerProfileValidationError as exc:
         await _rollback(db)
         raise _http_profile_error(exc) from exc

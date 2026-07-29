@@ -74,7 +74,9 @@ const {
   mockUpdateConfig,
   mockUpdateWorkerProfile,
   mockCreateWorkerProfile,
+  mockDeleteWorkerProfile,
   mockDuplicateWorkerProfile,
+  mockEnableWorkerProfile,
   mockSetDefaultWorkerProfile,
   mockDisableWorkerProfile,
   mockMessage
@@ -87,7 +89,9 @@ const {
   mockUpdateConfig: vi.fn(),
   mockUpdateWorkerProfile: vi.fn(),
   mockCreateWorkerProfile: vi.fn(),
+  mockDeleteWorkerProfile: vi.fn(),
   mockDuplicateWorkerProfile: vi.fn(),
+  mockEnableWorkerProfile: vi.fn(),
   mockSetDefaultWorkerProfile: vi.fn(),
   mockDisableWorkerProfile: vi.fn(),
   mockMessage: {
@@ -226,6 +230,14 @@ vi.mock('naive-ui', () => ({
       return () => h('div', { class: 'n-popover' }, [slots.trigger?.(), slots.default?.()])
     }
   },
+  NPopconfirm: {
+    name: 'NPopconfirm',
+    props: ['positiveText', 'negativeText'],
+    emits: ['positive-click'],
+    setup(_props: any, { slots }: any) {
+      return () => h('div', { class: 'n-popconfirm' }, [slots.trigger?.(), slots.default?.()])
+    }
+  },
   NSelect: {
     name: 'NSelect',
     props: ['value', 'options', 'size'],
@@ -323,7 +335,9 @@ vi.mock('../../api', () => ({
   updateConfig: mockUpdateConfig,
   updateWorkerProfile: mockUpdateWorkerProfile,
   createWorkerProfile: mockCreateWorkerProfile,
+  deleteWorkerProfile: mockDeleteWorkerProfile,
   duplicateWorkerProfile: mockDuplicateWorkerProfile,
+  enableWorkerProfile: mockEnableWorkerProfile,
   setDefaultWorkerProfile: mockSetDefaultWorkerProfile,
   disableWorkerProfile: mockDisableWorkerProfile
 }))
@@ -353,7 +367,9 @@ describe('WorkerSettingsPanel', () => {
     })
     mockUpdateWorkerProfile.mockResolvedValue(createWorkerProfile())
     mockCreateWorkerProfile.mockResolvedValue(createWorkerProfile({ id: 2, name: 'Worker Profile 2' }))
+    mockDeleteWorkerProfile.mockResolvedValue(undefined)
     mockDuplicateWorkerProfile.mockResolvedValue(createWorkerProfile({ id: 2, name: 'Default Worker Copy' }))
+    mockEnableWorkerProfile.mockResolvedValue(createWorkerProfile({ enabled: true }))
     mockSetDefaultWorkerProfile.mockResolvedValue(createWorkerProfile())
     mockDisableWorkerProfile.mockResolvedValue(createWorkerProfile({ enabled: false }))
   })
@@ -807,6 +823,66 @@ describe('WorkerSettingsPanel', () => {
     )
     expect(mockUpdateWorkerProfile).not.toHaveBeenCalled()
     expect(vm.selectedProfileId).toBe(3)
+  })
+
+  it('enables a disabled worker profile from the profile actions', async () => {
+    const disabledProfile = createWorkerProfile({
+      id: 2,
+      name: 'Disabled Worker',
+      enabled: false,
+      is_default: false
+    })
+    mockGetAdminWorkerProfiles.mockResolvedValueOnce([
+      createWorkerProfile(),
+      disabledProfile
+    ])
+    mockEnableWorkerProfile.mockResolvedValueOnce({ ...disabledProfile, enabled: true })
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: { isMobile: false, reloadKey: 0 }
+    })
+    await flushPromises()
+
+    const vm = wrapper.vm as any
+    vm.selectProfile(2)
+    await wrapper.vm.$nextTick()
+
+    const enableButton = wrapper
+      .findAll('button')
+      .find((button) => button.text() === 'config.enableWorkerProfile')
+    expect(enableButton).toBeDefined()
+    await enableButton!.trigger('click')
+    await flushPromises()
+
+    expect(mockEnableWorkerProfile).toHaveBeenCalledWith(2)
+    expect(vm.workerFormValue.enabled).toBe(true)
+    expect(mockMessage.success).toHaveBeenCalledWith('config.workerProfileEnabled')
+  })
+
+  it('deletes a disabled unassigned worker profile and selects the default profile', async () => {
+    const disabledProfile = createWorkerProfile({
+      id: 2,
+      name: 'Unused Worker',
+      enabled: false,
+      is_default: false
+    })
+    mockGetAdminWorkerProfiles.mockResolvedValueOnce([
+      createWorkerProfile(),
+      disabledProfile
+    ])
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: { isMobile: false, reloadKey: 0 }
+    })
+    await flushPromises()
+
+    const vm = wrapper.vm as any
+    vm.selectProfile(2)
+    await vm.handleDeleteProfile()
+
+    expect(mockDeleteWorkerProfile).toHaveBeenCalledWith(2)
+    expect(vm.workerProfiles.map((profile: any) => profile.id)).toEqual([1])
+    expect(vm.selectedProfileId).toBe(1)
+    expect(vm.workerFormValue.name).toBe('Default Worker')
+    expect(mockMessage.success).toHaveBeenCalledWith('config.workerProfileDeleted')
   })
 
   it('does not save workspace retention days when worker profile save fails', async () => {

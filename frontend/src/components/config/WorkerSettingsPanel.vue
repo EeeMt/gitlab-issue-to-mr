@@ -165,12 +165,18 @@
                 <n-button
                   size="small"
                   secondary
-                  :disabled="selectedProfileId === null || workerFormValue.is_default || isWorkerBusy"
+                  :disabled="
+                    selectedProfileId === null ||
+                    workerFormValue.is_default ||
+                    !workerFormValue.enabled ||
+                    isWorkerBusy
+                  "
                   @click="handleSetDefaultProfile"
                 >
                   {{ t('config.setDefaultWorkerProfile') }}
                 </n-button>
                 <n-button
+                  v-if="workerFormValue.enabled"
                   size="small"
                   secondary
                   :disabled="
@@ -183,6 +189,42 @@
                 >
                   {{ t('config.disableWorkerProfile') }}
                 </n-button>
+                <n-button
+                  v-else
+                  size="small"
+                  type="primary"
+                  secondary
+                  :disabled="selectedProfileId === null || isWorkerBusy"
+                  @click="handleEnableProfile"
+                >
+                  {{ t('config.enableWorkerProfile') }}
+                </n-button>
+                <n-popconfirm
+                  :positive-text="t('common.confirm')"
+                  :negative-text="t('common.cancel')"
+                  @positive-click="handleDeleteProfile"
+                >
+                  <template #trigger>
+                    <n-button
+                      size="small"
+                      type="error"
+                      secondary
+                      :disabled="
+                        selectedProfileId === null ||
+                        workerFormValue.is_default ||
+                        workerFormValue.enabled ||
+                        isWorkerBusy
+                      "
+                    >
+                      {{ t('config.deleteWorkerProfile') }}
+                    </n-button>
+                  </template>
+                  {{
+                    t('config.deleteWorkerProfileConfirm', {
+                      name: workerFormValue.name
+                    })
+                  }}
+                </n-popconfirm>
               </n-space>
             </div>
             <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
@@ -621,6 +663,7 @@ import {
   NGrid,
   NInput,
   NInputNumber,
+  NPopconfirm,
   NSelect,
   NSpace,
   NSpin,
@@ -633,8 +676,10 @@ import {
 import { useI18n } from 'vue-i18n'
 import {
   createWorkerProfile,
+  deleteWorkerProfile,
   disableWorkerProfile,
   duplicateWorkerProfile,
+  enableWorkerProfile,
   getAdminSkills,
   getConfig,
   getAdminWorkerProfiles,
@@ -1308,6 +1353,49 @@ async function handleDisableProfile() {
     message.success(t('config.saved'))
   } catch (error: any) {
     message.error(error?.response?.data?.detail || t('config.saveError'))
+  } finally {
+    workerSaving.value = false
+  }
+}
+
+async function handleEnableProfile() {
+  if (selectedProfileId.value === null) return
+  workerSaving.value = true
+  try {
+    const enabled = await enableWorkerProfile(selectedProfileId.value)
+    replaceLoadedProfile(enabled)
+    selectProfile(enabled.id)
+    message.success(t('config.workerProfileEnabled'))
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || t('config.saveError'))
+  } finally {
+    workerSaving.value = false
+  }
+}
+
+async function handleDeleteProfile() {
+  if (selectedProfileId.value === null) return
+  const profileId = selectedProfileId.value
+  workerSaving.value = true
+  try {
+    await deleteWorkerProfile(profileId)
+    workerProfiles.value = workerProfiles.value.filter((profile) => profile.id !== profileId)
+    const nextProfile =
+      workerProfiles.value.find((profile) => profile.is_default) ??
+      workerProfiles.value.find((profile) => profile.enabled) ??
+      workerProfiles.value[0] ??
+      null
+    creatingWorkerProfile.value = false
+    selectedProfileId.value = nextProfile?.id ?? null
+    workerFormValue.value = mapProfileToWorkerFormValue(
+      nextProfile,
+      workerFormValue.value.worker_workspace_retention_days,
+      workerFormValue.value.worker_workspace_host_path
+    )
+    lastLoadedWorker.value = cloneWorkerFormValue(workerFormValue.value)
+    message.success(t('config.workerProfileDeleted'))
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || t('config.deleteWorkerProfileFailed'))
   } finally {
     workerSaving.value = false
   }

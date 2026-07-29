@@ -1445,6 +1445,15 @@ export async function disableWorkerProfile(profileId: number): Promise<WorkerPro
   return data
 }
 
+export async function enableWorkerProfile(profileId: number): Promise<WorkerProfile> {
+  const { data } = await api.patch(`/worker-profiles/${profileId}`, { enabled: true })
+  return data
+}
+
+export async function deleteWorkerProfile(profileId: number): Promise<void> {
+  await api.delete(`/worker-profiles/${profileId}`)
+}
+
 export async function duplicateWorkerProfile(profileId: number): Promise<WorkerProfile> {
   const { data } = await api.post(`/worker-profiles/${profileId}/duplicate`)
   return data

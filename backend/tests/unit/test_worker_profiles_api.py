@@ -16,6 +16,7 @@ from app.api.worker_profiles import (
     WorkerProfileUpdateRequest,
     WorkerRuntimeVerificationRequest,
     create_worker_profile,
+    delete_worker_profile,
     disable_worker_profile,
     duplicate_worker_profile,
     set_default_worker_profile_endpoint,
@@ -679,6 +680,134 @@ async def test_disable_worker_profile_still_rejects_active_issue():
 
     assert exc.value.status_code == 422
     assert "assigned to 1 active issue" in str(exc.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_update_disabled_worker_profile_can_enable():
+    profile = _make_profile(id=11, name="Disabled Worker", enabled=False)
+    db = MagicMock()
+    db.get = AsyncMock(return_value=profile)
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+
+    response = await update_worker_profile(
+        11,
+        WorkerProfileUpdateRequest(enabled=True),
+        db=db,
+    )
+
+    assert response["enabled"] is True
+    assert profile.enabled is True
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("profile", "expected_detail"),
+    [
+        (
+            _make_profile(id=11, name="Default Worker", enabled=True, is_default=True),
+            "Default worker profile cannot be deleted",
+        ),
+        (
+            _make_profile(id=12, name="Enabled Worker", enabled=True, is_default=False),
+            "Worker profile must be disabled before it can be deleted",
+        ),
+    ],
+)
+async def test_delete_worker_profile_rejects_default_or_enabled_profile(
+    profile,
+    expected_detail,
+):
+    db = MagicMock()
+    db.get = AsyncMock(return_value=profile)
+    db.delete = AsyncMock()
+    db.rollback = AsyncMock()
+
+    with pytest.raises(HTTPException) as exc:
+        await delete_worker_profile(profile.id, db=db)
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail == expected_detail
+    db.delete.assert_not_awaited()
+    db.rollback.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_delete_worker_profile_rejects_closed_issue_assignment():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with session_factory() as db:
+            profile = WorkerProfile(
+                name="Closed Issue Worker",
+                enabled=False,
+                is_default=False,
+                image="codify-worker:test",
+                volume_mounts=[],
+                pre_script="",
+                post_script="",
+                default_execute_run_instruction_template="{{user_prompt}}",
+                default_plan_run_instruction_template="{{user_prompt}}",
+                ci_auto_repair_run_instruction_template="{{user_prompt}}",
+            )
+            db.add(profile)
+            await db.flush()
+            db.add(
+                Issue(
+                    title="Closed issue",
+                    project_id=100,
+                    status=IssueStatus.CLOSED.value,
+                    worker_profile_id=profile.id,
+                )
+            )
+            await db.commit()
+            profile_id = profile.id
+
+            with pytest.raises(HTTPException) as exc:
+                await delete_worker_profile(profile_id, db=db)
+
+            assert exc.value.status_code == 422
+            assert "assigned to 1 issue(s)" in str(exc.value.detail)
+            assert await db.get(WorkerProfile, profile_id) is not None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_delete_worker_profile_removes_disabled_unassigned_profile():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with session_factory() as db:
+            profile = WorkerProfile(
+                name="Unused Worker",
+                enabled=False,
+                is_default=False,
+                image="codify-worker:test",
+                volume_mounts=[],
+                pre_script="",
+                post_script="",
+                default_execute_run_instruction_template="{{user_prompt}}",
+                default_plan_run_instruction_template="{{user_prompt}}",
+                ci_auto_repair_run_instruction_template="{{user_prompt}}",
+            )
+            db.add(profile)
+            await db.commit()
+            profile_id = profile.id
+
+            response = await delete_worker_profile(profile_id, db=db)
+
+            assert response == {"status": "deleted", "id": profile_id}
+            assert await db.get(WorkerProfile, profile_id) is None
+    finally:
+        await engine.dispose()
 
 
 @pytest.mark.asyncio
