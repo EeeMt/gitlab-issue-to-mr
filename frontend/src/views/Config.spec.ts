@@ -133,9 +133,13 @@ vi.mock('naive-ui', () => ({
   },
   NTabPane: {
     name: 'NTabPane',
-    props: ['name', 'tab'],
+    props: ['name', 'tab', 'displayDirective'],
     setup(props: any, { slots }: any) {
-      return () => h('div', { class: 'n-tab-pane', 'data-name': props.name }, slots.default?.())
+      return () => h('div', {
+        class: 'n-tab-pane',
+        'data-name': props.name,
+        'data-display-directive': props.displayDirective,
+      }, slots.default?.())
     }
   },
   NTag: {
@@ -218,7 +222,10 @@ const globalStubs = {
   },
   MattermostNotificationsPanel: { template: '<div class="mattermost-panel">Mattermost</div>' },
   WorkerSettingsPanel: { template: '<div class="worker-panel">Worker</div>' },
-  SkillSettingsPanel: { template: '<div class="skills-panel">Skills</div>' },
+  SkillSettingsPanel: {
+    template: '<div class="skills-panel">Skills</div>',
+    methods: { hasUnsavedChanges: () => false },
+  },
   AIProvidersPanel: { template: '<div class="ai-providers-panel">AI Providers</div>' },
   WebhookEventsPanel: { template: '<div class="webhook-events-panel">Webhook Events</div>' },
   PageHeader: { template: '<div class="page-header"><slot name="actions"/></div>' },
@@ -327,5 +334,34 @@ describe('Config', () => {
       'maintenance',
       'webhook-events'
     ])
+  })
+
+  it('keeps the skills panel mounted after it has been opened', async () => {
+    wrapper = mount(Config, { global: { stubs: globalStubs } })
+    await flushPromises()
+
+    const skillsPane = wrapper.find('[data-name="skills"]')
+    expect(skillsPane.attributes('data-display-directive')).toBe('show:lazy')
+  })
+
+  it('includes the skills draft in the page-level unsaved indicator', async () => {
+    const skillDraftDirty = ref(false)
+    const DirtySkillSettingsPanel = {
+      setup(_props: unknown, { expose }: any) {
+        expose({ hasUnsavedChanges: () => skillDraftDirty.value })
+        return () => h('div', { class: 'skills-panel' }, 'Skills')
+      },
+    }
+    wrapper = mount(Config, {
+      global: {
+        stubs: { ...globalStubs, SkillSettingsPanel: DirtySkillSettingsPanel },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('config.inSync')
+    skillDraftDirty.value = true
+    await nextTick()
+    expect(wrapper.text()).toContain('config.unsavedChanges')
   })
 })

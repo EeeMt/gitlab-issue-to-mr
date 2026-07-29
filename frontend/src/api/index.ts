@@ -1465,6 +1465,11 @@ export async function getAdminSkill(skillId: number): Promise<Skill> {
   return data
 }
 
+export async function downloadSkill(skillId: number): Promise<Blob> {
+  const { data } = await api.get(`/skills/${skillId}/download`, { responseType: 'blob' })
+  return data
+}
+
 export async function createSkill(payload: SkillPayload): Promise<Skill> {
   const { data } = await api.post('/skills', payload)
   return data

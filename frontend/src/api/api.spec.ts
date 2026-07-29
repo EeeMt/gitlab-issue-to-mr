@@ -56,6 +56,7 @@ import {
   getBranches,
   getAuthStatus,
   downloadTaskArchive,
+  downloadSkill,
   cleanupSystemData
 } from './index'
 import * as apiModule from './index'
@@ -158,6 +159,18 @@ describe('API functions', () => {
 
       expect(result).toBe(blob)
       expect(mockAxiosGet).toHaveBeenCalledWith('/tasks/42/archive/download', { responseType: 'blob' })
+    })
+  })
+
+  describe('downloadSkill', () => {
+    it('downloads the current skill package as a blob', async () => {
+      const blob = new Blob(['skill package'])
+      mockAxiosGet.mockResolvedValue({ data: blob })
+
+      const result = await downloadSkill(4)
+
+      expect(result).toBe(blob)
+      expect(mockAxiosGet).toHaveBeenCalledWith('/skills/4/download', { responseType: 'blob' })
     })
   })
 

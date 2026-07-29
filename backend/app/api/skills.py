@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -18,6 +19,7 @@ from app.core.skills import (
     MAX_SKILL_MARKDOWN_LENGTH,
     SkillValidationError,
     acquire_worker_profile_skill_package_lock,
+    build_skill_download_archive,
     build_skill_version,
     delete_unreferenced_skill_versions,
     validate_worker_profile_skill_package_limits,
@@ -180,6 +182,32 @@ async def get_skill_for_admin(
     _admin=Depends(require_admin_user),
 ):
     return _skill_response(await _skill_or_404(db, skill_id, include_package=True))
+
+
+@router.get("/skills/{skill_id}/download", response_class=Response)
+async def download_skill(
+    skill_id: int,
+    db: AsyncSession = Depends(get_db),
+    _admin=Depends(require_admin_user),
+) -> Response:
+    """Download the current immutable Skill package as a ZIP archive."""
+    skill = await _skill_or_404(db, skill_id, include_package=True)
+    try:
+        archive = build_skill_download_archive(
+            name=skill.name,
+            skill_md=skill.current_version.skill_md,
+            files=skill.current_version.files,
+        )
+    except SkillValidationError as exc:
+        raise _skill_http_error(exc) from exc
+    return Response(
+        content=archive,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{skill.name}.zip"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @router.post("/skills", response_model=SkillResponse, status_code=status.HTTP_201_CREATED)

@@ -1,6 +1,7 @@
 import base64
 import io
 import tarfile
+import zipfile
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -17,6 +18,7 @@ from app.api.skills import (
     SkillUpdateRequest,
     create_skill,
     delete_skill,
+    download_skill,
     enable_skill,
     get_skill_for_admin,
     list_all_skills,
@@ -211,6 +213,65 @@ async def test_skill_crud_and_enabled_listing():
             await db.flush()
             assert await delete_unreferenced_skill_versions(db) == 1
             assert await db.get(SkillVersion, original_version_id) is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_skill_download_returns_current_package_with_nested_paths_and_modes():
+    engine, factory = await _session_factory()
+    try:
+        async with factory() as db:
+            created = await create_skill(
+                SkillCreateRequest(
+                    name="review-changes",
+                    skill_md=_skill_md(
+                        "Review changes before delivery.",
+                        "Inspect the final diff.",
+                    ),
+                    files=[
+                        SkillFilePayload(
+                            path="references/api/v2/guide.md",
+                            content_base64=base64.b64encode(b"# API guide\n").decode(),
+                        ),
+                        SkillFilePayload(
+                            path="scripts/check.sh",
+                            content_base64=base64.b64encode(b"#!/bin/sh\nexit 0\n").decode(),
+                            executable=True,
+                        ),
+                    ],
+                ),
+                db=db,
+            )
+
+            response = await download_skill(created.id, db=db)
+
+            assert response.media_type == "application/zip"
+            assert response.headers["content-disposition"] == (
+                'attachment; filename="review-changes.zip"'
+            )
+            assert response.headers["cache-control"] == "no-store"
+            with zipfile.ZipFile(io.BytesIO(response.body)) as archive:
+                assert archive.namelist() == [
+                    "review-changes/",
+                    "review-changes/SKILL.md",
+                    "review-changes/references/",
+                    "review-changes/references/api/",
+                    "review-changes/references/api/v2/",
+                    "review-changes/references/api/v2/guide.md",
+                    "review-changes/scripts/",
+                    "review-changes/scripts/check.sh",
+                ]
+                assert archive.read("review-changes/references/api/v2/guide.md") == (
+                    b"# API guide\n"
+                )
+                assert archive.read("review-changes/scripts/check.sh") == b"#!/bin/sh\nexit 0\n"
+                assert (
+                    archive.getinfo("review-changes/SKILL.md").external_attr >> 16
+                ) & 0o777 == 0o644
+                assert (
+                    archive.getinfo("review-changes/scripts/check.sh").external_attr >> 16
+                ) & 0o777 == 0o755
     finally:
         await engine.dispose()
 
@@ -589,7 +650,7 @@ async def test_worker_runtime_explicitly_loads_deferred_skill_content():
                 ),
                 files=[
                     {
-                        "path": "references/checklist.md",
+                        "path": "references/api/v2/checklist.md",
                         "content_base64": base64.b64encode(b"# Checklist\n").decode(),
                         "executable": False,
                     }
@@ -637,7 +698,9 @@ async def test_worker_runtime_explicitly_loads_deferred_skill_content():
 
             runtime = await load_task_worker_runtime(db, SimpleNamespace(id=41))
             assert "Inspect the final diff." in runtime.skills[0]["skill_md"]
-            assert runtime.skills[0]["files"][0]["path"] == "references/checklist.md"
+            assert runtime.skills[0]["files"][0]["path"] == (
+                "references/api/v2/checklist.md"
+            )
 
             snapshot.runtime_mode = "baked_image"
             snapshot.worker_kit_version = None
@@ -669,7 +732,7 @@ def test_runtime_archive_contains_task_scoped_claude_skill_without_home_mount():
                         "executable": True,
                     },
                     {
-                        "path": "references/checklist.md",
+                        "path": "references/api/v2/checklist.md",
                         "content_base64": base64.b64encode(b"# Checklist\n").decode(),
                         "executable": False,
                     },
@@ -688,7 +751,7 @@ def test_runtime_archive_contains_task_scoped_claude_skill_without_home_mount():
         )
         reference_path = (
             "codify-runtime/skill-scope/.claude/skills/review-changes/"
-            "references/checklist.md"
+            "references/api/v2/checklist.md"
         )
         assert script_path in names
         assert reference_path in names

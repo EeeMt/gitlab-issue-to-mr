@@ -5,8 +5,11 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import io
 import json
 import re
+import stat
+import zipfile
 from collections.abc import Iterable, Mapping
 from pathlib import PurePosixPath
 from typing import Any
@@ -206,6 +209,66 @@ def decode_skill_file_content(item: Mapping[str, Any]) -> bytes:
     """Decode one already-normalized package entry for runtime materialization."""
     path = validate_skill_file_path(item.get("path"))
     return _decode_skill_file(item.get("content_base64"), path)
+
+
+def build_skill_download_archive(
+    *,
+    name: str,
+    skill_md: str,
+    files: Iterable[Mapping[str, Any]] | None,
+) -> bytes:
+    """Build a deterministic, portable ZIP for one validated Skill package."""
+    normalized_name = validate_skill_name(name)
+    normalized_skill_md, _ = validate_skill_markdown(
+        skill_md,
+        expected_name=normalized_name,
+    )
+    normalized_files = normalize_skill_files(files)
+    file_payloads = [
+        (item, decode_skill_file_content(item)) for item in normalized_files
+    ]
+    package_size_bytes = len(normalized_skill_md.encode("utf-8")) + sum(
+        len(payload) for _, payload in file_payloads
+    )
+    if package_size_bytes > MAX_SKILL_PACKAGE_BYTES:
+        raise SkillValidationError(
+            f"Skill package exceeds the {MAX_SKILL_PACKAGE_BYTES}-byte package limit"
+        )
+    buffer = io.BytesIO()
+    written_directories: set[str] = set()
+
+    def write_directory(path: str) -> None:
+        archive_path = path.rstrip("/") + "/"
+        if archive_path in written_directories:
+            return
+        info = zipfile.ZipInfo(archive_path, date_time=(1980, 1, 1, 0, 0, 0))
+        info.create_system = 3
+        info.external_attr = ((stat.S_IFDIR | 0o755) << 16) | 0x10
+        archive.writestr(info, b"")
+        written_directories.add(archive_path)
+
+    def write_file(path: str, payload: bytes, mode: int) -> None:
+        info = zipfile.ZipInfo(path, date_time=(1980, 1, 1, 0, 0, 0))
+        info.create_system = 3
+        info.compress_type = zipfile.ZIP_DEFLATED
+        info.external_attr = (stat.S_IFREG | mode) << 16
+        archive.writestr(info, payload)
+
+    with zipfile.ZipFile(buffer, mode="w") as archive:
+        root = f"{normalized_name}/"
+        write_directory(root)
+        write_file(f"{root}SKILL.md", normalized_skill_md.encode("utf-8"), 0o644)
+        for item, payload in file_payloads:
+            relative_path = PurePosixPath(item["path"])
+            parent_paths = list(relative_path.parents)[:-1]
+            for parent in reversed(parent_paths):
+                write_directory(f"{root}{parent.as_posix()}")
+            write_file(
+                f"{root}{relative_path.as_posix()}",
+                payload,
+                0o755 if item["executable"] else 0o644,
+            )
+    return buffer.getvalue()
 
 
 def build_skill_version(

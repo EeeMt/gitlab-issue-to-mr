@@ -29,7 +29,8 @@
     "vue-mark-text": "^1.4.14",
     "vue-router": "^4.5.0",
     "vue3-highlight-text": "^1.0.7",
-    "vuedraggable": "^4.1.0"
+    "vuedraggable": "^4.1.0",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@testing-library/vue": "^8.1.0",

@@ -10,7 +10,7 @@
       >
         <template #actions>
           <n-space :size="8" wrap>
-            <n-tag v-if="isDirty" size="small" round type="warning">{{ t('config.unsavedChanges') }}</n-tag>
+            <n-tag v-if="pageIsDirty" size="small" round type="warning">{{ t('config.unsavedChanges') }}</n-tag>
             <n-tag v-else size="small" round type="success">{{ t('config.inSync') }}</n-tag>
             <n-tag size="small" round type="info">{{ t('config.dbOverride') }}</n-tag>
             <n-tag size="small" round>{{ t('config.envFallback') }}</n-tag>
@@ -65,8 +65,12 @@
               <WorkerSettingsPanel :is-mobile="isMobile" />
             </n-tab-pane>
 
-            <n-tab-pane name="skills" :tab="t('config.skillsTab')">
-              <SkillSettingsPanel />
+            <n-tab-pane
+              name="skills"
+              :tab="t('config.skillsTab')"
+              display-directive="show:lazy"
+            >
+              <SkillSettingsPanel ref="skillSettingsPanelRef" />
             </n-tab-pane>
 
             <n-tab-pane name="notifications" :tab="t('config.notificationsTab')">
@@ -144,6 +148,13 @@ const {
 // Panel refs
 const gitlabPanelRef = ref<InstanceType<typeof GitLabSettingsPanel> | null>(null)
 const promptTemplatesPanelRef = ref<InstanceType<typeof PromptTemplatesPanel> | null>(null)
+const skillSettingsPanelRef = ref<InstanceType<typeof SkillSettingsPanel> | null>(null)
+const pageIsDirty = computed(
+  () => isDirty.value || (
+    typeof skillSettingsPanelRef.value?.hasUnsavedChanges === 'function'
+    && skillSettingsPanelRef.value.hasUnsavedChanges()
+  ),
+)
 
 // Tab state
 const activeConfigTab = ref<'runtime' | 'auth' | 'gitlab' | 'ai-providers' | 'prompt-templates' | 'worker' | 'skills' | 'notifications' | 'announcement' | 'maintenance' | 'webhook-events'>('runtime')
