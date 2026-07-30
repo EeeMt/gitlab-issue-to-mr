@@ -43,6 +43,11 @@ docker-compose*.yml
 # Include deploy directory (required for worker image build)
 !deploy/
 
+# Generated offline artifacts are large and are never inputs to application/worker images.
+deploy/offline-bundle/
+deploy/codify-offline-bundle*.tar.gz
+deploy/.codify-offline-bundle*.tmp
+
 # Misc
 *.log
 logs/

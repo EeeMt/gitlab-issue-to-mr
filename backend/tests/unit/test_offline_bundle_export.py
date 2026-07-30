@@ -64,6 +64,14 @@ def test_make_offline_bundle_export_target_builds_exports_and_packages():
     assert "deploy/offline-bundle && ./scripts/package-bundle.sh" in result.stdout
 
 
+def test_offline_artifacts_are_excluded_from_docker_build_contexts():
+    repo_root = Path(__file__).resolve().parents[3]
+    root_ignore = (repo_root / ".dockerignore").read_text(encoding="utf-8")
+
+    assert "deploy/offline-bundle/" in root_ignore
+    assert "deploy/codify-offline-bundle*.tar.gz" in root_ignore
+
+
 def test_worker_kit_export_omits_macos_appledouble_metadata():
     repo_root = Path(__file__).resolve().parents[3]
     export_script = (repo_root / "deploy" / "worker-kit" / "export.sh").read_text(

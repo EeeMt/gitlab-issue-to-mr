@@ -51,9 +51,9 @@ make offline-bundle-export
 
 This command:
 
-1. Builds the latest backend and nginx images.
-2. Regenerates `images/codify-offline-images.tar.gz`.
-3. Builds and exports the versioned mounted worker kit.
+1. Builds the latest backend and nginx images in their pinned Docker build environments.
+2. Builds and exports the versioned mounted worker kit.
+3. Regenerates `images/codify-offline-images.tar.gz`.
 4. Packages the entire `deploy/offline-bundle/` directory as `deploy/codify-offline-bundle.tar.gz`.
 
 ## Notes
