@@ -1,0 +1,12 @@
+{
+  "name": "codify-playwright-worker-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Version-locked Playwright dependencies for a Codify Worker runtime image",
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.0"
+  }
+}

@@ -1,0 +1,88 @@
+# syntax=docker/dockerfile:1.7
+
+# Playwright project runtime image for Codify mounted-kit Worker Profiles.
+#
+# Build example:
+#   docker build -f deploy/Dockerfile.playwright \
+#     -t codify-worker/playwright:1.62.0 .
+#
+# Codify supplies its launcher, tools, workspace mounts, CA environment, and
+# privilege drop from the mounted Worker Kit. This image owns only the UI test
+# toolchain and intentionally defines no Codify entrypoint.
+
+ARG PLAYWRIGHT_VERSION=1.62.0
+ARG PLAYWRIGHT_BASE_IMAGE=mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble
+
+FROM ${PLAYWRIGHT_BASE_IMAGE} AS runtime-base
+USER root
+ARG DEBIAN_FRONTEND=noninteractive
+ARG TZ=Asia/Shanghai
+
+ENV TZ=${TZ} \
+    LANG=zh_CN.UTF-8 \
+    LC_ALL=zh_CN.UTF-8 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+    PLAYWRIGHT_SKIP_BROWSER_GC=1 \
+    NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_FUND=false \
+    NPM_CONFIG_UPDATE_NOTIFIER=false
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        locales language-pack-zh-hans \
+        fonts-noto-cjk fonts-noto-color-emoji fonts-liberation fonts-dejavu-core fontconfig \
+        ca-certificates openssl curl wget git openssh-client jq file \
+        zip unzip xz-utils tar gzip dnsutils iputils-ping netcat-openbsd \
+        procps lsof poppler-utils python3 make g++ pkg-config \
+    && locale-gen zh_CN.UTF-8 \
+    && fc-cache -f \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM runtime-base AS dependency-builder
+ARG PLAYWRIGHT_VERSION
+WORKDIR /opt/playwright-runtime
+COPY deploy/playwright/package.json deploy/playwright/package-lock.json ./
+
+RUN --mount=type=secret,id=npmrc,target=/root/.npmrc,required=false \
+    npm ci --no-audit --no-fund \
+    && installed_version="$(node -p "require('./node_modules/@playwright/test/package.json').version")" \
+    && if [ "${installed_version}" != "${PLAYWRIGHT_VERSION}" ]; then \
+        echo "Playwright package ${installed_version} does not match image ${PLAYWRIGHT_VERSION}" >&2; \
+        exit 1; \
+    fi \
+    && sha256sum package-lock.json | awk '{print $1}' > package-lock.sha256
+
+FROM runtime-base AS final
+ARG PLAYWRIGHT_VERSION
+
+LABEL org.opencontainers.image.title="Codify Playwright Worker Runtime"
+LABEL org.opencontainers.image.description="Playwright UI test toolchain for mounted-kit Worker Profiles"
+LABEL org.opencontainers.image.version="${PLAYWRIGHT_VERSION}"
+
+COPY --from=dependency-builder /opt/playwright-runtime/node_modules /node_modules
+COPY --from=dependency-builder /opt/playwright-runtime/package.json /opt/playwright-runtime/package.json
+COPY --from=dependency-builder /opt/playwright-runtime/package-lock.json /opt/playwright-runtime/package-lock.json
+COPY --from=dependency-builder /opt/playwright-runtime/package-lock.sha256 /opt/playwright-runtime/package-lock.sha256
+COPY --chmod=0755 deploy/playwright/verify-runtime.mjs /usr/local/bin/verify-playwright-runtime
+
+ENV PLAYWRIGHT_VERSION=${PLAYWRIGHT_VERSION} \
+    HOME=/home/codify \
+    XDG_CACHE_HOME=/home/codify/.cache \
+    NODE_PATH=/node_modules \
+    PATH=/node_modules/.bin:${PATH}
+
+# Mounted-kit tasks start as root and run user hooks/agents as numeric 1000:1000.
+# Prepare only image-owned paths; the Worker Kit owns task mount permissions.
+RUN install -d -o 1000 -g 1000 -m 0755 \
+        /workspace /home/codify /home/codify/.cache /home/codify/.npm \
+    && test -x /node_modules/.bin/playwright \
+    && test -s /opt/playwright-runtime/package-lock.sha256
+
+WORKDIR /workspace
+USER 1000:1000
+RUN verify-playwright-runtime --paths-only
+
+# Codify overrides this user and command with the mounted-kit launcher.
+USER root
+CMD ["/bin/sh"]
