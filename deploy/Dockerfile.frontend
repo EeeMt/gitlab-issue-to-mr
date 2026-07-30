@@ -25,6 +25,10 @@ RUN echo 'server { \
     listen 80; \
     root /usr/share/nginx/html; \
     index index.html; \
+    location /assets/vendor/mermaid/ { \
+        default_type application/javascript; \
+        try_files $uri =404; \
+    } \
     location / { \
         try_files $uri $uri/ /index.html; \
     } \

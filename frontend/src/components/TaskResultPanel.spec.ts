@@ -178,7 +178,8 @@ describe('TaskResultPanel', () => {
   })
 
   it('adds Mermaid rendering only to the AI delivery summary panel', () => {
-    expect(summaryRendererSource).toContain("await import('mermaid')")
+    expect(summaryRendererSource).toContain("await import('../../vendor/mermaid')")
+    expect(summaryRendererSource).toContain('await loadMermaid()')
     expect(summaryRendererSource).not.toContain("import mermaid from 'mermaid'")
     expect(summaryMermaidSource).toContain('function renderSummaryMarkdownWithMermaid(')
     expect(summaryMermaidSource).toContain('[ \\t]*mermaid')

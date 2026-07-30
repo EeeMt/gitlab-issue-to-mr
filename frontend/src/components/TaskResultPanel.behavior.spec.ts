@@ -34,11 +34,11 @@ vi.mock('../api', () => ({
   getTaskPayload: mockGetTaskPayload,
 }))
 
-vi.mock('mermaid', () => ({
-  default: {
+vi.mock('../vendor/mermaid', () => ({
+  loadMermaid: vi.fn(async () => ({
     initialize: vi.fn(),
     render: mockMermaidRender,
-  },
+  })),
 }))
 
 vi.mock('@vicons/ionicons5', () => ({
