@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 display="${DISPLAY:-:99}"
-geometry="${PLAYWRIGHT_DESKTOP_GEOMETRY:-1920x1080x24}"
+geometry="${PLAYWRIGHT_DESKTOP_GEOMETRY:-1600x900x24}"
 web_host="${PLAYWRIGHT_DESKTOP_HOST:-0.0.0.0}"
 web_port="${PLAYWRIGHT_DESKTOP_PORT:-6080}"
 vnc_port="${PLAYWRIGHT_VNC_PORT:-5900}"
@@ -27,7 +27,7 @@ if [[ ! "${display}" =~ ^:[0-9]+$ ]]; then
     exit 2
 fi
 if [[ ! "${geometry}" =~ ^[0-9]+x[0-9]+x(16|24|32)$ ]]; then
-    echo "PLAYWRIGHT_DESKTOP_GEOMETRY must look like 1920x1080x24" >&2
+    echo "PLAYWRIGHT_DESKTOP_GEOMETRY must look like 1600x900x24" >&2
     exit 2
 fi
 if [[ -n "${password_file}" && ! -r "${password_file}" ]]; then
@@ -90,6 +90,10 @@ wait_for_path "/tmp/.X11-unix/X${display_number}"
 fluxbox -display "${display}" >"${log_dir}/fluxbox.log" 2>&1 &
 child_pids+=("$!")
 
+# NOTE: no -ncache here. x11vnc's -ncache frames the screen into a tall
+# cache region that noVNC cannot render, and it adds duplicate updates, so it
+# is counter-productive with this web client. -wireframe / -scrollcopyrect /
+# -wirecopyrect are already on by default and are what actually save bandwidth.
 vnc_auth=(-nopw)
 if [[ -n "${password_file}" ]]; then
     vnc_auth=(-rfbauth "${password_file}")
@@ -107,8 +111,11 @@ x11vnc \
 child_pids+=("$!")
 wait_for_tcp 127.0.0.1 "${vnc_port}" x11vnc
 
+# --heartbeat keeps idle WebSocket connections alive through proxies/load
+# balancers that would otherwise drop them, which reads as lag/reconnect.
 websockify \
     --web=/usr/share/novnc \
+    --heartbeat=30 \
     "${web_host}:${web_port}" \
     "127.0.0.1:${vnc_port}" \
     >"${log_dir}/websockify.log" 2>&1 &

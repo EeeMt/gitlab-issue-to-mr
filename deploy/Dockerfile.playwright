@@ -35,7 +35,7 @@ RUN apt-get update \
         ca-certificates openssl curl wget git openssh-client jq file \
         zip unzip xz-utils tar gzip dnsutils iputils-ping netcat-openbsd \
         procps lsof poppler-utils python3 make g++ pkg-config \
-        xvfb fluxbox x11vnc novnc websockify dbus-x11 xterm \
+        xvfb fluxbox x11vnc novnc websockify dbus-x11 xterm xfonts-base \
     && locale-gen zh_CN.UTF-8 \
     && fc-cache -f \
     && rm -rf /var/lib/apt/lists/*

@@ -310,7 +310,7 @@ docker run --rm -it \
 | 变量 | 默认值 | 用途 |
 |------|--------|------|
 | `DISPLAY` | `:99` | Xvfb display，只接受 `:数字` |
-| `PLAYWRIGHT_DESKTOP_GEOMETRY` | `1920x1080x24` | 桌面分辨率和色深 |
+| `PLAYWRIGHT_DESKTOP_GEOMETRY` | `1600x900x24` | 桌面分辨率和色深 |
 | `PLAYWRIGHT_DESKTOP_HOST` | `0.0.0.0` | noVNC 监听地址 |
 | `PLAYWRIGHT_DESKTOP_PORT` | `6080` | noVNC Web 端口 |
 | `PLAYWRIGHT_VNC_PORT` | `5900` | 容器内部 VNC 端口 |
@@ -319,6 +319,50 @@ docker run --rm -it \
 
 `x11vnc` 只监听容器 loopback，由 websockify 转发；宿主机只需要发布 noVNC 的
 `6080` 端口。
+
+### 6.4 慢速网络下桌面卡顿 / "卡在连接中"
+
+noVNC 要把整屏像素经 WebSocket 传到浏览器才显示桌面：连接时的那一帧和之后的
+每次刷新，分辨率越高、色深越大，数据量越大。跨内网/跨 VPN 访问时觉得"卡在
+连接中很久""操作不顺滑"，几乎都是**初始帧/刷新帧传得慢**，不是连接握手本身
+的问题。按影响从大到小：
+
+1. **降低分辨率**（效果最明显）。默认已是 `1600x900x24`；链路仍然偏慢时继续
+   调小：
+
+   ```bash
+   -e PLAYWRIGHT_DESKTOP_GEOMETRY=1440x900x24 \
+   ```
+
+   必须 1080p 时显式覆盖回去：`-e PLAYWRIGHT_DESKTOP_GEOMETRY=1920x1080x24`。
+
+2. **降到 16 位色深**（带宽再减半，适合很慢的链路；codegen 使用不受影响，只有
+   VNC 画面颜色略失真）：
+
+   ```bash
+   -e PLAYWRIGHT_DESKTOP_GEOMETRY=1440x900x16 \
+   ```
+
+3. **连接长时间卡住时，去掉 `resize=remote`**。`resize=remote` 会在连接时（以及
+   每次改变浏览器窗口大小后）触发 Xvfb RANDR 缩放并**重发整屏**，慢链路上这一
+   步可能卡很久。改用客户端缩放：
+
+   ```text
+   http://127.0.0.1:6080/vnc.html?autoconnect=1&resize=scale
+   ```
+
+4. **降低 noVNC 质量/提高压缩**。访问 URL 追加参数，`quality` 越低画质越差但
+   越快，`compression` 越高数据越少但两端 CPU 越高：
+
+   ```text
+   http://127.0.0.1:6080/vnc.html?autoconnect=1&resize=remote&quality=3&compression=4
+   ```
+
+5. `x11vnc` 的 `-wireframe` / `-scrollcopyrect` / `-wirecopyrect` 默认已开启，
+   会用 CopyRect 代替重传像素，**不要**额外加 `-ncache`（noVNC 无法渲染其缓存
+   区域，反而更卡）。
+
+6. 尽量走 SSH 隧道访问（见第 7 节），隧道内置压缩。
 
 ## 7. 远程 Docker 主机
 
