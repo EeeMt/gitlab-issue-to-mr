@@ -21,6 +21,71 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Snapshot the active Docker builder once; both the platform gate and the
+# friendly message read from the same output.
+builder_info() {
+    docker buildx inspect 2>/dev/null || true
+}
+
+# Fail fast with a friendly message when the active builder cannot build the
+# requested platform. Otherwise BuildKit fails mid-build with a cryptic
+# "exec format error" that gives no hint about the real cause.
+#
+# The gate only applies when the current buildx builder is the docker driver,
+# i.e. the same builder plain `docker build` uses. For other drivers (e.g. a
+# docker-container builder selected via `docker buildx use`) `docker build`
+# ignores the selection and uses the daemon instead, so we cannot predict its
+# platforms here and fail open rather than risk a false abort.
+check_platform_support() {
+    local info driver platforms name supported="" p
+    info="$(builder_info)"
+    driver="$(awk -F': *' '/^Driver:/{print $2; exit}' <<<"${info}")"
+    [[ "${driver}" == "docker" ]] || return 0
+    platforms="$(awk '/Platforms:/{sub(/^[[:space:]]*Platforms:[[:space:]]*/,""); print}' <<<"${info}" | tr ',' '\n')"
+    [[ -n "${platforms}" ]] || return 0
+    while IFS= read -r p; do
+        p="${p#"${p%%[![:space:]]*}"}"
+        p="${p%"${p##*[![:space:]]}"}"
+        # Match in either direction so a platform family and its sub-variants
+        # (linux/arm64 vs linux/arm64/v8) satisfy each other.
+        if [[ -n "${p}" && ( "${p}" == "${PLATFORM}" || "${p}" == "${PLATFORM}/"* || "${PLATFORM}" == "${p}/"* ) ]]; then
+            supported=1
+            break
+        fi
+    done <<< "${platforms}"
+    [[ -n "${supported}" ]] && return 0
+    name="$(awk -F': *' '/^Name:/{print $2; exit}' <<<"${info}")"
+    available="$(sed -e 's/^[[:space:]]*//' -e '/^[[:space:]]*$/d' <<<"${platforms}" | paste -sd, - | sed 's/,/, /g')"
+    cat >&2 <<EOF
+
+Codify worker kit export cannot build for platform "${PLATFORM}" on the
+active Docker builder.
+
+    Active builder : ${name:-<unknown>}
+    Supports       : ${available:-<unknown>}
+
+The offline bundle ships both linux/amd64 and linux/arm64 kits, and each
+kit must be built where the Docker builder can run that platform (natively
+or via binfmt/QEMU emulation). BuildKit only reports a cryptic
+"exec format error" when the platform is unavailable.
+
+To produce the "${PLATFORM}" kit, either run on a machine whose builder
+supports the platform (e.g. an Apple Silicon host):
+
+    docker context use <dual-platform-context>
+    make offline-bundle-export
+
+or enable cross-arch emulation on the current host (binfmt/QEMU, e.g.
+'docker run --privileged --rm tonistiigi/binfmt'), or point Docker at a
+remote builder that already supports the platform, then re-run.
+
+Aborting; no kit was produced for "${PLATFORM}".
+EOF
+    return 1
+}
+
+check_platform_support || exit 1
+
 mkdir -p "${OUTPUT_DIR}"
 STAGING="$(mktemp -d "${OUTPUT_DIR}/.build-staging.XXXXXX")"
 
