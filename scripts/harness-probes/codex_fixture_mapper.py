@@ -5,8 +5,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+
+# The sanitizer removes full credential assignments, but a masked-key tail such
+# as the DeepSeek "Your api key: ****tial is invalid" error must never flow into
+# the canonical stream either. Redact it here as well so the mapper is safe even
+# against an un-sanitized raw record.
+MASKED_KEY_TAIL = re.compile(r"\*\*\*\*[A-Za-z0-9_-]{2,}")
+
+
+def _clean_message(text: str) -> str:
+    return MASKED_KEY_TAIL.sub("<MASKED_KEY>", str(text))
 
 
 FAILURE_KIND = {
@@ -168,7 +179,7 @@ def build_expected(scenario_dir: Path) -> list[dict]:
             else:
                 add(
                     "diagnostic",
-                    {"code": "capability_warning", "message": message},
+                    {"code": "capability_warning", "message": _clean_message(message)},
                     line_number,
                 )
         elif record_type == "turn.completed":
@@ -182,7 +193,7 @@ def build_expected(scenario_dir: Path) -> list[dict]:
                 harness_terminal = True
         elif record_type == "turn.failed":
             error = record.get("error") if isinstance(record.get("error"), dict) else {}
-            message = str(error.get("message") or "Codex turn failed")
+            message = _clean_message(str(error.get("message") or "Codex turn failed"))
             kind = _failure_kind(scenario, message)
             add(
                 "harness.failed",

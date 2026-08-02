@@ -14,6 +14,7 @@ from pathlib import Path
 
 SCHEMA = "codify.worker.event/v1"
 TASK_TERMINALS = {"run.completed", "run.failed"}
+HARNESS_TERMINAL_TYPES = {"harness.completed", "harness.failed"}
 KNOWN_TYPES = {
     "run.started",
     "model.resolved",
@@ -46,9 +47,9 @@ def _required_env(name: str) -> str:
     return value
 
 
-def _paths() -> tuple[Path, Path, Path]:
+def _paths() -> tuple[Path, Path]:
     runtime_dir = Path(_required_env("CODIFY_RUNTIME_DIR"))
-    return runtime_dir / "event.jsonl", runtime_dir / ".event-seq", runtime_dir / ".event.lock"
+    return runtime_dir / "event.jsonl", runtime_dir / ".event.lock"
 
 
 def _normalize_payload(event_type: str, payload: dict) -> dict:
@@ -76,30 +77,53 @@ def emit(event_type: str, payload: dict, raw_ref: dict | None) -> dict:
             "raw_ref": raw_ref,
         }
         event_type = "diagnostic"
-    event_path, seq_path, lock_path = _paths()
+    event_path, lock_path = _paths()
     event_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path.touch(exist_ok=True)
     with lock_path.open("r+") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        last_seq = int(seq_path.read_text().strip() or "0") if seq_path.exists() else 0
+        # seq is derived from the stream itself: the fsync'd event append is the
+        # single source of truth. A crash between an append and any auxiliary
+        # state can therefore never make a recovered container regenerate a
+        # divergent seq for the same record.
         first_event = None
         last_type = None
+        last_seq = 0
+        harness_terminal_seen = False
         if event_path.exists():
             for line in event_path.read_text(encoding="utf-8", errors="strict").splitlines():
-                if line.strip():
-                    parsed = json.loads(line)
-                    first_event = first_event or parsed
-                    last_type = parsed.get("type")
+                if not line.strip():
+                    continue
+                parsed = json.loads(line)
+                first_event = first_event or parsed
+                last_type = parsed.get("type")
+                last_seq += 1
+                if last_type in HARNESS_TERMINAL_TYPES:
+                    harness_terminal_seen = True
             if last_type in TASK_TERMINALS:
                 raise RuntimeError("cannot append an event after the Task terminal")
         if last_seq == 0 and event_type != "run.started":
             raise RuntimeError(
                 f"run.started must be the first canonical event; got {event_type}"
             )
+        if event_type == "run.started" and last_seq > 0:
+            raise RuntimeError("run.started appears more than once")
+        if event_type in HARNESS_TERMINAL_TYPES and harness_terminal_seen:
+            raise RuntimeError("harness terminal appears more than once")
+        if event_type.startswith("delivery.") and not harness_terminal_seen:
+            raise RuntimeError("delivery event appears before harness terminal")
+        if event_type == "worker.finalization":
+            if not harness_terminal_seen:
+                raise RuntimeError("worker.finalization appears before harness terminal")
+            if last_type == "worker.finalization":
+                raise RuntimeError("worker.finalization appears more than once")
+        if event_type in TASK_TERMINALS:
+            if not harness_terminal_seen:
+                raise RuntimeError("task terminal appears before harness terminal")
+            if last_type != "worker.finalization":
+                raise RuntimeError("Task terminal must immediately follow worker.finalization")
         if last_type == "worker.finalization" and event_type not in TASK_TERMINALS:
             raise RuntimeError("only the Task terminal may follow worker.finalization")
-        if event_type in TASK_TERMINALS and last_type != "worker.finalization":
-            raise RuntimeError("Task terminal must immediately follow worker.finalization")
         harness = {
             "key": _required_env("CODIFY_HARNESS_KEY"),
             "adapter_version": _required_env("CODIFY_ADAPTER_VERSION"),
@@ -120,12 +144,11 @@ def emit(event_type: str, payload: dict, raw_ref: dict | None) -> dict:
             "payload": _normalize_payload(event_type, payload),
         }
         if raw_ref is not None:
-            event["raw_ref"] = raw_ref
+            event["raw_ref"] = dict(raw_ref)
         with event_path.open("a", encoding="utf-8") as output:
             output.write(json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n")
             output.flush()
             os.fsync(output.fileno())
-        seq_path.write_text(str(seq), encoding="utf-8")
         return event
 
 

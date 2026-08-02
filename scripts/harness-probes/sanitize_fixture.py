@@ -59,6 +59,11 @@ PATTERNS: tuple[tuple[str, re.Pattern[str], Replacement], ...] = (
         lambda match: f"{match.group(1)}<REDACTED>",
     ),
     (
+        "masked_key_tail",
+        re.compile(r"\*\*\*\*[A-Za-z0-9_-]{2,}"),
+        "<MASKED_KEY>",
+    ),
+    (
         "mac_user_path",
         re.compile(r"/Users/(?!<USER>)([^/\s\"']+)"),
         "/Users/<USER>",

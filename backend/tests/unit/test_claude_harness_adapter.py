@@ -394,6 +394,46 @@ def test_event_writer_rejects_non_terminal_after_worker_finalization(tmp_path):
     assert "only the Task terminal" in result.stderr
 
 
+def test_event_writer_rejects_duplicate_harness_terminal(tmp_path):
+    _emit(tmp_path, "run.started")
+    _emit(tmp_path, "harness.completed")
+    result = subprocess.run(
+        ["python3", str(EVENT_WRITER), "harness.completed", "--payload", '{}'],
+        check=False,
+        env=_environment(tmp_path),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "harness terminal appears more than once" in result.stderr
+
+
+def test_event_writer_rejects_delivery_before_harness_terminal(tmp_path):
+    _emit(tmp_path, "run.started")
+    result = subprocess.run(
+        ["python3", str(EVENT_WRITER), "delivery.started", "--payload", '{"phase":"git"}'],
+        check=False,
+        env=_environment(tmp_path),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "delivery event appears before harness terminal" in result.stderr
+
+
+def test_event_writer_derives_seq_from_stream_after_state_loss(tmp_path):
+    # A recovered live container persists event.jsonl but may have lost every
+    # derived writer file (the lock and the legacy seq side file). seq must come
+    # from the fsync'd stream itself, or the next record would reuse a seq and
+    # collide with the Backend's idempotency key.
+    _emit(tmp_path, "run.started")
+    _emit(tmp_path, "harness.completed")
+    (tmp_path / ".event.lock").unlink(missing_ok=True)
+    (tmp_path / ".event-seq").unlink(missing_ok=True)
+    _emit(tmp_path, "worker.finalization", {"exit_code": 0})
+    assert [event["seq"] for event in _events(tmp_path)] == [1, 2, 3]
+
+
 def test_runner_initialization_failure_still_emits_complete_failed_attempt(tmp_path):
     runtime_dir = tmp_path / "runtime"
     runtime_dir.mkdir()

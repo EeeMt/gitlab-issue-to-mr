@@ -24,7 +24,7 @@
   "provider_kind": "deepseek",
   "provider_model": "deepseek-v4-flash",
   "review_note": "Real isolated DeepSeek probe. Sanitizer is idempotent; credentials, operator paths, correlation identifiers, and hidden reasoning content were removed before review.",
-  "sanitized_stdout_sha256": "249c28f1192b330d7c0719531b7822607fccb87cf4b112e4f1c267ffe5f4d6f5",
+  "sanitized_stdout_sha256": "dd07f7d99b2269c4e31374141d183dc3d22ba77b7fdbafbc3f94680598f2a200",
   "scenario": "authentication_failure",
   "started_at": "2026-08-01T11:19:30Z",
   "wire_protocol": "responses"

@@ -70,9 +70,9 @@ codify_harness_initialize() {
     echo "Canonical event stream before initialization: ${event_bytes} bytes"
     if [ ! -s "${CODIFY_RUNTIME_DIR}/event.jsonl" ]; then
         # A fresh container can inherit no canonical events. Reset only the
-        # derived writer state in that case; a recovered live container keeps
-        # both its stream and sequence state intact.
-        rm -f "${CODIFY_RUNTIME_DIR}/.event-seq" "${CODIFY_RUNTIME_DIR}/.event.lock"
+        # advisory writer lock in that case; a recovered live container keeps
+        # its stream intact (seq is derived from the stream, not a side file).
+        rm -f "${CODIFY_RUNTIME_DIR}/.event.lock"
         codify_emit_event "run.started" \
             "$(jq -nc --arg runtime_bundle_digest "${CODIFY_RUNTIME_BUNDLE_DIGEST:-}" '{runtime_bundle_digest:$runtime_bundle_digest}')" \
             || return 1
