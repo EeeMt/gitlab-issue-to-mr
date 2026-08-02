@@ -1347,7 +1347,12 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn('CODIFY_RUNTIME_DIR="/tmp/codify-runtime"', content)
         self.assertIn('CODIFY_ARTIFACT_DIR="${CODIFY_RUNTIME_DIR}/artifacts"', content)
         self.assertIn('chown 0:0 "${CODIFY_RUNTIME_DIR}"', content)
+        # fs.protected_regular denies cross-uid appends in sticky dirs (even for
+        # root), so the sticky bit is dropped for the legacy mixed-identity
+        # runtime and kept only for the Harness (root-only writes).
+        self.assertIn('if [ -n "${CODIFY_HARNESS_KEY:-}" ]; then', content)
         self.assertIn('chmod 1777 "${CODIFY_RUNTIME_DIR}"', content)
+        self.assertIn('chmod 777 "${CODIFY_RUNTIME_DIR}"', content)
         self.assertIn('CONSOLE_LOG="${CODIFY_RUNTIME_DIR}/console.log"', content)
         self.assertIn('tee -a "${CONSOLE_LOG}"', content)
         self.assertIn('chown 0:0 "${CODIFY_RUNTIME_DIR}/event.jsonl"', content)
