@@ -1,0 +1,7 @@
+{"thread_id": "<UUID:f7b86b387f38>", "type": "thread.started"}
+{"type": "turn.started"}
+{"message": "Reconnecting... 1/5 (stream disconnected before completion: error sending request for url (<PRIVATE_URL>", "type": "error"}
+{"message": "Reconnecting... 2/5 (stream disconnected before completion: error sending request for url (<PRIVATE_URL>", "type": "error"}
+{"message": "Reconnecting... 3/5 (stream disconnected before completion: error sending request for url (<PRIVATE_URL>", "type": "error"}
+{"message": "Reconnecting... 4/5 (stream disconnected before completion: error sending request for url (<PRIVATE_URL>", "type": "error"}
+{"message": "Reconnecting... 5/5 (stream disconnected before completion: error sending request for url (<PRIVATE_URL>", "type": "error"}

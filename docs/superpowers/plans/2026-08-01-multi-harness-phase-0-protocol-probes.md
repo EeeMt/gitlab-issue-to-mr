@@ -8,6 +8,15 @@
 
 **行为边界：** 本阶段不切换生产 Worker，不修改现有任务执行路径；新增代码仅用于协议定义、探针、fixture 清洗与离线回放。
 
+**实施状态（2026-08-01）：已通过 Phase 0 退出门禁。** 固定 Claude Code `2.1.152`
+与 Codex CLI `0.146.0-alpha.3.1`，仅使用 `deepseek-v4-flash` 完成双方各 16 个真实
+场景；32 组 fixture 均为 `sanitized-reviewed-real-probe`。清洗器会确定性移除凭据、
+操作员路径、关联 ID、reasoning signature 和隐藏推理正文。严格门禁结果为 76 passed，
+协议、fixture、Claude Adapter、attempt 与 Runtime Bundle 组合回归为 121 passed；验证后
+未清洗 raw 临时目录已删除。固定 Codex 二进制是 Darwin/arm64，Linux 容器 sandbox/approval
+实现仍属于 Phase 2 的 Codex 生产接入边界，Phase 0 将该能力差异记录为 host-only probe，
+不把它误报为 Linux Worker 验收。
+
 ---
 
 ## 1. 前置条件

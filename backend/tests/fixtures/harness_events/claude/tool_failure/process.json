@@ -1,0 +1,11 @@
+{
+  "ended_at": "2026-08-01T11:18:36.052333Z",
+  "exit_code": 0,
+  "kill_sent": false,
+  "pgid": 532,
+  "pid": 532,
+  "received_signal": null,
+  "started_at": "2026-08-01T11:18:32.421633Z",
+  "term_sent": false,
+  "timed_out": false
+}

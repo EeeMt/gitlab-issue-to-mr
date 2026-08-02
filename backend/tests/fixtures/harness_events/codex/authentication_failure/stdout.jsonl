@@ -1,0 +1,9 @@
+{"thread_id": "<UUID:40ca420608b2>", "type": "thread.started"}
+{"type": "turn.started"}
+{"message": "Reconnecting... 1/5 (unexpected status 401 Unauthorized: Authentication Fails, Your api key: ****tial is invalid, url: https://api.deepseek.com/responses)", "type": "error"}
+{"message": "Reconnecting... 2/5 (unexpected status 401 Unauthorized: Authentication Fails, Your api key: ****tial is invalid, url: https://api.deepseek.com/responses)", "type": "error"}
+{"message": "Reconnecting... 3/5 (unexpected status 401 Unauthorized: Authentication Fails, Your api key: ****tial is invalid, url: https://api.deepseek.com/responses)", "type": "error"}
+{"message": "Reconnecting... 4/5 (unexpected status 401 Unauthorized: Authentication Fails, Your api key: ****tial is invalid, url: https://api.deepseek.com/responses)", "type": "error"}
+{"message": "Reconnecting... 5/5 (unexpected status 401 Unauthorized: Authentication Fails, Your api key: ****tial is invalid, url: https://api.deepseek.com/responses)", "type": "error"}
+{"message": "unexpected status 401 Unauthorized: Authentication Fails, Your api key: ****tial is invalid, url: https://api.deepseek.com/responses", "type": "error"}
+{"error": {"message": "unexpected status 401 Unauthorized: Authentication Fails, Your api key: ****tial is invalid, url: https://api.deepseek.com/responses"}, "type": "turn.failed"}

@@ -1,0 +1,31 @@
+{
+  "adapter_candidate_version": "1.0.0-candidate",
+  "binary_digest": "6d8be49e49751554df16572369e636cbe02c84b208cad3dc35528c846eeca223",
+  "cli_source": "Codex desktop bundle",
+  "cli_version": "0.146.0-alpha.3.1",
+  "collection_state": "sanitized-reviewed-real-probe",
+  "command": [
+    "codex",
+    "exec",
+    "--json",
+    "--skip-git-repo-check",
+    "<SCENARIO_PROMPT>"
+  ],
+  "ended_at": "2026-08-01T11:19:22Z",
+  "expected_harness_result": "harness.completed",
+  "expected_task_result": "run.failed",
+  "fixture_schema": "codify.harness.fixture/v1",
+  "harness": "codex",
+  "image_digest": null,
+  "platform": {
+    "machine": "arm64",
+    "system": "Darwin"
+  },
+  "provider_kind": "deepseek",
+  "provider_model": "deepseek-v4-flash",
+  "review_note": "Real isolated DeepSeek probe. Sanitizer is idempotent; credentials, operator paths, correlation identifiers, and hidden reasoning content were removed before review.",
+  "sanitized_stdout_sha256": "2ad0096fef0561eddbdb9e2c7680a1a975e3bc5845f697c504345bee5ecc9ca5",
+  "scenario": "tool_failure",
+  "started_at": "2026-08-01T11:19:16Z",
+  "wire_protocol": "responses"
+}

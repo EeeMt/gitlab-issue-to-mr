@@ -1,0 +1,11 @@
+{"thread_id": "<UUID:b36717641fa5>", "type": "thread.started"}
+{"type": "turn.started"}
+{"item": {"id": "item_0", "message": "Skill descriptions were shortened to fit the 2% skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest.", "type": "error"}, "type": "item.completed"}
+{"item": {"id": "item_1", "text": "RESUME_SEED_OK", "type": "agent_message"}, "type": "item.completed"}
+{"type": "turn.completed", "usage": {"cache_write_input_tokens": 0, "cached_input_tokens": 3712, "input_tokens": 9604, "output_tokens": 36, "reasoning_output_tokens": 30}}
+{"thread_id": "<UUID:b36717641fa5>", "type": "thread.started"}
+{"type": "turn.started"}
+{"item": {"id": "item_0", "message": "Heads up: Long threads and multiple compactions can cause the model to be less accurate. Start a new thread when possible to keep threads small and targeted.", "type": "error"}, "type": "item.completed"}
+{"item": {"id": "item_1", "message": "Skill descriptions were shortened to fit the 2% skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest.", "type": "error"}, "type": "item.completed"}
+{"item": {"id": "item_2", "text": "COMPACTION_OK", "type": "agent_message"}, "type": "item.completed"}
+{"type": "turn.completed", "usage": {"cache_write_input_tokens": 0, "cached_input_tokens": 12160, "input_tokens": 24506, "output_tokens": 144, "reasoning_output_tokens": 134}}

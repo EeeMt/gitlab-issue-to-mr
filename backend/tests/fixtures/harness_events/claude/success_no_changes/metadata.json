@@ -1,0 +1,33 @@
+{
+  "adapter_candidate_version": "1.0.0",
+  "binary_digest": "43cb9361f7bc48c39214d5f125003b8de0ebde5cd6a1173e6b74fcdd10966d46",
+  "cli_source": "installed operator CLI",
+  "cli_version": "2.1.152",
+  "collection_state": "sanitized-reviewed-real-probe",
+  "command": [
+    "claude",
+    "-p",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--dangerously-skip-permissions",
+    "<SCENARIO_PROMPT>"
+  ],
+  "ended_at": "2026-08-01T11:18:24Z",
+  "expected_harness_result": "harness.completed",
+  "expected_task_result": "run.completed",
+  "fixture_schema": "codify.harness.fixture/v1",
+  "harness": "claude",
+  "image_digest": null,
+  "platform": {
+    "machine": "arm64",
+    "system": "Darwin"
+  },
+  "provider_kind": "deepseek",
+  "provider_model": "deepseek-v4-flash",
+  "review_note": "Real isolated DeepSeek probe. Sanitizer is idempotent; credentials, operator paths, correlation identifiers, and hidden reasoning content were removed before review.",
+  "sanitized_stdout_sha256": "a55c2fef18173cec9df725463d460ad8000f34fac1c08bfbf25016a77f2de706",
+  "scenario": "success_no_changes",
+  "started_at": "2026-08-01T11:18:23Z",
+  "wire_protocol": "anthropic-messages"
+}

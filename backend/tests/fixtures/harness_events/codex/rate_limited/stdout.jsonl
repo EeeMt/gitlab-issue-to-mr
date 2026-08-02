@@ -1,0 +1,4 @@
+{"thread_id": "<UUID:e5585a381f6c>", "type": "thread.started"}
+{"type": "turn.started"}
+{"message": "exceeded retry limit, last status: 429 Too Many Requests", "type": "error"}
+{"error": {"message": "exceeded retry limit, last status: 429 Too Many Requests"}, "type": "turn.failed"}

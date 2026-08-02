@@ -1,0 +1,4 @@
+{"thread_id": "<UUID:05a1bed59633>", "type": "thread.started"}
+{"type": "turn.started"}
+{"item": {"id": "item_0", "text": "PROBE_OK", "type": "agent_message"}, "type": "item.completed"}
+{"type": "turn.completed", "usage": {"cache_write_input_tokens": 0, "cached_input_tokens": 3712, "input_tokens": 10064, "output_tokens": 51, "reasoning_output_tokens": 47}}
