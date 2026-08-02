@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
@@ -18,7 +19,7 @@ from app.api.task_responses import (
 )
 from app.api.task_schemas import CreateTaskRequest, RetryTaskRequest
 from app.core.scheduling import resolve_scheduled_at
-from app.core.skills import SkillValidationError, skill_snapshots_from_task_snapshot
+from app.core.skills import SkillValidationError
 from app.core.task_prompt import TaskPromptValidationError
 from app.core.usage_limits import UsageLimitExceeded, usage_limit_exceeded_detail
 from app.core.utcnow import utcnow
@@ -41,6 +42,8 @@ class TaskCreationServices:
     resolve_worker_profile_for_issue: Callable[..., Any]
     prepare_task_runtime_snapshot: Callable[..., Any]
     replace_task_worker_snapshot: Callable[..., Any]
+    clone_task_worker_snapshot: Callable[..., Any]
+    bind_runtime_bundle: Callable[..., Any]
     select_snapshot_run_instruction_template: Callable[..., Any]
     render_and_store_task_prompt: Callable[..., Any]
     notify_task_retried: Callable[..., Any]
@@ -127,21 +130,16 @@ async def retry_task_record(
     if issue.status == "closed":
         raise HTTPException(status_code=400, detail="Cannot retry tasks on a closed issue")
 
-    try:
-        provider = await services.resolve_provider_for_issue(
-            db,
-            issue,
-            original_task.provider_id,
-        )
-        worker_profile = await services.resolve_worker_profile_for_issue(
-            db,
-            issue,
-        )
-    except WorkerProfileValidationError as exc:
+    source_snapshot = original_task.worker_profile_snapshot
+    if source_snapshot is None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=str(exc),
-        ) from exc
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Retry source has no immutable Worker snapshot",
+        )
+    # The provider snapshot is deferred because it may contain encrypted runtime
+    # configuration. Load it explicitly before copying execution truth; implicit
+    # async lazy loading here would raise MissingGreenlet.
+    await db.refresh(original_task, attribute_names=["provider_runtime_snapshot"])
 
     original_session_mode = getattr(original_task, "session_mode", "continue")
     original_output_session_id = getattr(original_task, "output_session_id", None)
@@ -162,8 +160,9 @@ async def retry_task_record(
         retry_source_task_id=original_task.id,
         trigger_source="retry",
         ci_failure_run_id=original_task.ci_failure_run_id,
-        provider_id=provider.id,
-        worker_profile_id=worker_profile.id,
+        provider_id=original_task.provider_id,
+        worker_profile_id=source_snapshot.worker_profile_id,
+        provider_runtime_snapshot=deepcopy(original_task.provider_runtime_snapshot),
         initiator_user_id=current_user.id if current_user is not None else None,
         initiator_gitlab_user_id=(
             current_user.gitlab_user_id if current_user is not None else None
@@ -176,6 +175,9 @@ async def retry_task_record(
         # Continue a session established by the source run. If a fresh run failed before it
         # produced a session, preserve fresh mode so the retry cannot fall back to the old one.
         session_mode=retry_session_mode,
+        run_instruction_template=original_task.run_instruction_template,
+        rendered_prompt=original_task.rendered_prompt,
+        rendered_prompt_at=original_task.rendered_prompt_at,
     )
     issue.workspace_last_used_at = utcnow()
     issue.workspace_delete_attempted_at = None
@@ -184,29 +186,15 @@ async def retry_task_record(
     db.add(new_task)
     await db.flush()
     try:
-        snapshot = await services.prepare_task_runtime_snapshot(
+        snapshot = await services.clone_task_worker_snapshot(
             db,
-            new_task,
-            issue,
-            worker_profile,
-            await services.get_project_metadata(new_task.project_id),
-            run_instruction_template=original_task.run_instruction_template,
-            template_trigger_source=original_task.trigger_source or "manual",
-            replace_snapshot=services.replace_task_worker_snapshot,
-            select_template=services.select_snapshot_run_instruction_template,
-            render_prompt=services.render_and_store_task_prompt,
-            skill_snapshots=(
-                skill_snapshots_from_task_snapshot(original_task.worker_profile_snapshot)
-                if original_task.worker_profile_snapshot is not None
-                else []
-            ),
-            skill_selection_source=getattr(
-                getattr(original_task, "worker_profile_snapshot", None),
-                "skill_selection_source",
-                "profile",
-            ),
+            source=source_snapshot,
+            target_task=new_task,
         )
-    except (TaskPromptValidationError, SkillValidationError) as exc:
+        if not isinstance(new_task.rendered_prompt, str) or not new_task.rendered_prompt.strip():
+            raise TaskPromptValidationError("Retry source has no persisted rendered prompt")
+        await services.bind_runtime_bundle(db, new_task, source_task=original_task)
+    except (TaskPromptValidationError, SkillValidationError, RuntimeError) as exc:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -326,7 +314,8 @@ async def create_task_record(
                 "skill_ids" in request.model_fields_set and request.skill_ids is not None
             ),
         )
-    except (TaskPromptValidationError, SkillValidationError) as exc:
+        await services.bind_runtime_bundle(db, task)
+    except (TaskPromptValidationError, SkillValidationError, RuntimeError) as exc:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,

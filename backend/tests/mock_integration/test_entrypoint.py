@@ -7,8 +7,10 @@ Prerequisites:
     docker-compose -f backend/tests/mock_integration/docker-compose.mock-test.yml up -d
 """
 
+import io
 import json
 import logging
+import tarfile
 
 import httpx
 import pytest
@@ -154,15 +156,15 @@ class TestCODIFYMarkersDetailed:
 
 
 class TestClaudeOutputTypes:
-    """Verify all Claude output types (thinking/tool calls/text) are parsed and stored."""
+    """Verify Claude raw output is normalized into public event/log types."""
 
-    async def test_thinking_logs_created(
+    async def test_hidden_thinking_is_not_projected(
         self,
         http_client: httpx.AsyncClient,
         backend_url: str,
         admin_auth_headers: dict,
     ):
-        """Stream event thinking blocks should create 'thinking' log entries."""
+        """Hidden Claude thinking must not enter task logs or payloads."""
         _issue, task = await create_issue_and_task(
             http_client, backend_url, admin_auth_headers,
             title="Thinking output test",
@@ -185,19 +187,54 @@ class TestClaudeOutputTypes:
         assert resp.status_code == 200
         logs = resp.json()
 
-        thinking_logs = [l for l in logs if l.get("log_type") == "thinking"]
-        assert len(thinking_logs) >= 2, (
-            f"Expected at least 2 thinking entries, got {len(thinking_logs)}. "
-            f"Log types: {[l.get('log_type') for l in logs]}"
+        thinking_logs = [entry for entry in logs if entry.get("log_type") == "thinking"]
+        assert thinking_logs == []
+
+    async def test_archive_separates_canonical_and_sanitized_raw_events(
+        self,
+        http_client: httpx.AsyncClient,
+        backend_url: str,
+        admin_auth_headers: dict,
+    ):
+        """Canonical event.jsonl must not expose Claude's raw event vocabulary."""
+        _issue, task = await create_issue_and_task(
+            http_client,
+            backend_url,
+            admin_auth_headers,
+            title="Canonical archive separation test",
+            prompt="Create a file and preserve auditable event evidence",
+        )
+        task_id = task["id"]
+        await wait_for_task_status(
+            http_client,
+            backend_url,
+            task_id,
+            target_statuses=["completed"],
+            auth_headers=admin_auth_headers,
+            timeout=120,
         )
 
-        # Verify thinking metadata references a payload (text stored separately)
-        for tl in thinking_logs:
-            meta = json.loads(tl["metadata"]) if isinstance(tl["metadata"], str) else tl["metadata"]
-            assert "payload_id" in meta, f"Thinking log should have 'payload_id' field: {meta}"
-            assert meta["char_count"] > 0, "Thinking char_count should be positive"
+        response = await http_client.get(
+            f"{backend_url}/api/tasks/{task_id}/archive/download",
+            headers=admin_auth_headers,
+        )
+        assert response.status_code == 200
+        with tarfile.open(fileobj=io.BytesIO(response.content), mode="r:gz") as archive:
+            canonical_handle = archive.extractfile("event.jsonl")
+            raw_handle = archive.extractfile("harness-events/claude.jsonl")
+            assert canonical_handle is not None
+            assert raw_handle is not None
+            canonical = [json.loads(line) for line in canonical_handle.read().splitlines()]
+            raw_text = raw_handle.read().decode()
 
-        logger.info(f"✅ {len(thinking_logs)} thinking entries verified for task {task_id}")
+        assert canonical
+        assert all(record["schema"] == "codify.worker.event/v1" for record in canonical)
+        assert not {"system", "assistant", "user", "result", "stream_event"}.intersection(
+            record["type"] for record in canonical
+        )
+        assert '"type":"stream_event"' in raw_text
+        assert "private mock chain of thought" not in raw_text
+        assert "<HIDDEN_REASONING_OMITTED>" in raw_text
 
     async def test_tool_call_logs_with_results(
         self,
@@ -370,7 +407,7 @@ class TestClaudeOutputTypes:
 
         # Extract typed log entries (exclude raw log chunks)
         typed_logs = [l for l in logs if l.get("log_type") in (
-            "system_init", "thinking", "assistant_text", "tool_call"
+            "system_init", "assistant_text", "tool_call"
         )]
 
         # Extract sequence of types
@@ -384,18 +421,15 @@ class TestClaudeOutputTypes:
 
         # Should have all expected types
         type_set = set(type_sequence)
-        assert "thinking" in type_set, f"Missing 'thinking' in log types: {type_set}"
         assert "tool_call" in type_set, f"Missing 'tool_call' in log types: {type_set}"
         assert "assistant_text" in type_set, f"Missing 'assistant_text' in log types: {type_set}"
 
         # Verify counts
-        assert type_sequence.count("thinking") >= 2, f"Expected 2+ thinking, got {type_sequence.count('thinking')}"
         assert type_sequence.count("tool_call") >= 3, f"Expected 3+ tool_call, got {type_sequence.count('tool_call')}"
         assert type_sequence.count("assistant_text") >= 2, f"Expected 2+ assistant_text, got {type_sequence.count('assistant_text')}"
 
         logger.info(
             f"✅ Full output sequence verified: "
-            f"{type_sequence.count('thinking')} thinking, "
             f"{type_sequence.count('tool_call')} tool_call, "
             f"{type_sequence.count('assistant_text')} assistant_text"
         )

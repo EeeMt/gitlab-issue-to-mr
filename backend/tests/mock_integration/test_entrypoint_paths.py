@@ -306,6 +306,7 @@ class TestNoChangesDetection:
             http_client, backend_url, admin_auth_headers,
             issue["id"],
             user_prompt="No changes MR mode test",
+            require_changes=True,
         )
         task_id = task["id"]
 

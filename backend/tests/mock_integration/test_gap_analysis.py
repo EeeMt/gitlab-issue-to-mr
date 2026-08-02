@@ -14,6 +14,7 @@ Prerequisites:
 import asyncio
 import logging
 import time
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -56,6 +57,7 @@ class TestNoChangesInMRMode:
             title=f"No changes MR test {int(time.time())}",
             prompt="Review code quality",
             target_branch="main",
+            require_changes=True,
         )
         task_id = task["id"]
 
@@ -364,6 +366,7 @@ class TestMultiplePriorityLevels:
         )
 
         ts = int(time.time())
+        scheduled_datetime = (datetime.now(UTC) + timedelta(seconds=5)).isoformat()
         task_ids = {}
         for priority in [2, 1, 0]:
             issue, task = await create_issue_and_task(
@@ -372,6 +375,7 @@ class TestMultiplePriorityLevels:
                 prompt=f"Priority P{priority} task",
                 target_branch="main",
                 priority=priority,
+                scheduled_datetime=scheduled_datetime,
             )
             task_ids[priority] = task["id"]
 

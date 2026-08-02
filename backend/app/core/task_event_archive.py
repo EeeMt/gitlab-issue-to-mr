@@ -7,6 +7,8 @@ from typing import Any
 @dataclass(frozen=True, slots=True)
 class ArtifactPaths:
     event_jsonl: str
+    harness_events_dir: str
+    harness_result_json: str
     runtime_json: str
     console_log: str
 
@@ -14,6 +16,8 @@ class ArtifactPaths:
 def artifact_paths(run_dir: str) -> ArtifactPaths:
     return ArtifactPaths(
         event_jsonl=os.path.join(run_dir, "event.jsonl"),
+        harness_events_dir=os.path.join(run_dir, "harness-events"),
+        harness_result_json=os.path.join(run_dir, "harness-result.json"),
         runtime_json=os.path.join(run_dir, "runtime.json"),
         console_log=os.path.join(run_dir, "console.log"),
     )
@@ -41,7 +45,11 @@ from app.models import TaskIngestCursor  # noqa: E402
 
 
 async def get_or_create_cursor(
-    db: AsyncSession, *, task_id: int, stream_name: str
+    db: AsyncSession,
+    *,
+    task_id: int,
+    stream_name: str,
+    attempt_id: str | None = None,
 ) -> TaskIngestCursor:
     """Get or create an ingest cursor for the given task and stream."""
     result = await db.execute(
@@ -54,7 +62,20 @@ async def get_or_create_cursor(
     )
     cursor = result.scalar_one_or_none()
     if cursor is None:
-        cursor = TaskIngestCursor(task_id=task_id, stream_name=stream_name)
+        cursor = TaskIngestCursor(
+            task_id=task_id,
+            stream_name=stream_name,
+            attempt_id=attempt_id,
+        )
         db.add(cursor)
         await db.flush()
+    elif attempt_id is not None:
+        if cursor.attempt_id is None and cursor.last_offset == 0 and cursor.last_sequence_no == 0:
+            cursor.attempt_id = attempt_id
+            await db.flush()
+        elif cursor.attempt_id != attempt_id:
+            raise ValueError(
+                f"ingest cursor {task_id}/{stream_name} belongs to attempt "
+                f"{cursor.attempt_id}, not {attempt_id}"
+            )
     return cursor

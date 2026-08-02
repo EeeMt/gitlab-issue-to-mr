@@ -56,7 +56,13 @@ def create_mock_db(task, issue=None, *, worker_finalization_metadata=None):
         if "FROM task_logs" in query_str:
             task_log_query_count[0] += 1
             result = MagicMock()
-            if task_log_query_count[0] != 3 or worker_finalization_metadata is None:
+            if task_log_query_count[0] == 1:
+                log_entry = MagicMock()
+                log_entry.log_metadata = (
+                    '{"type":"run.completed","status":"completed","success":true}'
+                )
+                result.scalar_one_or_none.return_value = log_entry
+            elif task_log_query_count[0] != 5 or worker_finalization_metadata is None:
                 result.scalar_one_or_none.return_value = None
             else:
                 log_entry = MagicMock()

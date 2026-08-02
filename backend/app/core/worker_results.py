@@ -245,12 +245,21 @@ async def parse_task_result(
     gitlab_client,
     issue: Issue | None = None,
 ) -> None:
-    """Parse task execution logs and update task with results."""
+    """Apply the unique Canonical Task terminal and normalized projections."""
     run_result_meta = await _load_latest_log_metadata(db, task.id, "run_result")
+    harness_result_meta = await _load_latest_log_metadata(db, task.id, "harness_result")
+    usage_final_meta = await _load_latest_log_metadata(db, task.id, "usage_final")
     system_init_meta = await _load_latest_log_metadata(db, task.id, "system_init")
     finalization_meta = await _load_latest_log_metadata(db, task.id, "worker_finalization")
 
-    usage = run_result_meta.get("usage") if isinstance(run_result_meta.get("usage"), dict) else {}
+    usage = (
+        usage_final_meta.get("usage")
+        if isinstance(usage_final_meta.get("usage"), dict)
+        else {}
+    )
+    if not usage and isinstance(run_result_meta.get("usage"), dict):
+        # Read-only compatibility for task logs created before Runtime Bundles.
+        usage = run_result_meta["usage"]
     if usage:
         task.input_tokens = usage.get('input_tokens')
         task.output_tokens = usage.get('output_tokens')
@@ -276,18 +285,52 @@ async def parse_task_result(
         except Exception:
             logger.debug(f"[Task {task.id}] Failed to parse structured commit message")
 
-    if exit_code == 0:
+    terminal_type = str(run_result_meta.get("type") or "")
+    finalization_exit_code = finalization_meta.get("exit_code")
+    if not terminal_type:
+        task.status = TaskStatus.FAILED
+        task.completed_at = utcnow()
+        task.error_message = "protocol_error: canonical attempt is missing a Task terminal"
+    elif terminal_type == "run.completed" and (
+        exit_code != 0 or finalization_exit_code not in {None, 0}
+    ):
+        task.status = TaskStatus.FAILED
+        task.completed_at = utcnow()
+        task.error_message = (
+            "protocol_error: run.completed conflicts with the worker process exit state"
+        )
+    elif terminal_type == "run.completed":
         task.status = TaskStatus.COMPLETED
         task.completed_at = utcnow()
         await parse_mr_from_logs(task, logs, gitlab_client)
         structured_diff = finalization_meta.get("diff") if isinstance(finalization_meta.get("diff"), dict) else None
         await update_task_stats_from_logs_or_api(task, logs, gitlab_client, issue, structured_diff)
+    elif terminal_type == "run.failed":
+        failure = run_result_meta.get("failure")
+        failure_kind = str(failure.get("kind") or "") if isinstance(failure, dict) else ""
+        terminal_status = str(run_result_meta.get("status") or "")
+        task.status = (
+            TaskStatus.CANCELLED
+            if terminal_status == "cancelled" or failure_kind == "cancelled"
+            else TaskStatus.FAILED
+        )
+        task.completed_at = utcnow()
+        failure_message = ""
+        if isinstance(failure, dict):
+            failure_message = str(failure.get("message") or failure.get("kind") or "")
+        if terminal_status == "protocol_error" or failure_kind == "protocol_error":
+            failure_message = f"protocol_error: {failure_message or 'canonical attempt failed'}"
+        task.error_message = sanitize_sensitive_data(
+            failure_message or logs[-1000:] or "Harness task failed"
+        )[-1000:]
     else:
         task.status = TaskStatus.FAILED
         task.completed_at = utcnow()
-        task.error_message = sanitize_sensitive_data(logs)[-1000:]
+        task.error_message = f"protocol_error: unknown Task terminal {terminal_type!r}"
 
-    extracted_session_id = str(run_result_meta.get("session_id") or "").strip()
+    extracted_session_id = str(
+        harness_result_meta.get("session_id") or run_result_meta.get("session_id") or ""
+    ).strip()
     if extracted_session_id:
         logger.info(f"[Task {task.id}] Extracted session ID: {extracted_session_id}")
         task.output_session_id = extracted_session_id

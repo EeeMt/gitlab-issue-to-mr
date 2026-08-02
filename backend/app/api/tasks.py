@@ -85,11 +85,13 @@ from app.core.usage_limits import (
 )
 from app.core.utcnow import utcnow
 from app.core.worker_profiles import (
+    clone_task_worker_snapshot,
     replace_task_worker_snapshot,
     resolve_provider_for_issue,
     resolve_worker_profile_for_issue,
     select_snapshot_run_instruction_template,
 )
+from app.core.worker_runtime_bundle import bind_runtime_bundle
 from app.core.worker_workspace import configured_workspace_root
 from app.core.worker_workspace_remote import (
     inspect_issue_workspace,
@@ -135,6 +137,8 @@ def _task_creation_services() -> TaskCreationServices:
         resolve_worker_profile_for_issue=resolve_worker_profile_for_issue,
         prepare_task_runtime_snapshot=prepare_task_runtime_snapshot,
         replace_task_worker_snapshot=replace_task_worker_snapshot,
+        clone_task_worker_snapshot=clone_task_worker_snapshot,
+        bind_runtime_bundle=bind_runtime_bundle,
         select_snapshot_run_instruction_template=select_snapshot_run_instruction_template,
         render_and_store_task_prompt=render_and_store_task_prompt,
         notify_task_retried=notify_task_retried,

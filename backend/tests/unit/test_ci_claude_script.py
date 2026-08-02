@@ -415,6 +415,37 @@ def test_ci_claude_emits_failure_json_when_claude_exits_nonzero():
         }
 
 
+def test_ci_claude_emits_cli_error_when_claude_dies_before_result(tmp_path):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        script_copy = _prepare_script_copy(
+            tmpdir_path,
+            "#!/usr/bin/env bash\n"
+            "printf '%s\\n' '--dangerously-skip-permissions cannot be used with root/sudo privileges for security reasons'\n"
+            "exit 1\n",
+        )
+
+        result = subprocess.run(
+            [str(script_copy), "test prompt"],
+            cwd=tmpdir,
+            env={**os.environ, "SANDBOX_MODE": "1"},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 1
+        payload = json.loads(result.stdout)
+        assert payload == {
+            "success": False,
+            "subtype": "cli_error",
+            "result": "--dangerously-skip-permissions cannot be used with root/sudo privileges for security reasons",
+            "session_id": "",
+            "usage": {},
+            "tool_calls": [],
+        }
+
+
 def test_ci_claude_stops_cli_that_does_not_exit_after_final_result(tmp_path):
     script_copy = _prepare_script_copy(
         tmp_path,
@@ -653,6 +684,75 @@ def test_ci_claude_reuses_stream_runner_for_resume_fallback(tmp_path):
     assert json.loads(result.stdout)["result"] == "fallback"
     assert "Retrying without --resume" in result.stderr
     assert json.loads((tmp_path / "runtime.json").read_text(encoding="utf-8"))["resume_session"] == ""
+
+
+def test_adapter_resume_fallback_preserves_canonical_event_history():
+    script = (
+        Path(__file__).resolve().parents[3] / "deploy" / "ci-claude.sh"
+    ).read_text(encoding="utf-8")
+    fallback = script.split('if [[ -n "$RESUME" && ! -s "$RESULT_FILE" ]]; then', 1)[1]
+    assert 'CODIFY_CLAUDE_EVENT_TRANSLATOR' in fallback
+    assert '"${CODIFY_CANONICAL_EVENT_WRITER:?}" diagnostic' in fallback
+    assert '"code":"resume_fallback"' in fallback
+
+
+def test_ci_claude_runs_only_cli_through_privilege_drop_launcher(tmp_path):
+    script_copy = _prepare_script_copy(
+        tmp_path,
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' \"${HOME}|${USER}|${LOGNAME}\" > claude_identity.txt\n"
+        "cat <<'EOF'\n"
+        '{"type":"result","subtype":"success","result":"done","session_id":"s1","usage":{"input_tokens":1,"output_tokens":1}}\n'
+        "EOF\n",
+    )
+    run_as = tmp_path / "run-as"
+    run_as.write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' \"$*\" >> run_as_invocations.txt\n"
+        "[[ \"${1:-}\" == '--' ]] && shift\n"
+        "exec \"$@\"\n",
+        encoding="utf-8",
+    )
+    run_as.chmod(run_as.stat().st_mode | stat.S_IEXEC)
+
+    result = subprocess.run(
+        [str(script_copy), "test prompt"],
+        cwd=str(tmp_path),
+        env={
+            **os.environ,
+            "SANDBOX_MODE": "1",
+            "CODIFY_CLAUDE_RUN_AS": str(run_as),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "claude_identity.txt").read_text(encoding="utf-8").strip() == (
+        "/home/codify|codify|codify"
+    )
+    invocations = (tmp_path / "run_as_invocations.txt").read_text(encoding="utf-8")
+    assert f"-- {tmp_path / 'fake-claude.sh'}" in invocations
+
+
+def test_ci_claude_rejects_relative_privilege_drop_launcher(tmp_path):
+    script_copy = _prepare_script_copy(tmp_path, "#!/usr/bin/env bash\nexit 0\n")
+    result = subprocess.run(
+        [str(script_copy), "test prompt"],
+        cwd=str(tmp_path),
+        env={
+            **os.environ,
+            "SANDBOX_MODE": "1",
+            "CODIFY_CLAUDE_RUN_AS": "run-as",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "must be an executable absolute path" in result.stderr
 
 
 def test_ci_claude_redacts_append_system_prompt_from_logs(tmp_path):

@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import StaticPool
 
+from app.core.worker_runtime_bundle import get_or_create_runtime_bundle
 from app.database import get_db
 from app.dependencies.auth import (
     get_optional_current_user,
@@ -35,7 +36,15 @@ from app.dependencies.project_access import (
     require_project_access_scope,
 )
 from app.main import app
-from app.models import AIProvider, Base, Issue, Task, TaskStatus, WorkerProfile
+from app.models import (
+    AIProvider,
+    Base,
+    Issue,
+    Task,
+    TaskStatus,
+    TaskWorkerProfileSnapshot,
+    WorkerProfile,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -210,6 +219,7 @@ async def _seed_tasks(
 ) -> list[Task]:
     """Insert *count* tasks directly into the test database."""
     tasks: list[Task] = []
+    runtime_bundle = await get_or_create_runtime_bundle(session)
     for i in range(count):
         # Create an issue for each task
         issue = Issue(
@@ -227,10 +237,32 @@ async def _seed_tasks(
             project_id=project_id,
             issue_id=issue.id,
             user_prompt="Seeded task",
+            rendered_prompt="Seeded task",
+            rendered_prompt_at=datetime.now(UTC).replace(tzinfo=None),
+            worker_profile_id=issue.worker_profile_id,
             status=status,
             scheduled_at=scheduled_at,
+            runtime_bundle_id=runtime_bundle.id,
         )
         session.add(task)
+        await session.flush()
+        if status in {TaskStatus.FAILED, TaskStatus.CANCELLED}:
+            task.worker_profile_snapshot = TaskWorkerProfileSnapshot(
+                task_id=task.id,
+                worker_profile_id=task.worker_profile_id,
+                profile_name="Test Worker",
+                image="codify-worker:test",
+                runtime_mode="baked_image",
+                codegraph_enabled=False,
+                volume_mounts=[],
+                environment_variables=[],
+                skill_selection_source="profile",
+                pre_script="",
+                post_script="",
+                default_execute_run_instruction_template="{{user_prompt}}",
+                default_plan_run_instruction_template="{{user_prompt}}",
+                ci_auto_repair_run_instruction_template="{{user_prompt}}",
+            )
         tasks.append(task)
     await session.commit()
     for t in tasks:

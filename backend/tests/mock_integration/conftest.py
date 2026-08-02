@@ -177,6 +177,17 @@ async def get_worker_profile_id(
     workers = [worker for worker in resp.json() if worker.get("enabled")]
     assert workers, "No enabled Worker profile is available for integration tests"
     default = next((worker for worker in workers if worker.get("is_default")), workers[0])
+    expected_image = os.environ.get("WORKER_IMAGE")
+    if expected_image and default.get("image") != expected_image:
+        update = await client.patch(
+            f"{backend_url}/api/worker-profiles/{default['id']}",
+            json={"image": expected_image},
+            headers=auth_headers,
+        )
+        assert update.status_code == 200, (
+            f"Select mock Worker image failed: {update.status_code} {update.text}"
+        )
+        default = update.json()
     return int(default["id"])
 
 
@@ -190,6 +201,7 @@ async def create_task(
     priority: int = 0,
     delay_seconds: int | None = None,
     scheduled_datetime: str | None = None,
+    require_changes: bool | None = None,
 ) -> dict:
     """Create a task under an issue via the API. Returns the task JSON."""
     body: dict[str, Any] = {"issue_id": issue_id, "priority": priority}
@@ -199,6 +211,8 @@ async def create_task(
         body["delay_seconds"] = delay_seconds
     if scheduled_datetime is not None:
         body["scheduled_datetime"] = scheduled_datetime
+    if require_changes is not None:
+        body["require_changes"] = require_changes
     resp = await client.post(
         f"{backend_url}/api/tasks",
         json=body,
@@ -220,6 +234,7 @@ async def create_issue_and_task(
     priority: int = 0,
     delay_seconds: int | None = None,
     scheduled_datetime: str | None = None,
+    require_changes: bool | None = None,
 ) -> tuple[dict, dict]:
     """Convenience: create an issue + task. Returns (issue, task) tuple."""
     issue = await create_issue(
@@ -231,6 +246,7 @@ async def create_issue_and_task(
         client, backend_url, auth_headers, issue["id"],
         user_prompt=prompt, priority=priority,
         delay_seconds=delay_seconds, scheduled_datetime=scheduled_datetime,
+        require_changes=require_changes,
     )
     return issue, task
 

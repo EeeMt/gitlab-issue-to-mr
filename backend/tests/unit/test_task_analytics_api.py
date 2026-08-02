@@ -78,6 +78,7 @@ async def test_create_task_persists_manual_initiator_metadata():
          ), \
          patch("app.api.tasks.resolve_provider_for_issue", new=AsyncMock(return_value=provider)), \
          patch("app.api.tasks.replace_task_worker_snapshot", new=AsyncMock(return_value=snapshot)), \
+         patch("app.api.tasks.bind_runtime_bundle", new=AsyncMock(return_value=MagicMock(id=1))), \
          patch(
              "app.api.tasks.get_usage_quota_service",
              return_value=MagicMock(raise_if_over_limit=AsyncMock()),
@@ -124,6 +125,12 @@ async def test_retry_task_persists_manual_initiator_metadata():
         ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
         created_at=datetime(2026, 3, 14, 12, 0, 0),
     )
+    original_task.worker_profile_snapshot = snapshot
+    original_task.provider_runtime_snapshot = {"model": "frozen-model"}
+    original_task.rendered_prompt = "Retry analytics task"
+    original_task.rendered_prompt_at = datetime(2026, 3, 14, 11, 0, 0)
+    original_task.run_instruction_template = "Execute {{user_prompt}}"
+    original_task.runtime_bundle_id = 1
 
     db = MagicMock()
     db.add = MagicMock()
@@ -164,6 +171,8 @@ async def test_retry_task_persists_manual_initiator_metadata():
              new=AsyncMock(return_value=worker_profile),
          ), \
          patch("app.api.tasks.replace_task_worker_snapshot", new=AsyncMock(return_value=snapshot)), \
+         patch("app.api.tasks.clone_task_worker_snapshot", new=AsyncMock(return_value=snapshot)), \
+         patch("app.api.tasks.bind_runtime_bundle", new=AsyncMock(return_value=MagicMock(id=1))), \
          patch("app.api.tasks.select_snapshot_run_instruction_template", return_value="template"), \
          patch(
              "app.api.tasks.get_usage_quota_service",

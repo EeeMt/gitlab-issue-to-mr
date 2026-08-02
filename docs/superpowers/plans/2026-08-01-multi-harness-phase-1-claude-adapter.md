@@ -7,6 +7,21 @@
 
 **周期：** Phase 0 后增量 4–6 人日。
 
+**实施状态（2026-08-01）：源码、迁移、Runtime Bundle、Claude Adapter、Canonical-only
+投影、不可变 Kit `0.3.9` 与 mock/迁移回归已经完成。** `0.3.9-linux-amd64` 已导出、校验，
+并使用 Profile 11 的真实 Claude CLI `2.1.153`、Java 21/Maven runtime image 在一个目标
+Docker Host 安装验证通过。Phase 1 退出门禁还差开发环境 L4：当前 Codify 实际配置的 GitLab
+bot token 调用 `/api/v4/user` 返回 401，因此尚未完成真实 Claude 新任务、resume、Skills、
+取消、Git push/MR 和 archive smoke；发版硬边界要求的历史 Issue 关闭及所有启用 Profile
+切换到 Kit `0.3.9` 也尚未执行。
+
+**自动化证据（2026-08-01）：** Backend 全量 `2169 passed, 1 skipped, 70 subtests passed`；
+mock E2E `371 passed`；Phase 0/1 协议、fixture、Adapter、attempt 与 Runtime Bundle 组合回归
+`121 passed`；Worker 公共层 focused 回归 `164 passed`；Frontend Task 时间线 focused 回归
+`110 passed`。mock integration 全量首次运行暴露 3 个旧测试契约；修正后从当前工作区重建
+全部测试镜像并完整复验为 `246 passed, 2 deselected`，0 failed，耗时 41 分 32 秒。
+`make lint-backend`、Worker shell `bash -n`、Ruff 和 `git diff --check` 均通过。
+
 **核心约束：** 这是协议替换，不是功能改写。除事件文件从 raw 变为 canonical、raw 输出另行归档外，Claude 新任务、resume、Git/MR、Skills、CodeGraph、取消、timeout 和 UI 时间线必须无回归。
 
 ---
@@ -18,7 +33,7 @@
 - Worker 公共编排继续使用 Bash；每个 Adapter 使用独立目录和脚本，复杂事件转换使用独立 Python translator。
 - `event.jsonl` 改为 Canonical Event；Claude 原始 `stream-json` 原样清洗后写入 `harness-events/claude.jsonl`。
 - 公共 runner 只调用 Adapter 合同，不检查 Harness 名称；Claude 专有环境变量和参数只存在于 Claude Adapter。
-- 编排脚本、Adapter、协议文件组成内容寻址的 Runtime Bundle。新 Task 创建时冻结并绑定 bundle digest，执行、scheduler 重启和 retry 复用相同 bundle；仅迁移前遗留 Task 允许首次执行时兼容冻结一次。
+- 编排脚本、Adapter、协议文件组成内容寻址的 Runtime Bundle。新 Task 创建时冻结并绑定 bundle digest，执行、scheduler 重启和 retry 复用相同 bundle；本次发版采用硬边界，迁移前遗留 Task 只读，不允许首次执行或 retry 时补建 bundle。
 - Runtime Bundle manifest 是实际执行的 Adapter version/digest、event schema 和 orchestration version 的唯一事实源；Worker Kit manifest 只声明 bootstrap、Runtime Bundle 合同和 CLI runtime 的兼容范围。
 - Worker Kit launcher 仍提供可信工具和最小 bootstrap；实际任务编排从已冻结的 `/tmp/codify-runtime/orchestration/` 启动。
 - 当前一个 Task 对应一个执行 attempt；scheduler 对同一容器的 crash resume 继续使用同一 `attempt_id`，retry 创建新 Task 和新 attempt，但复用原 Runtime Bundle 与 Task Snapshot。
@@ -123,7 +138,7 @@ DATABASE_URL="$CODIFY_MIGRATION_TEST_DATABASE_URL" .venv/bin/alembic upgrade hea
 - [ ] 创建新 Task 时事务性地 `get-or-create` bundle，并与 Task Snapshot 一起绑定；Task 入队或容器创建失败后仍保留该绑定。
 - [ ] task input bundle 继续单独包含 prompt、artifact policy、用户 pre/post script、previous summaries、Skills 和 CI failure bundle。
 - [ ] 通过 Docker API 分别注入 orchestration bundle 和 task input，不依赖 Backend 本地 bind path。
-- [ ] retry：源 Task 已有 bundle 时直接复用；迁移前源 Task 从未执行且无 bundle 时，创建 retry Task 的事务中冻结当时 bundle，并记录 `legacy_bundle_backfill` 兼容例外。
+- [ ] retry：源 Task 已有 bundle 时直接复用；源 Task 无 bundle 时拒绝 retry，要求关闭历史 Issue，并在发版后新建 Task。
 - [ ] scheduler crash resume 从数据库和容器 runtime manifest 核对 digest，不重新生成或替换 bundle。
 - [ ] Worker Kit compatibility manifest 只声明可接受的 runtime contract/event schema 范围和 bootstrap/CLI runtime 能力；不得作为执行 Adapter 版本的事实源。
 - [ ] 运行时发现 bundle manifest、Kit compatibility range 或容器中文件 digest 任一不匹配，立即 `protocol_error`，不能退回 Kit 当前脚本。

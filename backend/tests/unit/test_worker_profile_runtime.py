@@ -166,6 +166,20 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
     db.flush = AsyncMock()
     db.get = AsyncMock(return_value=None)
     db.refresh = AsyncMock()
+    bundle = SimpleNamespace(
+        digest="d" * 64,
+        contract_version="codify.worker.harness/v1",
+        manifest={
+            "archive_manifest_digest": "m" * 64,
+            "adapters": {"claude": {"version": "1.0.0", "digest": "a" * 64}},
+        },
+        bundle_bytes=b"runtime-bundle",
+    )
+    attempt = SimpleNamespace(
+        attempt_id="task-12-attempt-1",
+        harness_key="claude",
+        adapter_version="1.0.0",
+    )
 
     with (
         patch(
@@ -175,6 +189,14 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
         patch(
             "app.core.worker_task_lifecycle.build_issue_workspace_paths",
             return_value=SimpleNamespace(issue_root=str(tmp_path)),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.load_bound_runtime_bundle",
+            new=AsyncMock(return_value=bundle),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.create_task_attempt",
+            new=AsyncMock(return_value=attempt),
         ),
     ):
         container = await create_execute_container(
@@ -206,7 +228,7 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
     )
     worker.docker.create_container.assert_called_once()
     assert worker.docker.create_container.call_args.kwargs["start"] is False
-    worker.docker.put_archive.assert_called_once()
+    assert worker.docker.put_archive.call_count == 2
     worker.docker.start_container.assert_called_once_with(container)
     assert db.commit.await_count == 2
     assert worker.docker.create_container.call_args.kwargs["image"] == "custom-worker:latest"

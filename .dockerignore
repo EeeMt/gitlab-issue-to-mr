@@ -42,6 +42,9 @@ docker-compose*.yml
 
 # Include deploy directory (required for worker image build)
 !deploy/
+# Re-apply generated-file exclusions after the deploy negation above.
+deploy/**/__pycache__/
+deploy/**/*.py[cod]
 
 # Generated offline artifacts are large and are never inputs to application/worker images.
 deploy/offline-bundle/

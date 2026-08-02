@@ -203,12 +203,49 @@ class TestCodifySystemInitParsing(unittest.TestCase):
         self.assertEqual(task._extracted_session_id, "session-123")
         self.assertEqual(task.output_session_id, "session-123")
 
+    def test_canonical_cancelled_terminal_sets_cancelled_task_status(self):
+        from app.models import TaskStatus
+
+        task = _make_task(runtime_bundle_id=1)
+        self._run_parse(
+            task,
+            "cancelled",
+            run_result_metadata=(
+                '{"type":"run.failed","status":"cancelled","success":false,'
+                '"failure":{"kind":"cancelled","message":"operator cancelled"}}'
+            ),
+            worker_finalization_metadata='{"exit_code":143}',
+            exit_code=143,
+        )
+        self.assertEqual(task.status, TaskStatus.CANCELLED)
+        self.assertIn("operator cancelled", task.error_message)
+
+    def test_canonical_protocol_failure_is_not_inferred_from_exit_code(self):
+        from app.models import TaskStatus
+
+        task = _make_task(runtime_bundle_id=1)
+        self._run_parse(
+            task,
+            "",
+            run_result_metadata=(
+                '{"type":"run.failed","status":"protocol_error","success":false,'
+                '"failure":{"kind":"protocol_error","message":"missing terminal"}}'
+            ),
+            worker_finalization_metadata='{"exit_code":0}',
+            exit_code=0,
+        )
+        self.assertEqual(task.status, TaskStatus.FAILED)
+        self.assertTrue(task.error_message.startswith("protocol_error:"))
+
     def test_updates_commit_diff_and_mr_title_from_worker_finalization(self):
         """Structured finalization sets commit SHA, diff stats, and MR title without markers."""
         task = _make_task()
         self._run_parse(
             task,
             '',
+            run_result_metadata=(
+                '{"type":"run.completed","status":"completed","success":true}'
+            ),
             worker_finalization_metadata=(
                 '{"commit_sha":"0123456789abcdef0123456789abcdef01234567",'
                 '"diff":{"additions":12,"deletions":3,"total":15},'
@@ -450,13 +487,28 @@ class TestBackfillEventJsonlCommit(unittest.TestCase):
 
     def _finalization_event_jsonl(self) -> str:
         import json as _json
-        return _json.dumps({
-            "type": "codify_worker",
-            "subtype": "finalization",
-            "commit_sha": "a" * 40,
-            "diff": {"additions": 20, "deletions": 7, "total": 27},
-            "commit_message": "feat: add tests",
-        }) + "\n"
+
+        from app.core.harness_protocol import build_event
+
+        return _json.dumps(
+            build_event(
+                attempt_id="task-1-attempt-1",
+                seq=1,
+                task_id=1,
+                harness_key="claude",
+                adapter_version="1.0.0",
+                cli_version="2.1.152",
+                event_type="worker.finalization",
+                payload={
+                    "commit_sha": "a" * 40,
+                    "diff": {"additions": 20, "deletions": 7, "total": 27},
+                    "commit_message": "feat: add tests",
+                },
+                event_id="event-1",
+                occurred_at="2026-08-01T00:00:01Z",
+            ),
+            separators=(",", ":"),
+        ) + "\n"
 
     def test_backfill_commits_after_projecting_finalization_event(self):
         import io
@@ -480,17 +532,23 @@ class TestBackfillEventJsonlCommit(unittest.TestCase):
         mock_db.add = MagicMock()
 
         mock_cursor = MagicMock()
+        mock_cursor.attempt_id = None
         mock_cursor.last_offset = 0
         mock_cursor.last_sequence_no = 0
+        ingest_result = MagicMock()
+        ingest_result.duplicate = False
 
         with patch(
-            "app.core.worker_event_projector._os.path.exists", return_value=True
+            "app.core.worker_event_projector.os.path.exists", return_value=True
         ), patch(
-            "app.core.worker_event_projector._tarfile.open",
+            "app.core.worker_event_projector.tarfile.open",
             return_value=_tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:gz"),
         ), patch(
             "app.core.worker_event_projector.get_or_create_cursor",
             AsyncMock(return_value=mock_cursor),
+        ), patch(
+            "app.core.worker_event_projector.ingest_canonical_event",
+            AsyncMock(return_value=ingest_result),
         ):
             async def run():
                 await self.projector.backfill_event_jsonl_from_archive(

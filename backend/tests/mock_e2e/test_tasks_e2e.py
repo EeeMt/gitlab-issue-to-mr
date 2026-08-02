@@ -38,6 +38,7 @@ from sqlalchemy.pool import StaticPool
 # Ensure a usable encryption key is available for secret config persistence
 os.environ.setdefault("CONFIG_ENCRYPTION_KEY", "test-tasks-e2e-key-32chars!!!")
 
+from app.core.worker_runtime_bundle import get_or_create_runtime_bundle
 from app.database import get_db
 from app.dependencies.auth import (
     get_optional_current_user,
@@ -49,7 +50,16 @@ from app.dependencies.project_access import (
     require_project_access_scope,
 )
 from app.main import app
-from app.models import AIProvider, Base, Issue, Task, TaskLog, TaskStatus, WorkerProfile
+from app.models import (
+    AIProvider,
+    Base,
+    Issue,
+    Task,
+    TaskLog,
+    TaskStatus,
+    TaskWorkerProfileSnapshot,
+    WorkerProfile,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -263,18 +273,40 @@ async def _seed_task(db_session: AsyncSession, issue: Issue = None, **overrides)
     """Create a task directly in the DB for testing."""
     if issue is None:
         issue = await _seed_issue(db_session)
+    runtime_bundle = await get_or_create_runtime_bundle(db_session)
 
     defaults = dict(
         project_id=issue.project_id,
         issue_id=issue.id,
         user_prompt="Test prompt",
+        rendered_prompt="Test prompt",
+        rendered_prompt_at=datetime.now(UTC).replace(tzinfo=None),
+        worker_profile_id=issue.worker_profile_id,
         status=TaskStatus.PENDING,
         priority=1,
         initiator_username="testuser",
+        runtime_bundle_id=runtime_bundle.id,
     )
     defaults.update(overrides)
     task = Task(**defaults)
     db_session.add(task)
+    await db_session.flush()
+    task.worker_profile_snapshot = TaskWorkerProfileSnapshot(
+        task_id=task.id,
+        worker_profile_id=task.worker_profile_id,
+        profile_name="Test Worker",
+        image="codify-worker:test",
+        runtime_mode="baked_image",
+        codegraph_enabled=False,
+        volume_mounts=[],
+        environment_variables=[],
+        skill_selection_source="profile",
+        pre_script="",
+        post_script="",
+        default_execute_run_instruction_template="{{user_prompt}}",
+        default_plan_run_instruction_template="{{user_prompt}}",
+        ci_auto_repair_run_instruction_template="{{user_prompt}}",
+    )
     await db_session.commit()
     await db_session.refresh(task)
     return task
@@ -904,6 +936,23 @@ class TestRetryTask:
         data = resp.json()
         assert data["is_retry"] is True
         assert data["retry_source_task_id"] == task.id
+
+    async def test_retry_historical_task_without_runtime_bundle_rejected(
+        self,
+        client,
+        db_session,
+    ):
+        """Pre-release Tasks remain readable but cannot create a retry."""
+        task = await _seed_task(
+            db_session,
+            status=TaskStatus.FAILED,
+            runtime_bundle_id=None,
+        )
+
+        resp = await client.post(f"/api/tasks/{task.id}/retry")
+
+        assert resp.status_code == 422
+        assert "no immutable Runtime Bundle" in resp.json()["detail"]
 
     async def test_retry_pending_task_rejected(self, client, db_session):
         """Retrying a PENDING task returns 400."""

@@ -29,6 +29,8 @@ LABEL=""
 COMPOSE_FILE=""
 SOURCE_ROOT=""
 TEARDOWN=false
+WORKSPACE_HOST_PATH=""
+CLEAN_WORKSPACE_ON_EXIT=false
 
 while getopts "p:n:w:P:B:l:c:s:d" opt; do
   case $opt in
@@ -45,6 +47,12 @@ while getopts "p:n:w:P:B:l:c:s:d" opt; do
   esac
 done
 shift $((OPTIND - 1))
+if [[ -n "${MOCK_WORKSPACE_HOST_PATH:-}" ]]; then
+  WORKSPACE_HOST_PATH="$MOCK_WORKSPACE_HOST_PATH"
+else
+  WORKSPACE_HOST_PATH="/tmp/${PROJECT}-workspaces-$$"
+  CLEAN_WORKSPACE_ON_EXIT=true
+fi
 
 # Remaining args are test files (relative to tests/mock_integration/)
 TEST_FILES=("$@")
@@ -62,12 +70,19 @@ compose() {
   WORKER_PREFIX="$PREFIX" \
   MOCK_PORT_MOCK="$PORT_MOCK" \
   MOCK_PORT_BACKEND="$PORT_BACK" \
+  MOCK_WORKSPACE_HOST_PATH="$WORKSPACE_HOST_PATH" \
     docker-compose -f "$COMPOSE_FILE" "$@"
 }
 
 teardown() {
   if $TEARDOWN; then
     compose down -v 2>/dev/null || true
+    if $CLEAN_WORKSPACE_ON_EXIT; then
+      docker run --rm --entrypoint /bin/bash \
+        -v "${WORKSPACE_HOST_PATH}:/cleanup" \
+        "${MOCK_BACKEND_TEST_IMAGE:-codify-backend-test:latest}" \
+        -lc 'find /cleanup -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +'
+    fi
   fi
 }
 trap teardown EXIT

@@ -26,6 +26,17 @@
 | Phase 3 | [多 Host 灰度与生产验收](2026-08-01-multi-harness-phase-3-production-rollout.md) | 2–4 | Phase 2 生产候选已冻结版本 | 双引擎生产基线，可回滚，有真实 Host 证据 |
 | Phase 4 | [OpenCode 条件性候选接入](2026-08-01-multi-harness-phase-4-opencode-candidate.md) | 8–14 | 六项准入条件全部通过 | 仅 allowlist 能力范围内的第三 Harness 候选 |
 
+当前状态（2026-08-01）：Phase 0 的 32 组真实 `deepseek-v4-flash` fixtures 与严格离线门禁
+已经完成。Phase 1 的源码、迁移、不可变 Runtime Bundle、Claude Adapter、Kit `0.3.9` 导出、
+目标 Host 安装验证和自动化回归已经完成；开发环境真实 Git/MR L4 因实际配置的 GitLab bot token 返回 401
+尚未完成，历史 Issue/Profile 的发版硬切换也尚未执行。
+
+Phase 1 当前证据达到 L1、L2 和 L3：Backend 全量 `2169 passed, 1 skipped, 70 subtests passed`，
+mock E2E `371 passed`，Frontend focused `110 passed`，修正旧测试契约并重建镜像后的 mock
+integration 全量 `246 passed, 2 deselected`；Kit `0.3.9-linux-amd64` 已校验并在目标 Host 使用
+真实 Claude/runtime 验证通过。L4 仍必须产生真实 task ID、MR URL、archive 与 Canonical
+Event replay 证据。
+
 Phase 0 和 Phase 1 的 6–9 人日已包含在设计方案的 24–36 人日双引擎生产候选成本中；Phase 3 的 2–4 人日单独计算。
 
 ---
@@ -46,6 +57,7 @@ Phase 0 和 Phase 1 的 6–9 人日已包含在设计方案的 24–36 人日�
 10. **安全策略 fail closed。** 无人值守任务不能等待交互批准，也不能在 sandbox 不可用时静默放宽。
 11. **长期模型密钥不默认进入仓库代码可继承的进程。** 生产优先代理、Broker 或任务级短期 token；旧容器环境变量只能作为有记录的受限过渡。
 12. **版本不可变。** Runtime Bundle manifest 是实际 Adapter version/digest 的唯一事实源；Task Snapshot 保存镜像 digest、Kit、CLI source/path/version/binary digest 和 Runtime Bundle digest，不接受未经验证的 `latest` 或只按路径信任 host binary。
+13. **Phase 1 采用发版硬边界。** 发版前关闭全部历史 Issue，发版前 Task 只读；无 Runtime Bundle 的 Task 不允许执行或 retry。每个可调度 Host 必须安装并验证新 Worker Kit，每个启用的 Worker Profile 必须切换到该不可变版本后才能恢复调度。
 
 ---
 

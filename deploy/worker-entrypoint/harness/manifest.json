@@ -1,0 +1,23 @@
+{
+  "schema": "codify.worker.runtime-manifest/v1",
+  "contract_version": "codify.worker.harness/v1",
+  "event_schema": "codify.worker.event/v1",
+  "orchestration_version": "1.0.0",
+  "adapters": {
+    "claude": {
+      "version": "1.0.0",
+      "cli_version_range": ">=2.1.33 <3.0.0",
+      "provider_protocols": ["anthropic-messages"],
+      "capabilities": {
+        "resume": true,
+        "task_skills": true,
+        "max_turns": true,
+        "usage_tokens": true,
+        "usage_cost": true,
+        "run_text": true,
+        "codegraph": true,
+        "sandbox_mode": "container-boundary"
+      }
+    }
+  }
+}

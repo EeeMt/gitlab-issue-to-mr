@@ -1,23 +1,91 @@
 #!/bin/bash
-# Fake claude binary — handles --version and -p (prompt) modes
-# entrypoint.sh calls claude --version to check availability,
-# and claude -p to generate commit messages and MR titles.
+# Fake Claude CLI for the Runtime Bundle/Adapter integration tests.
 
-if [[ "$1" == "--version" ]]; then
-    echo "claude-fake 1.0.0 (mock-integration-test)"
+set -uo pipefail
+
+if [[ "${1:-}" == "--version" ]]; then
+    echo "2.1.152 (Claude Code mock-integration-test)"
     exit 0
 fi
 
-if [[ "$1" == "-p" ]]; then
-    # Prompt mode — used for commit message and MR title generation
-    # Just echo a reasonable commit message / title
-    echo "chore: AI-generated code changes
+output_format=""
+previous=""
+for argument in "$@"; do
+    if [[ "${previous}" == "--output-format" ]]; then
+        output_format="${argument}"
+        break
+    fi
+    previous="${argument}"
+done
 
-Implemented the requested modifications.
-
-AI-Generated: true"
+# Adapter run_text is deliberately separate from the stream-json lifecycle.
+if [[ "${output_format}" == "text" ]]; then
+    cat >/dev/null
+    printf '%s\n' 'chore: AI-generated code changes'
+    printf '%s\n\n' 'Implemented the requested modifications.'
+    printf '%s\n' 'AI-Generated: true'
     exit 0
 fi
 
-echo "Error: fake claude binary called with unexpected args: $*" >&2
-exit 1
+if [[ "${output_format}" != "stream-json" ]]; then
+    echo "Error: fake Claude called with unexpected args: $*" >&2
+    exit 1
+fi
+
+# Consume the prompt exactly like the real non-interactive CLI.
+cat >/dev/null
+
+mock_config='{}'
+if command -v curl >/dev/null && [[ -n "${GITLAB_URL:-}" ]]; then
+    mock_config="$(curl -sf "${GITLAB_URL}/mock/config" 2>/dev/null || printf '{}')"
+fi
+exit_code="$(printf '%s' "${mock_config}" | jq -r '.claude_exit_code // 0')"
+delay_seconds="$(printf '%s' "${mock_config}" | jq -r '.claude_delay_seconds // 0')"
+skip_files="$(printf '%s' "${mock_config}" | jq -r '.claude_skip_files // false')"
+result_text="$(printf '%s' "${mock_config}" | jq -r '.claude_result // "Created files"')"
+
+echo "[fake-claude] exit=${exit_code} delay=${delay_seconds} skip_files=${skip_files}" >&2
+if [[ "${delay_seconds}" -gt 0 ]] 2>/dev/null; then
+    sleep "${delay_seconds}"
+fi
+
+if [[ "${skip_files}" != "true" ]]; then
+    printf '%s' "${mock_config}" | jq -c '.claude_file_changes // [] | .[]' | while read -r entry; do
+        path="$(printf '%s' "${entry}" | jq -r '.path')"
+        content="$(printf '%s' "${entry}" | jq -r '.content')"
+        case "${path}" in
+            /*|../*|*/../*)
+                echo "unsafe fake Claude output path: ${path}" >&2
+                exit 1
+                ;;
+        esac
+        mkdir -p "$(dirname "${path}")"
+        printf '%s' "${content}" > "${path}"
+    done
+fi
+
+# Include hidden thinking in the raw stream so the Adapter integration proves it
+# is omitted from canonical/database output. The raw archive stores a redacted
+# placeholder rather than the content below.
+printf '%s\n' '{"type":"system","subtype":"init","model":"fake-claude-1.0","session_id":"fake-session"}'
+printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"private mock chain of thought"}}}'
+printf '%s\n' '{"type":"assistant","message":{"id":"msg-1","content":[{"type":"text","text":"I will inspect the project and make the requested change."}]}}'
+printf '%s\n' '{"type":"assistant","message":{"id":"msg-2","content":[{"type":"tool_use","id":"tool_001","name":"Read","input":{"file_path":"README.md"}}]}}'
+printf '%s\n' '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool_001","content":"# Test Project","is_error":false}]}}'
+printf '%s\n' '{"type":"assistant","message":{"id":"msg-3","content":[{"type":"tool_use","id":"tool_002","name":"Write","input":{"file_path":"hello.py"}}]}}'
+printf '%s\n' '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool_002","content":"File created successfully","is_error":false}]}}'
+printf '%s\n' '{"type":"assistant","message":{"id":"msg-4","content":[{"type":"tool_use","id":"tool_003","name":"Write","input":{"file_path":"utils.py"}}]}}'
+printf '%s\n' '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool_003","content":"File created successfully","is_error":false}]}}'
+printf '%s\n' '{"type":"assistant","message":{"id":"msg-5","content":[{"type":"text","text":"The requested change is complete."}]}}'
+
+if [[ "${exit_code}" == "0" ]]; then
+    jq -nc \
+        --arg result "${result_text}" \
+        '{type:"result",subtype:"success",is_error:false,result:$result,session_id:"fake-session",usage:{input_tokens:1500,output_tokens:800,cache_read_input_tokens:200,cache_creation_input_tokens:100}}'
+    exit 0
+fi
+
+jq -nc \
+    --arg result "Task failed (configured exit ${exit_code})" \
+    '{type:"result",subtype:"error",is_error:true,result:$result,session_id:"fake-session",usage:{input_tokens:500,output_tokens:100}}'
+exit "${exit_code}"

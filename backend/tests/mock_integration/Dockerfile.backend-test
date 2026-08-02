@@ -1,6 +1,7 @@
 # Extends the production backend image with test dependencies and test code.
 # Test files can be overridden at runtime via volume mount for fast iteration.
-FROM codify-backend:latest
+ARG BASE_IMAGE=codify-backend:latest
+FROM ${BASE_IMAGE}
 
 # Install test dependencies (baked into image to avoid runtime pip install)
 RUN pip install pytest pytest-asyncio httpx

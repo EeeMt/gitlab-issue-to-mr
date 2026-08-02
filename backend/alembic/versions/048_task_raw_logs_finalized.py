@@ -23,7 +23,10 @@ def upgrade() -> None:
         """
         UPDATE tasks
         SET raw_logs_finalized_at = COALESCE(completed_at, updated_at)
-        WHERE status IN ('completed', 'failed', 'cancelled')
+        -- Alembic upgrades the full chain in one transaction. Migration 002 adds
+        -- the cancelled enum value, so compare through text here instead of
+        -- asking PostgreSQL to consume an uncommitted enum literal.
+        WHERE status::text IN ('completed', 'failed', 'cancelled')
         """
     )
 

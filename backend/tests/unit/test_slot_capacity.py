@@ -62,6 +62,16 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     task.commit_message = None
     task.issue = None
     now = datetime(2024, 1, 1, 12, 0, 0)
+    task.worker_profile_snapshot = MagicMock(
+        worker_profile_id=1,
+        skill_references=[],
+        skill_selection_source="profile",
+    )
+    task.provider_runtime_snapshot = {}
+    task.rendered_prompt = "Rendered prompt"
+    task.rendered_prompt_at = now
+    task.run_instruction_template = "Execute {{user_prompt}}"
+    task.runtime_bundle_id = 1
     task.created_at = now
     task.updated_at = now
     task.started_at = None
@@ -135,6 +145,14 @@ def _mock_task_runtime_dependencies():
         patch(
             "app.api.tasks.get_project_metadata",
             new=AsyncMock(return_value={}),
+        ),
+        patch(
+            "app.api.tasks.clone_task_worker_snapshot",
+            new=AsyncMock(return_value=MagicMock()),
+        ),
+        patch(
+            "app.api.tasks.bind_runtime_bundle",
+            new=AsyncMock(return_value=MagicMock(id=1)),
         ),
     ):
         yield

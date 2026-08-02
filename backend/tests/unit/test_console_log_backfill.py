@@ -332,6 +332,42 @@ class TestEventJsonlBackfill(unittest.IsolatedAsyncioTestCase):
         import shutil
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
+    @staticmethod
+    def _event(task_id, seq, event_type, payload=None):
+        from app.core.harness_protocol import build_event
+
+        return build_event(
+            attempt_id=f"task-{task_id}-attempt-1",
+            seq=seq,
+            task_id=task_id,
+            harness_key="claude",
+            adapter_version="1.0.0",
+            cli_version="2.1.152",
+            event_type=event_type,
+            payload=payload or {},
+            event_id=f"task-{task_id}-event-{seq}",
+            occurred_at=f"2026-08-01T00:00:{seq:02d}Z",
+        )
+
+    async def _seed_attempt(self, db, task_id, ingested_events):
+        from app.core.harness_attempts import create_task_attempt, ingest_canonical_event
+        from app.models import Task
+
+        task = Task(id=task_id, issue_id=1, project_id=1, user_prompt="backfill")
+        db.add(task)
+        await db.flush()
+        attempt = await create_task_attempt(
+            db,
+            task=task,
+            harness_key="claude",
+            adapter_version="1.0.0",
+            cli_version="2.1.152",
+            attempt_id=f"task-{task_id}-attempt-1",
+        )
+        for event in ingested_events:
+            await ingest_canonical_event(db, event)
+        return attempt
+
     async def test_backfill_projects_missing_event_records(self):
         from sqlalchemy import select
 
@@ -339,11 +375,12 @@ class TestEventJsonlBackfill(unittest.IsolatedAsyncioTestCase):
         from app.models import TaskIngestCursor, TaskLog
 
         task_id = 50
-        event_lines = [
-            json.dumps({"type": "system", "subtype": "init", "model": "test-model", "cwd": "/workspace"}),
-            json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "changes applied"}]}}),
-            json.dumps({"type": "result", "subtype": "success", "is_error": False}),
+        events = [
+            self._event(task_id, 1, "run.started"),
+            self._event(task_id, 2, "message.completed", {"text": "changes applied"}),
+            self._event(task_id, 3, "harness.completed"),
         ]
+        event_lines = [json.dumps(event, separators=(",", ":")) for event in events]
         "".join(line + "\n" for line in event_lines)
         first_line = event_lines[0] + "\n"
 
@@ -352,8 +389,10 @@ class TestEventJsonlBackfill(unittest.IsolatedAsyncioTestCase):
         projector = WorkerEventProjector(sanitize_sensitive_data=lambda x: x)
 
         async with self.session_factory() as db:
+            attempt = await self._seed_attempt(db, task_id, events[:1])
             cursor = TaskIngestCursor(
                 task_id=task_id,
+                attempt_id=attempt.attempt_id,
                 stream_name="event_jsonl",
                 last_offset=len(first_line.encode("utf-8")),
                 last_sequence_no=1,
@@ -433,12 +472,14 @@ class TestEventJsonlBackfill(unittest.IsolatedAsyncioTestCase):
         from app.models import TaskIngestCursor, TaskLog
 
         task_id = 53
-        event_lines = [
-            json.dumps({"type": "system", "subtype": "init", "model": "test-model", "cwd": "/workspace"}),
-            json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "work done"}]}}),
-            json.dumps({"type": "result", "subtype": "success", "is_error": False}),
+        events = [
+            self._event(task_id, 1, "run.started"),
+            self._event(task_id, 2, "model.resolved", {"model": "test-model", "session_id": "session-abc"}),
+            self._event(task_id, 3, "message.completed", {"text": "work done"}),
+            self._event(task_id, 4, "harness.completed", {"session_id": "session-abc"}),
         ]
-        first_line = event_lines[0] + "\n"
+        event_lines = [json.dumps(event, separators=(",", ":")) for event in events]
+        ingested_text = "".join(line + "\n" for line in event_lines[:2])
 
         _create_archive_with_event_jsonl(
             self.temp_dir,
@@ -450,11 +491,13 @@ class TestEventJsonlBackfill(unittest.IsolatedAsyncioTestCase):
         projector = WorkerEventProjector(sanitize_sensitive_data=lambda x: x)
 
         async with self.session_factory() as db:
+            attempt = await self._seed_attempt(db, task_id, events[:2])
             cursor = TaskIngestCursor(
                 task_id=task_id,
+                attempt_id=attempt.attempt_id,
                 stream_name="event_jsonl",
-                last_offset=len(first_line.encode("utf-8")),
-                last_sequence_no=1,
+                last_offset=len(ingested_text.encode("utf-8")),
+                last_sequence_no=2,
             )
             db.add(cursor)
             await db.commit()

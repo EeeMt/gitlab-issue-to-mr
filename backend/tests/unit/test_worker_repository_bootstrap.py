@@ -955,6 +955,45 @@ def test_runtime_archive_can_be_created_before_claude_outputs(
         }
 
 
+def test_runtime_archive_fallback_keeps_sanitized_raw_harness_events(tmp_path: Path):
+    runtime_dir = tmp_path / "runtime"
+    raw_dir = runtime_dir / "harness-events"
+    raw_dir.mkdir(parents=True)
+    (runtime_dir / "event.jsonl").write_text('{"type":"run.started"}\n')
+    (raw_dir / "claude.jsonl").write_text(
+        '{"type":"system","subtype":"init"}\n',
+        encoding="utf-8",
+    )
+    bootstrap = BOOTSTRAP_SCRIPT.read_text()
+    match = re.search(r"(?ms)^create_runtime_archive\(\) \{\n.*?^\}\n", bootstrap)
+    assert match is not None
+
+    harness = (
+        "set -e\n"
+        f"CODIFY_RUNTIME_DIR={runtime_dir!s}\n"
+        "CODIFY_ARTIFACT_HELPER=\n"
+        "TASK_ID=80\n"
+        "RUNTIME_ARCHIVE_CREATED=0\n"
+        f"{match.group(0)}\n"
+        "create_runtime_archive\n"
+    )
+    result = subprocess.run(
+        ["bash", "-c", harness],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    archive_path = runtime_dir / "task-80-runtime-archive.tar.gz"
+    with tarfile.open(archive_path, "r:gz") as archive:
+        assert set(archive.getnames()) == {
+            "event.jsonl",
+            "harness-events",
+            "harness-events/claude.jsonl",
+        }
+
+
 def test_runtime_archive_fallback_removes_output_over_hard_limit(tmp_path: Path):
     runtime_dir = tmp_path / "runtime"
     runtime_dir.mkdir()

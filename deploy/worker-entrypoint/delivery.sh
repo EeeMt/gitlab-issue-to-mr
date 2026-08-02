@@ -125,7 +125,7 @@ prepare_delivery_summary() {
 
         set +e
         local repaired_summary
-        repaired_summary=$(codify_run_shell 'cd /tmp && timeout 60 "${CODIFY_CLAUDE_BIN}" -p --bare --tools "" --permission-mode plan --no-session-persistence --output-format text --max-turns 3 --model "${ANTHROPIC_MODEL}" < /tmp/delivery-summary-repair-prompt.md' 2>/dev/null)
+        repaired_summary=$(codify_harness_run_text /tmp/delivery-summary-repair-prompt.md 60 2>/dev/null)
         local repair_status=$?
         set -e
 

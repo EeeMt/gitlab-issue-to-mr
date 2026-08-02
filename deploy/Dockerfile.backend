@@ -74,6 +74,16 @@ COPY backend/app/ ./app/
 COPY backend/alembic/ ./alembic/
 COPY backend/alembic.ini .
 COPY backend/pyproject.toml .
+# Controlled Runtime Bundle source. Scheduler/backend package this content and
+# upload it through the Docker API; Worker execution never depends on this host path.
+COPY deploy/entrypoint.worker.sh /opt/codify/runtime-source/deploy/entrypoint.worker.sh
+COPY deploy/ci-claude.sh /opt/codify/runtime-source/deploy/ci-claude.sh
+COPY deploy/worker-entrypoint/ /opt/codify/runtime-source/deploy/worker-entrypoint/
+RUN chmod -R a+rX /opt/codify/runtime-source \
+    && chmod 755 /opt/codify/runtime-source/deploy/entrypoint.worker.sh \
+      /opt/codify/runtime-source/deploy/ci-claude.sh
+
+ENV CODIFY_RUNTIME_SOURCE_DIR=/opt/codify/runtime-source
 
 EXPOSE 8000
 

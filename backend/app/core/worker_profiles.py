@@ -52,6 +52,7 @@ from app.models import (
     AIProvider,
     Issue,
     Task,
+    TaskSkillVersionReference,
     TaskWorkerProfileSnapshot,
     WorkerProfile,
     WorkerProfileEnvironmentVariable,
@@ -595,6 +596,59 @@ async def replace_task_worker_snapshot(
     snapshot = snapshot_from_profile(task, profile, settings=get_effective_settings())
     db.add(snapshot)
     task.worker_profile_id = profile.id
+    await db.flush()
+    return snapshot
+
+
+async def clone_task_worker_snapshot(
+    db: AsyncSession,
+    *,
+    source: TaskWorkerProfileSnapshot,
+    target_task: Task,
+) -> TaskWorkerProfileSnapshot:
+    """Clone execution truth for retry without consulting the editable Profile."""
+    try:
+        skills_unloaded = "skill_references" in sa_inspect(source).unloaded
+    except Exception:
+        skills_unloaded = False
+    if skills_unloaded:
+        await db.refresh(source, attribute_names=["skill_references"])
+    snapshot = TaskWorkerProfileSnapshot(
+        task_id=target_task.id,
+        worker_profile_id=source.worker_profile_id,
+        profile_name=source.profile_name,
+        image=source.image,
+        runtime_mode=source.runtime_mode,
+        worker_kit_version=source.worker_kit_version,
+        worker_kit_path=source.worker_kit_path,
+        docker_host=source.docker_host,
+        docker_tls_ca=source.docker_tls_ca,
+        docker_tls_cert=source.docker_tls_cert,
+        docker_tls_key=source.docker_tls_key,
+        codegraph_enabled=source.codegraph_enabled,
+        volume_mounts=[dict(item) for item in (source.volume_mounts or [])],
+        environment_variables=[dict(item) for item in (source.environment_variables or [])],
+        skill_selection_source=source.skill_selection_source,
+        pre_script=source.pre_script,
+        post_script=source.post_script,
+        default_execute_run_instruction_template=source.default_execute_run_instruction_template,
+        default_plan_run_instruction_template=source.default_plan_run_instruction_template,
+        ci_auto_repair_run_instruction_template=source.ci_auto_repair_run_instruction_template,
+        skill_references=[
+            TaskSkillVersionReference(
+                task_id=target_task.id,
+                position=reference.position,
+                skill_id=reference.skill_id,
+                skill_version_id=reference.skill_version_id,
+                name=reference.name,
+                description=reference.description,
+            )
+            for reference in source.skill_references
+        ],
+    )
+    db.add(snapshot)
+    target_task.worker_profile_id = source.worker_profile_id
+    target_task.worker_profile_snapshot = snapshot
     await db.flush()
     return snapshot
 

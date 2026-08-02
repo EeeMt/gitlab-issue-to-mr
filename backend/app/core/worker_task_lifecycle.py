@@ -13,6 +13,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ci_failure_logs import append_ci_failure_log
+from app.core.harness_attempts import create_task_attempt
 from app.core.utcnow import utcnow
 from app.core.worker_docker_targets import TaskContainerLookupError
 from app.core.worker_profiles import load_task_worker_runtime
@@ -22,6 +23,7 @@ from app.core.worker_runtime import (
     capture_provider_runtime_snapshot,
     worker_custom_scripts_configured,
 )
+from app.core.worker_runtime_bundle import load_bound_runtime_bundle
 from app.core.worker_task_artifacts import (
     _stop_artifact_poller,
     finalize_task_raw_logs,
@@ -267,6 +269,15 @@ async def create_execute_container(
         await worker._build_previous_task_summaries(db, issue, task) if issue else ""
     )
 
+    runtime_bundle = await load_bound_runtime_bundle(db, task)
+    claude_manifest = (runtime_bundle.manifest.get("adapters") or {}).get("claude") or {}
+    attempt = await create_task_attempt(
+        db,
+        task=task,
+        harness_key="claude",
+        adapter_version=str(claude_manifest.get("version") or "1.0.0"),
+    )
+
     if worker_custom_scripts_configured(settings):
         logger.debug(
             "[Task %s] Ignoring legacy global worker scripts; using task worker snapshot",
@@ -324,6 +335,18 @@ async def create_execute_container(
     environment["CODIFY_CODEGRAPH_ENABLED"] = (
         "true" if worker_runtime.codegraph_enabled else "false"
     )
+    environment.update(
+        {
+            "CODIFY_HARNESS_KEY": attempt.harness_key,
+            "CODIFY_ADAPTER_VERSION": attempt.adapter_version,
+            "CODIFY_ATTEMPT_ID": attempt.attempt_id,
+            "CODIFY_RUNTIME_BUNDLE_DIGEST": runtime_bundle.digest,
+            "CODIFY_RUNTIME_MANIFEST_DIGEST": str(
+                runtime_bundle.manifest.get("archive_manifest_digest") or ""
+            ),
+            "CODIFY_RUNTIME_CONTRACT_VERSION": runtime_bundle.contract_version,
+        }
+    )
     if worker_runtime.skills:
         environment["CODIFY_TASK_SKILLS_DIR"] = TASK_SKILLS_CONTAINER_PATH
     # Persist the exact provider/session choices before the Docker side effect. If the
@@ -357,6 +380,8 @@ async def create_execute_container(
             "codify.task_id": str(task.id),
             "codify.worker_runtime_mode": worker_runtime.runtime_mode,
             "codify.worker_kit_version": worker_runtime.worker_kit_version or "",
+            "codify.attempt_id": attempt.attempt_id,
+            "codify.runtime_bundle_digest": runtime_bundle.digest,
         },
     )
 
@@ -365,6 +390,7 @@ async def create_execute_container(
         await _remove_created_container(worker, db, task, container)
         return None
     try:
+        worker.docker.put_archive(container, "/tmp", runtime_bundle.bundle_bytes)
         worker.docker.put_archive(container, "/tmp", runtime_archive)
     except Exception:
         await _remove_created_container(worker, db, task, container)
@@ -800,7 +826,14 @@ async def monitor_container_run(
                 )
             )
     elif exit_code != 0:
-        task.error_message = worker._sanitize_sensitive_data(logs)[-1000:]
+        sanitized_failure_logs = worker._sanitize_sensitive_data(logs)
+        if len(sanitized_failure_logs) > 16_000:
+            sanitized_failure_logs = (
+                sanitized_failure_logs[:8_000]
+                + "\n...[failure output truncated]...\n"
+                + sanitized_failure_logs[-8_000:]
+            )
+        task.error_message = sanitized_failure_logs
         if log_chunks_saved == 0:
             db.add(
                 TaskLog(

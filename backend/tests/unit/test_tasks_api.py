@@ -8,6 +8,8 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from fastapi import HTTPException
@@ -21,7 +23,18 @@ from app.api.task_operations import (
     validate_task_status_for_retry,
 )
 from app.core.worker_profiles import WorkerProfileValidationError
-from app.models import TaskStatus, TaskWorkerProfileSnapshot
+from app.models import Task, TaskSkillVersionReference, TaskStatus, TaskWorkerProfileSnapshot
+
+
+@pytest.fixture(autouse=True)
+def _stub_runtime_bundle_binding():
+    async def bind(_db, task, *, source_task=None):
+        source_id = getattr(source_task, "runtime_bundle_id", None) if source_task else None
+        task.runtime_bundle_id = source_id if isinstance(source_id, int) else 9001
+        return SimpleNamespace(id=task.runtime_bundle_id, digest="d" * 64)
+
+    with patch("app.api.tasks.bind_runtime_bundle", new=AsyncMock(side_effect=bind)):
+        yield
 
 
 def _make_task(status: TaskStatus, scheduled_at=None) -> MagicMock:
@@ -30,6 +43,14 @@ def _make_task(status: TaskStatus, scheduled_at=None) -> MagicMock:
     task.status = status
     task.scheduled_at = scheduled_at
     return task
+
+
+def _added_task(mock_db) -> Task:
+    return next(
+        call.args[0]
+        for call in mock_db.add.call_args_list
+        if call.args and isinstance(call.args[0], Task)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -459,8 +480,8 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     task.issue_id = 1
     task.user_prompt = "Test prompt"
     task.run_instruction_template = None
-    task.rendered_prompt = None
-    task.rendered_prompt_at = None
+    task.rendered_prompt = "Execute Test prompt"
+    task.rendered_prompt_at = datetime(2024, 1, 1, 11, 59, 0)
     task.trigger_source = "manual"
     task.ci_failure_run_id = None
     task.initiator_user_id = None
@@ -485,7 +506,16 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     task.provider = None
     task.worker_profile_id = 12
     task.worker_profile = None
-    task.worker_profile_snapshot = None
+    task.worker_profile_snapshot = _make_worker_snapshot(
+        task_id=task_id,
+        worker_profile_id=task.worker_profile_id,
+    )
+    task.runtime_bundle_id = 41
+    task.provider_runtime_snapshot = {
+        "provider_id": None,
+        "provider_name": "snapshot",
+        "base_url": "https://provider.example.test",
+    }
     task.issue = None
     now = datetime(2024, 1, 1, 12, 0, 0)
     task.created_at = now
@@ -838,17 +868,18 @@ class RetryTaskAPITests(unittest.TestCase):
         task.project_id = 1
         task.session_mode = "fresh"
         task.output_session_id = None
-        task.worker_profile_snapshot = MagicMock(
-            skill_references=[
-                SimpleNamespace(
-                    skill_id=17,
-                    name="review-changes",
-                    description="Review changes before delivery.",
-                    skill_version_id=71,
-                )
-            ],
-            skill_selection_source="task",
-        )
+        task.worker_profile_snapshot = _make_worker_snapshot(task_id=5)
+        task.worker_profile_snapshot.skill_references = [
+            TaskSkillVersionReference(
+                task_id=5,
+                position=0,
+                skill_id=17,
+                name="review-changes",
+                description="Review changes before delivery.",
+                skill_version_id=71,
+            )
+        ]
+        task.worker_profile_snapshot.skill_selection_source = "task"
 
         # First execute returns the task; second returns None (no existing retry);
         # third fetches the Issue used for worker/provider resolution and serialization.
@@ -1070,10 +1101,10 @@ class RetryTaskAPITests(unittest.TestCase):
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 200)
-        created_task = mock_db.add.call_args.args[0]
+        created_task = _added_task(mock_db)
         self.assertEqual(created_task.provider_id, 23)
         self.assertEqual(created_task.worker_profile_id, 12)
-        mock_replace_snapshot.assert_awaited_once()
+        mock_replace_snapshot.assert_not_awaited()
 
     def test_retry_task_preserves_ci_failure_context(self):
         """Retrying a CI repair keeps the bundle provenance and renders its stable path."""
@@ -1089,6 +1120,7 @@ class RetryTaskAPITests(unittest.TestCase):
         task.trigger_source = "ci_auto_repair"
         task.ci_failure_run_id = 91
         task.run_instruction_template = BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE
+        task.rendered_prompt = "Repair using /tmp/codify-runtime/ci-failure without re-rendering"
 
         issue = Issue(id=1, title="Repair CI", project_id=42, status="in_review")
         mock_result_task = MagicMock()
@@ -1138,13 +1170,13 @@ class RetryTaskAPITests(unittest.TestCase):
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 200)
-        created_task = mock_db.add.call_args.args[0]
+        created_task = _added_task(mock_db)
         self.assertEqual(created_task.trigger_source, "retry")
         self.assertEqual(created_task.ci_failure_run_id, 91)
-        self.assertIn("/tmp/codify-runtime/ci-failure", created_task.rendered_prompt)
+        self.assertEqual(created_task.rendered_prompt, task.rendered_prompt)
 
-    def test_retry_task_rejects_disabled_original_provider(self):
-        """POST /api/tasks/{id}/retry should reject an explicitly disabled provider."""
+    def test_retry_task_does_not_re_resolve_disabled_original_provider(self):
+        """Retry uses the frozen provider reference instead of editable provider state."""
         task = _make_serializable_task(task_status=TaskStatus.FAILED)
         task.id = 71
         task.project_id = 1
@@ -1162,11 +1194,24 @@ class RetryTaskAPITests(unittest.TestCase):
             side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue]
         )
         mock_db.add = MagicMock()
+        mock_db.flush = AsyncMock()
+        mock_db.commit = AsyncMock()
+
+        async def fake_refresh(obj, attribute_names=None):
+            if isinstance(obj, Task):
+                obj.id = 171
+                obj.status = TaskStatus.PENDING
+                obj.created_at = datetime(2024, 1, 1, 12, 0, 0)
+                obj.updated_at = datetime(2024, 1, 1, 12, 0, 0)
+
+        mock_db.refresh = AsyncMock(side_effect=fake_refresh)
 
         client, app = _make_app_client_with_db(mock_db)
 
         with (
             patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch("app.api.tasks.notify_task_retried", new=AsyncMock()),
+            patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
             patch(
                 "app.api.tasks.resolve_provider_for_issue",
                 new=AsyncMock(
@@ -1174,18 +1219,18 @@ class RetryTaskAPITests(unittest.TestCase):
                         "AI provider 'Test Provider' is disabled"
                     )
                 ),
-            ),
+            ) as provider_resolver,
         ):
             response = client.post("/api/tasks/71/retry")
 
         app.dependency_overrides.clear()
 
-        self.assertEqual(response.status_code, 422)
-        self.assertIn("disabled", response.json()["detail"])
-        mock_db.add.assert_not_called()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(_added_task(mock_db).provider_id, 23)
+        provider_resolver.assert_not_awaited()
 
-    def test_retry_task_rejects_disabled_default_provider(self):
-        """POST /api/tasks/{id}/retry should reject a disabled default provider fallback."""
+    def test_retry_task_does_not_fall_back_to_current_default_provider(self):
+        """A null frozen provider stays null; retry never consults the new default."""
         task = _make_serializable_task(task_status=TaskStatus.FAILED)
         task.id = 72
         task.project_id = 1
@@ -1203,11 +1248,24 @@ class RetryTaskAPITests(unittest.TestCase):
             side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue]
         )
         mock_db.add = MagicMock()
+        mock_db.flush = AsyncMock()
+        mock_db.commit = AsyncMock()
+
+        async def fake_refresh(obj, attribute_names=None):
+            if isinstance(obj, Task):
+                obj.id = 172
+                obj.status = TaskStatus.PENDING
+                obj.created_at = datetime(2024, 1, 1, 12, 0, 0)
+                obj.updated_at = datetime(2024, 1, 1, 12, 0, 0)
+
+        mock_db.refresh = AsyncMock(side_effect=fake_refresh)
 
         client, app = _make_app_client_with_db(mock_db)
 
         with (
             patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch("app.api.tasks.notify_task_retried", new=AsyncMock()),
+            patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
             patch(
                 "app.api.tasks.resolve_provider_for_issue",
                 new=AsyncMock(
@@ -1215,15 +1273,15 @@ class RetryTaskAPITests(unittest.TestCase):
                         "AI provider 'Test Provider' is disabled"
                     )
                 ),
-            ),
+            ) as provider_resolver,
         ):
             response = client.post("/api/tasks/72/retry")
 
         app.dependency_overrides.clear()
 
-        self.assertEqual(response.status_code, 422)
-        self.assertIn("disabled", response.json()["detail"])
-        mock_db.add.assert_not_called()
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(_added_task(mock_db).provider_id)
+        provider_resolver.assert_not_awaited()
 
     def test_retry_task_returns_409_when_usage_limit_exceeded(self):
         """POST /api/tasks/{id}/retry should enforce create quota limits."""

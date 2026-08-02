@@ -149,6 +149,7 @@ async def test_create_persists_snapshot_and_rendered_prompt_before_commit() -> N
         ),
         patch("app.api.tasks.resolve_provider_for_issue", new=AsyncMock(return_value=provider)),
         patch("app.api.tasks.replace_task_worker_snapshot", new=AsyncMock(return_value=snapshot)),
+        patch("app.api.tasks.bind_runtime_bundle", new=AsyncMock(return_value=MagicMock(id=1))),
         patch(
             "app.core.task_helpers.get_effective_settings",
             return_value=SimpleNamespace(

@@ -3,8 +3,8 @@
 codify_verify_runtime() {
     local require_skill_support=0
     local smoke_command=""
-    local command claude_version artifact_helper
-    local claude_version_major claude_version_minor claude_version_patch
+    local command cli_version artifact_helper
+    local cli_version_major cli_version_minor cli_version_patch
 
     while [ "$#" -gt 0 ]; do
         case "$1" in
@@ -27,6 +27,9 @@ codify_verify_runtime() {
         esac
     done
 
+    CODIFY_HARNESS_CLI_BIN="${CODIFY_HARNESS_CLI_BIN:?Missing CODIFY_HARNESS_CLI_BIN}"
+    export CODIFY_HARNESS_CLI_BIN
+
     echo "Codify worker kit ${CODIFY_KIT_VERSION:-unknown}"
     echo "Runtime image: ${CODIFY_RUNTIME_IMAGE:-unknown}"
     for command in bash git curl head jq python3 node codegraph ssh rg tar wc; do
@@ -36,32 +39,45 @@ codify_verify_runtime() {
             return 1
         fi
     done
-    case "${CODIFY_CLAUDE_BIN}" in
+    case "${CODIFY_HARNESS_CLI_BIN}" in
         /*) ;;
         *)
-            echo "CODIFY_CLAUDE_BIN must be an absolute path: ${CODIFY_CLAUDE_BIN}" >&2
+            echo "CODIFY_HARNESS_CLI_BIN must be an absolute path: ${CODIFY_HARNESS_CLI_BIN}" >&2
             return 1
             ;;
     esac
-    if [ ! -x "${CODIFY_CLAUDE_BIN}" ]; then
-        echo "Claude CLI is unavailable or not executable: ${CODIFY_CLAUDE_BIN}" >&2
+    if [ ! -x "${CODIFY_HARNESS_CLI_BIN}" ]; then
+        echo "Harness CLI is unavailable or not executable: ${CODIFY_HARNESS_CLI_BIN}" >&2
         return 1
     fi
-    claude_version="$(codify_run_shell '"${CODIFY_CLAUDE_BIN}" --version')"
-    echo "${claude_version}"
+    local adapter_path
+    adapter_path="${CODIFY_ORCHESTRATION_DIR}/worker-entrypoint/harness/adapters/${CODIFY_HARNESS_KEY:-claude}.sh"
+    if [ -r "${adapter_path}" ]; then
+        CODIFY_RUNTIME_DIR="${CODIFY_RUNTIME_DIR:-/tmp/codify-runtime}"
+        mkdir -p "${CODIFY_RUNTIME_DIR}" "${CODIFY_RUNTIME_DIR}/harness-events"
+        # shellcheck source=/dev/null
+        source "${CODIFY_ORCHESTRATION_DIR}/worker-entrypoint/harness/common.sh"
+        # shellcheck source=/dev/null
+        source "${adapter_path}"
+        adapter_verify_runtime || return 1
+        cli_version="${CODIFY_CLI_VERSION}"
+    else
+        cli_version="$(codify_run_shell '"${CODIFY_HARNESS_CLI_BIN}" --version')"
+    fi
+    echo "${cli_version}"
     if [ "${require_skill_support}" -eq 1 ]; then
-        if [[ ! "${claude_version}" =~ ([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
-            echo "Could not parse Claude Code version required for task skills: ${claude_version}" >&2
+        if [[ ! "${cli_version}" =~ ([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+            echo "Could not parse Harness CLI version required for task skills: ${cli_version}" >&2
             return 1
         fi
-        claude_version_major=$((10#${BASH_REMATCH[1]}))
-        claude_version_minor=$((10#${BASH_REMATCH[2]}))
-        claude_version_patch=$((10#${BASH_REMATCH[3]}))
-        if (( claude_version_major < 2 \
-            || (claude_version_major == 2 && claude_version_minor < 1) \
-            || (claude_version_major == 2 && claude_version_minor == 1 \
-                && claude_version_patch < 33) )); then
-            echo "Task skills require Claude Code 2.1.33 or newer; detected: ${claude_version}" >&2
+        cli_version_major=$((10#${BASH_REMATCH[1]}))
+        cli_version_minor=$((10#${BASH_REMATCH[2]}))
+        cli_version_patch=$((10#${BASH_REMATCH[3]}))
+        if (( cli_version_major < 2 \
+            || (cli_version_major == 2 && cli_version_minor < 1) \
+            || (cli_version_major == 2 && cli_version_minor == 1 \
+                && cli_version_patch < 33) )); then
+            echo "Task skills require a compatible Harness CLI; detected: ${cli_version}" >&2
             return 1
         fi
     fi

@@ -216,6 +216,12 @@ class Task(Base):
         nullable=True,
         index=True,
     )
+    runtime_bundle_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("worker_runtime_bundles.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
 
     # Task details
     user_prompt: Mapped[str] = mapped_column(Text, nullable=False)
@@ -326,6 +332,17 @@ class Task(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
+    runtime_bundle: Mapped["WorkerRuntimeBundle | None"] = relationship(
+        "WorkerRuntimeBundle",
+        back_populates="tasks",
+    )
+    harness_attempts: Mapped[list["TaskHarnessAttempt"]] = relationship(
+        "TaskHarnessAttempt",
+        back_populates="task",
+        order_by="TaskHarnessAttempt.attempt_no",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
     ci_failure_run: Mapped[Optional["CIFailureRun"]] = relationship(
         "CIFailureRun",
         foreign_keys=[ci_failure_run_id],
@@ -365,6 +382,104 @@ class IssueExecutionLock(Base):
         default=utcnow,
     )
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class WorkerRuntimeBundle(Base):
+    """Content-addressed orchestration and Harness Adapter runtime source."""
+
+    __tablename__ = "worker_runtime_bundles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    digest: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    bundle_bytes: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, deferred=True)
+    contract_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    orchestration_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    manifest: Mapped[dict] = mapped_column(JSON, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+    tasks: Mapped[list[Task]] = relationship("Task", back_populates="runtime_bundle")
+
+
+class TaskHarnessAttempt(Base):
+    """Immutable execution-attempt identity and canonical ingest state."""
+
+    __tablename__ = "task_harness_attempts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    attempt_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    task_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    attempt_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_schema: Mapped[str] = mapped_column(String(64), nullable=False)
+    harness_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    adapter_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    cli_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    last_seq: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    terminal_event_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    terminal_event_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    terminal_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=utcnow,
+        onupdate=utcnow,
+    )
+
+    task: Mapped[Task] = relationship("Task", back_populates="harness_attempts")
+    ingest_cursors: Mapped[list["TaskIngestCursor"]] = relationship(
+        "TaskIngestCursor",
+        back_populates="attempt",
+    )
+    event_receipts: Mapped[list["TaskHarnessEventReceipt"]] = relationship(
+        "TaskHarnessEventReceipt",
+        back_populates="attempt",
+        order_by="TaskHarnessEventReceipt.seq",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    __table_args__ = (
+        UniqueConstraint("task_id", "attempt_no", name="uq_task_harness_attempt_no"),
+        CheckConstraint("attempt_no >= 1", name="ck_task_harness_attempt_no"),
+        CheckConstraint("last_seq >= 0", name="ck_task_harness_attempt_last_seq"),
+        CheckConstraint(
+            "terminal_event_type IS NULL OR terminal_event_type IN ('run.completed', 'run.failed')",
+            name="ck_task_harness_attempt_terminal_type",
+        ),
+    )
+
+
+class TaskHarnessEventReceipt(Base):
+    """Canonical event receipt used for exact idempotency and conflict detection."""
+
+    __tablename__ = "task_harness_event_receipts"
+
+    attempt_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("task_harness_attempts.attempt_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    seq: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    event_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    event: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+    attempt: Mapped[TaskHarnessAttempt] = relationship(
+        "TaskHarnessAttempt",
+        back_populates="event_receipts",
+    )
+
+    __table_args__ = (
+        CheckConstraint("seq >= 1", name="ck_task_harness_event_receipt_seq"),
+    )
 
 
 class TaskLog(Base):
@@ -1136,6 +1251,12 @@ class TaskIngestCursor(Base):
     task_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("tasks.id", ondelete="CASCADE"), index=True
     )
+    attempt_id: Mapped[str | None] = mapped_column(
+        String(64),
+        ForeignKey("task_harness_attempts.attempt_id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     stream_name: Mapped[str] = mapped_column(String(50), nullable=False)
     last_offset: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_sequence_no: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -1145,6 +1266,12 @@ class TaskIngestCursor(Base):
 
     __table_args__ = (
         UniqueConstraint("task_id", "stream_name", name="uq_task_ingest_cursor"),
+        UniqueConstraint("attempt_id", "stream_name", name="uq_attempt_ingest_cursor"),
+    )
+
+    attempt: Mapped[TaskHarnessAttempt | None] = relationship(
+        "TaskHarnessAttempt",
+        back_populates="ingest_cursors",
     )
 
 

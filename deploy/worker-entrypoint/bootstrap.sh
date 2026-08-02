@@ -53,7 +53,8 @@ CODIFY_WORKER_PRE_SCRIPT_FILE="${CODIFY_RUNTIME_DIR}/worker-pre-script.sh"
 CODIFY_WORKER_POST_SCRIPT_FILE="${CODIFY_RUNTIME_DIR}/worker-post-script.sh"
 CODIFY_ARTIFACT_HELPER="${ENTRYPOINT_LIB_DIR}/artifacts.py"
 export CODIFY_RUNTIME_DIR CODIFY_ARTIFACT_DIR
-mkdir -p "${CODIFY_RUNTIME_DIR}" /workspace /home/codify /root
+mkdir -p "${CODIFY_RUNTIME_DIR}" "${CODIFY_RUNTIME_DIR}/harness-events" \
+    /workspace /home/codify /root
 codify_chown /workspace /home/codify
 if [ -r "${CODIFY_ARTIFACT_HELPER}" ] && command -v python3 >/dev/null 2>&1; then
     if ! python3 "${CODIFY_ARTIFACT_HELPER}" prepare \
@@ -73,6 +74,24 @@ codify_chown -R "${CODIFY_RUNTIME_DIR}"
 # to be created. The EXIT helper removes write access before sealing.
 chown 0:0 "${CODIFY_RUNTIME_DIR}"
 chmod 1777 "${CODIFY_RUNTIME_DIR}"
+chmod 755 "${CODIFY_RUNTIME_DIR}/harness-events"
+touch "${CODIFY_RUNTIME_DIR}/event.jsonl" \
+    "${CODIFY_RUNTIME_DIR}/harness-events/claude.jsonl" \
+    "${CODIFY_RUNTIME_DIR}/console.log"
+if [ ! -s "${CODIFY_RUNTIME_DIR}/harness-result.json" ]; then
+    printf '{}\n' > "${CODIFY_RUNTIME_DIR}/harness-result.json"
+fi
+# Canonical, raw-Harness, result, and console evidence is owned by the root
+# orchestration process. The model runs with the codify identity and must not
+# be able to rewrite the audit stream directly.
+chown 0:0 "${CODIFY_RUNTIME_DIR}/event.jsonl" \
+    "${CODIFY_RUNTIME_DIR}/harness-events/claude.jsonl" \
+    "${CODIFY_RUNTIME_DIR}/harness-result.json" \
+    "${CODIFY_RUNTIME_DIR}/console.log"
+chmod 644 "${CODIFY_RUNTIME_DIR}/event.jsonl" \
+    "${CODIFY_RUNTIME_DIR}/harness-events/claude.jsonl" \
+    "${CODIFY_RUNTIME_DIR}/harness-result.json" \
+    "${CODIFY_RUNTIME_DIR}/console.log"
 if [ -d /opt/codify-issue-meta ]; then
     printf '{"project_id":%s,"issue_id":%s,"worker_profile_id":%s}\n' \
         "${PROJECT_ID}" "${ISSUE_ID}" "${CODIFY_WORKER_PROFILE_ID:-null}" \
@@ -155,6 +174,8 @@ create_runtime_archive() {
     local candidate
     for candidate in \
         event.jsonl \
+        harness-events \
+        harness-result.json \
         runtime.json \
         console.log \
         delivery-summary.md \
@@ -162,7 +183,7 @@ create_runtime_archive() {
         repository-preparation.json \
         artifacts-validation.json
     do
-        [ -f "${CODIFY_RUNTIME_DIR}/${candidate}" ] && archive_files+=("${candidate}")
+        [ -e "${CODIFY_RUNTIME_DIR}/${candidate}" ] && archive_files+=("${candidate}")
     done
     if [ "${#archive_files[@]}" -eq 0 ]; then
         return 0
@@ -207,12 +228,23 @@ codify_finalize_on_exit() {
     if declare -F repo_finalize_preparation_on_exit >/dev/null 2>&1; then
         repo_finalize_preparation_on_exit "${exit_code}" || true
     fi
+    if declare -F codify_harness_finalize_attempt >/dev/null 2>&1 \
+        && [ -n "${CODIFY_ATTEMPT_ID:-}" ]; then
+        codify_harness_finalize_attempt "${exit_code}" || true
+    fi
+    # Detach the shell from the console FIFO and wait for tee to persist every
+    # buffered line before the archive snapshots console.log.
+    exec >/dev/null 2>&1
+    if [ -n "${CONSOLE_TEE_PID:-}" ]; then
+        wait "${CONSOLE_TEE_PID}" 2>/dev/null || true
+    fi
     create_runtime_archive || true
 }
 
 trap 'codify_finalize_on_exit "$?"' EXIT
 touch "${CONSOLE_LOG}"
-codify_chown "${CONSOLE_LOG}"
+chown 0:0 "${CONSOLE_LOG}"
+chmod 644 "${CONSOLE_LOG}"
 
 # Persist the same human-readable console stream that Docker exposes while the
 # task is running. TaskRawLogChunk tails this file after completion.
@@ -220,6 +252,7 @@ CONSOLE_TEE_DIR=$(mktemp -d)
 CONSOLE_TEE_PIPE="${CONSOLE_TEE_DIR}/console.pipe"
 mkfifo "${CONSOLE_TEE_PIPE}"
 tee -a "${CONSOLE_LOG}" < "${CONSOLE_TEE_PIPE}" &
+CONSOLE_TEE_PID=$!
 exec > "${CONSOLE_TEE_PIPE}" 2>&1
 rm -f "${CONSOLE_TEE_PIPE}"
 rmdir "${CONSOLE_TEE_DIR}" 2>/dev/null || true

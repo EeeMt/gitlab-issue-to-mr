@@ -9,6 +9,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -41,9 +42,32 @@ from app.models import Issue, Task, TaskStatus
 @pytest.fixture(autouse=True)
 def _worker_test_dependencies():
     """Keep worker settings and sleep patches scoped to this test module."""
+    bundle = SimpleNamespace(
+        id=1,
+        digest="d" * 64,
+        contract_version="codify.worker.harness/v1",
+        manifest={
+            "archive_manifest_digest": "m" * 64,
+            "adapters": {"claude": {"version": "1.0.0", "digest": "a" * 64}},
+        },
+        bundle_bytes=b"runtime-bundle",
+    )
+    attempt = SimpleNamespace(
+        attempt_id="task-attempt-1",
+        harness_key="claude",
+        adapter_version="1.0.0",
+    )
     with (
         patch('asyncio.sleep', new_callable=AsyncMock),
         patch('app.core.worker.get_settings', return_value=mock_settings),
+        patch(
+            "app.core.worker_task_lifecycle.load_bound_runtime_bundle",
+            new=AsyncMock(return_value=bundle),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.create_task_attempt",
+            new=AsyncMock(return_value=attempt),
+        ),
     ):
         yield
 

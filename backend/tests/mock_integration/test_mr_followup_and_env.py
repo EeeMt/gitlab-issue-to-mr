@@ -136,10 +136,15 @@ class TestContainerEnvironment:
             timeout=120,
         )
 
-        # Check the task/issue have expected fields
+        # A successful entrypoint proves its required `${VAR:?}` environment
+        # gate passed. The durable container reference is intentionally cleared
+        # after logs and runtime artifacts have been finalized.
+        assert task["status"] == "completed", task.get("error_message")
         assert task.get("project_id") == 1
         assert task["issue"]["branch_name"] is not None
-        assert task.get("container_id") is not None
+        assert task.get("worker_profile_id") is not None
+        assert task.get("worker_image") is not None
+        assert task.get("container_id") is None
 
     @pytest.mark.asyncio
     async def test_task_records_model_name(

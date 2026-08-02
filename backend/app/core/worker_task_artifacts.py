@@ -246,11 +246,22 @@ async def flush_task_artifacts(
 ) -> None:
     """Flush event, archive, and archive-derived log artifacts once."""
     async with session_factory() as artifact_db:
-        await worker._tail_event_jsonl(
-            task_id=task.id,
-            container=container,
-            db=artifact_db,
-        )
+        try:
+            await worker._tail_event_jsonl(
+                task_id=task.id,
+                container=container,
+                db=artifact_db,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # Docker rejects exec calls after a container has stopped. The
+            # stopped container can still serve get_archive, so preserve that
+            # authoritative fallback and replay event.jsonl from it below.
+            logger.warning(
+                "[Task %s] Could not tail final canonical events; "
+                "continuing with runtime archive: %s",
+                task.id,
+                exc,
+            )
         await worker._finalize_archive(
             task_id=task.id,
             container=container,

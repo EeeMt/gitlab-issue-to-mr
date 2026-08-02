@@ -22,6 +22,10 @@ def upgrade() -> None:
     # Add new status values to enum
     op.execute("ALTER TYPE taskstatus ADD VALUE IF NOT EXISTS 'queued'")
     op.execute("ALTER TYPE taskstatus ADD VALUE IF NOT EXISTS 'cancelled'")
+    # PostgreSQL forbids using a newly added enum label until the transaction
+    # that added it commits. Alembic otherwise wraps a fresh-db upgrade through
+    # head in one transaction, and later migrations query both labels.
+    op.execute("COMMIT")
 
     # Add new columns to tasks table
     op.add_column(

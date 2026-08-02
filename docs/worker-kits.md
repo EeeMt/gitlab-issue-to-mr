@@ -44,7 +44,7 @@ Mermaid npm bundle, or ci-claude script.
 On a connected build machine:
 
 ```bash
-make worker-kit-export WORKER_KIT_VERSION=0.3.6 WORKER_KIT_PLATFORM=linux/amd64
+make worker-kit-export WORKER_KIT_VERSION=0.3.9 WORKER_KIT_PLATFORM=linux/amd64
 ```
 
 This creates an archive and checksum under `deploy/offline-bundle/kits/`. Kit versions are
@@ -74,10 +74,35 @@ it, while continuing to reject deletion of a remote branch previously observed b
 
 Runtime verification for Worker Kit `0.3.5` and newer checks the Claude executable mounted into
 the actual project image and fails when its version is older than `2.1.33`.
-Existing mounted-kit profiles remain pinned to their configured path: install `0.3.6`
+Version `0.3.7` adds Runtime Bundle contract/event compatibility metadata. Version `0.3.8`
+adds the complete executable Adapter v1 operation gate, capability-driven CodeGraph/run-text
+degradation, normalized failure propagation, and raw-Harness preservation in fallback archives.
+Version `0.3.9` removes the remaining Claude-specific prompt, result, system-prompt, and session
+preparation from the common task environment and keeps it behind the Claude Adapter boundary.
+The actual Claude
+Adapter version and digest come only from each Task's immutable Runtime Bundle manifest; the Kit
+does not carry or declare a current Adapter. Existing mounted-kit profiles remain pinned to their
+configured path: install `0.3.9`
 on every eligible Docker host, verify it,
 and then update the profile version and path. Merely deploying the Backend does not replace an
 already installed kit.
+
+## Phase 1 release boundary
+
+The Phase 1 release is a coordinated hard cutover:
+
+1. Stop scheduling and close every Issue created before the release. Its existing Tasks remain
+   readable but cannot execute or retry because they have no immutable Runtime Bundle.
+2. Install and verify Worker Kit `0.3.9` on every Docker Engine host eligible for scheduling.
+3. Update every enabled Worker Profile to the immutable `0.3.9` version and absolute path. A host
+   or profile left on an older Kit must remain disabled.
+4. Deploy Backend/Scheduler and run the migration before accepting new Issues or Tasks, then
+   resume scheduling.
+
+Task execution without a Runtime Bundle manifest fails before orchestration starts. Neither the
+Backend nor the Kit launcher backfills historical Tasks or falls back to Kit-local task scripts.
+The Kit-local entrypoint remains available only to the `--verify` installation preflight.
+
 The nixpkgs source is locked by revision and Nix content hash in
 `deploy/worker-kit/nixpkgs.json`; builds do not follow a mutable Nix channel. Update both values
 deliberately when upgrading nixpkgs, then publish a new worker-kit version. The manifest records
@@ -133,13 +158,13 @@ can execute mounted-kit profiles:
 
 ```bash
 sudo ./scripts/install-worker-kit.sh \
-  kits/codify-worker-kit-0.3.6-linux-amd64.tar.gz
+  kits/codify-worker-kit-0.3.9-linux-amd64.tar.gz
 ```
 
 The default installation path is:
 
 ```text
-/opt/codify/worker-kits/0.3.6-linux-amd64
+/opt/codify/worker-kits/0.3.9-linux-amd64
 ```
 
 For remote Docker targets, this is a path on the Docker Engine host, not on the Backend or
@@ -157,7 +182,7 @@ Verify the kit and one project runtime image before creating a profile:
 
 ```bash
 ./scripts/verify-worker-runtime.sh \
-  --kit /opt/codify/worker-kits/0.3.6-linux-amd64 \
+  --kit /opt/codify/worker-kits/0.3.9-linux-amd64 \
   --claude-host-path /opt/codify/overrides/claude-2.1.200 \
   --image team/java21-maven:2026.07 \
   --smoke 'java -version && mvn -version'
@@ -190,8 +215,8 @@ No UI is required. Create or update a Worker Profile through the existing admin 
   "name": "Java 21 and Maven",
   "image": "codify-worker/java21-maven:2026.07",
   "runtime_mode": "mounted_kit",
-  "worker_kit_version": "0.3.6",
-  "worker_kit_path": "/opt/codify/worker-kits/0.3.6-linux-amd64",
+  "worker_kit_version": "0.3.9",
+  "worker_kit_path": "/opt/codify/worker-kits/0.3.9-linux-amd64",
   "codegraph_enabled": true,
   "volume_mounts": [
     {

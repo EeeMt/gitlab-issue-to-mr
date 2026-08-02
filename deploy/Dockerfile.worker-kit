@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 ARG NIX_IMAGE=nixos/nix:2.24.11
-ARG WORKER_KIT_VERSION=0.3.6
+ARG WORKER_KIT_VERSION=0.3.9
 
 FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS launcher-builder
 ARG TARGETOS
@@ -32,7 +32,7 @@ RUN nix-build default.nix -o /tmp/codify-worker-kit-runtime \
     && cp -a --parents $(nix-store -qR /tmp/codify-worker-kit-runtime) /out
 
 FROM alpine:3.21 AS artifact
-ARG WORKER_KIT_VERSION=0.3.6
+ARG WORKER_KIT_VERSION=0.3.9
 ARG TARGETARCH
 RUN apk add --no-cache jq
 COPY --from=launcher-builder /out/launcher /worker-kit/launcher
@@ -43,7 +43,6 @@ COPY --from=closure-builder /tmp/nixpkgs-version /tmp/nixpkgs-version
 COPY --from=closure-builder /tmp/nixpkgs-revision /tmp/nixpkgs-revision
 COPY deploy/entrypoint.worker.sh /worker-kit/entrypoint.sh
 COPY deploy/worker-entrypoint/ /worker-kit/worker-entrypoint/
-COPY deploy/ci-claude.sh /worker-kit/ci-claude.sh
 COPY deploy/scripts/validate_mermaid_summary.mjs /worker-kit/validate_mermaid_summary.mjs
 RUN runtime_store="$(cat /tmp/runtime-store-path)" \
     && nixpkgs_version="$(cat /tmp/nixpkgs-version)" \
@@ -55,9 +54,11 @@ RUN runtime_store="$(cat /tmp/runtime-store-path)" \
       --arg bash "${runtime_store}/bin/bash" \
       --arg nixpkgs_version "${nixpkgs_version}" \
       --arg nixpkgs_revision "${nixpkgs_revision}" \
-      '{schema_version: 1, kit_version: $version, platform: $platform, runtime_bin: $runtime_bin, bash: $bash, entrypoint: "/opt/codify-kit/entrypoint.sh", components: {nixpkgs: $nixpkgs_version, nixpkgs_revision: $nixpkgs_revision}}' \
+      '{schema_version: 2, kit_version: $version, platform: $platform, runtime_bin: $runtime_bin, bash: $bash, entrypoint: "/opt/codify-kit/entrypoint.sh", runtime_compatibility: {harness_contracts:["codify.worker.harness/v1"], event_schemas:["codify.worker.event/v1"], bootstrap_version:"1.0.0"}, cli_runtimes:{claude:{minimum_version:"2.1.33"}}, components: {nixpkgs: $nixpkgs_version, nixpkgs_revision: $nixpkgs_revision}}' \
       > /worker-kit/manifest.json \
-    && chmod 755 /worker-kit/launcher /worker-kit/bin/* /worker-kit/entrypoint.sh /worker-kit/ci-claude.sh \
+    && rm -rf /worker-kit/worker-entrypoint/harness/adapters \
+      /worker-kit/worker-entrypoint/harness/manifest.json \
+    && chmod 755 /worker-kit/launcher /worker-kit/bin/* /worker-kit/entrypoint.sh \
     && test -d /worker-kit/nix/store \
     && test -s /worker-kit/manifest.json
 

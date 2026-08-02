@@ -20,6 +20,9 @@
 #   APPEND_SYSTEM_PROMPT_FILE
 #                          Read extra system instructions from a file
 #   CODIFY_TASK_SKILLS_DIR Task-local directory containing .claude/skills
+#   CODIFY_CLAUDE_RUN_AS   Optional absolute privilege-drop launcher. When set,
+#                          only the Claude CLI subprocess runs through it; the
+#                          CI runner retains ownership of audit artifacts.
 #   RESUME_SESSION         Session ID to resume a specific conversation
 #   CONTINUE_SESSION       "1" → --continue the most recent conversation
 #   CLAUDE_MAX_TURNS       Max agent turns (default: unlimited)
@@ -39,6 +42,21 @@ EVENT_JSONL="${ARTIFACT_DIR}/event.jsonl"
 RUNTIME_JSON="${ARTIFACT_DIR}/runtime.json"
 CONSOLE_LOG="${ARTIFACT_DIR}/console.log"
 touch "$EVENT_JSONL" "$CONSOLE_LOG"
+
+record_stream_event() {
+  local raw_line="$1"
+  if [[ -n "${CODIFY_CLAUDE_EVENT_TRANSLATOR:-}" ]]; then
+    [[ -n "${CODIFY_CLAUDE_RAW_EVENT_JSONL:-}" ]] || {
+      printf "CODIFY_CLAUDE_RAW_EVENT_JSONL is required with the Claude translator\n" >&2
+      return 1
+    }
+    printf '%s\n' "$raw_line" | \
+      python3 "${CODIFY_CLAUDE_EVENT_TRANSLATOR}" --raw-file "${CODIFY_CLAUDE_RAW_EVENT_JSONL}"
+  else
+    # Legacy direct invocation remains useful for focused compatibility tests.
+    printf '%s\n' "$raw_line" >> "$EVENT_JSONL"
+  fi
+}
 if [[ "${CI_CLAUDE_DISABLE_CONSOLE_TEE:-0}" != "1" ]]; then
   # Tee all stderr to console.log while preserving the caller's stderr.
   # Use a FIFO instead of process substitution so this works in restricted
@@ -103,7 +121,21 @@ CLAUDE_CODE_EXIT_AFTER_STOP_DELAY="${CLAUDE_CODE_EXIT_AFTER_STOP_DELAY:-5000}"
 RESULT_EXIT_GRACE_SECONDS="${CI_CLAUDE_RESULT_EXIT_GRACE_SECONDS:-30}"
 TASK_SKILLS_DIR="${CODIFY_TASK_SKILLS_DIR:-}"
 CLAUDE_BIN="${CODIFY_CLAUDE_BIN:-/usr/local/bin/claude}"
+CLAUDE_RUN_AS="${CODIFY_CLAUDE_RUN_AS:-}"
 SESSION_ID_FILE=".claude_session_id"
+
+CLAUDE_COMMAND=("$CLAUDE_BIN")
+if [[ -n "$CLAUDE_RUN_AS" ]]; then
+  if [[ "$CLAUDE_RUN_AS" != /* || ! -x "$CLAUDE_RUN_AS" ]]; then
+    printf "CODIFY_CLAUDE_RUN_AS must be an executable absolute path: %s\n" \
+      "$CLAUDE_RUN_AS" >&2
+    exit 1
+  fi
+  CLAUDE_COMMAND=(
+    env HOME=/home/codify USER=codify LOGNAME=codify
+    "$CLAUDE_RUN_AS" -- "$CLAUDE_BIN"
+  )
+fi
 
 if ! [[ "$CLAUDE_CODE_EXIT_AFTER_STOP_DELAY" =~ ^[0-9]+$ ]] \
   || [[ "$CLAUDE_CODE_EXIT_AFTER_STOP_DELAY" == "0" ]]; then
@@ -129,7 +161,7 @@ if [[ -n "$TASK_SKILLS_DIR" ]]; then
       "$TASK_SKILLS_DIR" >&2
     exit 1
   fi
-  if ! CLAUDE_VERSION_OUTPUT=$("$CLAUDE_BIN" --version 2>&1); then
+  if ! CLAUDE_VERSION_OUTPUT=$("${CLAUDE_COMMAND[@]}" --version 2>&1); then
     printf "Could not determine Claude Code version required for task skills: %s\n" \
       "$CLAUDE_VERSION_OUTPUT" >&2
     exit 1
@@ -165,6 +197,7 @@ fi
 # ── Build claude args ─────────────────────────────────────────────────────────
 CLAUDE_ARGS=(
   -p
+  --bare
   --output-format stream-json
   --verbose
 )
@@ -294,8 +327,9 @@ trap cleanup EXIT
 
 TOOL_CALLS_FILE="$WORK_DIR/tool_calls.jsonl"   # one JSON object per line
 RESULT_FILE="$WORK_DIR/result.json"
+CLI_STDERR_FILE="$WORK_DIR/cli_stderr.log"     # plain-text CLI output (non-JSON lines)
 RESULT_SIGNAL_FIFO="$WORK_DIR/final-result.signal"
-touch "$TOOL_CALLS_FILE" "$RESULT_FILE"
+touch "$TOOL_CALLS_FILE" "$RESULT_FILE" "$CLI_STDERR_FILE"
 mkfifo "$RESULT_SIGNAL_FIFO"
 
 # ── Stream processor ──────────────────────────────────────────────────────────
@@ -315,18 +349,21 @@ process_stream() {
     [[ -z "$line" ]] && continue
     event_count=$((event_count + 1))
 
-    # Mirror every raw stream-json line verbatim to event.jsonl
-    printf '%s\n' "$line" >> "$EVENT_JSONL"
+    # The Adapter sanitizes and archives raw output, then emits Canonical Events.
+    # Direct compatibility invocations keep the legacy event.jsonl behavior.
+    record_stream_event "$line"
 
     local type
     type=$(printf '%s' "$line" | jq -r '.type // empty' 2>/dev/null) || {
       # Non-JSON line (e.g. plain-text error from CLI) — pass through to stderr
       _e "%s\n" "$line"
+      printf '%s\n' "$line" >> "$CLI_STDERR_FILE"
       continue
     }
     if [[ -z "$type" ]]; then
       # JSON but no .type field — pass through to stderr
       _e "%s\n" "$line"
+      printf '%s\n' "$line" >> "$CLI_STDERR_FILE"
       continue
     fi
     case "$type" in
@@ -685,7 +722,7 @@ run_claude_stream() {
   # Job control gives this background command its own process group without a
   # platform-specific setsid dependency. Descendants inherit the group.
   set -m
-  "$CLAUDE_BIN" "$@" \
+  "${CLAUDE_COMMAND[@]}" "$@" \
     < "$prompt_input" > "$stream_fifo" 2>&1 &
   claude_pid=$!
   set +m
@@ -758,7 +795,16 @@ if [[ -n "$RESUME" && ! -s "$RESULT_FILE" ]]; then
   # Reset temp files
   : > "$TOOL_CALLS_FILE"
   : > "$RESULT_FILE"
-  : > "$EVENT_JSONL"
+  if [[ -n "${CODIFY_CLAUDE_EVENT_TRANSLATOR:-}" ]]; then
+    # Keep the single canonical attempt intact. Phase 1 intentionally preserves
+    # Claude's legacy fresh-session fallback, but makes it auditable instead of
+    # erasing the first run's evidence.
+    python3 "${CODIFY_CANONICAL_EVENT_WRITER:?}" diagnostic \
+      --payload '{"code":"resume_fallback","message":"Invalid resume retried as a fresh Claude session"}' \
+      >/dev/null
+  else
+    : > "$EVENT_JSONL"
+  fi
   jq '.resume_session = ""' "$RUNTIME_JSON" > "${RUNTIME_JSON}.tmp" && mv "${RUNTIME_JSON}.tmp" "$RUNTIME_JSON"
   if ! run_claude_stream "${NEW_ARGS[@]}"; then
     :
@@ -767,7 +813,20 @@ fi
 
 # ── Build and emit structured JSON to stdout ──────────────────────────────────
 if [[ ! -s "$RESULT_FILE" ]]; then
-  jq -n '{success:false, subtype:"no_result", result:"", session_id:"", usage:{}, tool_calls:[]}'
+  # The CLI aborted before emitting a result event (e.g. a permission guard or
+  # invalid invocation). Surface the last plain-text stderr lines so the real
+  # failure reason is not lost behind a generic protocol_error.
+  cli_error=""
+  if [[ -s "$CLI_STDERR_FILE" ]]; then
+    cli_error=$(tail -n 25 "$CLI_STDERR_FILE")
+    cli_error="${cli_error:0:2000}"
+  fi
+  if [[ -n "$cli_error" ]]; then
+    jq -n --arg error "$cli_error" \
+      '{success:false, subtype:"cli_error", result:$error, session_id:"", usage:{}, tool_calls:[]}'
+  else
+    jq -n '{success:false, subtype:"no_result", result:"", session_id:"", usage:{}, tool_calls:[]}'
+  fi
   exit 1
 fi
 

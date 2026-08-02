@@ -10,6 +10,8 @@ def test_artifact_paths_returns_expected_runtime_files():
     paths = artifact_paths("/tmp/task-run")
 
     assert paths.event_jsonl == "/tmp/task-run/event.jsonl"
+    assert paths.harness_events_dir == "/tmp/task-run/harness-events"
+    assert paths.harness_result_json == "/tmp/task-run/harness-result.json"
     assert paths.runtime_json == "/tmp/task-run/runtime.json"
     assert paths.console_log == "/tmp/task-run/console.log"
 

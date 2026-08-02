@@ -34,6 +34,7 @@ COPY_CHUNK_BYTES = 1024 * 1024
 
 BASE_ARCHIVE_FILES = (
     "event.jsonl",
+    "harness-result.json",
     "runtime.json",
     "console.log",
     "delivery-summary.md",
@@ -570,6 +571,18 @@ def _add_base_files(archive: tarfile.TarFile) -> None:
             continue
         if stat.S_ISREG(info.st_mode):
             archive.add(path, arcname=name, recursive=False)
+    raw_dir = RUNTIME_DIR / "harness-events"
+    try:
+        raw_state = raw_dir.stat(follow_symlinks=False)
+    except FileNotFoundError:
+        return
+    if not stat.S_ISDIR(raw_state.st_mode):
+        raise ArtifactError("invalid_raw_events", "Harness raw event root is not a real directory")
+    for path in sorted(raw_dir.iterdir(), key=lambda item: item.name):
+        info = path.stat(follow_symlinks=False)
+        if not stat.S_ISREG(info.st_mode):
+            raise ArtifactError("invalid_raw_events", "Harness raw event entries must be regular files")
+        archive.add(path, arcname=f"harness-events/{path.name}", recursive=False)
 
 
 def _build_archive(archive_path: Path, sealed: Path | None) -> None:

@@ -81,6 +81,7 @@ async def test_create_task_uses_issue_pinned_worker_and_default_provider():
         ),
         patch("app.api.tasks.resolve_provider_for_issue", new=AsyncMock(return_value=provider)),
         patch("app.api.tasks.replace_task_worker_snapshot", new=AsyncMock(return_value=worker_profile)),
+        patch("app.api.tasks.bind_runtime_bundle", new=AsyncMock(return_value=MagicMock(id=1))),
         patch("app.api.tasks.select_snapshot_run_instruction_template", return_value="Execute {{user_prompt}}"),
         patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
         patch(

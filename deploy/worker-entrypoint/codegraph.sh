@@ -70,6 +70,14 @@ prepare_codegraph() {
         return 0
     fi
 
+    if ! declare -F codify_harness_capability_enabled >/dev/null 2>&1 \
+        || ! codify_harness_capability_enabled "codegraph"; then
+        echo "Warning: CodeGraph requested by the Worker Profile but unsupported " \
+            "by the frozen Harness Adapter; continuing without CodeGraph"
+        disable_codegraph
+        return 0
+    fi
+
     echo "CodeGraph enabled for this worker profile"
     configure_codegraph
 

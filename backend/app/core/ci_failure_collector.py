@@ -28,6 +28,7 @@ from app.core.worker_profiles import (
     resolve_worker_profile_for_issue,
     select_snapshot_run_instruction_template,
 )
+from app.core.worker_runtime_bundle import bind_runtime_bundle
 from app.core.worker_workspace import configured_workspace_root
 from app.database import AsyncSessionLocal
 from app.models import (
@@ -676,6 +677,7 @@ async def process_ci_failure_run(
             select_template=select_snapshot_run_instruction_template,
             render_prompt=render_and_store_task_prompt,
         )
+        await bind_runtime_bundle(db, repair_task)
         run.repair_task_id = repair_task.id
         run.status = "task_created"
         await append_ci_failure_log(

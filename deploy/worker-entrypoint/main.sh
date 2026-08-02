@@ -1,23 +1,19 @@
 # Execute Claude, validate delivery, commit/push changes, and persist metadata.
 
+# Freeze and validate the Adapter/capability view before any Harness-specific
+# optional tooling is prepared. codify_harness_run reuses this initialization.
+if ! codify_harness_initialize; then
+    set +e
+    codify_harness_run "${CODIFY_HARNESS_PROMPT_FILE}" "${CODIFY_HARNESS_OUTPUT_FILE}"
+    HARNESS_INITIALIZATION_RESULT=$?
+    set -e
+    exit "${HARNESS_INITIALIZATION_RESULT}"
+fi
+
 write_existing_commit_delivery_metadata() {
     COMMIT_SHA=$(codify_run_shell 'cd /workspace && git rev-parse HEAD')
     FINAL_COMMIT_MESSAGE=$(codify_run_shell 'cd /workspace && git log -1 --pretty=%B')
     echo "Delivered existing local commit: ${COMMIT_SHA}"
-
-    local finalization_event
-    finalization_event=$(jq -nc \
-        --arg commit_sha "${COMMIT_SHA}" \
-        --arg commit_message "${FINAL_COMMIT_MESSAGE}" \
-        '{
-            type:"codify_worker",
-            subtype:"finalization",
-            commit_sha:$commit_sha,
-            diff:{additions:0,deletions:0,total:0},
-            commit_message:$commit_message,
-            reused_local_commit:true
-        }')
-    append_runtime_event "${finalization_event}"
 
     local summary_truncated task_metadata
     summary_truncated="${FINAL_SUMMARY_CONTENT:0:3000}"
@@ -53,25 +49,23 @@ run_worker_script "pre" "${CODIFY_WORKER_PRE_SCRIPT_FILE}"
 prepare_codegraph
 
 echo "CodeGraph CLI version: $(codegraph --version 2>/dev/null || echo unavailable)"
-echo "Claude CLI version: $("${CODIFY_CLAUDE_BIN}" --version)"
+echo "Harness: ${CODIFY_HARNESS_KEY:-claude}"
 echo "Updating MR with execution status..."
 update_mr_description "$(build_running_mr_description)" || true
 
-echo "Starting Claude CLI (streaming mode)..."
+echo "Starting Harness Adapter (streaming mode)..."
 set +e
-codify_run_shell \
-    'cd /workspace && export PATH="${CODIFY_RUNTIME_PATH}" && ARTIFACT_DIR="${CODIFY_RUNTIME_DIR}" CI_CLAUDE_DISABLE_CONSOLE_TEE=1 PROMPT_FILE=/tmp/claude_prompt.txt timeout "${TASK_TIMEOUT:-1800}" "${CODIFY_CI_CLAUDE}"' \
-    > /tmp/claude_result.json
+codify_harness_run "${CODIFY_HARNESS_PROMPT_FILE}" "${CODIFY_HARNESS_OUTPUT_FILE}"
 SCRIPT_RESULT=$?
 set -e
-echo "Claude CLI exited with code: ${SCRIPT_RESULT}"
+echo "Harness exited with code: ${SCRIPT_RESULT}"
 
 RESULT=${SCRIPT_RESULT}
 
 # Always emit structured tool calls if the JSON file exists, even on failure.
 # This lets the frontend show a timeline of what was attempted before the failure.
-if [ -f /tmp/claude_result.json ] && [ -s /tmp/claude_result.json ]; then
-    SUMMARY_CONTENT=$(jq -r '.result // ""' /tmp/claude_result.json 2>/dev/null || true)
+if [ -f "${CODIFY_HARNESS_OUTPUT_FILE}" ] && [ -s "${CODIFY_HARNESS_OUTPUT_FILE}" ]; then
+    SUMMARY_CONTENT=$(jq -r '.result // ""' "${CODIFY_HARNESS_OUTPUT_FILE}" 2>/dev/null || true)
     if [ ${#SUMMARY_CONTENT} -gt 45000 ]; then
         SUMMARY_CONTENT="${SUMMARY_CONTENT:0:45000}
 
@@ -82,10 +76,11 @@ if [ -f /tmp/claude_result.json ] && [ -s /tmp/claude_result.json ]; then
 fi
 
 if [ $RESULT -ne 0 ]; then
-    echo "Claude execution failed with exit code: ${RESULT}"
-    create_runtime_archive
+    echo "Harness execution failed with exit code: ${RESULT}"
     exit $RESULT
 fi
+
+codify_harness_mark_delivery_started
 
 run_worker_script "post" "${CODIFY_WORKER_POST_SCRIPT_FILE}"
 
@@ -98,7 +93,6 @@ if [ "${TASK_MODE}" = "plan" ]; then
     codify_run_shell 'cd /workspace && git checkout -- .' 2>/dev/null || true
     codify_run_shell 'cd /workspace && git clean -fd' 2>/dev/null || true
     write_plan_task_metadata "${FINAL_SUMMARY_CONTENT}"
-    create_runtime_archive
     echo "========================================"
     echo "Plan task completed successfully!"
     echo "========================================"
@@ -195,7 +189,7 @@ if [ -n "$CHANGES" ]; then
     echo "Commit message prompt written to /tmp/commit_message_prompt.txt"
 
     set +e
-    GENERATED_COMMIT_MESSAGE=$(codify_run_shell 'cd /workspace && timeout 60 "${CODIFY_CLAUDE_BIN}" -p --dangerously-skip-permissions --no-session-persistence --output-format text --max-turns 3 --model "${ANTHROPIC_MODEL}" < /tmp/commit_message_prompt.txt' 2>/dev/null)
+    GENERATED_COMMIT_MESSAGE=$(codify_harness_run_text /tmp/commit_message_prompt.txt 60 2>/dev/null)
     COMMIT_MESSAGE_RESULT=$?
     set -e
 
@@ -239,7 +233,7 @@ AI-Generated: true"
     echo "Overall summary prompt written to /tmp/overall_summary_prompt.txt (${#OVERALL_SUMMARY_PROMPT} chars)"
 
     set +e
-    GENERATED_OVERALL_SUMMARY=$(codify_run_shell 'cd /workspace && timeout 60 "${CODIFY_CLAUDE_BIN}" -p --dangerously-skip-permissions --no-session-persistence --output-format text --max-turns 3 --model "${ANTHROPIC_MODEL}" < /tmp/overall_summary_prompt.txt' 2>/dev/null)
+    GENERATED_OVERALL_SUMMARY=$(codify_harness_run_text /tmp/overall_summary_prompt.txt 60 2>/dev/null)
     OVERALL_SUMMARY_RESULT=$?
     set -e
 
@@ -312,21 +306,6 @@ AI-Generated: true"
         echo "MR IID: ${MR_IID}"
     fi
 
-    FINALIZATION_EVENT=$(jq -nc \
-        --arg commit_sha "${COMMIT_SHA:-}" \
-        --argjson additions "${ADDITIONS:-0}" \
-        --argjson deletions "${DELETIONS:-0}" \
-        --argjson total "${TOTAL_CHANGES:-0}" \
-        --arg commit_message "${FINAL_COMMIT_MESSAGE:-}" \
-        '{
-            type:"codify_worker",
-            subtype:"finalization",
-            commit_sha:$commit_sha,
-            diff:{additions:$additions,deletions:$deletions,total:$total},
-            commit_message:$commit_message
-        }')
-    append_runtime_event "${FINALIZATION_EVENT}"
-
     # Write per-task metadata for MR description aggregation across tasks.
     # FINAL_SUMMARY_CONTENT is Claude's execution narrative (truncated to 3000 chars).
     SUMMARY_TRUNCATED="${FINAL_SUMMARY_CONTENT:0:3000}"
@@ -360,8 +339,6 @@ AI-Generated: true"
     printf '%s\n' "${TASK_METADATA}" > "${CODIFY_RUNTIME_DIR}/task-metadata.json"
     echo "Task metadata written to ${CODIFY_RUNTIME_DIR}/task-metadata.json (overall_summary_chars=${#FINAL_OVERALL_SUMMARY})"
 
-    create_runtime_archive
-
     echo "========================================"
     echo "Task completed successfully!"
     echo "========================================"
@@ -370,20 +347,17 @@ elif repo_has_unpublished_local_head; then
     repo_log "delivery work_branch=${BRANCH_NAME} relation=${REPO_WORK_BRANCH_RELATION} action=push_existing_head"
     repo_push_work_branch_with_lease
     write_existing_commit_delivery_metadata
-    create_runtime_archive
     echo "========================================"
     echo "Task completed successfully!"
     echo "========================================"
 else
-    echo "No changes made by Claude CLI"
+    echo "No changes made by Harness"
     if [ "${REQUIRE_CHANGES:-true}" = "false" ]; then
         echo "require_changes disabled: task completed without code changes"
-        create_runtime_archive
         echo "========================================"
         echo "Task completed successfully!"
         echo "========================================"
         exit 0
     fi
-    create_runtime_archive
     exit 1
 fi
