@@ -15,6 +15,8 @@ UI Mode、Xvfb、VNC 或 noVNC；只有手工执行 `playwright-ui` 或
 
 - Node.js 24
 - `@playwright/test` 1.62.0
+- TypeScript/前端工具链：typescript、ts-node、tsx、eslint + @typescript-eslint、
+  prettier、@types/node
 - Chromium、Firefox、WebKit 及其系统依赖
 - 中文、Emoji 和常用西文字体
 - Xvfb、Fluxbox、x11vnc、noVNC、websockify、xterm
@@ -25,11 +27,12 @@ UI Mode、Xvfb、VNC 或 noVNC；只有手工执行 `playwright-ui` 或
 
 - Codify Worker Kit。Codify 运行时通过只读挂载提供。
 - Claude CLI。需要由 Worker Profile 挂载，或在派生镜像中提供。
-- 测试项目自身的任意 npm 依赖。
+- 测试项目除镜像预装之外的任意 npm 依赖。
 - Codify ENTRYPOINT。Codify 会使用 mounted Worker Kit 的 launcher 覆盖入口。
 
-镜像内 Playwright 包和浏览器固定为 `1.62.0`。测试项目不要安装其他版本的
-Playwright，否则项目本地 `node_modules` 可能覆盖镜像版本，并找不到匹配的浏览器。
+镜像内 Playwright 包和浏览器固定为 `1.62.0`；TypeScript/前端工具链版本同样固定并
+锁进 lock 文件。测试项目不要安装其他版本的 Playwright，否则项目本地 `node_modules`
+可能覆盖镜像版本，并找不到匹配的浏览器。
 
 ## 2. 构建镜像
 
@@ -468,13 +471,19 @@ Kit；只在 Codify 应用主机加载是不够的。
 
 ## 10. 项目依赖和目录权限
 
-镜像只保证提供 Playwright 1.62.0。项目如果还依赖 Axios、dotenv、数据库客户端或其他
-npm 包，需要满足以下任一条件：
+镜像保证提供 Playwright 1.62.0 和一套固定版本的 TypeScript/前端工具链
+（typescript、ts-node、tsx、eslint + @typescript-eslint、prettier、@types/node），
+可直接执行 `tsc`、`ts-node`、`tsx`、`eslint`、`prettier`。项目如果还依赖
+Axios、dotenv、数据库客户端或其他 npm 包，需要满足以下任一条件：
 
 - 项目依赖已存在于适用于 Linux 的 `node_modules`。
 - 容器能访问内网 npm Registry 并执行 `npm ci`。
 - 通过派生镜像预装项目依赖。
 - 使用已准备好的 Docker volume 保存 Linux 依赖。
+
+预装工具链是兜底基线，不是硬锁定：Node 就近解析优先，项目本地 `node_modules` 会
+覆盖镜像版本。需要其他工具版本时，直接在项目里安装即可；但要避免让本地
+`@playwright/test` 与镜像 1.62.0 不一致。
 
 不要直接复用 macOS 或 Windows 生成的含原生模块 `node_modules`。
 

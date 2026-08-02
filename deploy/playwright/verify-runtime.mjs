@@ -19,6 +19,11 @@ const runtimePaths = [
   ['/usr/share/novnc/vnc.html', constants.R_OK],
   ['/usr/local/bin/playwright-ui', constants.X_OK],
   ['/usr/local/bin/playwright-desktop', constants.X_OK],
+  ['/node_modules/.bin/tsc', constants.X_OK],
+  ['/node_modules/.bin/ts-node', constants.X_OK],
+  ['/node_modules/.bin/tsx', constants.X_OK],
+  ['/node_modules/.bin/eslint', constants.X_OK],
+  ['/node_modules/.bin/prettier', constants.X_OK],
 ];
 
 if (!expectedVersion) {
@@ -60,4 +65,5 @@ for (const [name, browserType] of Object.entries({ chromium, firefox, webkit }))
 }
 
 console.log('Playwright UI and noVNC desktop paths are available');
+console.log('TypeScript / ESLint / Prettier toolchain is available');
 console.log(`Playwright ${packageJson.version} runtime verification passed`);
