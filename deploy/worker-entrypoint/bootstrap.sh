@@ -73,16 +73,7 @@ codify_chown -R "${CODIFY_RUNTIME_DIR}"
 # Keep the fixed runtime path non-replaceable while allowing task-local files
 # to be created. The EXIT helper removes write access before sealing.
 chown 0:0 "${CODIFY_RUNTIME_DIR}"
-# The runtime dir is shared by the root orchestrator and the model identity.
-# A sticky world-writable dir makes the kernel's fs.protected_regular deny
-# cross-uid appends (even for root), which breaks the legacy mixed-identity
-# writer. The Harness keeps the sticky bit: there only root writes the runtime
-# dir (the model identity never does), so the audit stream stays sealed.
-if [ -n "${CODIFY_HARNESS_KEY:-}" ]; then
-    chmod 1777 "${CODIFY_RUNTIME_DIR}"
-else
-    chmod 777 "${CODIFY_RUNTIME_DIR}"
-fi
+chmod 1777 "${CODIFY_RUNTIME_DIR}"
 chmod 755 "${CODIFY_RUNTIME_DIR}/harness-events"
 touch "${CODIFY_RUNTIME_DIR}/event.jsonl" \
     "${CODIFY_RUNTIME_DIR}/harness-events/claude.jsonl" \

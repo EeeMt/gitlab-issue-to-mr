@@ -15,26 +15,8 @@ FINAL_OVERALL_SUMMARY=""
 
 append_runtime_event() {
     local event_json="$1"
-    if [ -z "${event_json}" ] || [ ! -d "${CODIFY_RUNTIME_DIR}" ]; then
-        return 0
-    fi
-    local event_file="${CODIFY_RUNTIME_DIR}/event.jsonl"
-    # The first writer (root orchestrator or the model identity) creates the
-    # shared canonical stream. Make it world-writable so every runtime identity
-    # can append.
-    if [ ! -e "${event_file}" ]; then
-        : > "${event_file}" 2>/dev/null || return 0
-        chmod 666 "${event_file}" 2>/dev/null || true
-    fi
-    # The kernel can deny the open even when mode bits allow it: a sticky
-    # world-writable dir with fs.protected_regular refuses cross-uid appends,
-    # and that check also applies to root. Never fail the caller or print the
-    # shell's redirection error; on a denied append fall back to a per-uid
-    # sidecar the runtime archive still collects.
-    if ! ( printf '%s\n' "${event_json}" >> "${event_file}" ) 2>/dev/null; then
-        printf '%s\n' "${event_json}" \
-            >> "${CODIFY_RUNTIME_DIR}/event.$(id -u 2>/dev/null || printf unknown).jsonl" \
-            2>/dev/null || true
+    if [ -n "${event_json}" ] && [ -d "${CODIFY_RUNTIME_DIR}" ]; then
+        printf '%s\n' "${event_json}" >> "${CODIFY_RUNTIME_DIR}/event.jsonl"
     fi
 }
 
