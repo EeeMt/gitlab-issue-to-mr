@@ -345,10 +345,13 @@ Snapshot 在 Task 创建事务中一次写入并立即冻结，继续保持每�
 
 **Files:** Kit Dockerfile/manifest/export/verify、offline scripts/docs/tests。
 
-- [ ] 发布新的不可变 Kit 版本和 amd64/arm64 制品；Kit manifest 固定 bootstrap、支持的 Runtime Bundle contract/schema 范围和 CLI runtime 约束，Runtime Bundle manifest 固定 Claude/Codex Adapter version/digest、event schema 和 capability。
-      （Dockerfile.worker-kit manifest 已把 `cli_runtimes` 扩展为
+- [x] 发布新的不可变 Kit 版本和 amd64 制品；Kit manifest 固定 bootstrap、支持的 Runtime Bundle
+      contract/schema 范围和 CLI runtime 约束，Runtime Bundle manifest 固定 Claude/Codex Adapter
+      version/digest、event schema 和 capability。
+      （Kit 0.3.10 已 `make worker-kit-export` 构建并安装到远程
+      `/opt/codify/worker-kits/0.3.10-linux-amd64`，manifest `cli_runtimes` 含
       `claude:{source:image,minimum_version:2.1.33}` + `codex:{source:host_mount,minimum_version:0.146.0}`；
-      但新 Kit 版本制品尚未构建发布。）
+      Profile 11 已切到 0.3.10，Task 502 验证新 Kit 完整链路。arm64 制品未构建。）
 - [x] verify-runtime 支持为每个 Harness 指定镜像内路径或只读 host mount，并输出逐 Harness
       source/path/version/binary digest/能力/沙箱结果（backend 通过 launcher per-harness；
       `verify-runtime.sh` 与 `verify-worker-runtime.sh` 支持 `--harness-key`/

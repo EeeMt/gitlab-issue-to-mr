@@ -108,8 +108,10 @@ Backend unit `2240 passed`、前端 `1485 passed`、mock-e2e `371 passed`、vue-
 根因：codex `normalize_result` 误读 `CODIFY_HARNESS_OUTPUT_FILE`（空）而非
 `CODIFY_HARNESS_RESULT_FILE`；delivery 用 `repo_work_branch_ahead_of_base`
 （基线 `REPO_REMOTE_WORK_SHA`）复用 harness 自提交，避免误判历史 commit。Claude 同环境
-回归待 provider 余额恢复后补。2.12 剩余：Kit 0.3.10 已在远程 `/tmp` 待手动安装、
-Claude 回归、resume/跨 Harness/取消/timeout 的 Codex 矩阵。
+回归待 provider 余额恢复后补。2.12 剩余：Kit 0.3.10 已安装到远程
+`/opt/codify/worker-kits/0.3.10-linux-amd64` 且 Profile 11 已切到 0.3.10（Task 502
+completed、commit `0c864dd7` 验证新 Kit 完整链路）、Claude 回归、
+resume/跨 Harness/取消/timeout 的 Codex 矩阵。
 
 **2.8 沙箱决策已定（2026-08-03）：容器边界模式是生产默认。** worker 容器本身就是每任务
 隔离沙箱（独立文件系统/网络/非特权用户/只读仓库挂载），与 Claude harness 一致，容器内
