@@ -243,6 +243,27 @@ def _serialize_provider_rows(rows: list) -> list[dict]:
     return items
 
 
+def _serialize_harness_rows(rows: list) -> list[dict]:
+    items: list[dict] = []
+    for row in rows:
+        finished_count = int(row.finished_tasks or 0)
+        completed_count = int(row.completed_tasks or 0)
+        items.append(
+            {
+                "harness_key": row.harness_key or "claude",
+                "adapter_version": row.adapter_version,
+                "task_count": int(row.task_count or 0),
+                "finished_task_count": finished_count,
+                "completed_task_count": completed_count,
+                "failed_task_count": int(row.failed_tasks or 0),
+                "cancelled_task_count": int(row.cancelled_tasks or 0),
+                "success_rate": safe_ratio(completed_count, finished_count),
+                "avg_execution_seconds": _optional_float(row.avg_execution_seconds),
+            }
+        )
+    return items
+
+
 def _serialize_common_breakdown(row) -> dict:
     completed = int(row.completed_tasks or 0)
     failed = int(row.failed_tasks or 0)
@@ -342,8 +363,10 @@ def build_analytics_response(
     task_status_rows: list,
     error_rows: list,
     provider_rows: list,
+    harness_rows: list,
 ) -> dict:
     provider_items = _serialize_provider_rows(provider_rows)
+    harness_items = _serialize_harness_rows(harness_rows)
     return {
         "window_days": days,
         "generated_at": now.isoformat(),
@@ -375,6 +398,7 @@ def build_analytics_response(
         },
         "providers": provider_items,
         "provider_chart_series": build_provider_chart_series(provider_items),
+        "harnesses": harness_items,
         "trends": _serialize_trends(trend_rows, since=since, days=days),
         "priority_waits": [
             {

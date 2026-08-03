@@ -284,6 +284,8 @@ class AnalyticsQueryStub:
             return MockResult([])
         if self._is_provider_query(sql):
             return MockResult(self.provider_rows)
+        if "task_worker_profile_snapshots.harness_key AS harness_key" in sql:
+            return MockResult([])
 
         raise AssertionError(f"unrecognized analytics query: {sql}")
 
@@ -752,6 +754,8 @@ async def test_get_analytics_provider_query_groups_by_joined_provider_model():
             assert "tasks.input_tokens" not in provider_metric_sql
             assert "EXTRACT(epoch FROM tasks.completed_at - tasks.started_at)" in provider_metric_sql
             return MockResult([])
+        if "task_worker_profile_snapshots.harness_key AS harness_key" in sql:
+            return MockResult([])
 
         raise AssertionError(f"unrecognized analytics query: {sql}")
 
@@ -807,6 +811,8 @@ async def test_get_analytics_queue_wait_excludes_pre_schedule_delay():
         if AnalyticsQueryStub._is_error_query(sql):
             return MockResult([])
         if AnalyticsQueryStub._is_provider_query(sql):
+            return MockResult([])
+        if "task_worker_profile_snapshots.harness_key AS harness_key" in sql:
             return MockResult([])
 
         raise AssertionError(f"unrecognized analytics query: {sql}")

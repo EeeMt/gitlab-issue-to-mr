@@ -231,6 +231,7 @@ async def get_analytics(
     task_status_rows = (await db.execute(queries.task_statuses)).all()
     error_rows = (await db.execute(queries.errors)).all()
     provider_rows = (await db.execute(queries.providers)).all()
+    harness_rows = (await db.execute(queries.harnesses)).all()
 
     return build_analytics_response(
         days=days,
@@ -247,6 +248,7 @@ async def get_analytics(
         task_status_rows=task_status_rows,
         error_rows=error_rows,
         provider_rows=provider_rows,
+        harness_rows=harness_rows,
     )
 
 

@@ -27,4 +27,5 @@ def test_analytics_query_bundle_keeps_all_response_domains_explicit():
         "task_statuses",
         "errors",
         "providers",
+        "harnesses",
     ]
