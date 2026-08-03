@@ -96,6 +96,41 @@ def test_worker_profile_requests_reject_invalid_skill_ids(request_type, request_
         request_type(**request_kwargs)
 
 
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"enabled_harnesses": ["claude", "opencode"], "default_harness_key": "claude"},
+        {"enabled_harnesses": ["claude"], "default_harness_key": "codex"},
+        {"enabled_harnesses": [], "default_harness_key": "claude"},
+        {"harness_constraints": {"privileged": True}},
+        {"harness_runtimes": {"claude": {"source": "docker exec rm -rf"}}},
+        {"harness_runtimes": {"unknown": {"source": "image"}}},
+    ],
+)
+def test_worker_profile_requests_reject_invalid_harness_fields(kwargs):
+    with pytest.raises(ValidationError):
+        WorkerProfileCreateRequest(name="Worker", image="worker:latest", **kwargs)
+
+
+def test_worker_profile_request_accepts_valid_harness_fields():
+    request = WorkerProfileCreateRequest(
+        name="Worker",
+        image="worker:latest",
+        enabled_harnesses=["claude"],
+        default_harness_key="claude",
+        harness_constraints={"max_turns": 20},
+        harness_runtimes={
+            "claude": {
+                "source": "image",
+                "executable_path": "/usr/local/bin/claude",
+            }
+        },
+    )
+    assert request.enabled_harnesses == ["claude"]
+    assert request.default_harness_key == "claude"
+    assert request.harness_constraints == {"max_turns": 20}
+
+
 @pytest.mark.asyncio
 async def test_create_worker_profile_rejects_duplicate_env_keys():
     db = MagicMock()

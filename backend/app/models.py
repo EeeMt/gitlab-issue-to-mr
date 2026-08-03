@@ -162,6 +162,43 @@ class Issue(Base):
         Index("ix_issues_project_status", "project_id", "status"),
     )
 
+    harness_sessions: Mapped[list["IssueHarnessSession"]] = relationship(
+        "IssueHarnessSession",
+        back_populates="issue",
+        cascade="all, delete-orphan",
+    )
+
+
+class IssueHarnessSession(Base):
+    """Per-issue, per-harness, per-namespace session lineage pointer."""
+
+    __tablename__ = "issue_harness_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    issue_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("issues.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    harness_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    session_namespace: Mapped[str] = mapped_column(String(128), nullable=False)
+    session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    lineage_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    session_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "issue_id",
+            "harness_key",
+            "session_namespace",
+            name="uq_issue_harness_session",
+        ),
+    )
+
+    issue: Mapped["Issue"] = relationship("Issue", back_populates="harness_sessions")
+
 
 class AIProvider(Base):
     """Named AI provider configuration."""
@@ -177,6 +214,15 @@ class AIProvider(Base):
     system_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_disabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    provider_kind: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="anthropic_compatible"
+    )
+    wire_protocol: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="anthropic_messages"
+    )
+    provider_driver: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    provider_options: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    credential_ref: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=utcnow
@@ -190,6 +236,31 @@ class AIProvider(Base):
         "Issue",
         back_populates="default_provider",
         foreign_keys="Issue.default_provider_id",
+    )
+
+
+class ModelCredential(Base):
+    """Persistent, independently-rotatable model credential referenced by Task snapshots.
+
+    Task snapshots keep only a stable ``credential_ref``; the secret lives here.
+    Deleting a Provider does not cascade-delete a credential: referenced
+    credentials can only be soft-retired, never hard-deleted.
+    """
+
+    __tablename__ = "model_credentials"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    ref: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
+    secret_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False, default="api_key")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    provider_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    version_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utcnow, onupdate=utcnow
     )
 
 
@@ -643,6 +714,13 @@ class WorkerProfile(Base):
     default_execute_run_instruction_template: Mapped[str] = mapped_column(Text, nullable=False)
     default_plan_run_instruction_template: Mapped[str] = mapped_column(Text, nullable=False)
     ci_auto_repair_run_instruction_template: Mapped[str] = mapped_column(Text, nullable=False)
+    enabled_harnesses: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    default_harness_key: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="claude", server_default=text("'claude'")
+    )
+    harness_constraints: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    image_digest: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    harness_runtimes: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
@@ -860,6 +938,20 @@ class TaskWorkerProfileSnapshot(Base):
     default_execute_run_instruction_template: Mapped[str] = mapped_column(Text, nullable=False)
     default_plan_run_instruction_template: Mapped[str] = mapped_column(Text, nullable=False)
     ci_auto_repair_run_instruction_template: Mapped[str] = mapped_column(Text, nullable=False)
+    harness_key: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    harness_adapter_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    harness_adapter_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    harness_config_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    model_endpoint_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    credential_ref: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    cli_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    cli_executable_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    cli_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    cli_binary_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    image_digest: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    runtime_contract_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    orchestration_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    runtime_bundle_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,

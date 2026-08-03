@@ -351,6 +351,11 @@ def serialize_worker_profile_for_api(
         "ci_auto_repair_run_instruction_template": (
             profile.ci_auto_repair_run_instruction_template
         ),
+        "enabled_harnesses": getattr(profile, "enabled_harnesses", None) or ["claude"],
+        "default_harness_key": getattr(profile, "default_harness_key", None) or "claude",
+        "harness_constraints": getattr(profile, "harness_constraints", None) or {},
+        "image_digest": getattr(profile, "image_digest", None),
+        "harness_runtimes": getattr(profile, "harness_runtimes", None) or {},
         "created_at": profile.created_at,
         "updated_at": profile.updated_at,
     }

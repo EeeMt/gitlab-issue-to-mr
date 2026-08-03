@@ -10,13 +10,19 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field, StrictInt, field_validator
+from pydantic import BaseModel, Field, StrictInt, field_validator, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import get_effective_settings
 from app.core.docker_client import DockerClientWrapper, resolve_docker_connection
+from app.core.harness_registry import (
+    HarnessRegistryError,
+    validate_enabled_harnesses,
+    validate_harness_constraints,
+    validate_harness_runtimes,
+)
 from app.core.skills import (
     SkillValidationError,
     acquire_worker_profile_skill_package_lock,
@@ -91,6 +97,11 @@ class WorkerProfileRequestBase(BaseModel):
     default_execute_run_instruction_template: str | None = None
     default_plan_run_instruction_template: str | None = None
     ci_auto_repair_run_instruction_template: str | None = None
+    enabled_harnesses: list[str] | None = None
+    default_harness_key: str | None = Field(default=None, max_length=32)
+    harness_constraints: dict[str, Any] | None = None
+    image_digest: str | None = Field(default=None, max_length=128)
+    harness_runtimes: dict[str, Any] | None = None
 
     @field_validator("default_skill_ids")
     @classmethod
@@ -101,6 +112,30 @@ class WorkerProfileRequestBase(BaseModel):
             return normalize_skill_ids(value)
         except SkillValidationError as exc:
             raise ValueError(str(exc)) from exc
+
+    @model_validator(mode="after")
+    def validate_harness_fields(self) -> "WorkerProfileRequestBase":
+        enabled = self.enabled_harnesses
+        default_key = self.default_harness_key
+        if enabled is not None or default_key is not None:
+            try:
+                validate_enabled_harnesses(
+                    enabled if enabled is not None else ["claude"],
+                    default_harness_key=default_key or "claude",
+                )
+            except HarnessRegistryError as exc:
+                raise ValueError(str(exc)) from exc
+        if self.harness_constraints is not None:
+            try:
+                validate_harness_constraints(self.harness_constraints)
+            except HarnessRegistryError as exc:
+                raise ValueError(str(exc)) from exc
+        if self.harness_runtimes is not None:
+            try:
+                validate_harness_runtimes(self.harness_runtimes)
+            except HarnessRegistryError as exc:
+                raise ValueError(str(exc)) from exc
+        return self
 
 
 class WorkerProfileCreateRequest(WorkerProfileRequestBase):
@@ -462,6 +497,15 @@ async def create_worker_profile(
             default_execute_run_instruction_template=execute_template,
             default_plan_run_instruction_template=plan_template,
             ci_auto_repair_run_instruction_template=ci_template,
+            enabled_harnesses=(
+                list(request.enabled_harnesses)
+                if request.enabled_harnesses is not None
+                else ["claude"]
+            ),
+            default_harness_key=request.default_harness_key or "claude",
+            harness_constraints=request.harness_constraints or {},
+            image_digest=request.image_digest,
+            harness_runtimes=request.harness_runtimes or {},
             default_skills=[],
         )
         db.add(profile)
@@ -547,6 +591,44 @@ async def update_worker_profile(
             profile.runtime_mode = runtime_mode
             profile.worker_kit_version = kit_version
             profile.worker_kit_path = kit_path
+        harness_fields = {
+            "enabled_harnesses",
+            "default_harness_key",
+            "harness_constraints",
+            "image_digest",
+            "harness_runtimes",
+        }
+        if harness_fields & fields:
+            # Partial updates revalidate the merged view so default_harness_key
+            # can never end up outside enabled_harnesses.
+            merged_enabled = (
+                list(request.enabled_harnesses)
+                if "enabled_harnesses" in fields
+                and request.enabled_harnesses is not None
+                else list(getattr(profile, "enabled_harnesses", None) or ["claude"])
+            )
+            merged_default = (
+                request.default_harness_key
+                if "default_harness_key" in fields
+                and request.default_harness_key
+                else getattr(profile, "default_harness_key", None) or "claude"
+            )
+            try:
+                validate_enabled_harnesses(
+                    merged_enabled, default_harness_key=merged_default
+                )
+            except HarnessRegistryError as exc:
+                raise WorkerProfileValidationError(str(exc)) from exc
+            if "enabled_harnesses" in fields:
+                profile.enabled_harnesses = merged_enabled
+            if "default_harness_key" in fields:
+                profile.default_harness_key = merged_default
+            if "harness_constraints" in fields:
+                profile.harness_constraints = request.harness_constraints or {}
+            if "image_digest" in fields:
+                profile.image_digest = request.image_digest
+            if "harness_runtimes" in fields:
+                profile.harness_runtimes = request.harness_runtimes or {}
         docker_target_fields = {
             "docker_host",
             "docker_tls_ca",
