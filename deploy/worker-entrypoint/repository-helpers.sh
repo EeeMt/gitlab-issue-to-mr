@@ -4,6 +4,17 @@ repo_log() {
     printf '[repo] %s\n' "$*"
 }
 
+repo_work_branch_ahead_of_base() {
+    # True when the local work branch gained commits since the task started —
+    # e.g. the harness (Codex) committed changes itself and possibly already
+    # pushed them. The baseline is the work-branch head observed during repo
+    # preparation, NOT the base branch, so a pre-existing commit from an
+    # earlier task on the same branch is not mistaken for this task's work.
+    local count
+    count=$(codify_run_shell "cd /workspace && git rev-list --count '${REPO_REMOTE_WORK_SHA:-HEAD}'..HEAD 2>/dev/null" 2>/dev/null || echo 0)
+    [ -n "${count}" ] && [ "${count}" -gt 0 ] 2>/dev/null
+}
+
 repo_has_unpublished_local_head() {
     local local_sha unpublished_sha
     local_sha=$(codify_run_shell 'cd /workspace && git rev-parse HEAD' 2>/dev/null || true)

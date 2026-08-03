@@ -391,6 +391,23 @@ async def create_execute_container(
     )
     if worker_runtime.skills:
         environment["CODIFY_TASK_SKILLS_DIR"] = TASK_SKILLS_CONTAINER_PATH
+    sandbox_mode = None
+    cli_binary_digest = None
+    try:
+        inspection = sa_inspect(task)
+        if "worker_profile_snapshot" not in inspection.unloaded:
+            frozen_snapshot = task.worker_profile_snapshot
+            frozen_config = getattr(frozen_snapshot, "harness_config_snapshot", None)
+            if isinstance(frozen_config, dict):
+                sandbox_mode = frozen_config.get("sandbox_mode")
+            cli_binary_digest = getattr(frozen_snapshot, "cli_binary_digest", None)
+    except Exception:  # noqa: BLE001 - sandbox policy is advisory for old snapshots
+        sandbox_mode = None
+        cli_binary_digest = None
+    if sandbox_mode:
+        environment["CODIFY_HARNESS_SANDBOX_MODE"] = str(sandbox_mode)
+    if cli_binary_digest:
+        environment["CODIFY_CLI_BINARY_DIGEST"] = str(cli_binary_digest)
     # Persist the exact provider/session choices before the Docker side effect. If the
     # scheduler crashes after container creation, recovery can still report the runtime
     # configuration that was used to build the container environment.

@@ -22,6 +22,7 @@ from app.core.docker_client import (
     canonicalize_docker_host,
     resolve_docker_connection,
 )
+from app.core.harness_registry import capability_policy
 from app.core.skills import (
     SkillValidationError,
     hydrate_skill_snapshots,
@@ -564,6 +565,13 @@ def snapshot_from_profile(
         if settings is not None
         else None
     )
+    resolved_harness_key = (
+        harness_key or getattr(profile, "default_harness_key", None) or "claude"
+    )
+    effective_capabilities = capability_policy(
+        resolved_harness_key,
+        getattr(profile, "harness_constraints", None) or {},
+    )
     return TaskWorkerProfileSnapshot(
         task_id=task.id,
         worker_profile_id=profile.id,
@@ -594,7 +602,12 @@ def snapshot_from_profile(
         default_execute_run_instruction_template=profile.default_execute_run_instruction_template,
         default_plan_run_instruction_template=profile.default_plan_run_instruction_template,
         ci_auto_repair_run_instruction_template=profile.ci_auto_repair_run_instruction_template,
-        harness_key=harness_key or getattr(profile, "default_harness_key", None) or "claude",
+        harness_key=resolved_harness_key,
+        harness_config_snapshot={
+            "capabilities": effective_capabilities,
+            "sandbox_mode": effective_capabilities.get("sandbox_mode"),
+            "constraints": dict(getattr(profile, "harness_constraints", None) or {}),
+        },
         image_digest=getattr(profile, "image_digest", None),
         model_endpoint_snapshot=endpoint.as_snapshot() if endpoint is not None else None,
         credential_ref=(

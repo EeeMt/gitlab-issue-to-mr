@@ -1,4 +1,4 @@
-"""Validation and immutable snapshot helpers for Claude Code skills."""
+"""Validation and immutable snapshot helpers for harness skills."""
 
 from __future__ import annotations
 
@@ -337,19 +337,19 @@ def validate_runtime_supports_skills(runtime: Any, skills: Iterable[Any]) -> Non
     runtime_mode = getattr(runtime, "runtime_mode", BAKED_IMAGE_MODE)
     if runtime_mode != MOUNTED_KIT_MODE:
         raise SkillValidationError(
-            "Claude skills require mounted-kit mode; baked-image mode is deprecated "
+            "Skills require mounted-kit mode; baked-image mode is deprecated "
             "and does not support skills"
         )
     version = _version_tuple(getattr(runtime, "worker_kit_version", None))
     if version is None or version < SKILL_CAPABLE_WORKER_KIT_VERSION:
         raise SkillValidationError(
-            "Claude skills require worker-kit "
+            "Skills require worker-kit "
             f"{SKILL_CAPABLE_WORKER_KIT_VERSION_TEXT} or newer for mounted-kit profiles"
         )
 
 
 def runtime_uses_skill_capable_worker_kit(runtime: Any) -> bool:
-    """Return whether runtime verification must enforce Claude Skill support."""
+    """Return whether runtime verification must enforce Skill support."""
     if getattr(runtime, "runtime_mode", BAKED_IMAGE_MODE) != MOUNTED_KIT_MODE:
         return False
     version = _version_tuple(getattr(runtime, "worker_kit_version", None))

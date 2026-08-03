@@ -1216,9 +1216,9 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
             "codify_harness_run_text /tmp/overall_summary_prompt.txt 60",
             content,
         )
-        self.assertIn('echo "Claude overall summary generation succeeded"', content)
+        self.assertIn('echo "Harness overall summary generation succeeded"', content)
         self.assertIn('echo "Overall MR summary generated (${#FINAL_OVERALL_SUMMARY} chars)"', content)
-        self.assertIn('echo "Claude overall summary normalized to empty; keeping previous MR summary"', content)
+        self.assertIn('echo "Harness overall summary normalized to empty; keeping previous MR summary"', content)
         self.assertIn('overall_summary_chars=${#FINAL_OVERALL_SUMMARY}', content)
         self.assertIn('--arg overall_summary "${FINAL_OVERALL_SUMMARY:-}"', content)
         self.assertIn('overall_summary: $overall_summary', content)
@@ -1280,12 +1280,12 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
         content = _read_worker_entrypoint_sources(script)
 
-        self.assertIn('echo "Generating commit message with Claude..."', content)
+        self.assertIn('echo "Generating commit message with the harness model..."', content)
         self.assertIn('echo "Commit message prompt written to /tmp/commit_message_prompt.txt"', content)
-        self.assertIn('echo "Claude commit message generation succeeded"', content)
-        self.assertIn('echo "Claude raw commit message response:"', content)
+        self.assertIn('echo "Harness commit message generation succeeded"', content)
+        self.assertIn('echo "Harness raw commit message response:"', content)
         self.assertIn("printf '%s\\n' \"${GENERATED_COMMIT_MESSAGE}\" | sed 's/^/  /'", content)
-        self.assertIn('echo "Claude commit message generation failed with exit code ${COMMIT_MESSAGE_RESULT}; using fallback"', content)
+        self.assertIn('echo "Harness commit message generation failed with exit code ${COMMIT_MESSAGE_RESULT}; using fallback"', content)
         self.assertIn('echo "Generated commit message was empty after normalization; using fallback"', content)
         self.assertIn('echo "Commit message written to /tmp/commit_message.txt"', content)
         self.assertIn('echo "Final commit message:"', content)

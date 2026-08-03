@@ -276,6 +276,50 @@ def test_system_docker_profile_snapshots_resolved_deployment_target():
     assert snapshot.docker_tls_key == "/system/key.pem"
 
 
+def test_worker_profile_snapshot_freezes_capability_and_sandbox_policy():
+    def make_profile(constraints):
+        return SimpleNamespace(
+            id=11,
+            name="Harness Worker",
+            description=None,
+            enabled=True,
+            is_default=False,
+            image="codify-worker/base:2026.08",
+            codegraph_enabled=False,
+            volume_mounts=[],
+            environment_variables=[],
+            pre_script="",
+            post_script="",
+            default_execute_run_instruction_template="execute {{user_prompt}}",
+            default_plan_run_instruction_template="plan {{user_prompt}}",
+            ci_auto_repair_run_instruction_template="repair {{issue_title}}",
+            default_harness_key="codex",
+            harness_constraints=constraints,
+            created_at=None,
+            updated_at=None,
+        )
+
+    default_snapshot = snapshot_from_profile(
+        SimpleNamespace(id=50),
+        make_profile({}),
+    )
+    assert default_snapshot.harness_key == "codex"
+    frozen = default_snapshot.harness_config_snapshot
+    assert frozen is not None
+    # container-boundary is the system default: the worker container is the
+    # isolation boundary, matching the Claude harness.
+    assert frozen["sandbox_mode"] == "container-boundary"
+    assert frozen["capabilities"]["sandbox_mode"] == "container-boundary"
+    assert frozen["constraints"] == {}
+
+    tightened = snapshot_from_profile(
+        SimpleNamespace(id=51),
+        make_profile({"sandbox_mode": "sandboxed"}),
+    )
+    assert tightened.harness_config_snapshot["sandbox_mode"] == "sandboxed"
+    assert tightened.harness_config_snapshot["capabilities"]["sandbox_mode"] == "sandboxed"
+
+
 def test_validate_worker_profile_docker_target_requires_complete_absolute_tls_paths():
     with pytest.raises(WorkerProfileValidationError, match="configured together"):
         validate_worker_profile_docker_target(

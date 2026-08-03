@@ -41,6 +41,14 @@ codex_adapter_verify_runtime() {
     fi
     CODIFY_CLI_VERSION="${version_output}"
     export CODIFY_CLI_VERSION
+    if [ -n "${CODIFY_CLI_BINARY_DIGEST:-}" ]; then
+        local actual_digest
+        actual_digest="$(sha256sum "${bin}" 2>/dev/null | awk '{print $1}')"
+        if [ -z "${actual_digest}" ] || [ "${actual_digest}" != "${CODIFY_CLI_BINARY_DIGEST}" ]; then
+            echo "Codex CLI binary digest mismatch: expected ${CODIFY_CLI_BINARY_DIGEST}, got ${actual_digest:-unreadable}" >&2
+            return 1
+        fi
+    fi
     return 0
 }
 
@@ -59,12 +67,21 @@ codex_adapter_prepare_config() {
     local base_url="${OPENAI_BASE_URL:-}"
     local model="${OPENAI_MODEL:-}"
     if [ -n "${base_url}" ] && [ -n "${model}" ]; then
-        # Sandbox: the container IS the boundary (container-boundary mode).
-        # bwrap cannot create userns inside the worker container; running with
-        # full access within the hardened container is an explicit, documented
-        # dev risk-acceptance, not a silent relaxation (CODIFY_CODEX_SANDBOX
-        # can force "read-only" when the host supports bwrap/userns).
-        sandbox_mode="${CODIFY_CODEX_SANDBOX:-danger-full-access}"
+        # Sandbox: the worker container IS the isolation boundary (container-
+        # boundary mode, matching the Claude harness). Codex's own bwrap sandbox
+        # cannot create userns inside the worker container, so the default grants
+        # full access within that hardened container — an intentional, auditable
+        # policy frozen in the Task Snapshot, not a silent relaxation.
+        #   container-boundary (Codify default) -> danger-full-access
+        #   sandboxed (profile-tightened)       -> read-only (bwrap on hardened host)
+        # CODIFY_CODEX_SANDBOX may still force an explicit codex-level override.
+        local sandbox_mode="${CODIFY_CODEX_SANDBOX:-}"
+        if [ -z "${sandbox_mode}" ]; then
+            case "${CODIFY_HARNESS_SANDBOX_MODE:-container-boundary}" in
+                sandboxed) sandbox_mode="read-only" ;;
+                *) sandbox_mode="danger-full-access" ;;
+            esac
+        fi
         cat > "${CODEX_HOME}/config.toml" <<EOF
 model = "${model}"
 model_provider = "codify"
@@ -91,11 +108,24 @@ codex_adapter_build_command() {
 }
 
 codex_adapter_materialize_skills() {
-    # Codex skills live under CODEX_HOME/AGENTS.md conventions; neutral Skill
-    # snapshots are materialized by the runner only when declared available.
-    if [ -n "${CODIFY_TASK_SKILLS_DIR:-}" ] && [ -d "${CODIFY_TASK_SKILLS_DIR}" ]; then
+    # Codex discovers skills from the agentskills.io layout. Materialize the
+    # sealed per-task Skill snapshot (packaged as .claude/skills) into the
+    # per-task CODEX_HOME so the workspace/Git tree stays clean.
+    if [ -z "${CODIFY_TASK_SKILLS_DIR:-}" ]; then
         return 0
     fi
+    local src="${CODIFY_TASK_SKILLS_DIR}/.claude/skills"
+    if [ ! -d "${src}" ]; then
+        echo "Task Skills snapshot does not contain skills: ${src}" >&2
+        return 1
+    fi
+    local dest="${CODEX_HOME:-${CODIFY_RUNTIME_DIR}/codex-home}/.agents/skills"
+    mkdir -p "${dest}"
+    if ! cp -a "${src}/." "${dest}/" 2>/dev/null; then
+        echo "Could not materialize skills into ${dest}" >&2
+        return 1
+    fi
+    chown -R "${CODIFY_RUN_UID:-1000}:${CODIFY_RUN_GID:-1000}" "${dest}" 2>/dev/null || true
     return 0
 }
 
@@ -123,7 +153,11 @@ codex_adapter_stream_events() {
 
 codex_adapter_normalize_result() {
     local result_file="$1"
-    [ -s "${result_file}" ] || return 1
+    # The authoritative result is written by the event translator under
+    # CODIFY_HARNESS_RESULT_FILE; the runner's result_file receives only the
+    # legacy CLI stdout and must not be used for canonical normalization.
+    local authoritative="${CODIFY_HARNESS_RESULT_FILE:-${result_file}}"
+    [ -s "${authoritative}" ] || return 1
     jq -e \
         --arg harness_key codex \
         --arg adapter_version "${CODIFY_ADAPTER_VERSION}" \
@@ -133,7 +167,7 @@ codex_adapter_normalize_result() {
           session_id:null,model:null,
           usage:{input_tokens:null,cached_input_tokens:null,output_tokens:null,reasoning_tokens:null,cost:null,currency:null,engine_fields:{}},
           failure:null,capability_warnings:[]}' \
-        "${result_file}" >/dev/null 2>&1 || return 1
+        "${authoritative}" >/dev/null 2>&1 || return 1
     return 0
 }
 

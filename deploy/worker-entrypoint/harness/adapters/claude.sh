@@ -47,6 +47,14 @@ claude_adapter_verify_runtime() {
     fi
     CODIFY_CLI_VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
     export CODIFY_CLI_VERSION
+    if [ -n "${CODIFY_CLI_BINARY_DIGEST:-}" ]; then
+        local actual_digest
+        actual_digest="$(sha256sum "${CODIFY_CLAUDE_BIN}" 2>/dev/null | awk '{print $1}')"
+        if [ -z "${actual_digest}" ] || [ "${actual_digest}" != "${CODIFY_CLI_BINARY_DIGEST}" ]; then
+            echo "Claude CLI binary digest mismatch: expected ${CODIFY_CLI_BINARY_DIGEST}, got ${actual_digest:-unreadable}" >&2
+            return 1
+        fi
+    fi
 }
 
 claude_adapter_detect_capabilities() {

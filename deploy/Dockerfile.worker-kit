@@ -54,7 +54,7 @@ RUN runtime_store="$(cat /tmp/runtime-store-path)" \
       --arg bash "${runtime_store}/bin/bash" \
       --arg nixpkgs_version "${nixpkgs_version}" \
       --arg nixpkgs_revision "${nixpkgs_revision}" \
-      '{schema_version: 2, kit_version: $version, platform: $platform, runtime_bin: $runtime_bin, bash: $bash, entrypoint: "/opt/codify-kit/entrypoint.sh", runtime_compatibility: {harness_contracts:["codify.worker.harness/v1"], event_schemas:["codify.worker.event/v1"], bootstrap_version:"1.0.0"}, cli_runtimes:{claude:{minimum_version:"2.1.33"}}, components: {nixpkgs: $nixpkgs_version, nixpkgs_revision: $nixpkgs_revision}}' \
+      '{schema_version: 2, kit_version: $version, platform: $platform, runtime_bin: $runtime_bin, bash: $bash, entrypoint: "/opt/codify-kit/entrypoint.sh", runtime_compatibility: {harness_contracts:["codify.worker.harness/v1"], event_schemas:["codify.worker.event/v1"], bootstrap_version:"1.0.0"}, cli_runtimes:{claude:{source:"image",minimum_version:"2.1.33"},codex:{source:"host_mount",minimum_version:"0.146.0"}}, components: {nixpkgs: $nixpkgs_version, nixpkgs_revision: $nixpkgs_revision}}' \
       > /worker-kit/manifest.json \
     && rm -rf /worker-kit/worker-entrypoint/harness/adapters \
       /worker-kit/worker-entrypoint/harness/manifest.json \
