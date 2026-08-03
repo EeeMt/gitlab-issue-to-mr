@@ -131,6 +131,7 @@ export interface CreateTaskRequest {
   delay_seconds?: number
   scheduled_datetime?: string
   provider_id?: number | null
+  harness_key?: string
   require_changes?: boolean
   task_mode?: 'execute' | 'plan'
   session_mode?: 'continue' | 'fresh'
