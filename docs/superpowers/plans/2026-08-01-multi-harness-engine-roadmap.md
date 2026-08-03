@@ -82,9 +82,25 @@ Phase 1 剩余项：**发版硬边界切换**（关闭历史 Issue + 启用 Prof
   Completions 转换);创建时绑独立 `ModelCredential` 并写 `credential_ref`,更新时轮换(旧凭据退役),
   删除 Provider 只 soft-retire 凭据不硬删(既有 retry 仍可解析);响应暴露 `credential_ref` +
   `credential_status`。已在 dev 验证。Backend unit 全量 `2227 passed`。
-- **后续增量**：2.4 verify-runtime + image digest → 2.5 Task 级 Harness 选择与冻结 retry → 2.6
-  session namespace → 2.7–2.9 Codex Adapter + sandbox + Skills → 2.10 analytics → 2.11 frontend
-  → 2.12 Kit 升级与单 Host smoke。
+- **增量 3–5（已提交 `b039e477`/`a0868082`/`dc27c5c3`）**：Task 2.4 verify-runtime 解析并持久化
+  `image_digest`/`verified_at`、Profile 变更置 stale;Task 2.5 Task 级 Harness 选择(`CreateTaskRequest.harness_key`)
+  并把 harness/endpoint/credential/CLI/bundle digest 冻结进 Snapshot、retry 原样复制;Task 2.6
+  per-harness/per-namespace session lineage(`IssueHarnessSession` + 执行/完成路径接线)。
+- **增量 6（`62976dd9`）**：Task 2.7 Codex Adapter 核心 —— `codex.sh`/`codex_events.py`/`codex-run.sh` +
+  manifest `adapters.codex`(openai_responses),bundle 泛化构建所有 adapters。
+- **增量 7–8（`85d94d9f`…`0e0f50e5`）**：Task 2.10 per-harness analytics + null-safe usage;Task 2.11
+  前端 harness 管线 + TaskFormDrawer 选择器 + WorkerSettings 引擎编辑器 + AIProvidersPanel 端点信息。
+- **Codex 真实集成调试（`f5652cc7`…`8f5ecf0f`,见 `docs/codex-integration-debugging.md`）**：真实 Codex CLI
+  0.146.0 挂载进 worker。逐项修复:执行路径硬编码 claude→读冻结 snapshot;greenlet 懒加载;bundle
+  manifest 只声明 claude;OPENAI_* env;config.toml 端点/模型;bwrap userns 不可用→容器边界模式。
+  **已验证**:codex 连接 DeepSeek+`deepseek-v4-flash`、执行命令、写入文件、跑测试、产出有效
+  `harness-result`(success=True + usage)。**待完成**:任务级 delivery commit+MR 的最终验证,以及
+  沙箱硬化决策(容器边界模式 vs 启用 userns/bwrap)。
+
+**当前状态（2026-08-03）**：Phase 2 后端核心（2.1–2.7、2.10）+ 前端 2.11 全部完成并提交,
+Backend `2234 passed`、前端 vue-tsc clean + specs 全过。Codex harness 真实端到端跑通,但
+**单 Host 真实 commit+MR 证据尚未获得**,且 2.8 沙箱存在安全决策待定(dev 用容器边界模式,
+生产需硬化容器启用 userns/bwrap)。
 
 ---
 
