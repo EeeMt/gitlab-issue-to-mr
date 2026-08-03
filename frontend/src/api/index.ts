@@ -260,6 +260,9 @@ export interface WorkerProfile {
   default_execute_run_instruction_template: string
   default_plan_run_instruction_template: string
   ci_auto_repair_run_instruction_template: string
+  enabled_harnesses?: string[]
+  default_harness_key?: string
+  image_digest?: string | null
   created_at: string
   updated_at: string
 }

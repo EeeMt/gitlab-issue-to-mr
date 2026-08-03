@@ -544,6 +544,14 @@
                           :placeholder="t('createTask.selectProvider')"
                         />
                       </label>
+                      <label v-if="harnessOptions.length > 1" class="execution-environment__field">
+                        <span>{{ t('createTask.harness') }}</span>
+                        <n-select
+                          v-model:value="harnessKey"
+                          :options="harnessOptions"
+                          :placeholder="t('createTask.harness')"
+                        />
+                      </label>
                     </div>
                     <div class="execution-environment__skills" data-testid="task-skill-selection">
                       <div class="execution-environment__skills-header">
@@ -769,6 +777,7 @@ const executionEnvironmentExpanded = ref(false)
 const executionEnvironmentContentId = `${useId()}-execution-environment-content`
 const executionOptionsReady = ref(false)
 const selectedProviderId = ref<number | null>(null)
+const harnessKey = ref<string | null>(null)
 const inheritProfileSkills = ref(true)
 const selectedSkillIds = ref<number[]>([])
 const skillSelectionDirty = ref(false)
@@ -836,6 +845,14 @@ const executionEnvironmentMissing = computed(() =>
   executionOptionsReady.value
   && (!effectiveWorkerProfile.value || !effectiveProvider.value)
 )
+const harnessOptions = computed(() => {
+  const enabled = effectiveWorkerProfile.value?.enabled_harnesses
+  if (!enabled || !enabled.length) return []
+  return enabled.map(key => ({
+    label: key === 'codex' ? t('createTask.harnessCodex') : t('createTask.harnessClaude'),
+    value: key,
+  }))
+})
 const executionEnvironmentOverridden = computed(() =>
   selectedProviderId.value !== null || !inheritProfileSkills.value
 )
@@ -1019,6 +1036,9 @@ watch(() => props.show, (val) => {
       requireChanges.value = props.task.require_changes ?? true
       taskMode.value = (props.task.task_mode as 'execute' | 'plan') ?? 'execute'
       selectedProviderId.value = props.task.provider_id ?? null
+      harnessKey.value = props.task.harness_key
+        ?? effectiveWorkerProfile.value?.default_harness_key
+        ?? 'claude'
       inheritProfileSkills.value =
         (props.task.skill_selection_source ?? 'profile') === 'profile'
       selectedSkillIds.value = [...(props.task.skill_ids ?? [])]
@@ -1217,6 +1237,7 @@ const {
   startFreshSession,
   taskModeErrorVisible,
   selectedProviderId,
+  harnessKey,
   scheduleType,
   scheduledAt,
   runInstructionTemplate,

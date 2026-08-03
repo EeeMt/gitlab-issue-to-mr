@@ -33,6 +33,7 @@ export interface TaskWorkerRuntimeSummary {
   snapshot_available: boolean
   worker_profile_id: number | null
   worker_profile_name: string | null
+  harness_key?: string | null
   image: string | null
   runtime_mode: 'baked_image' | 'mounted_kit' | string | null
   worker_kit_version: string | null
@@ -99,6 +100,7 @@ export interface Task {
   provider_name?: string | null
   worker_profile_id: number | null
   worker_profile_name?: string | null
+  harness_key?: string | null
   worker_image?: string | null
   worker_runtime_mode?: 'baked_image' | 'mounted_kit' | string | null
   worker_kit_version?: string | null

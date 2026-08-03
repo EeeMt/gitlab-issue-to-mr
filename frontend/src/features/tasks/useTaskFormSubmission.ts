@@ -29,6 +29,7 @@ interface TaskFormSubmissionOptions {
   startFreshSession: Ref<boolean>
   taskModeErrorVisible: Ref<boolean>
   selectedProviderId: Ref<number | null>
+  harnessKey: Ref<string | null>
   scheduleType: Ref<TaskScheduleType>
   scheduledAt: Ref<number | null>
   runInstructionTemplate: Ref<string>
@@ -85,7 +86,7 @@ export function useTaskFormSubmission(options: TaskFormSubmissionOptions) {
         requireChanges: options.requireChanges.value,
         taskMode,
         sessionMode: options.startFreshSession.value ? 'fresh' : 'continue',
-        harnessKey: null,
+        harnessKey: options.harnessKey?.value ?? null,
         selectedProviderId: options.selectedProviderId.value,
         scheduleType: options.scheduleType.value,
         scheduledAt: options.scheduledAt.value,
