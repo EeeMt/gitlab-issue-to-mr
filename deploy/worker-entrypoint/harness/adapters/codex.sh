@@ -1,7 +1,14 @@
 #!/bin/bash
 # Codex adapter for the Codify harness contract.
 
+CODIFY_CODEX_TRANSLATOR="${CODIFY_ORCHESTRATION_DIR}/worker-entrypoint/harness/adapters/codex_events.py"
+
 codify_codex_bin() {
+    # Prefer the profile-mounted codex package, then an explicit env override.
+    if [ -x "/opt/codify-codex/bin/codex" ]; then
+        echo "/opt/codify-codex/bin/codex"
+        return 0
+    fi
     echo "${CODIFY_CODEX_BIN:-/usr/local/bin/codex}"
 }
 
@@ -51,8 +58,9 @@ codex_adapter_prepare_config() {
 }
 
 codex_adapter_build_command() {
-    # Model/Provider source is only the frozen Snapshot (via env).
-    echo "${CODIFY_HARNESS_COMMAND:-${CODIFY_ORCHESTRATION_DIR}/legacy/codex-run.sh}"
+    # Model/Provider source is only the frozen Snapshot (via env). The runner
+    # lives under worker-entrypoint/legacy (maps to the same path in the bundle).
+    echo "${CODIFY_HARNESS_COMMAND:-${CODIFY_ORCHESTRATION_DIR}/worker-entrypoint/legacy/codex-run.sh}"
 }
 
 codex_adapter_materialize_skills() {

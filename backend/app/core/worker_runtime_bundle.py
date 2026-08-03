@@ -135,18 +135,24 @@ def build_runtime_bundle(source_dir: Path | None = None) -> BuiltRuntimeBundle:
     for key, expected in expected_protocol.items():
         if harness_manifest.get(key) != expected:
             raise RuntimeError(f"Runtime source {key} does not match executable protocol")
-    claude_metadata = dict((harness_manifest.get("adapters") or {}).get("claude") or {})
-    if not claude_metadata.get("version"):
-        raise RuntimeError("Runtime source has no Claude Adapter version")
-    claude_metadata["digest"] = _adapter_digest(source_files)
+    source_adapters = harness_manifest.get("adapters") or {}
+    if not isinstance(source_adapters, dict) or not source_adapters:
+        raise RuntimeError("Runtime source has no Adapter declarations")
+    adapters: dict[str, dict[str, Any]] = {}
+    for adapter_key, metadata in source_adapters.items():
+        if not isinstance(metadata, dict) or not metadata.get("version"):
+            raise RuntimeError(
+                f"Runtime source Adapter {adapter_key!r} has no version"
+            )
+        adapter_metadata = dict(metadata)
+        adapter_metadata["digest"] = _adapter_digest(source_files)
+        adapters[adapter_key] = adapter_metadata
     manifest = {
         "schema": "codify.worker.runtime-bundle/v1",
         "contract_version": HARNESS_CONTRACT_VERSION,
         "event_schema": CANONICAL_EVENT_SCHEMA,
         "orchestration_version": ORCHESTRATION_VERSION,
-        "adapters": {
-            "claude": claude_metadata,
-        },
+        "adapters": adapters,
         "files": [
             {
                 "path": _archive_name(name).removeprefix(f"{RUNTIME_ARCHIVE_ROOT}/"),

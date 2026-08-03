@@ -9,7 +9,7 @@ from typing import Any
 
 from docker.errors import NotFound
 from gitlab import Gitlab
-from sqlalchemy import delete, select
+from sqlalchemy import delete, inspect as sa_inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ci_failure_logs import append_ci_failure_log
@@ -275,12 +275,23 @@ async def create_execute_container(
     )
 
     runtime_bundle = await load_bound_runtime_bundle(db, task)
-    claude_manifest = (runtime_bundle.manifest.get("adapters") or {}).get("claude") or {}
+    # The harness is a per-Task choice frozen into the snapshot at creation;
+    # never default to claude when the snapshot is loaded.
+    harness_key = "claude"
+    try:
+        inspection = sa_inspect(task)
+        if "worker_profile_snapshot" not in inspection.unloaded:
+            harness_key = (
+                getattr(task.worker_profile_snapshot, "harness_key", None) or "claude"
+            )
+    except Exception:  # noqa: BLE001
+        harness_key = "claude"
+    adapter_meta = (runtime_bundle.manifest.get("adapters") or {}).get(harness_key) or {}
     attempt = await create_task_attempt(
         db,
         task=task,
-        harness_key="claude",
-        adapter_version=str(claude_manifest.get("version") or "1.0.0"),
+        harness_key=harness_key,
+        adapter_version=str(adapter_meta.get("version") or "1.0.0"),
     )
 
     if worker_custom_scripts_configured(settings):
@@ -320,22 +331,30 @@ async def create_execute_container(
     )
 
     session_mode = getattr(task, "session_mode", "continue")
-    snapshot = getattr(task, "worker_profile_snapshot", None)
-    harness_key = getattr(snapshot, "harness_key", None) or "claude"
-    endpoint_fingerprint = None
-    if snapshot is not None and isinstance(snapshot.model_endpoint_snapshot, dict):
-        endpoint_fingerprint = snapshot.model_endpoint_snapshot.get("fingerprint")
+    # Resolve the per-harness resume session only when the frozen snapshot is
+    # actually loaded; a lazy relationship must never trigger sync IO here.
     resume_session: str | None = None
+    harness_key = "claude"
     try:
-        resume_session, _lineage = await resolve_resume_session(
-            db,
-            issue=issue,
-            harness_key=harness_key,
-            session_namespace=session_namespace_for(harness_key, endpoint_fingerprint),
-            session_mode=session_mode,
-        )
+        inspection = sa_inspect(task)
+        if "worker_profile_snapshot" not in inspection.unloaded:
+            snapshot = task.worker_profile_snapshot
+            harness_key = getattr(snapshot, "harness_key", None) or "claude"
+            endpoint_fingerprint = None
+            if isinstance(getattr(snapshot, "model_endpoint_snapshot", None), dict):
+                endpoint_fingerprint = snapshot.model_endpoint_snapshot.get("fingerprint")
+            resume_session, _lineage = await resolve_resume_session(
+                db,
+                issue=issue,
+                harness_key=harness_key,
+                session_namespace=session_namespace_for(
+                    harness_key, endpoint_fingerprint
+                ),
+                session_mode=session_mode,
+            )
     except Exception:  # noqa: BLE001 - never block task execution on session bookkeeping
         resume_session = issue.claude_session_id if issue is not None else None
+        harness_key = "claude"
     task.input_session_id = (
         resume_session if session_mode == "continue" and issue is not None else None
     )
@@ -793,12 +812,19 @@ async def monitor_container_run(
         # also covers fresh runs and the CLI wrapper's resume-not-found fallback.
         issue.claude_session_id = output_session_id
         # Upsert the per-harness/namespace session lineage so a continue on the
-        # same harness can resume it and a different harness never can.
-        snapshot = getattr(task, "worker_profile_snapshot", None)
-        harness_key = getattr(snapshot, "harness_key", None) or "claude"
+        # same harness can resume it and a different harness never can. Only
+        # read the frozen snapshot when it is actually loaded (never lazy).
+        harness_key = "claude"
         endpoint_fingerprint = None
-        if snapshot is not None and isinstance(snapshot.model_endpoint_snapshot, dict):
-            endpoint_fingerprint = snapshot.model_endpoint_snapshot.get("fingerprint")
+        try:
+            inspection = sa_inspect(task)
+            if "worker_profile_snapshot" not in inspection.unloaded:
+                snapshot = task.worker_profile_snapshot
+                harness_key = getattr(snapshot, "harness_key", None) or "claude"
+                if isinstance(getattr(snapshot, "model_endpoint_snapshot", None), dict):
+                    endpoint_fingerprint = snapshot.model_endpoint_snapshot.get("fingerprint")
+        except Exception:  # noqa: BLE001 - session bookkeeping must never break completion
+            harness_key = "claude"
         await record_task_output_session(
             db,
             issue=issue,

@@ -725,6 +725,8 @@ async def load_task_worker_runtime(db: AsyncSession, task: Task) -> TaskWorkerRu
     snapshot = await db.get(TaskWorkerProfileSnapshot, task.id)
     if snapshot is None:
         raise WorkerProfileValidationError(f"Task {task.id} has no worker profile snapshot")
+    # Attach so downstream code can read the frozen harness without a lazy load.
+    task.worker_profile_snapshot = snapshot
     try:
         skills_unloaded = "skill_references" in sa_inspect(snapshot).unloaded
     except Exception:
