@@ -1884,6 +1884,8 @@ const zhCN = {
       apiKeyHint: '留空保持现有密钥',
       apiKeyConfigured: 'API 密钥已配置',
       apiKeyNotConfigured: '未配置 API 密钥',
+      endpointInfo: '端点',
+      endpointInfoHint: 'Provider 类型、wire 协议与凭据状态固定于每个 Provider,不能在此修改。',
       systemPrompt: '系统提示词',
       systemPromptHint: '附加到每次 Claude CLI 调用的系统指令',
       status: '状态',

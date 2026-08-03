@@ -119,6 +119,18 @@
               </template>
             </n-form-item>
 
+            <n-form-item :label="t('config.providers.endpointInfo')">
+              <div class="provider-endpoint-info">
+                <span>{{ editingProvider?.provider_kind ?? 'anthropic_compatible' }} · {{ editingProvider?.wire_protocol ?? 'anthropic_messages' }}</span>
+                <n-tag v-if="editingProvider?.credential_status" size="tiny" :type="editingProvider.credential_status === 'active' ? 'success' : 'warning'" round>
+                  {{ editingProvider.credential_status }}
+                </n-tag>
+              </div>
+              <template #feedback>
+                {{ t('config.providers.endpointInfoHint') }}
+              </template>
+            </n-form-item>
+
             <n-form-item :label="t('config.providers.systemPrompt')" path="system_prompt">
               <n-input
                 v-model:value="formValue.system_prompt"

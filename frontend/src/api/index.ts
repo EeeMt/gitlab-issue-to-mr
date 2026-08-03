@@ -185,6 +185,12 @@ export interface AIProvider {
   name: string
   base_url: string
   api_key_configured: boolean
+  provider_kind?: string
+  wire_protocol?: string
+  provider_driver?: string | null
+  provider_options?: Record<string, unknown>
+  credential_ref?: string | null
+  credential_status?: string | null
   model: string
   max_turns: number
   system_prompt: string | null

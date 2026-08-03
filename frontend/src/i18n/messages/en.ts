@@ -1910,6 +1910,8 @@ const en = {
       apiKeyHint: 'Leave blank to keep existing key',
       apiKeyConfigured: 'API key configured',
       apiKeyNotConfigured: 'No API key',
+      endpointInfo: 'Endpoint',
+      endpointInfoHint: 'Provider kind, wire protocol and credential state are fixed per provider and cannot be changed here.',
       systemPrompt: 'System Prompt',
       systemPromptHint: 'System instructions appended to each Claude CLI invocation',
       status: 'Status',
