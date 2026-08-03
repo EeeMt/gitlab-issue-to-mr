@@ -54,6 +54,26 @@ codex_adapter_prepare_config() {
     export CODEX_HOME="${CODIFY_RUNTIME_DIR}/codex-home"
     mkdir -p "${CODEX_HOME}"
     chown -R "${CODIFY_RUN_UID:-1000}:${CODIFY_RUN_GID:-1000}" "${CODEX_HOME}" 2>/dev/null || true
+    # Point codex at the frozen Snapshot endpoint/model (codex does not honour
+    # OPENAI_BASE_URL for the Responses API, so write an explicit config).
+    local base_url="${OPENAI_BASE_URL:-}"
+    local model="${OPENAI_MODEL:-}"
+    if [ -n "${base_url}" ] && [ -n "${model}" ]; then
+        cat > "${CODEX_HOME}/config.toml" <<EOF
+model = "${model}"
+model_provider = "codify"
+
+[model_providers.codify]
+name = "Codify endpoint"
+base_url = "${base_url}"
+wire_api = "responses"
+env_key = "OPENAI_API_KEY"
+
+[model_providers.codify.models."${model}"]
+name = "${model}"
+EOF
+        chown "${CODIFY_RUN_UID:-1000}:${CODIFY_RUN_GID:-1000}" "${CODEX_HOME}/config.toml" 2>/dev/null || true
+    fi
     return 0
 }
 
@@ -79,6 +99,7 @@ codex_adapter_run() {
     : > "${raw_file}"
     chown 0:0 "${raw_file}"
     chmod 644 "${raw_file}"
+    CODIFY_CODEX_BIN="$(codify_codex_bin)" \
     CODIFY_CODEX_RAW_EVENT_JSONL="${raw_file}" \
     CODIFY_CODEX_EVENT_TRANSLATOR="${CODIFY_CODEX_TRANSLATOR}" \
     CODIFY_CANONICAL_EVENT_WRITER="${CODIFY_CANONICAL_EVENT_WRITER}" \
