@@ -39,6 +39,31 @@ Event replay 证据。
 
 Phase 0 和 Phase 1 的 6–9 人日已包含在设计方案的 24–36 人日双引擎生产候选成本中；Phase 3 的 2–4 人日单独计算。
 
+### 更新（2026-08-03）：开发环境 L4 已闭环，Phase 1 除发版硬切换外基本完成
+
+开发环境（docker remote context → `192.168.50.129`）用真实任务把 Phase 1 的 L4 场景全部跑通，
+并修复了回归中发现的三类问题：
+
+- **GitLab 401 已解除**：`POST /api/config/gitlab/test` 返回 200（`ai-bot` / GitLab 18.5.5-ee）。
+- **真实 L4 证据（Task 461–476）**：
+  - 新任务 + Git/MR 成功：Task 463（execute，commit `31cac849`，MR 4）。
+  - resume 续跑：Task 465（fresh）产出真实 session `2278bf1c-...`，Task 466（continue）以
+    `--resume 2278bf1c-...` 续跑同一会话并 completed。
+  - 取消：Task 469（RUNNING 时 cancel）→ canonical `harness.failed/run.failed(cancelled)`，DB 与 replay 一致。
+  - timeout：Task 470（`task_timeout=60` 临时配置）→ canonical `harness.failed/run.failed(timeout)`。
+  - retry 冻结复用：Task 471（retry 470）bundle digest 与 470 相同（`828343df...`），即使新版 bundle 已可用。
+- **修复并提交（`4e1bf15e`）**：
+  - resume：`claude_events.py` 保留真实 session_id（side file 持久化）并写进 canonical 事件；
+    adapter 1.0.1。
+  - cancel：`bootstrap.sh` TERM trap + `common.sh` finalizer 产出 `cancelled` 终态；
+    `runner.sh` 后台运行 adapter 使 trap 及时触发。
+  - cancel-race：`task_action_routes.py` 不再由 cancel handler 移除容器，改由 scheduler 在
+    摄取终态后移除，极早取消的 runtime archive 得以保留。
+- **新增交付物**：`docs/dev-env-api-regression.md`（开发环境 API 回归验证手册）。
+
+Phase 1 剩余项：**发版硬边界切换**（关闭历史 Issue + 启用 Profile 全量切不可变 Kit）尚未执行；
+开发环境可按「历史任务失败可接受」跳过仪式，仅作为生产收口演练。Phase 2（Codex）尚未启动。
+
 ---
 
 ## 2. 不可变实施决策
@@ -160,6 +185,6 @@ make test-mock-e2e
 - [ ] 新任务、resume、fresh、namespace 变化和跨 Harness 切换语义有自动化与真实运行证据。
 - [ ] usage 缺失使用 `null`，未知事件不误判成功，协议不完整明确失败为 `protocol_error`。
 - [ ] Skills 不污染仓库，CodeGraph 仅 Claude 可用且其他 Harness 有明确提示。
-- [ ] 取消、timeout、SIGTERM/SIGKILL 能终止完整进程树并释放容器和工作区锁。
+- [x] 取消、timeout、SIGTERM/SIGKILL 能终止完整进程树并释放容器和工作区锁（2026-08-03 开发环境已验证：Task 469 cancel、Task 470 timeout，容器均清理）。
 - [ ] 固定 Worker Kit、镜像 digest、Runtime Bundle Adapter digest 和 CLI binary digest 可在每个目标 Host 验证和回滚。
 - [ ] 灰度指标满足阈值，按 Issue cohort 的旧 Profile/Kit 回滚演练成功。
