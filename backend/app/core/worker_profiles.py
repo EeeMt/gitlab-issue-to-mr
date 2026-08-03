@@ -533,8 +533,16 @@ def snapshot_from_profile(
     profile: WorkerProfile,
     *,
     settings: Any | None = None,
+    harness_key: str | None = None,
+    endpoint: Any | None = None,
 ) -> TaskWorkerProfileSnapshot:
-    """Build an immutable task worker snapshot from a loaded profile."""
+    """Build an immutable task worker snapshot from a loaded profile.
+
+    ``harness_key`` defaults to the Profile's default harness. ``endpoint`` is a
+    secret-free ``ModelEndpoint`` (or any object exposing ``as_snapshot``) whose
+    snapshot and credential ref are frozen so later Profile/Provider edits never
+    change a created Task's execution truth.
+    """
     try:
         runtime_mode, kit_version, kit_path = validate_worker_kit_config(
             runtime_mode=getattr(profile, "runtime_mode", BAKED_IMAGE_MODE),
@@ -586,6 +594,14 @@ def snapshot_from_profile(
         default_execute_run_instruction_template=profile.default_execute_run_instruction_template,
         default_plan_run_instruction_template=profile.default_plan_run_instruction_template,
         ci_auto_repair_run_instruction_template=profile.ci_auto_repair_run_instruction_template,
+        harness_key=harness_key or getattr(profile, "default_harness_key", None) or "claude",
+        image_digest=getattr(profile, "image_digest", None),
+        model_endpoint_snapshot=endpoint.as_snapshot() if endpoint is not None else None,
+        credential_ref=(
+            endpoint.credential_ref
+            if endpoint is not None and getattr(endpoint, "credential_ref", None)
+            else None
+        ),
     )
 
 
@@ -593,13 +609,22 @@ async def replace_task_worker_snapshot(
     db: AsyncSession,
     task: Task,
     profile: WorkerProfile,
+    *,
+    harness_key: str | None = None,
+    endpoint: Any | None = None,
 ) -> TaskWorkerProfileSnapshot:
     """Replace one task's worker profile snapshot."""
     existing = await db.get(TaskWorkerProfileSnapshot, task.id)
     if existing is not None:
         await db.delete(existing)
         await db.flush()
-    snapshot = snapshot_from_profile(task, profile, settings=get_effective_settings())
+    snapshot = snapshot_from_profile(
+        task,
+        profile,
+        settings=get_effective_settings(),
+        harness_key=harness_key,
+        endpoint=endpoint,
+    )
     db.add(snapshot)
     task.worker_profile_id = profile.id
     await db.flush()
@@ -640,6 +665,28 @@ async def clone_task_worker_snapshot(
         default_execute_run_instruction_template=source.default_execute_run_instruction_template,
         default_plan_run_instruction_template=source.default_plan_run_instruction_template,
         ci_auto_repair_run_instruction_template=source.ci_auto_repair_run_instruction_template,
+        harness_key=source.harness_key,
+        harness_adapter_version=source.harness_adapter_version,
+        harness_adapter_digest=source.harness_adapter_digest,
+        harness_config_snapshot=(
+            dict(source.harness_config_snapshot)
+            if isinstance(source.harness_config_snapshot, dict)
+            else None
+        ),
+        model_endpoint_snapshot=(
+            dict(source.model_endpoint_snapshot)
+            if isinstance(source.model_endpoint_snapshot, dict)
+            else None
+        ),
+        credential_ref=source.credential_ref,
+        cli_source=source.cli_source,
+        cli_executable_path=source.cli_executable_path,
+        cli_version=source.cli_version,
+        cli_binary_digest=source.cli_binary_digest,
+        image_digest=source.image_digest,
+        runtime_contract_version=source.runtime_contract_version,
+        orchestration_version=source.orchestration_version,
+        runtime_bundle_digest=source.runtime_bundle_digest,
         skill_references=[
             TaskSkillVersionReference(
                 task_id=target_task.id,

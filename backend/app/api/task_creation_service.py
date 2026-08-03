@@ -23,6 +23,14 @@ from app.core.skills import SkillValidationError
 from app.core.task_prompt import TaskPromptValidationError
 from app.core.usage_limits import UsageLimitExceeded, usage_limit_exceeded_detail
 from app.core.utcnow import utcnow
+from app.core.harness_registry import (
+    HarnessRegistryError,
+    validate_enabled_harnesses,
+)
+from app.core.model_endpoints import (
+    ensure_harness_protocol_compatibility,
+    normalize_endpoint,
+)
 from app.core.worker_profiles import WorkerProfileValidationError
 from app.dependencies.project_access import ProjectAccessScope, require_project_access
 from app.models import Issue, Task, User
@@ -254,6 +262,25 @@ async def create_task_record(
             detail=str(exc),
         ) from exc
 
+    # Resolve + validate the harness choice (Profile default when omitted) and
+    # freeze a secret-free ModelEndpoint into the snapshot.
+    profile_default_key = getattr(worker_profile, "default_harness_key", None)
+    if not isinstance(profile_default_key, str) or not profile_default_key:
+        profile_default_key = "claude"
+    harness_key = request.harness_key or profile_default_key
+    enabled_harnesses = getattr(worker_profile, "enabled_harnesses", None)
+    if not isinstance(enabled_harnesses, list) or not enabled_harnesses:
+        enabled_harnesses = ["claude"]
+    try:
+        validate_enabled_harnesses(enabled_harnesses, default_harness_key=harness_key)
+        endpoint = normalize_endpoint(provider)
+        ensure_harness_protocol_compatibility(harness_key, endpoint)
+    except (HarnessRegistryError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+
     scheduled_at = resolve_scheduled_at(
         request.scheduled_datetime,
         request.delay_seconds,
@@ -313,8 +340,39 @@ async def create_task_record(
             skill_ids_provided=(
                 "skill_ids" in request.model_fields_set and request.skill_ids is not None
             ),
+            harness_key=harness_key,
+            endpoint=endpoint,
         )
-        await services.bind_runtime_bundle(db, task)
+        bundle = await services.bind_runtime_bundle(db, task)
+        # Freeze the immutable Adapter + Bundle facts into the snapshot so the
+        # execution truth is self-contained and immune to later edits. Guards
+        # keep mocked/partial bundles or snapshots from breaking creation.
+        if snapshot is not None:
+            bundle_manifest = getattr(bundle, "manifest", None)
+            adapter = {}
+            if isinstance(bundle_manifest, dict):
+                adapter = (bundle_manifest.get("adapters") or {}).get(harness_key) or {}
+            if isinstance(adapter, dict):
+                snapshot.harness_adapter_version = adapter.get("version")
+                snapshot.harness_adapter_digest = adapter.get("digest")
+            bundle_digest = getattr(bundle, "digest", None)
+            if isinstance(bundle_digest, str):
+                snapshot.runtime_bundle_digest = bundle_digest
+            contract_version = getattr(bundle, "contract_version", None)
+            if isinstance(contract_version, str):
+                snapshot.runtime_contract_version = contract_version
+            orchestration_version = getattr(bundle, "orchestration_version", None)
+            if isinstance(orchestration_version, str):
+                snapshot.orchestration_version = orchestration_version
+            cli_runtime = getattr(worker_profile, "harness_runtimes", None) or {}
+            if not isinstance(cli_runtime, dict):
+                cli_runtime = {}
+            cli_runtime = cli_runtime.get(harness_key)
+            if isinstance(cli_runtime, dict):
+                snapshot.cli_source = cli_runtime.get("source")
+                snapshot.cli_executable_path = cli_runtime.get("executable_path")
+                snapshot.cli_version = cli_runtime.get("version")
+                snapshot.cli_binary_digest = cli_runtime.get("binary_digest")
     except (TaskPromptValidationError, SkillValidationError, RuntimeError) as exc:
         await db.rollback()
         raise HTTPException(

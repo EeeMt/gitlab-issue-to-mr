@@ -50,18 +50,29 @@ class ModelEndpoint:
         }
 
 
+def _attr_str(obj: Any, name: str, default: str) -> str:
+    value = getattr(obj, name, None)
+    return value if isinstance(value, str) and value else default
+
+
 def normalize_endpoint(provider: Any) -> ModelEndpoint:
     """Build a secret-free ModelEndpoint from an AIProvider ORM row."""
+    provider_options = getattr(provider, "provider_options", None)
+    if not isinstance(provider_options, dict):
+        provider_options = {}
+    credential_ref = getattr(provider, "credential_ref", None)
+    if not isinstance(credential_ref, str):
+        credential_ref = None
     return ModelEndpoint(
-        id=provider.id,
-        name=provider.name,
-        base_url=provider.base_url,
-        model=provider.model,
-        provider_kind=getattr(provider, "provider_kind", "anthropic_compatible"),
-        wire_protocol=getattr(provider, "wire_protocol", "anthropic_messages"),
+        id=getattr(provider, "id", None),
+        name=_attr_str(provider, "name", ""),
+        base_url=_attr_str(provider, "base_url", ""),
+        model=_attr_str(provider, "model", ""),
+        provider_kind=_attr_str(provider, "provider_kind", "anthropic_compatible"),
+        wire_protocol=_attr_str(provider, "wire_protocol", "anthropic_messages"),
         provider_driver=getattr(provider, "provider_driver", None),
-        provider_options=getattr(provider, "provider_options", None) or {},
-        credential_ref=getattr(provider, "credential_ref", None),
+        provider_options=provider_options,
+        credential_ref=credential_ref,
     )
 
 

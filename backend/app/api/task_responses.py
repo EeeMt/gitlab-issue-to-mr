@@ -79,6 +79,26 @@ def serialize_task(*args, **kwargs) -> dict:
                 if snapshot is not None
                 else "profile"
             ),
+            "harness_key": getattr(snapshot, "harness_key", None) if snapshot is not None else None,
+            "harness_snapshot": (
+                {
+                    "harness_adapter_version": snapshot.harness_adapter_version,
+                    "harness_adapter_digest": snapshot.harness_adapter_digest,
+                    "cli_source": snapshot.cli_source,
+                    "cli_executable_path": snapshot.cli_executable_path,
+                    "cli_version": snapshot.cli_version,
+                    "cli_binary_digest": snapshot.cli_binary_digest,
+                    "image_digest": snapshot.image_digest,
+                    "runtime_bundle_digest": snapshot.runtime_bundle_digest,
+                    "endpoint_protocol": (
+                        (snapshot.model_endpoint_snapshot or {}).get("wire_protocol")
+                        if snapshot.model_endpoint_snapshot
+                        else None
+                    ),
+                }
+                if snapshot is not None
+                else None
+            ),
         }
     )
     if skill_snapshots is not None:

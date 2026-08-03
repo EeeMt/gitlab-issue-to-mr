@@ -137,6 +137,7 @@ class CreateTaskRequest(BaseModel):
     delay_seconds: int | None = None
     scheduled_datetime: datetime | None = None
     provider_id: int | None = None
+    harness_key: str | None = None  # Omitted -> Profile default
     require_changes: bool | None = False
     task_mode: Literal["execute", "plan"] = "execute"
     session_mode: Literal["continue", "fresh"] = "continue"

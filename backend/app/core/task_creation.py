@@ -42,6 +42,8 @@ async def prepare_task_runtime_snapshot(
     skill_ids_provided: bool = False,
     skill_snapshots: list[dict[str, Any]] | None = None,
     skill_selection_source: str | None = None,
+    harness_key: str | None = None,
+    endpoint: Any | None = None,
 ) -> TaskWorkerProfileSnapshot:
     """Snapshot the worker profile and persist the task's rendered prompt."""
     if skill_snapshots is None:
@@ -55,7 +57,9 @@ async def prepare_task_runtime_snapshot(
         resolved_skills = normalize_skill_snapshots(skill_snapshots)
         validate_runtime_supports_skills(worker_profile, resolved_skills)
         resolved_source = skill_selection_source or "task"
-    snapshot = await replace_snapshot(db, task, worker_profile)
+    snapshot = await replace_snapshot(
+        db, task, worker_profile, harness_key=harness_key, endpoint=endpoint
+    )
     replace_task_skill_references(snapshot, resolved_skills)
     snapshot.skill_selection_source = resolved_source
     task.worker_profile_snapshot = snapshot
