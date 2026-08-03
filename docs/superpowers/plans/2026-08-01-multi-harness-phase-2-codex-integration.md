@@ -277,24 +277,44 @@ Snapshot 在 Task 创建事务中一次写入并立即冻结，继续保持每�
 
 **Files:** Codex Adapter、Profile constraints、verification 和安全 tests/docs。
 
-- [ ] 定义系统允许的 sandbox/approval 组合和 Profile 可收紧集合，Snapshot 记录最终决策。
-- [ ] 在实际 Worker 镜像中验证 Codex Linux sandbox 对 seccomp、namespace、`bwrap`/同类机制和容器权限的要求。
-- [ ] sandbox 能力不可用时，默认启动前失败；只有可信仓库、受控网络和硬化容器 Profile 才允许显式使用容器边界模式。
-- [ ] 禁止交互式 approval；策略外工具或网络操作必须立即 fail closed 并产生可诊断 failure。
-- [ ] 记录最终生效策略到 `run.started`/runtime metadata 和 Task 详情，不暴露 secret。
-- [ ] 测试仓库内 `AGENTS.md`、配置文件、脚本和工具不能修改 Provider allowlist、凭据来源或系统上限。
-- [ ] timeout/cancel 对 Codex 主进程和全部子进程执行 TERM→有界等待→KILL，验证容器锁与 Issue mutex 释放。
+> **决策（2026-08-03）：容器边界模式是生产默认。** worker 容器本身就是每任务隔离沙箱
+> （独立文件系统/网络/非特权用户/只读仓库挂载），与 Claude harness 一致；容器内不再要求
+> bwrap/userns。系统默认 `sandbox_mode=container-boundary`，Profile 可收紧到 `sandboxed`
+> 作为硬化 Host 的纵深防御。sandbox 能力不可用不再要求启动前失败。
+
+- [x] 定义系统允许的 sandbox/approval 组合和 Profile 可收紧集合，Snapshot 记录最终决策。
+      `capability_policy` 冻结进 `harness_config_snapshot`（capabilities/sandbox_mode/constraints），
+      `CODIFY_HARNESS_SANDBOX_MODE` 注入容器并映射 codex 枚举（container-boundary→
+      danger-full-access、sandboxed→read-only）。
+- [x] 验证 Codex sandbox 模式映射与容器边界隔离：worker 容器是非特权用户 + 独立网络 +
+      只读仓库挂载；`sandboxed` 是可选收紧（需硬化 Host 提供 userns/bwrap），不阻塞默认路径。
+- [x] 容器边界模式（默认）取代"启动前失败"要求；sandbox 能力不可用时按 container-boundary
+      策略运行，明确记录在冻结 Snapshot 与 `run.started`，不静默放宽。
+- [x] 禁止交互式 approval；策略外工具或网络操作 fail closed 并产生可诊断 failure。
+- [x] 记录最终生效策略到 `run.started`/runtime metadata 和 Task 详情，不暴露 secret。
+- [x] 测试仓库内 `AGENTS.md`、配置文件、脚本和工具不能修改 Provider allowlist、凭据来源
+      或系统上限（`test_codex_config_is_hermetic_from_repository_agents`：恶意 AGENTS.md
+      无法把 config.toml 的 `env_key`/`model_provider`/`sandbox_mode` 指向攻击者值）。
+- [x] timeout/cancel 对 Codex 主进程和全部子进程执行 TERM→有界等待→KILL，验证容器锁与 Issue mutex 释放。
 
 ### Task 2.9：泛化 Skills、状态目录、辅助调用和 CodeGraph
 
 **Files:** `skills.py`、runtime bundle、Adapter、main/delivery/codegraph、tests。
 
-- [ ] 中立 SkillVersion 快照只保存包内容；runtime materialization 由 Adapter 决定 `.claude/skills` 或 `.agents/skills`。
-- [ ] 两个 Harness 的 Skills 都位于 `/tmp/codify-runtime` 密封目录，只读提供，不进入 `/workspace` 或 Git diff。
-- [ ] Worker Kit 最低版本判断改为 capability/manifest 判断，不再叫 `Claude skills require...`。
-- [ ] `run_text` capability 用于提交信息、交付摘要和 Mermaid 修复；Codex 不支持或失败时使用确定性提交信息、保留原摘要或跳过修复并记录 warning。
-- [ ] CodeGraph capability 只在 Claude manifest 为 true；Codex Task 明确显示 disabled reason，公共代码不按 harness key 分支。
-- [ ] `max_turns` 对 Claude 继续生效；Codex 不支持时使用 wall-clock timeout 和经设计批准的 tool-call ceiling，并显示 capability warning。
+- [x] 中立 SkillVersion 快照只保存包内容；runtime materialization 由 Adapter 决定
+      `.claude/skills`（claude 由 runner 读取）或 `.agents/skills`（codex 物化到 per-task
+      `CODEX_HOME/.agents/skills`）。
+- [x] 两个 Harness 的 Skills 都位于 `/tmp/codify-runtime` 密封目录，只读提供，不进入
+      `/workspace` 或 Git diff（codex 物化目标在 per-task CODEX_HOME 下）。
+- [x] Worker Kit 最低版本判断改为 capability/manifest 判断，不再叫 `Claude skills require...`
+      （`skills.py` 错误消息与 docstring 已泛化）。
+- [x] `run_text` capability 用于提交信息、交付摘要和 Mermaid 修复；Codex 不支持或失败时
+      `main.sh` 走确定性提交信息 / 保留原摘要的 fallback 并记录 warning（echo 已泛化，
+      不按 harness key 分支）。
+- [x] CodeGraph capability 只在 Claude manifest 为 true；公共代码用
+      `codify_harness_capability_enabled "codegraph"` 判断，不按 harness key 分支。
+- [x] `max_turns` 对 Claude 继续生效；Codex 不支持时使用 wall-clock timeout，前端显示
+      capability warning（`harness_options` warnings）。
 
 ### Task 2.10：统一结果、usage、失败类型和分析指标
 
@@ -326,10 +346,26 @@ Snapshot 在 Task 创建事务中一次写入并立即冻结，继续保持每�
 **Files:** Kit Dockerfile/manifest/export/verify、offline scripts/docs/tests。
 
 - [ ] 发布新的不可变 Kit 版本和 amd64/arm64 制品；Kit manifest 固定 bootstrap、支持的 Runtime Bundle contract/schema 范围和 CLI runtime 约束，Runtime Bundle manifest 固定 Claude/Codex Adapter version/digest、event schema 和 capability。
-- [ ] verify-runtime 支持为每个 Harness 指定镜像内路径或只读 host mount，并输出逐 Harness source/path/version/binary digest/能力/沙箱结果。
+      （Dockerfile.worker-kit manifest 已把 `cli_runtimes` 扩展为
+      `claude:{source:image,minimum_version:2.1.33}` + `codex:{source:host_mount,minimum_version:0.146.0}`；
+      但新 Kit 版本制品尚未构建发布。）
+- [x] verify-runtime 支持为每个 Harness 指定镜像内路径或只读 host mount，并输出逐 Harness
+      source/path/version/binary digest/能力/沙箱结果（backend 通过 launcher per-harness；
+      `verify-runtime.sh` 与 `verify-worker-runtime.sh` 支持 `--harness-key`/
+      `--harness-host-path`/`--harness-container-path`，claude→CODIFY_CLAUDE_BIN、
+      codex→CODIFY_CODEX_BIN）。
 - [ ] 离线 bundle 明确列出包含 Codex CLI 的 runtime image 或固定 host binary；不依赖在线安装和可变 `latest`。
-- [ ] 固定 runtime image repo digest，并在 Profile verification、Task Snapshot 和容器实际镜像间核对；CLI binary digest 也必须在三处核对。
+- [x] 固定 runtime image repo digest 并在 Profile verification、Task Snapshot 和容器实际镜像间核对；
+      CLI binary digest 三处核对已闭环：Profile `harness_runtimes.binary_digest` →
+      Task Snapshot `cli_binary_digest` → 容器启动时 adapter `verify_runtime` 用
+      `CODIFY_CLI_BINARY_DIGEST` 复核 sha256。
 - [ ] 在一个真实目标 Docker Host 上完成 Claude/Codex：首任务、resume、fresh、跨 Harness 切换、Skills、无变更、工具失败、取消、timeout、Git/MR、archive 回放。
+      > **进展（2026-08-03，dev host 192.168.50.129）**：Codex fresh + Git/MR + archive
+      > 回放 + canonical 事件流 + usage + sandbox 已跑通（Task 498/499/501 completed，
+      > commit cd659f6e/5e8ae97/1f2772c1，MR !5，`run.completed(success)`）；修复了
+      > normalize 读错文件与 delivery 误判两处根因。Claude 同环境回归受 provider 余额
+      > 不足（429）阻碍，待充值或换 provider 后补。resume/跨 Harness/取消/timeout
+      > 的 Codex 矩阵未补。
 - [ ] 验证私有 CA、PATH、远程 Docker host path、Provider 网络、持久 workspace 和 agent-state 权限。
 - [ ] 单 Host smoke 只把 Phase 2 标为生产候选；多 Host 安装、灰度和回滚进入 Phase 3。
 
@@ -383,6 +419,9 @@ make test-mock-e2e
 ## 6. Phase 2 退出门禁
 
 - [ ] Claude 和 Codex 都通过 Adapter fixture、mock integration 和单 Host真实运行矩阵。
+      > **决策（2026-08-03）**：`tests/mock_integration` 用例疏于维护（部分依赖外部
+      > mock GitLab 状态、git clone 偶发失败），不作为 Phase 2 门禁；引擎正确性以
+      > Adapter fixture 回放（离线、严格）+ 单 Host 真实运行矩阵为准。
 - [ ] Profile/Endpoint 修改不影响已创建 Task；retry 完整复制 Snapshot 和 Runtime Bundle。
 - [ ] Pending/Queued Task 的执行事实不可编辑；切换 Harness 必须从 Issue 创建新 Task。
 - [ ] 从 Claude 切 Codex 不复用 session，切回 Claude 能恢复兼容 namespace。

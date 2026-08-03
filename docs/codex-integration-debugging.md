@@ -83,11 +83,13 @@
 **现象**:codex 执行命令报 `bwrap: No permissions to create a new namespace ... kernel does not
 allow non-privileged user namespaces`。
 
-**根因**:worker 容器未允许非特权 userns,bwrap 无法工作。**这是 2.8 沙箱的真实卡点。**
+**根因**:worker 容器未允许非特权 userns,bwrap 无法工作。**这触发了 2.8 的沙箱决策。**
 
-**修复(dev 风险接受)**:`codex_adapter_prepare_config` 设 `sandbox_mode = "danger-full-access"`
-(容器即边界),用 `CODIFY_CODEX_SANDBOX` 可覆盖为 `read-only`。**注意**:这是显式风险接受,
-不是静默放宽;生产必须硬化容器启用 userns/bwrap(见计划 2.8 fail-closed)。
+**决策(2026-08-03)**:worker 容器本身就是每任务隔离沙箱,与 Claude harness 一致,**容器边界
+模式(`container-boundary`)是生产默认**,不需要容器内 bwrap/userns。`codex_adapter_prepare_config`
+从冻结 Snapshot 的 `CODIFY_HARNESS_SANDBOX_MODE` 映射:container-boundary→`danger-full-access`,
+sandboxed(Profile 收紧)→`read-only`;`CODIFY_CODEX_SANDBOX` 仍可显式覆盖。最终策略冻结进
+Snapshot 并写入 `run.started` 供审计。
 
 ### 8. harness 成功但任务 failed、commit_sha=null
 
@@ -100,6 +102,39 @@ allow non-privileged user namespaces`。
 **修复**:`codex-run.sh` 在 raw 流含 `"turn.completed"` 时返回 0(canonical result 是权威),
 让共享 delivery 提交 agent 的改动。**注意**:此修复后需重新验证 commit+MR。
 
+### 9. 单 Host smoke 暴露的两层真实根因（2026-08-03，Task 493–498）
+
+第 8 节修复后 codex 任务仍是 `harness 成功 + 任务 failed + 无 commit`。单 Host 加 DIAG
+（`DIAG codex_run/harness_run` 写 console.log）定位到两层根因：
+
+**根因 9a —— `codex_adapter_normalize_result` 读错文件。**
+runner 把 legacy CLI 的 stdout 重定向到 `CODIFY_HARNESS_OUTPUT_FILE`
+（`/tmp/codify-harness-output.json`，codex 的 stdout 为空 → 0 字节）；而权威 canonical
+result 由事件 translator 写 `CODIFY_HARNESS_RESULT_FILE`（`/tmp/codify-runtime/harness-result.json`）。
+codex 的 normalize 误读 `result_file` → 空文件 → `normalize_result=1`；由于
+`harness.completed` 已发射，不补发 `harness.failed`，但 `codify_harness_run` 返回 1 →
+main.sh `exit $RESULT`。claude adapter 正确读 `CODIFY_HARNESS_RESULT_FILE`，所以 claude 不受影响。
+**修复**:`codex_adapter_normalize_result` 改读 `CODIFY_HARNESS_RESULT_FILE`（translator 写的权威文件）。
+
+**根因 9b —— delivery 不识别“harness 已 commit+push”。**
+codex exec 会自己 `git commit`+`git push`（工作区变干净、HEAD 已发布）。main.sh 的
+`repo_has_unpublished_local_head` 只覆盖“未发布本地 commit”；已发布场景落入 else
+“No changes made by Harness” → `require_changes=true` 时 `exit 1`。
+**修复**:新增 `repo_work_branch_ahead_of_base`（`git rev-list base..HEAD` 非空），main.sh
+加 `elif` 分支 `push_harness_commit`：push（`|| true` 容忍已发布）+ 
+`write_existing_commit_delivery_metadata`（复用 harness commit 并写 metadata，backend 据此更新 MR）。
+
+**验证（Task 498/499/501）**:`run.completed(success)`，commit `cd659f6e`/`5e8ae97`/`1f2772c1`，
+MR !5；canonical 流 `run.started(sandbox=container-boundary) → … → harness.completed →
+delivery.started → delivery.completed → worker.finalization(exit 0) → run.completed`。
+
+**根因 9c —— `repo_work_branch_ahead_of_base` 不能以 base 为基线。**
+最初用 `git rev-list ${BASE_BRANCH}..HEAD` 判“分支有新 commit”，但同一 issue 分支上
+已存在历史任务（codex）的 commit，导致**新任务无任何变更时也被误判为“harness 已提交”**
+并复用旧 commit（Task 500：claude provider 429 无新变更，却“成功”复用 codex 的 5e8ae97）。
+**修复**:基线改为 repository 准备时记录的 `REPO_REMOTE_WORK_SHA`（任务开始时的 work 分支
+head），只检测**本次任务期间**新产生的 commit；无新 commit 的任务正确落入 else 失败。
+
 ## 经验总结
 
 1. **「执行事实来自冻结 Snapshot / Bundle manifest」是多 Harness 的核心不变量**——所有被硬编码的
@@ -108,8 +143,14 @@ allow non-privileged user namespaces`。
 3. **外部 CLI 行为差异是调试主战场**——codex 不读 `OPENAI_BASE_URL`、默认模型、bwrap 依赖 userns,
    这些都要通过 adapter 的 config/prepare 显式收敛到 Codify 的冻结事实。
 4. **归档的 `harness-events/<harness>.jsonl` 是定位 CLI 层问题的第一现场**——每次失败先看它。
-5. **沙箱安全是硬边界**——容器内核能力(bwrap/userns)决定 codex 能否用真沙箱;dev 可显式风险接受
-   容器边界模式,生产必须硬化容器。
+5. **沙箱决策(2026-08-03)**——worker 容器即沙箱,容器边界模式是生产默认(与 Claude 一致);
+   容器内 bwrap/userns 不是前提,`sandboxed` 只是硬化 Host 的可选纵深防御,由 Profile 收紧。
+6. **权威结果文件的单一来源是 `CODIFY_HARNESS_RESULT_FILE`**——translator 写它,adapter
+   `normalize_result` 必须读它;runner 的 `result_file`（`CODIFY_HARNESS_OUTPUT_FILE`）只是
+   legacy CLI stdout,不可用于 canonical 判定。两个路径不一致时任务静默 failed。
+7. **Codex 会自己 commit+push**——delivery 必须区分“harness 产生的已发布 commit”
+   （`repo_work_branch_ahead_of_base` 复用）与“无任何变更”（require_changes 才失败）。
+   对 Codex 任务,工作区干净不代表失败。
 
 ## 验证命令速查
 

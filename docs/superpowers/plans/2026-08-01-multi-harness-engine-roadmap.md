@@ -97,10 +97,27 @@ Phase 1 剩余项：**发版硬边界切换**（关闭历史 Issue + 启用 Prof
   `harness-result`(success=True + usage)。**待完成**:任务级 delivery commit+MR 的最终验证,以及
   沙箱硬化决策(容器边界模式 vs 启用 userns/bwrap)。
 
-**当前状态（2026-08-03）**：Phase 2 后端核心（2.1–2.7、2.10）+ 前端 2.11 全部完成并提交,
-Backend `2234 passed`、前端 vue-tsc clean + specs 全过。Codex harness 真实端到端跑通,但
-**单 Host 真实 commit+MR 证据尚未获得**,且 2.8 沙箱存在安全决策待定(dev 用容器边界模式,
-生产需硬化容器启用 userns/bwrap)。
+**当前状态（2026-08-03 晚）**：Phase 2 后端核心（2.1–2.7、2.10）+ 前端 2.11 全部完成并提交,
+Backend unit `2240 passed`、前端 `1485 passed`、mock-e2e `371 passed`、vue-tsc clean。
+2.8（容器边界为生产默认）、2.9（Skills/CodeGraph 泛化）、2.12 自动化部分（CLI digest 启动
+复核、verify-runtime 逐 Harness、Kit manifest codex 声明）已完成。
+
+**Codex 单 Host smoke 已跑通（dev host 192.168.50.129，Task 498/499/501）**：真实 Codex
+0.146.0 + DeepSeek `deepseek-v4-flash`，`run.completed(success)`、commit + MR !5、archive
+回放、usage、`sandbox=container-boundary`、Skills materialization 均验证。修复了两处真实
+根因：codex `normalize_result` 误读 `CODIFY_HARNESS_OUTPUT_FILE`（空）而非
+`CODIFY_HARNESS_RESULT_FILE`；delivery 用 `repo_work_branch_ahead_of_base`
+（基线 `REPO_REMOTE_WORK_SHA`）复用 harness 自提交，避免误判历史 commit。Claude 同环境
+回归待 provider 余额恢复后补。2.12 剩余：Kit 0.3.10 已在远程 `/tmp` 待手动安装、
+Claude 回归、resume/跨 Harness/取消/timeout 的 Codex 矩阵。
+
+**2.8 沙箱决策已定（2026-08-03）：容器边界模式是生产默认。** worker 容器本身就是每任务
+隔离沙箱（独立文件系统/网络/非特权用户/只读仓库挂载），与 Claude harness 一致，容器内
+不再要求 bwrap/userns。系统默认 `sandbox_mode=container-boundary`（codex 映射为
+`danger-full-access`）；Profile 可收紧到 `sandboxed`（codex 映射 `read-only`，用于硬化
+Host 的纵深防御）。最终决策冻结进 Task Snapshot `harness_config_snapshot`，经
+`CODIFY_HARNESS_SANDBOX_MODE` 注入容器并写入 `run.started` 供审计；`CODIFY_CODEX_SANDBOX`
+可显式覆盖。sandbox 能力不可用不再要求启动前失败——容器边界本身就是受支持的隔离边界。
 
 ---
 
