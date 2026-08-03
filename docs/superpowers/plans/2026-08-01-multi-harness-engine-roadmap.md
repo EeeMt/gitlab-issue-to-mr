@@ -62,7 +62,23 @@ Phase 0 和 Phase 1 的 6–9 人日已包含在设计方案的 24–36 人日�
 - **新增交付物**：`docs/dev-env-api-regression.md`（开发环境 API 回归验证手册）。
 
 Phase 1 剩余项：**发版硬边界切换**（关闭历史 Issue + 启用 Profile 全量切不可变 Kit）尚未执行；
-开发环境可按「历史任务失败可接受」跳过仪式，仅作为生产收口演练。Phase 2（Codex）尚未启动。
+开发环境可按「历史任务失败可接受」跳过仪式，仅作为生产收口演练。
+
+### Phase 2（Codex 接入）进展
+
+- **增量 1（2026-08-03，已提交 `a984d842`）**：落地「必须先合入」的数据地基 ——
+  - 迁移 `064_multi_harness_runtime`:WorkerProfile Harness allowlist/约束/image digest/
+    harness_runtimes;AIProvider Endpoint 字段 + `credential_ref`;新表 `model_credentials`、
+    `issue_harness_sessions`;Task Snapshot 冻结字段;幂等回填(Profile→claude、Provider→独立
+    ModelCredential、Snapshot→claude、Issue→legacy session lineage)。
+  - `harness_registry.py`(内置 claude/codex + capability policy + bundle manifest 校验 +
+    `harness_options` 兼容结构)、`model_endpoints.py`(secret-free fingerprint)、
+    `model_credentials.py`(active/retired/revoked 生命周期 + 软退役 + ref 硬删保护)。
+  - Worker Profile API 校验新字段。已在开发环境 Postgres 应用并验证回填(6 凭据 / 52 snapshot /
+    63 session lineage)。Backend unit 全量 `2222 passed`。
+- **后续增量**：2.3 Provider API 层 → 2.4 verify-runtime + image digest → 2.5 Task 级 Harness 选择
+  与冻结 retry → 2.6 session namespace → 2.7–2.9 Codex Adapter + sandbox + Skills → 2.10 analytics
+  → 2.11 frontend → 2.12 Kit 升级与单 Host smoke。
 
 ---
 
