@@ -76,9 +76,15 @@ Phase 1 剩余项：**发版硬边界切换**（关闭历史 Issue + 启用 Prof
     `model_credentials.py`(active/retired/revoked 生命周期 + 软退役 + ref 硬删保护)。
   - Worker Profile API 校验新字段。已在开发环境 Postgres 应用并验证回填(6 凭据 / 52 snapshot /
     63 session lineage)。Backend unit 全量 `2222 passed`。
-- **后续增量**：2.3 Provider API 层 → 2.4 verify-runtime + image digest → 2.5 Task 级 Harness 选择
-  与冻结 retry → 2.6 session namespace → 2.7–2.9 Codex Adapter + sandbox + Skills → 2.10 analytics
-  → 2.11 frontend → 2.12 Kit 升级与单 Host smoke。
+- **增量 2（2026-08-03，已提交 `a036d623`）**：Task 2.3 Provider API 层 ——
+  `providers.py` 支持 `provider_kind`/`wire_protocol`/`provider_driver`/`provider_options`(allowlist +
+  kind↔protocol 配对校验,claude→anthropic_messages、codex→openai_responses,不做静默 Chat
+  Completions 转换);创建时绑独立 `ModelCredential` 并写 `credential_ref`,更新时轮换(旧凭据退役),
+  删除 Provider 只 soft-retire 凭据不硬删(既有 retry 仍可解析);响应暴露 `credential_ref` +
+  `credential_status`。已在 dev 验证。Backend unit 全量 `2227 passed`。
+- **后续增量**：2.4 verify-runtime + image digest → 2.5 Task 级 Harness 选择与冻结 retry → 2.6
+  session namespace → 2.7–2.9 Codex Adapter + sandbox + Skills → 2.10 analytics → 2.11 frontend
+  → 2.12 Kit 升级与单 Host smoke。
 
 ---
 
