@@ -982,11 +982,15 @@ async def test_verify_mounted_worker_profile_runs_preflight_on_profile_target():
     ]
     db = MagicMock()
     db.get = AsyncMock(return_value=profile)
+    db.commit = AsyncMock()
 
     container = MagicMock()
     client = MagicMock()
     client.create_container.return_value = container
     client.wait_for_container.return_value = (0, "Worker kit verification passed")
+    client.resolve_image_repo_digest.return_value = (
+        "team/java21-maven@sha256:abc123def456"
+    )
 
     with patch("app.api.worker_profiles.DockerClientWrapper", return_value=client):
         response = await verify_worker_profile_runtime(
@@ -997,7 +1001,12 @@ async def test_verify_mounted_worker_profile_runs_preflight_on_profile_target():
 
     assert response["ok"] is True
     assert response["image"] == "team/java21-maven:2026.07"
+    assert response["image_digest"] == "team/java21-maven@sha256:abc123def456"
+    assert profile.image_digest == "team/java21-maven@sha256:abc123def456"
+    assert profile.verified_at is not None
+    db.commit.assert_awaited_once()
     client.client.images.get.assert_called_once_with("team/java21-maven:2026.07")
+    client.resolve_image_repo_digest.assert_called_once_with("team/java21-maven:2026.07")
     create_kwargs = client.create_container.call_args.kwargs
     assert create_kwargs["command"] == [
         "--verify",

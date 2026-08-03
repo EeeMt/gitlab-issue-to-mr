@@ -721,6 +721,7 @@ class WorkerProfile(Base):
     harness_constraints: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     image_digest: Mapped[str | None] = mapped_column(String(128), nullable=True)
     harness_runtimes: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,

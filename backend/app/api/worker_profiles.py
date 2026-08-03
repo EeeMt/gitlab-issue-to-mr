@@ -377,11 +377,12 @@ async def verify_worker_profile_runtime(
     connection = runtime.docker_connection(get_effective_settings())
     started_at = time.monotonic()
 
-    def verify_runtime() -> tuple[int, str]:
+    def verify_runtime() -> tuple[int, str, str]:
         client = DockerClientWrapper(connection)
         container = None
         try:
             client.client.images.get(runtime.image)
+            repo_digest = client.resolve_image_repo_digest(runtime.image)
             container = client.create_container(
                 image=runtime.image,
                 command=command,
@@ -400,7 +401,8 @@ async def verify_worker_profile_runtime(
                     "codify.worker_kit_version": runtime.worker_kit_version or "",
                 },
             )
-            return client.wait_for_container(container, timeout=180)
+            exit_code, logs = client.wait_for_container(container, timeout=180)
+            return exit_code, logs, repo_digest
         finally:
             if container is not None:
                 with contextlib.suppress(Exception):
@@ -409,7 +411,7 @@ async def verify_worker_profile_runtime(
                 client.close()
 
     try:
-        exit_code, logs = await asyncio.wait_for(
+        exit_code, logs, repo_digest = await asyncio.wait_for(
             asyncio.to_thread(verify_runtime),
             timeout=200,
         )
@@ -427,9 +429,20 @@ async def verify_worker_profile_runtime(
                 "logs": logs[-8000:],
             },
         )
+
+    # Persist the immutable image digest + verification timestamp so Task
+    # creation can gate on a verified Profile.
+    from app.core.utcnow import utcnow as _utcnow
+
+    profile.image_digest = repo_digest
+    profile.verified_at = _utcnow()
+    await db.commit()
+
     return {
         "ok": True,
         "image": runtime.image,
+        "image_digest": repo_digest,
+        "verified_at": profile.verified_at.isoformat() if profile.verified_at else None,
         "worker_kit_version": runtime.worker_kit_version,
         "docker_host": connection.host,
         "elapsed_ms": round((time.monotonic() - started_at) * 1000),
@@ -737,6 +750,22 @@ async def update_worker_profile(
                 if skill.enabled
             ],
         )
+
+        # Changing the image, Kit, or Harness allowlist/constraints invalidates
+        # the prior verification; existing Task snapshots are unaffected.
+        stale_fields = {
+            "image",
+            "runtime_mode",
+            "worker_kit_version",
+            "worker_kit_path",
+            "enabled_harnesses",
+            "default_harness_key",
+            "harness_constraints",
+            "harness_runtimes",
+        }
+        if stale_fields & fields:
+            profile.image_digest = None
+            profile.verified_at = None
 
         await db.commit()
         await db.refresh(

@@ -355,6 +355,7 @@ def serialize_worker_profile_for_api(
         "default_harness_key": getattr(profile, "default_harness_key", None) or "claude",
         "harness_constraints": getattr(profile, "harness_constraints", None) or {},
         "image_digest": getattr(profile, "image_digest", None),
+        "verified_at": getattr(profile, "verified_at", None),
         "harness_runtimes": getattr(profile, "harness_runtimes", None) or {},
         "created_at": profile.created_at,
         "updated_at": profile.updated_at,
