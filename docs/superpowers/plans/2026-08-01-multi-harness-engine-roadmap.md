@@ -112,11 +112,13 @@ Backend unit `2240 passed`、前端 `1485 passed`、mock-e2e `371 passed`、vue-
 **Codex 与 Claude 行为已统一（2026-08-04）**：codex 改用 execpolicy 禁止 git 写操作
 （`danger-full-access` + `forbidden git commit/push/add/...` + `approval_policy="never"`），
 只写文件、由 Codify delivery 统一 commit（Task 504/505/506 验证）；连带修复持久 workspace
-`.git` root-owned 的权限问题（repository 准备时 chown 到执行用户）。Claude 同环境
-回归待 provider 余额恢复后补。2.12 剩余：Kit 0.3.10 已安装到远程
-`/opt/codify/worker-kits/0.3.10-linux-amd64` 且 Profile 11 已切到 0.3.10（Task 502
-completed、commit `0c864dd7` 验证新 Kit 完整链路）、Claude 回归、
-resume/跨 Harness/取消/timeout 的 Codex 矩阵。
+`.git` root-owned 的权限问题（repository 准备时 chown 到执行用户）。
+
+**双引擎 dev host 回归均通过（2026-08-04）**：Claude 用 DeepSeek anthropic provider 6
+（provider 1/智谱 余额不足 429）在 issue 84 分支上 Task 508 completed、commit `ece571b4`、
+`run.completed(success)`，delivery/elif/chown 改动对 Claude 无回归。2.12 剩余：Kit 0.3.10
+已安装到远程 `/opt/codify/worker-kits/0.3.10-linux-amd64` 且 Profile 11 已切到 0.3.10
+（Task 502 验证）、resume/跨 Harness/取消/timeout 的 Codex 矩阵。
 
 **2.8 沙箱决策已定（2026-08-03 决策，08-04 细化）：容器边界模式是生产默认。** worker 容器
 本身就是每任务隔离沙箱（独立文件系统/网络/非特权用户/只读仓库挂载），与 Claude harness

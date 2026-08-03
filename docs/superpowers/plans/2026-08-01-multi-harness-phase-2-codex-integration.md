@@ -368,8 +368,10 @@ Snapshot 在 Task 创建事务中一次写入并立即冻结，继续保持每�
       > `run.completed(success)`）；修复了 normalize 读错文件、delivery 误判历史 commit、
       > `.git` root-owned 权限三处根因。**Codex 已改为只写文件**（execpolicy 禁 git 写操作 +
       > `approval_policy="never"`），由 Codify delivery 统一 commit，与 Claude 一致
-      > （Task 504/505/506 验证）。Claude 同环境回归受 provider 余额不足（429）阻碍，
-      > 待充值或换 provider 后补。resume/跨 Harness/取消/timeout 的 Codex 矩阵未补。
+      > （Task 504/505/506 验证）。**Claude 同环境回归已通过**（2026-08-04，DeepSeek
+      > anthropic provider 6，provider 1/智谱余额不足 429；Task 508 completed、
+      > commit `ece571b4`、`run.completed(success)`，delivery/elif/chown 改动无回归）。
+      > resume/跨 Harness/取消/timeout 的 Codex 矩阵未补。
 - [ ] 验证私有 CA、PATH、远程 Docker host path、Provider 网络、持久 workspace 和 agent-state 权限。
 - [ ] 单 Host smoke 只把 Phase 2 标为生产候选；多 Host 安装、灰度和回滚进入 Phase 3。
 
