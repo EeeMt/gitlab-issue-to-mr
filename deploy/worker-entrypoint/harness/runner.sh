@@ -113,7 +113,13 @@ codify_harness_run() {
         return 1
     fi
     set +e
-    adapter_run "${prompt_file}" "${result_file}"
+    # Run the adapter as a background job and wait on it so the SIGTERM trap
+    # interrupts immediately. A foreground child would otherwise defer the trap
+    # until the CLI exits, letting `docker stop` escalate to SIGKILL before the
+    # finalizer can emit a cancelled terminal.
+    adapter_run "${prompt_file}" "${result_file}" &
+    local adapter_pid=$!
+    wait "${adapter_pid}"
     local result=$?
     adapter_normalize_result "${result_file}"
     local normalize_result=$?

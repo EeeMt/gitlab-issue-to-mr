@@ -232,27 +232,15 @@ async def cancel_task(
         task.container_id = None
     await db.commit()
 
-    if container is not None and raw_logs_finalized:
-        try:
-            await asyncio.to_thread(container.remove, force=True, v=True)
-            logger.info(
-                "Removed container %s for cancelled task %s",
-                container_reference,
-                task_id,
-            )
-        except Exception as remove_error:  # noqa: BLE001
-            logger.warning(
-                "Could not remove container for cancelled task %s: %s",
-                task_id,
-                remove_error,
-            )
-        else:
-            task.container_id = None
-            await db.commit()
-    elif container is not None:
-        logger.error(
-            "Retaining container %s for cancelled task %s because raw logs were not finalized",
-            container_reference,
+    if container is not None:
+        # Physical removal is owned by the scheduler's worker finalization, which
+        # drains the log stream (capturing the cancelled terminal the container's
+        # EXIT-trap finalizer emits) and then removes the container. Removing the
+        # container here races that drain and can drop the canonical terminal for
+        # a very early cancel, leaving the attempt without a run terminal. The
+        # scheduler releases the issue execution lock once finalization completes.
+        logger.info(
+            "Cancelled task %s: deferring container removal to worker finalization",
             task_id,
         )
 

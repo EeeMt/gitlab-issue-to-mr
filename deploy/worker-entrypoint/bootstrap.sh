@@ -223,6 +223,19 @@ create_runtime_archive() {
     return 0
 }
 
+CODIFY_CANCELLED=0
+
+codify_signal_exit() {
+    # Idempotent: a second TERM while the EXIT-trap finalizer is running must
+    # not abort it (docker stop retries, double-cancel).
+    trap - TERM INT
+    CODIFY_CANCELLED=1
+    echo "Cancellation signal received; finalizing task as cancelled" >&2
+    # 143 = 128 + SIGTERM: the finalizer maps signal exit codes to cancelled.
+    exit 143
+}
+trap codify_signal_exit TERM INT
+
 codify_finalize_on_exit() {
     local exit_code="${1:-0}"
     if declare -F repo_finalize_preparation_on_exit >/dev/null 2>&1; then
@@ -238,6 +251,9 @@ codify_finalize_on_exit() {
     if [ -n "${CONSOLE_TEE_PID:-}" ]; then
         wait "${CONSOLE_TEE_PID}" 2>/dev/null || true
     fi
+    # Re-derive the canonical result so an orphaned adapter translator that raced
+    # this finalizer cannot leave a stale harness-result.json in the archive.
+    codify_harness_ensure_result "${exit_code}" || true
     create_runtime_archive || true
 }
 

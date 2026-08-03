@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import tarfile
 from pathlib import Path
@@ -37,12 +38,18 @@ async def session_factory():
 
 
 def test_runtime_bundle_is_byte_deterministic_and_manifested():
+    source_manifest = json.loads(
+        (REPO_ROOT / "deploy/worker-entrypoint/harness/manifest.json").read_text()
+    )
     first = build_runtime_bundle(REPO_ROOT)
     second = build_runtime_bundle(REPO_ROOT)
     assert first.digest == second.digest
     assert first.archive_bytes == second.archive_bytes
     assert first.manifest["event_schema"] == "codify.worker.event/v1"
-    assert first.manifest["adapters"]["claude"]["version"] == "1.0.0"
+    assert (
+        first.manifest["adapters"]["claude"]["version"]
+        == source_manifest["adapters"]["claude"]["version"]
+    )
     assert len(first.manifest["adapters"]["claude"]["digest"]) == 64
     assert first.manifest["bundle_digest"] == first.digest
     assert len(first.manifest["archive_manifest_digest"]) == 64

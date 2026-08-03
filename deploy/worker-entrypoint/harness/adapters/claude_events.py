@@ -20,6 +20,60 @@ def _stable_placeholder(kind: str, value: str) -> str:
     digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
     return f"<{kind}:{digest}>"
 
+
+_REAL_SESSION_ID: str = ""
+_REAL_SESSION_ID_FILE_NAME = ".real-session-id"
+
+
+def _real_session_id_file() -> Path:
+    return Path(os.environ["CODIFY_RUNTIME_DIR"]) / _REAL_SESSION_ID_FILE_NAME
+
+
+def _persist_real_session_id(session_id: str) -> None:
+    try:
+        _real_session_id_file().write_text(session_id, encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _capture_real_session_id(raw_text: str) -> None:
+    """Keep the unmasked session id before sanitization so resume stays possible.
+
+    UUIDs are redacted to stable ``<UUID:...>`` placeholders in events and raw
+    streams, but the harness result must carry the real session id so the backend
+    persists ``output_session_id`` and ``--resume`` receives a valid value. The
+    value is persisted to a side file because each stream line is translated in
+    its own subprocess; the ``result`` line must not depend on re-carrying it.
+    """
+    global _REAL_SESSION_ID
+    if _REAL_SESSION_ID:
+        return
+    try:
+        record = json.loads(raw_text)
+    except json.JSONDecodeError:
+        return
+    session_id = record.get("session_id")
+    if isinstance(session_id, str) and session_id and "<" not in session_id:
+        _REAL_SESSION_ID = session_id
+        _persist_real_session_id(session_id)
+
+
+def _session_id(record: dict) -> str | None:
+    """Real session id when captured, else the (possibly masked) record value.
+
+    The backend projects ``output_session_id`` from canonical events, so the
+    resume capability requires the real value here; other UUIDs stay masked.
+    """
+    if _REAL_SESSION_ID:
+        return _REAL_SESSION_ID
+    try:
+        persisted = _real_session_id_file().read_text(encoding="utf-8").strip()
+    except OSError:
+        persisted = ""
+    if persisted and "<" not in persisted:
+        return persisted
+    return record.get("session_id")
+
 TOKEN_PATTERNS = (
     (re.compile(r"\bglpat-[A-Za-z0-9_-]{8,}\b"), "<GITLAB_TOKEN>"),
     (re.compile(r"\bsk-ant-[A-Za-z0-9_-]{8,}\b"), "<ANTHROPIC_API_KEY>"),
@@ -168,9 +222,9 @@ def _write_result(record: dict, *, success: bool, usage: dict) -> None:
         "success": success,
         "result": record.get("result") or "",
         "harness_key": "claude",
-        "adapter_version": os.environ.get("CODIFY_ADAPTER_VERSION", "1.0.0"),
+        "adapter_version": os.environ.get("CODIFY_ADAPTER_VERSION", "1.0.1"),
         "cli_version": os.environ.get("CODIFY_CLI_VERSION", "unknown"),
-        "session_id": record.get("session_id"),
+        "session_id": _session_id(record),
         "model": os.environ.get("ANTHROPIC_MODEL") or None,
         "usage": usage,
         "failure": failure,
@@ -219,11 +273,11 @@ def translate(record: dict, raw_line: int) -> None:
     if record_type == "system" and subtype == "init":
         _emit(
             "model.resolved",
-            {"model": record.get("model"), "session_id": record.get("session_id")},
+            {"model": record.get("model"), "session_id": _session_id(record)},
             raw_line,
         )
     elif record_type == "system" and subtype == "compact_boundary":
-        _emit("context.compacted", {"session_id": record.get("session_id")}, raw_line)
+        _emit("context.compacted", {"session_id": _session_id(record)}, raw_line)
     elif record_type == "system" and subtype == "api_retry":
         _emit(
             "provider.retry",
@@ -290,7 +344,7 @@ def translate(record: dict, raw_line: int) -> None:
         success = subtype == "success" and record.get("is_error") is not True
         payload = {
             "result": record.get("result") or "",
-            "session_id": record.get("session_id"),
+            "session_id": _session_id(record),
         }
         if success:
             _emit("harness.completed", payload, raw_line)
@@ -313,7 +367,9 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--raw-file", required=True, type=Path)
     args = parser.parse_args()
-    input_text = sanitize(sys.stdin.read().rstrip("\n"))
+    raw_input = sys.stdin.read().rstrip("\n")
+    _capture_real_session_id(raw_input)
+    input_text = sanitize(raw_input)
     if not input_text:
         return 0
     try:
