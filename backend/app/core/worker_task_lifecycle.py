@@ -14,6 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ci_failure_logs import append_ci_failure_log
 from app.core.harness_attempts import create_task_attempt
+from app.core.harness_sessions import (
+    record_task_output_session,
+    resolve_resume_session,
+    session_namespace_for,
+)
 from app.core.utcnow import utcnow
 from app.core.worker_docker_targets import TaskContainerLookupError
 from app.core.worker_profiles import load_task_worker_runtime
@@ -315,11 +320,29 @@ async def create_execute_container(
     )
 
     session_mode = getattr(task, "session_mode", "continue")
+    snapshot = getattr(task, "worker_profile_snapshot", None)
+    harness_key = getattr(snapshot, "harness_key", None) or "claude"
+    endpoint_fingerprint = None
+    if snapshot is not None and isinstance(snapshot.model_endpoint_snapshot, dict):
+        endpoint_fingerprint = snapshot.model_endpoint_snapshot.get("fingerprint")
+    resume_session: str | None = None
+    try:
+        resume_session, _lineage = await resolve_resume_session(
+            db,
+            issue=issue,
+            harness_key=harness_key,
+            session_namespace=session_namespace_for(harness_key, endpoint_fingerprint),
+            session_mode=session_mode,
+        )
+    except Exception:  # noqa: BLE001 - never block task execution on session bookkeeping
+        resume_session = issue.claude_session_id if issue is not None else None
     task.input_session_id = (
-        None
-        if session_mode == "fresh" or issue is None
-        else issue.claude_session_id
+        resume_session if session_mode == "continue" and issue is not None else None
     )
+    # Mirror the legacy read source for the runtime env builder; only the Claude
+    # harness owns the legacy pointer.
+    if issue is not None and harness_key == "claude" and resume_session:
+        issue.claude_session_id = resume_session
     task.output_session_id = None
     # Record the exact session decision at execution time. Scheduled tasks must not snapshot
     # this at creation because earlier queued tasks may advance the Issue session first. The
@@ -769,6 +792,20 @@ async def monitor_container_run(
         # The session returned by the task is the only safe pointer for subsequent work. This
         # also covers fresh runs and the CLI wrapper's resume-not-found fallback.
         issue.claude_session_id = output_session_id
+        # Upsert the per-harness/namespace session lineage so a continue on the
+        # same harness can resume it and a different harness never can.
+        snapshot = getattr(task, "worker_profile_snapshot", None)
+        harness_key = getattr(snapshot, "harness_key", None) or "claude"
+        endpoint_fingerprint = None
+        if snapshot is not None and isinstance(snapshot.model_endpoint_snapshot, dict):
+            endpoint_fingerprint = snapshot.model_endpoint_snapshot.get("fingerprint")
+        await record_task_output_session(
+            db,
+            issue=issue,
+            harness_key=harness_key,
+            session_namespace=session_namespace_for(harness_key, endpoint_fingerprint),
+            session_id=output_session_id,
+        )
         await db.commit()
 
     if issue:
