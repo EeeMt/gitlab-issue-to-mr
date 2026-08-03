@@ -211,8 +211,9 @@ def validate_runtime_bundle_manifest(manifest: dict[str, Any]) -> None:
             raise HarnessRegistryError(
                 f"adapter {key!r} has no provider_protocols"
             )
+        allowed = HARNESS_PROVIDER_PROTOCOLS[key]
         for protocol in protocols:
-            if protocol not in HARNESS_PROVIDER_PROTOCOLS[key]:
+            if protocol.replace("-", "_") not in allowed:
                 raise HarnessRegistryError(
                     f"adapter {key!r} declares unsupported protocol {protocol!r}"
                 )

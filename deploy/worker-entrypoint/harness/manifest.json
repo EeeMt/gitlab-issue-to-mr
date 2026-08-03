@@ -18,6 +18,21 @@
         "codegraph": true,
         "sandbox_mode": "container-boundary"
       }
+    },
+    "codex": {
+      "version": "1.0.0",
+      "cli_version_range": ">=0.146.0 <0.160.0",
+      "provider_protocols": ["openai-responses"],
+      "capabilities": {
+        "resume": true,
+        "task_skills": false,
+        "max_turns": false,
+        "usage_tokens": true,
+        "usage_cost": true,
+        "run_text": false,
+        "codegraph": false,
+        "sandbox_mode": "container-boundary"
+      }
     }
   }
 }

@@ -1,0 +1,31 @@
+#!/bin/bash
+set -u
+
+# Minimal Codex runner: run `codex exec --json`, stream each line through the
+# Codex event translator, and persist a canonical harness result.
+
+CODIFY_CODEX_BIN="${CODIFY_CODEX_BIN:-/usr/local/bin/codex}"
+CODIFY_CODEX_RAW_EVENT_JSONL="${CODIFY_CODEX_RAW_EVENT_JSONL:-${CODIFY_RUNTIME_DIR}/harness-events/codex.jsonl}"
+CODIFY_CODEX_EVENT_TRANSLATOR="${CODIFY_CODEX_EVENT_TRANSLATOR:-${CODIFY_ORCHESTRATION_DIR}/worker-entrypoint/harness/adapters/codex_events.py}"
+PROMPT_FILE="${PROMPT_FILE:-${CODIFY_HARNESS_PROMPT_FILE:-}}"
+
+mkdir -p "$(dirname "${CODIFY_CODEX_RAW_EVENT_JSONL}")"
+
+if [ -z "${PROMPT_FILE}" ] || [ ! -s "${PROMPT_FILE}" ]; then
+    echo "Codex prompt file is missing: ${PROMPT_FILE}" >&2
+    exit 1
+fi
+
+export CODEX_HOME="${CODEX_HOME:-${CODIFY_RUNTIME_DIR}/codex-home}"
+mkdir -p "${CODEX_HOME}"
+
+set +e
+"${CODIFY_CODEX_BIN}" exec --json --skip-git-repo-check "$(cat "${PROMPT_FILE}")" 2>&1 \
+    | while IFS= read -r line; do
+        printf '%s\n' "${line}" \
+            | python3 "${CODIFY_CODEX_EVENT_TRANSLATOR}" --raw-file "${CODIFY_CODEX_RAW_EVENT_JSONL}"
+    done
+exit_code=${PIPESTATUS[0]}
+set -e
+
+exit "${exit_code}"

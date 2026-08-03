@@ -72,14 +72,20 @@ def _sha256(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+_ADAPTER_DIGEST_FILES = (
+    "deploy/ci-claude.sh",
+    "deploy/worker-entrypoint/harness/adapters/claude.sh",
+    "deploy/worker-entrypoint/harness/adapters/claude_events.py",
+    "deploy/worker-entrypoint/harness/adapters/codex.sh",
+    "deploy/worker-entrypoint/harness/adapters/codex_events.py",
+    "deploy/worker-entrypoint/legacy/codex-run.sh",
+)
+
+
 def _adapter_digest(files: Iterable[tuple[str, bytes]]) -> str:
     digest = hashlib.sha256()
     for name, payload in files:
-        if name in {
-            "deploy/ci-claude.sh",
-            "deploy/worker-entrypoint/harness/adapters/claude.sh",
-            "deploy/worker-entrypoint/harness/adapters/claude_events.py",
-        }:
+        if name in _ADAPTER_DIGEST_FILES:
             digest.update(name.encode())
             digest.update(b"\0")
             digest.update(payload)
