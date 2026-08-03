@@ -135,6 +135,28 @@ delivery.started → delivery.completed → worker.finalization(exit 0) → run.
 **修复**:基线改为 repository 准备时记录的 `REPO_REMOTE_WORK_SHA`（任务开始时的 work 分支
 head），只检测**本次任务期间**新产生的 commit；无新 commit 的任务正确落入 else 失败。
 
+### 10. 让 Codex 与 Claude 一致：只写文件、由 Codify 统一提交（2026-08-04）
+
+Codex 固有行为是 `exec` 会自己 `git commit`+`git push`，与 Codify「harness 只产代码、
+delivery 统一提交」的模型不一致。查官方文档确认两点后改为「写文件模式」：
+
+- **官方设计**:`workspace-write` 沙箱下 `.git/` 恒只读 → codex 无法 commit。但 worker 容器
+  不允许非特权 userns，`workspace-write` 的 bwrap 让**所有命令失败**（实测 Task 503 failed），
+  所以容器边界模式仍用 `danger-full-access`。
+- **方案**:`danger-full-access`（容器即边界）+ `execpolicy.rules` 明确 `forbidden`
+  `git commit/push/add/rm/mv/reset/revert/merge/checkout/branch/stash/init` + `approval_policy="never"`
+  （CI 无人值守）。这样 codex 只写工作区文件、不碰 git；Codify 的 delivery 检测到变更后统一 commit。
+
+**连带权限问题（`.git/objects` root-owned）**:codex exec 由 adapter 直接执行，以容器 root 运行，
+早期任务写的 `.git/objects` 属主是 root；Codify delivery 以 codify 用户（uid 1000）commit 时
+报 `insufficient permission ... .git/objects`（实测 Task 504 failed）。**修复**:repository 准备
+完成时 `chown -R "${CODIFY_RUN_UID}:${CODIFY_RUN_GID}" /workspace/.git`，把持久 workspace 的
+`.git` 归一化到执行用户。
+
+**验证（Task 505/506）**:codex 写文件（+61 行变更）→ `delivery.completed(exit 0)` →
+`run.completed(success)`，commit `c69e283c`/`070aefad`；自动 chown 生效（objects 从 root 归位
+到 codify）。至此 Codex 与 Claude 的行为一致：**只生成代码，交付层统一 commit + MR**。
+
 ## 经验总结
 
 1. **「执行事实来自冻结 Snapshot / Bundle manifest」是多 Harness 的核心不变量**——所有被硬编码的

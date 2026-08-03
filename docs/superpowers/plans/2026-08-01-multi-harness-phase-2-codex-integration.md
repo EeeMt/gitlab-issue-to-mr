@@ -363,12 +363,13 @@ Snapshot 在 Task 创建事务中一次写入并立即冻结，继续保持每�
       Task Snapshot `cli_binary_digest` → 容器启动时 adapter `verify_runtime` 用
       `CODIFY_CLI_BINARY_DIGEST` 复核 sha256。
 - [ ] 在一个真实目标 Docker Host 上完成 Claude/Codex：首任务、resume、fresh、跨 Harness 切换、Skills、无变更、工具失败、取消、timeout、Git/MR、archive 回放。
-      > **进展（2026-08-03，dev host 192.168.50.129）**：Codex fresh + Git/MR + archive
-      > 回放 + canonical 事件流 + usage + sandbox 已跑通（Task 498/499/501 completed，
-      > commit cd659f6e/5e8ae97/1f2772c1，MR !5，`run.completed(success)`）；修复了
-      > normalize 读错文件与 delivery 误判两处根因。Claude 同环境回归受 provider 余额
-      > 不足（429）阻碍，待充值或换 provider 后补。resume/跨 Harness/取消/timeout
-      > 的 Codex 矩阵未补。
+      > **进展（2026-08-03→04，dev host 192.168.50.129）**：Codex fresh + Git/MR + archive
+      > 回放 + canonical 事件流 + usage + sandbox 已跑通（Task 498–506，MR !5，
+      > `run.completed(success)`）；修复了 normalize 读错文件、delivery 误判历史 commit、
+      > `.git` root-owned 权限三处根因。**Codex 已改为只写文件**（execpolicy 禁 git 写操作 +
+      > `approval_policy="never"`），由 Codify delivery 统一 commit，与 Claude 一致
+      > （Task 504/505/506 验证）。Claude 同环境回归受 provider 余额不足（429）阻碍，
+      > 待充值或换 provider 后补。resume/跨 Harness/取消/timeout 的 Codex 矩阵未补。
 - [ ] 验证私有 CA、PATH、远程 Docker host path、Provider 网络、持久 workspace 和 agent-state 权限。
 - [ ] 单 Host smoke 只把 Phase 2 标为生产候选；多 Host 安装、灰度和回滚进入 Phase 3。
 
