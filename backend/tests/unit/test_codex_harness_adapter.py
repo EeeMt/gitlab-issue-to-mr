@@ -153,14 +153,26 @@ def _codex_config_sandbox(tmp_path: Path, *, frozen: str | None, override: str |
 
 
 def test_codex_config_maps_frozen_sandbox_to_codex_enum(tmp_path):
-    # container-boundary (system default) trusts the worker container boundary.
+    # container-boundary (system default) = danger-full-access because Codex's
+    # bwrap sandbox cannot create userns inside the worker container; an
+    # execution policy forbids git write ops so Codex only edits files and the
+    # shared Codify delivery commits — matching the Claude harness.
     default_config = _codex_config_sandbox(tmp_path, frozen=None)
     assert 'sandbox_mode = "danger-full-access"' in default_config
+    assert 'approval_policy = "never"' in default_config
     boundary_config = _codex_config_sandbox(tmp_path, frozen="container-boundary")
     assert 'sandbox_mode = "danger-full-access"' in boundary_config
     # sandboxed (profile-tightened) asks codex for an in-container read-only sandbox.
     sandboxed_config = _codex_config_sandbox(tmp_path, frozen="sandboxed")
     assert 'sandbox_mode = "read-only"' in sandboxed_config
+
+
+def test_codex_container_boundary_writes_git_forbidden_execpolicy(tmp_path):
+    config = _codex_config_sandbox(tmp_path, frozen="container-boundary")
+    assert 'approval_policy = "never"' in config
+    rules = (tmp_path / "codex-home" / "execpolicy.rules").read_text(encoding="utf-8")
+    assert "forbidden" in rules
+    assert '"commit"' in rules and '"push"' in rules
 
 
 def test_codex_config_explicit_sandbox_override_wins(tmp_path):

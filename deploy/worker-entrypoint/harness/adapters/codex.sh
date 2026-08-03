@@ -69,11 +69,14 @@ codex_adapter_prepare_config() {
     if [ -n "${base_url}" ] && [ -n "${model}" ]; then
         # Sandbox: the worker container IS the isolation boundary (container-
         # boundary mode, matching the Claude harness). Codex's own bwrap sandbox
-        # cannot create userns inside the worker container, so the default grants
-        # full access within that hardened container — an intentional, auditable
-        # policy frozen in the Task Snapshot, not a silent relaxation.
-        #   container-boundary (Codify default) -> danger-full-access
-        #   sandboxed (profile-tightened)       -> read-only (bwrap on hardened host)
+        # cannot create userns inside the worker container (workspace-write/read-only
+        # would fail every command), so the container boundary runs in
+        # danger-full-access. To keep Codex write-files-only — like Claude — an
+        # execution policy forbids git write operations, so Codex cannot commit/
+        # push and the shared Codify delivery does. approval_policy "never" keeps
+        # unattended runs prompt-free (CI mode).
+        #   container-boundary (Codify default) -> danger-full-access + execpolicy
+        #   sandboxed (profile-tightened)       -> read-only
         # CODIFY_CODEX_SANDBOX may still force an explicit codex-level override.
         local sandbox_mode="${CODIFY_CODEX_SANDBOX:-}"
         if [ -z "${sandbox_mode}" ]; then
@@ -82,10 +85,20 @@ codex_adapter_prepare_config() {
                 *) sandbox_mode="danger-full-access" ;;
             esac
         fi
+        if [ "${sandbox_mode}" = "danger-full-access" ]; then
+            cat > "${CODEX_HOME}/execpolicy.rules" <<'RULES'
+prefix_rule(
+    pattern = ["git", ["commit", "push", "add", "rm", "mv", "reset", "revert", "merge", "checkout", "branch", "stash", "init"]],
+    decision = "forbidden",
+    justification = "Codify delivery owns version control; Codex edits working-tree files only",
+)
+RULES
+        fi
         cat > "${CODEX_HOME}/config.toml" <<EOF
 model = "${model}"
 model_provider = "codify"
 sandbox_mode = "${sandbox_mode}"
+approval_policy = "never"
 
 [model_providers.codify]
 name = "Codify endpoint"

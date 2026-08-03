@@ -370,6 +370,10 @@ REPO_PREPARE_ELAPSED_MS=$((REPO_PREPARE_FINISHED_MS - REPO_PREPARE_STARTED_MS))
 REPO_PREPARATION_PHASE="ready"
 repo_log "actual_state shallow=${REPO_ACTUAL_SHALLOW} effective_filter=${REPO_EFFECTIVE_FILTER:-none}"
 repo_log "ready action=${REPO_ACTION} elapsed_ms=${REPO_PREPARE_ELAPSED_MS} branch=${BRANCH_NAME} commit=${REPO_COMMIT_SHA} pack_size=${REPO_PACK_SIZE:-unknown} fallback=${REPO_FALLBACK:-none}"
+# Persistent workspaces may carry .git objects owned by a different uid from an
+# earlier harness run (e.g. Codex exec as root). The shared delivery commits as
+# the worker runtime user, so normalize ownership so it can write .git.
+chown -R "${CODIFY_RUN_UID}:${CODIFY_RUN_GID}" /workspace/.git 2>/dev/null || true
 repo_write_preparation_artifact \
     "${REPO_PREPARE_ELAPSED_MS}" \
     "${REPO_ACTUAL_SHALLOW}" \
