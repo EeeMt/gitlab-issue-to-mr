@@ -473,3 +473,206 @@ class ProviderAuthScopeTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 500)
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 Task 2.3: Endpoint fields + credential lifecycle
+# ---------------------------------------------------------------------------
+
+import asyncio
+import pytest
+from pydantic import ValidationError
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
+
+from app.api.providers import CreateProviderRequest, UpdateProviderRequest
+from app.core.config_crypto import decrypt_config_secret
+from app.models import Base, ModelCredential
+
+
+def _valid_create_kwargs(**overrides):
+    kwargs = {
+        "name": "endpoint",
+        "base_url": "https://api.example.com/v1",
+        "model": "model-x",
+    }
+    kwargs.update(overrides)
+    return kwargs
+
+
+class ProviderEndpointFieldSchemaTests(unittest.TestCase):
+    def test_accepts_valid_kind_protocol_pairs(self):
+        CreateProviderRequest(
+            **_valid_create_kwargs(
+                provider_kind="openai_compatible", wire_protocol="openai_responses"
+            )
+        )
+        CreateProviderRequest(
+            **_valid_create_kwargs(
+                provider_kind="openai_compatible",
+                wire_protocol="openai_chat_completions",
+            )
+        )
+        CreateProviderRequest(
+            **_valid_create_kwargs(
+                provider_kind="anthropic_compatible",
+                wire_protocol="anthropic_messages",
+            )
+        )
+
+    def test_rejects_invalid_kind_protocol_pairs(self):
+        for kwargs in (
+            {"provider_kind": "openai_compatible", "wire_protocol": "anthropic_messages"},
+            {"provider_kind": "anthropic_compatible", "wire_protocol": "openai_responses"},
+            {"provider_kind": "unknown_kind", "wire_protocol": "anthropic_messages"},
+            {"provider_kind": "anthropic_compatible", "wire_protocol": "unknown_protocol"},
+        ):
+            with pytest.raises(ValidationError):
+                CreateProviderRequest(**_valid_create_kwargs(**kwargs))
+
+    def test_update_validates_kind_protocol(self):
+        UpdateProviderRequest(wire_protocol="openai_responses")
+        with pytest.raises(ValidationError):
+            UpdateProviderRequest(
+                provider_kind="anthropic_compatible", wire_protocol="openai_responses"
+            )
+
+
+class ProviderCredentialLifecycleTests(unittest.TestCase):
+    """Provider create/delete drives the independent credential lifecycle."""
+
+    def setUp(self):
+        os.environ["CONFIG_ENCRYPTION_KEY"] = "unit-test-key"
+        from app.config import get_settings
+
+        get_settings.cache_clear()
+        self.engine = create_async_engine(
+            "sqlite+aiosqlite:///:memory:", poolclass=StaticPool
+        )
+        asyncio.run(_create_schema(self.engine))
+        self.factory = async_sessionmaker(self.engine, expire_on_commit=False)
+        app.dependency_overrides[require_admin_user] = lambda: MagicMock()
+        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
+
+    def tearDown(self):
+        app.dependency_overrides.clear()
+        asyncio.run(self.engine.dispose())
+
+    def _client(self):
+        async def override_db():
+            async with self.factory() as session:
+                yield session
+
+        app.dependency_overrides[get_db] = override_db
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_create_with_key_binds_credential_and_delete_retires_it(self):
+        client = self._client()
+        resp = client.post(
+            "/api/providers",
+            json={
+                "name": "ds-key",
+                "base_url": "https://api.deepseek.com/anthropic",
+                "model": "deepseek-v4-flash",
+                "api_key": "sk-test-secret",
+                "provider_kind": "anthropic_compatible",
+                "wire_protocol": "anthropic_messages",
+            },
+        )
+        self.assertEqual(resp.status_code, 201, resp.text)
+        body = resp.json()
+        self.assertEqual(body["credential_status"], "active")
+        self.assertIsNotNone(body["credential_ref"])
+
+        provider_id = body["id"]
+        ref = body["credential_ref"]
+
+        async def _assert_credential_active_and_decryptable():
+            async with self.factory() as session:
+                from sqlalchemy import select
+                credential = (
+                    await session.execute(
+                        select(ModelCredential).where(ModelCredential.ref == ref)
+                    )
+                ).scalar_one()
+                self.assertEqual(credential.status, "active")
+                self.assertEqual(decrypt_config_secret(credential.secret_encrypted), "sk-test-secret")
+
+        asyncio.run(_assert_credential_active_and_decryptable())
+
+        # A second provider so the first is not the "only provider".
+        second = client.post(
+            "/api/providers",
+            json={
+                "name": "other",
+                "base_url": "https://api.example.com/v1",
+                "model": "m",
+            },
+        )
+        self.assertEqual(second.status_code, 201, second.text)
+
+        # Deleting the provider retires the credential, never hard-deletes it.
+        del_resp = client.delete(f"/api/providers/{provider_id}")
+        self.assertEqual(del_resp.status_code, 204)
+
+        async def _assert_credential_retired():
+            async with self.factory() as session:
+                from sqlalchemy import select
+                credential = (
+                    await session.execute(
+                        select(ModelCredential).where(ModelCredential.ref == ref)
+                    )
+                ).scalar_one()
+                self.assertEqual(credential.status, "retired")
+                self.assertIsNotNone(credential.retired_at)
+
+        asyncio.run(_assert_credential_retired())
+
+    def test_update_rotates_credential_and_retires_old(self):
+        client = self._client()
+        resp = client.post(
+            "/api/providers",
+            json={
+                "name": "rotating",
+                "base_url": "https://api.example.com/v1",
+                "model": "m",
+                "api_key": "sk-old",
+            },
+        )
+        self.assertEqual(resp.status_code, 201, resp.text)
+        provider_id = resp.json()["id"]
+        old_ref = resp.json()["credential_ref"]
+
+        upd = client.patch(
+            f"/api/providers/{provider_id}",
+            json={"api_key": "sk-new"},
+        )
+        self.assertEqual(upd.status_code, 200, upd.text)
+        new_ref = upd.json()["credential_ref"]
+        self.assertNotEqual(new_ref, old_ref)
+
+        async def _assert_rotation():
+            async with self.factory() as session:
+                from sqlalchemy import select
+                old = (
+                    await session.execute(
+                        select(ModelCredential).where(ModelCredential.ref == old_ref)
+                    )
+                ).scalar_one()
+                new = (
+                    await session.execute(
+                        select(ModelCredential).where(ModelCredential.ref == new_ref)
+                    )
+                ).scalar_one()
+                self.assertEqual(old.status, "retired")
+                self.assertEqual(new.status, "active")
+                self.assertEqual(
+                    decrypt_config_secret(new.secret_encrypted), "sk-new"
+                )
+
+        asyncio.run(_assert_rotation())
+
+
+async def _create_schema(engine):
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
