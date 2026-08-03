@@ -1535,6 +1535,8 @@ const en = {
       codegraphHint: 'Enables the local CodeGraph MCP server and project index for tasks using this profile.',
       harnesses: 'Harnesses',
       harnessesHint: 'Harnesses enabled for tasks on this profile; the default is pre-selected for new tasks.',
+      defaultHarness: 'Default harness',
+      defaultHarnessHint: 'Pre-selected engine for new tasks on this profile; switch to another engine per task when enabled.',
       defaultSkills: 'Default Claude Skills',
       selectDefaultSkills: 'Select default skills',
       defaultSkillsHint: 'New tasks inherit these enabled skills unless the task explicitly overrides the selection. Skills require mounted-kit 0.3.5 or newer.',

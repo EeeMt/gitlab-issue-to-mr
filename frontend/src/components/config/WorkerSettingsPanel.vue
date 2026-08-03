@@ -257,12 +257,25 @@
                     {{ t('config.codegraphHint') }}
                   </template>
                 </n-form-item>
-                <n-form-item :label="t('config.harnesses')">
-                  <span class="harness-summary">
-                    {{ harnessSummary }}
-                  </span>
+                <n-form-item :label="t('config.harnesses')" path="enabled_harnesses">
+                  <n-select
+                    v-model:value="workerFormValue.enabled_harnesses"
+                    multiple
+                    :options="harnessSelectOptions"
+                    :disabled="workerFormValue.runtime_mode !== 'mounted_kit'"
+                  />
                   <template #feedback>
                     {{ t('config.harnessesHint') }}
+                  </template>
+                </n-form-item>
+                <n-form-item :label="t('config.defaultHarness')" path="default_harness_key">
+                  <n-select
+                    v-model:value="workerFormValue.default_harness_key"
+                    :options="harnessSelectOptions"
+                    :disabled="workerFormValue.runtime_mode !== 'mounted_kit'"
+                  />
+                  <template #feedback>
+                    {{ t('config.defaultHarnessHint') }}
                   </template>
                 </n-form-item>
               </n-gi>
@@ -771,13 +784,10 @@ const skills = ref<SkillSummary[]>([])
 const selectedProfileId = ref<number | null>(null)
 const creatingWorkerProfile = ref(false)
 const activeRunInstructionTab = ref<'execute' | 'plan' | 'ci_auto_repair'>('execute')
-const harnessSummary = computed(() => {
-  const enabled = workerFormValue.value.enabled_harnesses?.length
-    ? workerFormValue.value.enabled_harnesses
-    : ['claude']
-  const defaultKey = workerFormValue.value.default_harness_key ?? 'claude'
-  return `${enabled.join(' / ')}（默认 ${defaultKey}）`
-})
+const harnessSelectOptions = [
+  { label: 'Claude', value: 'claude' },
+  { label: 'Codex', value: 'codex' },
+]
 const knownPromptPlaceholders = computed(() => [
   ...new Set(builtIns.value?.execute.known_placeholders ?? [
     ...(builtIns.value?.execute.available_placeholders ?? []),
@@ -1484,6 +1494,17 @@ onMounted(() => {
 watch(() => props.reloadKey, () => {
   fetchConfig()
 })
+
+watch(
+  () => workerFormValue.value.enabled_harnesses,
+  (enabled) => {
+    const list = enabled?.length ? enabled : ['claude']
+    const def = workerFormValue.value.default_harness_key
+    if (!def || !list.includes(def)) {
+      workerFormValue.value.default_harness_key = list[0]
+    }
+  },
+)
 
 watch(
   () => [

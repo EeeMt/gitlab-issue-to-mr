@@ -1514,6 +1514,8 @@ const zhCN = {
     codegraphHint: '为使用该配置的任务启用本地 CodeGraph MCP 服务和项目索引。',
     harnesses: '引擎',
     harnessesHint: '该配置下任务可用的引擎;默认引擎会预选给新任务。',
+    defaultHarness: '默认引擎',
+    defaultHarnessHint: '该配置下新任务预选的引擎;启用多个引擎时可按任务切换。',
     defaultSkills: '默认 Claude Skills',
     selectDefaultSkills: '选择默认 Skill',
     defaultSkillsHint: '新任务默认继承这些已启用 Skill，任务创建时可以完整覆盖。Skill 仅支持 Worker Kit 0.3.5 或更高版本的挂载模式。',
