@@ -257,6 +257,14 @@
                     {{ t('config.codegraphHint') }}
                   </template>
                 </n-form-item>
+                <n-form-item :label="t('config.harnesses')">
+                  <span class="harness-summary">
+                    {{ harnessSummary }}
+                  </span>
+                  <template #feedback>
+                    {{ t('config.harnessesHint') }}
+                  </template>
+                </n-form-item>
               </n-gi>
             </n-grid>
             <n-grid
@@ -714,6 +722,10 @@ type WorkerFormValue = {
   docker_tls_cert: string
   docker_tls_key: string
   codegraph_enabled: boolean
+  enabled_harnesses: string[]
+  default_harness_key: string
+  harness_constraints: Record<string, unknown>
+  image_digest: string | null
   mounts: WorkerProfileMount[]
   environment_variables: EnvironmentVariableFormItem[]
   default_skill_ids: number[]
@@ -759,6 +771,13 @@ const skills = ref<SkillSummary[]>([])
 const selectedProfileId = ref<number | null>(null)
 const creatingWorkerProfile = ref(false)
 const activeRunInstructionTab = ref<'execute' | 'plan' | 'ci_auto_repair'>('execute')
+const harnessSummary = computed(() => {
+  const enabled = workerFormValue.value.enabled_harnesses?.length
+    ? workerFormValue.value.enabled_harnesses
+    : ['claude']
+  const defaultKey = workerFormValue.value.default_harness_key ?? 'claude'
+  return `${enabled.join(' / ')}（默认 ${defaultKey}）`
+})
 const knownPromptPlaceholders = computed(() => [
   ...new Set(builtIns.value?.execute.known_placeholders ?? [
     ...(builtIns.value?.execute.available_placeholders ?? []),
@@ -806,6 +825,10 @@ const workerFormValue = ref<WorkerFormValue>({
   docker_tls_cert: '',
   docker_tls_key: '',
   codegraph_enabled: false,
+  enabled_harnesses: ['claude'],
+  default_harness_key: 'claude',
+  harness_constraints: {},
+  image_digest: null,
   mounts: [],
   environment_variables: [],
   default_skill_ids: [],
@@ -949,6 +972,12 @@ function mapProfileToWorkerFormValue(
     docker_tls_cert: profile?.docker_tls_cert ?? '',
     docker_tls_key: profile?.docker_tls_key ?? '',
     codegraph_enabled: profile?.codegraph_enabled ?? false,
+    enabled_harnesses: profile?.enabled_harnesses?.length
+      ? [...profile.enabled_harnesses]
+      : ['claude'],
+    default_harness_key: profile?.default_harness_key ?? 'claude',
+    harness_constraints: profile?.harness_constraints ?? {},
+    image_digest: profile?.image_digest ?? null,
     mounts: parseMounts(profile?.volume_mounts),
     environment_variables: parseEnvironmentVariables(profile?.environment_variables),
     default_skill_ids: [...(profile?.default_skill_ids ?? [])],
@@ -981,6 +1010,12 @@ function cloneWorkerFormValue(value: WorkerFormValue): WorkerFormValue {
     docker_tls_cert: value.docker_tls_cert,
     docker_tls_key: value.docker_tls_key,
     codegraph_enabled: value.codegraph_enabled,
+    enabled_harnesses: value.enabled_harnesses?.length
+      ? [...value.enabled_harnesses]
+      : ['claude'],
+    default_harness_key: value.default_harness_key ?? 'claude',
+    harness_constraints: value.harness_constraints ?? {},
+    image_digest: value.image_digest ?? null,
     mounts: value.mounts.map((mount) => ({ ...mount })),
     environment_variables: value.environment_variables.map((environmentVariable) => ({
       ...environmentVariable
@@ -1088,6 +1123,10 @@ function createEmptyWorkerFormValue(): WorkerFormValue {
     docker_tls_cert: '',
     docker_tls_key: '',
     codegraph_enabled: false,
+    enabled_harnesses: ['claude'],
+    default_harness_key: 'claude',
+    harness_constraints: {},
+    image_digest: null,
     mounts: [],
     environment_variables: [],
     default_skill_ids: [],

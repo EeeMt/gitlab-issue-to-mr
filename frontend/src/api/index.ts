@@ -262,6 +262,7 @@ export interface WorkerProfile {
   ci_auto_repair_run_instruction_template: string
   enabled_harnesses?: string[]
   default_harness_key?: string
+  harness_constraints?: Record<string, unknown>
   image_digest?: string | null
   created_at: string
   updated_at: string
