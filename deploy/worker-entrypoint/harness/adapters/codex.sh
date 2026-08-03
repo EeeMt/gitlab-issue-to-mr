@@ -59,9 +59,16 @@ codex_adapter_prepare_config() {
     local base_url="${OPENAI_BASE_URL:-}"
     local model="${OPENAI_MODEL:-}"
     if [ -n "${base_url}" ] && [ -n "${model}" ]; then
+        # Sandbox: the container IS the boundary (container-boundary mode).
+        # bwrap cannot create userns inside the worker container; running with
+        # full access within the hardened container is an explicit, documented
+        # dev risk-acceptance, not a silent relaxation (CODIFY_CODEX_SANDBOX
+        # can force "read-only" when the host supports bwrap/userns).
+        sandbox_mode="${CODIFY_CODEX_SANDBOX:-danger-full-access}"
         cat > "${CODEX_HOME}/config.toml" <<EOF
 model = "${model}"
 model_provider = "codify"
+sandbox_mode = "${sandbox_mode}"
 
 [model_providers.codify]
 name = "Codify endpoint"
