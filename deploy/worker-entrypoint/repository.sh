@@ -217,11 +217,11 @@ REPO_REQUESTED_FILTER="${CODIFY_GIT_CLONE_FILTER:-none}"
 
 # Clone or reuse repository with authentication.
 if [ -d /workspace/.git ]; then
-    # A reused persistent workspace may carry a .git owned by a different uid
-    # from an earlier run (e.g. pre-codify-as-user codex). Only normalize
-    # ownership when a root-owned entry is actually present, so a normal run
-    # does not pay a full-tree chown on a large repository. `-print -quit`
-    # stops at the first root-owned entry instead of scanning everything.
+    # Legacy guard: workspaces created by pre-codify-run harnesses (codex/claude
+    # executed as root) may still carry root-owned .git entries. Only normalize
+    # when a root-owned entry is actually present, so a normal run does not pay
+    # a full-tree chown on a large repository. `-print -quit` stops at the first
+    # root-owned entry instead of scanning everything.
     if [ -n "$(find /workspace/.git -user root -print -quit 2>/dev/null)" ]; then
         chown -R "${CODIFY_RUN_UID}:${CODIFY_RUN_GID}" /workspace/.git 2>/dev/null || true
     fi
@@ -378,10 +378,6 @@ REPO_PREPARE_ELAPSED_MS=$((REPO_PREPARE_FINISHED_MS - REPO_PREPARE_STARTED_MS))
 REPO_PREPARATION_PHASE="ready"
 repo_log "actual_state shallow=${REPO_ACTUAL_SHALLOW} effective_filter=${REPO_EFFECTIVE_FILTER:-none}"
 repo_log "ready action=${REPO_ACTION} elapsed_ms=${REPO_PREPARE_ELAPSED_MS} branch=${BRANCH_NAME} commit=${REPO_COMMIT_SHA} pack_size=${REPO_PACK_SIZE:-unknown} fallback=${REPO_FALLBACK:-none}"
-# Persistent workspaces may carry .git objects owned by a different uid from an
-# earlier harness run (e.g. Codex exec as root). The shared delivery commits as
-# the worker runtime user, so normalize ownership so it can write .git.
-chown -R "${CODIFY_RUN_UID}:${CODIFY_RUN_GID}" /workspace/.git 2>/dev/null || true
 repo_write_preparation_artifact \
     "${REPO_PREPARE_ELAPSED_MS}" \
     "${REPO_ACTUAL_SHALLOW}" \

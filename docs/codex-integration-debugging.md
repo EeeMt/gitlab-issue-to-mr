@@ -147,20 +147,24 @@ delivery 统一提交」的模型不一致。查官方文档确认两点后改�
   `git commit/push/add/rm/mv/reset/revert/merge/checkout/branch/stash/init` + `approval_policy="never"`
   （CI 无人值守）。这样 codex 只写工作区文件、不碰 git；Codify 的 delivery 检测到变更后统一 commit。
 
-**连带权限问题（`.git/objects` root-owned）**:codex exec 由 adapter 直接执行，以容器 root 运行
-（audit 流 event.jsonl/harness-result.json 由 bootstrap 有意 root-owned+644，所以 translator
-也必须以 root 写 canonical 事件），codex 写工作区/`.git` 产生 root-owned 对象；Codify delivery
-以 codify 用户（uid 1000）commit 时报 `insufficient permission ... .git/objects`（Task 504 failed）。
-**修复（条件 chown）**:repository 在 **fetch 前**用 `find /workspace/.git -user root -print -quit`
-检测（`-quit` 遇首个 root 即返回，不全量扫描）；仅当存在 root-owned 条目才
-`chown -R ... .git` 归一化。正常 run（属主一致）完全跳过 chown，避免大仓库/慢磁盘下
-`chown -R` 全量遍历的耗时。曾尝试让 codex 以 codify 运行以根治 root-owned，但因 bootstrap 的
-audit 流设计（event.jsonl 等 root-owned，model 不可篡改）会阻塞 translator 写 canonical 事件
-而回退为 root 运行 + 条件 chown。
+**运行用户决策（2026-08-04 修订）**:最初 codex exec 由 adapter 直接执行、以容器 root 运行
+（audit 流 event.jsonl/harness-result.json 由 bootstrap 有意 root-owned+644，translator 需以
+root 写 canonical 事件），codex 写出的工作区/`.git` 因此是 root-owned；Codify delivery 以
+codify 用户（uid 1000）commit 时报 `insufficient permission ... .git/objects`（Task 504 failed），
+并引入了 repository 的条件 chown hack。
+**根治**:把 codex 收编到与 Claude 一致的模式——`codex-run.sh` 用 FIFO + 后台进程重构（镜像
+ci-claude.sh）：codex CLI 子进程经 `CODIFY_CODEX_RUN_AS`（codify-run-as）降为 codify 运行，
+FIFO 写端 fd 由 root 父 shell 的重定向打开、降权子进程继承；事件 translator 留在 root 上下文
+逐行消费 FIFO，写 root-owned 的 raw 流/canonical 事件。这样 codex 产出的工作树/`.git` 天生
+codify-owned。交付前无条件 chown 删除；保留 reuse 路径的**条件 chown 作为 legacy 安全网**
+（`find /workspace/.git -user root` 仅在存在 root-owned 条目时才归一化，覆盖旧 codex-as-root
+工作区遗留的 root-owned shard；kit 部署新 run 不产生 root-owned 对象，正常 run 因无 root-owned
+条目而跳过）。另：codex-run.sh 不用 `set -m`（避免 timeout 的组信号够不到 codex 导致孤儿进程），
+并校验 `CODIFY_CODEX_RUN_AS` 必须为可执行绝对路径。
 
-**验证（Task 505/506）**:codex 写文件（+61 行变更）→ `delivery.completed(exit 0)` →
-`run.completed(success)`，commit `c69e283c`/`070aefad`；自动 chown 生效（objects 从 root 归位
-到 codify）。至此 Codex 与 Claude 的行为一致：**只生成代码，交付层统一 commit + MR**。
+**验证**:codex 写文件 → `delivery.completed(exit 0)` → `run.completed(success)`；`.git` 全程
+codify-owned，无需 chown 归位。Codex 与 Claude 行为与运行用户完全一致：**只生成代码，交付层
+统一 commit + MR**。
 
 ### 11. Codex 扩展矩阵 + resume + harness 切换约束（2026-08-04）
 

@@ -157,6 +157,7 @@ codex_adapter_run() {
     : > "${raw_file}"
     chown 0:0 "${raw_file}"
     chmod 644 "${raw_file}"
+    CODIFY_CODEX_RUN_AS="${CODIFY_RUN_AS:-}" \
     CODIFY_CODEX_BIN="$(codify_codex_bin)" \
     CODIFY_CODEX_RAW_EVENT_JSONL="${raw_file}" \
     CODIFY_CODEX_EVENT_TRANSLATOR="${CODIFY_CODEX_TRANSLATOR}" \
