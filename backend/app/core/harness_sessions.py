@@ -91,6 +91,26 @@ async def upsert_session(
     return session
 
 
+async def get_issue_latest_harness_key(
+    db: AsyncSession,
+    issue_id: int,
+) -> str | None:
+    """Return the harness_key of the most recent session lineage for an issue.
+
+    This is the issue's current harness: as tasks are appended and fresh
+    sessions started, the latest lineage's harness wins over any profile
+    default. ``None`` means the issue has no session lineage yet.
+    """
+    result = await db.execute(
+        select(IssueHarnessSession)
+        .where(IssueHarnessSession.issue_id == issue_id)
+        .order_by(IssueHarnessSession.id.desc())
+        .limit(1)
+    )
+    session = result.scalar_one_or_none()
+    return session.harness_key if session is not None else None
+
+
 async def resolve_resume_session(
     db: AsyncSession,
     *,

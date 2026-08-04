@@ -58,8 +58,16 @@ codex_adapter_detect_capabilities() {
 }
 
 codex_adapter_prepare_config() {
-    # Hermetic per-task CODEX_HOME; never inherit host or image global config.
-    export CODEX_HOME="${CODIFY_RUNTIME_DIR}/codex-home"
+    # Persist CODEX_HOME (config.toml + session transcripts) on the issue-shared
+    # volume so a later continue task can resume the same codex session across
+    # containers. config.toml is rewritten per task from the frozen endpoint, so
+    # the persisted home never leaks stale provider settings. Fall back to the
+    # per-task runtime dir when the shared volume is absent.
+    if [ -d "/opt/codify-issue-shared" ] && [ -w "/opt/codify-issue-shared" ]; then
+        export CODEX_HOME="/opt/codify-issue-shared/codex-home"
+    else
+        export CODEX_HOME="${CODIFY_RUNTIME_DIR}/codex-home"
+    fi
     mkdir -p "${CODEX_HOME}"
     chown -R "${CODIFY_RUN_UID:-1000}:${CODIFY_RUN_GID:-1000}" "${CODEX_HOME}" 2>/dev/null || true
     # Point codex at the frozen Snapshot endpoint/model (codex does not honour

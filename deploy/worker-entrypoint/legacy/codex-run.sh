@@ -20,11 +20,20 @@ export CODEX_HOME="${CODEX_HOME:-${CODIFY_RUNTIME_DIR}/codex-home}"
 mkdir -p "${CODEX_HOME}"
 
 set +e
-"${CODIFY_CODEX_BIN}" exec --json --skip-git-repo-check "$(cat "${PROMPT_FILE}")" 2>&1 \
-    | while IFS= read -r line; do
-        printf '%s\n' "${line}" \
-            | python3 "${CODIFY_CODEX_EVENT_TRANSLATOR}" --raw-file "${CODIFY_CODEX_RAW_EVENT_JSONL}"
-    done
+if [ -n "${CODIFY_RESUME_SESSION:-}" ]; then
+    "${CODIFY_CODEX_BIN}" exec resume --json --skip-git-repo-check \
+        "${CODIFY_RESUME_SESSION}" "$(cat "${PROMPT_FILE}")" 2>&1 \
+        | while IFS= read -r line; do
+            printf '%s\n' "${line}" \
+                | python3 "${CODIFY_CODEX_EVENT_TRANSLATOR}" --raw-file "${CODIFY_CODEX_RAW_EVENT_JSONL}"
+        done
+else
+    "${CODIFY_CODEX_BIN}" exec --json --skip-git-repo-check "$(cat "${PROMPT_FILE}")" 2>&1 \
+        | while IFS= read -r line; do
+            printf '%s\n' "${line}" \
+                | python3 "${CODIFY_CODEX_EVENT_TRANSLATOR}" --raw-file "${CODIFY_CODEX_RAW_EVENT_JSONL}"
+        done
+fi
 exit_code=${PIPESTATUS[0]}
 set -e
 

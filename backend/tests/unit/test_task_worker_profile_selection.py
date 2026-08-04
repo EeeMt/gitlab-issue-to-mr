@@ -83,6 +83,10 @@ async def test_create_task_uses_issue_pinned_worker_and_default_provider():
         patch("app.api.tasks.replace_task_worker_snapshot", new=AsyncMock(return_value=worker_profile)),
         patch("app.api.tasks.bind_runtime_bundle", new=AsyncMock(return_value=MagicMock(id=1))),
         patch("app.api.tasks.select_snapshot_run_instruction_template", return_value="Execute {{user_prompt}}"),
+        patch(
+            "app.api.task_creation_service.get_issue_latest_harness_key",
+            new=AsyncMock(return_value=None),
+        ),
         patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
         patch(
             "app.api.tasks.get_usage_quota_service",
@@ -352,3 +356,81 @@ async def test_update_task_preserves_worker_metadata_after_refresh_without_snaps
     assert response["worker_profile_id"] == 33
     assert response["worker_profile_name"] == "Default Worker"
     assert response["worker_image"] == "codify-worker/java21-maven:2026.07"
+
+
+@pytest.mark.asyncio
+async def test_create_task_continue_cannot_switch_harness():
+    """A continue task must reuse the issue's current harness lineage."""
+    request = CreateTaskRequest(
+        issue_id=1,
+        user_prompt="Implement",
+        priority=1,
+        session_mode="continue",
+        harness_key="claude",
+    )
+    issue = MagicMock()
+    issue.id = 1
+    issue.project_id = 101
+    issue.description = "Implement"
+    issue.status = "open"
+    issue.worker_profile_id = 33
+    issue.default_provider_id = 44
+
+    worker_profile = MagicMock()
+    worker_profile.id = 33
+    worker_profile.name = "Java Worker"
+    worker_profile.enabled = True
+    worker_profile.default_execute_run_instruction_template = "Execute {{user_prompt}}"
+    worker_profile.default_plan_run_instruction_template = "Plan {{user_prompt}}"
+    worker_profile.ci_auto_repair_run_instruction_template = "Repair {{issue_title}}"
+    worker_profile.default_harness_key = "claude"
+    worker_profile.enabled_harnesses = ["claude", "codex"]
+
+    provider = MagicMock()
+    provider.id = 44
+    provider.is_disabled = False
+
+    db = MagicMock()
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+    db.flush = AsyncMock()
+    db.get = AsyncMock(return_value=issue)
+    db.refresh = AsyncMock()
+
+    access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+    current_user = SimpleNamespace(
+        id=7,
+        gitlab_user_id=77,
+        username="alice",
+        display_name=None,
+        email=None,
+    )
+
+    with (
+        patch(
+            "app.api.tasks.resolve_worker_profile_for_issue",
+            new=AsyncMock(return_value=worker_profile),
+        ),
+        patch("app.api.tasks.resolve_provider_for_issue", new=AsyncMock(return_value=provider)),
+        patch("app.api.tasks.replace_task_worker_snapshot", new=AsyncMock(return_value=worker_profile)),
+        patch("app.api.tasks.bind_runtime_bundle", new=AsyncMock(return_value=MagicMock(id=1))),
+        patch("app.api.tasks.select_snapshot_run_instruction_template", return_value="Execute {{user_prompt}}"),
+        patch(
+            "app.api.task_creation_service.get_issue_latest_harness_key",
+            new=AsyncMock(return_value="codex"),
+        ),
+        patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
+        patch(
+            "app.api.tasks.get_usage_quota_service",
+            return_value=MagicMock(raise_if_over_limit=AsyncMock()),
+        ),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            await create_task(
+                request=request,
+                db=db,
+                current_user=current_user,
+                access_scope=access_scope,
+            )
+    assert exc.value.status_code == 422
+    assert "续跑" in str(exc.value.detail)

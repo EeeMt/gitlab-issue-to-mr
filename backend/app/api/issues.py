@@ -20,6 +20,7 @@ from app.api.list_filter_values import (
 )
 from app.config import get_effective_settings
 from app.core.gitlab_client import get_gitlab_client
+from app.core.harness_sessions import get_issue_latest_harness_key
 from app.core.skills import delete_unreferenced_skill_versions
 from app.core.task_helpers import _require_issue_operator
 from app.core.utcnow import utcnow
@@ -107,7 +108,11 @@ class CloseIssueRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _serialize_issue(issue: Issue, task_count: int | None = None) -> dict:
+def _serialize_issue(
+    issue: Issue,
+    task_count: int | None = None,
+    current_harness: str | None = None,
+) -> dict:
     """Serialize an Issue row for API responses."""
     worker_profile = _loaded_issue_relationship(issue, "worker_profile")
     default_provider = _loaded_issue_relationship(issue, "default_provider")
@@ -133,6 +138,7 @@ def _serialize_issue(issue: Issue, task_count: int | None = None) -> dict:
         "worker_profile_name": worker_profile.name if worker_profile is not None else None,
         "default_provider_name": default_provider.name if default_provider is not None else None,
         "claude_session_id": issue.claude_session_id,
+        "current_harness": current_harness,
         "session_storage_path": issue.session_storage_path,
         "initiator_user_id": issue.initiator_user_id,
         "initiator_username": issue.initiator_username,
@@ -229,9 +235,9 @@ def _task_duration_seconds(task: Task, now: datetime | None = None) -> float:
     return (ended_at - task.started_at).total_seconds()
 
 
-def _serialize_issue_detail(issue: Issue) -> dict:
+def _serialize_issue_detail(issue: Issue, current_harness: str | None = None) -> dict:
     """Serialize an Issue with its eagerly-loaded tasks."""
-    data = _serialize_issue(issue)
+    data = _serialize_issue(issue, current_harness=current_harness)
     tasks = issue.tasks or []
     data["tasks"] = [
         {
@@ -641,7 +647,8 @@ async def get_issue(
             detail=f"Issue {issue_id} not found",
         )
     require_project_access(issue.project_id, access_scope)
-    return _serialize_issue_detail(issue)
+    current_harness = await get_issue_latest_harness_key(db, issue.id)
+    return _serialize_issue_detail(issue, current_harness=current_harness)
 
 
 @router.patch("/{issue_id}")

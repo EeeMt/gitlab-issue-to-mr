@@ -217,6 +217,10 @@ REPO_REQUESTED_FILTER="${CODIFY_GIT_CLONE_FILTER:-none}"
 
 # Clone or reuse repository with authentication.
 if [ -d /workspace/.git ]; then
+    # A reused persistent workspace may carry a .git owned by a different uid
+    # from an earlier run; normalize ownership before any git write (the fetch
+    # below needs to create/update .git/FETCH_HEAD and objects).
+    chown -R "${CODIFY_RUN_UID}:${CODIFY_RUN_GID}" /workspace/.git 2>/dev/null || true
     REPO_PREPARATION_PHASE="fetch"
     REPO_WORKSPACE_STATE="reused"
     REPO_ACTION="fetch"

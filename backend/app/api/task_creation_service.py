@@ -27,6 +27,7 @@ from app.core.harness_registry import (
     HarnessRegistryError,
     validate_enabled_harnesses,
 )
+from app.core.harness_sessions import get_issue_latest_harness_key
 from app.core.model_endpoints import (
     ensure_harness_protocol_compatibility,
     normalize_endpoint,
@@ -268,6 +269,21 @@ async def create_task_record(
     if not isinstance(profile_default_key, str) or not profile_default_key:
         profile_default_key = "claude"
     harness_key = request.harness_key or profile_default_key
+    if request.session_mode == "continue" and request.harness_key:
+        # A continue task that explicitly picks a harness must match the issue's
+        # current harness lineage; switching harness is only allowed on a fresh
+        # session. The issue's current harness is the most recent session
+        # lineage's harness_key, which advances as tasks are appended / fresh
+        # sessions are started. When the caller omits harness_key (API-direct
+        # create), the profile default applies without a lineage check.
+        current_harness = await get_issue_latest_harness_key(db, issue.id)
+        if current_harness is not None and request.harness_key != current_harness:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="续跑会话必须沿用原 Harness；切换 Harness 请勾选“使用新会话执行”",
+            )
+        if current_harness is not None:
+            harness_key = current_harness
     enabled_harnesses = getattr(worker_profile, "enabled_harnesses", None)
     if not isinstance(enabled_harnesses, list) or not enabled_harnesses:
         enabled_harnesses = ["claude"]

@@ -406,6 +406,8 @@ async def create_execute_container(
         cli_binary_digest = None
     if sandbox_mode:
         environment["CODIFY_HARNESS_SANDBOX_MODE"] = str(sandbox_mode)
+    if resume_session and harness_key == "codex":
+        environment["CODIFY_RESUME_SESSION"] = resume_session
     if cli_binary_digest:
         environment["CODIFY_CLI_BINARY_DIGEST"] = str(cli_binary_digest)
     # Persist the exact provider/session choices before the Docker side effect. If the
@@ -827,21 +829,22 @@ async def monitor_container_run(
     if issue and isinstance(output_session_id, str) and output_session_id:
         # The session returned by the task is the only safe pointer for subsequent work. This
         # also covers fresh runs and the CLI wrapper's resume-not-found fallback.
-        issue.claude_session_id = output_session_id
-        # Upsert the per-harness/namespace session lineage so a continue on the
-        # same harness can resume it and a different harness never can. Only
-        # read the frozen snapshot when it is actually loaded (never lazy).
+        # Resolve the frozen harness key first so a codex task's session is never
+        # recorded under the claude lineage (which would break codex resume).
         harness_key = "claude"
         endpoint_fingerprint = None
         try:
             inspection = sa_inspect(task)
-            if "worker_profile_snapshot" not in inspection.unloaded:
-                snapshot = task.worker_profile_snapshot
-                harness_key = getattr(snapshot, "harness_key", None) or "claude"
-                if isinstance(getattr(snapshot, "model_endpoint_snapshot", None), dict):
-                    endpoint_fingerprint = snapshot.model_endpoint_snapshot.get("fingerprint")
+            if "worker_profile_snapshot" in inspection.unloaded:
+                await db.refresh(task, attribute_names=["worker_profile_snapshot"])
+            snapshot = task.worker_profile_snapshot
+            harness_key = getattr(snapshot, "harness_key", None) or "claude"
+            if isinstance(getattr(snapshot, "model_endpoint_snapshot", None), dict):
+                endpoint_fingerprint = snapshot.model_endpoint_snapshot.get("fingerprint")
         except Exception:  # noqa: BLE001 - session bookkeeping must never break completion
             harness_key = "claude"
+        if harness_key == "claude":
+            issue.claude_session_id = output_session_id
         await record_task_output_session(
             db,
             issue=issue,
