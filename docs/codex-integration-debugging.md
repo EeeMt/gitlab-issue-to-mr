@@ -147,11 +147,16 @@ delivery 统一提交」的模型不一致。查官方文档确认两点后改�
   `git commit/push/add/rm/mv/reset/revert/merge/checkout/branch/stash/init` + `approval_policy="never"`
   （CI 无人值守）。这样 codex 只写工作区文件、不碰 git；Codify 的 delivery 检测到变更后统一 commit。
 
-**连带权限问题（`.git/objects` root-owned）**:codex exec 由 adapter 直接执行，以容器 root 运行，
-早期任务写的 `.git/objects` 属主是 root；Codify delivery 以 codify 用户（uid 1000）commit 时
-报 `insufficient permission ... .git/objects`（实测 Task 504 failed）。**修复**:repository 准备
-完成时 `chown -R "${CODIFY_RUN_UID}:${CODIFY_RUN_GID}" /workspace/.git`，把持久 workspace 的
-`.git` 归一化到执行用户。
+**连带权限问题（`.git/objects` root-owned）**:codex exec 由 adapter 直接执行，以容器 root 运行
+（audit 流 event.jsonl/harness-result.json 由 bootstrap 有意 root-owned+644，所以 translator
+也必须以 root 写 canonical 事件），codex 写工作区/`.git` 产生 root-owned 对象；Codify delivery
+以 codify 用户（uid 1000）commit 时报 `insufficient permission ... .git/objects`（Task 504 failed）。
+**修复（条件 chown）**:repository 在 **fetch 前**用 `find /workspace/.git -user root -print -quit`
+检测（`-quit` 遇首个 root 即返回，不全量扫描）；仅当存在 root-owned 条目才
+`chown -R ... .git` 归一化。正常 run（属主一致）完全跳过 chown，避免大仓库/慢磁盘下
+`chown -R` 全量遍历的耗时。曾尝试让 codex 以 codify 运行以根治 root-owned，但因 bootstrap 的
+audit 流设计（event.jsonl 等 root-owned，model 不可篡改）会阻塞 translator 写 canonical 事件
+而回退为 root 运行 + 条件 chown。
 
 **验证（Task 505/506）**:codex 写文件（+61 行变更）→ `delivery.completed(exit 0)` →
 `run.completed(success)`，commit `c69e283c`/`070aefad`；自动 chown 生效（objects 从 root 归位
