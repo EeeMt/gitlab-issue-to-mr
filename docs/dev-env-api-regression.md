@@ -115,3 +115,45 @@ PY
 ```bash
 rm -f /tmp/codify_cookies.txt /tmp/task-*.tar.gz /tmp/event.jsonl /tmp/harness-result.json
 ```
+
+## 8. 调试经验补充（2026-08-04）
+
+### 改动 worker 脚本后如何让 dev 环境生效
+
+worker 容器执行的 entrypoint 来自 Task Runtime Bundle——backend 在任务创建时从镜像内
+`/opt/codify/runtime-source` 生成（`Dockerfile.backend` 把 `deploy/` 烘焙进镜像，`CODIFY_RUNTIME_SOURCE_DIR` 指向它）。
+所以改动 `deploy/worker-entrypoint/**` 或 `deploy/ci-claude.sh` 后**必须重建镜像**：
+
+```bash
+make rebuild-backend                                  # 重建 + 重启 backend
+cd deploy && docker-compose --env-file .env.test up -d scheduler   # scheduler 同镜像，须显式 recreate 才吃到新层
+docker exec codify-backend grep -c "<特征串>" /opt/codify/runtime-source/deploy/worker-entrypoint/<file>  # 确认已烘焙
+```
+
+注意：retry 任务复用原任务冻结的 bundle（bundle digest 不变），要验证新改动必须**新建**任务。
+
+### 远程 docker context 的坑
+
+`docker context show` 为 `remote`（ssh://root@host）。`docker run -v <本地路径>:/x` 挂的是**目标主机**路径，
+本地仓库不能直接挂进容器。想拿容器内脚本到本地/测试容器：
+
+```bash
+docker run --rm --entrypoint cat <image> /opt/codify/runtime-source/deploy/.../file.sh > /tmp/x.sh
+```
+
+别直接 `docker run <image> cat <path>`——backend 镜像有 entrypoint banner，会混进 stdout（用 `--entrypoint cat` 绕开）。
+
+### 验证 harness 运行用户（probe 模板）
+
+让任务 prompt 执行 `id -u` 并把结果写入仓库文件（如 uid-probe.txt），提交后三重确认运行用户：
+- workspace 上该文件**内容 + 属主**（codify 应写 1000:1000）
+- archive 里 `harness-events/<harness>.jsonl` 的 `aggregated_output`（`id -u` → `1000`）
+- 任务 RUNNING 时现场 `docker exec <worker> ps -eo pid,user,uid,args | grep -E "[c]odex exec"`
+
+顺带 `find /workspace/.git -user root` 查旧 run 遗留的 root-owned 对象（条件 chown 只在这些存在时才归一化）。
+
+### `session_mode=continue` 的 harness 约束
+
+continue 必须沿用 issue 当前 lineage 的 harness；传不匹配的 `harness_key` 返回 422
+「续跑会话必须沿用原 Harness；切换 Harness 请勾选"使用新会话执行"」。issue 混用过 claude/codex
+时 continue 会被拒，改用 lineage 干净的 issue 或 `session_mode=fresh`。
