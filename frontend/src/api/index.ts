@@ -105,6 +105,7 @@ export interface Issue {
   merge_request_iid: number | null
   merge_request_url: string | null
   claude_session_id: string | null
+  current_harness?: string | null
   initiator_user_id: number | null
   initiator_username: string | null
   created_at: string

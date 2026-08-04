@@ -550,6 +550,7 @@
                           v-model:value="harnessKey"
                           :options="harnessOptions"
                           :placeholder="t('createTask.harness')"
+                          :disabled="harnessLocked"
                         />
                       </label>
                     </div>
@@ -736,12 +737,14 @@ const props = withDefaults(defineProps<{
   issueId?: number
   issueDescription?: string
   hasClaudeSession?: boolean
+  issueCurrentHarness?: string | null
   workerProfileId?: number | null
   defaultProviderId?: number | null
   task?: Task
 }>(), {
   mode: 'create',
-  hasClaudeSession: false
+  hasClaudeSession: false,
+  issueCurrentHarness: null
 })
 
 const emit = defineEmits<{
@@ -778,6 +781,9 @@ const executionEnvironmentContentId = `${useId()}-execution-environment-content`
 const executionOptionsReady = ref(false)
 const selectedProviderId = ref<number | null>(null)
 const harnessKey = ref<string | null>(null)
+const harnessLocked = computed(
+  () => !startFreshSession.value && !!props.issueCurrentHarness,
+)
 const inheritProfileSkills = ref(true)
 const selectedSkillIds = ref<number[]>([])
 const skillSelectionDirty = ref(false)
@@ -1067,6 +1073,9 @@ watch(() => props.show, (val) => {
       runInstructionDirty.value = false
       requireChanges.value = DEFAULT_REQUIRE_CHANGES
       startFreshSession.value = false
+      harnessKey.value = props.issueCurrentHarness
+        ?? effectiveWorkerProfile.value?.default_harness_key
+        ?? 'claude'
       scheduleType.value = 'now'
       scheduledAt.value = null
       void loadScheduleContext()
