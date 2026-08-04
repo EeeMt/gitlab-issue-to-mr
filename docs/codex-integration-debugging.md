@@ -157,6 +157,29 @@ delivery 统一提交」的模型不一致。查官方文档确认两点后改�
 `run.completed(success)`，commit `c69e283c`/`070aefad`；自动 chown 生效（objects 从 root 归位
 到 codify）。至此 Codex 与 Claude 的行为一致：**只生成代码，交付层统一 commit + MR**。
 
+### 11. Codex 扩展矩阵 + resume + harness 切换约束（2026-08-04）
+
+单 Host 补齐 Codex 矩阵与两条行为修正：
+
+- **取消（Task 509/511）**:RUNNING 时 cancel → `status=cancelled`、容器清理、scheduler
+  `Task was cancelled during execution; removing container`（finalizer 的 cancelled 分支
+  是 harness 无关的，Task 469 已验证）。
+- **timeout（Task 513）**:全局 `task_timeout=60` → `status=failed`、error
+  `Task timed out after 60s`、容器终止（测试后恢复 1800）。
+- **跨 Harness session 隔离（Task 514/515/516）**:claude fresh 产生 session A，codex
+  continue 的 `input_session_id` 为空（不复用 claude session）；修复 `record_task_output_session`
+  懒加载 fallback 导致 codex session 误记到 claude lineage 的 bug（显式 `db.refresh` snapshot +
+  仅在 claude 时写 `issue.claude_session_id`）。
+- **resume（Task 521/522）**:`CODIFY_RESUME_SESSION` 注入（仅 codex continue）+ `codex-run.sh`
+  用 `codex exec resume <session>`；**CODEX_HOME 改挂 issue-shared 持久目录**
+  （`/opt/codify-issue-shared/codex-home`），session transcript 跨任务保存，
+  `rollout-*.jsonl` 可见；resume 任务 `input_session=019fca3c` 且 `run.completed(success)`。
+- **harness 切换约束（决策 4 落地）**:`session_mode=continue` 且显式传 `harness_key` 时，
+  后端校验必须等于 issue 最近 lineage 的 `harness_key`（`get_issue_latest_harness_key`），
+  否则 422「续跑会话必须沿用原 Harness；切换请勾选使用新会话执行」；前端 `TaskFormDrawer`
+  在非新会话且有现有 lineage 时禁用 harness 选择器（`harnessLocked`），Issue 详情返回
+  `current_harness` 供前端默认。
+
 ## 经验总结
 
 1. **「执行事实来自冻结 Snapshot / Bundle manifest」是多 Harness 的核心不变量**——所有被硬编码的
