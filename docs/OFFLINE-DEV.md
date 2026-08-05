@@ -740,6 +740,18 @@ sudo tar xzf offline-bundle-dev/maven-repo.tar.gz -C /opt/maven-repo
 3. `.env.offline` 设置 `WORKER_CA_CERT_HOST_PATH=/opt/ca.crt`
 4. `docker-compose.yml` 中为 backend 和 scheduler 挂载 CA 文件
 
+**测试用 CA 生成**：开发环境没有真实内网 CA 时，可用
+`scripts/generate-test-ca.sh` 生成一次性测试 CA 和服务端证书：
+
+```bash
+scripts/generate-test-ca.sh /tmp/codify-test-ca 127.0.0.1 localhost
+```
+
+生成的 `ca.crt`/`ca.key` 只用于本地或隔离开发环境验证，不得用于生产。
+脚本自带 `openssl verify` 校验，并可配合 `openssl s_server` + `curl --cacert`
+先在本机验证握手，再把它作为 `WORKER_CA_CERT_HOST_PATH` 挂进 worker 容器验证
+Git/Node/Python/JDK 的 CA 信任链路。
+
 ---
 
 ## 8. 验证清单

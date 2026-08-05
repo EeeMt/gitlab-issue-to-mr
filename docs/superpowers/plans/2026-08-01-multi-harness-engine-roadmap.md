@@ -23,7 +23,7 @@
 | Phase 0 | [协议探针与样本采集](2026-08-01-multi-harness-phase-0-protocol-probes.md) | 2–3 | 已确定 Claude/Codex 固定测试版本和隔离测试凭据 | Adapter 合同 v1、Canonical Event v1、golden fixtures 可回放 |
 | Phase 1 | [Claude Adapter 无回归抽取](2026-08-01-multi-harness-phase-1-claude-adapter.md) | 4–6 | Phase 0 协议冻结 | 公共入口和 Backend 只消费 Canonical Event；Claude 行为无回归 |
 | Phase 2 | [Codex 与公共产品能力接入](2026-08-01-multi-harness-phase-2-codex-integration.md) | 18–27 | Phase 1 回归门禁通过 | Claude + Codex 生产候选，自动化测试和单 Host smoke 完整 |
-| Phase 3 | [多 Host 灰度与生产验收](2026-08-01-multi-harness-phase-3-production-rollout.md) | 2–4 | Phase 2 生产候选已冻结版本 | 双引擎生产基线，可回滚，有真实 Host 证据 |
+| Phase 3 | [多 Host 直接切换与生产验收](2026-08-01-multi-harness-phase-3-production-rollout.md) | 2–4 | Phase 2 生产候选已冻结版本 | 双引擎生产基线，可回滚，有真实 Host 证据 |
 | Phase 4 | [OpenCode 条件性候选接入](2026-08-01-multi-harness-phase-4-opencode-candidate.md) | 8–14 | 六项准入条件全部通过 | 仅 allowlist 能力范围内的第三 Harness 候选 |
 
 当前状态（2026-08-01）：Phase 0 的 32 组真实 `deepseek-v4-flash` fixtures 与严格离线门禁
@@ -158,7 +158,8 @@ Backend unit `2240 passed`、前端 `1485 passed`、mock-e2e `371 passed`、vue-
   532（RUNNING cancel → cancelled 收敛）、533（timeout=60 → `run.failed` + 容器清理）、
   534（RUNNING cancel → cancelled）、535（PATH probe：claude=/usr/local/bin/claude、uid=1000）。
 
-**剩余已知项（列入 Phase 3/后续）**：私有 CA 与 Profile 级远程 Docker host path 需部署环境配置；
+**剩余已知项（列入 Phase 3/后续）**：私有 CA 与 Profile 级远程 Docker host path 需部署环境配置
+（`scripts/generate-test-ca.sh` 已提供测试 CA 生成与本地握手验证，2026-08-05）；
 `credential_ref` 运行时接线（短期 token/Broker）；arm64 Kit 制品；生产发版硬边界切换。
 另外 cancel 路由与 finalizer 对同一任务并发写存在极窄的 last-write-wins 残留窗口
 （refresh 与 commit 之间 finalizer 恰好提交），如需彻底原子化可在 Phase 3 用条件 UPDATE 收口。
@@ -194,7 +195,7 @@ flowchart LR
     P1 --> G1{"Claude 自动化与真实 smoke 无回归"}
     G1 --> P2["Phase 2 Codex 接入"]
     P2 --> G2{"双引擎生产候选"}
-    G2 --> P3["Phase 3 多 Host 灰度"]
+    G2 --> P3["Phase 3 多 Host 切换"]
     P3 --> G3{"双引擎生产基线"}
     G3 -. "稳定发布周期 + 明确业务需求" .-> P4["Phase 4 OpenCode 候选"]
 ```
@@ -236,7 +237,7 @@ flowchart LR
 | L2 集成 | mock container、runtime archive、API/前端契约 | `make test-mock-e2e`、focused mock integration |
 | L3 制品 | 固定版本 Worker Kit/镜像可导出、校验、安装 | archive checksum、manifest、image digest |
 | L4 真实运行 | 目标 Docker Host、真实 Provider、持久工作区、Git/MR | smoke task ID、MR URL、archive 与事件回放 |
-| L5 灰度 | 指标、告警、取消、回滚演练 | 时间窗口、样本数、阈值和回滚记录 |
+| L5 切换上线 | 指标、告警、取消、回滚演练 | 切换窗口、阈值和回滚记录 |
 
 Phase 2 最多交付到“生产候选”；只有 Phase 3 的 L4/L5 证据完整后，才称为双引擎生产基线。
 
@@ -287,5 +288,5 @@ make test-mock-e2e
 - [x] Skills 不污染仓库，CodeGraph 仅 Claude 可用且其他 Harness 有明确提示。
 - [x] 取消、timeout、SIGTERM/SIGKILL 能终止完整进程树并释放容器和工作区锁（2026-08-03 开发环境已验证：Task 469 cancel、Task 470 timeout，容器均清理；2026-08-05 复核 Task 532–534 cancel 收敛、Task 533 timeout 优雅停）。
 - [x] 固定 Worker Kit、镜像 digest、Runtime Bundle Adapter digest 和 CLI binary digest 可在每个目标 Host 验证和回滚。
-- [ ] 灰度指标满足阈值，按 Issue cohort 的旧 Profile/Kit 回滚演练成功。
-      （Phase 3 项：单 Host 已达标，多 Host 灰度/回滚演练进入 Phase 3。）
+- [ ] 切换指标满足阈值，按旧 Profile/Kit 的回滚演练成功。
+      （Phase 3 项：单 Host 已达标，多 Host 切换/回滚演练进入 Phase 3。）

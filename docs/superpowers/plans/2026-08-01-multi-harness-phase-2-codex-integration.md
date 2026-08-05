@@ -7,7 +7,7 @@
 
 **周期：** 18–27 人日。
 
-**不包含：** 多 Host 生产灰度（Phase 3）和 OpenCode（Phase 4）。如果需要从零建设模型出口代理或凭据 Broker，另计 4–7 人日，并作为本阶段生产安全门禁的外部依赖管理。
+**不包含：** 多 Host 生产切换（Phase 3）和 OpenCode（Phase 4）。如果需要从零建设模型出口代理或凭据 Broker，另计 4–7 人日，并作为本阶段生产安全门禁的外部依赖管理。
 
 ---
 
@@ -381,7 +381,7 @@ Snapshot 在 Task 创建事务中一次写入并立即冻结，继续保持每�
 - [x] 验证私有 CA、PATH、远程 Docker host path、Provider 网络、持久 workspace 和 agent-state 权限。
       （PATH/运行用户/Provider 网络/持久 workspace/agent-state 已真实验证；私有 CA 与
       Profile 级远程 Docker host path 依赖部署环境配置，列入 Phase 3 清单。）
-- [x] 单 Host smoke 只把 Phase 2 标为生产候选；多 Host 安装、灰度和回滚进入 Phase 3。
+- [x] 单 Host smoke 只把 Phase 2 标为生产候选；多 Host 安装、切换和回滚进入 Phase 3。
 
 ---
 
