@@ -130,6 +130,39 @@ Backend unit `2240 passed`、前端 `1485 passed`、mock-e2e `371 passed`、vue-
 经 `CODIFY_HARNESS_SANDBOX_MODE` 注入容器并写入 `run.started` 供审计；`CODIFY_CODEX_SANDBOX`
 可显式覆盖。sandbox 能力不可用不再要求启动前失败——容器边界本身就是受支持的隔离边界。
 
+### 更新（2026-08-05）：Phase 2 收口为生产候选 + 设计/实施回顾修复
+
+**Phase 2 已标为「Claude + Codex 生产候选」**。对多 Harness 方案做了整体回顾，识别并修复了
+8 处逻辑漏洞（2 高 + 5 中 + 1 低，见下表），补齐凭据交付风险接受与离线包 Codex inventory，
+并在开发环境重建镜像、用真实任务复核（Task 531–535）。
+
+| 严重度 | 问题 | 修复 |
+|---|---|---|
+| 高 | cancel/finalizer 竞态：真实 `run.completed` 被降级为 CANCELLED | finalizer 先解析 canonical 终态再决定是否应用取消意图；cancel 路由写 CANCELLED 前重读状态，已 terminal 不覆盖（dev host 复核） |
+| 高 | continue 省略 `harness_key` 绕过 lineage 约束 | continue 无论是否显式传 harness_key 都校验 lineage（dev host 422 验证） |
+| 中 | PATCH `provider_id` 使 Snapshot 与执行 Provider 漂移 | 刷新 `model_endpoint_snapshot`/`credential_ref` + harness 协议兼容校验（dev host 422/200 验证） |
+| 中 | `latest` lineage 被 failed/从未运行的 fresh 尝试翻转 | `get_issue_latest_harness_key` 优先取有 `session_id` 的最近 lineage |
+| 中 | CI auto-repair 不校验 enabled_harnesses/wire_protocol | 创建时校验，失败即报错不产生运行时失败任务 |
+| 低 | fresh 不清 stale session_id，后续 continue 静默 resume 旧会话 | `upsert_session` 在 `lineage_reason=fresh` 时显式清空 |
+| 低 | cancel 路由强制 `raw_logs_finalized_at=None` | 移除，避免保留容器额外往返 |
+| 低 | timeout 直接 force 移除运行中容器 | 先 `stop`（TERM→有界等待→KILL），终态统一 FAILED + timeout 消息 |
+
+配套：
+- **凭据交付**：`docs/security/credential-delivery-risk-acceptance.md`（受限 legacy 风险接受，
+  `credential_ref` 运行时接线延后）；secret 清洗扩展到 `sk-proj-*`/通用 `sk-*`/`Bearer`/
+  Google/GitHub/HF/Slack/配置形态。
+- **离线包**：`config/worker-binaries.txt.example` 记录 codex host binary inventory。
+- **门禁**：Backend unit `2257 passed, 70 subtests`、Frontend `1485 passed`、mock-e2e `371 passed`、
+  worker 脚本 `bash -n` 干净。
+- **真实复核（dev host 192.168.50.129）**：Task 531（PATCH provider 协议 422/200）、
+  532（RUNNING cancel → cancelled 收敛）、533（timeout=60 → `run.failed` + 容器清理）、
+  534（RUNNING cancel → cancelled）、535（PATH probe：claude=/usr/local/bin/claude、uid=1000）。
+
+**剩余已知项（列入 Phase 3/后续）**：私有 CA 与 Profile 级远程 Docker host path 需部署环境配置；
+`credential_ref` 运行时接线（短期 token/Broker）；arm64 Kit 制品；生产发版硬边界切换。
+另外 cancel 路由与 finalizer 对同一任务并发写存在极窄的 last-write-wins 残留窗口
+（refresh 与 commit 之间 finalizer 恰好提交），如需彻底原子化可在 Phase 3 用条件 UPDATE 收口。
+
 ---
 
 ## 2. 不可变实施决策
@@ -245,12 +278,14 @@ make test-mock-e2e
 
 双引擎目标只有同时满足以下条件才完成：
 
-- [ ] 用户可在 Issue 固定的 Worker Profile 允许范围内，为新 Task 选择 Claude 或 Codex。
-- [ ] 创建后 Task Snapshot 完整冻结且 retry 原样复制；更改 Profile/Endpoint 不影响既有任务。
-- [ ] Claude/Codex 原始事件均只由各自 Adapter 解析，Backend/Frontend 只消费 Canonical Event。
-- [ ] 新任务、resume、fresh、namespace 变化和跨 Harness 切换语义有自动化与真实运行证据。
-- [ ] usage 缺失使用 `null`，未知事件不误判成功，协议不完整明确失败为 `protocol_error`。
-- [ ] Skills 不污染仓库，CodeGraph 仅 Claude 可用且其他 Harness 有明确提示。
-- [x] 取消、timeout、SIGTERM/SIGKILL 能终止完整进程树并释放容器和工作区锁（2026-08-03 开发环境已验证：Task 469 cancel、Task 470 timeout，容器均清理）。
-- [ ] 固定 Worker Kit、镜像 digest、Runtime Bundle Adapter digest 和 CLI binary digest 可在每个目标 Host 验证和回滚。
+- [x] 用户可在 Issue 固定的 Worker Profile 允许范围内，为新 Task 选择 Claude 或 Codex。
+- [x] 创建后 Task Snapshot 完整冻结且 retry 原样复制；更改 Profile/Endpoint 不影响既有任务。
+      （2026-08-05 增补：PATCH provider 会刷新 Snapshot 并做协议校验，见 Phase 2 收口记录。）
+- [x] Claude/Codex 原始事件均只由各自 Adapter 解析，Backend/Frontend 只消费 Canonical Event。
+- [x] 新任务、resume、fresh、namespace 变化和跨 Harness 切换语义有自动化与真实运行证据。
+- [x] usage 缺失使用 `null`，未知事件不误判成功，协议不完整明确失败为 `protocol_error`。
+- [x] Skills 不污染仓库，CodeGraph 仅 Claude 可用且其他 Harness 有明确提示。
+- [x] 取消、timeout、SIGTERM/SIGKILL 能终止完整进程树并释放容器和工作区锁（2026-08-03 开发环境已验证：Task 469 cancel、Task 470 timeout，容器均清理；2026-08-05 复核 Task 532–534 cancel 收敛、Task 533 timeout 优雅停）。
+- [x] 固定 Worker Kit、镜像 digest、Runtime Bundle Adapter digest 和 CLI binary digest 可在每个目标 Host 验证和回滚。
 - [ ] 灰度指标满足阈值，按 Issue cohort 的旧 Profile/Kit 回滚演练成功。
+      （Phase 3 项：单 Host 已达标，多 Host 灰度/回滚演练进入 Phase 3。）

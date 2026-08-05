@@ -552,6 +552,9 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
         mock_db.commit = AsyncMock()
         mock_db.flush = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
+        _no_lineage = MagicMock()
+        _no_lineage.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=_no_lineage)
         mock_db.get = AsyncMock(return_value=mock_issue)
 
         client, app = _make_app_client_with_db(mock_db)
@@ -591,6 +594,9 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
         mock_db.commit = AsyncMock()
         mock_db.flush = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
+        _no_lineage = MagicMock()
+        _no_lineage.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=_no_lineage)
         mock_db.get = AsyncMock(return_value=mock_issue)
 
         client, app = _make_app_client_with_db(mock_db)
@@ -629,6 +635,9 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
         mock_db.commit = AsyncMock()
         mock_db.flush = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
+        _no_lineage = MagicMock()
+        _no_lineage.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=_no_lineage)
         mock_db.get = AsyncMock(return_value=mock_issue)
 
         client, app = _make_app_client_with_db(mock_db)
@@ -663,6 +672,9 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
         mock_db.commit = AsyncMock()
         mock_db.flush = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
+        _no_lineage = MagicMock()
+        _no_lineage.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=_no_lineage)
         mock_db.get = AsyncMock(return_value=mock_issue)
 
         client, app = _make_app_client_with_db(mock_db)

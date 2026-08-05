@@ -847,15 +847,23 @@ class TestCancelTask:
         assert resp.json()["status"] == "success"
 
     async def test_cancel_running_task(self, client, db_session):
-        """Cancelling a RUNNING task sets status to CANCELLED and attempts Docker stop."""
-        task = await _seed_task(db_session, status=TaskStatus.RUNNING)
+        """Cancelling a RUNNING task records the cancellation intent.
 
-        resp = await client.post(f"/api/tasks/{task.id}/cancel")
+        The terminal is NOT flipped synchronously: the worker finalizer converges
+        the authoritative canonical terminal, so a run that already completed is
+        never downgraded to CANCELLED. The task stays RUNNING (with
+        cancel_requested_at set) until the finalizer applies the outcome.
+        """
+        task = await _seed_task(db_session, status=TaskStatus.RUNNING)
+        task_id = task.id
+
+        resp = await client.post(f"/api/tasks/{task_id}/cancel")
         assert resp.status_code == 200
         assert resp.json()["status"] == "success"
 
-        resp2 = await client.get(f"/api/tasks/{task.id}")
-        assert resp2.json()["status"] == "cancelled"
+        await db_session.refresh(task)
+        assert task.cancel_requested_at is not None
+        assert task.status == TaskStatus.RUNNING
 
     async def test_cancel_completed_task_rejected(self, client, db_session):
         """Cancelling a COMPLETED task returns 400."""

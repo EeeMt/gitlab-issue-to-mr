@@ -203,10 +203,25 @@ async def cancel_task(
                 log_error,
             )
 
-    task.status = TaskStatus.CANCELLED
-    task.completed_at = utcnow()
-    task.error_message = "Cancelled by user"
-    task.raw_logs_finalized_at = None
+    # Re-read the authoritative status: while this cancel was stopping the
+    # container and draining logs, the scheduler finalizer may have already
+    # converged a genuinely-completed run to COMPLETED. Never downgrade a
+    # terminal outcome to CANCELLED.
+    await db.refresh(task)
+    if (
+        task.status in (TaskStatus.PENDING, TaskStatus.QUEUED, TaskStatus.RUNNING)
+        and (container_absent or task.status != TaskStatus.RUNNING)
+    ):
+        # No live execution to converge (PENDING/QUEUED, or RUNNING whose
+        # container is already gone): finalize as cancelled directly. A RUNNING
+        # task with a live container keeps RUNNING here — the scheduler finalizer
+        # converges the authoritative canonical terminal (a run that already
+        # completed stays COMPLETED; a TERM-interrupted run becomes CANCELLED).
+        task.status = TaskStatus.CANCELLED
+        task.completed_at = utcnow()
+        task.error_message = "Cancelled by user"
+    # Do not clobber raw_logs_finalized_at, which would force a retained-container
+    # round trip.
     await db.commit()
     await db.refresh(task)
     logger.info(

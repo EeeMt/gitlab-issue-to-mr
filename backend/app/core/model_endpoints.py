@@ -70,7 +70,7 @@ def normalize_endpoint(provider: Any) -> ModelEndpoint:
         model=_attr_str(provider, "model", ""),
         provider_kind=_attr_str(provider, "provider_kind", "anthropic_compatible"),
         wire_protocol=_attr_str(provider, "wire_protocol", "anthropic_messages"),
-        provider_driver=getattr(provider, "provider_driver", None),
+        provider_driver=_attr_str(provider, "provider_driver", None),
         provider_options=provider_options,
         credential_ref=credential_ref,
     )

@@ -17,6 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_effective_settings
 from app.core.ci_failure_logs import append_ci_failure_log
 from app.core.gitlab_client import get_gitlab_client
+from app.core.harness_registry import HarnessRegistryError, validate_enabled_harnesses
+from app.core.model_endpoints import (
+    ensure_harness_protocol_compatibility,
+    normalize_endpoint,
+)
 from app.core.projects import get_project_metadata
 from app.core.task_creation import prepare_task_runtime_snapshot
 from app.core.task_prompt import render_and_store_task_prompt
@@ -645,6 +650,27 @@ async def process_ci_failure_run(
         except WorkerProfileValidationError as exc:
             raise RuntimeError(f"CI auto-repair cannot start: {exc}") from exc
 
+        # Validate the repair task's execution truth at creation time, exactly
+        # like a manual task: the profile default harness must be enabled and the
+        # provider's wire protocol must be able to talk to that harness. Otherwise
+        # the repair task is created and fails at runtime, which is the opposite of
+        # the "fail at creation" invariant.
+        profile_default_key = getattr(worker_profile, "default_harness_key", None)
+        if not isinstance(profile_default_key, str) or not profile_default_key:
+            profile_default_key = "claude"
+        enabled_harnesses = getattr(worker_profile, "enabled_harnesses", None)
+        if not isinstance(enabled_harnesses, list) or not enabled_harnesses:
+            enabled_harnesses = ["claude"]
+        endpoint = normalize_endpoint(provider)
+        try:
+            validate_enabled_harnesses(
+                enabled_harnesses,
+                default_harness_key=profile_default_key,
+            )
+            ensure_harness_protocol_compatibility(profile_default_key, endpoint)
+        except (HarnessRegistryError, ValueError) as exc:
+            raise RuntimeError(f"CI auto-repair cannot start: {exc}") from exc
+
         repair_task = Task(
             issue_id=issue.id,
             project_id=issue.project_id,
@@ -676,6 +702,8 @@ async def process_ci_failure_run(
             replace_snapshot=replace_task_worker_snapshot,
             select_template=select_snapshot_run_instruction_template,
             render_prompt=render_and_store_task_prompt,
+            harness_key=profile_default_key,
+            endpoint=endpoint,
         )
         await bind_runtime_bundle(db, repair_task)
         run.repair_task_id = repair_task.id

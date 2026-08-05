@@ -18,11 +18,6 @@ from app.api.task_responses import (
     serialize_task,
 )
 from app.api.task_schemas import CreateTaskRequest, RetryTaskRequest
-from app.core.scheduling import resolve_scheduled_at
-from app.core.skills import SkillValidationError
-from app.core.task_prompt import TaskPromptValidationError
-from app.core.usage_limits import UsageLimitExceeded, usage_limit_exceeded_detail
-from app.core.utcnow import utcnow
 from app.core.harness_registry import (
     HarnessRegistryError,
     validate_enabled_harnesses,
@@ -32,6 +27,11 @@ from app.core.model_endpoints import (
     ensure_harness_protocol_compatibility,
     normalize_endpoint,
 )
+from app.core.scheduling import resolve_scheduled_at
+from app.core.skills import SkillValidationError
+from app.core.task_prompt import TaskPromptValidationError
+from app.core.usage_limits import UsageLimitExceeded, usage_limit_exceeded_detail
+from app.core.utcnow import utcnow
 from app.core.worker_profiles import WorkerProfileValidationError
 from app.dependencies.project_access import ProjectAccessScope, require_project_access
 from app.models import Issue, Task, User
@@ -269,20 +269,19 @@ async def create_task_record(
     if not isinstance(profile_default_key, str) or not profile_default_key:
         profile_default_key = "claude"
     harness_key = request.harness_key or profile_default_key
-    if request.session_mode == "continue" and request.harness_key:
-        # A continue task that explicitly picks a harness must match the issue's
-        # current harness lineage; switching harness is only allowed on a fresh
-        # session. The issue's current harness is the most recent session
-        # lineage's harness_key, which advances as tasks are appended / fresh
-        # sessions are started. When the caller omits harness_key (API-direct
-        # create), the profile default applies without a lineage check.
+    if request.session_mode == "continue":
+        # A continue task must match the issue's current harness lineage;
+        # switching harness is only allowed on a fresh session. The resolved
+        # harness_key covers both an explicit request.harness_key and the
+        # profile default, so an API-direct continue that omits harness_key can
+        # no longer silently cross the lineage boundary.
         current_harness = await get_issue_latest_harness_key(db, issue.id)
-        if current_harness is not None and request.harness_key != current_harness:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="续跑会话必须沿用原 Harness；切换 Harness 请勾选“使用新会话执行”",
-            )
         if current_harness is not None:
+            if harness_key != current_harness:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="续跑会话必须沿用原 Harness；切换 Harness 请勾选“使用新会话执行”",
+                )
             harness_key = current_harness
     enabled_harnesses = getattr(worker_profile, "enabled_harnesses", None)
     if not isinstance(enabled_harnesses, list) or not enabled_harnesses:

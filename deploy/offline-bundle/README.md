@@ -39,8 +39,9 @@ reference runtime must be available offline.
 6. Verify each runtime image with `./scripts/verify-worker-runtime.sh --kit <installed-path> --image <runtime-image>`. For mounted CLI binaries, pass the harness and its host path, e.g. `--harness-key claude --harness-host-path <host-claude-bin>` and/or `--harness-key codex --harness-host-path <host-codex-bin>`. The legacy `--claude-host-path <host-claude-bin>` form is still accepted.
 
 > Codex CLI is a fixed host binary (not part of the runtime image). Ship it with the bundle
-> under `kits/` or `images/` with its SHA-256 recorded in `worker-images.txt`-style inventory, and
-> mount it read-only at the path declared by the Worker Profile `harness_runtimes.codex`.
+> under `kits/` or `images/`, record its SHA-256 in `config/worker-binaries.txt` (see the
+> `worker-binaries.txt.example`), and mount it read-only at the path declared by the Worker
+> Profile `harness_runtimes.codex`. Never rely on online install or a mutable `latest` tag.
 7. Run `./scripts/start.sh` and then `./scripts/health-check.sh`.
 8. Create worker profiles through the API with `runtime_mode=mounted_kit`, the runtime image,
    kit version, and the same absolute kit path installed on that profile's Docker host.

@@ -113,8 +113,31 @@ def scrub_sensitive_data(text: str) -> str:
     if not text:
         return text
 
+    # GitLab
     text = re.sub(r"glpat-[a-zA-Z0-9\-]{10,}", "[GITLAB_TOKEN]", text)
+    # Anthropic (sk-ant-* / sk-cp-* / sk-api-*)
     text = re.sub(r"sk-(?:cp|ant|api)-[a-zA-Z0-9\-]{10,}", "[ANTHROPIC_API_KEY]", text)
+    # OpenAI (sk-proj-* and generic sk-* with a long enough body to avoid prose)
+    text = re.sub(r"sk-proj-[a-zA-Z0-9_\-]{20,}", "[OPENAI_API_KEY]", text)
+    text = re.sub(r"sk-[a-zA-Z0-9]{24,}", "[OPENAI_API_KEY]", text)
+    # Authorization headers / Bearer tokens
+    text = re.sub(
+        r"(?i)(authorization\s*:\s*bearer\s+|bearer\s+)[a-zA-Z0-9\-._~+/]+=*",
+        r"\1[REDACTED]",
+        text,
+    )
+    # Common provider token prefixes (Google, GitHub, HuggingFace, Slack)
+    text = re.sub(r"AIza[0-9A-Za-z\-_]{20,}", "[GOOGLE_API_KEY]", text)
+    text = re.sub(r"ghp_[A-Za-z0-9]{20,}", "[GITHUB_TOKEN]", text)
+    text = re.sub(r"hf_[A-Za-z0-9]{20,}", "[HUGGINGFACE_TOKEN]", text)
+    text = re.sub(r"xox[baprs]-[A-Za-z0-9\-]{10,}", "[SLACK_TOKEN]", text)
+    # Config-file secret shapes (api_key / env_key / apiKey = "value")
+    text = re.sub(
+        r"(?i)(\b(?:api_key|env_key|apikey|api-key|apiKey|api_token)\s*[=:]\s*)[\"']?"
+        r"[^\"'\s,;}{]+",
+        r"\1[REDACTED]",
+        text,
+    )
     text = re.sub(r"(PRIVATE-TOKEN:\s*)[^\s]+", r"\1[REDACTED]", text)
     text = text.replace("\x00", "")
     return text

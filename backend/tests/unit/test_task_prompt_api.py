@@ -133,6 +133,9 @@ async def test_create_persists_snapshot_and_rendered_prompt_before_commit() -> N
     db.flush = AsyncMock(side_effect=flush)
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
+    _no_lineage = MagicMock()
+    _no_lineage.scalar_one_or_none.return_value = None
+    db.execute = AsyncMock(return_value=_no_lineage)
     request = CreateTaskRequest(
         issue_id=5,
         user_prompt="Implement auth",
@@ -202,6 +205,9 @@ async def test_create_rejects_explicitly_blank_run_instruction_template() -> Non
     db.flush = AsyncMock()
     db.commit = AsyncMock()
     db.rollback = AsyncMock()
+    _no_lineage = MagicMock()
+    _no_lineage.scalar_one_or_none.return_value = None
+    db.execute = AsyncMock(return_value=_no_lineage)
     request = CreateTaskRequest(
         issue_id=5,
         user_prompt="Implement auth",

@@ -9,7 +9,8 @@ from typing import Any
 
 from docker.errors import NotFound
 from gitlab import Gitlab
-from sqlalchemy import delete, inspect as sa_inspect, select
+from sqlalchemy import delete, select
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ci_failure_logs import append_ci_failure_log
@@ -738,6 +739,28 @@ async def monitor_container_run(
         f"exit_code={exit_code}, timed_out={timed_out}, chunks={log_chunks_saved}"
     )
 
+    if timed_out:
+        # The log stream hit task_timeout while the harness was still running.
+        # Stop the container gracefully (TERM -> EXIT trap -> harness finalizer
+        # flushes its canonical events) with a bounded grace, then force-kill
+        # only if it does not exit in time. This leaves the workspace in a
+        # consistent state instead of force-removing a mid-write container.
+        try:
+            await asyncio.to_thread(container.stop, timeout=15)
+            logger.info(
+                f"[Task {task.id}] Gracefully stopped container after log timeout{resume_prefix}"
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                f"[Task {task.id}] Graceful stop after log timeout failed: {exc}"
+            )
+            try:
+                await asyncio.to_thread(container.kill)
+            except Exception as kill_exc:  # noqa: BLE001
+                logger.warning(
+                    f"[Task {task.id}] Force kill after log timeout failed: {kill_exc}"
+                )
+
     raw_logs_finalized = False
     for attempt in range(1, 4):
         try:
@@ -780,7 +803,19 @@ async def monitor_container_run(
         getattr(task, "cancel_requested_at", None),
         datetime,
     )
-    if task.status == TaskStatus.CANCELLED or cancellation_requested:
+    if issue:
+        await db.refresh(issue)
+
+    # The canonical terminal is authoritative. Parse it first so a persisted
+    # cancellation intent never downgrades a run that actually completed (the
+    # cancel request can land after the container already exited with success).
+    await worker._parse_task_result(task, logs, db, exit_code, issue=issue)
+    if exit_code == 0:
+        await _save_delivery_summary_from_container(worker, container, task, db)
+
+    if (
+        task.status == TaskStatus.CANCELLED or cancellation_requested
+    ) and task.status != TaskStatus.COMPLETED and not timed_out:
         if task.status != TaskStatus.CANCELLED:
             task.status = TaskStatus.CANCELLED
             task.completed_at = task.completed_at or utcnow()
@@ -818,12 +853,12 @@ async def monitor_container_run(
         await db.commit()
         return False
 
-    if issue:
-        await db.refresh(issue)
-
-    await worker._parse_task_result(task, logs, db, exit_code, issue=issue)
-    if exit_code == 0:
-        await _save_delivery_summary_from_container(worker, container, task, db)
+    if cancellation_requested:
+        logger.info(
+            "[Task %s] Cancellation intent arrived after the run had already completed; "
+            "keeping COMPLETED",
+            task.id,
+        )
 
     output_session_id = getattr(task, "output_session_id", None)
     if issue and isinstance(output_session_id, str) and output_session_id:
@@ -896,6 +931,11 @@ async def monitor_container_run(
 
     scrubbed_logs = worker._scrub_sensitive_data(logs)
     if timed_out:
+        # Timeout is the authoritative outcome: the graceful stop we issued above
+        # may have let the harness emit a `cancelled` terminal, but a wall-clock
+        # timeout is a FAILED task, never a user cancellation.
+        task.status = TaskStatus.FAILED
+        task.completed_at = task.completed_at or utcnow()
         task.error_message = (
             f"Task timed out after {settings.task_timeout}s\n"
             + worker._sanitize_sensitive_data(logs)[-800:]

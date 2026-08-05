@@ -16,6 +16,11 @@ from app.api.task_responses import (
     serialize_task,
 )
 from app.api.task_schemas import UpdateTaskRequest
+from app.core.harness_registry import HarnessRegistryError
+from app.core.model_endpoints import (
+    ensure_harness_protocol_compatibility,
+    normalize_endpoint,
+)
 from app.core.skills import (
     SkillValidationError,
     delete_unreferenced_skill_versions,
@@ -91,6 +96,13 @@ async def update_task_record(
             raise HTTPException(status_code=404, detail="Issue not found")
 
     if "provider_id" in updated_fields:
+        if snapshot is None:
+            snapshot = await db.get(TaskWorkerProfileSnapshot, task.id)
+        if snapshot is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Task has no worker profile snapshot",
+            )
         try:
             provider = await services.resolve_provider_for_issue(
                 db,
@@ -101,6 +113,21 @@ async def update_task_record(
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         task.provider_id = provider.id
         task.provider_runtime_snapshot = None
+        # Keep the frozen snapshot consistent with the provider that will actually
+        # execute: re-freeze the secret-free endpoint and credential ref, and
+        # reject a provider whose wire protocol cannot talk to the task's frozen
+        # harness instead of failing at runtime.
+        endpoint = normalize_endpoint(provider)
+        harness_key = getattr(snapshot, "harness_key", None) or "claude"
+        try:
+            ensure_harness_protocol_compatibility(harness_key, endpoint)
+        except (HarnessRegistryError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+        snapshot.model_endpoint_snapshot = endpoint.as_snapshot()
+        snapshot.credential_ref = endpoint.credential_ref
 
     if "require_changes" in updated_fields:
         task.require_changes = request.require_changes

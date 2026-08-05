@@ -101,6 +101,79 @@ async def test_create_task_uses_issue_pinned_worker_and_default_provider():
 
 
 @pytest.mark.asyncio
+async def test_continue_without_harness_key_rejects_lineage_mismatch():
+    request = CreateTaskRequest(
+        issue_id=1,
+        user_prompt="Continue the work",
+        priority=1,
+        session_mode="continue",
+        # harness_key omitted: must still respect the issue's harness lineage
+    )
+    issue = MagicMock()
+    issue.id = 1
+    issue.project_id = 101
+    issue.description = "Continue the work"
+    issue.status = "open"
+    issue.worker_profile_id = 33
+    issue.default_provider_id = 44
+
+    worker_profile = MagicMock()
+    worker_profile.id = 33
+    worker_profile.name = "Default Worker"
+    worker_profile.enabled = True
+    worker_profile.default_harness_key = "claude"
+    worker_profile.enabled_harnesses = ["claude"]
+
+    provider = MagicMock()
+    provider.id = 44
+    provider.is_disabled = False
+
+    db = MagicMock()
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+    db.flush = AsyncMock()
+    db.get = AsyncMock(return_value=issue)
+    db.refresh = AsyncMock()
+    access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+    current_user = SimpleNamespace(
+        id=7,
+        gitlab_user_id=77,
+        username="alice",
+        display_name=None,
+        email=None,
+    )
+
+    with (
+        patch(
+            "app.api.tasks.resolve_worker_profile_for_issue",
+            new=AsyncMock(return_value=worker_profile),
+        ),
+        patch("app.api.tasks.resolve_provider_for_issue", new=AsyncMock(return_value=provider)),
+        patch("app.api.tasks.replace_task_worker_snapshot", new=AsyncMock(return_value=worker_profile)),
+        patch("app.api.tasks.bind_runtime_bundle", new=AsyncMock(return_value=MagicMock(id=1))),
+        patch("app.api.tasks.select_snapshot_run_instruction_template", return_value="Execute {{user_prompt}}"),
+        patch(
+            "app.api.task_creation_service.get_issue_latest_harness_key",
+            new=AsyncMock(return_value="codex"),
+        ),
+        patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
+        patch(
+            "app.api.tasks.get_usage_quota_service",
+            return_value=MagicMock(raise_if_over_limit=AsyncMock()),
+        ),
+    ):
+        with pytest.raises(HTTPException) as exc_info:
+            await create_task(
+                request=request,
+                db=db,
+                current_user=current_user,
+                access_scope=access_scope,
+            )
+
+    assert exc_info.value.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_create_task_loads_worker_profile_environment_from_existing_identity():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
@@ -356,6 +429,182 @@ async def test_update_task_preserves_worker_metadata_after_refresh_without_snaps
     assert response["worker_profile_id"] == 33
     assert response["worker_profile_name"] == "Default Worker"
     assert response["worker_image"] == "codify-worker/java21-maven:2026.07"
+
+
+def _provider_mock(id_, wire_protocol, base_url="https://api.example", model="test-model"):
+    provider = MagicMock()
+    provider.id = id_
+    provider.name = f"provider-{id_}"
+    provider.base_url = base_url
+    provider.model = model
+    provider.provider_kind = (
+        "openai_compatible" if wire_protocol.startswith("openai") else "anthropic_compatible"
+    )
+    provider.wire_protocol = wire_protocol
+    provider.provider_driver = None
+    provider.provider_options = {}
+    provider.credential_ref = None
+    return provider
+
+
+@pytest.mark.asyncio
+async def test_update_task_rejects_provider_incompatible_with_frozen_harness():
+    task = Task(
+        id=99,
+        issue_id=1,
+        project_id=101,
+        user_prompt="Implement",
+        priority=1,
+        status=TaskStatus.PENDING,
+        provider_id=44,
+        worker_profile_id=33,
+        task_mode="execute",
+        require_changes=True,
+        trigger_source="manual",
+        created_at=datetime(2026, 6, 25, 9, 0, 0),
+        updated_at=datetime(2026, 6, 25, 9, 0, 0),
+    )
+    snapshot = TaskWorkerProfileSnapshot(
+        task_id=99,
+        worker_profile_id=33,
+        profile_name="Default Worker",
+        image="codify-worker/java21-maven:2026.07",
+        volume_mounts=[],
+        environment_variables=[],
+        pre_script="",
+        post_script="",
+        default_execute_run_instruction_template="Execute {{user_prompt}}",
+        default_plan_run_instruction_template="Plan {{user_prompt}}",
+        ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+        harness_key="codex",
+        model_endpoint_snapshot={
+            "wire_protocol": "openai_responses",
+            "base_url": "https://api.deepseek.com",
+            "model": "deepseek-v4-flash",
+        },
+        created_at=datetime(2026, 6, 25, 9, 0, 0),
+    )
+    task.worker_profile_snapshot = snapshot
+
+    new_provider = _provider_mock(55, wire_protocol="anthropic_messages")
+    issue = MagicMock()
+    issue.id = 1
+    issue.project_id = 101
+
+    db = MagicMock()
+    db.commit = AsyncMock()
+    db.rollback = AsyncMock()
+    db.get = AsyncMock(side_effect=lambda model, pk, *a, **k: issue if model is Issue else None)
+    db.refresh = AsyncMock()
+    access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+    with (
+        patch("app.api.tasks.get_task_with_access_check", new=AsyncMock(return_value=task)),
+        patch(
+            "app.api.tasks.resolve_provider_for_issue",
+            new=AsyncMock(return_value=new_provider),
+        ),
+        patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
+        patch(
+            "app.api.tasks.select_snapshot_run_instruction_template",
+            return_value="Execute {{user_prompt}}",
+        ),
+        patch("app.api.tasks.render_and_store_task_prompt", new=MagicMock()),
+    ):
+        with pytest.raises(HTTPException) as exc_info:
+            await update_task(
+                99,
+                UpdateTaskRequest(provider_id=55),
+                db=db,
+                current_user=SimpleNamespace(id=7),
+                access_scope=access_scope,
+            )
+
+    assert exc_info.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_update_task_provider_change_refreshes_snapshot_endpoint():
+    task = Task(
+        id=100,
+        issue_id=1,
+        project_id=101,
+        user_prompt="Implement",
+        priority=1,
+        status=TaskStatus.PENDING,
+        provider_id=44,
+        worker_profile_id=33,
+        task_mode="execute",
+        require_changes=True,
+        trigger_source="manual",
+        created_at=datetime(2026, 6, 25, 9, 0, 0),
+        updated_at=datetime(2026, 6, 25, 9, 0, 0),
+    )
+    snapshot = TaskWorkerProfileSnapshot(
+        task_id=100,
+        worker_profile_id=33,
+        profile_name="Default Worker",
+        image="codify-worker/java21-maven:2026.07",
+        volume_mounts=[],
+        environment_variables=[],
+        pre_script="",
+        post_script="",
+        default_execute_run_instruction_template="Execute {{user_prompt}}",
+        default_plan_run_instruction_template="Plan {{user_prompt}}",
+        ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+        harness_key="codex",
+        model_endpoint_snapshot={
+            "wire_protocol": "openai_responses",
+            "base_url": "https://api-old.example",
+            "model": "old-model",
+        },
+        credential_ref=None,
+        created_at=datetime(2026, 6, 25, 9, 0, 0),
+    )
+    task.worker_profile_snapshot = snapshot
+
+    new_provider = _provider_mock(
+        55, wire_protocol="openai_responses", base_url="https://api-new.example"
+    )
+    new_provider.model = "new-model"
+    new_provider.credential_ref = "mc-rotated-1"
+    issue = MagicMock()
+    issue.id = 1
+    issue.project_id = 101
+
+    db = MagicMock()
+    db.commit = AsyncMock()
+    db.rollback = AsyncMock()
+    db.get = AsyncMock(side_effect=lambda model, pk, *a, **k: issue if model is Issue else None)
+    db.refresh = AsyncMock()
+    access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+    with (
+        patch("app.api.tasks.get_task_with_access_check", new=AsyncMock(return_value=task)),
+        patch(
+            "app.api.tasks.resolve_provider_for_issue",
+            new=AsyncMock(return_value=new_provider),
+        ),
+        patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
+        patch(
+            "app.api.tasks.select_snapshot_run_instruction_template",
+            return_value="Execute {{user_prompt}}",
+        ),
+        patch("app.api.tasks.render_and_store_task_prompt", new=MagicMock()),
+    ):
+        await update_task(
+            100,
+            UpdateTaskRequest(provider_id=55),
+            db=db,
+            current_user=SimpleNamespace(id=7),
+            access_scope=access_scope,
+        )
+
+    assert task.provider_id == 55
+    assert snapshot.model_endpoint_snapshot["wire_protocol"] == "openai_responses"
+    assert snapshot.model_endpoint_snapshot["base_url"] == "https://api-new.example"
+    assert snapshot.model_endpoint_snapshot["model"] == "new-model"
+    assert snapshot.credential_ref == "mc-rotated-1"
 
 
 @pytest.mark.asyncio

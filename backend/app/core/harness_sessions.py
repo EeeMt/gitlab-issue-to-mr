@@ -82,6 +82,10 @@ async def upsert_session(
     else:
         if session_id is not None:
             session.session_id = session_id
+        elif lineage_reason == "fresh":
+            # An explicit fresh run starts a brand-new lineage: never let a
+            # stale session_id silently resume the old conversation.
+            session.session_id = None
         if lineage_reason is not None:
             session.lineage_reason = lineage_reason
         if metadata is not None:
@@ -100,14 +104,30 @@ async def get_issue_latest_harness_key(
     This is the issue's current harness: as tasks are appended and fresh
     sessions started, the latest lineage's harness wins over any profile
     default. ``None`` means the issue has no session lineage yet.
+
+    A lineage row only gets a ``session_id`` once the harness actually produced
+    a usable session. Fresh/failed attempts that never ran therefore do not
+    count as the "current harness", otherwise a single failed attempt could
+    block legitimate continues on the previous harness.
     """
     result = await db.execute(
         select(IssueHarnessSession)
-        .where(IssueHarnessSession.issue_id == issue_id)
+        .where(
+            IssueHarnessSession.issue_id == issue_id,
+            IssueHarnessSession.session_id.isnot(None),
+        )
         .order_by(IssueHarnessSession.id.desc())
         .limit(1)
     )
     session = result.scalar_one_or_none()
+    if session is None:
+        result = await db.execute(
+            select(IssueHarnessSession)
+            .where(IssueHarnessSession.issue_id == issue_id)
+            .order_by(IssueHarnessSession.id.desc())
+            .limit(1)
+        )
+        session = result.scalar_one_or_none()
     return session.harness_key if session is not None else None
 
 

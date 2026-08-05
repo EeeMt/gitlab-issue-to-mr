@@ -861,8 +861,149 @@ async def test_worker_finalization_honors_persisted_cancellation_intent():
     assert task.error_message == "Cancelled by user"
     assert task.container_id is None
     assert db.commit.await_count == 2
-    worker._parse_task_result.assert_not_awaited()
+    worker._parse_task_result.assert_awaited()
     worker.docker.remove_container.assert_called_once_with(container, force=True)
+
+
+@pytest.mark.asyncio
+async def test_worker_finalization_keeps_completed_when_cancel_arrives_late():
+    now = datetime.now(UTC).replace(tzinfo=None)
+    task = SimpleNamespace(
+        id=43,
+        status=TaskStatus.RUNNING,
+        cancel_requested_at=now,
+        completed_at=None,
+        error_message=None,
+        raw_logs_finalized_at=now,
+        container_id=None,
+        output_session_id=None,
+        _parsed_mr_iid=None,
+        _parsed_mr_url=None,
+        model_name=None,
+        commit_sha=None,
+        commit_message=None,
+        input_tokens=None,
+        output_tokens=None,
+        _extracted_session_id=None,
+    )
+    container = MagicMock()
+    worker = MagicMock()
+    worker._session_factory = None
+    worker._stream_logs_to_db = AsyncMock(return_value=(0, "", 1, False))
+    worker._send_notifications = AsyncMock()
+    worker._try_upsert_usage_ledger = AsyncMock()
+    worker.docker.remove_container = MagicMock()
+
+    async def _parse_success(task, logs, db, exit_code, issue=None):
+        task.status = TaskStatus.COMPLETED
+        task.completed_at = now
+
+    worker._parse_task_result = AsyncMock(side_effect=_parse_success)
+    db = MagicMock()
+    db.refresh = AsyncMock()
+    db.commit = AsyncMock()
+    settings = SimpleNamespace(task_timeout=1800)
+
+    with (
+        patch(
+            "app.core.worker_task_lifecycle.poll_task_artifacts",
+            new=MagicMock(return_value=object()),
+        ),
+        patch("app.core.worker_task_lifecycle.asyncio.create_task", return_value=MagicMock()),
+        patch("app.core.worker_task_lifecycle._stop_artifact_poller", new=AsyncMock()),
+        patch("app.core.worker_task_lifecycle.finalize_task_raw_logs", new=AsyncMock()),
+        patch("app.core.worker_task_lifecycle.flush_task_artifacts", new=AsyncMock()),
+        patch(
+            "app.core.worker_task_lifecycle._save_delivery_summary_from_container",
+            new=AsyncMock(),
+        ),
+    ):
+        result = await monitor_container_run(
+            worker,
+            db=db,
+            task=task,
+            issue=None,
+            container=container,
+            settings=settings,
+            had_existing_mr=False,
+            sudo_gl=None,
+        )
+
+    assert result is True
+    assert task.status == TaskStatus.COMPLETED
+    assert task.error_message is None
+    worker._send_notifications.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_worker_finalization_gracefully_stops_container_on_timeout():
+    now = datetime.now(UTC).replace(tzinfo=None)
+    task = SimpleNamespace(
+        id=44,
+        status=TaskStatus.RUNNING,
+        cancel_requested_at=None,
+        completed_at=None,
+        error_message=None,
+        raw_logs_finalized_at=now,
+        container_id=None,
+        output_session_id=None,
+        _parsed_mr_iid=None,
+        _parsed_mr_url=None,
+        model_name=None,
+        commit_sha=None,
+        commit_message=None,
+        input_tokens=None,
+        output_tokens=None,
+        _extracted_session_id=None,
+    )
+    container = MagicMock()
+    worker = MagicMock()
+    worker._session_factory = None
+    worker._stream_logs_to_db = AsyncMock(return_value=(-1, "", 1, True))
+    worker._send_failure_notifications = AsyncMock()
+    worker._try_upsert_usage_ledger = AsyncMock()
+    worker._sanitize_sensitive_data = MagicMock(return_value="")
+    worker._scrub_sensitive_data = MagicMock(return_value="")
+    worker.docker.remove_container = MagicMock()
+
+    async def _parse_failed(task, logs, db, exit_code, issue=None):
+        task.status = TaskStatus.FAILED
+
+    worker._parse_task_result = AsyncMock(side_effect=_parse_failed)
+    db = MagicMock()
+    db.refresh = AsyncMock()
+    db.commit = AsyncMock()
+    settings = SimpleNamespace(task_timeout=1800)
+
+    with (
+        patch(
+            "app.core.worker_task_lifecycle.poll_task_artifacts",
+            new=MagicMock(return_value=object()),
+        ),
+        patch("app.core.worker_task_lifecycle.asyncio.create_task", return_value=MagicMock()),
+        patch("app.core.worker_task_lifecycle._stop_artifact_poller", new=AsyncMock()),
+        patch("app.core.worker_task_lifecycle.finalize_task_raw_logs", new=AsyncMock()),
+        patch("app.core.worker_task_lifecycle.flush_task_artifacts", new=AsyncMock()),
+        patch(
+            "app.core.worker_task_lifecycle._save_delivery_summary_from_container",
+            new=AsyncMock(),
+        ),
+    ):
+        result = await monitor_container_run(
+            worker,
+            db=db,
+            task=task,
+            issue=None,
+            container=container,
+            settings=settings,
+            had_existing_mr=False,
+            sudo_gl=None,
+        )
+
+    container.stop.assert_called_once_with(timeout=15)
+    assert result is False
+    assert task.status == TaskStatus.FAILED
+    assert "Task timed out after 1800s" in task.error_message
 
 
 @pytest.mark.asyncio

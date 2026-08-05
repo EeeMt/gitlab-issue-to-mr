@@ -71,12 +71,55 @@ class ScrubSensitiveDataTests(unittest.TestCase):
         self.assertIn("PRIVATE-TOKEN:", result)
         self.assertIn("[REDACTED]", result)
 
-    def test_preserves_authorization_header_label(self) -> None:
-        """Authorization header label should be preserved."""
+    def test_scrubs_authorization_bearer_token(self) -> None:
+        """Authorization header Bearer tokens should be redacted (label preserved)."""
         text = "Authorization: Bearer secret1234567890"
         result = scrub_sensitive_data(text)
-        # Only PRIVATE-TOKEN pattern is scrubbed, not generic Authorization
-        self.assertEqual(result, text)
+        self.assertNotIn("secret1234567890", result)
+        self.assertIn("[REDACTED]", result)
+        self.assertIn("Authorization: Bearer", result)
+
+    def test_scrubs_openai_proj_keys(self) -> None:
+        """OpenAI sk-proj-* keys should be redacted."""
+        text = "Key sk-proj-abcdefghijklmnopqrstuvwxyz1234567890 for the API"
+        result = scrub_sensitive_data(text)
+        self.assertNotIn("sk-proj-abcdefghijklmnopqrstuvwxyz1234567890", result)
+        self.assertIn("[OPENAI_API_KEY]", result)
+
+    def test_scrubs_generic_sk_keys(self) -> None:
+        """Long generic sk-* keys should be redacted."""
+        text = "token sk-abcdefghijklmnopqrstuvwxyz0123456789 here"
+        result = scrub_sensitive_data(text)
+        self.assertNotIn("sk-abcdefghijklmnopqrstuvwxyz0123456789", result)
+        self.assertIn("[OPENAI_API_KEY]", result)
+
+    def test_scrubs_google_github_hf_tokens(self) -> None:
+        """Common provider token prefixes should be redacted."""
+        text = (
+            "g=AIzaSyabcdefghijklmnopqrstuvwxyz123456 h=ghp_abcdefghijklmnopqrstuvwxyz123456 "
+            "f=hf_abcdefghijklmnopqrstuvwxyz123456"
+        )
+        result = scrub_sensitive_data(text)
+        self.assertNotIn("AIzaSyabcdefghijklmnopqrstuvwxyz123456", result)
+        self.assertIn("[GOOGLE_API_KEY]", result)
+        self.assertNotIn("ghp_abcdefghijklmnopqrstuvwxyz123456", result)
+        self.assertIn("[GITHUB_TOKEN]", result)
+        self.assertNotIn("hf_abcdefghijklmnopqrstuvwxyz123456", result)
+        self.assertIn("[HUGGINGFACE_TOKEN]", result)
+
+    def test_scrubs_config_file_secret_shapes(self) -> None:
+        """api_key / env_key config values should be redacted."""
+        text = 'api_key = "sk-secretvalue1234567890abcdef" env_key: abcdef123456'
+        result = scrub_sensitive_data(text)
+        self.assertNotIn("sk-secretvalue1234567890abcdef", result)
+        self.assertNotIn("abcdef123456", result)
+        self.assertIn("[REDACTED]", result)
+
+    def test_does_not_scrub_short_sk_prose(self) -> None:
+        """Generic sk- pattern must not redact short prose words."""
+        text = "the skill was used sk-someprose"
+        result = scrub_sensitive_data(text)
+        self.assertIn("sk-someprose", result)
 
     def test_removes_null_bytes(self) -> None:
         """Null bytes should be removed from text."""

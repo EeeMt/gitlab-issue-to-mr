@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from app.core.harness_sessions import (
     find_session,
+    get_issue_latest_harness_key,
     record_task_output_session,
     resolve_resume_session,
     session_namespace_for,
@@ -128,3 +128,74 @@ async def test_record_output_does_not_touch_claude_pointer_for_codex(session_fac
         )
         await db.flush()
         assert issue.claude_session_id == "claude-old"
+
+
+async def test_latest_harness_ignores_fresh_attempt_without_session(session_factory):
+    async with session_factory() as db:
+        issue = _issue()
+        db.add(issue)
+        await db.flush()
+        ns = session_namespace_for("claude", "v1:abc")
+        await upsert_session(
+            db,
+            issue_id=issue.id,
+            harness_key="claude",
+            session_namespace=ns,
+            session_id="session-1",
+            lineage_reason="completed",
+        )
+        await db.flush()
+        # A codex fresh attempt that never produced a session (startup failure or
+        # still-running) must not flip the issue's "current harness".
+        await upsert_session(
+            db,
+            issue_id=issue.id,
+            harness_key="codex",
+            session_namespace=session_namespace_for("codex", "v1:abc"),
+            session_id=None,
+            lineage_reason="fresh",
+        )
+        await db.flush()
+        assert await get_issue_latest_harness_key(db, issue.id) == "claude"
+
+
+async def test_fresh_clears_stale_session_id(session_factory):
+    async with session_factory() as db:
+        issue = _issue()
+        db.add(issue)
+        await db.flush()
+        ns = session_namespace_for("claude", "v1:abc")
+        await upsert_session(
+            db,
+            issue_id=issue.id,
+            harness_key="claude",
+            session_namespace=ns,
+            session_id="session-1",
+            lineage_reason="completed",
+        )
+        await db.flush()
+        # A fresh run means "start a brand-new lineage": the stale session_id must
+        # be cleared so a later continue cannot silently resume the old session.
+        resume, reason = await resolve_resume_session(
+            db,
+            issue=issue,
+            harness_key="claude",
+            session_namespace=ns,
+            session_mode="fresh",
+        )
+        await db.flush()
+        assert resume is None
+        assert reason == "fresh"
+        found = await find_session(
+            db, issue_id=issue.id, harness_key="claude", session_namespace=ns
+        )
+        assert found.session_id is None
+        resume2, reason2 = await resolve_resume_session(
+            db,
+            issue=issue,
+            harness_key="claude",
+            session_namespace=ns,
+            session_mode="continue",
+        )
+        assert resume2 is None
+        assert reason2 == "fresh_no_match"

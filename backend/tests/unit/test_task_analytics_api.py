@@ -53,6 +53,9 @@ async def test_create_task_persists_manual_initiator_metadata():
     db.add = MagicMock()
     db.commit = AsyncMock()
     db.flush = AsyncMock()
+    _no_lineage = MagicMock()
+    _no_lineage.scalar_one_or_none.return_value = None
+    db.execute = AsyncMock(return_value=_no_lineage)
     db.get = AsyncMock(return_value=mock_issue)
 
     async def refresh(task, **_kwargs):

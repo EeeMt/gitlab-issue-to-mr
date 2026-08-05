@@ -286,6 +286,45 @@ class CancelTaskEndpointTests(unittest.TestCase):
         mock_release.assert_awaited_once()
         self.assertEqual(mock_release.await_args.kwargs["issue_id"], 33)
 
+    def test_cancel_running_task_does_not_downgrade_completed(self) -> None:
+        """Cancel of a RUNNING task must not downgrade a run the finalizer
+        already converged to COMPLETED while the cancel was in flight."""
+        from app.core.worker_docker_targets import TaskContainerNotFoundError
+
+        task = MagicMock()
+        task.id = 3
+        task.project_id = 1
+        task.issue_id = 33
+        task.status = TaskStatus.RUNNING
+        task.scheduled_at = None
+        task.container_id = "ctr-3"
+        task.cancel_requested_at = None
+
+        client, app, mock_db = self._get_client(task)
+
+        async def converge_to_completed(*_args, **_kwargs):
+            # Simulate the scheduler finalizer converging the run to COMPLETED
+            # while this cancel was stopping the container / draining logs.
+            task.status = TaskStatus.COMPLETED
+
+        mock_db.refresh = AsyncMock(side_effect=converge_to_completed)
+
+        with (
+            patch("app.api.task_action_routes.notify_task_cancelled", new=AsyncMock()),
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch(
+                "app.api.task_action_routes.find_task_container",
+                new=AsyncMock(side_effect=TaskContainerNotFoundError("missing")),
+            ),
+            patch("app.api.task_action_routes.release_issue_execution_lock", new=AsyncMock()),
+        ):
+            response = client.post("/api/tasks/3/cancel")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(task.status, TaskStatus.COMPLETED)
+
     def test_cancel_task_404_when_not_found(self) -> None:
         """POST /api/tasks/{id}/cancel should return 404 when task not found."""
         from app.database import get_db
@@ -1646,6 +1685,9 @@ class CreateTaskAPITests(unittest.TestCase):
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock()
+        no_lineage = MagicMock()
+        no_lineage.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=no_lineage)
 
         current_user = MagicMock()
         current_user.id = 7
