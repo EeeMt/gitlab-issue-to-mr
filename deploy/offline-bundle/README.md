@@ -16,6 +16,23 @@ This folder contains the artifacts needed to deploy the current Codify build int
 - `images/`: Docker image archives and checksum files
 - `kits/`: versioned worker-kit archives and checksums
 
+## Release candidate freeze
+
+Before a rollout, freeze the complete multi-harness release candidate:
+
+- Worker Kit archives for every architecture used by the Host matrix, plus archive SHA-256 and
+  `manifest.json` SHA-256. Do not reuse an archive across CPU architectures.
+- Every runtime image used by enabled Worker Profiles, exported through `config/worker-images.txt`
+  and verified by repo digest after loading, not by mutable tag.
+- Fixed host binaries (the Codex CLI) shipped in the bundle and recorded in
+  `config/worker-binaries.txt` with `harness_key`, host/container paths, version and SHA-256.
+- The Task Runtime Bundle manifest digest and each harness Adapter version/digest; the actual
+  Adapter comes only from the immutable Runtime Bundle, never from the Kit or host path.
+
+See `docs/runbooks/multi-harness-rollout.md` for the full freeze list, per-Host verification,
+direct switch, alerting and rollback procedure, and `docs/runbooks/multi-harness-rollout-evidence.md`
+for the evidence template.
+
 ## Images exported by default
 
 The bundle exports these image tags without additional configuration:
@@ -36,7 +53,29 @@ reference runtime must be available offline.
 3. Edit `config/.env.offline` and fill in your real values.
 4. Run `./scripts/load-images.sh`.
 5. On every Docker host, install the kit with `./scripts/install-worker-kit.sh kits/<archive>`.
-6. Verify each runtime image with `./scripts/verify-worker-runtime.sh --kit <installed-path> --image <runtime-image>`. For mounted CLI binaries, pass the harness and its host path, e.g. `--harness-key claude --harness-host-path <host-claude-bin>` and/or `--harness-key codex --harness-host-path <host-codex-bin>`. The legacy `--claude-host-path <host-claude-bin>` form is still accepted.
+6. Verify each runtime image per harness on the Docker host:
+
+   ```bash
+   ./scripts/verify-worker-runtime.sh \
+     --kit /opt/codify/worker-kits/0.3.10-linux-amd64 \
+     --image <runtime-image> \
+     --harness-key claude \
+     --harness-host-path /usr/bin/claude \
+     --harness-container-path /usr/local/bin/claude \
+     --smoke 'java -version && mvn -version'
+
+   ./scripts/verify-worker-runtime.sh \
+     --kit /opt/codify/worker-kits/0.3.10-linux-amd64 \
+     --image <runtime-image> \
+     --harness-key codex \
+     --harness-host-path /opt/codify/codex/bin/codex \
+     --harness-container-path /opt/codify-codex/bin/codex \
+     --smoke 'test -x /opt/codify-codex/bin/codex && /opt/codify-codex/bin/codex --version'
+   ```
+
+   The legacy `--claude-host-path <host-claude-bin>` form is still accepted. Then run
+   `/api/worker-profiles/<id>/verify-runtime` through Codify so the immutable image repo digest and
+   `verified_at` are persisted on the profile.
 
 > Codex CLI is a fixed host binary (not part of the runtime image). Ship it with the bundle
 > under `kits/` or `images/`, record its SHA-256 in `config/worker-binaries.txt` (see the
@@ -69,4 +108,7 @@ This command:
 - If you set or change `WORKER_IMAGE` in `config/.env.offline`, include an image with the same tag through `config/worker-images.txt` or load it separately on every worker Docker host.
 - Copy `config/worker-images.txt.example` to `config/worker-images.txt` before export and list
   all project runtime images that must be available offline.
+- The Kit version defaulted by `make offline-bundle-export` follows `WORKER_KIT_VERSION`; set it to
+  the frozen release version (e.g. `WORKER_KIT_VERSION=0.3.10`) so both architecture archives match
+  the release candidate.
 - If your intranet environment has no outbound internet access, `ANTHROPIC_BASE_URL` must point to an internal Claude-compatible endpoint.

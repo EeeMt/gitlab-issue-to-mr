@@ -164,6 +164,49 @@ Backend unit `2240 passed`、前端 `1485 passed`、mock-e2e `371 passed`、vue-
 另外 cancel 路由与 finalizer 对同一任务并发写存在极窄的 last-write-wins 残留窗口
 （refresh 与 commit 之间 finalizer 恰好提交），如需彻底原子化可在 Phase 3 用条件 UPDATE 收口。
 
+### 更新（2026-08-05）：Phase 3 dev 目标 Host 直接切换、验收与回滚演练完成
+
+Phase 3 的 Git 交付物与 dev 目标 Host 演练已完成，形成可运营的双引擎切换流程：
+
+- **Runbook 与证据模板**：新增 `docs/runbooks/multi-harness-rollout.md` 和
+  `docs/runbooks/multi-harness-rollout-evidence.md`，覆盖发布冻结、Host 矩阵、逐 Host 安装验证、
+  真实验收矩阵、直接切换、指标/阈值/告警、回滚演练与生产签署；真实 Host 地址/token/仓库 URL
+  只进入受控发布系统，不写入 Git。
+- **发布冻结值已固化**：Kit `0.3.10`（archive `48880f31...`、manifest `97b316b5...`）、
+  Claude CLI `2.1.153`（`214f603f...`）、Codex CLI `0.146.0`（`2e863156...`）、
+  runtime image repo digest `a9d046b1...`、Backend/Nginx registry digest
+  `ee57644d...`/`65ad95d6...`、migration head `065_worker_profile_verification`、
+  Runtime Bundle digest `00addfc6...`；Kit/export 默认版本已从 `0.3.9` 升到 `0.3.10`。
+- **逐 Host / 逐 Harness 验证通过**：dev 目标 Host（x86_64，Docker `28.5.2`）对 Kit `0.3.10`
+  分别通过 claude（`2.1.153`）与 codex（`0.146.0`）离线 verify-runtime；Codify API
+  `/api/worker-profiles/11/verify-runtime` 通过并持久化 `image_digest`/`verified_at`；
+  Kit 安装器拒绝覆盖已安装版本目录（`already installed`）。
+- **直接切换完成**：Profile 11 镜像引用从可变 tag 切换为
+  `127.0.0.1:5000/codify-worker/java21-maven@sha256:a9d046b1...`（不可变 repo digest）并复验，
+  设为系统默认 Profile；新 Issue 87 + Task 538（codex）/539（claude）双引擎 fresh execute 均
+  completed，commit + MR !6，canonical event 连续无缺口且仅一个 `run.completed` 终态。
+- **回滚演练通过**：Profile 11 恢复 tag 坐标 + re-verify 成功，Task 540（claude）在回滚坐标下
+  completed，随后重新切回 digest 固定坐标并复验；旧 Kit `0.3.9` 目录仍在 Host 保留。
+- **发版硬边界已执行（dev 目标 Host）**：关闭全部切换前历史 Issue（57 个，保留分支），
+  禁用旧 Profile 1（baked_image）与 12（Kit 0.1.0）；当前仅 Profile 11 启用且为默认，
+  无 PENDING/QUEUED/RUNNING 任务，无残留 worker 容器。
+- **切换后 cancel/timeout 证据补齐**：Task 541（claude）RUNNING 时取消 →
+  canonical `harness.failed(cancelled)` → `run.failed(cancelled, exit_code=143)`，容器与 mutex 清理；
+  Task 542（claude，`task_timeout=60`）→ canonical `harness.failed(timeout)` →
+  `run.failed(timeout)`，archive 200 且回放连续（测试后恢复 1800）。
+- **完整回滚演练通过**：恢复旧 tag 坐标后创建 replacement Issue 88 + Task 543（claude）
+  completed（commit + MR !7），随后重新切回 digest 坐标并复验。
+- **故障演练**：fake codex binary 触发离线 verify 失败（exit 1，Host 不可路由）；
+  Provider 7 临时指向不可达端点后 Task 544 以 `protocol_error` 正确归类并恢复；
+  Codify Docker 连接检查对不可达 daemon 返回 502。
+- **已交付配套更新**：`docs/worker-kits.md`（0.3.10 双引擎安装/verify 示例）、
+  `deploy/offline-bundle/README.md`（release candidate freeze）、
+  `config/worker-images.txt.example`（必需 runtime image 示例）。
+
+**进入生产签署前仍需执行**：在真实生产 Host 上按 Runbook 重建证据批次（repo digest 以生产
+registry 为准）并完成最小观察期；`credential_ref` 运行时接线、arm64 Kit 制品与私有 CA 部署配置
+仍按「剩余已知项」处理。
+
 ---
 
 ## 2. 不可变实施决策

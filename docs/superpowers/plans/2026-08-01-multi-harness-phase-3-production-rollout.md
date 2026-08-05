@@ -152,3 +152,50 @@ make offline-bundle-export WORKER_KIT_VERSION=<release-version>
 - [ ] 运维 runbook、Host 清单、告警和责任人已完成交接。
 
 达到以上条件后，Claude + Codex 才可标记为生产基线。OpenCode 仍保持未启动，至少等待一个稳定 Worker Kit 发布周期后再评估 Phase 4 准入。
+
+---
+
+## 5. 实施记录（2026-08-05，dev 目标 Host 演练）
+
+本阶段 Git 交付物与 dev 目标 Host 演练已完成；真实生产 Host 的生产签署仍按 Runbook 执行。
+
+### 已完成
+
+- [x] `docs/runbooks/multi-harness-rollout.md`：发布冻结、Host 矩阵、安装/verify、直接切换、
+      指标/阈值/告警、回滚与生产签署流程。
+- [x] `docs/runbooks/multi-harness-rollout-evidence.md`：逐 Host / 逐 Harness / 验收矩阵 /
+      切换 / 回滚 / 签署的脱敏证据模板。
+- [x] `docs/worker-kits.md`：Kit `0.3.10` 双引擎安装与 verify-runtime 示例，镜像 digest 固定说明。
+- [x] `deploy/offline-bundle/README.md` 与 `config/worker-images.txt.example`：release candidate
+      freeze、必需 runtime image 与逐 Harness verify 说明。
+- [x] Kit/export 默认版本升级到 `0.3.10`（`Makefile`、`deploy/Dockerfile.worker-kit`、
+      `deploy/worker-kit/export.sh`）。
+- [x] 发布冻结值：Kit `0.3.10` archive/manifest SHA-256、Claude `2.1.153`、
+      Codex `0.146.0` binary digest、runtime image repo digest、Backend/Nginx registry digest、
+      migration head `065_worker_profile_verification`、Runtime Bundle digest `00addfc6...`。
+- [x] dev 目标 Host（x86_64，Docker `28.5.2`）：Kit `0.3.10` 已安装且 manifest 与本地制品一致；
+      claude/codex 离线 verify-runtime 均通过；安装器拒绝覆盖已安装版本目录。
+- [x] Codify API `/api/worker-profiles/11/verify-runtime` 通过，Profile 11 持久化
+      `image_digest`/`verified_at`。
+- [x] 直接切换：Profile 11 镜像引用固定为 `repo@sha256:a9d046b1...` 并设为系统默认；
+      新 Issue 87 的 Task 538（codex）/539（claude）completed，commit + MR !6，
+      canonical event 连续、唯一 `run.completed` 终态。
+- [x] 回滚演练：Profile 11 恢复 tag 坐标并 re-verify，Task 540（claude）completed；
+      随后重新切回 digest 坐标并复验；旧 Kit `0.3.9` 目录保留。
+- [x] 发版硬边界（dev 目标 Host）：关闭全部切换前历史 Issue（57 个，保留分支），禁用旧
+      Profile 1/12；当前仅 Profile 11 启用且为默认，无在途任务、无残留 worker 容器。
+- [x] 切换后 cancel/timeout 证据：Task 541 cancel → canonical `run.failed(cancelled)`；
+      Task 542 timeout=60 → canonical `run.failed(timeout)` + archive 回放连续（已恢复 1800）。
+- [x] 完整回滚 + replacement Issue：恢复旧 tag 坐标，Issue 88 + Task 543（claude）
+      completed（commit + MR !7），随后恢复 digest 坐标并复验。
+- [x] 故障演练：fake codex binary → 离线 verify exit 1；Provider 7 不可达 → Task 544
+      `protocol_error` 正确归类（已恢复端点）；不可达 daemon 连接检查 → 502。
+
+### 生产签署前仍需执行（不阻塞本阶段 Git 交付）
+
+- [ ] 在真实生产 Host 按 Runbook 重建冻结与证据批次，repo digest 以生产 registry 为准。
+- [x] 关闭全部历史 Issue、drain 旧任务，切换窗口内无旧 Kit/旧镜像任务在途（dev 目标 Host 已执行）。
+- [ ] 完成最小观察任务数与观察时间，记录基线/切换后指标并批准阈值（dev 观察窗口 Task 536–544 已记录，生产需重建）。
+- [x] 完成回滚演练与 replacement Issue 流程（dev 目标 Host 已执行；生产四种故障场景仍按 Runbook 演练）。
+- [ ] `credential_ref` 运行时接线、arm64 Kit 制品、私有 CA 与 Profile 级远程 Docker path
+      部署配置（见总计划剩余已知项）。

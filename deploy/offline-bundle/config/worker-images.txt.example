@@ -1,6 +1,8 @@
-# Runtime images are not exported by default. Add every project runtime image required in the
-# offline environment, one per line.
-# codify-worker/java21-maven:2026.07
+# Runtime images are not exported by default. Add every project runtime image required by enabled
+# mounted-kit Worker Profiles, one per line. After loading the archive on each Docker host, verify
+# the repo digest matches the value frozen in the rollout evidence (never rely on a mutable tag).
+codify-worker/java21-maven:2026.07
 # team/java21-maven:2026.07
 # team/node22-pnpm:2026.07
 # team/cpp-gcc14:2026.07
+# gcc:15
