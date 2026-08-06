@@ -756,6 +756,18 @@ describe('TaskView', () => {
       expect(wrapper.find('[data-testid="task-actions-card"]').exists()).toBe(false)
     })
 
+    it('shows the harness engine used by the task in the overview', async () => {
+      await mountComponent({ harness_key: 'codex' })
+
+      const harnessRow = wrapper.find('[data-testid="task-harness-row"]')
+      expect(harnessRow.exists()).toBe(true)
+      expect(harnessRow.find('.metadata-label-icon').exists()).toBe(true)
+      expect(harnessRow.find('.task-mode-chip__icon').exists()).toBe(true)
+      expect(harnessRow.text()).toContain('taskView.harness')
+      expect(harnessRow.text()).toContain('taskView.harnessCodex')
+      expect(harnessRow.text()).not.toContain('taskView.harnessClaude')
+    })
+
     it('loads worker and model-service runtime summaries only after each popover is opened', async () => {
       ;(mockApi.getTaskModelServiceSummary as Mock).mockResolvedValue({
         configuration_source: 'execution_snapshot',

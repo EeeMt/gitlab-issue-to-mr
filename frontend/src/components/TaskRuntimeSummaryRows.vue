@@ -563,9 +563,15 @@ function formatDate(dateStr: string): string {
 .metadata-label {
   display: inline-flex;
   align-items: center;
+  gap: 4px;
   color: var(--n-text-color-3, #999);
   font-size: 13px;
   white-space: nowrap;
+}
+
+.metadata-label-icon {
+  flex: 0 0 auto;
+  opacity: 0.65;
 }
 
 .metadata-row > :last-child {
