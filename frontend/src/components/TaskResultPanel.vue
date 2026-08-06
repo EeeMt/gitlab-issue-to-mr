@@ -20,10 +20,8 @@
         <div class="result-card__content">
           <div v-if="task.failure_kind || task.failure_message" class="error-summary">
             <span class="error-summary__label">{{ t('taskView.failureReason') }}</span>
-            <span v-if="task.failure_kind" class="error-kind-chip">{{ task.failure_kind }}</span>
-            <span class="error-summary__message">
-              {{ task.failure_message || t('taskView.taskCancelled') }}
-            </span>
+            <span v-if="task.failure_kind" class="error-kind-chip">{{ failureKindLabel }}</span>
+            <span class="error-summary__message">{{ failureSummaryMessage }}</span>
           </div>
           <div v-if="task.error_message" class="error-raw">
             <button
@@ -335,6 +333,29 @@ const rawErrorExpanded = ref(false)
 const hasFailure = computed(
   () => props.task.status === 'failed' || props.task.status === 'cancelled',
 )
+const failureKindLabel = computed(() => {
+  if (!props.task.failure_kind) return ''
+  const labels: Record<string, string> = {
+    timeout: t('taskView.failureTimeout'),
+    protocol_error: t('taskView.failureProtocolError'),
+    cancelled: t('taskView.failureCancelled'),
+    auth: t('taskView.failureAuth'),
+    rate_limit: t('taskView.failureRateLimit'),
+    sandbox: t('taskView.failureSandbox'),
+    engine_error: t('taskView.failureEngineError'),
+  }
+  return labels[props.task.failure_kind] || props.task.failure_kind
+})
+const failureSummaryMessage = computed(() => {
+  if (props.task.failure_kind === 'timeout') {
+    const firstLine = (props.task.error_message || '')
+      .split('\n')
+      .map((line) => line.trim())
+      .find(Boolean)
+    if (firstLine) return firstLine
+  }
+  return props.task.failure_message || t('taskView.taskCancelled')
+})
 
 // Delivery summary, falling back to the last assistant text event for older tasks.
 const summaryExpanded = ref(false)

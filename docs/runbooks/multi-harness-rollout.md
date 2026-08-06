@@ -21,7 +21,7 @@
 | 冻结项 | 冻结值（2026-08-05 dev 演练） | 生产切换时 |
 |---|---|---|
 | Backend image | `codify-backend:latest`，content digest `sha256:00e992eb8f99d0c6756e8aa8cc20bffdf17cfad1962647264064df447d5fa669`，repo `127.0.0.1:5000/codify-backend@sha256:37671703a81492c0f578c753ce8599bdf670d54c1cd5ba0c97b793d2edd5ec90` | 重新记录 repo digest |
-| Frontend/Nginx image | `codify-nginx:latest`，content digest `sha256:6ecc4a922133ae2b93a27a80768cae91a755ee43e5e9b8e6c28d6848391e520b`，repo `127.0.0.1:5000/codify-nginx@sha256:683f18e46d543c66d8e5f6797c05963028b88f25937e0b260fe9bc568ad3790a` | 重新记录 repo digest |
+| Frontend/Nginx image | `codify-nginx:latest`，content digest `sha256:ecbdace033777162356d216f36520a64ec6d9d153cd3f34ea497c6f54b75e88f`，repo `127.0.0.1:5000/codify-nginx@sha256:f132d2e18029cc2efc912f58689aeab729acb550c59996ae61669adaff596ef6` | 重新记录 repo digest |
 | Database migration head | `065_worker_profile_verification` | 以发布时实际 head 为准 |
 | Worker Kit | `0.3.10`；amd64 archive `48880f314d0c380333b932771b7c0f09628d2093a6396167925ea94bbc1b96b1`；manifest `97b316b509f5b2608684fe505cf88f5a9a121680210727b08d4f83c463af011e` | 重新记录 archive/manifest SHA-256 |
 | arm64 Kit | 当前 Host 矩阵无 arm64 Host，标记 not required；新增 arm64 Host 前必须导出并校验，禁止跨架构复用 | 按矩阵标记 |

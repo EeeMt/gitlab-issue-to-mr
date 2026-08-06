@@ -175,7 +175,7 @@ Phase 3 的 Git 交付物与 dev 目标 Host 演练已完成，形成可运营�
 - **发布冻结值已固化**：Kit `0.3.10`（archive `48880f31...`、manifest `97b316b5...`）、
   Claude CLI `2.1.153`（`214f603f...`）、Codex CLI `0.146.0`（`2e863156...`）、
   runtime image repo digest `a9d046b1...`、Backend/Nginx registry digest
-  `37671703...`/`683f18e4...`（2026-08-06 UI 修复后重建并重新推送）、migration head `065_worker_profile_verification`、
+  `37671703...`/`f132d2e1...`（2026-08-06 UI 修复后重建并重新推送）、migration head `065_worker_profile_verification`、
   Runtime Bundle digest `00addfc6...`；Kit/export 默认版本已从 `0.3.9` 升到 `0.3.10`。
 - **逐 Host / 逐 Harness 验证通过**：dev 目标 Host（x86_64，Docker `28.5.2`）对 Kit `0.3.10`
   分别通过 claude（`2.1.153`）与 codex（`0.146.0`）离线 verify-runtime；Codify API
