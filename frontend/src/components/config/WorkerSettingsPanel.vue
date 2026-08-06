@@ -257,6 +257,29 @@
                     {{ t('config.codegraphHint') }}
                   </template>
                 </n-form-item>
+              </n-gi>
+              <n-gi v-if="workerFormValue.runtime_mode === 'mounted_kit'">
+                <n-form-item :label="t('config.workerKitVersion')">
+                  <n-input
+                    v-model:value="workerFormValue.worker_kit_version"
+                    class="config-form__input"
+                    placeholder="0.3.6"
+                  />
+                </n-form-item>
+              </n-gi>
+              <n-gi v-if="workerFormValue.runtime_mode === 'mounted_kit'">
+                <n-form-item :label="t('config.workerKitPath')">
+                  <n-input
+                    v-model:value="workerFormValue.worker_kit_path"
+                    class="config-form__input"
+                    placeholder="/opt/codify/worker-kits/0.3.6-linux-amd64"
+                  />
+                  <template #feedback>
+                    {{ t('config.workerKitPathHint') }}
+                  </template>
+                </n-form-item>
+              </n-gi>
+              <n-gi>
                 <n-form-item :label="t('config.harnesses')" path="enabled_harnesses">
                   <n-select
                     v-model:value="workerFormValue.enabled_harnesses"
@@ -268,6 +291,8 @@
                     {{ t('config.harnessesHint') }}
                   </template>
                 </n-form-item>
+              </n-gi>
+              <n-gi>
                 <n-form-item :label="t('config.defaultHarness')" path="default_harness_key">
                   <n-select
                     v-model:value="workerFormValue.default_harness_key"
@@ -280,39 +305,7 @@
                 </n-form-item>
               </n-gi>
             </n-grid>
-            <n-grid
-              v-if="workerFormValue.runtime_mode === 'mounted_kit'"
-              :cols="isMobile ? 1 : 2"
-              :x-gap="16"
-              :y-gap="8"
-            >
-              <n-gi>
-                <n-form-item :label="t('config.workerKitVersion')">
-                  <n-input
-                    v-model:value="workerFormValue.worker_kit_version"
-                    class="config-form__input"
-                    placeholder="0.3.6"
-                  />
-                </n-form-item>
-              </n-gi>
-              <n-gi>
-                <n-form-item :label="t('config.workerKitPath')">
-                  <n-input
-                    v-model:value="workerFormValue.worker_kit_path"
-                    class="config-form__input"
-                    placeholder="/opt/codify/worker-kits/0.3.6-linux-amd64"
-                  />
-                  <template #feedback>
-                    {{ t('config.workerKitPathHint') }}
-                  </template>
-                </n-form-item>
-              </n-gi>
-            </n-grid>
-          </div>
-
-          <div class="config-form__section">
-            <div class="config-form__section-title">{{ t('config.defaultSkills') }}</div>
-            <n-form-item>
+            <n-form-item :label="t('config.defaultSkills')">
               <n-select
                 v-model:value="workerFormValue.default_skill_ids"
                 multiple
