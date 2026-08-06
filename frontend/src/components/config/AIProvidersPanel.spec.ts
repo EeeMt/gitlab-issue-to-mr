@@ -57,7 +57,7 @@ describe('AIProvidersPanel', () => {
     const wrapper = mount(AIProvidersPanel, {
       props: { isMobile: false },
       global: {
-        stubs: ['NCard', 'NButton', 'NDataTable', 'NModal', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSpace', 'NSwitch', 'NTag']
+        stubs: ['NCard', 'NButton', 'NDataTable', 'NModal', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSelect', 'NSpace', 'NSwitch', 'NTag']
       }
     })
 
@@ -93,7 +93,7 @@ describe('AIProvidersPanel', () => {
     const wrapper = mount(AIProvidersPanel, {
       props: { isMobile: false },
       global: {
-        stubs: ['NCard', 'NButton', 'NDataTable', 'NModal', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSpace', 'NSwitch', 'NTag']
+        stubs: ['NCard', 'NButton', 'NDataTable', 'NModal', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSelect', 'NSpace', 'NSwitch', 'NTag']
       }
     })
 
@@ -133,7 +133,7 @@ describe('AIProvidersPanel', () => {
     const wrapper = mount(AIProvidersPanel, {
       props: { isMobile: false },
       global: {
-        stubs: ['NCard', 'NButton', 'NDataTable', 'NModal', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSpace', 'NSwitch', 'NTag']
+        stubs: ['NCard', 'NButton', 'NDataTable', 'NModal', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSelect', 'NSpace', 'NSwitch', 'NTag']
       }
     })
 
@@ -160,7 +160,7 @@ describe('AIProvidersPanel', () => {
     const wrapper = mount(AIProvidersPanel, {
       props: { isMobile: false },
       global: {
-        stubs: ['NCard', 'NButton', 'NDataTable', 'NModal', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSpace', 'NSwitch', 'NTag']
+        stubs: ['NCard', 'NButton', 'NDataTable', 'NModal', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSelect', 'NSpace', 'NSwitch', 'NTag']
       }
     })
 
@@ -196,11 +196,104 @@ describe('AIProvidersPanel', () => {
     expect(wrapper.vm.formValue.name).toBe('')
   })
 
+  it('switches the wire protocol when the provider kind changes', async () => {
+    const wrapper = mount(AIProvidersPanel, {
+      props: { isMobile: false },
+      global: {
+        stubs: ['NCard', 'NButton', 'NDataTable', 'NModal', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSelect', 'NSpace', 'NSwitch', 'NTag']
+      }
+    })
+
+    await wrapper.vm.openCreate()
+    expect(wrapper.vm.formValue.provider_kind).toBe('anthropic_compatible')
+    expect(wrapper.vm.formValue.wire_protocol).toBe('anthropic_messages')
+
+    wrapper.vm.handleProviderKindChange('openai_compatible')
+    expect(wrapper.vm.formValue.wire_protocol).toBe('openai_responses')
+    expect(wrapper.vm.wireProtocolOptions.map(option => option.value))
+      .toEqual(['openai_responses'])
+  })
+
+  it('keeps an existing chat completions value visible while hiding it for new providers', async () => {
+    const wrapper = mount(AIProvidersPanel, {
+      props: { isMobile: false },
+      global: {
+        stubs: ['NCard', 'NButton', 'NDataTable', 'NModal', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSelect', 'NSpace', 'NSwitch', 'NTag']
+      }
+    })
+    const provider = {
+      id: 'p1',
+      name: 'legacy-openai',
+      base_url: 'https://api.example',
+      model: 'model-x',
+      max_turns: 20,
+      api_key_configured: true,
+      system_prompt: null,
+      provider_kind: 'openai_compatible',
+      wire_protocol: 'openai_chat_completions',
+      is_default: false,
+      is_disabled: false
+    }
+
+    await wrapper.vm.openEdit(provider)
+    expect(wrapper.vm.formValue.wire_protocol).toBe('openai_chat_completions')
+    expect(wrapper.vm.wireProtocolOptions.map(option => option.value))
+      .toEqual(['openai_responses', 'openai_chat_completions'])
+  })
+
+  it('creates an OpenAI-compatible provider for Codex', async () => {
+    const wrapper = mount(AIProvidersPanel, {
+      props: { isMobile: false },
+      global: {
+        stubs: ['NCard', 'NButton', 'NDataTable', 'NModal', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSelect', 'NSpace', 'NSwitch', 'NTag']
+      }
+    })
+
+    await wrapper.vm.openCreate()
+    wrapper.vm.formRef = { validate: () => Promise.resolve() }
+    wrapper.vm.formValue.name = 'ds-openai'
+    wrapper.vm.formValue.base_url = 'https://api.deepseek.com'
+    wrapper.vm.formValue.model = 'deepseek-v4-flash'
+    wrapper.vm.handleProviderKindChange('openai_compatible')
+    await wrapper.vm.handleSave()
+
+    expect(mockApi.createProvider).toHaveBeenCalledWith(expect.objectContaining({
+      provider_kind: 'openai_compatible',
+      wire_protocol: 'openai_responses'
+    }))
+  })
+
+  it('restores provider kind and wire protocol when editing', async () => {
+    const provider = {
+      id: 'p1',
+      name: 'ds-openai',
+      base_url: 'https://api.deepseek.com',
+      model: 'deepseek-v4-flash',
+      max_turns: 20,
+      api_key_configured: true,
+      system_prompt: null,
+      provider_kind: 'openai_compatible',
+      wire_protocol: 'openai_responses',
+      is_default: false,
+      is_disabled: false
+    }
+    const wrapper = mount(AIProvidersPanel, {
+      props: { isMobile: false },
+      global: {
+        stubs: ['NCard', 'NButton', 'NDataTable', 'NModal', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSelect', 'NSpace', 'NSwitch', 'NTag']
+      }
+    })
+
+    await wrapper.vm.openEdit(provider)
+    expect(wrapper.vm.formValue.provider_kind).toBe('openai_compatible')
+    expect(wrapper.vm.formValue.wire_protocol).toBe('openai_responses')
+  })
+
   it('disables actions that would violate provider status rules', async () => {
     const wrapper = mount(AIProvidersPanel, {
       props: { isMobile: false },
       global: {
-        stubs: ['NCard', 'NButton', 'NDataTable', 'NModal', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSpace', 'NSwitch', 'NTag']
+        stubs: ['NCard', 'NButton', 'NDataTable', 'NModal', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSelect', 'NSpace', 'NSwitch', 'NTag']
       }
     })
 

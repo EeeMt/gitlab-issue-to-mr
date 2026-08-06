@@ -210,6 +210,8 @@ export interface CreateProviderRequest {
   model: string
   max_turns?: number
   system_prompt?: string
+  provider_kind?: string
+  wire_protocol?: string
   is_disabled?: boolean
 }
 
@@ -222,6 +224,8 @@ export interface UpdateProviderRequest {
   max_turns?: number
   system_prompt?: string | null
   clear_system_prompt?: boolean
+  provider_kind?: string
+  wire_protocol?: string
   is_disabled?: boolean
 }
 

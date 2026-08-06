@@ -31,7 +31,7 @@
       class="config-editor-modal"
       :show="modalVisible"
       preset="card"
-      :style="{ width: isMobile ? '96vw' : '720px' }"
+      :style="{ width: isMobile ? '96vw' : 'min(880px, calc(100vw - 32px))' }"
       @update:show="handleModalVisibilityChange"
     >
       <template #header>
@@ -98,6 +98,29 @@
                 {{ t('config.providers.modelHint') }}
               </template>
             </n-form-item>
+
+            <n-form-item :label="t('config.providers.providerKind')" path="provider_kind">
+              <n-select
+                v-model:value="formValue.provider_kind"
+                :options="providerKindOptions"
+                class="config-form__input"
+                @update:value="handleProviderKindChange"
+              />
+              <template #feedback>
+                {{ t('config.providers.providerKindHint') }}
+              </template>
+            </n-form-item>
+
+            <n-form-item :label="t('config.providers.wireProtocol')" path="wire_protocol">
+              <n-select
+                v-model:value="formValue.wire_protocol"
+                :options="wireProtocolOptions"
+                class="config-form__input"
+              />
+              <template #feedback>
+                {{ t('config.providers.wireProtocolHint') }}
+              </template>
+            </n-form-item>
           </div>
 
           <div class="ai-provider-modal__section">
@@ -116,18 +139,6 @@
                 <span v-else-if="editingProvider">
                   <n-tag size="tiny" type="warning" round>{{ t('config.providers.apiKeyNotConfigured') }}</n-tag>
                 </span>
-              </template>
-            </n-form-item>
-
-            <n-form-item :label="t('config.providers.endpointInfo')">
-              <div class="provider-endpoint-info">
-                <span>{{ editingProvider?.provider_kind ?? 'anthropic_compatible' }} · {{ editingProvider?.wire_protocol ?? 'anthropic_messages' }}</span>
-                <n-tag v-if="editingProvider?.credential_status" size="tiny" :type="editingProvider.credential_status === 'active' ? 'success' : 'warning'" round>
-                  {{ editingProvider.credential_status }}
-                </n-tag>
-              </div>
-              <template #feedback>
-                {{ t('config.providers.endpointInfoHint') }}
               </template>
             </n-form-item>
 
@@ -184,6 +195,7 @@ import {
   NInput,
   NInputNumber,
   NPopconfirm,
+  NSelect,
   NSpace,
   NSwitch,
   NTag,
@@ -203,6 +215,16 @@ import {
   type CreateProviderRequest,
   type UpdateProviderRequest
 } from '../../api'
+
+const PROVIDER_KIND_PROTOCOLS: Record<string, string[]> = {
+  anthropic_compatible: ['anthropic_messages'],
+  openai_compatible: ['openai_responses', 'openai_chat_completions'],
+}
+
+const PROVIDER_KIND_DEFAULT_PROTOCOL: Record<string, string> = {
+  anthropic_compatible: 'anthropic_messages',
+  openai_compatible: 'openai_responses',
+}
 
 defineProps<{
   isMobile: boolean
@@ -226,7 +248,33 @@ const formValue = ref({
   max_turns: 20,
   api_key: '',
   system_prompt: '',
+  provider_kind: 'anthropic_compatible',
+  wire_protocol: 'anthropic_messages',
   is_disabled: false
+})
+
+const providerKindOptions = computed(() => [
+  { label: t('config.providers.providerKindAnthropic'), value: 'anthropic_compatible' },
+  { label: t('config.providers.providerKindOpenai'), value: 'openai_compatible' },
+])
+
+const wireProtocolOptions = computed(() => {
+  const protocols = (PROVIDER_KIND_PROTOCOLS[formValue.value.provider_kind] ?? [])
+    .filter(protocol => protocol !== 'openai_chat_completions')
+  if (
+    formValue.value.wire_protocol === 'openai_chat_completions'
+    && !protocols.includes('openai_chat_completions')
+  ) {
+    protocols.push('openai_chat_completions')
+  }
+  return protocols.map(protocol => ({
+    label: protocol === 'anthropic_messages'
+      ? t('config.providers.wireProtocolAnthropicMessages')
+      : protocol === 'openai_responses'
+        ? t('config.providers.wireProtocolOpenaiResponses')
+        : t('config.providers.wireProtocolOpenaiChatCompletions'),
+    value: protocol,
+  }))
 })
 
 const rules: FormRules = {
@@ -408,6 +456,8 @@ function resetForm() {
     max_turns: 20,
     api_key: '',
     system_prompt: '',
+    provider_kind: 'anthropic_compatible',
+    wire_protocol: 'anthropic_messages',
     is_disabled: false
   }
 }
@@ -447,6 +497,8 @@ function openEdit(provider: AIProvider) {
     max_turns: provider.max_turns,
     api_key: '',
     system_prompt: provider.system_prompt || '',
+    provider_kind: provider.provider_kind || 'anthropic_compatible',
+    wire_protocol: provider.wire_protocol || 'anthropic_messages',
     is_disabled: provider.is_disabled
   }
   modalVisible.value = true
@@ -455,6 +507,15 @@ function openEdit(provider: AIProvider) {
 
 function handleStatusSwitchChange(isEnabled: boolean) {
   formValue.value.is_disabled = !isEnabled
+}
+
+function handleProviderKindChange(kind: string) {
+  formValue.value.provider_kind = kind
+  const protocols = PROVIDER_KIND_PROTOCOLS[kind] ?? []
+  if (!protocols.includes(formValue.value.wire_protocol)) {
+    formValue.value.wire_protocol =
+      PROVIDER_KIND_DEFAULT_PROTOCOL[kind] ?? protocols[0] ?? 'anthropic_messages'
+  }
 }
 
 async function handleSave() {
@@ -474,6 +535,8 @@ async function handleSave() {
         base_url: formValue.value.base_url.trim(),
         model: formValue.value.model.trim(),
         max_turns: formValue.value.max_turns,
+        provider_kind: formValue.value.provider_kind,
+        wire_protocol: formValue.value.wire_protocol,
         is_disabled: formValue.value.is_disabled
       }
       if (formValue.value.api_key.trim()) {
@@ -493,6 +556,8 @@ async function handleSave() {
         base_url: formValue.value.base_url.trim(),
         model: formValue.value.model.trim(),
         max_turns: formValue.value.max_turns,
+        provider_kind: formValue.value.provider_kind,
+        wire_protocol: formValue.value.wire_protocol,
         is_disabled: formValue.value.is_disabled
       }
       if (formValue.value.api_key.trim()) {
@@ -590,7 +655,7 @@ onMounted(() => {
 .ai-provider-modal__grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  column-gap: 16px;
+  column-gap: 20px;
   row-gap: 14px;
 }
 
@@ -608,6 +673,16 @@ onMounted(() => {
 
 .ai-provider-modal__form :deep(.n-form-item) {
   margin-bottom: 0;
+}
+
+.ai-provider-modal__grid :deep(.n-form-item--top-labelled) {
+  grid-template-rows: auto auto auto;
+  align-content: start;
+}
+
+.ai-provider-modal__grid :deep(.n-form-item) {
+  align-self: start;
+  min-width: 0;
 }
 
 .ai-provider-modal__form :deep(.n-form-item-feedback-wrapper) {

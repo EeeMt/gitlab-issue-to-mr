@@ -751,8 +751,102 @@ describe('TaskFormDrawer', () => {
       await openDrawer()
 
       expect(wrapper.vm.providerOptions).toEqual([
-        { label: 'Default Provider (model-a) ★', value: 7, disabled: false },
+        { label: 'Default Provider (model-a) ★', protocolText: 'anthropic_messages', value: 7, disabled: false },
       ])
+    })
+
+    it('filters providers by harness protocol and auto-selects a compatible provider', async () => {
+      mockApi.getProviders.mockResolvedValue([
+        { id: 6, name: 'ds', model: 'deepseek-v4-flash', is_default: true, is_disabled: false, wire_protocol: 'anthropic_messages' },
+        { id: 7, name: 'ds-openai', model: 'deepseek-v4-flash', is_default: false, is_disabled: false, wire_protocol: 'openai_responses' },
+      ])
+      mockApi.getWorkerProfiles.mockResolvedValue([
+        { ...mockWorkerProfiles[0], enabled_harnesses: ['claude', 'codex'] },
+        mockWorkerProfiles[1],
+      ])
+      await mountDrawer({ issueCurrentHarness: 'claude', defaultProviderId: 6 })
+      await openDrawer()
+
+      expect(wrapper.vm.providerOptions.map(option => option.value)).toEqual([6])
+      expect(wrapper.vm.providerOptions[0].protocolText).toBe('anthropic_messages')
+      expect(wrapper.vm.selectedProviderId).toBeNull()
+
+      await wrapper.find('[data-testid="task-session-mode-switch"]').trigger('click')
+      wrapper.vm.harnessKey = 'codex'
+      await nextTick()
+
+      expect(wrapper.vm.providerOptions.map(option => option.value)).toEqual([7])
+      expect(wrapper.vm.providerOptions[0].protocolText).toBe('openai_responses')
+      expect(wrapper.vm.selectedProviderId).toBe(7)
+
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+      expect(wrapper.find('[data-testid="task-provider-auto-adjusted-hint"]').exists()).toBe(true)
+
+      wrapper.vm.harnessKey = 'claude'
+      await nextTick()
+      expect(wrapper.vm.selectedProviderId).toBeNull()
+      expect(wrapper.vm.providerAutoAdjusted).toBe(false)
+    })
+
+    it('disables a harness when no enabled provider uses its required protocol', async () => {
+      mockApi.getProviders.mockResolvedValue([
+        { id: 6, name: 'ds', model: 'deepseek-v4-flash', is_default: true, is_disabled: false, wire_protocol: 'anthropic_messages' },
+      ])
+      mockApi.getWorkerProfiles.mockResolvedValue([
+        { ...mockWorkerProfiles[0], enabled_harnesses: ['claude', 'codex'] },
+        mockWorkerProfiles[1],
+      ])
+      await mountDrawer({ issueDefaultHarness: 'claude' })
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const harnessSelect = wrapper.get('[data-testid="task-harness-select"]')
+      const codexOption = harnessSelect.findAll('option')
+        .find(option => option.text() === 'createTask.harnessCodex')
+      expect(codexOption).toBeDefined()
+      expect(codexOption!.attributes('disabled')).toBeDefined()
+    })
+
+    it('treats legacy providers without a wire protocol as Anthropic', async () => {
+      mockApi.getProviders.mockResolvedValue([
+        { id: 6, name: 'legacy-ds', model: 'deepseek-v4-flash', is_default: true, is_disabled: false },
+        { id: 7, name: 'ds-openai', model: 'deepseek-v4-flash', is_default: false, is_disabled: false, wire_protocol: 'openai_responses' },
+      ])
+      mockApi.getWorkerProfiles.mockResolvedValue([
+        { ...mockWorkerProfiles[0], enabled_harnesses: ['claude', 'codex'] },
+        mockWorkerProfiles[1],
+      ])
+      await mountDrawer({ issueCurrentHarness: 'claude', defaultProviderId: 6 })
+      await openDrawer()
+
+      expect(wrapper.vm.providerOptions.map(option => option.value)).toEqual([6])
+      expect(wrapper.vm.providerOptions[0].protocolText).toBe('anthropic_messages')
+    })
+
+    it('restores a manually selected provider after switching harness back', async () => {
+      mockApi.getProviders.mockResolvedValue([
+        { id: 6, name: 'ds', model: 'deepseek-v4-flash', is_default: true, is_disabled: false, wire_protocol: 'anthropic_messages' },
+        { id: 7, name: 'ds-openai', model: 'deepseek-v4-flash', is_default: false, is_disabled: false, wire_protocol: 'openai_responses' },
+      ])
+      mockApi.getWorkerProfiles.mockResolvedValue([
+        { ...mockWorkerProfiles[0], enabled_harnesses: ['claude', 'codex'] },
+        mockWorkerProfiles[1],
+      ])
+      await mountDrawer({ issueCurrentHarness: 'claude', defaultProviderId: 6 })
+      await openDrawer()
+
+      wrapper.vm.handleProviderChange(6)
+      await wrapper.find('[data-testid="task-session-mode-switch"]').trigger('click')
+      wrapper.vm.harnessKey = 'codex'
+      await nextTick()
+      expect(wrapper.vm.selectedProviderId).toBe(7)
+
+      wrapper.vm.harnessKey = 'claude'
+      await nextTick()
+      expect(wrapper.vm.selectedProviderId).toBe(6)
+      expect(wrapper.vm.providerAutoAdjusted).toBe(false)
     })
 
     it('collapses the effective execution environment and updates its override summary', async () => {

@@ -541,11 +541,22 @@
                       <label class="execution-environment__field">
                         <span>{{ t('config.providers.providerLabel') }}</span>
                         <n-select
-                          v-model:value="selectedProviderId"
+                          :value="selectedProviderId"
                           :options="providerOptions"
                           clearable
                           :placeholder="t('createTask.selectProvider')"
+                          :render-label="renderProviderLabel"
+                          :menu-props="{ class: 'task-provider-select-menu' }"
+                          class="task-provider-select"
+                          @update:value="handleProviderChange"
                         />
+                        <div
+                          v-if="providerAutoAdjusted"
+                          class="execution-environment__field-hint"
+                          data-testid="task-provider-auto-adjusted-hint"
+                        >
+                          {{ t('createTask.providerAutoAdjustedHint') }}
+                        </div>
                       </label>
                       <label v-if="harnessOptions.length > 1" class="execution-environment__field">
                         <span>{{ t('createTask.harness') }}</span>
@@ -562,6 +573,13 @@
                           data-testid="task-harness-locked-hint"
                         >
                           {{ t('createTask.harnessLockedHint') }}
+                        </div>
+                        <div
+                          v-if="harnessProviderMismatch"
+                          class="execution-environment__field-hint"
+                          data-testid="task-harness-provider-mismatch-hint"
+                        >
+                          {{ t('createTask.harnessProviderMismatchHint') }}
                         </div>
                       </label>
                     </div>
@@ -700,10 +718,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, toRef, useAttrs, useId } from 'vue'
+import { ref, computed, watch, onMounted, toRef, useAttrs, useId, h } from 'vue'
 import {
   NButton, NDrawer, NDrawerContent, NForm, NFormItem,
   NDatePicker, NInput, NSelect, NAlert, NTooltip, NSwitch, NSpin, NIcon, NScrollbar, NTag,
+  type SelectOption,
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import {
@@ -723,6 +742,7 @@ import HeatmapChart from './HeatmapChart.vue'
 import RunInstructionTemplateEditor from './RunInstructionTemplateEditor.vue'
 import {
   getRunInstructionTemplateDefaults,
+  type AIProvider,
   type Task, type TaskSkillSnapshot, type RunInstructionTemplateDefaults
 } from '../api'
 import { useBreakpoints } from '../composables/useBreakpoints'
@@ -739,6 +759,38 @@ import { useTaskExecutionOptions } from '../features/tasks/useTaskExecutionOptio
 import { useRunInstructionPreview } from '../features/tasks/useRunInstructionPreview'
 import { useTaskSlotCapacity } from '../features/tasks/useTaskSlotCapacity'
 import { useTaskFormSubmission } from '../features/tasks/useTaskFormSubmission'
+
+const HARNESS_WIRE_PROTOCOLS: Record<string, string> = {
+  claude: 'anthropic_messages',
+  codex: 'openai_responses',
+}
+
+function providerProtocol(provider: AIProvider): string | null {
+  const protocol = provider.wire_protocol
+  return typeof protocol === 'string' && protocol.trim() ? protocol.trim() : 'anthropic_messages'
+}
+
+function providerCompatibleWithHarness(
+  provider: AIProvider,
+  harnessKey: string | null | undefined,
+): boolean {
+  if (!harnessKey) return true
+  const expected = HARNESS_WIRE_PROTOCOLS[harnessKey]
+  if (!expected) return true
+  const protocol = providerProtocol(provider)
+  return protocol === expected
+}
+
+function renderProviderLabel(option: SelectOption) {
+  const label = typeof option.label === 'string' ? option.label : String(option.value ?? '')
+  const protocolText = typeof option.protocolText === 'string' ? option.protocolText : ''
+  return h('div', { class: 'provider-option-label' }, [
+    h('span', { class: 'provider-option-label__name' }, label),
+    protocolText
+      ? h('span', { class: 'provider-option-label__protocol' }, protocolText)
+      : null,
+  ])
+}
 
 defineOptions({ inheritAttrs: false })
 
@@ -850,7 +902,7 @@ const {
   loadProviders,
   loadSkills,
   loadWorkerProfiles,
-  providerOptions,
+  selectableProviders,
   skillOptions,
   skills,
   skillsLoadSucceeded,
@@ -861,21 +913,66 @@ const {
   workerProfileId: toRef(props, 'workerProfileId'),
   selectedProviderId,
 })
+const resolvedHarnessKey = computed(() =>
+  harnessKey.value
+  ?? props.issueCurrentHarness
+  ?? props.issueDefaultHarness
+  ?? effectiveWorkerProfile.value?.default_harness_key
+  ?? 'claude',
+)
+const harnessCompatibleProviders = computed(() =>
+  selectableProviders.value.filter(provider =>
+    providerCompatibleWithHarness(provider, resolvedHarnessKey.value),
+  ),
+)
+const providerOptions = computed(() =>
+  harnessCompatibleProviders.value.map(provider => {
+    const protocol = providerProtocol(provider)
+    return {
+      label: [
+        `${provider.name} (${provider.model})`,
+        provider.is_default ? ' ★' : '',
+        provider.is_disabled ? ` - ${t('config.providers.disabled')}` : '',
+      ].join(''),
+      protocolText: protocol ?? '',
+      value: provider.id,
+      disabled: provider.is_disabled,
+    }
+  }),
+)
+const harnessProviderMismatch = computed(() =>
+  selectableProviders.value.length > 0
+  && !harnessCompatibleProviders.value.some(provider => !provider.is_disabled),
+)
 const executionEnvironmentMissing = computed(() =>
   executionOptionsReady.value
-  && (!effectiveWorkerProfile.value || !effectiveProvider.value)
+  && (
+    !effectiveWorkerProfile.value
+    || !effectiveProvider.value
+    || harnessProviderMismatch.value
+  )
 )
 const harnessOptions = computed(() => {
   const enabled = effectiveWorkerProfile.value?.enabled_harnesses
   if (!enabled || !enabled.length) return []
-  return enabled.map(key => ({
-    label: key === 'codex' ? t('createTask.harnessCodex') : t('createTask.harnessClaude'),
-    value: key,
-  }))
+  return enabled.map(key => {
+    const compatibleProviderAvailable = selectableProviders.value.length === 0
+      || selectableProviders.value.some(
+        provider => !provider.is_disabled && providerCompatibleWithHarness(provider, key),
+      )
+    return {
+      label: key === 'codex' ? t('createTask.harnessCodex') : t('createTask.harnessClaude'),
+      value: key,
+      disabled: !harnessLocked.value && !compatibleProviderAvailable,
+    }
+  })
 })
 const executionEnvironmentOverridden = computed(() =>
   selectedProviderId.value !== null || !inheritProfileSkills.value
 )
+const providerAutoAdjusted = ref(false)
+let providerAutoAdjustSource: number | null | undefined
+let providerAutoAdjustedForHarness: string | null = null
 function isSkillCapableWorkerKitVersion(value: string | null | undefined): boolean {
   const match = value?.trim().match(/^(\d+)\.(\d+)\.(\d+)$/)
   if (!match) return false
@@ -1054,11 +1151,65 @@ watch(
   },
 )
 
+function reconcileProviderForHarness(harnessKey: string, forceRestore = false) {
+  const current = selectedProviderId.value !== null
+    ? selectableProviders.value.find(provider => provider.id === selectedProviderId.value) ?? null
+    : effectiveProvider.value
+  if (!current || providerCompatibleWithHarness(current, harnessKey)) return
+
+  if (forceRestore && providerAutoAdjustSource !== undefined) {
+    const restoreValue = providerAutoAdjustSource
+    providerAutoAdjustSource = undefined
+    providerAutoAdjustedForHarness = null
+    providerAutoAdjusted.value = false
+    if (restoreValue === null) {
+      selectedProviderId.value = null
+      return
+    }
+    const restoreProvider = selectableProviders.value.find(provider => provider.id === restoreValue)
+    if (restoreProvider && providerCompatibleWithHarness(restoreProvider, harnessKey)) {
+      selectedProviderId.value = restoreValue
+      return
+    }
+    selectedProviderId.value = null
+    return
+  }
+
+  const fallback = harnessCompatibleProviders.value.find(provider => !provider.is_disabled)
+  if (fallback) {
+    if (providerAutoAdjustSource === undefined) {
+      providerAutoAdjustSource = selectedProviderId.value
+    }
+    selectedProviderId.value = fallback.id
+    providerAutoAdjustedForHarness = harnessKey
+    providerAutoAdjusted.value = true
+  } else {
+    selectedProviderId.value = null
+    providerAutoAdjustSource = undefined
+    providerAutoAdjustedForHarness = null
+    providerAutoAdjusted.value = false
+  }
+}
+
+watch(resolvedHarnessKey, (harnessKey, previous) => {
+  const shouldRestore = previous !== undefined
+    && providerAutoAdjustSource !== undefined
+    && providerAutoAdjustedForHarness === previous
+  reconcileProviderForHarness(harnessKey, shouldRestore)
+})
+
+watch([selectableProviders, effectiveProvider], () => {
+  reconcileProviderForHarness(resolvedHarnessKey.value)
+})
+
 watch(() => props.show, (val) => {
   invalidateRunInstructionPreview()
   runInstructionExpanded.value = false
   executionEnvironmentExpanded.value = false
   if (val) {
+    providerAutoAdjusted.value = false
+    providerAutoAdjustSource = undefined
+    providerAutoAdjustedForHarness = null
     if (props.mode === 'edit' && props.task) {
       prompt.value = props.task.user_prompt ?? ''
       priority.value = props.task.priority ?? DEFAULT_TASK_PRIORITY
@@ -1194,10 +1345,20 @@ function toggleExecutionEnvironment() {
 
 function restoreExecutionEnvironmentDefaults() {
   selectedProviderId.value = null
+  providerAutoAdjusted.value = false
+  providerAutoAdjustSource = undefined
+  providerAutoAdjustedForHarness = null
   handleSkillInheritanceUpdate(true)
   if (!executionEnvironmentMissing.value) {
     executionEnvironmentExpanded.value = false
   }
+}
+
+function handleProviderChange(value: number | null) {
+  selectedProviderId.value = value
+  providerAutoAdjusted.value = false
+  providerAutoAdjustSource = undefined
+  providerAutoAdjustedForHarness = null
 }
 
 function handleSkillInheritanceUpdate(value: boolean) {
@@ -2150,12 +2311,23 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+  align-items: start;
 }
 
 .execution-environment__field {
   display: grid;
   gap: 5px;
   min-width: 0;
+  align-content: start;
+}
+
+.execution-environment__field :deep(.n-input),
+.execution-environment__field :deep(.n-select) {
+  height: 34px;
+}
+
+.execution-environment__field :deep(.n-base-selection) {
+  min-height: 34px;
 }
 
 .execution-environment__field > span {
@@ -2420,5 +2592,62 @@ onMounted(() => {
   gap: 8px;
   font-size: 13px;
   flex-wrap: wrap;
+}
+</style>
+
+<style>
+.provider-option-label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 0;
+  line-height: 1.35;
+}
+
+.provider-option-label__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: rgba(15, 23, 42, 0.88);
+}
+
+.provider-option-label__protocol {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 1px 7px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.07);
+  color: rgba(15, 23, 42, 0.6);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.task-provider-select .n-base-selection-input__content .provider-option-label {
+  display: block;
+  padding: 0;
+  line-height: 1.5;
+}
+
+.task-provider-select .n-base-selection-input__content .provider-option-label__name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-provider-select .n-base-selection-input__content .provider-option-label__protocol {
+  display: none;
+}
+
+.task-provider-select-menu .n-base-select-option {
+  min-height: 50px;
+  padding-top: 6px;
+  padding-bottom: 6px;
 }
 </style>
