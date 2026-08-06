@@ -480,6 +480,8 @@
     :issue-id="task?.issue_id"
     :issue-description="issueDescription"
     :has-claude-session="issueHasClaudeSession"
+    :issue-current-harness="issueCurrentHarness"
+    :issue-default-harness="issueDefaultHarness"
     :worker-profile-id="issueWorkerProfileId"
     :default-provider-id="issueDefaultProviderId"
     data-testid="task-view-create-task-drawer"
@@ -586,6 +588,8 @@ const issueHasClaudeSession = ref(false)
 const issueStatus = ref<Issue['status'] | null>(null)
 const issueWorkerProfileId = ref<number | null>(null)
 const issueDefaultProviderId = ref<number | null>(null)
+const issueCurrentHarness = ref<string | null>(null)
+const issueDefaultHarness = ref<string | null>(null)
 const archiveMetadata = ref<TaskArchiveMetadata | null>(null)
 let pollTimer: number | null = null
 let taskRequestGeneration = 0
@@ -843,6 +847,8 @@ async function refreshIssueTasks(requestedTaskId: number) {
     issueStatus.value = null
     issueWorkerProfileId.value = null
     issueDefaultProviderId.value = null
+    issueCurrentHarness.value = null
+    issueDefaultHarness.value = null
     return
   }
   try {
@@ -854,6 +860,8 @@ async function refreshIssueTasks(requestedTaskId: number) {
     issueStatus.value = issueData.status ?? null
     issueWorkerProfileId.value = issueData.worker_profile_id ?? null
     issueDefaultProviderId.value = issueData.default_provider_id ?? null
+    issueCurrentHarness.value = issueData.current_harness ?? null
+    issueDefaultHarness.value = issueData.default_harness_key ?? null
   } catch {
     if (requestedTaskId !== taskId.value || task.value?.issue_id !== issueId) return
     issueTasks.value = []
@@ -862,6 +870,8 @@ async function refreshIssueTasks(requestedTaskId: number) {
     issueStatus.value = null
     issueWorkerProfileId.value = null
     issueDefaultProviderId.value = null
+    issueCurrentHarness.value = null
+    issueDefaultHarness.value = null
   }
 }
 
@@ -1016,6 +1026,8 @@ watch(
       issueDescription.value = undefined
       issueHasClaudeSession.value = false
       issueStatus.value = null
+      issueCurrentHarness.value = null
+      issueDefaultHarness.value = null
       archiveMetadata.value = null
       showCreateDrawer.value = false
       showRescheduleDrawer.value = false

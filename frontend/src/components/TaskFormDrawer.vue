@@ -534,6 +534,9 @@
                           :value="effectiveWorkerProfile?.name ?? t('common.unavailable')"
                           disabled
                         />
+                        <div class="execution-environment__field-hint" data-testid="task-worker-profile-hint">
+                          {{ t('createTask.workerProfileLockedHint') }}
+                        </div>
                       </label>
                       <label class="execution-environment__field">
                         <span>{{ t('config.providers.providerLabel') }}</span>
@@ -551,7 +554,15 @@
                           :options="harnessOptions"
                           :placeholder="t('createTask.harness')"
                           :disabled="harnessLocked"
+                          data-testid="task-harness-select"
                         />
+                        <div
+                          v-if="harnessLocked"
+                          class="execution-environment__field-hint"
+                          data-testid="task-harness-locked-hint"
+                        >
+                          {{ t('createTask.harnessLockedHint') }}
+                        </div>
                       </label>
                     </div>
                     <div class="execution-environment__skills" data-testid="task-skill-selection">
@@ -784,7 +795,8 @@ const executionOptionsReady = ref(false)
 const selectedProviderId = ref<number | null>(null)
 const harnessKey = ref<string | null>(null)
 const harnessLocked = computed(
-  () => !startFreshSession.value && !!props.issueCurrentHarness,
+  () => props.mode === 'edit'
+    || (!startFreshSession.value && !!props.issueCurrentHarness),
 )
 const inheritProfileSkills = ref(true)
 const selectedSkillIds = ref<number[]>([])
@@ -1031,6 +1043,15 @@ watch(
     }
   },
   { immediate: true },
+)
+
+watch(
+  [startFreshSession, () => props.issueCurrentHarness],
+  ([fresh, currentHarness]) => {
+    if (!fresh && currentHarness) {
+      harnessKey.value = currentHarness
+    }
+  },
 )
 
 watch(() => props.show, (val) => {
@@ -2141,6 +2162,12 @@ onMounted(() => {
   color: var(--n-text-color-3);
   font-size: 11px;
   line-height: 16px;
+}
+
+.execution-environment__field-hint {
+  color: var(--n-text-color-3);
+  font-size: 10px;
+  line-height: 14px;
 }
 
 .execution-environment__skills {

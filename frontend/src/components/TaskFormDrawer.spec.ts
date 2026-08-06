@@ -216,8 +216,9 @@ vi.mock('naive-ui', () => ({
     name: 'NSelect',
     props: ['value', 'options', 'clearable', 'placeholder', 'multiple', 'disabled'],
     emits: ['update:value'],
-    setup(props: any, { emit }: any) {
+    setup(props: any, { attrs, emit }: any) {
       return () => h('select', {
+        ...attrs,
         class: 'n-select',
         multiple: props.multiple,
         disabled: props.disabled,
@@ -543,6 +544,57 @@ describe('TaskFormDrawer', () => {
       expect(mockApi.createTask).toHaveBeenCalledWith(
         expect.objectContaining({ session_mode: 'fresh' })
       )
+    })
+
+    it('locks harness to the issue lineage unless a fresh session is enabled', async () => {
+      mockApi.getWorkerProfiles.mockResolvedValue([
+        { ...mockWorkerProfiles[0], enabled_harnesses: ['claude', 'codex'] },
+        mockWorkerProfiles[1],
+      ])
+      await mountDrawer({ issueCurrentHarness: 'codex', issueDefaultHarness: 'claude' })
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const harnessSelect = wrapper.get('[data-testid="task-harness-select"]')
+      const lockedHint = wrapper.find('[data-testid="task-harness-locked-hint"]')
+      expect(harnessSelect.attributes('disabled')).toBeDefined()
+      expect(lockedHint.exists()).toBe(true)
+      expect(lockedHint.text()).toContain('createTask.harnessLockedHint')
+      expect(wrapper.vm.harnessKey).toBe('codex')
+
+      await wrapper.find('[data-testid="task-session-mode-switch"]').trigger('click')
+      await nextTick()
+      expect(harnessSelect.attributes('disabled')).toBeUndefined()
+      expect(wrapper.find('[data-testid="task-harness-locked-hint"]').exists()).toBe(false)
+    })
+
+    it('restores the issue harness when fresh-session mode is turned off', async () => {
+      mockApi.getWorkerProfiles.mockResolvedValue([
+        { ...mockWorkerProfiles[0], enabled_harnesses: ['claude', 'codex'] },
+        mockWorkerProfiles[1],
+      ])
+      await mountDrawer({ issueCurrentHarness: 'codex', issueDefaultHarness: 'claude' })
+      await openDrawer()
+      await wrapper.find('[data-testid="task-session-mode-switch"]').trigger('click')
+      await nextTick()
+
+      wrapper.vm.harnessKey = 'claude'
+      await wrapper.find('[data-testid="task-session-mode-switch"]').trigger('click')
+      await nextTick()
+
+      expect(wrapper.vm.harnessLocked).toBe(true)
+      expect(wrapper.vm.harnessKey).toBe('codex')
+    })
+
+    it('explains why the Worker field is locked in the execution environment', async () => {
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const workerHint = wrapper.get('[data-testid="task-worker-profile-hint"]')
+      expect(workerHint.text()).toContain('createTask.workerProfileLockedHint')
     })
 
     it('pre-fills prompt from issue description when opened', async () => {
@@ -1223,6 +1275,14 @@ describe('TaskFormDrawer', () => {
       expect(wrapper.vm.priority).toBe(1)
       expect(wrapper.vm.requireChanges).toBe(true)
       expect(wrapper.vm.selectedProviderId).toBe(7)
+    })
+
+    it('keeps harness locked when editing an existing task', async () => {
+      await mountEditDrawer()
+      await wrapper.setProps({ show: true })
+      await flushPromises()
+
+      expect(wrapper.vm.harnessLocked).toBe(true)
     })
 
     it('uses the immutable task runtime when checking skill support in edit mode', async () => {

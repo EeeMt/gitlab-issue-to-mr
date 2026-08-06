@@ -2307,6 +2307,38 @@ describe('TaskView', () => {
       expect(router.currentRoute.value.path).toBe('/tasks/99')
     })
 
+    it('passes the issue harness lineage into the create task drawer', async () => {
+      await mountComponent({
+        id: 1,
+        issue_id: 10,
+        status: 'completed',
+        created_at: '2026-04-01T10:00:00Z',
+        completed_at: '2026-04-01T10:05:00Z',
+      })
+      ;(mockApi.getIssue as Mock).mockResolvedValue({
+        tasks: [
+          createMockTask({ id: 1, issue_id: 10, created_at: '2026-04-01T10:00:00Z' }),
+        ],
+        description: 'Issue context for follow-up',
+        status: 'open',
+        claude_session_id: 'legacy-session',
+        current_harness: 'codex',
+        default_harness_key: 'claude',
+      })
+
+      await wrapper.vm.refreshIssueTasks(1)
+      await flushPromises()
+      wrapper.vm.showCreateDrawer = true
+      await nextTick()
+
+      const createDrawer = wrapper
+        .findAllComponents({ name: 'TaskFormDrawer' })
+        .find((drawer) => drawer.props('mode') === 'create')
+      expect(createDrawer).toBeTruthy()
+      expect(createDrawer!.props('issueCurrentHarness')).toBe('codex')
+      expect(createDrawer!.props('issueDefaultHarness')).toBe('claude')
+    })
+
     it('does not enable the append shortcut when a newer issue task exists', async () => {
       await mountComponent({
         id: 1,
