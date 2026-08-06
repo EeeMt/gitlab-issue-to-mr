@@ -501,7 +501,7 @@ describe('WorkerSettingsPanel', () => {
     expect(vm.workerFormValue.environment_variables[1].key).toBe('JAVA_OPTS')
   })
 
-  it('sorts volume mounts by container path when loading, editing, and saving', async () => {
+  it('sorts volume mounts by container path when loading and saving', async () => {
     mockGetAdminWorkerProfiles.mockResolvedValueOnce([
       createWorkerProfile({
         volume_mounts: [
@@ -529,12 +529,6 @@ describe('WorkerSettingsPanel', () => {
     ])
 
     vm.workerFormValue.mounts[2].container_path = '/bin'
-    vm.sortMounts()
-    expect(vm.workerFormValue.mounts.map((mount: any) => mount.container_path)).toEqual([
-      '/bin',
-      '/cache',
-      '/opt/tools'
-    ])
 
     await vm.handleSaveWorker()
 
@@ -548,6 +542,57 @@ describe('WorkerSettingsPanel', () => {
         ]
       })
     )
+  })
+
+  it('keeps a newly added mount at the top after editing and blurring', async () => {
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: {
+        isMobile: false,
+        reloadKey: 0
+      }
+    })
+
+    await flushPromises()
+
+    const vm = wrapper.vm as any
+    vm.addMount()
+    await flushPromises()
+
+    const mountRows = wrapper.findAll('.config-compact-row--mount')
+    const newContainerPathInput = mountRows[0].findAll('input')[1]
+    await newContainerPathInput.setValue('/zzz/new')
+    await newContainerPathInput.trigger('blur')
+
+    expect(vm.workerFormValue.mounts.map((mount: any) => mount.container_path)).toEqual([
+      '/zzz/new',
+      '/container/cache'
+    ])
+  })
+
+  it('keeps a newly added environment variable at the top after editing and blurring', async () => {
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: {
+        isMobile: false,
+        reloadKey: 0
+      }
+    })
+
+    await flushPromises()
+
+    const vm = wrapper.vm as any
+    vm.addEnvironmentVariable()
+    await flushPromises()
+
+    const environmentRows = wrapper.findAll('.config-compact-row--environment')
+    const newKeyInput = environmentRows[0].find('input')
+    await newKeyInput.setValue('ZZZ_NEW')
+    await newKeyInput.trigger('blur')
+
+    expect(vm.workerFormValue.environment_variables.map((item: any) => item.key)).toEqual([
+      'ZZZ_NEW',
+      'JAVA_OPTS',
+      'SECRET_TOKEN'
+    ])
   })
 
   it('loads and saves worker custom scripts', async () => {

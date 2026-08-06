@@ -442,7 +442,6 @@
                     size="small"
                     :placeholder="t('config.containerPathPlaceholder')"
                     class="config-form__input"
-                    @blur="sortMounts"
                   />
                 </label>
                 <label class="config-compact-field">
@@ -509,7 +508,6 @@
                     size="small"
                     :placeholder="t('config.environmentVariableKeyPlaceholder')"
                     class="config-form__input"
-                    @blur="sortEnvironmentVariables"
                   />
                 </label>
                 <label class="config-compact-field">
@@ -914,10 +912,6 @@ function serializeMounts(mounts: WorkerProfileMount[]): WorkerProfileMount[] {
     .sort(compareMountContainerPaths)
 }
 
-function sortMounts() {
-  workerFormValue.value.mounts.sort(compareMountContainerPaths)
-}
-
 function parseEnvironmentVariables(
   environmentVariables: WorkerProfileEnvironmentVariable[] | undefined
 ): EnvironmentVariableFormItem[] {
@@ -956,10 +950,6 @@ function compareEnvironmentVariableKeys(
   right: Pick<EnvironmentVariableFormItem, 'key'>
 ): number {
   return left.key.localeCompare(right.key)
-}
-
-function sortEnvironmentVariables() {
-  workerFormValue.value.environment_variables.sort(compareEnvironmentVariableKeys)
 }
 
 function mapProfileToWorkerFormValue(
