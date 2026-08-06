@@ -113,6 +113,11 @@ def test_codex_stream_maps_to_canonical_events(tmp_path):
     assert tool_completed["exit_code"] == 0
     usage = events[5]["payload"]["usage"]
     assert usage["reasoning_tokens"] == 2
+    harness_completed = events[6]["payload"]
+    assert harness_completed["result"] == "done"
+    assert harness_completed["session_id"] == "6ad6e4f5-6205-8e2a-9b3c-1a2b3c4d5e6f"
+    canonical_result = json.loads((tmp_path / "harness-result.json").read_text(encoding="utf-8"))
+    assert canonical_result["result"] == "done"
     replay = replay_events(events)
     assert replay.terminal_type == "run.completed"
 

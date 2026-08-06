@@ -71,8 +71,14 @@ set -e
 # The canonical result is authoritative: when a turn completed, the translator
 # already persisted a successful harness result. codex may exit non-zero due to
 # benign per-item errors (e.g. fallback model metadata) even after a completed
-# turn; returning 0 lets the shared delivery commit the agent's changes.
+# turn; returning 0 lets the shared delivery commit the agent's changes. Emit
+# the canonical result on stdout (the same contract as the Claude runner) so
+# main.sh can read `.result` for the delivery summary and commit prompts.
 if grep -q '"turn.completed"' "${CODIFY_CODEX_RAW_EVENT_JSONL}" 2>/dev/null; then
+    CODIFY_HARNESS_RESULT_FILE="${CODIFY_HARNESS_RESULT_FILE:-${CODIFY_RUNTIME_DIR}/harness-result.json}"
+    if [ -s "${CODIFY_HARNESS_RESULT_FILE}" ]; then
+        cat "${CODIFY_HARNESS_RESULT_FILE}"
+    fi
     exit 0
 fi
 

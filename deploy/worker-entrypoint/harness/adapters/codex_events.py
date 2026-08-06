@@ -15,10 +15,29 @@ from urllib.parse import urlsplit
 
 _REAL_THREAD_ID: str = ""
 _REAL_THREAD_ID_FILE_NAME = ".real-thread-id"
+_LAST_ASSISTANT_TEXT_FILE_NAME = ".last-assistant-text"
 
 
 def _real_thread_id_file() -> Path:
     return Path(os.environ["CODIFY_RUNTIME_DIR"]) / _REAL_THREAD_ID_FILE_NAME
+
+
+def _last_assistant_text_file() -> Path:
+    return Path(os.environ["CODIFY_RUNTIME_DIR"]) / _LAST_ASSISTANT_TEXT_FILE_NAME
+
+
+def _persist_last_assistant_text(text: str) -> None:
+    try:
+        _last_assistant_text_file().write_text(text, encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _last_assistant_text() -> str:
+    try:
+        return _last_assistant_text_file().read_text(encoding="utf-8")
+    except OSError:
+        return ""
 
 
 def _persist_real_thread_id(thread_id: str) -> None:
@@ -215,6 +234,7 @@ def translate(record: dict, raw_line: int) -> None:
             )
         elif item_type == "agent_message":
             text = item.get("text") or ""
+            _persist_last_assistant_text(text)
             _emit(
                 "message.completed",
                 {"message_id": item.get("id"), "text": text},
@@ -224,12 +244,13 @@ def translate(record: dict, raw_line: int) -> None:
         usage = _usage(record)
         _emit("usage.final", {"usage": usage}, raw_line)
         thread_id = _thread_id(record)
+        final_result = _last_assistant_text()
         _emit(
             "harness.completed",
-            {"result": "", "session_id": thread_id},
+            {"result": final_result, "session_id": thread_id},
             raw_line,
         )
-        _write_result(record, success=True, result="", usage=usage)
+        _write_result(record, success=True, result=final_result, usage=usage)
     else:
         _emit("diagnostic", {"code": "unknown_raw_event", "type": record_type}, raw_line)
 
