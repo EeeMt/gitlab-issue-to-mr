@@ -38,9 +38,15 @@ describe('task mode copy', () => {
     )
   })
 
-  it('labels the harness engine in the task creation drawer', () => {
-    expect(zhCN.createTask.harness).toBe('引擎')
+  it('labels the harness engine consistently as Harness', () => {
+    expect(zhCN.createTask.harness).toBe('Harness')
     expect(en.createTask.harness).toBe('Harness')
+    expect(zhCN.taskView.harness).toBe('Harness')
+    expect(en.taskView.harness).toBe('Harness')
+    expect(zhCN.issue.defaultHarness).toBe('默认 Harness')
+    expect(en.issue.defaultHarness).toBe('Default Harness')
+    expect(zhCN.taskView.failureEngineError).toBe('Harness 错误')
+    expect(en.taskView.failureEngineError).toBe('Harness error')
     expect(zhCN.createTask.harnessClaude).toBe('Claude')
     expect(en.createTask.harnessClaude).toBe('Claude')
     expect(zhCN.createTask.harnessCodex).toBe('Codex')
