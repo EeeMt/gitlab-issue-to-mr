@@ -782,10 +782,10 @@ const skills = ref<SkillSummary[]>([])
 const selectedProfileId = ref<number | null>(null)
 const creatingWorkerProfile = ref(false)
 const activeRunInstructionTab = ref<'execute' | 'plan' | 'ci_auto_repair'>('execute')
-const harnessSelectOptions = [
-  { label: 'Claude', value: 'claude' },
-  { label: 'Codex', value: 'codex' },
-]
+const harnessSelectOptions = computed(() => [
+  { label: t('createTask.harnessClaude'), value: 'claude' },
+  { label: t('createTask.harnessCodex'), value: 'codex' },
+])
 const knownPromptPlaceholders = computed(() => [
   ...new Set(builtIns.value?.execute.known_placeholders ?? [
     ...(builtIns.value?.execute.available_placeholders ?? []),

@@ -388,7 +388,7 @@ repo_write_preparation_artifact \
     "${REPO_PREPARATION_PHASE}" \
     "0"
 
-# Run Claude Code CLI in direct execution mode
-echo "Running Claude Code CLI in direct execution mode..."
+# Run AI code generation in direct execution mode
+echo "Running AI code generation in direct execution mode..."
 echo "Prompt: ${USER_PROMPT}"
 echo ""

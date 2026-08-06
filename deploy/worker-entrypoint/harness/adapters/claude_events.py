@@ -206,7 +206,7 @@ def _write_result(record: dict, *, success: bool, usage: dict) -> None:
         kind = _failure_kind(record)
         failure = {
             "kind": kind,
-            "message": record.get("result") or record.get("subtype") or "Claude execution failed",
+            "message": record.get("result") or record.get("subtype") or "AI execution failed",
         }
     result = {
         "schema": "codify.worker.result/v1",
@@ -322,7 +322,7 @@ def translate(record: dict, raw_line: int) -> None:
             elif block_type == "thinking":
                 _emit(
                     "diagnostic",
-                    {"code": "hidden_reasoning_omitted", "message": "Claude thinking omitted"},
+                    {"code": "hidden_reasoning_omitted", "message": "AI thinking omitted"},
                     raw_line,
                 )
     elif record_type == "user":
@@ -351,7 +351,7 @@ def translate(record: dict, raw_line: int) -> None:
         else:
             payload["failure"] = {
                 "kind": _failure_kind(record),
-                "message": record.get("result") or subtype or "Claude execution failed",
+                "message": record.get("result") or subtype or "AI execution failed",
             }
             _emit("harness.failed", payload, raw_line)
         _write_result(record, success=success, usage=usage)

@@ -91,7 +91,7 @@
             <n-form-item :label="t('config.providers.model')" path="model">
               <n-input
                 v-model:value="formValue.model"
-                placeholder="claude-sonnet-4-20250514"
+                placeholder="my-model"
                 class="config-form__input"
               />
               <template #feedback>
