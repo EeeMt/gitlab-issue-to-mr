@@ -781,6 +781,61 @@ async def test_get_analytics_provider_query_groups_by_joined_provider_model():
 
 
 @pytest.mark.asyncio
+async def test_get_analytics_harness_query_uses_boolean_finished_predicate():
+    """It compares the finished-task CASE to 1 inside the AND condition."""
+    fixed_now = datetime(2026, 3, 14, 12, 0, 0)
+    db = MagicMock()
+
+    def execute_side_effect(query):
+        sql = " ".join(str(query).split())
+
+        if AnalyticsQueryStub._is_summary_query(sql):
+            return MockResult(AnalyticsSummaryRow().as_result_row())
+        if AnalyticsQueryStub._is_project_query(sql):
+            return MockResult([])
+        if AnalyticsQueryStub._is_available_initiators_query(sql):
+            return MockResult([])
+        if AnalyticsQueryStub._is_initiators_query(sql):
+            return MockResult([])
+        if AnalyticsQueryStub._is_trend_query(sql):
+            return MockResult([])
+        if AnalyticsQueryStub._is_priority_wait_query(sql):
+            return MockResult([])
+        if AnalyticsQueryStub._is_issue_status_query(sql):
+            return MockResult([])
+        if AnalyticsQueryStub._is_task_status_query(sql):
+            return MockResult([])
+        if AnalyticsQueryStub._is_error_query(sql):
+            return MockResult([])
+        if AnalyticsQueryStub._is_provider_query(sql):
+            return MockResult([])
+        if "task_worker_profile_snapshots.harness_key AS harness_key" in sql:
+            succeeded_sql = sql.split("AS succeeded_tasks", 1)[0]
+            assert " END = " in succeeded_sql
+            assert "AND CASE WHEN (tasks.started_at IS NOT NULL" in succeeded_sql
+            return MockResult([])
+
+        raise AssertionError(f"unrecognized analytics query: {sql}")
+
+    db.execute = AsyncMock(side_effect=execute_side_effect)
+    access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+    with patch("app.api.stats.utcnow", return_value=fixed_now), patch(
+        "app.api.stats.build_project_lookup", new=AsyncMock(return_value={})
+    ):
+        response = await get_analytics(
+            days=7,
+            project_id=None,
+            initiator_username=None,
+            db=db,
+            _current_user=None,
+            access_scope=access_scope,
+        )
+
+    assert response["harnesses"] == []
+
+
+@pytest.mark.asyncio
 async def test_get_analytics_queue_wait_excludes_pre_schedule_delay():
     """Scheduled tasks should only count waiting time after scheduled_at."""
     fixed_now = datetime(2026, 3, 14, 12, 0, 0)

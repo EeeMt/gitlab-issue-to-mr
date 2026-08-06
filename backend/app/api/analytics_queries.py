@@ -540,7 +540,7 @@ def _build_harness_query(
                 func.sum(
                     case(
                         (
-                            expressions.finished_task
+                            (expressions.finished_task == 1)
                             & (expressions.execution_seconds.is_not(None))
                             & (expressions.execution_seconds > 0),
                             1,
