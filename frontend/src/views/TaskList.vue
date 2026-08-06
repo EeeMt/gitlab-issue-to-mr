@@ -108,6 +108,7 @@ import {
   getTasksPaginated,
   snapshotInitiatorValue,
   type InitiatorFilterOption,
+  type SimpleFilterOption,
   type Project,
   type Task,
 } from '../api'
@@ -127,7 +128,7 @@ import { useBreakpoints } from '../composables/useBreakpoints'
 import { usePolling } from '../composables/usePolling'
 import { formatDateTimeUtc8Compact, parseUtcDate } from '../utils/datetime'
 import { formatDurationMs, formatPriority, getProjectLabel as _getProjectLabel } from '../utils/format'
-import { EllipseOutline, FolderOpenOutline, FlagOutline, PersonOutline, CalendarOutline, GitMergeOutline, TimeOutline, GridOutline, CheckmarkCircleOutline, PlayCircleOutline } from '@vicons/ionicons5'
+import { EllipseOutline, FolderOpenOutline, FlagOutline, PersonOutline, CalendarOutline, GitMergeOutline, TimeOutline, GridOutline, CheckmarkCircleOutline, PlayCircleOutline, GitNetworkOutline } from '@vicons/ionicons5'
 
 const router = useRouter()
 const route = useRoute()
@@ -142,6 +143,9 @@ const projectOptionsError = ref(false)
 const initiatorFilterOptions = ref<InitiatorFilterOption[]>([])
 const initiatorOptionsLoading = ref(false)
 const initiatorOptionsError = ref(false)
+const harnessFilterOptions = ref<SimpleFilterOption[]>([])
+const harnessOptionsLoading = ref(false)
+const harnessOptionsError = ref(false)
 const loading = ref(false)
 const hasLoadedOnce = ref(false)
 
@@ -233,6 +237,20 @@ const filterConfig: FilterSortConfig = {
       ],
     },
     {
+      key: 'harness',
+      label: 'filter.harness',
+      icon: GitNetworkOutline,
+      type: 'multi-select',
+      options: () => harnessFilterOptions.value.map((o) => ({
+        label: o.label,
+        value: o.value,
+        count: o.count,
+      })),
+      optionsLoading: () => harnessOptionsLoading.value,
+      optionsError: () => harnessOptionsError.value,
+      optionsRetry: fetchFilterOptions,
+    },
+    {
       key: 'initiator',
       label: 'filter.initiator',
       icon: PersonOutline,
@@ -241,7 +259,7 @@ const filterConfig: FilterSortConfig = {
       options: initiatorOptions,
       optionsLoading: () => initiatorOptionsLoading.value,
       optionsError: () => initiatorOptionsError.value,
-      optionsRetry: fetchInitiatorOptions,
+      optionsRetry: fetchFilterOptions,
     },
     {
       key: 'has_mr',
@@ -728,16 +746,21 @@ async function fetchTasks(options: { skipIfLoading?: boolean } = {}) {
 
 let latestTaskRequestId = 0
 
-async function fetchInitiatorOptions() {
+async function fetchFilterOptions() {
   initiatorOptionsLoading.value = true
   initiatorOptionsError.value = false
+  harnessOptionsLoading.value = true
+  harnessOptionsError.value = false
   try {
     const result = await getTaskFilterOptions()
     initiatorFilterOptions.value = result.initiators
+    harnessFilterOptions.value = result.harnesses ?? []
   } catch {
     initiatorOptionsError.value = true
+    harnessOptionsError.value = true
   } finally {
     initiatorOptionsLoading.value = false
+    harnessOptionsLoading.value = false
   }
 }
 
@@ -782,7 +805,7 @@ const { start: startPolling } = usePolling(
 onMounted(() => {
   syncRouteQuery()
   fetchProjects()
-  fetchInitiatorOptions()
+  fetchFilterOptions()
   fetchStats()
   fetchTasks()
   startPolling()

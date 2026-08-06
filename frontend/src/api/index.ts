@@ -1345,6 +1345,7 @@ export async function getIssues(params?: {
   initiator_username?: string
   has_mr?: boolean | string
   search?: string
+  worker_kit?: string
   created_after?: string
   created_before?: string
   sort_by?: string

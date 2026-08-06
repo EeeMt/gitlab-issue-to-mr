@@ -308,6 +308,7 @@ export async function getTasksPaginated(params: {
   created_before?: string
   scheduled_after?: string
   scheduled_before?: string
+  harness?: string
   sort_by?: string
   sort_order?: string
 }): Promise<PaginatedResponse<Task>> {

@@ -15,7 +15,7 @@ from app.api.list_filter_values import (
     validate_datetime_range,
 )
 from app.dependencies.project_access import ProjectAccessScope
-from app.models import Issue, Task, TaskStatus
+from app.models import Issue, Task, TaskHarnessAttempt, TaskStatus
 
 TASKS_SORT_FIELDS = {
     "created_at",
@@ -43,6 +43,7 @@ class TaskListFilters:
     created_before: str | None = None
     scheduled_after: str | None = None
     scheduled_before: str | None = None
+    harness: str | None = None
     sort_by: str | None = None
     sort_order: str | None = None
 
@@ -163,6 +164,15 @@ def build_task_list_query(
             query = query.where(Task.priority == priorities[0])
         elif priorities:
             query = query.where(Task.priority.in_(priorities))
+
+    if filters.harness:
+        harness_keys = [k.strip() for k in filters.harness.split(",") if k.strip()]
+        if harness_keys:
+            query = query.where(
+                Task.harness_attempts.any(
+                    TaskHarnessAttempt.harness_key.in_(harness_keys)
+                )
+            )
 
     if filters.has_mr is not None:
         condition = (

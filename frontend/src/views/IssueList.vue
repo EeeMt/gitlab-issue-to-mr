@@ -110,6 +110,7 @@ import {
   getStats,
   snapshotInitiatorValue,
   type InitiatorFilterOption,
+  type SimpleFilterOption,
   type Issue,
   type IssueStatus,
   type Project,
@@ -129,7 +130,7 @@ import {
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeUtc8Compact } from '../utils/datetime'
 import { formatDurationSec } from '../utils/format'
-import { EllipseOutline, FolderOpenOutline, CalendarOutline, PersonOutline, GitMergeOutline, DocumentTextOutline, AlertCircleOutline, SyncOutline, CheckmarkCircleOutline } from '@vicons/ionicons5'
+import { EllipseOutline, FolderOpenOutline, CalendarOutline, PersonOutline, GitMergeOutline, DocumentTextOutline, AlertCircleOutline, SyncOutline, CheckmarkCircleOutline, CubeOutline } from '@vicons/ionicons5'
 
 const router = useRouter()
 const route = useRoute()
@@ -144,6 +145,9 @@ const projectOptionsError = ref(false)
 const initiatorFilterOptions = ref<InitiatorFilterOption[]>([])
 const initiatorOptionsLoading = ref(false)
 const initiatorOptionsError = ref(false)
+const workerKitFilterOptions = ref<SimpleFilterOption[]>([])
+const workerKitOptionsLoading = ref(false)
+const workerKitOptionsError = ref(false)
 const loading = ref(false)
 const hasLoadedOnce = ref(false)
 
@@ -228,7 +232,7 @@ const filterConfig: FilterSortConfig = {
       options: creatorOptions,
       optionsLoading: () => initiatorOptionsLoading.value,
       optionsError: () => initiatorOptionsError.value,
-      optionsRetry: fetchInitiatorOptions,
+      optionsRetry: fetchFilterOptions,
     },
     {
       key: 'has_mr',
@@ -240,6 +244,20 @@ const filterConfig: FilterSortConfig = {
         { label: t('filter.hasMrYes'), value: 'true' },
         { label: t('filter.hasMrNo'), value: 'false' },
       ],
+    },
+    {
+      key: 'worker_kit',
+      label: 'filter.workerKit',
+      icon: CubeOutline,
+      type: 'multi-select',
+      options: () => workerKitFilterOptions.value.map((o) => ({
+        label: o.label,
+        value: o.value,
+        count: o.count,
+      })),
+      optionsLoading: () => workerKitOptionsLoading.value,
+      optionsError: () => workerKitOptionsError.value,
+      optionsRetry: fetchFilterOptions,
     },
     {
       key: 'created',
@@ -612,16 +630,21 @@ async function fetchIssues() {
 
 let latestIssueRequestId = 0
 
-async function fetchInitiatorOptions() {
+async function fetchFilterOptions() {
   initiatorOptionsLoading.value = true
   initiatorOptionsError.value = false
+  workerKitOptionsLoading.value = true
+  workerKitOptionsError.value = false
   try {
     const result = await getIssueFilterOptions()
     initiatorFilterOptions.value = result.initiators
+    workerKitFilterOptions.value = result.worker_kits ?? []
   } catch {
     initiatorOptionsError.value = true
+    workerKitOptionsError.value = true
   } finally {
     initiatorOptionsLoading.value = false
+    workerKitOptionsLoading.value = false
   }
 }
 
@@ -656,7 +679,7 @@ async function fetchStats() {
 onMounted(() => {
   syncRouteQuery()
   fetchProjects()
-  fetchInitiatorOptions()
+  fetchFilterOptions()
   fetchIssues()
   fetchStats()
 })

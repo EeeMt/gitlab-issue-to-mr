@@ -175,6 +175,8 @@ const en = {
     direction: 'Direction',
     resultCount: '{count} results',
     mine: 'Mine',
+    harness: 'Harness',
+    workerKit: 'Worker Kit',
   },
   login: {
     subtitle: 'Sign in to access the dashboard.',
