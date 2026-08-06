@@ -435,6 +435,22 @@ describe('CreateIssue', () => {
       expect(wrapper.find('.create-issue-page').exists()).toBe(true)
     })
 
+    it('lays out execution environment fields in three columns on desktop', async () => {
+      await mountComponent()
+
+      const grid = wrapper.findComponent({ name: 'NGrid' })
+      expect(grid.props('cols')).toBe(3)
+    })
+
+    it('shows hints for all execution environment fields', async () => {
+      await mountComponent()
+
+      const panel = wrapper.find('.execution-environment-panel')
+      expect(panel.text()).toContain('issue.workerDefaultHint')
+      expect(panel.text()).toContain('issue.defaultProviderHint')
+      expect(panel.text()).toContain('issue.defaultHarnessHint')
+    })
+
     it('should load the project list without webhook status expansion', async () => {
       await mountComponent()
 

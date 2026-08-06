@@ -296,7 +296,7 @@
               </div>
 
               <div class="execution-environment-panel">
-                <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+                <n-grid :cols="isMobile ? 1 : 3" :x-gap="16" :y-gap="8">
                   <n-gi>
                     <n-form-item
                       :label="t('createTask.workerProfile')"
@@ -311,6 +311,7 @@
                         data-testid="worker-profile-select"
                       />
                     </n-form-item>
+                    <div class="field-hint">{{ t('issue.workerDefaultHint') }}</div>
                   </n-gi>
                   <n-gi>
                     <n-form-item :label="t('createTask.defaultProvider')">
@@ -321,6 +322,7 @@
                         :placeholder="t('config.providers.systemDefault')"
                       />
                     </n-form-item>
+                    <div class="field-hint">{{ t('issue.defaultProviderHint') }}</div>
                   </n-gi>
                   <n-gi>
                     <n-form-item :label="t('issue.defaultHarness')">
