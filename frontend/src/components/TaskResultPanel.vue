@@ -550,7 +550,7 @@ const hasChanges = computed(() =>
 .error-summary {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
   margin-bottom: 10px;
 }
@@ -559,7 +559,7 @@ const hasChanges = computed(() =>
   font-size: 12px;
   font-weight: 600;
   color: var(--n-text-color-3, #666);
-  padding-top: 3px;
+  line-height: 1.5;
 }
 
 .error-kind-chip {

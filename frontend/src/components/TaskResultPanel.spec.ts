@@ -41,6 +41,14 @@ describe('TaskResultPanel', () => {
     expect(taskResultPanelSource).toContain('v-show="rawErrorExpanded"')
   })
 
+  it('vertically centers the failure reason label with the kind chip and message', () => {
+    const errorSummary = cssBlock('.error-summary')
+    const errorLabel = cssBlock('.error-summary__label')
+
+    expect(errorSummary).toContain('align-items: center;')
+    expect(errorLabel).not.toContain('padding-top: 3px;')
+  })
+
   it('execution summary card is guarded by selectedSummaryLog and uses result-card--summary-text class', () => {
     expect(taskResultPanelSource).toContain('v-if="selectedSummaryLog"')
     expect(deliverySummaryPayloadSource).toContain(
