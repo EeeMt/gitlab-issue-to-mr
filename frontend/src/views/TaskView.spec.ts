@@ -940,13 +940,20 @@ describe('TaskView', () => {
     it('should display error message for failed tasks', async () => {
       await mountComponent({
         status: 'failed',
-        error_message: 'Task failed due to network error'
+        error_message: 'Task failed due to network error',
+        failure_kind: 'network_error',
+        failure_message: 'Connection refused by provider'
       })
 
       await vi.waitFor(() => {
-        return wrapper.find('.error-message').exists()
+        return wrapper.find('.error-summary').exists()
       })
 
+      expect(wrapper.find('.error-kind-chip').text()).toContain('network_error')
+      expect(wrapper.find('.error-summary__message').text()).toContain(
+        'Connection refused by provider'
+      )
+      await wrapper.find('.error-raw__toggle').trigger('click')
       expect(wrapper.find('.error-message').text()).toContain('Task failed due to network error')
     })
   })

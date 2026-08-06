@@ -84,6 +84,8 @@ export interface Task {
   container_name: string | null
   commit_sha: string | null
   error_message: string | null
+  failure_kind?: string | null
+  failure_message?: string | null
   additions: number
   deletions: number
   total_changes: number

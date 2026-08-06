@@ -25,6 +25,18 @@ describe('TaskResultPanel', () => {
     expect(commitStats).toContain('font-variant-numeric: tabular-nums;')
   })
 
+  it('leads with a concise failure reason and keeps raw output expandable', () => {
+    expect(taskResultPanelSource).toContain(
+      'hasFailure && (task.failure_kind || task.failure_message || task.error_message)'
+    )
+    expect(taskResultPanelSource).toContain('error-kind-chip')
+    expect(taskResultPanelSource).toContain("t('taskView.failureReason')")
+    expect(taskResultPanelSource).toContain('rawErrorExpanded = ref(false)')
+    expect(taskResultPanelSource).toContain("t('taskView.showRawError')")
+    expect(taskResultPanelSource).toContain("t('taskView.hideRawError')")
+    expect(taskResultPanelSource).toContain('v-show="rawErrorExpanded"')
+  })
+
   it('execution summary card is guarded by selectedSummaryLog and uses result-card--summary-text class', () => {
     expect(taskResultPanelSource).toContain('v-if="selectedSummaryLog"')
     expect(deliverySummaryPayloadSource).toContain(

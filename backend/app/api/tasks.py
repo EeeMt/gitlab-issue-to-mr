@@ -72,6 +72,7 @@ from app.api.task_update_service import TaskUpdateServices, update_task_record
 from app.config import get_effective_settings
 from app.core.projects import build_project_lookup, get_project_metadata
 from app.core.task_creation import prepare_task_runtime_snapshot
+from app.core.task_failure_summary import load_task_failure_summary
 from app.core.task_prompt import (
     NORMAL_PLACEHOLDER_NAMES,
     PLACEHOLDER_NAMES,
@@ -474,6 +475,8 @@ async def get_task(
     metadata = await get_project_metadata(task.project_id)
     t3 = time.time()
     result_data = _serialize_task(task, metadata, include_prompt_details=True)
+    failure_summary = await load_task_failure_summary(db, task.id)
+    result_data.update(failure_summary)
     t4 = time.time()
 
     total = t4 - t0

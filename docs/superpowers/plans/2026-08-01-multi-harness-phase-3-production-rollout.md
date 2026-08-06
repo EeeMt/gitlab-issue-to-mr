@@ -173,6 +173,8 @@ make offline-bundle-export WORKER_KIT_VERSION=<release-version>
 - [x] 发布冻结值：Kit `0.3.10` archive/manifest SHA-256、Claude `2.1.153`、
       Codex `0.146.0` binary digest、runtime image repo digest、Backend/Nginx registry digest、
       migration head `065_worker_profile_verification`、Runtime Bundle digest `00addfc6...`。
+- [x] 任务失败摘要 UI 修复（2026-08-06）：任务详情 API 返回 `failure_kind`/`failure_message`，
+      结果面板优先展示失败原因、完整日志折叠展示；Backend/Nginx 已重建并推送新 digest。
 - [x] dev 目标 Host（x86_64，Docker `28.5.2`）：Kit `0.3.10` 已安装且 manifest 与本地制品一致；
       claude/codex 离线 verify-runtime 均通过；安装器拒绝覆盖已安装版本目录。
 - [x] Codify API `/api/worker-profiles/11/verify-runtime` 通过，Profile 11 持久化
