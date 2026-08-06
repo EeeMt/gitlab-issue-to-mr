@@ -19,3 +19,16 @@ def test_frontend_image_uses_the_checked_nginx_config():
     dockerfile = (repo_root / "deploy" / "Dockerfile.frontend").read_text(encoding="utf-8")
 
     assert "COPY deploy/nginx/default.conf /etc/nginx/conf.d/default.conf" in dockerfile
+
+
+def test_spa_entry_is_revalidated_and_hashed_assets_are_immutable():
+    repo_root = Path(__file__).resolve().parents[3]
+    nginx_config = (repo_root / "deploy" / "nginx" / "default.conf").read_text(
+        encoding="utf-8"
+    )
+
+    index_location = nginx_config.index("location = /index.html")
+    assert "Cache-Control \"no-cache, must-revalidate\"" in nginx_config[index_location:]
+
+    assets_location = nginx_config.index("location /assets/")
+    assert "max-age=31536000, immutable" in nginx_config[assets_location:]
