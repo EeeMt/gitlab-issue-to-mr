@@ -45,6 +45,7 @@ export { default as GitBranchOutline } from '@vicons/ionicons5/es/GitBranchOutli
 export { default as GitCommitOutline } from '@vicons/ionicons5/es/GitCommitOutline'
 export { default as GitCompareOutline } from '@vicons/ionicons5/es/GitCompareOutline'
 export { default as GitMergeOutline } from '@vicons/ionicons5/es/GitMergeOutline'
+export { default as GitNetworkOutline } from '@vicons/ionicons5/es/GitNetworkOutline'
 export { default as GitPullRequest } from '@vicons/ionicons5/es/GitPullRequest'
 export { default as GlobeOutline } from '@vicons/ionicons5/es/GlobeOutline'
 export { default as GridOutline } from '@vicons/ionicons5/es/GridOutline'

@@ -175,6 +175,8 @@ const zhCN = {
     direction: '排序方向',
     resultCount: '{count} 条结果',
     mine: '我的',
+    harness: 'Harness',
+    workerKit: 'Worker Kit',
   },
   login: {
     subtitle: '登录以访问控制台。',

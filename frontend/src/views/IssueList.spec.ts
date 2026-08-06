@@ -201,6 +201,7 @@ vi.mock('@vicons/ionicons5', () => ({
   FolderOpenOutline: {},
   PersonOutline: {},
   CalendarOutline: {},
+  CubeOutline: {},
   GitMergeOutline: {},
   DocumentTextOutline: {},
   AlertCircleOutline: {},
@@ -300,6 +301,7 @@ function setupDefaultMocks() {
       { value: 'user:2', kind: 'user', user_id: 2, username: 'bob', display_name: null, count: 8 },
       { value: 'user:3', kind: 'user', user_id: 3, username: 'charlie', display_name: null, count: 2 },
     ],
+    worker_kits: [],
   })
   mockApi.getProjects.mockResolvedValue(mockProjects)
   mockApi.getIssues.mockResolvedValue({ items: mockIssues, total: mockIssues.length })

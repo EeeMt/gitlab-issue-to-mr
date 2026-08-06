@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
-from sqlalchemy import func, or_, select
+from sqlalchemy import false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -108,6 +108,7 @@ from app.models import (
     AIProvider,
     Issue,
     Task,
+    TaskHarnessAttempt,
     TaskStatus,
     TaskWorkerProfileSnapshot,
     User,
@@ -170,6 +171,7 @@ async def list_tasks(
     created_before: str | None = None,
     scheduled_after: str | None = None,
     scheduled_before: str | None = None,
+    harness: str | None = None,
     sort_by: str | None = None,
     sort_order: str | None = None,
     page: int | None = None,
@@ -196,6 +198,7 @@ async def list_tasks(
             created_before=created_before,
             scheduled_after=scheduled_after,
             scheduled_before=scheduled_before,
+            harness=harness,
             sort_by=sort_by,
             sort_order=sort_order,
         ),
@@ -248,7 +251,32 @@ async def get_task_filter_options(
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Return complete task-list filter options within the caller's access scope."""
-    return await list_initiator_filter_options(db, Task, access_scope)
+    result = await list_initiator_filter_options(db, Task, access_scope)
+
+    harness_query = select(
+        TaskHarnessAttempt.harness_key,
+        func.count(func.distinct(TaskHarnessAttempt.task_id)).label("task_count"),
+    ).join(Task, Task.id == TaskHarnessAttempt.task_id)
+
+    if not access_scope.is_unrestricted:
+        if not access_scope.accessible_project_ids:
+            harness_query = harness_query.where(false())
+        else:
+            harness_query = harness_query.where(
+                Task.project_id.in_(access_scope.accessible_project_ids)
+            )
+
+    harness_query = harness_query.group_by(TaskHarnessAttempt.harness_key).order_by(
+        TaskHarnessAttempt.harness_key
+    )
+    harness_result = await db.execute(harness_query)
+
+    result["harnesses"] = [
+        {"value": key, "label": key, "count": count}
+        for key, count in harness_result.all()
+    ]
+
+    return result
 
 
 @router.get("/tasks/scheduled")

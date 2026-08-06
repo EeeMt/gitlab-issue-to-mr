@@ -383,6 +383,7 @@ async def list_issues(
     initiator_username: str | None = None,
     has_mr: bool | None = None,
     search: str | None = None,
+    worker_kit: str | None = None,
     created_after: str | None = None,
     created_before: str | None = None,
     sort_by: str | None = None,
@@ -550,6 +551,16 @@ async def list_issues(
         else:
             query = query.where(Issue.merge_request_iid.is_(None))
 
+    # Worker kit version filter (via issue's worker profile)
+    if worker_kit:
+        kit_versions = [v.strip() for v in worker_kit.split(",") if v.strip()]
+        if kit_versions:
+            query = query.where(
+                Issue.worker_profile.has(
+                    WorkerProfile.worker_kit_version.in_(kit_versions)
+                )
+            )
+
     # Text search on title (min 2, max 200 chars)
     if search:
         search_term = normalize_search_term(search)
@@ -614,7 +625,36 @@ async def get_issue_filter_options(
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Return complete issue-list filter options within the caller's access scope."""
-    return await list_initiator_filter_options(db, Issue, access_scope)
+    result = await list_initiator_filter_options(db, Issue, access_scope)
+
+    kit_query = (
+        select(
+            WorkerProfile.worker_kit_version,
+            func.count(func.distinct(Issue.id)).label("issue_count"),
+        )
+        .join(Issue, Issue.worker_profile_id == WorkerProfile.id)
+        .where(WorkerProfile.worker_kit_version.is_not(None))
+    )
+
+    if not access_scope.is_unrestricted:
+        if not access_scope.accessible_project_ids:
+            kit_query = kit_query.where(false())
+        else:
+            kit_query = kit_query.where(
+                Issue.project_id.in_(access_scope.accessible_project_ids)
+            )
+
+    kit_query = kit_query.group_by(WorkerProfile.worker_kit_version).order_by(
+        WorkerProfile.worker_kit_version
+    )
+    kit_result = await db.execute(kit_query)
+
+    result["worker_kits"] = [
+        {"value": version, "label": version, "count": count}
+        for version, count in kit_result.all()
+    ]
+
+    return result
 
 
 @router.get("/{issue_id}")
