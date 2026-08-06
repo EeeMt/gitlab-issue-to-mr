@@ -738,13 +738,15 @@ const props = withDefaults(defineProps<{
   issueDescription?: string
   hasClaudeSession?: boolean
   issueCurrentHarness?: string | null
+  issueDefaultHarness?: string | null
   workerProfileId?: number | null
   defaultProviderId?: number | null
   task?: Task
 }>(), {
   mode: 'create',
   hasClaudeSession: false,
-  issueCurrentHarness: null
+  issueCurrentHarness: null,
+  issueDefaultHarness: null
 })
 
 const emit = defineEmits<{
@@ -1074,6 +1076,7 @@ watch(() => props.show, (val) => {
       requireChanges.value = DEFAULT_REQUIRE_CHANGES
       startFreshSession.value = false
       harnessKey.value = props.issueCurrentHarness
+        ?? props.issueDefaultHarness
         ?? effectiveWorkerProfile.value?.default_harness_key
         ?? 'claude'
       scheduleType.value = 'now'

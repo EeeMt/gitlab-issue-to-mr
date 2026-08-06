@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from app.api.issues import (
     CreateIssueRequest,
     UpdateIssueRequest,
+    _resolve_issue_default_harness_key,
     _resolve_issue_worker_id,
     create_issue,
     update_issue,
@@ -157,6 +158,10 @@ async def test_create_issue_persists_explicit_worker_and_default_provider():
 
     with (
         patch("app.api.issues.get_default_provider", new=AsyncMock(return_value=default_provider)),
+        patch(
+            "app.api.issues._resolve_issue_default_harness_key",
+            new=AsyncMock(return_value="claude"),
+        ),
         patch("app.api.issues.build_issue_workspace_paths", return_value=None),
     ):
         await create_issue(body=request, db=db, current_user=current_user)
@@ -164,7 +169,111 @@ async def test_create_issue_persists_explicit_worker_and_default_provider():
     issue = db.add.call_args.args[0]
     assert issue.worker_profile_id == 11
     assert issue.default_provider_id == 22
+    assert issue.default_harness_key == "claude"
     db.get.assert_awaited_once_with(WorkerProfile, 11, with_for_update=True)
+
+
+@pytest.mark.asyncio
+async def test_create_issue_resolves_profile_default_harness_key():
+    request = CreateIssueRequest(
+        title="Use harness default",
+        project_id=100,
+        worker_profile_id=11,
+    )
+
+    db = MagicMock()
+    db.add = MagicMock()
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+
+    async def refresh(issue):
+        issue.id = 55
+        issue.created_at = datetime(2026, 6, 25, 9, 0, 0)
+        issue.updated_at = datetime(2026, 6, 25, 9, 0, 0)
+
+    db.refresh = AsyncMock(side_effect=refresh)
+    current_user = SimpleNamespace(id=7, username="alice")
+    profile = SimpleNamespace(
+        id=11,
+        enabled=True,
+        enabled_harnesses=["claude", "codex"],
+        default_harness_key="codex",
+    )
+    db.get = AsyncMock(return_value=profile)
+
+    with (
+        patch("app.api.issues._resolve_issue_worker_id", new=AsyncMock(return_value=11)),
+        patch(
+            "app.api.issues._resolve_issue_default_provider_id",
+            new=AsyncMock(return_value=None),
+        ),
+        patch("app.api.issues.build_issue_workspace_paths", return_value=None),
+    ):
+        await create_issue(body=request, db=db, current_user=current_user)
+
+    issue = db.add.call_args.args[0]
+    assert issue.default_harness_key == "codex"
+
+
+@pytest.mark.asyncio
+async def test_issue_default_harness_must_be_enabled_by_worker():
+    db = MagicMock()
+    db.get = AsyncMock(
+        return_value=SimpleNamespace(
+            id=11,
+            enabled=True,
+            enabled_harnesses=["claude"],
+            default_harness_key="claude",
+        )
+    )
+
+    with pytest.raises(HTTPException, match="codex") as exc_info:
+        await _resolve_issue_default_harness_key(db, 11, "codex")
+
+    assert exc_info.value.status_code == 422
+
+    with pytest.raises(HTTPException, match="unknown harness key") as exc_info:
+        await _resolve_issue_default_harness_key(db, 11, "fake")
+
+    assert exc_info.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_update_issue_changes_default_harness():
+    issue = Issue(
+        id=55,
+        title="Update harness default",
+        project_id=100,
+        status="open",
+        worker_profile_id=11,
+        default_harness_key="claude",
+        created_at=datetime(2026, 6, 25, 9, 0, 0),
+        updated_at=datetime(2026, 6, 25, 9, 0, 0),
+    )
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = issue
+
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=result)
+    db.get = AsyncMock(
+        return_value=SimpleNamespace(
+            id=11,
+            enabled=True,
+            enabled_harnesses=["claude", "codex"],
+            default_harness_key="claude",
+        )
+    )
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+
+    await update_issue(
+        issue_id=55,
+        body=UpdateIssueRequest(default_harness_key="codex"),
+        db=db,
+        current_user=SimpleNamespace(id=7, username="alice"),
+    )
+
+    assert issue.default_harness_key == "codex"
 
 
 @pytest.mark.asyncio

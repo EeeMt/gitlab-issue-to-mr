@@ -263,12 +263,15 @@ async def create_task_record(
             detail=str(exc),
         ) from exc
 
-    # Resolve + validate the harness choice (Profile default when omitted) and
-    # freeze a secret-free ModelEndpoint into the snapshot.
+    # Resolve + validate the harness choice (Issue default, then Profile default
+    # when omitted) and freeze a secret-free ModelEndpoint into the snapshot.
+    issue_default_key = getattr(issue, "default_harness_key", None)
+    if not isinstance(issue_default_key, str) or not issue_default_key:
+        issue_default_key = None
     profile_default_key = getattr(worker_profile, "default_harness_key", None)
     if not isinstance(profile_default_key, str) or not profile_default_key:
         profile_default_key = "claude"
-    harness_key = request.harness_key or profile_default_key
+    harness_key = request.harness_key or issue_default_key or profile_default_key
     if request.session_mode == "continue":
         # A continue task must match the issue's current harness lineage;
         # switching harness is only allowed on a fresh session. The resolved

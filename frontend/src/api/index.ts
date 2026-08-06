@@ -126,6 +126,7 @@ export interface Issue {
   ci_auto_repair_enabled: boolean
   worker_profile_id: number
   default_provider_id: number | null
+  default_harness_key?: string | null
   git_clone_depth: number | null
   git_clone_filter: 'blob:none' | null
   worker_profile_name?: string | null
@@ -143,6 +144,7 @@ export interface CreateIssueRequest {
   ci_auto_repair_enabled?: boolean
   worker_profile_id: number
   default_provider_id?: number | null
+  default_harness_key?: string | null
   git_clone_depth?: number | null
   git_clone_filter?: 'blob:none' | null
 }

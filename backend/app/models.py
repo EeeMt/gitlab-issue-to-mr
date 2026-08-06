@@ -100,6 +100,7 @@ class Issue(Base):
         nullable=True,
         index=True,
     )
+    default_harness_key: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # Repository bootstrap policy. ``None`` keeps the existing full-clone behavior.
     git_clone_depth: Mapped[int | None] = mapped_column(Integer, nullable=True)
     git_clone_filter: Mapped[str | None] = mapped_column(String(64), nullable=True)

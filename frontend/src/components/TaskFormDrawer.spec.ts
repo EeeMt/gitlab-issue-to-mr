@@ -433,6 +433,13 @@ describe('TaskFormDrawer', () => {
   }
 
   describe('create mode', () => {
+    it('uses the issue default harness before the worker profile default', async () => {
+      await mountDrawer({ issueDefaultHarness: 'codex' })
+      await openDrawer()
+
+      expect(wrapper.vm.harnessKey).toBe('codex')
+    })
+
     it('inherits skills for a capable mounted-kit profile without sending an override', async () => {
       await mountDrawer()
       await openDrawer()

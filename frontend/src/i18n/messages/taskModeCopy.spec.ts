@@ -37,4 +37,13 @@ describe('task mode copy', () => {
       'Analysis only outputs answers, analysis, or proposals'
     )
   })
+
+  it('labels the harness engine in the task creation drawer', () => {
+    expect(zhCN.createTask.harness).toBe('引擎')
+    expect(en.createTask.harness).toBe('Harness')
+    expect(zhCN.createTask.harnessClaude).toBe('Claude')
+    expect(en.createTask.harnessClaude).toBe('Claude')
+    expect(zhCN.createTask.harnessCodex).toBe('Codex')
+    expect(en.createTask.harnessCodex).toBe('Codex')
+  })
 })

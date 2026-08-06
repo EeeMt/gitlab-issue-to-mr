@@ -181,6 +181,9 @@ class CreateIssueTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "app.api.issues._resolve_issue_default_provider_id",
             new=AsyncMock(return_value=None),
+        ), patch(
+            "app.api.issues._resolve_issue_default_harness_key",
+            new=AsyncMock(return_value="claude"),
         ), patch("app.api.issues.get_effective_settings") as mock_settings:
             mock_settings.return_value.session_storage_root = "/var/codify/sessions"
             mock_settings.return_value.worker_workspace_host_path = "/opt/codify-workspaces"
@@ -198,6 +201,7 @@ class CreateIssueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(created.branch_name, "codify/issue-42")
         self.assertEqual(created.git_clone_depth, 50)
         self.assertEqual(created.git_clone_filter, "blob:none")
+        self.assertEqual(created.default_harness_key, "claude")
         self.assertEqual(
             created.session_storage_path,
             "/opt/codify-workspaces/project-10/issue-42/claude",
@@ -240,6 +244,9 @@ class CreateIssueTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "app.api.issues._resolve_issue_default_provider_id",
             new=AsyncMock(return_value=None),
+        ), patch(
+            "app.api.issues._resolve_issue_default_harness_key",
+            new=AsyncMock(return_value="claude"),
         ), patch("app.api.issues.get_effective_settings") as mock_settings:
             mock_settings.return_value.session_storage_root = "/var/codify/sessions"
             mock_settings.return_value.worker_workspace_host_path = ""
@@ -279,6 +286,9 @@ class CreateIssueTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "app.api.issues._resolve_issue_default_provider_id",
             new=AsyncMock(return_value=None),
+        ), patch(
+            "app.api.issues._resolve_issue_default_harness_key",
+            new=AsyncMock(return_value="claude"),
         ), patch("app.api.issues.get_effective_settings") as mock_settings:
             mock_settings.return_value.session_storage_root = "/tmp/sessions"
             await create_issue(body=body, db=mock_db, current_user=mock_user)

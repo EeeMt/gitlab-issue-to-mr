@@ -174,6 +174,81 @@ async def test_continue_without_harness_key_rejects_lineage_mismatch():
 
 
 @pytest.mark.asyncio
+async def test_create_task_uses_issue_default_harness_when_request_omits_key():
+    request = CreateTaskRequest(
+        issue_id=1,
+        user_prompt="Use issue harness default",
+        priority=1,
+        session_mode="fresh",
+    )
+    issue = MagicMock()
+    issue.id = 1
+    issue.project_id = 101
+    issue.description = "Use issue harness default"
+    issue.status = "open"
+    issue.worker_profile_id = 33
+    issue.default_provider_id = 44
+    issue.default_harness_key = "codex"
+
+    worker_profile = MagicMock()
+    worker_profile.id = 33
+    worker_profile.name = "Default Worker"
+    worker_profile.enabled = True
+    worker_profile.default_harness_key = "claude"
+    worker_profile.enabled_harnesses = ["claude", "codex"]
+
+    provider = _provider_mock(44, wire_protocol="openai_responses")
+
+    db = MagicMock()
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+    db.flush = AsyncMock()
+    db.get = AsyncMock(return_value=issue)
+
+    async def refresh(task, attribute_names=None):
+        task.id = 88
+        task.status = TaskStatus.PENDING
+        task.created_at = datetime(2026, 6, 25, 9, 0, 0)
+        task.updated_at = datetime(2026, 6, 25, 9, 0, 0)
+
+    db.refresh = AsyncMock(side_effect=refresh)
+    access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+    current_user = SimpleNamespace(
+        id=7,
+        gitlab_user_id=77,
+        username="alice",
+        display_name=None,
+        email=None,
+    )
+
+    prepare_snapshot = AsyncMock(return_value=MagicMock(harness_key="codex"))
+
+    with (
+        patch(
+            "app.api.tasks.resolve_worker_profile_for_issue",
+            new=AsyncMock(return_value=worker_profile),
+        ),
+        patch("app.api.tasks.resolve_provider_for_issue", new=AsyncMock(return_value=provider)),
+        patch("app.api.tasks.prepare_task_runtime_snapshot", new=prepare_snapshot),
+        patch("app.api.tasks.bind_runtime_bundle", new=AsyncMock(return_value=MagicMock(id=1))),
+        patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
+        patch(
+            "app.api.tasks.get_usage_quota_service",
+            return_value=MagicMock(raise_if_over_limit=AsyncMock()),
+        ),
+    ):
+        await create_task(
+            request=request,
+            db=db,
+            current_user=current_user,
+            access_scope=access_scope,
+        )
+
+    _, kwargs = prepare_snapshot.call_args
+    assert kwargs["harness_key"] == "codex"
+
+
+@pytest.mark.asyncio
 async def test_create_task_loads_worker_profile_environment_from_existing_identity():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:

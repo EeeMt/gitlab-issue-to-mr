@@ -309,6 +309,7 @@
       :issue-description="issue?.description ?? undefined"
       :has-claude-session="Boolean(issue?.claude_session_id)"
       :issue-current-harness="issue?.current_harness ?? null"
+      :issue-default-harness="issue?.default_harness_key ?? null"
       :worker-profile-id="issue?.worker_profile_id ?? null"
       :default-provider-id="issue?.default_provider_id ?? null"
       data-testid="issue-create-task-drawer"

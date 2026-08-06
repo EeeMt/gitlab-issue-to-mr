@@ -20,6 +20,7 @@ from app.api.list_filter_values import (
 )
 from app.config import get_effective_settings
 from app.core.gitlab_client import get_gitlab_client
+from app.core.harness_registry import HarnessRegistryError, validate_enabled_harnesses
 from app.core.harness_sessions import get_issue_latest_harness_key
 from app.core.skills import delete_unreferenced_skill_versions
 from app.core.task_helpers import _require_issue_operator
@@ -64,6 +65,7 @@ class CreateIssueRequest(BaseModel):
     ci_auto_repair_enabled: bool = False
     worker_profile_id: int
     default_provider_id: int | None = None
+    default_harness_key: str | None = None
     git_clone_depth: int | None = Field(default=None, ge=1, le=10_000, strict=True)
     git_clone_filter: Literal["blob:none"] | None = None
 
@@ -76,6 +78,7 @@ class UpdateIssueRequest(BaseModel):
     status: str | None = None
     ci_auto_repair_enabled: bool | None = None
     default_provider_id: int | None = None
+    default_harness_key: str | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -133,6 +136,7 @@ def _serialize_issue(
         "ci_auto_repair_enabled": issue.ci_auto_repair_enabled,
         "worker_profile_id": issue.worker_profile_id,
         "default_provider_id": issue.default_provider_id,
+        "default_harness_key": issue.default_harness_key,
         "git_clone_depth": issue.git_clone_depth,
         "git_clone_filter": issue.git_clone_filter,
         "worker_profile_name": worker_profile.name if worker_profile is not None else None,
@@ -223,6 +227,33 @@ async def _resolve_issue_default_provider_id(
         return provider.id
     provider = await get_default_provider(db)
     return provider.id if provider else None
+
+
+async def _resolve_issue_default_harness_key(
+    db: AsyncSession,
+    worker_profile_id: int,
+    explicit_key: str | None,
+) -> str:
+    """Resolve and validate the issue's default harness against its worker profile."""
+    profile = await db.get(WorkerProfile, worker_profile_id)
+    if profile is None or not profile.enabled:
+        raise HTTPException(status_code=422, detail="Worker profile is not available")
+    enabled_harnesses = getattr(profile, "enabled_harnesses", None) or ["claude"]
+    if not isinstance(enabled_harnesses, list) or not enabled_harnesses:
+        enabled_harnesses = ["claude"]
+    default_key = (
+        explicit_key
+        or getattr(profile, "default_harness_key", None)
+        or "claude"
+    )
+    try:
+        validate_enabled_harnesses(
+            enabled_harnesses,
+            default_harness_key=default_key,
+        )
+    except (HarnessRegistryError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return default_key
 
 
 def _task_duration_seconds(task: Task, now: datetime | None = None) -> float:
@@ -330,6 +361,11 @@ async def create_issue(
         db,
         body.default_provider_id,
     )
+    default_harness_key = await _resolve_issue_default_harness_key(
+        db,
+        worker_profile_id,
+        body.default_harness_key,
+    )
     issue = Issue(
         title=body.title,
         description=body.description,
@@ -341,6 +377,7 @@ async def create_issue(
         ci_auto_repair_enabled=body.ci_auto_repair_enabled,
         worker_profile_id=worker_profile_id,
         default_provider_id=default_provider_id,
+        default_harness_key=default_harness_key,
         git_clone_depth=body.git_clone_depth,
         git_clone_filter=body.git_clone_filter,
         initiator_user_id=current_user.id if current_user else None,
@@ -707,6 +744,12 @@ async def update_issue(
         issue.default_provider_id = await _resolve_issue_default_provider_id(
             db,
             body.default_provider_id,
+        )
+    if "default_harness_key" in body.model_fields_set:
+        issue.default_harness_key = await _resolve_issue_default_harness_key(
+            db,
+            issue.worker_profile_id,
+            body.default_harness_key,
         )
 
     await db.commit()
