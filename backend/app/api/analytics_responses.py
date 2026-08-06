@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -63,6 +64,12 @@ class AnalyticsSummary:
 
     @classmethod
     def from_row(cls, row) -> AnalyticsSummary:
+        # Newer SQLAlchemy rows may be SimpleNamespace objects instead of
+        # tuple-like Row objects, so normalize both shapes before unpacking.
+        if isinstance(row, Mapping):
+            return cls(*row.values())
+        if hasattr(row, "__dict__"):
+            return cls(*vars(row).values())
         return cls(*row)
 
     def serialize(self) -> dict:
