@@ -127,3 +127,15 @@ async def test_execution_rejects_historical_task_without_runtime_bundle(session_
 
         with pytest.raises(RuntimeError, match="historical Tasks are read-only"):
             await load_bound_runtime_bundle(db, task)
+
+
+def test_source_manifest_capabilities_pass_registry_upper_bound():
+    """The frozen source manifest must never declare a capability above the
+    system upper bound; the bundle build calls the same validation."""
+    from app.core.harness_registry import validate_adapter_capabilities
+
+    manifest = json.loads(
+        (REPO_ROOT / "deploy/worker-entrypoint/harness/manifest.json").read_text()
+    )
+    for key, adapter in manifest["adapters"].items():
+        validate_adapter_capabilities(key, adapter.get("capabilities") or {})

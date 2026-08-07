@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import undefer
 
 from app.core.harness_protocol import CANONICAL_EVENT_SCHEMA, HARNESS_CONTRACT_VERSION
+from app.core.harness_registry import validate_adapter_capabilities
 from app.models import Task, WorkerRuntimeBundle
 
 ORCHESTRATION_VERSION = "1.0.0"
@@ -144,6 +145,9 @@ def build_runtime_bundle(source_dir: Path | None = None) -> BuiltRuntimeBundle:
             raise RuntimeError(
                 f"Runtime source Adapter {adapter_key!r} has no version"
             )
+        capabilities = metadata.get("capabilities")
+        if capabilities is not None:
+            validate_adapter_capabilities(adapter_key, capabilities)
         adapter_metadata = dict(metadata)
         adapter_metadata["digest"] = _adapter_digest(source_files)
         adapters[adapter_key] = adapter_metadata

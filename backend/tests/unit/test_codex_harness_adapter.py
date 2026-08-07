@@ -136,6 +136,24 @@ def test_codex_raw_stream_is_sanitized_and_persisted(tmp_path):
     assert "ANTHROPIC_API_KEY" in raw or "<OPENAI_API_KEY>" in raw
 
 
+def test_codex_sanitize_covers_shared_patterns(tmp_path):
+    # The shared sanitizer closes codex's former gap: cookies, operator paths,
+    # and tool ids must be masked in the codex raw archive too.
+    _emit(tmp_path, "run.started", {"runtime_bundle_digest": "d" * 64})
+    _translate(
+        tmp_path,
+        {"type": "item.completed", "item": {
+            "id": "toolu_1234567890", "type": "command_execution",
+            "command": "cat /Users/alice/.ssh/id_rsa; Cookie=secret; echo sk-ant-secret1234567890",
+            "exit_code": 0}},
+    )
+    raw = (tmp_path / "harness-events/codex.jsonl").read_text(encoding="utf-8")
+    assert "/Users/alice" not in raw
+    assert "Cookie=secret" not in raw
+    assert "sk-ant-secret1234567890" not in raw
+    assert "<TOOL_ID:" in raw
+
+
 def _codex_config_sandbox(tmp_path: Path, *, frozen: str | None, override: str | None = None) -> str:
     env = {
         **os.environ,

@@ -201,6 +201,35 @@ def compatible_harness_keys(wire_protocol: str | None) -> list[str]:
     )
 
 
+def validate_adapter_capabilities(
+    harness_key: str, capabilities: dict[str, Any]
+) -> None:
+    """Reject an Adapter manifest that declares a capability above the system bound.
+
+    ``SYSTEM_CAPABILITIES`` is the upper bound the platform will allow; the
+    frozen Runtime Bundle manifest must never claim support the system forbids
+    (e.g. codex ``run_text``). Under-declaring (a capability the system allows
+    but the Adapter does not ship) is a legitimate tightening and stays valid.
+    """
+    validate_harness_key(harness_key)
+    if not isinstance(capabilities, dict):
+        raise HarnessRegistryError(
+            f"adapter {harness_key!r} capabilities must be an object"
+        )
+    upper = SYSTEM_CAPABILITIES[harness_key]
+    for name, value in capabilities.items():
+        if name not in upper or not isinstance(upper[name], bool):
+            # Unknown capabilities are forward-compatible (readers ignore
+            # them); non-boolean bounds (e.g. sandbox_mode) are handled by
+            # capability_policy tightening.
+            continue
+        if value is True and upper[name] is False:
+            raise HarnessRegistryError(
+                f"adapter {harness_key!r} declares capability {name!r} "
+                "above the system upper bound"
+            )
+
+
 def validate_runtime_bundle_manifest(manifest: dict[str, Any]) -> None:
     """Validate a frozen Runtime Bundle manifest against the harness contract."""
     if manifest.get("contract_version") != HARNESS_CONTRACT_VERSION:
@@ -222,6 +251,9 @@ def validate_runtime_bundle_manifest(manifest: dict[str, Any]) -> None:
             raise HarnessRegistryError(f"adapter {key!r} has no version")
         if not adapter.get("digest"):
             raise HarnessRegistryError(f"adapter {key!r} has no digest")
+        capabilities = adapter.get("capabilities")
+        if capabilities is not None:
+            validate_adapter_capabilities(key, capabilities)
         protocols = adapter.get("provider_protocols")
         if not isinstance(protocols, list) or not protocols:
             raise HarnessRegistryError(

@@ -10,6 +10,7 @@ from app.core.harness_registry import (
     capability_policy,
     compatible_harness_keys,
     harness_options,
+    validate_adapter_capabilities,
     validate_enabled_harnesses,
     validate_harness_constraints,
     validate_harness_key,
@@ -29,6 +30,23 @@ def test_compatible_harness_keys_reverse_lookup():
     assert compatible_harness_keys(None) == ["claude"]
     assert compatible_harness_keys("openai_chat_completions") == []
     assert compatible_harness_keys("") == ["claude"]
+
+
+def test_validate_adapter_capabilities_rejects_above_system_bound():
+    # codex cannot support run_text (system bound False); a manifest claiming
+    # it must fail the build rather than silently diverge.
+    with pytest.raises(HarnessRegistryError, match="above the system upper bound"):
+        validate_adapter_capabilities("codex", {"run_text": True})
+    with pytest.raises(HarnessRegistryError, match="above the system upper bound"):
+        validate_adapter_capabilities("codex", {"max_turns": True})
+
+
+def test_validate_adapter_capabilities_allows_tightening_and_unknown():
+    # Under-declaring (a supported capability not shipped) is a valid tighten.
+    validate_adapter_capabilities("codex", {"run_text": False, "task_skills": True})
+    # Unknown capabilities are forward-compatible and ignored.
+    validate_adapter_capabilities("codex", {"future_capability": True})
+    validate_adapter_capabilities("claude", {"run_text": True, "codegraph": True})
 
 
 def test_validate_harness_key_accepts_known_and_rejects_unknown():
