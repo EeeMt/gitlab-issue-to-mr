@@ -129,7 +129,16 @@ Phase 4 文档已把门槛写得很对:六项准入、hermetic 配置证明、�
 
 ## 7. P1 执行进展
 
-### P1.1a codex translator 流式化 —— ✅ 完成 + dev 验证(2026-08-07)
+**P1 全部完成(2026-08-08)**,四项均已独立提交 + 开发环境真实验证:
+
+| 项 | 提交 | dev 验证 |
+|---|---|---|
+| P1.1a codex translator 流式化 | `872f864b` | Task 548(codex)replay 干净、单一终态 |
+| P1.1b claude translator 流式化 | `a1a95617` | Task 549(claude)replay 干净、真实 session 保留 |
+| P1.2 能力真相交叉校验 | `d28c2b76` | Task 550 能力校验未阻断构建 |
+| P1.3 共享 sanitizer 模块 | `d28c2b76` | Task 550 raw 归档已清洗 |
+
+### P1.1a codex translator 流式化 —— ✅ 完成 + dev 验证
 
 - `codex_events.py`:改为单个流式进程(读 stdin 到 EOF),全部跨行状态进内存 `_STATE`(thread-id / retry-count / model-resolved / last-assistant-text / 终态),EOF 单点发 harness 终态。**7 个侧文件全部删除**。
 - `codex-run.sh`:整流喂单个 translator 进程;退出码按 `harness-result.json` 的 status 判定(completed→0 / failed→1 / 无终态→codex 退出码)。
