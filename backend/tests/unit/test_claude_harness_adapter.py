@@ -72,6 +72,25 @@ def _translate(runtime_dir: Path, record: dict) -> None:
     )
 
 
+def _translate_stream(runtime_dir: Path, records: list[dict]) -> None:
+    """Feed the whole raw stream to ONE translator process (streaming)."""
+    raw_file = runtime_dir / "harness-events/claude.jsonl"
+    raw_file.parent.mkdir(parents=True, exist_ok=True)
+    raw_file.touch(exist_ok=True)
+    payload = "".join(
+        json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
+        for record in records
+    )
+    subprocess.run(
+        ["python3", str(TRANSLATOR), "--raw-file", str(raw_file)],
+        input=payload,
+        check=True,
+        env=_environment(runtime_dir),
+        capture_output=True,
+        text=True,
+    )
+
+
 def _events(runtime_dir: Path) -> list[dict]:
     return [
         json.loads(line)
@@ -238,19 +257,21 @@ def test_translator_preserves_real_session_id_for_resume_while_masking_events(tm
     assert masked in raw
 
 
-def test_translator_reuses_persisted_session_id_when_result_record_omits_it(tmp_path):
+def test_translator_reuses_real_session_id_when_result_record_omits_it(tmp_path):
     session_id = "6ad6e4f5-6205-8e2a-9b3c-1a2b3c4d5e6f"
-    (tmp_path / ".real-session-id").write_text(session_id, encoding="utf-8")
     _emit(tmp_path, "run.started", {"runtime_bundle_digest": "d" * 64})
-    _translate(
+    _translate_stream(
         tmp_path,
-        {
-            "type": "result",
-            "subtype": "success",
-            "result": "complete",
-            "total_cost_usd": 0.0,
-            "usage": {"input_tokens": 10, "output_tokens": 4},
-        },
+        [
+            {"type": "system", "subtype": "init", "model": "claude-probe", "session_id": session_id},
+            {
+                "type": "result",
+                "subtype": "success",
+                "result": "complete",
+                "total_cost_usd": 0.0,
+                "usage": {"input_tokens": 10, "output_tokens": 4},
+            },
+        ],
     )
     _emit(tmp_path, "delivery.started")
     _emit(tmp_path, "delivery.completed")
@@ -353,8 +374,7 @@ def test_real_claude_fixture_stream_translates_to_safe_canonical_events(
         for line in (scenario_dir / "stdout.jsonl").read_text().splitlines()
         if line.strip()
     ]
-    for record in raw_records:
-        _translate(runtime_dir, record)
+    _translate_stream(runtime_dir, raw_records)
 
     translated = _events(runtime_dir)
     for event in translated:

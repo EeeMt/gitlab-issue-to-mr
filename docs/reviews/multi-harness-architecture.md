@@ -136,3 +136,10 @@ Phase 4 文档已把门槛写得很对:六项准入、hermetic 配置证明、�
 - `codex.sh`:删除 `codex_adapter_emit_terminal`(终态决策收敛到 translator EOF 单点)。
 - 测试:29 条 codex adapter 全过(含新 `test_codex_turn_failed_after_completion_is_the_terminal`,直接断言"后到的 turn.failed 覆盖先到的完成");backend 全量 **2296 passed**。
 - **dev 验证(192.168.50.129,Task 548)**:真实 codex 任务完成,canonical 流 `run.started → … → usage.final → harness.completed(EOF) → delivery.* → worker.finalization → run.completed`,replay 无缺口、单一终态,真实 session_id 保留,commit 推送成功。
+
+### P1.1b claude translator 流式化 —— ✅ 完成 + dev 验证(2026-08-08)
+
+- `claude_events.py`:改为单个流式进程(读 stdin 到 EOF),真实 session id 进内存 `_REAL_SESSION_ID`,**删除 `.real-session-id` 侧文件**。终态时序不变(仍内联于 result record),纯状态管理重构。
+- `ci-claude.sh`:translator 由每行子进程改为**单个流式进程**(FIFO + 常驻 fd 9 喂入,EOF 由关闭 fd 9 触发);显示循环/进程组/watchdog 完全不动;watchdog 开头丢弃继承的 fd 9 使 translator 及时拿到 EOF;cleanup 兜底 kill translator。
+- 测试:新增 `test_ci_claude_feeds_streaming_translator`(真实 ci-claude.sh + fake claude + translator env,验证 canonical 事件 + raw 掩码 + 真实 session 保留);claude adapter 测试整流喂入;backend 全量 **2297 passed**。
+- **dev 验证(192.168.50.129,Task 549)**:真实 claude 任务完成,canonical 流 `run.started → … → harness.completed → delivery.* → run.completed`,replay 无缺口、单一终态,真实 session `3bdceaed-…` 保留(raw 掩码),usage 有效。

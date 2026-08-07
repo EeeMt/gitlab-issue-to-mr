@@ -45,13 +45,14 @@ touch "$EVENT_JSONL" "$CONSOLE_LOG"
 
 record_stream_event() {
   local raw_line="$1"
-  if [[ -n "${CODIFY_CLAUDE_EVENT_TRANSLATOR:-}" ]]; then
+  if [[ -n "${CODIFY_CLAUDE_EVENT_TRANSLATOR:-}" && -n "${ACTIVE_TRANSLATOR_PID:-}" ]]; then
     [[ -n "${CODIFY_CLAUDE_RAW_EVENT_JSONL:-}" ]] || {
       printf "CODIFY_CLAUDE_RAW_EVENT_JSONL is required with the Claude translator\n" >&2
       return 1
     }
-    printf '%s\n' "$raw_line" | \
-      python3 "${CODIFY_CLAUDE_EVENT_TRANSLATOR}" --raw-file "${CODIFY_CLAUDE_RAW_EVENT_JSONL}"
+    # Feed ONE streaming translator process (held-open fd 9) so cross-record
+    # state (the real session id) lives in translator memory, not a side file.
+    printf '%s\n' "$raw_line" >&9
   else
     # Legacy direct invocation remains useful for focused compatibility tests.
     printf '%s\n' "$raw_line" >> "$EVENT_JSONL"
@@ -286,6 +287,7 @@ ACTIVE_CLAUDE_PID=""
 ACTIVE_CLAUDE_PGID=""
 ACTIVE_STREAM_PID=""
 ACTIVE_WATCHDOG_PID=""
+ACTIVE_TRANSLATOR_PID=""
 
 process_is_running() {
   local process_pid="$1"
@@ -307,6 +309,9 @@ process_group_is_running() {
 }
 
 cleanup() {
+  if [[ -n "$ACTIVE_TRANSLATOR_PID" ]] && process_is_running "$ACTIVE_TRANSLATOR_PID"; then
+    kill -TERM "$ACTIVE_TRANSLATOR_PID" 2>/dev/null || true
+  fi
   if [[ -n "$ACTIVE_WATCHDOG_PID" ]] && process_is_running "$ACTIVE_WATCHDOG_PID"; then
     kill -TERM "$ACTIVE_WATCHDOG_PID" 2>/dev/null || true
   fi
@@ -684,6 +689,12 @@ watch_final_result_shutdown() {
   local last_event_type="none"
   local grace_check
 
+  # Drop the inherited translator write fd so EOF reaches the streaming
+  # translator once the stream processor finishes.
+  if [[ -n "${ACTIVE_TRANSLATOR_PID:-}" ]]; then
+    exec 9>&- 2>/dev/null || true
+  fi
+
   IFS= read -r result_event_count < "$RESULT_SIGNAL_FIFO" || return
 
   for (( grace_check=0; grace_check<RESULT_EXIT_GRACE_SECONDS * 10; grace_check++ )); do
@@ -741,6 +752,19 @@ run_claude_stream() {
   fi
   log "Claude CLI process started (pid=$claude_pid, pgid=$claude_pgid)"
 
+  # Spawn ONE streaming translator and hold fd 9 open so every raw line is
+  # fed to a single process (real session id stays in translator memory).
+  # record_stream_event writes to fd 9; closing it after the stream gives EOF.
+  if [[ -n "${CODIFY_CLAUDE_EVENT_TRANSLATOR:-}" && -n "${CODIFY_CLAUDE_RAW_EVENT_JSONL:-}" ]]; then
+    translator_fifo="$WORK_DIR/claude-translator.fifo"
+    rm -f "$translator_fifo"
+    mkfifo "$translator_fifo"
+    python3 "${CODIFY_CLAUDE_EVENT_TRANSLATOR}" \
+      --raw-file "${CODIFY_CLAUDE_RAW_EVENT_JSONL}" < "$translator_fifo" &
+    ACTIVE_TRANSLATOR_PID=$!
+    exec 9> "$translator_fifo"
+  fi
+
   process_stream "$claude_pid" < "$stream_fifo" &
   stream_pid=$!
   ACTIVE_STREAM_PID="$stream_pid"
@@ -753,6 +777,11 @@ run_claude_stream() {
   ACTIVE_STREAM_PID=""
   if [[ "$stream_status" -ne 0 && "$stream_status" -ne 143 ]]; then
     log "Claude CLI stream processor stopped unexpectedly (status=$stream_status, pid=$claude_pid)"
+  fi
+  if [[ -n "${ACTIVE_TRANSLATOR_PID:-}" ]]; then
+    exec 9>&-
+    wait "$ACTIVE_TRANSLATOR_PID" 2>/dev/null || true
+    ACTIVE_TRANSLATOR_PID=""
   fi
 
   wait "$claude_pid"

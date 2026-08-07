@@ -971,6 +971,73 @@ def test_ci_claude_can_skip_console_log_tee_when_parent_owns_it(tmp_path):
     assert (tmp_path / "console.log").read_text(encoding="utf-8") == ""
 
 
+def test_ci_claude_feeds_streaming_translator(tmp_path):
+    """The real ci-claude.sh feeds ONE streaming translator via fd 9."""
+    repo_root = Path(__file__).resolve().parents[3]
+    session = "6ad6e4f5-6205-8e2a-9b3c-1a2b3c4d5e6f"
+    script_copy = _prepare_script_copy(
+        tmp_path,
+        "#!/usr/bin/env bash\ncat <<'EOF'\n"
+        + '{"type":"system","subtype":"init","model":"claude-probe","session_id":"' + session + '"}\n'
+        + '{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"done"}]}}\n'
+        + '{"type":"result","subtype":"success","result":"done","session_id":"' + session + '","usage":{"input_tokens":5,"output_tokens":3}}\n'
+        + "EOF\n",
+    )
+    writer = str(repo_root / "deploy/worker-entrypoint/harness/events.py")
+    runtime_dir = tmp_path / "runtime"
+    (runtime_dir / "harness-events").mkdir(parents=True)
+    env = {
+        **os.environ,
+        "SANDBOX_MODE": "1",
+        "ARTIFACT_DIR": str(tmp_path),
+        "CI_CLAUDE_DISABLE_CONSOLE_TEE": "1",
+        "CODIFY_RUNTIME_DIR": str(runtime_dir),
+        "CODIFY_ATTEMPT_ID": "task-1-attempt-1",
+        "TASK_ID": "1",
+        "CODIFY_HARNESS_KEY": "claude",
+        "CODIFY_ADAPTER_VERSION": "1.0.0",
+        "CODIFY_CLI_VERSION": "2.1.152",
+        "CODIFY_CANONICAL_EVENT_WRITER": writer,
+        "CODIFY_HARNESS_RESULT_FILE": str(runtime_dir / "harness-result.json"),
+        "ANTHROPIC_MODEL": "claude-probe",
+        "CODIFY_CLAUDE_EVENT_TRANSLATOR": str(
+            repo_root / "deploy/worker-entrypoint/harness/adapters/claude_events.py"
+        ),
+        "CODIFY_CLAUDE_RAW_EVENT_JSONL": str(runtime_dir / "harness-events/claude.jsonl"),
+    }
+    subprocess.run(
+        [writer, "run.started", "--payload", "{}"],
+        env=env,
+        check=True,
+        capture_output=True,
+    )
+    result = subprocess.run(
+        [str(script_copy), "test prompt"],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=12,
+    )
+    assert result.returncode == 0, result.stderr
+
+    events = [
+        json.loads(line)
+        for line in (runtime_dir / "event.jsonl").read_text().splitlines()
+        if line.strip()
+    ]
+    types = [event["type"] for event in events]
+    assert "model.resolved" in types
+    assert "message.completed" in types
+    assert "harness.completed" in types
+    raw = (runtime_dir / "harness-events/claude.jsonl").read_text(encoding="utf-8")
+    assert len(raw.splitlines()) == 3
+    assert session not in raw
+    result_json = json.loads((runtime_dir / "harness-result.json").read_text(encoding="utf-8"))
+    assert result_json["session_id"] == session
+
+
 def test_ci_claude_respects_artifact_dir_env(tmp_path):
     artifact_dir = tmp_path / "artifacts"
     script_copy = _prepare_script_copy(

@@ -22,18 +22,6 @@ def _stable_placeholder(kind: str, value: str) -> str:
 
 
 _REAL_SESSION_ID: str = ""
-_REAL_SESSION_ID_FILE_NAME = ".real-session-id"
-
-
-def _real_session_id_file() -> Path:
-    return Path(os.environ["CODIFY_RUNTIME_DIR"]) / _REAL_SESSION_ID_FILE_NAME
-
-
-def _persist_real_session_id(session_id: str) -> None:
-    try:
-        _real_session_id_file().write_text(session_id, encoding="utf-8")
-    except OSError:
-        pass
 
 
 def _capture_real_session_id(raw_text: str) -> None:
@@ -42,8 +30,8 @@ def _capture_real_session_id(raw_text: str) -> None:
     UUIDs are redacted to stable ``<UUID:...>`` placeholders in events and raw
     streams, but the harness result must carry the real session id so the backend
     persists ``output_session_id`` and ``--resume`` receives a valid value. The
-    value is persisted to a side file because each stream line is translated in
-    its own subprocess; the ``result`` line must not depend on re-carrying it.
+    translator is one streaming process reading stdin to EOF, so the value lives
+    in memory; the first real id seen wins.
     """
     global _REAL_SESSION_ID
     if _REAL_SESSION_ID:
@@ -55,7 +43,6 @@ def _capture_real_session_id(raw_text: str) -> None:
     session_id = record.get("session_id")
     if isinstance(session_id, str) and session_id and "<" not in session_id:
         _REAL_SESSION_ID = session_id
-        _persist_real_session_id(session_id)
 
 
 def _session_id(record: dict) -> str | None:
@@ -66,13 +53,8 @@ def _session_id(record: dict) -> str | None:
     """
     if _REAL_SESSION_ID:
         return _REAL_SESSION_ID
-    try:
-        persisted = _real_session_id_file().read_text(encoding="utf-8").strip()
-    except OSError:
-        persisted = ""
-    if persisted and "<" not in persisted:
-        return persisted
-    return record.get("session_id")
+    value = record.get("session_id")
+    return value if isinstance(value, str) and value else None
 
 TOKEN_PATTERNS = (
     (re.compile(r"\bglpat-[A-Za-z0-9_-]{8,}\b"), "<GITLAB_TOKEN>"),
@@ -367,34 +349,40 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--raw-file", required=True, type=Path)
     args = parser.parse_args()
-    raw_input = sys.stdin.read().rstrip("\n")
-    _capture_real_session_id(raw_input)
-    input_text = sanitize(raw_input)
-    if not input_text:
-        return 0
-    try:
-        record = json.loads(input_text)
-    except json.JSONDecodeError:
-        record = None
-        raw_text = input_text
-    else:
-        record = redact_hidden_reasoning(record)
-        raw_text = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
     args.raw_file.parent.mkdir(parents=True, exist_ok=True)
+
+    line_no = 0
     with args.raw_file.open("a", encoding="utf-8") as handle:
-        handle.write(raw_text + "\n")
-    raw_line = sum(1 for _ in args.raw_file.open(encoding="utf-8"))
-    if record is None:
-        _emit(
-            "diagnostic",
-            {"code": "non_json_raw_line", "text": raw_text[:500]},
-            raw_line,
-        )
-        return 0
-    if not isinstance(record, dict):
-        _emit("diagnostic", {"code": "non_object_raw_event"}, raw_line)
-        return 0
-    translate(record, raw_line)
+        for raw_input in sys.stdin:
+            raw_input = raw_input.rstrip("\n")
+            if not raw_input.strip():
+                continue
+            _capture_real_session_id(raw_input)
+            input_text = sanitize(raw_input)
+            if not input_text:
+                continue
+            try:
+                record = json.loads(input_text)
+            except json.JSONDecodeError:
+                record = None
+                raw_text = input_text
+            else:
+                record = redact_hidden_reasoning(record)
+                raw_text = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+            handle.write(raw_text + "\n")
+            handle.flush()
+            line_no += 1
+            if record is None:
+                _emit(
+                    "diagnostic",
+                    {"code": "non_json_raw_line", "text": raw_text[:500]},
+                    line_no,
+                )
+                continue
+            if not isinstance(record, dict):
+                _emit("diagnostic", {"code": "non_object_raw_event"}, line_no)
+                continue
+            translate(record, line_no)
     return 0
 
 
