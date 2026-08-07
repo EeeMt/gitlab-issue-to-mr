@@ -1200,6 +1200,9 @@ function buildWorkerProfilePayload(): WorkerProfilePayload {
         : [],
     pre_script: workerFormValue.value.worker_pre_script,
     post_script: workerFormValue.value.worker_post_script,
+    enabled_harnesses: [...workerFormValue.value.enabled_harnesses],
+    default_harness_key: workerFormValue.value.default_harness_key,
+    harness_constraints: { ...workerFormValue.value.harness_constraints },
     default_execute_run_instruction_template:
       workerFormValue.value.default_execute_run_instruction_template,
     default_plan_run_instruction_template: workerFormValue.value.default_plan_run_instruction_template,

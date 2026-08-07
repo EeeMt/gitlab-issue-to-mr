@@ -760,11 +760,6 @@ import { useRunInstructionPreview } from '../features/tasks/useRunInstructionPre
 import { useTaskSlotCapacity } from '../features/tasks/useTaskSlotCapacity'
 import { useTaskFormSubmission } from '../features/tasks/useTaskFormSubmission'
 
-const HARNESS_WIRE_PROTOCOLS: Record<string, string> = {
-  claude: 'anthropic_messages',
-  codex: 'openai_responses',
-}
-
 function providerProtocol(provider: AIProvider): string | null {
   const protocol = provider.wire_protocol
   return typeof protocol === 'string' && protocol.trim() ? protocol.trim() : 'anthropic_messages'
@@ -775,10 +770,10 @@ function providerCompatibleWithHarness(
   harnessKey: string | null | undefined,
 ): boolean {
   if (!harnessKey) return true
-  const expected = HARNESS_WIRE_PROTOCOLS[harnessKey]
-  if (!expected) return true
-  const protocol = providerProtocol(provider)
-  return protocol === expected
+  // Harness/Endpoint compatibility is computed by the Backend
+  // (harness_registry.compatible_harness_keys); the Frontend must not
+  // reimplement the wire-protocol matrix.
+  return (provider.compatible_harnesses ?? []).includes(harnessKey)
 }
 
 function renderProviderLabel(option: SelectOption) {

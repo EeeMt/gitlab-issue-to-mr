@@ -14,7 +14,11 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config_crypto import decrypt_config_secret, encrypt_config_secret
+from app.core.config_crypto import (
+    ConfigEncryptionError,
+    decrypt_config_secret,
+    encrypt_config_secret,
+)
 from app.models import ModelCredential, TaskWorkerProfileSnapshot
 
 
@@ -58,7 +62,13 @@ async def get_credential(
 
 
 def credential_secret(credential: ModelCredential) -> str:
-    return decrypt_config_secret(credential.secret_encrypted)
+    try:
+        return decrypt_config_secret(credential.secret_encrypted)
+    except ConfigEncryptionError:
+        # Legacy plaintext migration: migration 064 copied ai_providers.api_key
+        # verbatim for keys stored before encryption existed, so the stored
+        # value may itself be the secret. Mirrors _decrypt_provider_api_key.
+        return credential.secret_encrypted
 
 
 async def soft_retire_credential(db: AsyncSession, ref: str) -> None:

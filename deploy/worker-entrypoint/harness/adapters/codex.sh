@@ -184,12 +184,15 @@ codex_adapter_normalize_result() {
         --arg harness_key codex \
         --arg adapter_version "${CODIFY_ADAPTER_VERSION}" \
         --arg cli_version "${CODIFY_CLI_VERSION}" \
-        '{schema:"codify.worker.result/v1",status:"completed",success:true,result:"",
-          harness_key:$harness_key,adapter_version:$adapter_version,cli_version:$cli_version,
-          session_id:null,model:null,
-          usage:{input_tokens:null,cached_input_tokens:null,output_tokens:null,reasoning_tokens:null,cost:null,currency:null,engine_fields:{}},
-          failure:null,capability_warnings:[]}' \
-        "${authoritative}" >/dev/null 2>&1 || return 1
+        '.schema == "codify.worker.result/v1"
+         and .harness_key == $harness_key
+         and .adapter_version == $adapter_version
+         and .cli_version == $cli_version
+         and (.status | IN("completed", "failed", "cancelled", "protocol_error"))
+         and (.success | type == "boolean")
+         and (.usage | type == "object")
+         and (.capability_warnings | type == "array")' \
+        "${authoritative}" >/dev/null || return 1
     return 0
 }
 

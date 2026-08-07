@@ -13,6 +13,7 @@ from app.core.config_crypto import (
     decrypt_config_secret,
     encrypt_config_secret,
 )
+from app.core.harness_registry import compatible_harness_keys
 from app.core.model_credentials import (
     CredentialError,
     create_model_credential,
@@ -232,6 +233,9 @@ def _serialize_provider(
         "system_prompt": provider.system_prompt,
         "provider_kind": getattr(provider, "provider_kind", "anthropic_compatible"),
         "wire_protocol": getattr(provider, "wire_protocol", "anthropic_messages"),
+        "compatible_harnesses": compatible_harness_keys(
+            getattr(provider, "wire_protocol", "anthropic_messages")
+        ),
         "provider_driver": getattr(provider, "provider_driver", None),
         "provider_options": getattr(provider, "provider_options", None) or {},
         "credential_ref": getattr(provider, "credential_ref", None),

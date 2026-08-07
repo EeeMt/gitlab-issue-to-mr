@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 
 _REAL_THREAD_ID: str = ""
 _REAL_THREAD_ID_FILE_NAME = ".real-thread-id"
+_THREAD_ID_FALLBACK_FILE_NAME = ".thread-id-fallback"
 _LAST_ASSISTANT_TEXT_FILE_NAME = ".last-assistant-text"
 
 
@@ -70,7 +71,79 @@ def _thread_id(record: dict) -> str | None:
         persisted = ""
     if persisted and "<" not in persisted:
         return persisted
+    try:
+        fallback = _side_file(_THREAD_ID_FALLBACK_FILE_NAME).read_text(encoding="utf-8").strip()
+    except OSError:
+        fallback = ""
+    if fallback:
+        return fallback
     return record.get("thread_id")
+
+
+_RETRY_COUNT_FILE_NAME = ".codex-retry-count"
+_MODEL_RESOLVED_FILE_NAME = ".codex-model-resolved"
+_HARNESS_COMPLETED_FILE_NAME = ".codex-harness-completed"
+
+
+def _side_file(name: str) -> Path:
+    return Path(os.environ["CODIFY_RUNTIME_DIR"]) / name
+
+
+def _next_retry_attempt() -> int:
+    """1-based provider retry count persisted across per-line subprocesses."""
+    path = _side_file(_RETRY_COUNT_FILE_NAME)
+    try:
+        count = int(path.read_text(encoding="utf-8").strip() or "0")
+    except (OSError, ValueError):
+        count = 0
+    count += 1
+    try:
+        path.write_text(str(count), encoding="utf-8")
+    except OSError:
+        pass
+    return count
+
+
+def _first_thread_in_stream() -> bool:
+    """True on the first thread.started; later ones are resumed evidence."""
+    path = _side_file(_MODEL_RESOLVED_FILE_NAME)
+    if path.exists():
+        return False
+    try:
+        path.write_text("1", encoding="utf-8")
+    except OSError:
+        pass
+    return True
+
+
+def _harness_completed_emitted() -> bool:
+    """True once harness.completed has been emitted for this stream."""
+    path = _side_file(_HARNESS_COMPLETED_FILE_NAME)
+    if path.exists():
+        return True
+    try:
+        path.write_text("1", encoding="utf-8")
+    except OSError:
+        pass
+    return False
+
+
+_MASKED_KEY_TAIL = re.compile(r"\*\*\*\*[A-Za-z0-9_-]{2,}")
+
+
+def _clean_message(text: str) -> str:
+    return _MASKED_KEY_TAIL.sub("<MASKED_KEY>", str(text))
+
+
+def _failure_kind(message: str) -> str:
+    lowered = str(message).lower()
+    if "401" in lowered or "unauthorized" in lowered or "authentication" in lowered:
+        return "authentication_error"
+    if "429" in lowered or "rate limit" in lowered or "too many requests" in lowered:
+        return "rate_limited"
+    if "sandbox" in lowered or "permission denied" in lowered:
+        return "sandbox_error"
+    return "engine_error"
 
 
 def _stable_placeholder(kind: str, value: str) -> str:
@@ -201,9 +274,41 @@ def translate(record: dict, raw_line: int) -> None:
             global _REAL_THREAD_ID
             _REAL_THREAD_ID = thread_id
             _persist_real_thread_id(thread_id)
+        resolved = _thread_id(record)
+        if resolved:
+            try:
+                _side_file(_THREAD_ID_FALLBACK_FILE_NAME).write_text(resolved, encoding="utf-8")
+            except OSError:
+                pass
+        if _first_thread_in_stream():
+            _emit(
+                "model.resolved",
+                {"model": os.environ.get("ANTHROPIC_MODEL") or None, "session_id": _thread_id(record)},
+                raw_line,
+            )
+        else:
+            _emit(
+                "diagnostic",
+                {"code": "session_resumed", "session_id": _thread_id(record)},
+                raw_line,
+            )
+    elif record_type == "turn.started":
+        return
+    elif record_type == "error":
         _emit(
-            "model.resolved",
-            {"model": os.environ.get("ANTHROPIC_MODEL") or None, "session_id": _thread_id(record)},
+            "provider.retry",
+            {
+                "attempt": _next_retry_attempt(),
+                "failure_kind": _failure_kind(record.get("message") or ""),
+            },
+            raw_line,
+        )
+    elif record_type == "turn.failed":
+        error = record.get("error") if isinstance(record.get("error"), dict) else {}
+        message = _clean_message(str(error.get("message") or "Codex turn failed"))
+        _emit(
+            "harness.failed",
+            {"failure": {"kind": _failure_kind(message), "message": message}},
             raw_line,
         )
     elif record_type == "item.started":
@@ -240,16 +345,34 @@ def translate(record: dict, raw_line: int) -> None:
                 {"message_id": item.get("id"), "text": text},
                 raw_line,
             )
+        elif item_type == "error":
+            message = _clean_message(str(item.get("message") or ""))
+            if "compaction" in message.lower():
+                _emit(
+                    "context.compacted",
+                    {"evidence": "cli_compaction_advisory"},
+                    raw_line,
+                )
+            else:
+                _emit(
+                    "diagnostic",
+                    {"code": "capability_warning", "message": message},
+                    raw_line,
+                )
     elif record_type == "turn.completed":
         usage = _usage(record)
         _emit("usage.final", {"usage": usage}, raw_line)
         thread_id = _thread_id(record)
         final_result = _last_assistant_text()
-        _emit(
-            "harness.completed",
-            {"result": final_result, "session_id": thread_id},
-            raw_line,
-        )
+        # Codex may compact and start a second turn inside one exec; the
+        # canonical stream allows exactly one harness terminal. Persist the
+        # latest result and session, but only emit harness.completed once.
+        if not _harness_completed_emitted():
+            _emit(
+                "harness.completed",
+                {"result": final_result, "session_id": thread_id},
+                raw_line,
+            )
         _write_result(record, success=True, result=final_result, usage=usage)
     else:
         _emit("diagnostic", {"code": "unknown_raw_event", "type": record_type}, raw_line)

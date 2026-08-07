@@ -8,6 +8,7 @@ from app.core.harness_registry import (
     HARNESS_KEYS,
     HarnessRegistryError,
     capability_policy,
+    compatible_harness_keys,
     harness_options,
     validate_enabled_harnesses,
     validate_harness_constraints,
@@ -20,6 +21,14 @@ from app.core.harness_registry import (
 
 def test_registry_knows_claude_and_codex():
     assert HARNESS_KEYS == {"claude", "codex"}
+
+
+def test_compatible_harness_keys_reverse_lookup():
+    assert compatible_harness_keys("anthropic_messages") == ["claude"]
+    assert compatible_harness_keys("openai_responses") == ["codex"]
+    assert compatible_harness_keys(None) == ["claude"]
+    assert compatible_harness_keys("openai_chat_completions") == []
+    assert compatible_harness_keys("") == ["claude"]
 
 
 def test_validate_harness_key_accepts_known_and_rejects_unknown():

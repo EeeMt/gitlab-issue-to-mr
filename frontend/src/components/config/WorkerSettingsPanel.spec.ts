@@ -689,6 +689,42 @@ describe('WorkerSettingsPanel', () => {
     )
   })
 
+  it('loads and saves the enabled/default harness fields', async () => {
+    mockGetAdminWorkerProfiles.mockResolvedValueOnce([
+      createWorkerProfile({
+        enabled_harnesses: ['claude'],
+        default_harness_key: 'claude',
+        harness_constraints: {}
+      })
+    ])
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: {
+        isMobile: false,
+        reloadKey: 0
+      }
+    })
+
+    await flushPromises()
+
+    const vm = wrapper.vm as any
+    expect(vm.workerFormValue.enabled_harnesses).toEqual(['claude'])
+    expect(vm.workerFormValue.default_harness_key).toBe('claude')
+
+    vm.workerFormValue.enabled_harnesses = ['claude', 'codex']
+    vm.workerFormValue.default_harness_key = 'codex'
+    vm.workerFormValue.harness_constraints = { sandbox_mode: 'container-boundary' }
+    await vm.handleSaveWorker()
+
+    expect(mockUpdateWorkerProfile).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        enabled_harnesses: ['claude', 'codex'],
+        default_harness_key: 'codex',
+        harness_constraints: { sandbox_mode: 'container-boundary' }
+      })
+    )
+  })
+
   it('clears worker kit coordinates when saving baked image mode', async () => {
     mockGetAdminWorkerProfiles.mockResolvedValueOnce([
       createWorkerProfile({

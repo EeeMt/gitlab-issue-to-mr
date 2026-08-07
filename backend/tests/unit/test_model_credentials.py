@@ -26,9 +26,28 @@ from app.core.model_credentials import (  # noqa: E402
 )
 from app.models import (  # noqa: E402
     Base,
+    ModelCredential,
     Task,
     TaskWorkerProfileSnapshot,
 )
+
+
+async def test_legacy_plaintext_secret_resolves_like_encrypted(session_factory):
+    # migration 064 copies ai_providers.api_key verbatim; keys stored before
+    # encryption existed are plaintext in secret_encrypted. credential_secret
+    # must fall back to the raw value instead of failing to decrypt.
+    async with session_factory() as db:
+        credential = ModelCredential(
+            name="legacy provider credential",
+            ref="cred-legacy-plain",
+            secret_encrypted="sk-legacy-plaintext-key",
+            kind="api_key",
+            status="active",
+        )
+        db.add(credential)
+        await db.flush()
+        resolved = await resolve_task_credential(db, credential.ref)
+        assert resolved["secret"] == "sk-legacy-plaintext-key"
 
 
 @pytest_asyncio.fixture

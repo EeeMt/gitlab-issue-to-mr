@@ -190,6 +190,7 @@ export interface AIProvider {
   api_key_configured: boolean
   provider_kind?: string
   wire_protocol?: string
+  compatible_harnesses?: string[]
   provider_driver?: string | null
   provider_options?: Record<string, unknown>
   credential_ref?: string | null
@@ -299,6 +300,9 @@ export interface WorkerProfilePayload {
   default_skill_ids?: number[]
   pre_script?: string
   post_script?: string
+  enabled_harnesses?: string[]
+  default_harness_key?: string
+  harness_constraints?: Record<string, unknown>
   default_execute_run_instruction_template?: string
   default_plan_run_instruction_template?: string
   ci_auto_repair_run_instruction_template?: string

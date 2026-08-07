@@ -8,12 +8,33 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from app.core.harness_protocol import replay_events, validate_event, validate_result
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 HARNESS_DIR = REPO_ROOT / "deploy/worker-entrypoint/harness"
 TRANSLATOR = HARNESS_DIR / "adapters/codex_events.py"
 EVENT_WRITER = HARNESS_DIR / "events.py"
+FIXTURE_ROOT = REPO_ROOT / "backend/tests/fixtures/harness_events/codex"
+FORBIDDEN_CANONICAL_KEYS = {
+    "subtype",
+    "thread_id",
+    "turn_id",
+    "item_id",
+    "raw_type",
+    "raw_subtype",
+    "thinking",
+    "chain_of_thought",
+    "hidden_reasoning",
+}
+
+# The mapper emits harness.completed only on the LAST turn of a multi-turn
+# stream; the streaming translator emits it on the first turn.completed and
+# skips later ones. context_compaction is the one multi-turn fixture, so it is
+# exercised by the failure/taxonomy assertions but excluded from exact-prefix
+# comparison.
+EXACT_PREFIX_EXCLUDED = {"context_compaction"}
 
 
 def _environment(runtime_dir: Path) -> dict[str, str]:
@@ -272,3 +293,113 @@ def test_codex_verify_runtime_enforces_frozen_cli_binary_digest(tmp_path):
     bad = _codex_verify_runtime(tmp_path, cli, "0" * 64)
     assert bad.returncode != 0
     assert "digest mismatch" in bad.stderr
+
+
+def _walk_keys(value):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            yield key
+            yield from _walk_keys(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _walk_keys(child)
+
+
+def _jsonl(path: Path) -> list[dict]:
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+def _semantic(event: dict) -> dict:
+    return {
+        "type": event["type"],
+        "payload": event["payload"],
+        "raw_ref": event.get("raw_ref"),
+    }
+
+
+def _translate_raw_stream(runtime_dir: Path, raw_records: list[dict]) -> None:
+    raw_file = runtime_dir / "harness-events/codex.jsonl"
+    raw_file.parent.mkdir(parents=True, exist_ok=True)
+    raw_file.touch(exist_ok=True)
+    for record in raw_records:
+        subprocess.run(
+            ["python3", str(TRANSLATOR), "--raw-file", str(raw_file)],
+            input=json.dumps(record),
+            check=True,
+            env=_environment(runtime_dir),
+            capture_output=True,
+            text=True,
+        )
+
+
+@pytest.mark.parametrize(
+    "scenario_dir",
+    sorted(path for path in FIXTURE_ROOT.iterdir() if path.is_dir()),
+    ids=lambda path: path.name,
+)
+def test_codex_fixture_stream_translates_to_canonical_events(tmp_path, scenario_dir):
+    runtime_dir = tmp_path / scenario_dir.name
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    raw_records = _jsonl(scenario_dir / "stdout.jsonl")
+    _translate_raw_stream(runtime_dir, raw_records)
+
+    translated = _events(runtime_dir)
+    for event in translated:
+        validate_event(event)
+    assert not (FORBIDDEN_CANONICAL_KEYS & set(_walk_keys(translated)))
+
+    expected = _jsonl(scenario_dir / "expected-canonical.jsonl")
+    if scenario_dir.name not in EXACT_PREFIX_EXCLUDED:
+        assert [_semantic(event) for event in translated] == [
+            _semantic(event) for event in expected[: len(translated)]
+        ]
+
+    terminal_types = {event["type"] for event in translated}
+    # A turn.failed raw record must produce a classified harness.failed, not a
+    # generic protocol_error/engine_error synthesized by the runner.
+    if any(record.get("type") == "turn.failed" for record in raw_records):
+        harness_failed = [e for e in translated if e["type"] == "harness.failed"]
+        assert harness_failed, f"{scenario_dir.name} should emit harness.failed"
+        metadata = json.loads((scenario_dir / "metadata.json").read_text())
+        assert metadata["expected_harness_result"] == "harness.failed"
+    if any(record.get("type") == "turn.completed" for record in raw_records):
+        assert (
+            sum(event["type"] == "harness.completed" for event in translated) == 1
+        ), "exactly one harness.completed per stream"
+
+    # Sanitized raw archive keeps the same line count and no masked secret tail
+    # ("****tial") leaks into the canonical stream.
+    archived = (runtime_dir / "harness-events/codex.jsonl").read_text(encoding="utf-8")
+    assert len(archived.splitlines()) == len(raw_records)
+    assert "****" not in json.dumps(translated, ensure_ascii=False)
+
+
+def test_codex_authentication_failure_preserves_failure_taxonomy(tmp_path):
+    runtime_dir = tmp_path / "auth"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    _translate_raw_stream(
+        runtime_dir,
+        _jsonl(FIXTURE_ROOT / "authentication_failure" / "stdout.jsonl"),
+    )
+    translated = _events(runtime_dir)
+    assert [event["type"] for event in translated].count("provider.retry") == 6
+    terminal = translated[-1]
+    assert terminal["type"] == "harness.failed"
+    assert terminal["payload"]["failure"]["kind"] == "authentication_error"
+
+
+def test_codex_rate_limited_preserves_failure_taxonomy(tmp_path):
+    runtime_dir = tmp_path / "rate"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    _translate_raw_stream(
+        runtime_dir,
+        _jsonl(FIXTURE_ROOT / "rate_limited" / "stdout.jsonl"),
+    )
+    translated = _events(runtime_dir)
+    assert [event["type"] for event in translated].count("provider.retry") == 1
+    terminal = translated[-1]
+    assert terminal["type"] == "harness.failed"
+    assert terminal["payload"]["failure"]["kind"] == "rate_limited"

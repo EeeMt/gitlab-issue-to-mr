@@ -79,7 +79,12 @@ ARGS+=(
 if [ -n "${HARNESS_HOST_PATH}" ]; then
     case "${HARNESS_KEY}" in
         claude) ARGS+=(--env "CODIFY_CLAUDE_BIN=${HARNESS_CONTAINER_PATH}") ;;
-        codex) ARGS+=(--env "CODIFY_CODEX_BIN=${HARNESS_CONTAINER_PATH}") ;;
+        codex)
+            ARGS+=(
+                --env "CODIFY_CODEX_BIN=${HARNESS_CONTAINER_PATH}"
+                --env "CODIFY_HARNESS_CLI_BIN=${HARNESS_CONTAINER_PATH}"
+            )
+            ;;
     esac
 fi
 ARGS+=("${IMAGE}" --verify)

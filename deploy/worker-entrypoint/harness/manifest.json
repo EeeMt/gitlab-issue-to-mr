@@ -25,7 +25,7 @@
       "provider_protocols": ["openai-responses"],
       "capabilities": {
         "resume": true,
-        "task_skills": false,
+        "task_skills": true,
         "max_turns": false,
         "usage_tokens": true,
         "usage_cost": true,

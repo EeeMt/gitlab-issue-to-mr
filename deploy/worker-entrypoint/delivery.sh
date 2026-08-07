@@ -51,7 +51,7 @@ run_mermaid_summary_validation() {
         return 0
     fi
 
-    if [ ! -x "${validator}" ] && [ ! -f "${validator}" ]; then
+    if [ ! -x "${validator}" ]; then
         jq -nc '{ok: false, diagramCount: 0, errors: [{index: null, message: "Mermaid validator unavailable", source: ""}], skipped: true, reason: "validator_unavailable"}' > "${output_file}"
         return 1
     fi

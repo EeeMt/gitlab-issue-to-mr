@@ -214,6 +214,24 @@ class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
         assert cursor.last_sequence_no == 1
         assert cursor.last_offset == len(complete.encode())
 
+    async def test_tail_survives_torn_final_line_with_split_multibyte_char(self):
+        async with self.session_factory() as db:
+            await self._setup_attempt(db)
+            cursor = TaskIngestCursor(task_id=1, stream_name="event_jsonl")
+            db.add(cursor)
+            await db.flush()
+            complete = (json.dumps(self._event(1, "run.started"), separators=(",", ":")) + "\n").encode()
+            # "你" is 3 UTF-8 bytes; drop the final byte so the tail ends with a
+            # split multi-byte character (a crash mid-write).
+            torn = ('{"type":"message.delta","payload":{"text":"' + "你").encode()[:-1]
+            container = MagicMock()
+            container.exec_run.return_value = MagicMock(exit_code=0, output=complete + torn)
+            executor = WorkerExecutor(docker_client=MagicMock(), gitlab_client=MagicMock())
+            await executor._tail_event_jsonl(task_id=1, container=container, db=db)
+        assert cursor.attempt_id == "task-1-attempt-1"
+        assert cursor.last_sequence_no == 1
+        assert cursor.last_offset == len(complete)
+
     async def test_raw_claude_record_is_rejected_by_backend(self):
         async with self.session_factory() as db:
             await self._setup_attempt(db)

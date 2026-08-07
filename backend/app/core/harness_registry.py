@@ -44,7 +44,7 @@ SYSTEM_CAPABILITIES: dict[str, dict[str, Any]] = {
         "max_turns": False,
         "usage_tokens": True,
         "usage_cost": True,
-        "run_text": True,
+        "run_text": False,
         "codegraph": False,
         "sandbox_mode": "container-boundary",
     },
@@ -183,6 +183,22 @@ def validate_protocol_compatibility(harness_key: str, wire_protocol: str) -> Non
         raise HarnessRegistryError(
             f"harness {harness_key!r} cannot consume wire protocol {wire_protocol!r}"
         )
+
+
+def compatible_harness_keys(wire_protocol: str | None) -> list[str]:
+    """Harness keys whose Adapter can consume the given wire protocol.
+
+    Backend-computed reverse lookup so the Frontend never reimplements the
+    harness/Endpoint compatibility matrix. A null protocol defaults to the
+    legacy Claude wire protocol, matching endpoint normalization.
+    """
+    if not wire_protocol:
+        wire_protocol = "anthropic_messages"
+    return sorted(
+        key
+        for key, protocols in HARNESS_PROVIDER_PROTOCOLS.items()
+        if wire_protocol in protocols
+    )
 
 
 def validate_runtime_bundle_manifest(manifest: dict[str, Any]) -> None:
