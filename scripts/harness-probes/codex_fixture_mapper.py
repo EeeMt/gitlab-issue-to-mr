@@ -30,6 +30,7 @@ FAILURE_KIND = {
     "sigterm": "cancelled",
     "sigkill": "protocol_error",
     "cancelled": "cancelled",
+    "turn_failed_after_completion": "engine_error",
 }
 
 
@@ -79,6 +80,16 @@ def build_expected(scenario_dir: Path) -> list[dict]:
     last_turn_completed = max(
         (index for index, record in enumerate(records, start=1) if record.get("type") == "turn.completed"),
         default=None,
+    )
+    # The harness terminal is the LAST turn-terminal record in the stream: a
+    # turn.failed after the last completed turn is authoritative (the agent did
+    # not finish), mirroring the production adapter's stream-end decision.
+    last_turn_failed = max(
+        (index for index, record in enumerate(records, start=1) if record.get("type") == "turn.failed"),
+        default=None,
+    )
+    failed_turn_is_terminal = last_turn_failed is not None and (
+        last_turn_completed is None or last_turn_failed > last_turn_completed
     )
 
     def add(event_type: str, payload: dict | None = None, raw_line: int | None = None) -> None:
@@ -184,7 +195,7 @@ def build_expected(scenario_dir: Path) -> list[dict]:
                 )
         elif record_type == "turn.completed":
             add("usage.final", {"usage": _usage(record.get("usage") or {})}, line_number)
-            if line_number == last_turn_completed:
+            if line_number == last_turn_completed and not failed_turn_is_terminal:
                 add(
                     "harness.completed",
                     {"session_id": session_id, "result": final_message},
@@ -194,13 +205,20 @@ def build_expected(scenario_dir: Path) -> list[dict]:
         elif record_type == "turn.failed":
             error = record.get("error") if isinstance(record.get("error"), dict) else {}
             message = _clean_message(str(error.get("message") or "Codex turn failed"))
-            kind = _failure_kind(scenario, message)
-            add(
-                "harness.failed",
-                {"failure": {"kind": kind, "message": message}},
-                line_number,
-            )
-            harness_terminal = True
+            if line_number == last_turn_failed and failed_turn_is_terminal:
+                kind = _failure_kind(scenario, message)
+                add(
+                    "harness.failed",
+                    {"failure": {"kind": kind, "message": message}},
+                    line_number,
+                )
+                harness_terminal = True
+            else:
+                add(
+                    "diagnostic",
+                    {"code": "post_completion_turn_failed", "message": message},
+                    line_number,
+                )
         else:
             add("diagnostic", {"code": "unknown_raw_event"}, line_number)
 

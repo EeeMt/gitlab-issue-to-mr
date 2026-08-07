@@ -29,13 +29,6 @@ FORBIDDEN_CANONICAL_KEYS = {
     "hidden_reasoning",
 }
 
-# The mapper emits harness.completed only on the LAST turn of a multi-turn
-# stream; the streaming translator emits it on the first turn.completed and
-# skips later ones. context_compaction is the one multi-turn fixture, so it is
-# exercised by the failure/taxonomy assertions but excluded from exact-prefix
-# comparison.
-EXACT_PREFIX_EXCLUDED = {"context_compaction"}
-
 
 def _environment(runtime_dir: Path) -> dict[str, str]:
     return {
@@ -84,30 +77,17 @@ def _events(runtime_dir: Path) -> list[dict]:
 
 def test_codex_stream_maps_to_canonical_events(tmp_path):
     _emit(tmp_path, "run.started", {"runtime_bundle_digest": "d" * 64})
-    _translate(
-        tmp_path,
+    _translate_raw_stream(tmp_path, [
         {"thread_id": "6ad6e4f5-6205-8e2a-9b3c-1a2b3c4d5e6f", "type": "thread.started"},
-    )
-    _translate(
-        tmp_path,
         {"type": "item.started", "item": {
             "id": "item_0", "type": "command_execution", "command": "printf OK"}},
-    )
-    _translate(
-        tmp_path,
         {"type": "item.completed", "item": {
             "id": "item_0", "type": "command_execution",
             "aggregated_output": "OK", "exit_code": 0}},
-    )
-    _translate(
-        tmp_path,
         {"type": "item.completed", "item": {"id": "item_1", "type": "agent_message", "text": "done"}},
-    )
-    _translate(
-        tmp_path,
         {"type": "turn.completed", "usage": {
             "input_tokens": 10, "output_tokens": 4, "reasoning_output_tokens": 2}},
-    )
+    ])
     _emit(tmp_path, "delivery.started")
     _emit(tmp_path, "delivery.completed")
     _emit(tmp_path, "worker.finalization", {"exit_code": 0})
@@ -321,15 +301,18 @@ def _translate_raw_stream(runtime_dir: Path, raw_records: list[dict]) -> None:
     raw_file = runtime_dir / "harness-events/codex.jsonl"
     raw_file.parent.mkdir(parents=True, exist_ok=True)
     raw_file.touch(exist_ok=True)
-    for record in raw_records:
-        subprocess.run(
-            ["python3", str(TRANSLATOR), "--raw-file", str(raw_file)],
-            input=json.dumps(record),
-            check=True,
-            env=_environment(runtime_dir),
-            capture_output=True,
-            text=True,
-        )
+    payload = "".join(
+        json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
+        for record in raw_records
+    )
+    subprocess.run(
+        ["python3", str(TRANSLATOR), "--raw-file", str(raw_file)],
+        input=payload,
+        check=True,
+        env=_environment(runtime_dir),
+        capture_output=True,
+        text=True,
+    )
 
 
 @pytest.mark.parametrize(
@@ -350,23 +333,34 @@ def test_codex_fixture_stream_translates_to_canonical_events(tmp_path, scenario_
     assert not (FORBIDDEN_CANONICAL_KEYS & set(_walk_keys(translated)))
 
     expected = _jsonl(scenario_dir / "expected-canonical.jsonl")
-    if scenario_dir.name not in EXACT_PREFIX_EXCLUDED:
-        assert [_semantic(event) for event in translated] == [
-            _semantic(event) for event in expected[: len(translated)]
-        ]
+    # The streaming translator emits the single harness terminal at stream end
+    # from the LAST turn-terminal record, matching the mapper. The exact prefix
+    # of the canonical attempt must match, including multi-turn streams
+    # (context_compaction).
+    assert [_semantic(event) for event in translated] == [
+        _semantic(event) for event in expected[: len(translated)]
+    ]
 
-    terminal_types = {event["type"] for event in translated}
-    # A turn.failed raw record must produce a classified harness.failed, not a
-    # generic protocol_error/engine_error synthesized by the runner.
-    if any(record.get("type") == "turn.failed" for record in raw_records):
-        harness_failed = [e for e in translated if e["type"] == "harness.failed"]
-        assert harness_failed, f"{scenario_dir.name} should emit harness.failed"
-        metadata = json.loads((scenario_dir / "metadata.json").read_text())
-        assert metadata["expected_harness_result"] == "harness.failed"
-    if any(record.get("type") == "turn.completed" for record in raw_records):
-        assert (
-            sum(event["type"] == "harness.completed" for event in translated) == 1
-        ), "exactly one harness.completed per stream"
+    metadata = json.loads((scenario_dir / "metadata.json").read_text())
+    # Only scenarios whose raw contains a turn-terminal record get the terminal
+    # from the translator; killed/no-terminal scenarios have it synthesized by
+    # the runner from process evidence.
+    if any(
+        record.get("type") in ("turn.completed", "turn.failed") for record in raw_records
+    ):
+        assert translated[-1]["type"] == metadata["expected_harness_result"]
+
+    # The result file written by the translator is the adapter's exit-decision
+    # source and must agree with the metadata's expected outcome.
+    result_file = runtime_dir / "harness-result.json"
+    if metadata["expected_harness_result"] == "harness.completed":
+        result = json.loads(result_file.read_text(encoding="utf-8"))
+        assert result.get("status") == "completed"
+        assert result.get("success") is True
+    elif any(record.get("type") == "turn.failed" for record in raw_records):
+        result = json.loads(result_file.read_text(encoding="utf-8"))
+        assert result.get("status") == "failed"
+        assert result.get("success") is False
 
     # Sanitized raw archive keeps the same line count and no masked secret tail
     # ("****tial") leaks into the canonical stream.
@@ -384,6 +378,8 @@ def test_codex_authentication_failure_preserves_failure_taxonomy(tmp_path):
         _jsonl(FIXTURE_ROOT / "authentication_failure" / "stdout.jsonl"),
     )
     translated = _events(runtime_dir)
+    # provider.retry streams in real time; the classified failure becomes the
+    # harness.failed terminal emitted by the translator at stream end.
     assert [event["type"] for event in translated].count("provider.retry") == 6
     terminal = translated[-1]
     assert terminal["type"] == "harness.failed"
@@ -403,3 +399,23 @@ def test_codex_rate_limited_preserves_failure_taxonomy(tmp_path):
     terminal = translated[-1]
     assert terminal["type"] == "harness.failed"
     assert terminal["payload"]["failure"]["kind"] == "rate_limited"
+
+
+def test_codex_turn_failed_after_completion_is_the_terminal(tmp_path):
+    # A turn.failed after a completed turn overrides the earlier success: the
+    # harness terminal is harness.failed, never harness.completed.
+    runtime_dir = tmp_path / "completion"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    _translate_raw_stream(
+        runtime_dir,
+        _jsonl(FIXTURE_ROOT / "turn_failed_after_completion" / "stdout.jsonl"),
+    )
+    translated = _events(runtime_dir)
+    types = [event["type"] for event in translated]
+    assert types.count("harness.completed") == 0
+    assert types.count("harness.failed") == 1
+    terminal = translated[-1]
+    assert terminal["type"] == "harness.failed"
+    assert terminal["payload"]["failure"]["kind"] == "engine_error"
+    assert terminal["raw_ref"]["line"] == 9

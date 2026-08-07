@@ -58,28 +58,33 @@ else
 fi
 codex_pid=$!
 
-# Root context drains the FIFO line-by-line through the translator so canonical
-# events and the raw audit file stay root-owned (the model cannot rewrite them).
-while IFS= read -r line; do
-    printf '%s\n' "${line}" \
-        | python3 "${CODIFY_CODEX_EVENT_TRANSLATOR}" --raw-file "${CODIFY_CODEX_RAW_EVENT_JSONL}"
-done < "${STREAM_FIFO}"
+# Root context drains the FIFO through the translator as ONE streaming process
+# so canonical events and the raw audit file stay root-owned (the model cannot
+# rewrite them) and all cross-record state lives in translator memory. The
+# translator emits the single harness terminal at stream end.
+python3 "${CODIFY_CODEX_EVENT_TRANSLATOR}" --raw-file "${CODIFY_CODEX_RAW_EVENT_JSONL}" < "${STREAM_FIFO}"
 wait "${codex_pid}"
 exit_code=$?
 set -e
 
-# The canonical result is authoritative: when a turn completed, the translator
-# already persisted a successful harness result. codex may exit non-zero due to
-# benign per-item errors (e.g. fallback model metadata) even after a completed
-# turn; returning 0 lets the shared delivery commit the agent's changes. Emit
-# the canonical result on stdout (the same contract as the Claude runner) so
-# main.sh can read `.result` for the delivery summary and commit prompts.
-if grep -q '"turn.completed"' "${CODIFY_CODEX_RAW_EVENT_JSONL}" 2>/dev/null; then
-    CODIFY_HARNESS_RESULT_FILE="${CODIFY_HARNESS_RESULT_FILE:-${CODIFY_RUNTIME_DIR}/harness-result.json}"
-    if [ -s "${CODIFY_HARNESS_RESULT_FILE}" ]; then
-        cat "${CODIFY_HARNESS_RESULT_FILE}"
-    fi
-    exit 0
+# Stream the authoritative result on stdout (the same contract as the Claude
+# runner) so main.sh can read `.result` for the delivery summary and commit
+# prompts, then decide the exit code from the result status.
+CODIFY_HARNESS_RESULT_FILE="${CODIFY_HARNESS_RESULT_FILE:-${CODIFY_RUNTIME_DIR}/harness-result.json}"
+result_status="$(jq -r '.status // empty' "${CODIFY_HARNESS_RESULT_FILE}" 2>/dev/null || true)"
+if [ -n "${result_status}" ] && [ -s "${CODIFY_HARNESS_RESULT_FILE}" ]; then
+    cat "${CODIFY_HARNESS_RESULT_FILE}"
 fi
+case "${result_status}" in
+    completed)
+        # codex may still exit non-zero on benign per-item errors after a
+        # completed turn; a completed turn is authoritative for delivery.
+        exit 0
+        ;;
+    failed)
+        # A failed turn means the agent did not finish its work: the attempt fails.
+        exit 1
+        ;;
+esac
 
 exit "${exit_code}"

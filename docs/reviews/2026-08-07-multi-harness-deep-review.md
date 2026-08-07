@@ -29,8 +29,8 @@
 - **证据**: 用真实 fixture `codex/authentication_failure/stdout.jsonl` 复现——修复前 translator 产出 10 条 `diagnostic`,无 `provider.retry`、无 `harness.failed`;最终任务只能以 runner 合成的 `protocol_error` 失败,丢失 auth/rate-limit 分类,UI/分析无法区分。
 - **影响**: codex 认证失败/限流等被错误归类为通用 `protocol_error`/`engine_error`;fixtures 描述的失败分类生产代码无法产出。
 - **修复**: 增加 `error → provider.retry`(侧文件计数)、`turn.failed → harness.failed`(按消息分类:401/429/sandbox)、`item.completed error → context.compacted/capability_warning`、`turn.started` 跳过、第二次 `thread.started → diagnostic(session_resumed)`;`harness.completed` 增加幂等守卫(多 turn 不再崩溃)。
-- **测试**: 新增 `test_codex_fixture_stream_translates_to_canonical_events`(16 场景参数化,15 场景精确前缀匹配,context_compaction 因多 turn 流式限制单独说明)+ `test_codex_authentication_failure_preserves_failure_taxonomy` + `test_codex_rate_limited_preserves_failure_taxonomy`。修复后全部 27 条 codex adapter 测试通过。
-- **已知偏离(未修)**: `context_compaction` 多 turn 场景下,流式 translator 在第一个 turn 发 `harness.completed`,fixture mapper 在最后一个 turn 发。需要流式前瞻能力,超出本次修复范围,已记录为注释。
+- **测试**: 新增 `test_codex_fixture_stream_translates_to_canonical_events`(17 场景参数化,全部精确前缀匹配)+ `test_codex_authentication_failure_preserves_failure_taxonomy` + `test_codex_rate_limited_preserves_failure_taxonomy`。修复后全部 31 条 codex adapter 测试通过。
+- **多 turn 语义(第三轮修复)**: 将 codex harness 终态**推迟到流结束**由 adapter 补发(`codex_adapter_emit_terminal`),使"最后 turn 的成败为准"。`turn.completed → turn.failed` 判定为**失败**(harness.failed + run.failed),对齐"绝不猜测成功"。这同时修掉了 context_compaction 的多 turn 偏离(现在在最后一个 turn 发 harness.completed)。新增合成 fixture `turn_failed_after_completion` 钉死该语义(见下)。
 
 ### 2. WorkerSettingsPanel harness 字段保存丢失 —— 已修复
 - **位置**: `frontend/src/components/config/WorkerSettingsPanel.vue` `buildWorkerProfilePayload()`;`frontend/src/api/index.ts` `WorkerProfilePayload`
@@ -124,8 +124,7 @@
 ## 未修复项后续建议
 
 1. **cli_version_range 运行时强制**(P2)建议补进 adapter `verify_runtime`,与 digest 校验并列。
-2. **多 turn harness.completed 语义**(context_compaction 偏离)建议在 Codex 深度验证时评估是否需要流式前瞻或改为 runner 侧合成。
-3. **session_namespace 增加认证域/工作区输入**(P2)若多凭据/多认证域场景上线,需补全 namespace 输入。
+2. **session_namespace 增加认证域/工作区输入**(P2)若多凭据/多认证域场景上线,需补全 namespace 输入。
 
 ## 第二轮修复(2026-08-07,用户指定)
 
@@ -135,3 +134,14 @@
 - **projector strict-decode**: 两处 `errors="strict"` → `errors="replace"`。
 
 第二轮修复后验证: backend **2293 passed**, frontend **1514 passed**, vue-tsc 干净。
+
+## 第三轮修复(2026-08-07,用户指定):codex 终态语义钉死
+
+用户确认 `turn.completed → turn.failed` 应判**失败**(agent 未完成工作)。实现与影响:
+
+- **终态推迟到流结束**: `codex_events.py` 不再内联发 harness 终态,只持久化最后 turn 终态(`.codex-terminal-type`/`.codex-terminal-line`)与结果文件;`codex.sh` 新增 `codex_adapter_emit_terminal` 在流结束后按"最后 turn 为准"补发单个 harness 终态;`codex-run.sh` 按终态决定退出码(completed→0,failed→1)。
+- **顺带修复 multi-turn 偏离**: context_compaction 现在在最后一个 turn 发 harness.completed(与 fixture mapper 一致),`EXACT_PREFIX_EXCLUDED` 已移除。
+- **fixture**: 新增合成样本 `codex/turn_failed_after_completion`(`collection_state=synthetic-offline-contract-sample`,因无 provider 凭据无法现场采集,README 已注明),钉死"后到的 turn.failed 覆盖先到的完成"。mapper 同步加 `last_turn_failed` 逻辑 + FAILURE_KIND 条目。
+- **测试**: translator 31 条(codex adapter)+ fixture 42 条全过;新增 `codex_adapter_emit_terminal` 三个用例(completed/failed/noop)。
+
+第三轮修复后验证: backend **2298 passed**, fixture 42 passed, codex adapter 31 passed。

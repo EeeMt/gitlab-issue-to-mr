@@ -45,6 +45,10 @@ REQUIRED_REAL_SCENARIOS = {
     "context_compaction",
     "usage_model",
 }
+# Codex-only additional scenarios. turn_failed_after_completion pins the
+# "a turn.failed after the last completed turn is the harness terminal"
+# semantics; it is a synthetic sample (see its metadata.review_note).
+CODEX_EXTRA_SCENARIOS = {"turn_failed_after_completion"}
 FORBIDDEN_CANONICAL_KEYS = {
     "subtype",
     "thread_id",
@@ -83,8 +87,11 @@ def _walk_keys(value):
 
 def test_required_real_probe_matrix_is_complete():
     for harness in ("claude", "codex"):
+        expected = REQUIRED_REAL_SCENARIOS | (
+            CODEX_EXTRA_SCENARIOS if harness == "codex" else set()
+        )
         actual = {path.name for path in (FIXTURE_ROOT / harness).iterdir() if path.is_dir()}
-        assert actual == REQUIRED_REAL_SCENARIOS
+        assert actual == expected
 
 
 @pytest.mark.parametrize("scenario_dir", _scenario_directories(), ids=lambda path: str(path.relative_to(FIXTURE_ROOT)))

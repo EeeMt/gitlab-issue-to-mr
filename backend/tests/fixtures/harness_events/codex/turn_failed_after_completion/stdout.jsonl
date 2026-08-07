@@ -1,0 +1,9 @@
+{"thread_id": "<UUID:1a2b3c4d5e6f>", "type": "thread.started"}
+{"type": "turn.started"}
+{"item": {"aggregated_output": "", "command": "/bin/zsh -lc \"printf 'PARTIAL_OK' > WORK_RESULT.txt\"", "exit_code": null, "id": "item_0", "status": "in_progress", "type": "command_execution"}, "type": "item.started"}
+{"item": {"aggregated_output": "", "command": "/bin/zsh -lc \"printf 'PARTIAL_OK' > WORK_RESULT.txt\"", "exit_code": 0, "id": "item_0", "status": "completed", "type": "command_execution"}, "type": "item.completed"}
+{"item": {"id": "item_1", "text": "PARTIAL_WORK_DONE", "type": "agent_message"}, "type": "item.completed"}
+{"type": "turn.completed", "usage": {"cache_write_input_tokens": 0, "cached_input_tokens": 4096, "input_tokens": 8000, "output_tokens": 96, "reasoning_output_tokens": 32}}
+{"type": "turn.started"}
+{"type": "error", "message": "model request failed after compaction: 500 Internal Server Error"}
+{"type": "turn.failed", "error": {"message": "model request failed after compaction: 500 Internal Server Error"}}
