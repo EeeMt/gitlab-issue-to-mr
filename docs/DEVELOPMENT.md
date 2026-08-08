@@ -24,7 +24,7 @@
 - Docker 与 Docker Compose
 - PostgreSQL（本地安装，或通过 Docker 提供）
 - 可访问的 GitLab 测试环境
-- 可访问的 Claude CLI 兼容模型服务
+- 可访问的 Harness 兼容模型服务（Claude/Codex）
 
 如果你要跑真实 GitLab E2E，还需要：
 
@@ -306,4 +306,4 @@ cd frontend && npm run build
 - [README.zh-CN.md](README.zh-CN.md)
 - [DEPLOYMENT.md](DEPLOYMENT.md)
 - [GITLAB_OIDC_SETUP.md](GITLAB_OIDC_SETUP.md)
-- [e2e-debugging.md](e2e-debugging.md)
+- [E2E_TESTS.md](E2E_TESTS.md)

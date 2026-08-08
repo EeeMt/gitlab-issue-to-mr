@@ -137,7 +137,7 @@ The workflow lives entirely in the dashboard:
 ## Operational notes
 
 - `backend` and `scheduler` share the same image in `deploy/docker-compose.yml`
-- `backend` runs with `AUTO_MIGRATE=false`; `scheduler` runs with `AUTO_MIGRATE=true`
+- `backend` and `scheduler` both run with `AUTO_MIGRATE=true`
 - Dashboard configuration route: `/configuration`
 - Project/task visibility is filtered by GitLab access rules for authenticated users
 
@@ -148,7 +148,7 @@ The workflow lives entirely in the dashboard:
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
 - [docs/GITLAB_OIDC_SETUP.md](docs/GITLAB_OIDC_SETUP.md)
-- [docs/e2e-debugging.md](docs/e2e-debugging.md)
+- [docs/E2E_TESTS.md](docs/E2E_TESTS.md)
 - [deploy/offline-bundle/README.md](deploy/offline-bundle/README.md)
 
 ## License
