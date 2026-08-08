@@ -57,6 +57,10 @@ async def test_create_task_uses_issue_pinned_worker_and_default_provider():
     db.commit = AsyncMock()
     db.flush = AsyncMock()
     db.get = AsyncMock(return_value=issue)
+    _empty_issue_tasks = MagicMock()
+    _empty_issue_tasks.scalars.return_value.all.return_value = []
+    _empty_issue_tasks.all.return_value = []
+    db.execute = AsyncMock(return_value=_empty_issue_tasks)
 
     async def refresh(task, attribute_names=None):
         task.id = 88
@@ -133,6 +137,10 @@ async def test_continue_without_harness_key_rejects_lineage_mismatch():
     db.commit = AsyncMock()
     db.flush = AsyncMock()
     db.get = AsyncMock(return_value=issue)
+    _empty_issue_tasks = MagicMock()
+    _empty_issue_tasks.scalars.return_value.all.return_value = []
+    _empty_issue_tasks.all.return_value = []
+    db.execute = AsyncMock(return_value=_empty_issue_tasks)
     db.refresh = AsyncMock()
     access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
     current_user = SimpleNamespace(
@@ -204,6 +212,10 @@ async def test_create_task_uses_issue_default_harness_when_request_omits_key():
     db.commit = AsyncMock()
     db.flush = AsyncMock()
     db.get = AsyncMock(return_value=issue)
+    _empty_issue_tasks = MagicMock()
+    _empty_issue_tasks.scalars.return_value.all.return_value = []
+    _empty_issue_tasks.all.return_value = []
+    db.execute = AsyncMock(return_value=_empty_issue_tasks)
 
     async def refresh(task, attribute_names=None):
         task.id = 88
@@ -403,6 +415,10 @@ async def test_create_task_rejects_disabled_issue_worker():
     issue = MagicMock(id=1, project_id=101, description="x", status="open")
     db = MagicMock()
     db.get = AsyncMock(return_value=issue)
+    _empty_issue_tasks = MagicMock()
+    _empty_issue_tasks.scalars.return_value.all.return_value = []
+    _empty_issue_tasks.all.return_value = []
+    db.execute = AsyncMock(return_value=_empty_issue_tasks)
     access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
     with patch(
@@ -719,6 +735,10 @@ async def test_create_task_continue_cannot_switch_harness():
     db.commit = AsyncMock()
     db.flush = AsyncMock()
     db.get = AsyncMock(return_value=issue)
+    _empty_issue_tasks = MagicMock()
+    _empty_issue_tasks.scalars.return_value.all.return_value = []
+    _empty_issue_tasks.all.return_value = []
+    db.execute = AsyncMock(return_value=_empty_issue_tasks)
     db.refresh = AsyncMock()
 
     access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])

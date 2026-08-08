@@ -29,10 +29,14 @@ class RetryTaskRequest(BaseModel):
     """Optional request body for retrying a task.
 
     If scheduled_datetime is provided, the task will be retried at that time
-    instead of being queued immediately.
+    instead of being queued immediately. ``lineage_strategy`` controls session
+    lineage: ``inherit`` (default) resumes the source lineage and conflicts if
+    the source no longer matches the queue tail; ``fresh_retry`` explicitly
+    starts a new generation at the tail.
     """
 
     scheduled_datetime: datetime | None = None
+    lineage_strategy: Literal["inherit", "fresh_retry"] = "inherit"
 
     @model_validator(mode="before")
     @classmethod

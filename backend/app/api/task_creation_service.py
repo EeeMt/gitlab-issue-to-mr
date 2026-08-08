@@ -13,7 +13,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.task_responses import (
+    apply_queue_context,
     attach_task_worker_snapshot,
+    compute_task_queue_contexts,
     refresh_task_response_state,
     serialize_task,
 )
@@ -22,7 +24,15 @@ from app.core.harness_registry import (
     HarnessRegistryError,
     validate_enabled_harnesses,
 )
-from app.core.harness_sessions import get_issue_latest_harness_key
+from app.core.harness_sessions import get_issue_latest_harness_key, session_namespace_for
+from app.core.issue_task_order import (
+    IssueOrderIntegrityError,
+    LineageConflict,
+    ScheduleWindowConflict,
+    ensure_issue_order_integrity_locked,
+    project_tail_lineage,
+    validate_schedule_time_locked,
+)
 from app.core.model_endpoints import (
     ensure_harness_protocol_compatibility,
     normalize_endpoint,
@@ -159,6 +169,89 @@ async def retry_task_record(
         else "continue"
     )
 
+    # Issue input-stream ordering: repair legacy NULL rows and read the tail
+    # projection while holding the Issue lock before allocating the tail turn.
+    try:
+        integrity_report = await ensure_issue_order_integrity_locked(
+            db,
+            issue_id=issue.id,
+            repair_nulls=True,
+        )
+    except IssueOrderIntegrityError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.detail) from exc
+
+    tail_projection = integrity_report["tail_projection"]
+    source_projection = {
+        "harness_key": getattr(original_task, "projected_harness_key", None),
+        "session_namespace": getattr(original_task, "projected_session_namespace", None),
+        "generation": getattr(original_task, "projected_lineage_generation", None),
+        "reset_task_id": getattr(original_task, "projected_reset_task_id", None),
+    }
+    if not source_projection["harness_key"] or not source_projection["session_namespace"]:
+        source_harness = getattr(source_snapshot, "harness_key", None) or "legacy"
+        endpoint = getattr(source_snapshot, "model_endpoint_snapshot", None) or {}
+        fingerprint = endpoint.get("fingerprint") if isinstance(endpoint, dict) else None
+        source_projection = {
+            "harness_key": source_harness,
+            "session_namespace": session_namespace_for(source_harness, fingerprint),
+            "generation": None,
+            "reset_task_id": None,
+        }
+
+    retry_is_fresh = retry_session_mode == "fresh" or bool(
+        request and request.lineage_strategy == "fresh_retry"
+    )
+    if retry_is_fresh:
+        projection = project_tail_lineage(
+            tail_projection,
+            issue_id=issue.id,
+            harness_key=source_projection["harness_key"],
+            session_namespace=source_projection["session_namespace"],
+            session_mode="fresh",
+        )
+    else:
+        if tail_projection is None or (
+            source_projection["harness_key"] != tail_projection["harness_key"]
+            or source_projection["session_namespace"]
+            != tail_projection["session_namespace"]
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "retry_lineage_conflict",
+                    "message": "Retry source belongs to an older session lineage",
+                    "issue_id": issue.id,
+                    "task_id": task_id,
+                    "source_lineage": {
+                        "harness_key": source_projection["harness_key"],
+                        "session_namespace": source_projection["session_namespace"],
+                        "generation": source_projection["generation"],
+                        "reset_task_id": source_projection["reset_task_id"],
+                    },
+                    "tail_lineage": tail_projection,
+                },
+            ) from None
+        projection = project_tail_lineage(
+            tail_projection,
+            issue_id=issue.id,
+            harness_key=source_projection["harness_key"],
+            session_namespace=source_projection["session_namespace"],
+            session_mode="continue",
+        )
+
+    if scheduled_at is not None:
+        try:
+            await validate_schedule_time_locked(
+                db,
+                issue_id=issue.id,
+                scheduled_at=scheduled_at,
+            )
+        except ScheduleWindowConflict as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=exc.detail,
+            ) from exc
+
     new_task = Task(
         issue_id=original_task.issue_id,
         project_id=original_task.project_id,
@@ -187,6 +280,12 @@ async def retry_task_record(
         run_instruction_template=original_task.run_instruction_template,
         rendered_prompt=original_task.rendered_prompt,
         rendered_prompt_at=original_task.rendered_prompt_at,
+        issue_sequence=integrity_report["max_sequence"] + 1,
+        projected_harness_key=projection["harness_key"],
+        projected_session_namespace=projection["session_namespace"],
+        projected_lineage_generation=projection["generation"],
+        projected_reset_task_id=projection["reset_task_id"],
+        lineage_projection_reason=projection["reason"],
     )
     issue.workspace_last_used_at = utcnow()
     issue.workspace_delete_attempted_at = None
@@ -194,6 +293,8 @@ async def retry_task_record(
     issue.workspace_delete_error = None
     db.add(new_task)
     await db.flush()
+    if retry_is_fresh and projection["reset_task_id"] is None:
+        new_task.projected_reset_task_id = new_task.id
     try:
         snapshot = await services.clone_task_worker_snapshot(
             db,
@@ -217,11 +318,14 @@ async def retry_task_record(
     await services.notify_task_retried(new_task, None, scheduled_at)
     action = f"scheduled for retry at {scheduled_at}" if scheduled_at else "created as retry"
     logger.info("Task %s %s (retry of task %s)", new_task.id, action, task_id)
-    return serialize_task(
+    response = serialize_task(
         new_task,
         await services.get_project_metadata(new_task.project_id),
         include_prompt_details=True,
     )
+    queue_contexts = await compute_task_queue_contexts(db, [new_task])
+    apply_queue_context(response, new_task.id, queue_contexts)
+    return response
 
 
 async def create_task_record(
@@ -240,6 +344,17 @@ async def create_task_record(
 
     services.require_issue_operator(issue, current_user)
     require_project_access(issue.project_id, access_scope)
+    # Issue input-stream ordering: repair legacy-NULL sequences inside the row
+    # lock before allocating the tail sequence; an unrecoverable issue fails
+    # closed instead of appending out of order.
+    try:
+        integrity_report = await ensure_issue_order_integrity_locked(
+            db,
+            issue_id=issue.id,
+            repair_nulls=True,
+        )
+    except IssueOrderIntegrityError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.detail) from exc
     prompt = request.user_prompt or issue.description
     if not prompt:
         raise HTTPException(
@@ -305,8 +420,27 @@ async def create_task_record(
     )
     await _raise_if_usage_limited(db, current_user, services)
 
+    # Freeze the projected session namespace from the harness/endpoint material
+    # that will land in the Task snapshot; it must not be recomputed at runtime
+    # from a newer Provider configuration.
+    projected_namespace = session_namespace_for(harness_key, endpoint.fingerprint)
+
     slot_warning = None
     if scheduled_at is not None:
+        # A scheduled append must satisfy the Issue queue floor (max scheduled_at
+        # of active predecessors) before consuming a slot.
+        try:
+            await validate_schedule_time_locked(
+                db,
+                issue_id=issue.id,
+                scheduled_at=scheduled_at,
+            )
+        except ScheduleWindowConflict as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=exc.detail,
+            ) from exc
+
         from app.core.slot_capacity import check_slot_capacity, slot_full_detail_dict
 
         slot_info = await check_slot_capacity(db, scheduled_at, acquire_lock=True)
@@ -318,6 +452,19 @@ async def create_task_record(
                 )
             slot_warning = slot_full_detail_dict(slot_info)
 
+    try:
+        projection = project_tail_lineage(
+            integrity_report["tail_projection"],
+            issue_id=issue.id,
+            harness_key=harness_key,
+            session_namespace=projected_namespace,
+            session_mode=request.session_mode,
+        )
+    except LineageConflict as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=exc.detail,
+        ) from exc
     task = Task(
         issue_id=issue.id,
         project_id=issue.project_id,
@@ -336,6 +483,12 @@ async def create_task_record(
         task_mode=request.task_mode,
         require_changes=request.effective_require_changes,
         session_mode=request.session_mode,
+        issue_sequence=integrity_report["max_sequence"] + 1,
+        projected_harness_key=projection["harness_key"],
+        projected_session_namespace=projection["session_namespace"],
+        projected_lineage_generation=projection["generation"],
+        projected_reset_task_id=projection["reset_task_id"],
+        lineage_projection_reason=projection["reason"],
     )
     issue.workspace_last_used_at = utcnow()
     issue.workspace_delete_attempted_at = None
@@ -343,6 +496,9 @@ async def create_task_record(
     issue.workspace_delete_error = None
     db.add(task)
     await db.flush()
+    if request.session_mode == "fresh" and projection["reset_task_id"] is None:
+        # A fresh generation is its own reset point; the id only exists after flush.
+        task.projected_reset_task_id = task.id
     try:
         snapshot = await services.prepare_task_runtime_snapshot(
             db,
@@ -418,4 +574,6 @@ async def create_task_record(
     )
     if slot_warning:
         response["slot_warning"] = slot_warning
+    queue_contexts = await compute_task_queue_contexts(db, [task])
+    apply_queue_context(response, task.id, queue_contexts)
     return response

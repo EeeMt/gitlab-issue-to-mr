@@ -182,9 +182,16 @@ export function useTaskViewActions(options: TaskViewActionsOptions) {
     const requestedTaskId = options.taskId.value
     actionLoading.value = true
     try {
-      await executeTask(requestedTaskId)
+      const result = await executeTask(requestedTaskId)
       if (!isCurrentTask(requestedTaskId)) return
-      message.success(t('taskView.taskExecutionStarted'))
+      if (result.queue_position && result.queue_position > 1) {
+        message.warning(t('taskView.taskWillRunAfterPredecessors', {
+          position: result.queue_position,
+          blockedBy: result.blocked_by_task_id ?? '',
+        }))
+      } else {
+        message.success(t('taskView.taskExecutionStarted'))
+      }
       void options.refreshTask()
     } catch {
       if (isCurrentTask(requestedTaskId)) {

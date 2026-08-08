@@ -117,6 +117,15 @@ export interface Task {
   completed_at: string | null
   is_manually_overridden?: boolean
   override_reason?: string | null
+  // Issue input-stream ordering / queue context (null for terminal or legacy rows).
+  issue_sequence?: number | null
+  queue_position?: number | null
+  blocked_by_task_id?: number | null
+  waiting_reason?: TaskWaitingReason | null
+  lock_owner_task_id?: number | null
+  waiting_since?: string | null
+  schedule_constraints?: TaskScheduleWindow | null
+  projected_lineage?: TaskProjectedLineage | null
   issue?: {
     id: number
     title: string
@@ -126,6 +135,58 @@ export interface Task {
     merge_request_iid: number | null
     merge_request_url: string | null
   }
+}
+
+export type TaskWaitingReason =
+  | 'predecessor'
+  | 'scheduled'
+  | 'global_capacity'
+  | 'workspace_cleanup'
+  | 'sequence_repair_required'
+  | string
+
+export interface TaskProjectedLineage {
+  harness_key: string
+  session_namespace: string
+  generation: number
+  reset_task_id: number | null
+}
+
+export interface TaskScheduleWindow {
+  has_valid_window: boolean
+  min_scheduled_at: string | null
+  min_source_task_id: number | null
+  max_scheduled_at: string | null
+  max_source_task_id: number | null
+}
+
+export interface ExecuteTaskResponse {
+  status: string
+  message: string
+  queue_position?: number | null
+  blocked_by_task_id?: number | null
+}
+
+export type TaskConflictCode =
+  | 'issue_schedule_order_conflict'
+  | 'issue_sequence_repair_required'
+  | 'issue_lineage_conflict'
+  | 'retry_lineage_conflict'
+  | 'SLOT_FULL'
+  | string
+
+export interface TaskConflictDetail {
+  code: TaskConflictCode
+  message?: string
+  issue_id?: number
+  task_id?: number
+  has_valid_window?: boolean
+  min_scheduled_at?: string | null
+  min_source_task_id?: number | null
+  max_scheduled_at?: string | null
+  max_source_task_id?: number | null
+  tail_lineage?: TaskProjectedLineage
+  source_lineage?: TaskProjectedLineage
 }
 
 export interface CreateTaskRequest {
@@ -486,8 +547,17 @@ export async function retryTask(id: number, scheduledDatetime?: string): Promise
   return data
 }
 
-export async function executeTask(id: number): Promise<void> {
-  await api.post(`/tasks/${id}/execute`)
+export async function executeTask(id: number): Promise<ExecuteTaskResponse> {
+  const response = await api.post(`/tasks/${id}/execute`)
+  return response.data
+}
+
+export async function getTaskScheduleConstraints(params: {
+  issue_id?: number
+  task_id?: number
+}): Promise<TaskScheduleWindow> {
+  const response = await api.get('/tasks/schedule-constraints', { params })
+  return response.data
 }
 
 export async function createTask(request: CreateTaskRequest): Promise<Task> {

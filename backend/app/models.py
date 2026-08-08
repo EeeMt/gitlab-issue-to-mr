@@ -201,6 +201,53 @@ class IssueHarnessSession(Base):
     issue: Mapped["Issue"] = relationship("Issue", back_populates="harness_sessions")
 
 
+class IssueSessionLineage(Base):
+    """Per-issue, per-generation actual session facts for the new scheduler.
+
+    One row per ``(issue_id, lineage_generation)``. ``session_id`` is only
+    backfilled from a completed Task's ``output_session_id`` in the same
+    generation; generation ``0`` may also import an exactly matching legacy
+    ``IssueHarnessSession``. ``reset_task_id`` points at the fresh/compat-reset
+    Task that established the generation (null for generation ``0``).
+    """
+
+    __tablename__ = "issue_session_lineages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    issue_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("issues.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    lineage_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    harness_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    session_namespace: Mapped[str] = mapped_column(String(128), nullable=False)
+    reset_task_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("tasks.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    last_output_task_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("tasks.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    last_output_issue_sequence: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    lineage_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    lineage_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "issue_id",
+            "lineage_generation",
+            name="uq_issue_session_lineage_generation",
+        ),
+    )
+
+
 class AIProvider(Base):
     """Named AI provider configuration."""
 
@@ -342,6 +389,30 @@ class Task(Base):
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
 
+    # Issue input-stream ordering. ``issue_sequence`` is the immutable turn number
+    # within the Issue and the single source of truth for execution order. It is
+    # nullable only during the 068 compatibility window so legacy writers can keep
+    # inserting rows; the Scheduler and append service always backfill/allocate it
+    # and fail closed while an active NULL exists.
+    issue_sequence: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Projected lineage frozen at creation time (harness, session namespace,
+    # generation and the fresh/reset task that established this generation).
+    # Kept nullable for the same 068 compatibility window.
+    projected_harness_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    projected_session_namespace: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    projected_lineage_generation: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    projected_reset_task_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("tasks.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # Why this lineage projection was chosen: initial / inherited / fresh /
+    # legacy_namespace_change. ``input_lineage_reason`` records the actual
+    # execution-time resume decision (fresh / resumed / fresh_no_match) and is
+    # never derived from the projection fields.
+    lineage_projection_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    input_lineage_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
     # Container tracking
     container_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
@@ -429,6 +500,23 @@ class Task(Base):
         Index("ix_tasks_issue_trigger_source", "issue_id", "trigger_source"),
         Index("ix_tasks_created_at_project", "created_at", "project_id"),
         Index("ix_tasks_created_at_status", "created_at", "status"),
+        # Issue input-stream ordering: ``issue_sequence`` is unique per issue
+        # (partial while the 068 compatibility window allows legacy NULL rows).
+        Index(
+            "uq_tasks_issue_sequence",
+            "issue_id",
+            "issue_sequence",
+            unique=True,
+            postgresql_where=text("issue_sequence IS NOT NULL"),
+            sqlite_where=text("issue_sequence IS NOT NULL"),
+        ),
+        Index("ix_tasks_issue_status_sequence", "issue_id", "status", "issue_sequence"),
+        Index(
+            "ix_tasks_issue_generation_sequence",
+            "issue_id",
+            "projected_lineage_generation",
+            "issue_sequence",
+        ),
     )
 
 

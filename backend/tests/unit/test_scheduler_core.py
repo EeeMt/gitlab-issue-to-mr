@@ -8,6 +8,7 @@ Tests:
 """
 
 import asyncio
+import contextlib
 import json
 import os
 import sys
@@ -15,7 +16,36 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from app.models import TaskStatus
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+
+def _claimable_task(task_id: int, issue_id: int, status=TaskStatus.QUEUED) -> MagicMock:
+    """Return a mock Task that passes _execute_task's atomic-claim re-validation."""
+    task = MagicMock()
+    task.id = task_id
+    task.issue_id = issue_id
+    task.status = status
+    task.issue_sequence = 1
+    task.scheduled_at = None
+    task.initiator_user_id = None
+    task.container_id = None
+    task.started_at = None
+    task.completed_at = None
+    task.error_message = None
+    task.raw_logs_finalized_at = None
+    return task
+
+
+def _claim_execute(db: MagicMock, task: MagicMock) -> None:
+    """Configure db.execute for _execute_task's atomic claim returning `task`."""
+    issue_lock = MagicMock()
+    task_result = MagicMock()
+    task_result.scalar_one_or_none.return_value = task
+    pred_result = MagicMock()
+    pred_result.first.return_value = None
+    db.execute = AsyncMock(side_effect=[issue_lock, task_result, pred_result])
 
 
 class SchedulerPriorityQueueTests(unittest.IsolatedAsyncioTestCase):
@@ -292,23 +322,16 @@ class SchedulerTaskExecutionTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_task_marks_failed_when_usage_limit_exceeded(self) -> None:
         """_execute_task should fail queued work before submitting it to the worker."""
         from app.core.usage_limits import UsageLimitExceeded
-        from app.models import TaskStatus
         from app.scheduler import Scheduler
 
         scheduler = Scheduler()
 
-        task = MagicMock()
-        task.id = 12
-        task.project_id = 1
-        task.issue_id = 34
+        task = _claimable_task(12, 34)
         task.initiator_user_id = 56
-        task.status = TaskStatus.QUEUED
-        task.started_at = None
-        task.completed_at = None
-        task.error_message = None
 
         mock_db = MagicMock()
         mock_db.commit = AsyncMock()
+        _claim_execute(mock_db, task)
 
         exceeded = UsageLimitExceeded(
             scope="execute",
@@ -326,6 +349,10 @@ class SchedulerTaskExecutionTests(unittest.IsolatedAsyncioTestCase):
             patch(
                 "app.scheduler.get_usage_quota_service",
                 return_value=MagicMock(raise_if_over_limit=AsyncMock(side_effect=exceeded)),
+            ),
+            patch(
+                "app.scheduler.ensure_issue_order_integrity_locked",
+                new=AsyncMock(return_value={"repaired_sequences": 0, "repaired_projections": 0}),
             ),
             patch("app.scheduler.utcnow", return_value=datetime(2026, 4, 27, 12, 0, 0)),
             patch("app.scheduler.asyncio.create_task") as mock_create_task,
@@ -935,25 +962,32 @@ class SchedulerCleanupWithDeletesTests(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 
 class SchedulerExecuteTaskTests(unittest.IsolatedAsyncioTestCase):
-    """Tests for Scheduler._execute_task."""
+    """Tests for Scheduler._execute_task atomic claim."""
+
+    @contextlib.contextmanager
+    def _patched_claim(self, acquire=True):
+        with (
+            patch(
+                "app.scheduler.ensure_issue_order_integrity_locked",
+                new=AsyncMock(return_value={"repaired_sequences": 0, "repaired_projections": 0}),
+            ),
+            patch("app.scheduler.acquire_issue_execution_lock", new=AsyncMock(return_value=acquire)),
+        ):
+            yield
 
     async def test_execute_task_marks_task_running_and_submits_background(self) -> None:
         """_execute_task should set status=RUNNING, commit, and create a background task."""
-        from app.models import TaskStatus
         from app.scheduler import Scheduler
 
         scheduler = Scheduler()
 
-        task = MagicMock()
-        task.id = 5
-        task.project_id = 10
-        task.issue_id = 20
-        task.status = TaskStatus.PENDING
+        task = _claimable_task(5, 20)
 
         mock_db = MagicMock()
         mock_db.commit = AsyncMock()
+        _claim_execute(mock_db, task)
 
-        with patch("app.scheduler.acquire_issue_execution_lock", new=AsyncMock(return_value=True)):
+        with self._patched_claim():
             with patch.object(scheduler, "_run_task_background", new=MagicMock()):
                 with patch("app.scheduler.asyncio.create_task") as mock_create_task:
                     await scheduler._execute_task(mock_db, task)
@@ -965,48 +999,42 @@ class SchedulerExecuteTaskTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(20, scheduler._running_issues)
         mock_create_task.assert_called_once()
 
-    async def test_execute_task_handles_exception_and_marks_failed(self) -> None:
-        """_execute_task should mark task FAILED when commit raises an exception."""
-        from app.models import TaskStatus
+    async def test_execute_task_rolls_back_when_claim_commit_fails(self) -> None:
+        """If the atomic claim commit raises, roll back and never start a worker."""
         from app.scheduler import Scheduler
 
         scheduler = Scheduler()
 
-        task = MagicMock()
-        task.id = 6
-        task.project_id = 11
-        task.issue_id = 21
-        task.status = TaskStatus.PENDING
+        task = _claimable_task(6, 21)
 
         mock_db = MagicMock()
-        # First commit (marking running) raises an exception
-        mock_db.commit = AsyncMock(side_effect=[Exception("DB failure"), None])
+        _claim_execute(mock_db, task)
+        mock_db.commit = AsyncMock(side_effect=Exception("DB failure"))
+        mock_db.rollback = AsyncMock()
 
-        with patch("app.scheduler.acquire_issue_execution_lock", new=AsyncMock(return_value=True)):
-            with patch("app.scheduler.release_issue_execution_lock", new=AsyncMock()):
+        with self._patched_claim():
+            with patch("app.scheduler.asyncio.create_task") as mock_create_task:
                 await scheduler._execute_task(mock_db, task)
 
-        self.assertEqual(task.status, TaskStatus.FAILED)
-        self.assertIn("DB failure", task.error_message)
+        mock_db.rollback.assert_awaited()
+        mock_create_task.assert_not_called()
         self.assertNotIn(6, scheduler._running_tasks)
         self.assertNotIn(21, scheduler._running_issues)
 
     async def test_execute_task_skips_when_issue_db_lock_is_held(self) -> None:
         """_execute_task should leave queued task untouched when DB issue lock is held."""
-        from app.models import TaskStatus
         from app.scheduler import Scheduler
 
         scheduler = Scheduler()
 
-        task = MagicMock()
-        task.id = 17
-        task.issue_id = 44
-        task.status = TaskStatus.QUEUED
+        task = _claimable_task(17, 44)
 
         mock_db = MagicMock()
         mock_db.commit = AsyncMock()
+        mock_db.rollback = AsyncMock()
+        _claim_execute(mock_db, task)
 
-        with patch("app.scheduler.acquire_issue_execution_lock", new=AsyncMock(return_value=False)):
+        with self._patched_claim(acquire=False):
             with patch("app.scheduler.asyncio.create_task") as mock_create_task:
                 await scheduler._execute_task(mock_db, task)
 
@@ -1014,13 +1042,13 @@ class SchedulerExecuteTaskTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(17, scheduler._running_tasks)
         self.assertNotIn(44, scheduler._running_issues)
         mock_db.commit.assert_not_called()
+        mock_db.rollback.assert_awaited()
         mock_create_task.assert_not_called()
 
     async def test_execute_task_lock_denied_does_not_read_expired_task_state(self) -> None:
         """_execute_task should not touch ORM attributes after lock rollback expires them."""
         from sqlalchemy.exc import MissingGreenlet
 
-        from app.models import TaskStatus
         from app.scheduler import Scheduler
 
         class ExpiringTask:
@@ -1029,6 +1057,8 @@ class SchedulerExecuteTaskTests(unittest.IsolatedAsyncioTestCase):
                 self._issue_id = 44
                 self.expired = False
                 self.status = TaskStatus.QUEUED
+                self.issue_sequence = 1
+                self.scheduled_at = None
 
             def _read(self, value):
                 if self.expired:
@@ -1048,42 +1078,50 @@ class SchedulerExecuteTaskTests(unittest.IsolatedAsyncioTestCase):
 
         mock_db = MagicMock()
         mock_db.commit = AsyncMock()
+        mock_db.rollback = AsyncMock()
+        task_result = MagicMock()
+        task_result.scalar_one_or_none.return_value = task
+        pred_result = MagicMock()
+        pred_result.first.return_value = None
+        mock_db.execute = AsyncMock(side_effect=[MagicMock(), task_result, pred_result])
 
         async def deny_lock(_db, current_task):
             current_task.expired = True
             return False
 
-        with patch("app.scheduler.acquire_issue_execution_lock", new=deny_lock):
-            with patch("app.scheduler.asyncio.create_task") as mock_create_task:
-                await scheduler._execute_task(mock_db, task)
+        with self._patched_claim():
+            with patch("app.scheduler.acquire_issue_execution_lock", new=deny_lock):
+                with patch("app.scheduler.asyncio.create_task") as mock_create_task:
+                    await scheduler._execute_task(mock_db, task)
 
-        self.assertEqual(task.status, TaskStatus.QUEUED)
-        self.assertNotIn(17, scheduler._running_tasks)
-        self.assertNotIn(44, scheduler._running_issues)
+        # The claim rolled back; the passed-in task's ORM state is no longer read.
+        mock_db.rollback.assert_awaited()
         mock_db.commit.assert_not_called()
         mock_create_task.assert_not_called()
+        self.assertNotIn(17, scheduler._running_tasks)
+        self.assertNotIn(44, scheduler._running_issues)
 
-    async def test_execute_task_releases_db_lock_when_commit_fails_after_acquire(self) -> None:
-        """_execute_task should release DB issue lock if marking RUNNING fails."""
-        from app.models import TaskStatus
+    async def test_execute_task_rolls_back_when_commit_fails_after_acquire(self) -> None:
+        """A failed claim commit persists neither the lock nor RUNNING (no release needed)."""
         from app.scheduler import Scheduler
 
         scheduler = Scheduler()
 
-        task = MagicMock()
-        task.id = 18
-        task.issue_id = 45
-        task.status = TaskStatus.QUEUED
+        task = _claimable_task(18, 45)
 
         mock_db = MagicMock()
+        _claim_execute(mock_db, task)
         mock_db.commit = AsyncMock(side_effect=Exception("commit failed"))
+        mock_db.rollback = AsyncMock()
 
-        with patch("app.scheduler.acquire_issue_execution_lock", new=AsyncMock(return_value=True)):
-            with patch("app.scheduler.release_issue_execution_lock", new=AsyncMock()) as mock_release:
+        with self._patched_claim():
+            with patch("app.scheduler.asyncio.create_task") as mock_create_task:
                 await scheduler._execute_task(mock_db, task)
 
-        mock_release.assert_awaited_once_with(mock_db, issue_id=45)
-        self.assertEqual(task.status, TaskStatus.FAILED)
+        mock_db.rollback.assert_awaited()
+        mock_create_task.assert_not_called()
+        self.assertNotIn(18, scheduler._running_tasks)
+        self.assertNotIn(45, scheduler._running_issues)
 
 
 # ---------------------------------------------------------------------------

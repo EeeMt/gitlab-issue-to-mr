@@ -66,6 +66,14 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     task.completed_at = None
     task.cancel_requested_at = None
     task.raw_logs_finalized_at = None
+    # Issue input-stream ordering / projected lineage (nullable compat fields).
+    task.issue_sequence = None
+    task.projected_harness_key = None
+    task.projected_session_namespace = None
+    task.projected_lineage_generation = None
+    task.projected_reset_task_id = None
+    task.lineage_projection_reason = None
+    task.input_lineage_reason = None
     return task
 
 

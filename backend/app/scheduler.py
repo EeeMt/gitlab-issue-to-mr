@@ -9,12 +9,14 @@ import logging
 import os
 import re
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
 from docker.errors import NotFound
-from sqlalchemy import case, delete, func, or_, select, update
+from sqlalchemy import case, delete, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.config import get_effective_settings as get_settings
 from app.core.docker_client import (
@@ -26,6 +28,12 @@ from app.core.issue_execution_locks import (
     acquire_issue_execution_lock,
     cleanup_inactive_issue_execution_locks,
     release_issue_execution_lock,
+)
+from app.core.issue_task_order import (
+    ACTIVE_STATUSES,
+    ACTIVE_STATUS_VALUES,
+    IssueOrderIntegrityError,
+    ensure_issue_order_integrity_locked,
 )
 from app.core.session import cleanup_stale_sessions
 from app.core.task_helpers import maybe_update_issue_status
@@ -176,6 +184,9 @@ class Scheduler:
 
     def __init__(self) -> None:
         self.running = False
+        # Stable per-process boot id for structured events; the in-memory
+        # "log only on state change" dedupe cache resets with each restart.
+        self.scheduler_boot_id = uuid.uuid4().hex
         self._running_tasks: set[int] = set()  # task_ids currently running
         self._running_issues: set[int] = set()  # issue_ids with running tasks
         self._retained_container_blocked_issues: set[int] = set()
@@ -189,6 +200,91 @@ class Scheduler:
         self._last_lock_cleanup_at = 0.0
         self._workspace_cleanup_task: asyncio.Task | None = None
         self._retained_container_cleanup_task: asyncio.Task | None = None
+
+    def _emit_event(self, event: str, *, reason: str, issue_id=None, task_id=None, **extra) -> None:
+        """Emit one single-line structured JSON event (spec §9).
+
+        Event names are stable and free of secrets; consumers use
+        ``scheduler_boot_id + event + issue_id + task_id + observed state`` to
+        dedupe across restarts.
+        """
+        payload: dict = {
+            "event": event,
+            "occurred_at": utcnow().isoformat(),
+            "scheduler_boot_id": self.scheduler_boot_id,
+            "reason": reason,
+        }
+        if issue_id is not None:
+            payload["issue_id"] = issue_id
+        if task_id is not None:
+            payload["task_id"] = task_id
+        payload.update({k: v for k, v in extra.items() if v is not None})
+        logger.warning(json.dumps(payload, default=str))
+
+    async def _release_issue_lock(
+        self,
+        db: AsyncSession,
+        *,
+        issue_id: int,
+        owner_task_id: int,
+    ) -> None:
+        """Release an issue execution lock only when this task still owns it."""
+        released = await release_issue_execution_lock(
+            db,
+            issue_id=issue_id,
+            owner_task_id=owner_task_id,
+        )
+        if not released:
+            self._emit_event(
+                "issue_lock_release_owner_mismatch",
+                reason="lock_not_owned_or_already_released",
+                issue_id=issue_id,
+                task_id=owner_task_id,
+            )
+
+    async def _startup_sequence_audit(self, db: AsyncSession) -> None:
+        """Re-emit abnormal/waiting ordering states once per boot (spec §9).
+
+        The audit runs before task dispatch and is the only place that re-logs
+        pre-existing states; the periodic cycle logs only on change.
+        """
+        rows = (
+            await db.execute(
+                select(
+                    Task.id,
+                    Task.issue_id,
+                    Task.issue_sequence,
+                    Task.status,
+                ).where(
+                    Task.status.in_(ACTIVE_STATUS_VALUES),
+                    or_(
+                        Task.issue_sequence.is_(None),
+                        Task.status == TaskStatus.QUEUED,
+                    ),
+                )
+            )
+        ).all()
+        for row in rows:
+            task_id, issue_id, issue_sequence, status = row
+            if issue_sequence is None:
+                self._emit_event(
+                    "issue_sequence_integrity_failed",
+                    reason="active_null_sequence",
+                    issue_id=issue_id,
+                    task_id=task_id,
+                    issue_sequence=None,
+                    recovered=True,
+                )
+            elif status == TaskStatus.QUEUED:
+                self._emit_event(
+                    "issue_queue_head_promoted",
+                    reason="recovered",
+                    issue_id=issue_id,
+                    task_id=task_id,
+                    issue_sequence=issue_sequence,
+                    recovered=True,
+                )
+        await db.commit()
 
     async def start(self) -> None:
         """Start the scheduler loop."""
@@ -213,6 +309,12 @@ class Scheduler:
         if not self.running:
             logger.info("Scheduler stopped before startup recovery completed")
             return
+
+        try:
+            async with AsyncSessionLocal() as db:
+                await self._startup_sequence_audit(db)
+        except Exception:  # noqa: BLE001
+            logger.exception("Startup sequence audit failed; cycle will repair in-band")
 
         while self.running:
             try:
@@ -924,26 +1026,131 @@ class Scheduler:
         self._last_lock_cleanup_at = now
 
     async def _mark_eligible_as_queued(self, db: AsyncSession) -> None:
-        """Mark eligible PENDING tasks as QUEUED.
+        """Promote only the legal active head of each Issue to QUEUED (spec §6.4).
 
-        A PENDING task becomes QUEUED when:
-        - scheduled_at is NULL (immediate) or scheduled_at <= now
-        - Its issue is not already running (issue mutex)
+        Order per cycle: (1) repair Issues that carry an active NULL sequence under
+        the Issue row lock (fail-closed keeps the Issue non-runnable when
+        unrecoverable); (2) normalize illegal historical ``QUEUED`` rows (active
+        NULL / active predecessor) back to ``PENDING``; (3) promote the due head
+        of each unlocked Issue from ``PENDING`` to ``QUEUED``.
         """
         now = utcnow()
-        # Build list of issue_ids that are currently running (mutex-blocked)
+        await self._repair_active_null_sequence_issues(db)
+        await self._normalize_illegal_queued_tasks(db)
+        await self._promote_due_heads(db, now)
+
+    async def _repair_active_null_sequence_issues(self, db: AsyncSession) -> None:
+        """Repair Issues with an active NULL ``issue_sequence`` under the Issue lock."""
+        null_issue_result = await db.execute(
+            select(Task.issue_id)
+            .distinct()
+            .where(
+                Task.status.in_(ACTIVE_STATUS_VALUES),
+                Task.issue_sequence.is_(None),
+            )
+        )
+        null_issue_ids = [
+            row[0] for row in null_issue_result.fetchall() if row[0] is not None
+        ]
+        for issue_id in null_issue_ids:
+            try:
+                await db.execute(
+                    select(Issue).where(Issue.id == issue_id).with_for_update()
+                )
+                report = await ensure_issue_order_integrity_locked(
+                    db,
+                    issue_id=issue_id,
+                    repair_nulls=True,
+                )
+                if report["repaired_sequences"] or report["repaired_projections"]:
+                    self._emit_event(
+                        "issue_sequence_repaired",
+                        reason="backfilled_null_sequence",
+                        issue_id=issue_id,
+                        repaired_sequences=report["repaired_sequences"],
+                        repaired_projections=report["repaired_projections"],
+                    )
+                await db.commit()
+            except IssueOrderIntegrityError as exc:
+                await db.rollback()
+                self._emit_event(
+                    "issue_sequence_integrity_failed",
+                    reason=exc.reason,
+                    issue_id=issue_id,
+                )
+                logger.warning("Issue %s non-runnable: %s", issue_id, exc.reason)
+
+    async def _normalize_illegal_queued_tasks(self, db: AsyncSession) -> None:
+        """Demote historical ``QUEUED`` tasks that are not the legal head back to PENDING."""
+        task_alias = aliased(Task)
+        result = await db.execute(
+            update(Task)
+            .where(
+                Task.status == TaskStatus.QUEUED,
+                or_(
+                    Task.issue_sequence.is_(None),
+                    exists(
+                        select(1).where(
+                            task_alias.issue_id == Task.issue_id,
+                            task_alias.status.in_(ACTIVE_STATUSES),
+                            task_alias.issue_sequence.is_(None),
+                        )
+                    ),
+                    exists(
+                        select(1).where(
+                            task_alias.issue_id == Task.issue_id,
+                            task_alias.status.in_(ACTIVE_STATUSES),
+                            task_alias.issue_sequence.is_not(None),
+                            task_alias.issue_sequence < Task.issue_sequence,
+                        )
+                    ),
+                ),
+            )
+            .values(status=TaskStatus.PENDING)
+        )
+        if result.rowcount > 0:
+            await db.commit()
+            logger.warning(
+                "Normalized %s illegal QUEUED task(s) back to PENDING",
+                result.rowcount,
+            )
+
+    async def _promote_due_heads(self, db: AsyncSession, now: datetime) -> None:
+        """Promote the due active head of each unlocked Issue from PENDING to QUEUED."""
+        task_alias = aliased(Task)
         blocked_issue_ids = list(self._running_issues) if self._running_issues else []
 
         stmt = (
             update(Task)
             .where(
                 Task.status == TaskStatus.PENDING,
-                (Task.scheduled_at == None) | (Task.scheduled_at <= now),
+                Task.issue_sequence.is_not(None),
+                (Task.scheduled_at.is_(None)) | (Task.scheduled_at <= now),
+                ~exists(
+                    select(1).where(
+                        task_alias.issue_id == Task.issue_id,
+                        task_alias.status.in_(ACTIVE_STATUSES),
+                        task_alias.issue_sequence.is_(None),
+                    )
+                ),
+                ~exists(
+                    select(1).where(
+                        task_alias.issue_id == Task.issue_id,
+                        task_alias.status.in_(ACTIVE_STATUSES),
+                        task_alias.issue_sequence.is_not(None),
+                        task_alias.issue_sequence < Task.issue_sequence,
+                    )
+                ),
+                ~exists(
+                    select(1).where(IssueExecutionLock.issue_id == Task.issue_id)
+                ),
             )
             .values(status=TaskStatus.QUEUED)
         )
         if blocked_issue_ids:
-            stmt = stmt.where((Task.issue_id == None) | (~Task.issue_id.in_(blocked_issue_ids)))
+            stmt = stmt.where(
+                (Task.issue_id.is_(None)) | (~Task.issue_id.in_(blocked_issue_ids))
+            )
         result = await db.execute(stmt)
         if result.rowcount > 0:
             await db.commit()
@@ -980,10 +1187,12 @@ class Scheduler:
         return result.scalar() or 0
 
     async def _get_next_task(self, db: AsyncSession) -> Task | None:
-        """Get the next QUEUED task to execute based on priority.
+        """Get the next QUEUED legal head to execute based on priority.
 
-        Only picks QUEUED tasks — eligible PENDING tasks are transitioned
-        to QUEUED by _mark_eligible_as_queued() earlier in the cycle.
+        Only picks the legal active head of each Issue (spec §6.5): the query
+        itself excludes active-NULL sequences and active predecessors so illegal
+        historical ``QUEUED`` data can never be returned. This is only a
+        candidate; the atomic claim re-verifies inside the Issue row lock.
 
         Ordering:
         1. priority ASC — P0(0) runs before P1(1) before P2(2)
@@ -992,7 +1201,29 @@ class Scheduler:
         3. scheduled_at ASC — earlier due times first
         4. created_at ASC — FIFO tiebreaker
         """
-        stmt = select(Task).where(Task.status == TaskStatus.QUEUED)
+        task_alias = aliased(Task)
+        stmt = select(Task).where(
+            Task.status == TaskStatus.QUEUED,
+            Task.issue_sequence.is_not(None),
+            ~exists(
+                select(1).where(
+                    task_alias.issue_id == Task.issue_id,
+                    task_alias.status.in_(ACTIVE_STATUSES),
+                    task_alias.issue_sequence.is_(None),
+                )
+            ),
+            ~exists(
+                select(1).where(
+                    task_alias.issue_id == Task.issue_id,
+                    task_alias.status.in_(ACTIVE_STATUSES),
+                    task_alias.issue_sequence.is_not(None),
+                    task_alias.issue_sequence < Task.issue_sequence,
+                )
+            ),
+            ~exists(
+                select(1).where(IssueExecutionLock.issue_id == Task.issue_id)
+            ),
+        )
         if self._running_issues:
             # Filtering in SQL avoids a queued task for a busy Issue sitting at the
             # head of the priority order and starving runnable tasks from other Issues.
@@ -1008,77 +1239,161 @@ class Scheduler:
         return result.scalar_one_or_none()
 
     async def _execute_task(self, db: AsyncSession, task: Task) -> None:
-        """Execute a task in a separate thread to avoid blocking the event loop."""
+        """Execute a task in a separate thread, claiming it atomically (§6.6)."""
         task_id = task.id
         issue_id = task.issue_id
         logger.info("Executing task %s for issue %s", task_id, issue_id)
 
-        lock_acquired = await acquire_issue_execution_lock(db, task)
-        if not lock_acquired:
-            logger.debug("Issue %s locked; task %s remains queued", issue_id, task_id)
+        # --- Atomic claim: one DB transaction ------------------------------
+        # Lock the Issue row first (never the reverse order), re-verify ordering
+        # integrity, re-load the Task FOR UPDATE, confirm it is the due legal
+        # head, acquire the IssueExecutionLock (ON CONFLICT DO NOTHING) and CAS
+        # QUEUED→RUNNING. Only after the commit succeeds do we start the worker.
+        try:
+            await db.execute(
+                select(Issue).where(Issue.id == issue_id).with_for_update()
+            )
+            await ensure_issue_order_integrity_locked(
+                db,
+                issue_id=issue_id,
+                repair_nulls=True,
+            )
+        except IssueOrderIntegrityError as exc:
+            await db.rollback()
+            self._emit_event(
+                "issue_task_claim_rejected",
+                reason="sequence_repair_required",
+                issue_id=issue_id,
+                task_id=task_id,
+            )
+            logger.warning(
+                "Issue %s blocked from claiming task %s: %s",
+                issue_id,
+                task_id,
+                exc.reason,
+            )
             return
 
-        try:
-            initiator_user_id = getattr(task, "initiator_user_id", None)
-            if isinstance(initiator_user_id, int):
-                try:
-                    await get_usage_quota_service().raise_if_over_limit(
-                        db,
-                        initiator_user_id,
-                        scope="execute",
-                    )
-                except UsageLimitExceeded as exc:
-                    logger.info(
-                        "Task %s blocked by usage limits before execution",
-                        task_id,
-                    )
-                    task.status = TaskStatus.FAILED
-                    task.error_message = json.dumps(usage_limit_exceeded_detail(exc))
-                    task.completed_at = utcnow()
-                    task.raw_logs_finalized_at = (
-                        getattr(task, "raw_logs_finalized_at", None) or utcnow()
-                    )
-                    await db.commit()
-                    await release_issue_execution_lock(db, issue_id=issue_id)
-                    await db.commit()
-                    await maybe_update_issue_status(db, issue_id)
-                    return
+        task = (
+            await db.execute(
+                select(Task).where(Task.id == task_id).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if task is None:
+            await db.rollback()
+            return
 
-            # Update status to RUNNING
-            task.status = TaskStatus.RUNNING
-            task.started_at = utcnow()
-            await db.commit()
+        if task.status != TaskStatus.QUEUED:
+            await db.rollback()
+            logger.debug("Task %s no longer QUEUED; skipping claim", task_id)
+            return
 
-            # Track in memory AFTER the DB commit so _reconcile_running_state
-            # (which queries for RUNNING tasks) doesn't race with the update.
-            self._running_tasks.add(task_id)
-            self._running_issues.add(issue_id)
+        if task.issue_sequence is None:
+            await self._demote_queued_task(db, task, "sequence_repair_required")
+            return
+        if task.scheduled_at is not None and task.scheduled_at > utcnow():
+            await self._demote_queued_task(db, task, "schedule_not_due")
+            return
+        if await self._has_active_predecessor(db, task):
+            await self._demote_queued_task(db, task, "predecessor_active")
+            return
 
-            # Any active task means the issue is currently in progress.
-            await self._transition_issue_to_in_progress(db, issue_id)
-
-            # Execute via worker in a thread pool WITHOUT waiting
-            self._worker_tasks[task_id] = asyncio.create_task(self._run_task_background(task_id))
-            logger.info("Task %s submitted to thread pool", task_id)
-
-        except Exception as e:
-            logger.exception("Task %s failed with exception", task_id)
-            task.status = TaskStatus.FAILED
-            task.error_message = str(e)[:500]
-            task.completed_at = utcnow()
-            if getattr(task, "container_id", None) is None:
+        # Usage limits are enforced before acquiring the lock so an over-limit
+        # task fails without an ownership-release dance.
+        initiator_user_id = getattr(task, "initiator_user_id", None)
+        if isinstance(initiator_user_id, int):
+            try:
+                await get_usage_quota_service().raise_if_over_limit(
+                    db,
+                    initiator_user_id,
+                    scope="execute",
+                )
+            except UsageLimitExceeded as exc:
+                logger.info(
+                    "Task %s blocked by usage limits before execution",
+                    task_id,
+                )
+                task.status = TaskStatus.FAILED
+                task.error_message = json.dumps(usage_limit_exceeded_detail(exc))
+                task.completed_at = utcnow()
                 task.raw_logs_finalized_at = (
                     getattr(task, "raw_logs_finalized_at", None) or utcnow()
                 )
-            await release_issue_execution_lock(db, issue_id=issue_id)
-            try:
                 await db.commit()
-            except Exception:
-                logger.exception("Failed to persist failure state for task %s", task_id)
+                await maybe_update_issue_status(db, issue_id)
+                return
 
-            # Clean up tracking (may not have been added yet, discard is idempotent)
-            self._running_tasks.discard(task_id)
-            self._running_issues.discard(issue_id)
+        if not await acquire_issue_execution_lock(db, task):
+            await db.rollback()
+            self._emit_event(
+                "issue_task_claim_rejected",
+                reason="issue_locked",
+                issue_id=issue_id,
+                task_id=task_id,
+            )
+            logger.debug("Issue %s locked; task %s remains queued", issue_id, task_id)
+            return
+
+        # CAS QUEUED → RUNNING in the same transaction as the lock insert.
+        task.status = TaskStatus.RUNNING
+        task.started_at = utcnow()
+        try:
+            await db.commit()
+        except Exception as e:  # noqa: BLE001
+            # The lock insert and the RUNNING update share one transaction: a
+            # failed commit persists neither, so there is no lock to release.
+            await db.rollback()
+            logger.exception("Failed to atomically claim task %s: %s", task_id, e)
+            return
+
+        # Track in memory AFTER the DB commit so _reconcile_running_state
+        # (which queries for RUNNING tasks) doesn't race with the update.
+        self._running_tasks.add(task_id)
+        self._running_issues.add(issue_id)
+
+        # Any active task means the issue is currently in progress.
+        await self._transition_issue_to_in_progress(db, issue_id)
+
+        # Execute via worker in a thread pool WITHOUT waiting
+        self._worker_tasks[task_id] = asyncio.create_task(self._run_task_background(task_id))
+        logger.info("Task %s submitted to thread pool", task_id)
+
+    async def _has_active_predecessor(self, db: AsyncSession, task: Task) -> bool:
+        """Return True when an active Task with a smaller sequence exists."""
+        task_alias = aliased(Task)
+        result = await db.execute(
+            select(task_alias.id)
+            .where(
+                task_alias.issue_id == task.issue_id,
+                task_alias.status.in_(ACTIVE_STATUSES),
+                task_alias.issue_sequence.is_not(None),
+                task_alias.issue_sequence < task.issue_sequence,
+            )
+            .limit(1)
+        )
+        return result.first() is not None
+
+    async def _demote_queued_task(
+        self,
+        db: AsyncSession,
+        task: Task,
+        reason: str,
+    ) -> None:
+        """Return an illegal QUEUED Task to PENDING (spec §6.6)."""
+        task.status = TaskStatus.PENDING
+        await db.commit()
+        self._emit_event(
+            "issue_queue_invalid_queued_normalized",
+            reason=reason,
+            issue_id=task.issue_id,
+            task_id=task.id,
+            issue_sequence=task.issue_sequence,
+        )
+        logger.warning(
+            "Demoted task %s to PENDING (reason=%s)",
+            task.id,
+            reason,
+        )
 
     async def _transition_issue_to_in_progress(self, db: AsyncSession, issue_id: int) -> None:
         """Auto-transition issue OPEN/COMPLETED → IN_PROGRESS when a task starts running."""
@@ -1175,9 +1490,10 @@ class Scheduler:
                                     )
                                 else:
                                     self._running_issues.discard(task.issue_id)
-                                    await release_issue_execution_lock(
+                                    await self._release_issue_lock(
                                         db,
                                         issue_id=task.issue_id,
+                                        owner_task_id=task_id,
                                     )
                                     await db.commit()
                                     # Auto-transition issue to COMPLETED if all tasks done
@@ -1220,7 +1536,11 @@ class Scheduler:
                         task.container_id,
                     )
                 else:
-                    await release_issue_execution_lock(db, issue_id=task.issue_id)
+                    await self._release_issue_lock(
+                        db,
+                        issue_id=task.issue_id,
+                        owner_task_id=task.id,
+                    )
                     self._running_issues.discard(task.issue_id)
                 await db.commit()
         except Exception:
@@ -1617,7 +1937,11 @@ class Scheduler:
                 task.raw_logs_finalized_at = (
                     getattr(task, "raw_logs_finalized_at", None) or utcnow()
                 )
-                await release_issue_execution_lock(db, issue_id=task.issue_id)
+                await self._release_issue_lock(
+                    db,
+                    issue_id=task.issue_id,
+                    owner_task_id=task.id,
+                )
                 logger.warning(
                     "Marked task %s as %s after reachable Docker daemon confirmed "
                     "that its container is absent",
@@ -1722,7 +2046,11 @@ class Scheduler:
                         task.raw_logs_finalized_at = (
                             getattr(task, "raw_logs_finalized_at", None) or utcnow()
                         )
-                        await release_issue_execution_lock(db, issue_id=task.issue_id)
+                        await self._release_issue_lock(
+                            db,
+                            issue_id=task.issue_id,
+                            owner_task_id=task.id,
+                        )
                         await db.commit()
                         self._running_tasks.discard(task_id)
                         self._running_issues.discard(task.issue_id)
@@ -1846,9 +2174,10 @@ class Scheduler:
                                     )
                                     task.container_id = None
                                     task.completed_at = utcnow()
-                                    await release_issue_execution_lock(
+                                    await self._release_issue_lock(
                                         db,
                                         issue_id=task.issue_id,
+                                        owner_task_id=task.id,
                                     )
                                     await db.commit()
                                     self._running_tasks.discard(task_id)
@@ -1961,9 +2290,10 @@ class Scheduler:
                                     )
                                 else:
                                     self._running_issues.discard(task.issue_id)
-                                    await release_issue_execution_lock(
+                                    await self._release_issue_lock(
                                         db,
                                         issue_id=task.issue_id,
+                                        owner_task_id=task_id,
                                     )
                                     await db.commit()
                                     await self._maybe_complete_issue(db, task.issue_id)

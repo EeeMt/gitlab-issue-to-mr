@@ -680,7 +680,7 @@ async def test_deferred_recovery_honors_cancel_intent_when_container_is_absent()
     assert task.status == TaskStatus.CANCELLED
     assert task.error_message == "Cancelled by user; worker container is confirmed absent"
     assert task.container_id is None
-    release_lock.assert_awaited_once_with(db, issue_id=task.issue_id)
+    release_lock.assert_awaited_once_with(db, issue_id=task.issue_id, owner_task_id=task.id)
     db.commit.assert_awaited_once()
     assert task.id not in scheduler._running_tasks
     assert task.issue_id not in scheduler._running_issues
@@ -777,7 +777,7 @@ async def test_deferred_recovery_keeps_cancelled_outcome_for_non_runnable_contai
         task_id=task.id,
         content=b"worker stopped\n",
     )
-    release_lock.assert_awaited_once_with(db, issue_id=task.issue_id)
+    release_lock.assert_awaited_once_with(db, issue_id=task.issue_id, owner_task_id=task.id)
     resume.assert_not_awaited()
 
 
@@ -809,7 +809,7 @@ async def test_worker_bootstrap_failure_keeps_persisted_cancelled_outcome():
 
     assert task.status == TaskStatus.CANCELLED
     assert task.error_message == "Cancelled by user before worker startup completed"
-    release_lock.assert_awaited_once_with(db, issue_id=task.issue_id)
+    release_lock.assert_awaited_once_with(db, issue_id=task.issue_id, owner_task_id=task.id)
     db.commit.assert_awaited_once()
 
 

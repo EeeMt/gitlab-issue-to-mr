@@ -35,7 +35,9 @@ class IssueExecutionLockHelperTests(unittest.IsolatedAsyncioTestCase):
         from app.core.issue_execution_locks import acquire_issue_execution_lock
 
         db = MagicMock()
-        db.execute = AsyncMock()
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = 7
+        db.execute = AsyncMock(return_value=result)
         db.flush = AsyncMock()
         task = MagicMock(id=7, issue_id=11)
 
@@ -45,30 +47,49 @@ class IssueExecutionLockHelperTests(unittest.IsolatedAsyncioTestCase):
         db.execute.assert_awaited_once()
         db.flush.assert_awaited_once()
 
-    async def test_acquire_issue_execution_lock_returns_false_on_integrity_error(self):
-        from sqlalchemy.exc import IntegrityError
-
+    async def test_acquire_issue_execution_lock_returns_false_on_conflict(self):
         from app.core.issue_execution_locks import acquire_issue_execution_lock
 
         db = MagicMock()
-        db.execute = AsyncMock(side_effect=IntegrityError("stmt", "params", "orig"))
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = None  # ON CONFLICT DO NOTHING -> no row
+        db.execute = AsyncMock(return_value=result)
         db.rollback = AsyncMock()
         task = MagicMock(id=8, issue_id=11)
 
         acquired = await acquire_issue_execution_lock(db, task)
 
         self.assertFalse(acquired)
-        db.rollback.assert_awaited_once()
+        db.rollback.assert_not_awaited()
 
-    async def test_release_issue_execution_lock_deletes_by_issue_id(self):
+    async def test_release_issue_execution_lock_deletes_by_issue_and_owner(self):
         from app.core.issue_execution_locks import release_issue_execution_lock
 
         db = MagicMock()
-        db.execute = AsyncMock()
+        result = MagicMock()
+        result.rowcount = 1
+        db.execute = AsyncMock(return_value=result)
 
-        await release_issue_execution_lock(db, issue_id=11)
+        removed = await release_issue_execution_lock(db, issue_id=11, owner_task_id=7)
 
+        self.assertTrue(removed)
         db.execute.assert_awaited_once()
+        delete_stmt = db.execute.await_args.args[0]
+        from sqlalchemy.sql.dml import Delete
+
+        self.assertIsInstance(delete_stmt, Delete)
+
+    async def test_release_issue_execution_lock_returns_false_when_already_gone(self):
+        from app.core.issue_execution_locks import release_issue_execution_lock
+
+        db = MagicMock()
+        result = MagicMock()
+        result.rowcount = 0
+        db.execute = AsyncMock(return_value=result)
+
+        removed = await release_issue_execution_lock(db, issue_id=11, owner_task_id=7)
+
+        self.assertFalse(removed)
 
     async def test_cleanup_inactive_issue_execution_locks_removes_terminal_task_locks(self):
         from app.core.issue_execution_locks import cleanup_inactive_issue_execution_locks

@@ -1,5 +1,6 @@
 import type { ComposerTranslation } from 'vue-i18n'
 import { formatDateTimeUtc8Compact, formatTimeUtc8, parseUtcDate } from './datetime'
+import { formatTaskConflict } from './taskConflict'
 
 interface SlotFullDetail {
   code: 'SLOT_FULL'
@@ -39,8 +40,9 @@ export function formatSlotError(
 }
 
 /**
- * Extract error message from an axios error, with slot-full awareness.
- * Tries structured slot-full detail first, then string detail, then fallback.
+ * Extract error message from an axios error, with slot-full and Issue-ordering
+ * conflict awareness. Tries the structured details first, then string detail,
+ * then fallback.
  */
 export function extractSlotErrorMessage(
   error: any,
@@ -49,5 +51,6 @@ export function extractSlotErrorMessage(
 ): string {
   const detail = error?.response?.data?.detail
   return formatSlotError(detail, t)
+    ?? formatTaskConflict(detail, t)
     ?? (typeof detail === 'string' ? detail : t(fallbackKey))
 }

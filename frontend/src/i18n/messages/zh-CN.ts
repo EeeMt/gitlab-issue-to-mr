@@ -742,6 +742,7 @@ const zhCN = {
     failedToRescheduleTask: '更新预约时间失败',
     rescheduleTimeFuture: '预约时间必须晚于当前时间',
     taskExecutionStarted: '任务开始执行',
+    taskWillRunAfterPredecessors: '前序完成后立即执行（队列第 {position} 位）',
     failedToExecuteTask: '立即执行失败',
     runtimeArchive: '运行归档',
     runtimeArchiveDescription: '下载本次运行已有的归档文件，包括 console.log 和 repository-preparation.json；进入 AI 执行阶段后还会包含 event.jsonl 和 runtime.json。',
@@ -2050,6 +2051,15 @@ const zhCN = {
   },
   slotCapacity: {
     slotFullError: '时段 {start}–{end} 已满载（{count}/{max} 个任务）。'
+  },
+  scheduleConflict: {
+    beforeFloor: '不得早于 {time}（Task #{source} 之后）',
+    afterCeiling: '不得晚于 {time}（Task #{source} 之前）',
+    windowBounds: 'Issue 队列可预约窗口：{min} – {max}',
+    noValidWindow: '该 Issue 队列当前不存在有效的可预约窗口。',
+    lineageMismatch: '会话 lineage 与 Issue 当前队尾不一致，请选择 fresh 会话后继续。',
+    sequenceRepairRequired: '该 Issue 的 Task 顺序需要人工修复后才能继续预约。',
+    generic: '所选时间与 Issue 任务队列冲突。'
   }
 }
 

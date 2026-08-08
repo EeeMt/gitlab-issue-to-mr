@@ -76,7 +76,29 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     task.updated_at = now
     task.started_at = None
     task.completed_at = None
+    # Issue input-stream ordering / projected lineage (nullable compat fields).
+    task.issue_sequence = None
+    task.projected_harness_key = None
+    task.projected_session_namespace = None
+    task.projected_lineage_generation = None
+    task.projected_reset_task_id = None
+    task.lineage_projection_reason = None
+    task.input_lineage_reason = None
     return task
+
+
+def _make_scalars_all_result(rows):
+    """Mock db.execute result whose ``.scalars().all()`` yields ``rows``."""
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = rows
+    return result
+
+
+def _make_rows_all_result(rows):
+    """Mock db.execute result whose ``.all()`` yields ``rows``."""
+    result = MagicMock()
+    result.all.return_value = rows
+    return result
 
 
 def _make_app_client_with_db(mock_db, extra_overrides=None):
@@ -554,6 +576,8 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
         _no_lineage = MagicMock()
         _no_lineage.scalar_one_or_none.return_value = None
+        _no_lineage.scalars.return_value.all.return_value = []
+        _no_lineage.all.return_value = []
         mock_db.execute = AsyncMock(return_value=_no_lineage)
         mock_db.get = AsyncMock(return_value=mock_issue)
 
@@ -596,6 +620,8 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
         _no_lineage = MagicMock()
         _no_lineage.scalar_one_or_none.return_value = None
+        _no_lineage.scalars.return_value.all.return_value = []
+        _no_lineage.all.return_value = []
         mock_db.execute = AsyncMock(return_value=_no_lineage)
         mock_db.get = AsyncMock(return_value=mock_issue)
 
@@ -637,6 +663,8 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
         _no_lineage = MagicMock()
         _no_lineage.scalar_one_or_none.return_value = None
+        _no_lineage.scalars.return_value.all.return_value = []
+        _no_lineage.all.return_value = []
         mock_db.execute = AsyncMock(return_value=_no_lineage)
         mock_db.get = AsyncMock(return_value=mock_issue)
 
@@ -674,6 +702,8 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
         _no_lineage = MagicMock()
         _no_lineage.scalar_one_or_none.return_value = None
+        _no_lineage.scalars.return_value.all.return_value = []
+        _no_lineage.all.return_value = []
         mock_db.execute = AsyncMock(return_value=_no_lineage)
         mock_db.get = AsyncMock(return_value=mock_issue)
 
@@ -769,7 +799,18 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
                 obj.updated_at = now
 
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue])
+        mock_db.execute = AsyncMock(
+            side_effect=[
+                mock_result_task,
+                mock_result_no_retry,
+                mock_result_issue,
+                _make_scalars_all_result([task]),
+                _make_rows_all_result([]),
+                _make_scalars_all_result([]),
+                _make_scalars_all_result([]),
+                MagicMock(),
+            ]
+        )
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.flush = AsyncMock()
@@ -820,7 +861,17 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
                 obj.updated_at = now
 
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue])
+        mock_db.execute = AsyncMock(
+            side_effect=[
+                mock_result_task,
+                mock_result_no_retry,
+                mock_result_issue,
+                _make_scalars_all_result([task]),
+                _make_rows_all_result([]),
+                _make_scalars_all_result([]),
+                MagicMock(),
+            ]
+        )
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.flush = AsyncMock()

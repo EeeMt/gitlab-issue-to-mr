@@ -752,6 +752,7 @@ const en = {
     failedToRescheduleTask: 'Failed to update scheduled time',
     rescheduleTimeFuture: 'Scheduled time must be in the future',
     taskExecutionStarted: 'Task execution started',
+    taskWillRunAfterPredecessors: 'Task will run after its predecessors complete (queue position {position})',
     failedToExecuteTask: 'Failed to execute task',
     runtimeArchive: 'Runtime Archive',
     runtimeArchiveDescription: 'Download available run artifacts, including console.log and repository-preparation.json; runs that reached AI execution also include event.jsonl and runtime.json.',
@@ -2079,6 +2080,15 @@ const en = {
   },
   slotCapacity: {
     slotFullError: 'Time slot {start}–{end} is at full capacity ({count}/{max} tasks).'
+  },
+  scheduleConflict: {
+    beforeFloor: 'Cannot be earlier than {time} (after Task #{source})',
+    afterCeiling: 'Cannot be later than {time} (before Task #{source})',
+    windowBounds: 'Issue queue window: {min} – {max}',
+    noValidWindow: 'No valid schedule window exists for this Issue queue.',
+    lineageMismatch: 'The session lineage does not match this Issue\'s current tail. Choose a fresh session to continue.',
+    sequenceRepairRequired: 'This Issue\'s task sequence requires manual repair before it can be scheduled.',
+    generic: 'The selected time conflicts with the Issue task queue.'
   }
 }
 

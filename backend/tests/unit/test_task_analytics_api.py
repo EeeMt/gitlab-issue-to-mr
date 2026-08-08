@@ -18,6 +18,20 @@ from app.dependencies.project_access import ProjectAccessScope
 from app.models import TaskStatus, TaskWorkerProfileSnapshot
 
 
+def _make_scalars_all_result(rows):
+    """Mock db.execute result whose ``.scalars().all()`` yields ``rows``."""
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = rows
+    return result
+
+
+def _make_rows_all_result(rows):
+    """Mock db.execute result whose ``.all()`` yields ``rows``."""
+    result = MagicMock()
+    result.all.return_value = rows
+    return result
+
+
 @pytest.mark.asyncio
 async def test_create_task_persists_manual_initiator_metadata():
     request = CreateTaskRequest(
@@ -55,6 +69,8 @@ async def test_create_task_persists_manual_initiator_metadata():
     db.flush = AsyncMock()
     _no_lineage = MagicMock()
     _no_lineage.scalar_one_or_none.return_value = None
+    _no_lineage.scalars.return_value.all.return_value = []
+    _no_lineage.all.return_value = []
     db.execute = AsyncMock(return_value=_no_lineage)
     db.get = AsyncMock(return_value=mock_issue)
 
@@ -146,8 +162,23 @@ async def test_retry_task_persists_manual_initiator_metadata():
     original_result.scalar_one_or_none.return_value = None
     issue_result = MagicMock()
     issue_result.scalar_one_or_none.return_value = MagicMock(id=1)
-    db.execute = AsyncMock(side_effect=[original_result, issue_result])
+    db.execute = AsyncMock(
+        side_effect=[
+            original_result,
+            issue_result,
+            _make_scalars_all_result([original_task]),
+            _make_rows_all_result([]),
+            _make_scalars_all_result([]),
+            MagicMock(),
+        ]
+    )
     async def refresh(task, **_kwargs):
+        # The retry flow re-reads the source task (terminal) before the ordering
+        # repair, then refreshes the freshly created retry (PENDING). Preserve the
+        # source's terminal status so the ordering repair does not treat it as an
+        # active task missing a snapshot.
+        if getattr(task, "status", None) in (TaskStatus.FAILED, TaskStatus.CANCELLED):
+            return
         task.id = 24
         task.status = TaskStatus.PENDING
         task.created_at = datetime(2026, 3, 14, 12, 0, 0)

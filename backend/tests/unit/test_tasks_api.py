@@ -561,6 +561,14 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     task.updated_at = now
     task.started_at = None
     task.completed_at = None
+    # Issue input-stream ordering / projected lineage (nullable compat fields).
+    task.issue_sequence = None
+    task.projected_harness_key = None
+    task.projected_session_namespace = None
+    task.projected_lineage_generation = None
+    task.projected_reset_task_id = None
+    task.lineage_projection_reason = None
+    task.input_lineage_reason = None
     return task
 
 
@@ -625,6 +633,20 @@ def _make_app_client_with_db(mock_db, extra_overrides=None):
         app.dependency_overrides.update(extra_overrides)
 
     return TestClient(app, raise_server_exceptions=False), app
+
+
+def _make_scalars_all_result(rows):
+    """Mock db.execute result whose ``.scalars().all()`` yields ``rows``."""
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = rows
+    return result
+
+
+def _make_rows_all_result(rows):
+    """Mock db.execute result whose ``.all()`` yields ``rows``."""
+    result = MagicMock()
+    result.all.return_value = rows
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -940,7 +962,7 @@ class RetryTaskAPITests(unittest.TestCase):
 
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(
-            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue]
+            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue, _make_scalars_all_result([task]), _make_rows_all_result([]), _make_scalars_all_result([]), MagicMock()]
         )
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
@@ -995,7 +1017,7 @@ class RetryTaskAPITests(unittest.TestCase):
         )
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(
-            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue]
+            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue, _make_scalars_all_result([task]), _make_rows_all_result([]), _make_scalars_all_result([]), MagicMock()]
         )
         mock_db.add = MagicMock()
 
@@ -1019,15 +1041,15 @@ class RetryTaskAPITests(unittest.TestCase):
         task.output_session_id = "session-created-by-source"
 
         # First execute returns the task; second returns None (no existing retry);
-        # third resolves default provider; fourth fetches the Issue for serialization
+        # third is the Issue row lock (returns a provider-shaped mock whose id is
+        # used as the issue id); fourth is the new ordering query; fifth is the
+        # lineage snapshot query.
         mock_result_task = MagicMock()
         mock_result_task.scalar_one_or_none.return_value = task
         mock_result_no_retry = MagicMock()
         mock_result_no_retry.scalar_one_or_none.return_value = None
         mock_result_default_provider = MagicMock()
         mock_result_default_provider.scalar_one_or_none.return_value = _make_mock_provider(id=1)
-        mock_result_issue = MagicMock()
-        mock_result_issue.scalar_one_or_none.return_value = None
 
         now = datetime(2024, 1, 1, 12, 0, 0)
 
@@ -1044,7 +1066,10 @@ class RetryTaskAPITests(unittest.TestCase):
                 mock_result_task,
                 mock_result_no_retry,
                 mock_result_default_provider,
-                mock_result_issue,
+                _make_scalars_all_result([task]),
+                _make_rows_all_result([]),
+                _make_scalars_all_result([]),
+                MagicMock(),
             ]
         )
         mock_db.add = MagicMock()
@@ -1109,7 +1134,7 @@ class RetryTaskAPITests(unittest.TestCase):
 
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(
-            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue]
+            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue, _make_scalars_all_result([task]), _make_rows_all_result([]), _make_scalars_all_result([]), MagicMock()]
         )
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
@@ -1180,7 +1205,7 @@ class RetryTaskAPITests(unittest.TestCase):
 
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(
-            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue]
+            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue, _make_scalars_all_result([task]), _make_rows_all_result([]), _make_scalars_all_result([]), MagicMock()]
         )
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
@@ -1230,7 +1255,7 @@ class RetryTaskAPITests(unittest.TestCase):
 
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(
-            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue]
+            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue, _make_scalars_all_result([task]), _make_rows_all_result([]), _make_scalars_all_result([]), MagicMock()]
         )
         mock_db.add = MagicMock()
         mock_db.flush = AsyncMock()
@@ -1284,7 +1309,7 @@ class RetryTaskAPITests(unittest.TestCase):
 
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(
-            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue]
+            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue, _make_scalars_all_result([task]), _make_rows_all_result([]), _make_scalars_all_result([]), MagicMock()]
         )
         mock_db.add = MagicMock()
         mock_db.flush = AsyncMock()
@@ -1340,7 +1365,7 @@ class RetryTaskAPITests(unittest.TestCase):
 
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(
-            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue]
+            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue, _make_scalars_all_result([task]), _make_rows_all_result([]), _make_scalars_all_result([]), MagicMock()]
         )
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
@@ -1616,6 +1641,7 @@ class CreateTaskAPITests(unittest.TestCase):
         mock_db.commit = AsyncMock()
         mock_db.flush = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
+        mock_db.execute = AsyncMock(return_value=_make_scalars_all_result([]))
 
         async def override_db():
             yield mock_db
@@ -1687,6 +1713,7 @@ class CreateTaskAPITests(unittest.TestCase):
         mock_db.refresh = AsyncMock()
         no_lineage = MagicMock()
         no_lineage.scalar_one_or_none.return_value = None
+        no_lineage.scalars.return_value.all.return_value = []
         mock_db.execute = AsyncMock(return_value=no_lineage)
 
         current_user = MagicMock()
@@ -1990,6 +2017,11 @@ class RetryTaskWithScheduleTests(unittest.TestCase):
                 mock_result_no_retry,
                 mock_result_default,
                 mock_result_issue,
+                _make_scalars_all_result([task]),
+                _make_rows_all_result([]),
+                _make_scalars_all_result([]),
+                _make_scalars_all_result([]),
+                MagicMock(),
             ]
         )
         mock_db.add = MagicMock()
@@ -2062,7 +2094,7 @@ class ListTasksProviderTests(unittest.TestCase):
         self.assertEqual(data[0]["provider_id"], 9)
         self.assertEqual(data[0]["provider_name"], "OpenAI Prod")
 
-        executed_query = mock_db.execute.await_args.args[0]
+        executed_query = mock_db.execute.await_args_list[0].args[0]
         self.assertIn("provider", str(executed_query))
 
 
@@ -2178,10 +2210,19 @@ class PaginationTests(unittest.TestCase):
         mock_db = MagicMock()
 
         if total_count is not None:
-            # Paginated mode: first execute → count, second execute → data
+            # Paginated mode: count, data, then per-Issue queue context (tasks +
+            # lock). Empty task sets do not reach the queue-context queries, so the
+            # extra entries are simply left unconsumed.
             mock_count_result = MagicMock()
             mock_count_result.scalar.return_value = total_count
-            mock_db.execute = AsyncMock(side_effect=[mock_count_result, mock_data_result])
+            mock_db.execute = AsyncMock(
+                side_effect=[
+                    mock_count_result,
+                    mock_data_result,
+                    _make_scalars_all_result(tasks_list),
+                    MagicMock(),
+                ]
+            )
         else:
             # Legacy mode: single execute → data
             mock_db.execute = AsyncMock(return_value=mock_data_result)

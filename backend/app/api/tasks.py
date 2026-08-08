@@ -47,10 +47,13 @@ from app.api.task_operations import (
     get_task_with_access_check,
     notify_task_retried,
     validate_scheduled_datetime_in_future,
+    validate_task_status_for_reschedule,
     validate_task_status_for_retry,
 )
 from app.api.task_queries import TaskListFilters, build_task_list_query
 from app.api.task_responses import (
+    apply_queue_context,
+    compute_task_queue_contexts,
     serialize_task as _serialize_task,
 )
 from app.api.task_runtime_summary_routes import (
@@ -229,11 +232,16 @@ async def list_tasks(
         result = await db.execute(query.limit(page_size).offset(offset))
         tasks = result.scalars().all()
 
+        items = [
+            _serialize_task(task, project_lookup.get(task.project_id), settings)
+            for task in tasks
+        ]
+        queue_contexts = await compute_task_queue_contexts(db, list(tasks))
+        for task, item in zip(tasks, items):
+            apply_queue_context(item, task.id, queue_contexts)
+
         return {
-            "items": [
-                _serialize_task(task, project_lookup.get(task.project_id), settings)
-                for task in tasks
-            ],
+            "items": items,
             "total": total,
             "page": page,
             "page_size": page_size,
@@ -243,7 +251,12 @@ async def list_tasks(
     result = await db.execute(query.limit(100))
     tasks = result.scalars().all()
 
-    return [_serialize_task(task, project_lookup.get(task.project_id), settings) for task in tasks]
+    items = [_serialize_task(task, project_lookup.get(task.project_id), settings) for task in tasks]
+    queue_contexts = await compute_task_queue_contexts(db, list(tasks))
+    for task, item in zip(tasks, items):
+        apply_queue_context(item, task.id, queue_contexts)
+
+    return items
 
 
 @router.get("/tasks/filter-options")
@@ -433,6 +446,50 @@ async def preview_run_instruction_template(
     }
 
 
+@router.get("/tasks/schedule-constraints")
+async def get_schedule_constraints(
+    issue_id: int | None = Query(default=None),
+    task_id: int | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
+    """Return the valid ``scheduled_at`` window for an append or a reschedule.
+
+    ``issue_id`` returns the tail-create floor (no ceiling) for new Tasks on an
+    Issue; ``task_id`` returns the bidirectional window for rescheduling that
+    Task. Exactly one of the two is required. The window returned here is a
+    convenience projection — the submitting transaction re-validates under the
+    Issue row lock and remains the source of truth.
+
+    Registered before ``/tasks/{task_id}`` so the static path is never captured
+    as a Task ID.
+    """
+    from app.core.issue_task_order import compute_schedule_window
+
+    if task_id is not None:
+        task = await get_task_with_access_check(task_id, db, access_scope, current_user)
+        validate_task_status_for_reschedule(task)
+        return await compute_schedule_window(
+            db,
+            issue_id=task.issue_id,
+            exclude_task_id=task.id,
+        )
+    if issue_id is not None:
+        issue = await db.get(Issue, issue_id)
+        if issue is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Issue not found",
+            )
+        require_project_access(issue.project_id, access_scope)
+        return await compute_schedule_window(db, issue_id=issue.id)
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Either issue_id or task_id is required",
+    )
+
+
 @router.get("/tasks/{task_id}")
 async def get_task(
     task_id: int,
@@ -503,6 +560,16 @@ async def get_task(
     metadata = await get_project_metadata(task.project_id)
     t3 = time.time()
     result_data = _serialize_task(task, metadata, include_prompt_details=True)
+    queue_contexts = await compute_task_queue_contexts(db, [task])
+    apply_queue_context(result_data, task.id, queue_contexts)
+    if task.status in (TaskStatus.PENDING, TaskStatus.QUEUED):
+        from app.core.issue_task_order import compute_schedule_window
+
+        result_data["schedule_constraints"] = await compute_schedule_window(
+            db,
+            issue_id=task.issue_id,
+            exclude_task_id=task.id,
+        )
     failure_summary = await load_task_failure_summary(db, task.id)
     result_data.update(failure_summary)
     t4 = time.time()

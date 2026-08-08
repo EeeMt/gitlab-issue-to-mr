@@ -260,7 +260,11 @@ async def cancel_task(
         )
 
     if task.container_id is None:
-        await release_issue_execution_lock(db, issue_id=task.issue_id)
+        await release_issue_execution_lock(
+            db,
+            issue_id=task.issue_id,
+            owner_task_id=task.id,
+        )
         await db.commit()
         logger.info(
             "Released issue %s execution lock for cancelled task %s",
@@ -334,7 +338,14 @@ async def execute_task(
     current_user: User | None = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
-    """Trigger immediate execution of a pending task."""
+    """Trigger immediate execution of a pending task.
+
+    Execute-now only clears the Task's own ``scheduled_at``. A non-head Task
+    still waits for its active predecessors; the response reports that blocking
+    fact instead of claiming the Task bypassed the Issue queue (§7.2).
+    """
+    from app.api.task_responses import compute_task_queue_contexts
+
     task = await get_task_with_access_check(task_id, db, access_scope, current_user)
     validate_task_status_for_execute(task)
 
@@ -343,11 +354,29 @@ async def execute_task(
     await db.commit()
     await db.refresh(task)
 
+    queue_contexts = await compute_task_queue_contexts(db, [task])
+    ctx = queue_contexts.get(task.id) or {}
+    queue_position = ctx.get("queue_position")
+
+    if queue_position is not None and queue_position > 1:
+        await notify_task_execute_now(task, previous_scheduled_at)
+        logger.info(
+            "Task %s cleared scheduled_at; still waits for predecessors",
+            task_id,
+        )
+        return {
+            "status": "success",
+            "message": "Task will run after its predecessors complete",
+            "queue_position": queue_position,
+            "blocked_by_task_id": ctx.get("blocked_by_task_id"),
+        }
+
     await notify_task_execute_now(task, previous_scheduled_at)
     logger.info(f"Task {task_id} scheduled for immediate execution")
     return {
         "status": "success",
         "message": f"Task {task_id} scheduled for immediate execution",
+        "queue_position": queue_position,
     }
 
 
@@ -359,10 +388,52 @@ async def reschedule_task(
     current_user: User | None = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
-    """Update the execution time for a pending scheduled task."""
+    """Update the execution time for a pending scheduled task.
+
+    The new time must stay inside the Issue queue window: not before the latest
+    scheduled time of any earlier active Task and not after the earliest
+    scheduled time of any later active Task (§4.2). The window is re-validated
+    under the Issue row lock (before the Slot advisory lock, §6.3) so a
+    concurrent append or reschedule cannot submit a monotonic-order violation.
+    """
+    from sqlalchemy import select
+
+    from app.api.task_responses import (
+        apply_queue_context,
+        compute_task_queue_contexts,
+    )
+    from app.core.issue_task_order import (
+        ScheduleWindowConflict,
+        compute_schedule_window,
+        count_active_successors,
+        validate_schedule_time_locked,
+    )
+    from app.models import Issue
+
     task = await get_task_with_access_check(task_id, db, access_scope, current_user)
     validate_task_status_for_reschedule(task)
     normalized_scheduled = validate_scheduled_datetime_in_future(request.scheduled_datetime)
+
+    issue = (
+        await db.execute(select(Issue).where(Issue.id == task.issue_id).with_for_update())
+    ).scalar_one_or_none()
+    if issue is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Issue not found",
+        )
+    try:
+        await validate_schedule_time_locked(
+            db,
+            issue_id=issue.id,
+            scheduled_at=normalized_scheduled,
+            exclude_task_id=task.id,
+        )
+    except ScheduleWindowConflict as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=exc.detail,
+        ) from exc
 
     from app.core.slot_capacity import check_slot_capacity, slot_full_detail_dict
 
@@ -376,6 +447,20 @@ async def reschedule_task(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=slot_full_detail_dict(slot_info),
+        )
+
+    # An active head that moves to a future time re-enters PENDING and keeps
+    # every active successor blocked behind it; report the blast radius (§7.3).
+    blocked_successor_count = 0
+    is_head = task.status == TaskStatus.QUEUED
+    if not is_head:
+        pre_contexts = await compute_task_queue_contexts(db, [task])
+        is_head = (pre_contexts.get(task.id) or {}).get("queue_position") == 1
+    if is_head:
+        blocked_successor_count = await count_active_successors(
+            db,
+            issue_id=issue.id,
+            task_id=task.id,
         )
 
     previous_scheduled_at = task.scheduled_at
@@ -397,8 +482,17 @@ async def reschedule_task(
         task_id,
         normalized_scheduled.isoformat(),
     )
-    return serialize_task(
+    response = serialize_task(
         task,
         await get_project_metadata(task.project_id),
         include_prompt_details=True,
     )
+    queue_contexts = await compute_task_queue_contexts(db, [task])
+    apply_queue_context(response, task.id, queue_contexts)
+    response["blocked_successor_count"] = blocked_successor_count
+    response["schedule_constraints"] = await compute_schedule_window(
+        db,
+        issue_id=issue.id,
+        exclude_task_id=task.id,
+    )
+    return response
