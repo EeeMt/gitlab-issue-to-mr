@@ -113,7 +113,7 @@ Phase 4 文档已把门槛写得很对:六项准入、hermetic 配置证明、�
 
 **P2(契约与身份完备):**
 4. **契约收口**:terminate 要么由 runner 真正行使(TERM→grace→KILL),要么移出契约。
-5. **cli_version_range 从 manifest 强制**。
+5. **cli_version_range 从 manifest 强制** —— **保持不强制,改为 advisory 告警(2026-08-08)**:新增 `harness/version_range.py` 评估声明范围,两个 adapter 的 `verify_runtime` 在 CLI 版本超出范围时打印 WARNING(advisory,不阻断);注释已写明。仍是设计上不强制,但运行时可见。
 6. ~~session namespace 补齐 5 输入或显式收窄~~ —— **已澄清(2026-08-08)**:选"显式收窄 + 文档对齐",契约已改为 3 输入并写明理由,代码注释同步。见 §视角 B。
 
 **P3(展示与打磨):**

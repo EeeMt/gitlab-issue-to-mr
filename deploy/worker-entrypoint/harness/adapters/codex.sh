@@ -41,6 +41,18 @@ codex_adapter_verify_runtime() {
     fi
     CODIFY_CLI_VERSION="${version_output}"
     export CODIFY_CLI_VERSION
+    # cli_version_range in the manifest is an advisory fast-startup hint, not an
+    # enforced gate: an out-of-range CLI logs a warning and is allowed to run.
+    local cli_range version_range_py manifest_path
+    version_range_py="${CODIFY_ORCHESTRATION_DIR:-}/worker-entrypoint/harness/version_range.py"
+    manifest_path="${CODIFY_ORCHESTRATION_DIR:-}/manifest.json"
+    [ -r "${manifest_path}" ] || manifest_path="${ENTRYPOINT_LIB_DIR:-}/harness/manifest.json"
+    cli_range="$(jq -r '.adapters.codex.cli_version_range // empty' "${manifest_path}" 2>/dev/null || true)"
+    if [ -n "${cli_range}" ] && [ -f "${version_range_py}" ] \
+        && ! python3 "${version_range_py}" \
+            --version "${CODIFY_CLI_VERSION}" --range "${cli_range}" >/dev/null 2>&1; then
+        echo "WARNING: codex CLI ${CODIFY_CLI_VERSION} is outside the declared range ${cli_range} (advisory, not enforced)" >&2
+    fi
     if [ -n "${CODIFY_CLI_BINARY_DIGEST:-}" ]; then
         local actual_digest
         actual_digest="$(sha256sum "${bin}" 2>/dev/null | awk '{print $1}')"

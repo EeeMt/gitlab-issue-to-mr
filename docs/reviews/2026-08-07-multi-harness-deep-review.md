@@ -75,10 +75,11 @@
 - **问题**: `HARNESS_WIRE_PROTOCOLS` + `providerCompatibleWithHarness` 复制了 `backend/app/core/harness_registry.py:55-56` 的规则,前端自行过滤 provider/禁选 harness/自动调整选中项。规格 Phase 2 Task 2.2 明确"Frontend 不得自行复制 Backend 的 Harness/Endpoint 兼容规则;直接消费 `list_harness_options`"。
 - **修复**: 后端新增 `compatible_harness_keys()` 反向查询(registry),provider 序列化返回 `compatible_harnesses`;前端删除硬编码 `HARNESS_WIRE_PROTOCOLS`,兼容判断改为成员检查。补 registry 单测与 spec fixtures。
 
-### 9. cli_version_range 声明但无运行时强制 —— 待决策
-- **位置**: `deploy/worker-entrypoint/harness/manifest.json`(claude `>=2.1.33 <3.0.0`,codex `>=0.146.0 <0.160.0`)
+### 9. cli_version_range 声明但无运行时强制 —— ✅ 已澄清为 advisory 告警(2026-08-08)
+- **位置**: `deploy/worker-entrypoint/harness/version_range.py`;`adapters/claude.sh` `adapters/codex.sh`
 - **问题**: contract 说 "Version ranges are a fast startup check";但 claude 仅硬编码下限 2.1.33(无上界),codex 完全未校验版本范围,只查二进制存在 + digest。`cli_version_range` 字段无任何代码读取。
-- **建议**: 在 adapter `verify_runtime` 内解析 manifest 的 range 并拒绝范围外版本。**未修**(需决策 range 解析与错误语义)。
+- **决定**: **不强制**(保持设计意图——digest 是真正的执行门禁,版本范围只是兼容提示)。新增 `version_range.py` 评估声明范围,两个 adapter 的 `verify_runtime` 在 CLI 版本超出范围时打印 WARNING(advisory,不阻断),注释写明。`version_range.py` 纳入 adapter digest 文件集。
+- **验证**: 新增 `test_version_range.py` + `test_codex_verify_runtime_warns_but_does_not_enforce_version_range`。
 
 ### 10. projector tail 对撕裂末行 strict-decode 崩溃 —— 已修复
 - **位置**: `backend/app/core/worker_event_projector.py:368`(及 backfill 路径)
@@ -124,7 +125,7 @@
 
 ## 未修复项后续建议
 
-1. **cli_version_range 运行时强制**(P2)建议补进 adapter `verify_runtime`,与 digest 校验并列。
+1. ~~cli_version_range 运行时强制~~ —— **已澄清为 advisory 告警(2026-08-08)**,见第 9 项;保持不强制。
 2. ~~session_namespace 增加认证域/工作区输入~~ —— **已澄清(2026-08-08)**:保持 3 输入,契约文档已对齐并写明理由,见第 6 项。
 
 ## 第二轮修复(2026-08-07,用户指定)

@@ -269,6 +269,7 @@ def _codex_verify_runtime(tmp_path: Path, cli: Path, digest: str) -> subprocess.
     env = {
         **os.environ,
         "CODIFY_ORCHESTRATION_DIR": str(REPO_ROOT / "deploy"),
+        "ENTRYPOINT_LIB_DIR": str(REPO_ROOT / "deploy/worker-entrypoint"),
         "CODIFY_CODEX_BIN": str(cli),
         "CODIFY_CLI_BINARY_DIGEST": digest,
     }
@@ -291,6 +292,19 @@ def test_codex_verify_runtime_enforces_frozen_cli_binary_digest(tmp_path):
     bad = _codex_verify_runtime(tmp_path, cli, "0" * 64)
     assert bad.returncode != 0
     assert "digest mismatch" in bad.stderr
+
+
+def test_codex_verify_runtime_warns_but_does_not_enforce_version_range(tmp_path):
+    # cli_version_range is advisory: an out-of-range CLI logs a warning and is
+    # allowed to run (the digest gate is the enforced one).
+    cli = tmp_path / "codex"
+    cli.write_text("#!/bin/sh\necho codex 9.9.9\n", encoding="utf-8")
+    cli.chmod(0o755)
+    digest = hashlib.sha256(cli.read_bytes()).hexdigest()
+
+    result = _codex_verify_runtime(tmp_path, cli, digest)
+    assert result.returncode == 0, result.stderr
+    assert "WARNING: codex CLI codex 9.9.9 is outside the declared range" in result.stderr
 
 
 def _walk_keys(value):
