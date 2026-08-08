@@ -58,11 +58,12 @@
 - **问题**: jq 程序是对象字面量模板(不读取输入),仅校验文件是合法 JSON;不像 claude 版校验 schema/harness_key/adapter_version/cli_version/status。
 - **修复**: 改为与 claude 一致的真实字段校验(兼容 completed/failed/cancelled/protocol_error)。
 
-### 6. session_namespace 缺少认证域与工作区身份输入 —— 已修复为规格对齐?**待决策**
-- **位置**: `backend/app/core/harness_sessions.py:24-32`
-- **问题**: contract 明确 namespace = digest(Harness, Endpoint fingerprint, **认证域**, **工作区身份**, Adapter state major);实现只用 harness + fingerprint + state-major。同一 endpoint 不同凭据(认证域)会共享 namespace,理论上可跨认证域续会话。
-- **建议**: 在 `session_namespace_for` 增加 auth-domain/workspace 输入并回填调用方。**未修**(涉及多调用点接线,需确认)。
-- **影响评估**: 每 issue 单一 provider/凭据的常见场景下影响有限。
+### 6. session_namespace 缺少认证域与工作区身份输入 —— ✅ 已澄清 + 文档对齐(2026-08-08)
+- **位置**: `backend/app/core/harness_sessions.py:24-32`;`docs/architecture/worker-harness-contract-v1.md`
+- **问题**: contract 原列 5 个输入(Harness、Endpoint fingerprint、**认证域**、**工作区身份**、Adapter state major);实现只用 harness + fingerprint + state-major。
+- **澄清**: 经评估,**3 输入是正确形态**,理由见架构报告 §视角 B——workspace identity 由 `issue_id` 隐含(冗余);authentication domain 若按凭据实例定义会使凭据轮换重置会话(有害),真正该防的跨认证方式续接已由 endpoint fingerprint 的非敏感 auth-scheme 字段覆盖。
+- **修复**: 契约文档改为 3 输入定义并写明理由;`session_namespace_for` 补注释指向契约。**不增加 namespace 输入**。
+- **影响评估**: 无代码行为变化,纯文档/注释对齐。
 
 ### 7. 064 迁移对遗留明文 api_key 的 backfill 会生成不可解密的 credential —— 已修复
 - **位置**: `backend/alembic/versions/064_multi_harness_runtime.py:193-219`;`backend/app/core/model_credentials.py`
@@ -124,7 +125,7 @@
 ## 未修复项后续建议
 
 1. **cli_version_range 运行时强制**(P2)建议补进 adapter `verify_runtime`,与 digest 校验并列。
-2. **session_namespace 增加认证域/工作区输入**(P2)若多凭据/多认证域场景上线,需补全 namespace 输入。
+2. ~~session_namespace 增加认证域/工作区输入~~ —— **已澄清(2026-08-08)**:保持 3 输入,契约文档已对齐并写明理由,见第 6 项。
 
 ## 第二轮修复(2026-08-07,用户指定)
 
