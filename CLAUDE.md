@@ -1,158 +1,70 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code in this repo. Full doc index: [docs/README.md](docs/README.md).
 
-## Project Overview
+## Overview
 
-Codify — an AI-powered code generation service. Users create issues in the dashboard, launch tasks from them, and Codify schedules execution in isolated Docker containers using Claude CLI to generate code, commit, push, and open Merge Requests.
+Codify runs each task in an isolated Docker container that executes an AI Harness — **Claude CLI or Codex CLI** — to generate code, commit, push, and open a GitLab MR. Backend: FastAPI + async SQLAlchemy. Frontend: Vue 3 + Naive UI. Worker scripts live in `deploy/worker-entrypoint/`.
+
+## Non-negotiables (worker/task code)
+
+- **Never hardcode a harness.** Execution facts (adapter, CLI path, bundle, session, `harness_key`) come from the frozen Task snapshot / runtime bundle manifest. Canonical events (`codify.worker.event/v1`) are the only event protocol the backend consumes; adapters translate engine raw output.
+- **Runtime Bundles are immutable.** A task freezes a bundle digest at creation; `retry` reuses it. After changing `deploy/worker-entrypoint/**` or `ci-claude.sh`, rebuild the backend image **and** recreate the scheduler — then verify with a **new** task (retry keeps the old bundle).
+- **Use `get_effective_settings()`**, not `get_settings()` — DB overrides from `system_config` must take effect at runtime.
+- **Async SQLAlchemy:** never read a lazy-loaded relationship (e.g. `task.worker_profile_snapshot`) without an `sa_inspect(...)` unloaded check — it raises `MissingGreenlet`. Prefer explicit `selectinload`.
+- **Sanitize before storing logs** (`harness/adapters/sanitize.py`; backend `worker.py::sanitize_sensitive_data`) — strips `glpat-*` tokens and `sk-ant-*` keys.
+- **Credential-aware sessions:** session namespace excludes the credential, so rotation does not reset a conversation.
+
+## Dev environment gotchas
+
+- Docker runs on a **remote host** via context `remote` (`ssh://root@192.168.50.129`); every `make`/compose target acts on it. Addresses/credentials: gitignored `deploy/dev-env-info.md`.
+- `docker run -v <local-path>:/x` mounts the **remote** path, not local; use `--entrypoint cat <image> <path>` to read files out of images.
+- Dev env = `make up` → backend/scheduler/nginx/postgres on the remote host; backend **and** scheduler both run `AUTO_MIGRATE=true`.
 
 ## Commands
 
-All commands use `make`. Run `make help` to see the full list.
-
-### Development
+`make help` lists everything. Frequently used:
 
 ```bash
-make help                    # Show all available commands
-
-# Dev environment
-make build                   # Build all images (backend, nginx, worker)
-make up                     # Start dev environment
-make down                   # Stop dev environment
-make restart                # Restart dev environment
-make logs                   # View logs
-make ps                     # Show running containers
-
-# Rebuild specific service
-make rebuild-backend         # Rebuild backend image and restart
-make rebuild-nginx           # Rebuild frontend image and restart
-make rebuild-worker          # Rebuild worker image
-
-# Testing
-make test-unit              # All unit tests (with coverage)
-make test-backend           # Backend unit tests only
-make test-frontend          # Frontend unit tests only
-make test-mock-e2e         # Mock E2E tests
-make test-e2e               # All E2E tests (Playwright + GitLab)
-make test-e2e-ui            # Playwright UI tests only
-make test-e2e-gitlab        # GitLab integration tests only
-make test-all               # All tests (unit + E2E)
-
-# Playwright E2E step-by-step
-make test-e2e-up            # Start E2E test environment
-make test-e2e-run           # Run E2E tests
-make test-e2e-down          # Stop E2E test environment
+make up / down / logs / ps        # dev environment
+make rebuild-backend              # rebuild + restart backend (required after worker-script changes)
+make test-unit                    # backend + frontend + mock-e2e unit suites
+make test-backend                 # backend unit tests only
+make test-mock-integration        # full lifecycle in Docker (mock GitLab + fake harness)
+make test-e2e                     # all E2E: Playwright + GitLab
+make lint                         # backend ruff
 ```
 
-### Testing & Debugging
+Testing deep-dive: [docs/TESTING.md](docs/TESTING.md).
 
-See [docs/TESTING.md](docs/TESTING.md) for the detailed testing guide.
+## Architecture essentials
 
-Quick debug commands:
-```bash
-# View backend logs
-docker logs codify-backend --tail 100
+Services (docker-compose): **backend** FastAPI · **scheduler** (same image, `app.scheduler_service`) · **nginx** (frontend + `/api` proxy) · **postgres** (`postgres_data` volume).
 
-# Check task status in database
-docker exec codify-postgres psql -U codify -d codify -c "SELECT id, status, error_message FROM tasks ORDER BY id DESC LIMIT 3;"
-```
+Key modules:
 
-## Architecture
+| Module | Purpose |
+|---|---|
+| `backend/app/api/tasks.py` / `issues.py` | task / issue CRUD |
+| `backend/app/scheduler.py` | priority queue (P0/P1/P2), concurrency, issue mutex `_running_issues: set[int]`, crash recovery |
+| `backend/app/core/worker.py` / `worker_runtime_bundle.py` | container execution, immutable bundle build |
+| `backend/app/core/harness_registry.py` | harness allowlist, capability policy, manifest validation |
+| `backend/app/core/harness_sessions.py` / `harness_attempts.py` | session lineage, idempotent canonical-event ingest |
+| `backend/app/core/model_credentials.py` | per-provider credentials (active/retired lifecycle) |
+| `deploy/worker-entrypoint/harness/` | worker-side adapters + event translators + runner (claude/codex) |
+| `backend/app/migrations.py` + `alembic/versions/NNN_*.py` | migrations (head: `067`) |
 
-### High-Level Flow
+Worker containers: `codify-{task_id}-p{project_id}-i{issue_iid}` — scheduler crash recovery matches this pattern.
 
-1. User creates an issue in the dashboard, describing the goal and constraints
-2. User launches or schedules a task from the issue
-3. Scheduler picks up pending tasks (priority queue, respects concurrency limits)
-4. WorkerExecutor runs the task in an isolated Docker container
-5. Container clones the repo, runs Claude CLI to generate code
-6. Container commits, pushes, and creates/updates the MR
-7. Dashboard shows status, logs, and delivery details in real-time
+## Conventions
 
-### Core Components
+- **Backend:** `AsyncSession` via `Depends(get_db)`; migrations as `NNN_description.py`; Python 3.11+, ruff 100 cols, `asyncio_mode="auto"`.
+- **Frontend:** add i18n keys to **both** `src/i18n/messages/en.ts` and `zh-CN.ts`; `npm run build` runs `vue-tsc` — run it before committing; API via shared axios (`src/api/index.ts`, base `/api`).
+- **Runtime config:** `get_settings()` (env) layered under `get_effective_settings()` (DB overrides) — always use the latter.
 
-| Component | File | Description |
-|-----------|------|-------------|
-| Issue API | `backend/app/api/issues.py` | Issue CRUD, close, task creation from issues |
-| Task API | `backend/app/api/tasks.py` | Task CRUD, cancel, retry, execute, schedule |
-| Models | `backend/app/models.py` | SQLAlchemy models (Task, TaskLog, Issue, etc.) |
-| Scheduler | `backend/app/scheduler.py` | Priority queue with P0/P1/P2, crash recovery |
-| Worker | `backend/app/core/worker.py` | Executes tasks in Docker containers |
-| Docker Client | `backend/app/core/docker_client.py` | Container lifecycle management |
-| GitLab Client | `backend/app/core/gitlab_client.py` | GitLab API interactions (repos, branches, MRs) |
-| AI Providers | `backend/app/api/providers.py` | Multi-provider AI configuration |
-| Stats | `backend/app/api/stats.py` | Analytics, heatmap, scheduled task stats |
-| Migration Runner | `backend/app/migrations.py` | Auto-run migrations on startup |
+## Docs map
 
-### Database
-
-Async SQLAlchemy (`AsyncSession`) throughout. Alembic manages migrations in `backend/alembic/versions/`, numbered sequentially as `NNN_description.py`. Current revision: `027_add_ai_providers`.
-
-Task lifecycle: `PENDING → QUEUED → RUNNING → COMPLETED | FAILED | CANCELLED`
-
-### Service split in Docker Compose
-
-- **backend** (`codify-backend`): FastAPI HTTP server, `AUTO_MIGRATE=false`
-- **scheduler** (`codify-scheduler`): same image, runs `app.scheduler_service`, `AUTO_MIGRATE=true` (owns migrations)
-- **nginx** (`codify-nginx`): serves built frontend and proxies `/api` to backend
-
-### Frontend (Vue 3)
-
-- `Dashboard.vue` — task overview with P0/P1/P2 tabs
-- `IssueList.vue` / `IssueView.vue` — issue management and task creation
-- `CreateIssue.vue` — new issue with prompt templates
-- `TaskList.vue` / `TaskView.vue` — task details and live logs
-- `CreateTask.vue` — manual task creation (`/create-task`)
-- `ScheduleOverview.vue` — scheduling queue
-- `Analytics.vue` — execution trends and success rates
-- `Config.vue` — runtime configuration (8 tabs)
-- `Monitor.vue` — system health (3 tabs)
-- `Sessions.vue` — session management
-- `AccessManagement.vue` — users and permissions
-- `OidcDiagnostics.vue` — SSO debugging
-
-### Runtime configuration
-
-Settings have two layers:
-- `get_settings()` — reads `.env` / environment variables (cached with `@lru_cache`)
-- `get_effective_settings()` — applies DB-persisted overrides from `system_config` table on top
-
-**Always use `get_effective_settings()`** in application code so runtime changes via `/api/config` take effect without restart. Secret config keys (`gitlab_bot_token`, `anthropic_api_key`, etc.) are stored encrypted.
-
-### Configuration (env vars)
-
-- `BACKEND_URL` — Backend service URL (default: http://localhost:8000)
-- `GITLAB_URL`, `GITLAB_BOT_TOKEN` — GitLab connection
-- `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` — AI provider
-- `DATABASE_URL` — PostgreSQL connection
-- `DOCKER_HOST` — Docker Engine API (default: tcp://localhost:2376)
-- `WORKER_IMAGE` — Worker container image (default: codify-worker:latest)
-- `MAX_CONCURRENCY` — Max parallel tasks (default: 3)
-- `TASK_TIMEOUT` — Task timeout in seconds (default: 1800 = 30 min)
-- `DEFAULT_TARGET_BRANCH` — Default branch for MRs (default: main)
-- `AUTO_MIGRATE` — Auto-run migrations on startup (default: true)
-
-## Key Conventions
-
-### Backend patterns
-
-- All DB operations use `AsyncSession`; pass sessions via `Depends(get_db)` in API routes
-- Add new Alembic migrations as `backend/alembic/versions/NNN_description.py` incrementing the number prefix
-- Issue mutex: the scheduler tracks `"project_id:issue_iid"` pairs in `_running_issues` to prevent concurrent tasks on the same issue
-- Worker logs are sanitized by `sanitize_sensitive_data()` before storage — strips `glpat-*` tokens and `sk-ant-*` keys
-- Python target: 3.11+, line length 100 (ruff), `asyncio_mode = "auto"` in pytest
-
-### Frontend patterns
-
-- Vue 3 + Naive UI component library + `vue-i18n` for i18n
-- All API calls go through the shared `axios` instance in `src/api/index.ts` (base `/api`, 401 → redirects to `/login`)
-- Two locales: `src/i18n/messages/en.ts` and `src/i18n/messages/zh-CN.ts` — add keys to both when adding UI text
-- `npm run build` runs `vue-tsc` type-check; use it to validate frontend changes before committing
-
-### Container naming
-
-Worker containers follow the pattern `codify-{task_id}-p{project_id}-i{issue_iid}` (matched by `WORKER_CONTAINER_PATTERN` regex). Crash recovery on scheduler startup identifies and cleans up stale containers by this pattern.
-
-### Priority levels
-
-Tasks use integer priority: `0` = P0 (highest), `1` = P1, `2` = P2. Dashboard shows separate tabs per level.
+- [docs/README.md](docs/README.md) — full index
+- [docs/dev-env-core-regression.md](docs/dev-env-core-regression.md) — dev-env regression plan (Tier 1/2/3)
+- [docs/dev-env-api-regression.md](docs/dev-env-api-regression.md) — L4 API verification steps
+- [docs/multi-harness-debugging.md](docs/multi-harness-debugging.md) — multi-harness integration lessons
