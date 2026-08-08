@@ -51,7 +51,10 @@ Codify 本质上是一个**引擎无关的代码交付平台**。在这种架构
 
 **session/thread/conversation**:各引擎术语不同,外部收敛为 opaque id + namespace。方向正确。
 
-**namespace 不完整**:契约说 5 个输入(harness + endpoint fingerprint + 认证域 + 工作区身份 + state major),实现只有 3 个。OpenCode 有更多认证模式,缺口会先被它踩到。
+**namespace 收窄为 3 输入并文档化(2026-08-08)**:契约原列 5 个输入(harness + endpoint fingerprint + 认证域 + 工作区身份 + state major),实现只有 3 个。经评估后确认 3 输入是正确形态并已把契约文档对齐:
+- **workspace identity 冗余**:由 `issue_id` 隐含(会话行已按 issue 作用域),再哈希进 namespace 是重复。
+- **authentication domain 若按凭据实例定义则有害**:凭据轮换会清空会话;真正该防的"跨认证方式续接"已由 endpoint fingerprint 的非敏感 auth-scheme 字段(provider_kind/wire_protocol/driver)覆盖。
+- 见 `docs/architecture/worker-harness-contract-v1.md`。
 
 **抽象教训:身份作用域要么完整,要么显式收窄并写理由。**
 
@@ -111,7 +114,7 @@ Phase 4 文档已把门槛写得很对:六项准入、hermetic 配置证明、�
 **P2(契约与身份完备):**
 4. **契约收口**:terminate 要么由 runner 真正行使(TERM→grace→KILL),要么移出契约。
 5. **cli_version_range 从 manifest 强制**。
-6. **session namespace 补齐 5 输入或显式收窄**。
+6. ~~session namespace 补齐 5 输入或显式收窄~~ —— **已澄清(2026-08-08)**:选"显式收窄 + 文档对齐",契约已改为 3 输入并写明理由,代码注释同步。见 §视角 B。
 
 **P3(展示与打磨):**
 7. **console 显示决策**:给 codex 补富显示,或明确"UI 时间线即显示、console 走 generic renderer"。

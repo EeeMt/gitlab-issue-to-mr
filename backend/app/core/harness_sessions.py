@@ -26,7 +26,15 @@ def session_namespace_for(
     endpoint_fingerprint: str | None,
     adapter_state_major: str = "1",
 ) -> str:
-    """Stable namespace for a harness/endpoint/state-major combination."""
+    """Stable namespace for a harness/endpoint/state-major combination.
+
+    Only the three inputs that structurally determine whether a transcript can
+    resume are hashed. Workspace identity is implied by ``issue_id`` (which
+    already scopes the session row), and the authentication domain is captured
+    by the Endpoint fingerprint's non-sensitive auth-scheme fields; the volatile
+    credential is excluded so credential rotation does not reset the session.
+    See docs/architecture/worker-harness-contract-v1.md.
+    """
     material = f"{harness_key}|{endpoint_fingerprint or ''}|state-{adapter_state_major}"
     digest = hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
     return f"{harness_key}-{digest}"
