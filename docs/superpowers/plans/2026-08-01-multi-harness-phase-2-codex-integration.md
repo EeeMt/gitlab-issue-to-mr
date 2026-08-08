@@ -373,7 +373,7 @@ Snapshot 在 Task 创建事务中一次写入并立即冻结，继续保持每�
       > （Task 504/505/506 验证）。**Claude 同环境回归已通过**（2026-08-04，DeepSeek
       > anthropic provider 6，provider 1/智谱余额不足 429；Task 508 completed、
       > commit `ece571b4`、`run.completed(success)`）。**resume/跨 Harness/取消/timeout
-      > 的 Codex 矩阵已补**（Task 509–522，见 `docs/codex-integration-debugging.md` §11）。
+      > 的 Codex 矩阵已补**（Task 509–522，见 `docs/multi-harness-debugging.md` §1.8–1.10）。
       > 2026-08-05 复核：Task 532（RUNNING cancel → cancelled 收敛）、533（task_timeout=60 →
       > `run.failed` timeout 终态 + 容器清理）、534（RUNNING cancel → cancelled）、
       > 535（PATH probe：`which claude`=/usr/local/bin/claude、`id -u`=1000、codex 由 adapter

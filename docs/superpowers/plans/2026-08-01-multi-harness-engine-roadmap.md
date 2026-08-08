@@ -90,7 +90,7 @@ Phase 1 剩余项：**发版硬边界切换**（关闭历史 Issue + 启用 Prof
   manifest `adapters.codex`(openai_responses),bundle 泛化构建所有 adapters。
 - **增量 7–8（`85d94d9f`…`0e0f50e5`）**：Task 2.10 per-harness analytics + null-safe usage;Task 2.11
   前端 harness 管线 + TaskFormDrawer 选择器 + WorkerSettings 引擎编辑器 + AIProvidersPanel 端点信息。
-- **Codex 真实集成调试（`f5652cc7`…`8f5ecf0f`,见 `docs/codex-integration-debugging.md`）**：真实 Codex CLI
+- **Codex 真实集成调试（`f5652cc7`…`8f5ecf0f`,见 `docs/multi-harness-debugging.md`）**：真实 Codex CLI
   0.146.0 挂载进 worker。逐项修复:执行路径硬编码 claude→读冻结 snapshot;greenlet 懒加载;bundle
   manifest 只声明 claude;OPENAI_* env;config.toml 端点/模型;bwrap userns 不可用→容器边界模式。
   **已验证**:codex 连接 DeepSeek+`deepseek-v4-flash`、执行命令、写入文件、跑测试、产出有效
