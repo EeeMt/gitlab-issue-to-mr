@@ -6,6 +6,8 @@
 
 **Status:** Draft
 
+**Scheduling dependency:** [Issue Task Ordered Turns Design](2026-08-08-issue-task-ordered-turns-design.md)
+
 ## Summary
 
 Codify currently uses an Issue as the requirement and delivery boundary, while each Task is one
@@ -36,7 +38,8 @@ session, branch, MR, Worker affinity, Task scheduler, and Issue execution lock.
 A GoalRun may start immediately or at a user-selected future time. Goal start scheduling is a
 Goal-level product action, but the first Goal Task carries the actual `scheduled_at` value and is
 dispatched by the existing Task scheduler. Goal continuations and CI auto-repair Tasks are created
-only when their triggering event occurs and are immediately eligible for the same scheduler.
+only when their triggering event occurs, append to the Issue input stream, and are immediately
+time-eligible for the same scheduler once they reach the Issue head.
 
 ## Context
 
@@ -47,9 +50,11 @@ Codify already provides most of the execution foundation required by a durable G
 - Tasks under the same Issue reuse the persistent repository workspace.
 - Claude session state is persisted at Issue scope.
 - Previous Task summaries are included when preparing later Task runtime context.
-- The scheduler and `IssueExecutionLock` ensure that Tasks for one Issue execute serially.
-- `Task.scheduled_at` is the existing execution-eligibility clock: null means immediately
-  eligible, while a future value means the Task is reserved for that time.
+- The ordered-turn scheduler selects only the earliest active Task for an Issue, while
+  `IssueExecutionLock` separately ensures that no two Tasks mutate the Issue workspace at once.
+- `Task.scheduled_at` is the existing time-eligibility clock: null means immediately
+  time-eligible, while a future value means the Task is reserved for that time. Issue turn order
+  remains a separate prerequisite for entering the global queue.
 - Scheduled Task creation, slot-capacity enforcement, rescheduling, execute-now, queue analytics,
   and notifications already operate on the Task row.
 - CI auto-repair creates a Task only after a qualifying CI event and marks it with
@@ -128,20 +133,23 @@ queued and runs.
 ### Task trigger
 
 The event or actor that causes a Task row to be created. `trigger_source` records this origin, such
-as `manual`, `retry`, `goal_initial`, `goal_continue`, or `ci_auto_repair`. It does not determine
-queue ordering or replace `scheduled_at`.
+as `manual`, `retry`, `goal_initial`, `goal_continue`, or `ci_auto_repair`. Every created Task is
+appended to the Issue's immutable `issue_sequence`; trigger source does not grant insertion or
+preemption rights and does not replace `scheduled_at`.
 
 ### Execution eligibility
 
-The earliest time an already-created Task may enter the queue:
+The earliest time an already-created Issue-head Task may enter the queue:
 
 ```text
-scheduled_at = null          -> immediately eligible
-scheduled_at = future time   -> eligible when that time arrives
+earliest active issue_sequence
++ scheduled_at = null or due
+-> eligible for QUEUED
 ```
 
-Immediate execution still passes through Task priority, global concurrency limits, the scheduler,
-and `IssueExecutionLock`.
+Later Issue Tasks remain pending even when their own schedule is due. Immediate execution still
+passes through Issue-head ordering, Task priority, global concurrency limits, the scheduler, and
+`IssueExecutionLock`.
 
 ### Scheduling control
 
@@ -208,10 +216,13 @@ new automated follow-up loop on the existing branch and MR.
 > All Tasks are dispatched by the scheduler; not all Tasks are user-schedulable.
 
 Codify must not add a Goal timer or a second queue. Every persisted Task, regardless of origin,
-uses the current `TaskScheduler` and the same eligibility rule:
+uses the current `TaskScheduler` and the same ordered-turn eligibility rule:
 
 ```text
-PENDING + (scheduled_at is null or scheduled_at <= now) -> QUEUED
+PENDING
++ earliest active issue_sequence
++ (scheduled_at is null or scheduled_at <= now)
+-> QUEUED
 ```
 
 Task creation trigger, execution timing, and user control are separate dimensions:
@@ -227,8 +238,9 @@ Task creation trigger, execution timing, and user control are separate dimension
 
 System-generated Tasks are not pre-created to wait for a workflow event. A Goal continuation does
 not exist until the previous Goal decision has been processed, and a CI repair Task does not exist
-until the CI failure gate has passed. Once created, both are immediately eligible but still wait
-for normal Task priority, concurrency, and Issue locking.
+until the CI failure gate has passed. Once created, both are appended to the Issue input stream.
+They become immediately time-eligible because `scheduled_at=null`, but can enter the global queue
+only after all earlier active Issue turns are terminal.
 
 Do not persist a `schedule_mode` enum. The API/UI choice `now | scheduled` maps to the existing
 nullable `Task.scheduled_at` field. A shared scheduling policy function determines available
@@ -244,7 +256,10 @@ get_task_schedule_capabilities(task, goal_run, current_user)
 Generic Task mutation endpoints reject Goal-owned Tasks and return the owning GoalRun ID. This
 prevents a user from rescheduling or executing the first Goal Task without updating GoalRun state.
 Goal-specific endpoints reuse the same datetime normalization, slot-capacity, execute-now,
-reschedule, notification, and serialization services used by ordinary Tasks.
+reschedule, notification, and serialization services used by ordinary Tasks. They also reuse the
+Issue ordered-turn schedule constraints: a scheduled initial Goal Task or manual retry cannot choose
+a time earlier than an active scheduled predecessor, and rescheduling cannot cross an active
+scheduled successor. The ordered-turn design remains the authoritative definition of this window.
 
 CI auto-repair Tasks expose no reschedule/execute-now capability. If one fails and a user invokes
 the existing manual retry flow, that newly created `trigger_source=retry` Task is user-controlled
@@ -278,9 +293,10 @@ running initial Task moves it back to `pending`, matching existing Task behavior
 scheduled Goal is not offered because reschedule and cancel already express the useful pre-start
 controls.
 
-The reservation promises only when the Goal becomes eligible to start. It does not reserve
+The reservation promises only when the Goal becomes time-eligible to start. It does not reserve
 continuous capacity until completion. All continuation Tasks are created with
-`scheduled_at=null` and compete normally under existing priority and concurrency rules.
+`scheduled_at=null`, append to the Issue input stream, and compete under normal global priority
+and concurrency rules only after reaching the Issue head.
 
 ### The Goal contract is immutable
 
@@ -781,9 +797,10 @@ flowchart TD
     A["User starts or reserves GoalRun"] --> B["Goal API creates GoalRun and step 1 atomically"]
     B --> S{"Step 1 scheduled_at"}
     S -->|"future"| W["Existing TaskScheduler waits until due"]
-    S -->|"null"| C["Task is immediately eligible"]
+    S -->|"null"| C["Task is immediately time-eligible"]
     W --> C
-    C --> Q["Existing TaskScheduler queues and runs Goal Task"]
+    C --> H["Wait until Task reaches Issue head"]
+    H --> Q["Existing TaskScheduler queues and runs Goal Task"]
     Q --> D["Worker executes in Issue workspace"]
     D --> E["Persist Goal decision and verification artifacts"]
     E --> F["GoalCoordinator claims completed step"]
@@ -804,7 +821,7 @@ flowchart TD
 | Goal API | Start/reserve, reschedule, start now, read, pause, resume, cancel, and resolve approvals |
 | Goal creation service | Validate invariants, reuse Task scheduling policy, and create GoalRun/Task/snapshots atomically |
 | Shared Task scheduling service | Normalize time, check/claim slots, reschedule, execute now, and derive mutation capabilities |
-| TaskScheduler | Apply the same eligibility, priority, concurrency, and Issue-lock rules to every Task source |
+| TaskScheduler | Enforce Issue turn order, then apply the same eligibility, priority, concurrency, and Issue-lock rules to every Task source |
 | Worker runtime | Materialize Goal context and persist decision/verification artifacts |
 | GoalCoordinator | Reconcile scheduled-to-active state, process terminal steps, and advance Goal state |
 | Task status helper | Distinguish reserved ownership from active execution and preserve intermediate Goal state |
@@ -904,7 +921,8 @@ unique(goal_run_id, goal_step_index)
 Multiple ordinary Tasks remain valid because both values are null.
 
 No Goal-specific scheduling column is added to `tasks`, and no mutable reservation time is added
-to `goal_runs`. The existing `Task.scheduled_at` remains the only execution-eligibility source:
+to `goal_runs`. The existing `Task.scheduled_at` remains the only time-eligibility source; the
+base `issue_sequence` remains the separate Issue-order prerequisite:
 
 - initial Goal Task: null for immediate start or a future time for reserved start;
 - every continuation Task: null;
@@ -1027,9 +1045,10 @@ Request:
 }
 ```
 
-`scheduled_datetime` is optional. Null/omitted means immediately eligible; a future value uses the
-same timezone normalization, future-time validation, advisory slot lock, capacity enforcement, and
-warning payload as ordinary scheduled Task creation.
+`scheduled_datetime` is optional. Null/omitted means immediately time-eligible after the Task
+reaches the Issue head; a future value uses the same timezone normalization, future-time
+validation, advisory slot lock, capacity enforcement, and warning payload as ordinary scheduled
+Task creation.
 
 Response includes the GoalRun and first Task summary. GoalRun `scheduled_at` is a response
 projection from the first Task, not a `goal_runs` column.
@@ -1074,7 +1093,7 @@ Request:
 ```
 
 Allowed only while the initial Task is `pending` or `queued` and has not started, whether it was
-previously scheduled or immediately eligible. The operation reuses the current Task reschedule
+previously scheduled or immediately time-eligible. The operation reuses the current Task reschedule
 service, moves a queued initial Task back to `pending`, sets GoalRun status to `scheduled`, and
 recomputes Issue status atomically.
 
@@ -1085,7 +1104,8 @@ POST /api/goal-runs/{goal_run_id}/start-now
 ```
 
 Clears the initial Task's `scheduled_at` and changes the GoalRun to `active` atomically. The Task
-does not bypass the queue; it becomes immediately eligible for the existing Scheduler.
+does not bypass the Issue turn queue; it becomes immediately time-eligible for the existing
+Scheduler once it reaches the Issue head.
 
 ### Pause
 
@@ -1297,11 +1317,13 @@ Goal-level notification.
 
 ### Manual Tasks and retries
 
-Ordinary manual Task creation, scheduling, execute-now, reschedule, and retry behavior does not
-change when an Issue has no unfinished GoalRun. System-generated Tasks gain explicit scheduling
-capabilities, so a queued CI auto-repair Task can no longer be repurposed into a user reservation
-through the generic schedule endpoint. Generic retry is unavailable for a Goal Task; users resume
-the Goal instead so lineage and state remain consistent.
+Ordinary manual Task creation, scheduling, execute-now, reschedule, and retry continue to use the
+generic Task APIs when an Issue has no unfinished GoalRun, but all such Tasks follow the base Issue
+ordered-turn contract. Retry creates a new tail Task and does not insert at the source Task's
+historical position. System-generated Tasks gain explicit scheduling capabilities, so a queued CI
+auto-repair Task can no longer be repurposed into a user reservation through the generic schedule
+endpoint. Generic retry is unavailable for a Goal Task; users resume the Goal instead so lineage
+and state remain consistent.
 
 Ordinary manual creation and retry continue accepting immediate or scheduled timing. A scheduled
 GoalRun immediately owns the Issue, so it conflicts with an existing active scheduled Task on that
@@ -1324,8 +1346,9 @@ When CI auto-repair is allowed to act, it preserves the current event-driven beh
 
 - the CI failure gate creates the Task only after the qualifying event;
 - `trigger_source="ci_auto_repair"` records why it exists;
-- `scheduled_at=null` makes it immediately eligible;
-- the Task still passes through the same Scheduler, priority, concurrency, and Issue lock; and
+- `scheduled_at=null` makes it immediately time-eligible;
+- the Task appends to the Issue input stream and reaches Scheduler priority, concurrency, and the
+  Issue lock only after earlier active turns are terminal; and
 - users cannot reschedule it as if it were a manual reservation.
 
 Goal continuations use the same pattern: the coordinator event creates the next Task with
@@ -1663,8 +1686,8 @@ The first serial Goal mode is complete when:
 3. A scheduled Goal uses the initial Task's `scheduled_at`, existing slot capacity, schedule
    overview, and TaskScheduler without a second timer or duplicated mutable timestamp.
 4. All Goal Tasks execute one at a time in the existing Issue workspace and branch.
-5. A `continue` result creates exactly one immediately eligible next Task, including after service
-   restart.
+5. A `continue` result creates exactly one immediately time-eligible tail Task, including after
+   service restart; it runs only after reaching the Issue head.
 6. Goal continuation and CI auto-repair Tasks are event-created with `scheduled_at=null` and are
    not user-reschedulable.
 7. A Goal cannot complete until every verification command passes.
@@ -1675,7 +1698,8 @@ The first serial Goal mode is complete when:
 12. Intermediate steps keep the Issue `in_progress` and MR in Draft.
 13. Final completion moves the Issue to `in_review` and finalizes MR readiness.
 14. Manual Tasks, retries, and CI auto-repair cannot race with an unfinished GoalRun.
-15. Existing manual Task and retry workflows without a GoalRun preserve their current behavior.
+15. Existing manual Task and retry workflows without a GoalRun keep their generic APIs but follow
+    the Issue ordered-turn contract; retry appends a new tail Task.
 16. No parallel subgoal, worktree, DAG, or Goal budget behavior is present.
 
 ## Deferred Follow-Ups
