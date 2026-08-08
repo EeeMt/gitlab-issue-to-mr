@@ -52,17 +52,42 @@ curl -s http://<host>:8880/api/auth/bootstrap-status
 # {"initialized":true,"oidc_configured":true,"total_users":N}
 ```
 
-### 1.3 数据准备（完整回归前一次性确认）
+### 1.3 前置准备与 preflight
 
-- [ ] GitLab 连通：`POST /api/config/gitlab/test` 返回 200（`server_version` / `username`）。
-- [ ] Provider 就绪：至少一个 `anthropic-messages`（claude）与一个 `openai-responses`（codex）Provider，
-      各自有独立 `ModelCredential`（`credential_status` 正常、secret 可解密）。
-- [ ] Worker Profile 就绪：`enabled_harnesses` 含 claude+codex、`default_harness_key`、
-      harness_runtimes（CLI source/path/version/digest）已冻结；`verify-runtime` 通过
-      （`POST /api/worker-profiles/{id}/verify-runtime`）。
-- [ ] 至少一个**干净 Issue**（未混用 harness，lineage 干净）用于 resume/continue 场景；
-      一个可反复创建任务的**工作 Issue**。
-- [ ] 本机已按 [`dev-env-api-regression.md` §2](./dev-env-api-regression.md) 保存登录 cookie（`/tmp/codify_cookies.txt`）。
+一次性准备：
+
+- [ ] 一个**可写分支的测试项目**（dev GitLab 上 bot 有推送权限）。脚本每次运行会自动在其上新建 issue；
+      或用 `ISSUE_ID=<现有issue>` 复用已有 issue（须 lineage 干净，用于 resume 场景）。
+
+Preflight 检查（Tier 1 由 [`scripts/dev-regression.sh`](../../scripts/dev-regression.sh) 自动执行；完整回归前手动核对）：
+
+```bash
+# 1. 环境就绪（无需认证）
+curl -s http://<host>:8880/api/auth/bootstrap-status
+
+# 2. GitLab 连通（需登录 cookie + platform_admin）
+curl -s -b /tmp/codify_cookies.txt -X POST http://<host>:8880/api/config/gitlab/test \
+  -H 'Content-Type: application/json' -d '{"integration":{}}'
+# 期望：{"server_version":..., "username":..., "gitlab_url":...}
+
+# 3. Provider 就绪：claude(anthropic_messages) 与 codex(openai_responses) 各至少一个
+curl -s -b /tmp/codify_cookies.txt http://<host>:8880/api/providers \
+  | python3 -c "import sys,json; print([(p['id'],p['wire_protocol'],p['credential_status']) for p in json.load(sys.stdin)])"
+
+# 4. Worker Profile 就绪：enabled_harnesses 含 claude+codex，verify-runtime 通过
+curl -s -b /tmp/codify_cookies.txt http://<host>:8880/api/worker-profiles
+```
+
+**Tier 1 半自动脚本**（登录 / preflight / 自动建 issue / 双 harness happy path / resume / archive 校验全自动）：
+
+```bash
+./scripts/dev-regression.sh                        # 自动选第一个可访问项目 + 新建 issue
+./scripts/dev-regression.sh --tier2                # 追加故障路径（切换约束/cancel/timeout/retry）
+PROJECT_ID=<测试项目> ./scripts/dev-regression.sh  # 在指定项目上新建 issue
+ISSUE_ID=<现有issue> ./scripts/dev-regression.sh   # 复用已有 issue
+```
+
+> 凭据与地址优先从 `deploy/dev-env-info.md`（gitignored）读取，也可用 `CODIFY_BASE_URL`/`CODIFY_USER`/`CODIFY_PASS`/`PROJECT_ID`/`PROVIDER_CLAUDE_ID`/`PROVIDER_CODEX_ID` 环境变量覆盖；脚本不含明文凭据。
 
 ---
 
@@ -71,6 +96,9 @@ curl -s http://<host>:8880/api/auth/bootstrap-status
 | 层级 | 覆盖 | 预计耗时 | 用途 |
 |---|---|---|---|
 | **Tier 1 冒烟** | 双 harness 各一条 happy path + MR + archive + sanitize + resume 一条 | ~15–25 min | 每次 worker/task 改动后 |
+
+> Tier 1 可用 [`scripts/dev-regression.sh`](../../scripts/dev-regression.sh) 半自动执行（§1.3）；加 `--tier2`
+> 会追加故障路径（切换约束 / cancel / timeout / retry 冻结），见脚本头注释。Tier 2 其余项（调度、analytics、config）仍建议人主导 + agent 辅助。
 | **Tier 2 完整回归** | §3 全矩阵 + §4 双引擎 × 故障路径 + §6 一致性 | ~1–1.5 h | 里程碑 / 发版前 |
 | **Tier 3 发版演练** | Phase 3 rollout drill（冻结清单核对、验证、切换、回滚演练） | 半天 | 发版收口 |
 
