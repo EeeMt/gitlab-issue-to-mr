@@ -12,7 +12,7 @@ structured 409 conflict envelope.
 import os
 import sys
 import unittest
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -217,6 +217,7 @@ class ValidateScheduleTimeLockedTests(unittest.IsolatedAsyncioTestCase):
         from app.core.issue_task_order import validate_schedule_time_locked
 
         db = MagicMock()
+        db.execute = AsyncMock(side_effect=[_make_scalars_all_result([])])
         window = self._window(min_time="2026-08-08T10:00:00", max_time="2026-08-08T20:00:00")
         with patch(
             "app.core.issue_task_order.compute_schedule_window",
@@ -231,6 +232,7 @@ class ValidateScheduleTimeLockedTests(unittest.IsolatedAsyncioTestCase):
         from app.core.issue_task_order import ScheduleWindowConflict, validate_schedule_time_locked
 
         db = MagicMock()
+        db.execute = AsyncMock(side_effect=[_make_scalars_all_result([])])
         window = self._window(min_time="2026-08-08T10:00:00")
         with patch(
             "app.core.issue_task_order.compute_schedule_window",
@@ -247,6 +249,7 @@ class ValidateScheduleTimeLockedTests(unittest.IsolatedAsyncioTestCase):
         from app.core.issue_task_order import ScheduleWindowConflict, validate_schedule_time_locked
 
         db = MagicMock()
+        db.execute = AsyncMock(side_effect=[_make_scalars_all_result([])])
         window = self._window(min_time="2026-08-08T10:00:00", max_time="2026-08-08T12:00:00")
         with patch(
             "app.core.issue_task_order.compute_schedule_window",
@@ -262,6 +265,7 @@ class ValidateScheduleTimeLockedTests(unittest.IsolatedAsyncioTestCase):
         from app.core.issue_task_order import ScheduleWindowConflict, validate_schedule_time_locked
 
         db = MagicMock()
+        db.execute = AsyncMock(side_effect=[_make_scalars_all_result([])])
         window = self._window(has_valid_window=False, min_time="2026-08-08T14:00:00", max_time="2026-08-08T10:00:00")
         with patch(
             "app.core.issue_task_order.compute_schedule_window",
@@ -434,7 +438,10 @@ class EnsureIssueOrderIntegrityLockedTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(report["tail_projection"])
 
     async def test_sequence_mismatch_fails_closed(self):
-        from app.core.issue_task_order import IssueOrderIntegrityError, ensure_issue_order_integrity_locked
+        from app.core.issue_task_order import (
+            IssueOrderIntegrityError,
+            ensure_issue_order_integrity_locked,
+        )
 
         t1 = _sn_task(1, issue_sequence=5, status=TaskStatus.COMPLETED, full_projection=True)
         db = MagicMock()
@@ -445,7 +452,10 @@ class EnsureIssueOrderIntegrityLockedTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ctx.exception.detail["reason"], "sequence_mismatch")
 
     async def test_active_null_sequence_blocks_without_repair(self):
-        from app.core.issue_task_order import IssueOrderIntegrityError, ensure_issue_order_integrity_locked
+        from app.core.issue_task_order import (
+            IssueOrderIntegrityError,
+            ensure_issue_order_integrity_locked,
+        )
 
         t1 = _sn_task(1, issue_sequence=None, status=TaskStatus.PENDING)
         db = MagicMock()

@@ -671,6 +671,43 @@ async def process_ci_failure_run(
         except (HarnessRegistryError, ValueError) as exc:
             raise RuntimeError(f"CI auto-repair cannot start: {exc}") from exc
 
+        # CI repair is a new tail turn in the Issue input stream (spec §5.4 /
+        # §6.2): inside the Issue row lock, repair legacy NULL sequences and
+        # project lineage from the tail before allocating the tail sequence.
+        from app.core.harness_sessions import session_namespace_for
+        from app.core.issue_task_order import (
+            IssueOrderIntegrityError,
+            LineageConflict,
+            ensure_issue_order_integrity_locked,
+            project_tail_lineage,
+        )
+
+        try:
+            integrity_report = await ensure_issue_order_integrity_locked(
+                db,
+                issue_id=issue.id,
+                repair_nulls=True,
+            )
+        except IssueOrderIntegrityError as exc:
+            raise RuntimeError(f"CI auto-repair blocked by Issue ordering: {exc.reason}") from exc
+
+        repair_namespace = session_namespace_for(
+            profile_default_key,
+            endpoint.fingerprint,
+        )
+        try:
+            repair_projection = project_tail_lineage(
+                integrity_report["tail_projection"],
+                issue_id=issue.id,
+                harness_key=profile_default_key,
+                session_namespace=repair_namespace,
+                session_mode="continue",
+            )
+        except LineageConflict as exc:
+            raise RuntimeError(
+                f"CI auto-repair blocked by lineage conflict: {exc.detail.get('message')}"
+            ) from exc
+
         repair_task = Task(
             issue_id=issue.id,
             project_id=issue.project_id,
@@ -684,6 +721,12 @@ async def process_ci_failure_run(
             require_changes=True,
             trigger_source="ci_auto_repair",
             ci_failure_run_id=run.id,
+            issue_sequence=integrity_report["max_sequence"] + 1,
+            projected_harness_key=repair_projection["harness_key"],
+            projected_session_namespace=repair_projection["session_namespace"],
+            projected_lineage_generation=repair_projection["generation"],
+            projected_reset_task_id=repair_projection["reset_task_id"],
+            lineage_projection_reason=repair_projection["reason"],
         )
         issue.workspace_last_used_at = utcnow()
         issue.workspace_delete_attempted_at = None
@@ -691,6 +734,10 @@ async def process_ci_failure_run(
         issue.workspace_delete_error = None
         db.add(repair_task)
         await db.flush()
+        if repair_projection["reset_task_id"] is None:
+            # A fresh/initial generation is its own reset point; the id only
+            # exists after flush.
+            repair_task.projected_reset_task_id = repair_task.id
         await prepare_task_runtime_snapshot(
             db,
             repair_task,

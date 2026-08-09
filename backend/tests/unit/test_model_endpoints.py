@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import pytest
 from types import SimpleNamespace
+
+import pytest
 
 from app.core.harness_registry import HarnessRegistryError
 from app.core.model_endpoints import (
     ModelEndpoint,
-    endpoint_fingerprint,
     ensure_harness_protocol_compatibility,
     normalize_endpoint,
 )

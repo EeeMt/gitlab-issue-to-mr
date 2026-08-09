@@ -1,6 +1,6 @@
 """add task issue_sequence and projected session lineage
 
-Revision ID: 068_task_issue_sequence_and_lineage
+Revision ID: 068_issue_sequence_lineage
 Revises: 067_harness_key
 Create Date: 2026-08-08
 
@@ -20,7 +20,7 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "068_task_issue_sequence_and_lineage"
+revision: str = "068_issue_sequence_lineage"
 down_revision: Union[str, None] = "067_harness_key"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -62,14 +62,18 @@ def _backfill_lineage(bind: sa.engine.Connection) -> None:
             continue
 
         task_ids = [row["id"] for row in rows]
+        # Bind each id as its own placeholder: a single tuple/array parameter
+        # renders as ``IN $1`` and is a syntax error under the asyncpg driver
+        # used by alembic's async env.py.
+        snapshot_placeholders = ", ".join(f":sid_{i}" for i in range(len(task_ids)))
         snapshots = {
             snap["task_id"]: snap
             for snap in bind.execute(
                 sa.text(
                     "SELECT task_id, harness_key, model_endpoint_snapshot "
-                    "FROM task_worker_profile_snapshots WHERE task_id IN :task_ids"
+                    f"FROM task_worker_profile_snapshots WHERE task_id IN ({snapshot_placeholders})"
                 ),
-                {"task_ids": tuple(task_ids)},
+                {f"sid_{i}": task_id for i, task_id in enumerate(task_ids)},
             ).mappings().all()
         }
 
@@ -275,7 +279,21 @@ def upgrade() -> None:
         "tasks",
         ["projected_reset_task_id"],
         ["id"],
-        ondelete="SET NULL",
+        ondelete="NO ACTION",
+        deferrable=True,
+        initially="DEFERRED",
+    )
+    op.create_check_constraint(
+        "ck_tasks_lineage_projection_reason",
+        "tasks",
+        "lineage_projection_reason IS NULL OR lineage_projection_reason IN "
+        "('initial', 'inherited', 'fresh', 'legacy_namespace_change')",
+    )
+    op.create_check_constraint(
+        "ck_tasks_input_lineage_reason",
+        "tasks",
+        "input_lineage_reason IS NULL OR input_lineage_reason IN "
+        "('fresh', 'resumed', 'fresh_no_match')",
     )
 
     op.create_table(
@@ -319,19 +337,11 @@ def upgrade() -> None:
         ),
     )
 
-    # Deterministic historical ordering: (created_at, id) is the pre-sequence
-    # audit order and matches the runtime repair traversal.
-    bind.execute(
-        sa.text(
-            "UPDATE tasks SET issue_sequence = ordered.rn FROM ("
-            "SELECT id, row_number() OVER (PARTITION BY issue_id "
-            "ORDER BY created_at ASC, id ASC) AS rn FROM tasks"
-            ") AS ordered WHERE tasks.id = ordered.id"
-        )
-    )
-
-    _backfill_lineage(bind)
-
+    # Create the task indexes before the backfill UPDATEs populate the deferrable
+    # ``projected_reset_task_id`` FK: PostgreSQL refuses CREATE INDEX on a table
+    # with pending deferred-trigger events, and every non-null projection value
+    # schedules one. At this point the new columns are still all NULL, so the
+    # partial unique index has no rows to conflict with.
     op.create_index(
         "uq_tasks_issue_sequence",
         "tasks",
@@ -350,6 +360,19 @@ def upgrade() -> None:
         ["issue_id", "projected_lineage_generation", "issue_sequence"],
     )
 
+    # Deterministic historical ordering: (created_at, id) is the pre-sequence
+    # audit order and matches the runtime repair traversal.
+    bind.execute(
+        sa.text(
+            "UPDATE tasks SET issue_sequence = ordered.rn FROM ("
+            "SELECT id, row_number() OVER (PARTITION BY issue_id "
+            "ORDER BY created_at ASC, id ASC) AS rn FROM tasks"
+            ") AS ordered WHERE tasks.id = ordered.id"
+        )
+    )
+
+    _backfill_lineage(bind)
+
 
 def downgrade() -> None:
     op.drop_index("uq_tasks_issue_sequence", table_name="tasks")
@@ -358,6 +381,20 @@ def downgrade() -> None:
     op.drop_table("issue_session_lineages")
     op.drop_constraint(
         "tasks_projected_reset_task_id_fkey", "tasks", type_="foreignkey"
+    )
+    op.drop_constraint(
+        "ck_tasks_input_lineage_reason", "tasks", type_="check"
+    )
+    op.drop_constraint(
+        "ck_tasks_lineage_projection_reason", "tasks", type_="check"
+    )
+    op.create_foreign_key(
+        "tasks_projected_reset_task_id_fkey",
+        "tasks",
+        "tasks",
+        ["projected_reset_task_id"],
+        ["id"],
+        ondelete="SET NULL",
     )
     op.drop_column("tasks", "input_lineage_reason")
     op.drop_column("tasks", "lineage_projection_reason")

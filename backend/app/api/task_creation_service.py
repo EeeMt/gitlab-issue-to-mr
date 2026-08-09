@@ -124,20 +124,6 @@ async def retry_task_record(
         scheduled_at = services.validate_scheduled_datetime_in_future(request.scheduled_datetime)
 
     await _raise_if_usage_limited(db, current_user, services)
-    if scheduled_at is not None:
-        from app.core.slot_capacity import check_slot_capacity, slot_full_detail_dict
-
-        slot_info = await check_slot_capacity(
-            db,
-            scheduled_at,
-            exclude_task_id=task_id,
-            acquire_lock=True,
-        )
-        if slot_info.is_full and slot_info.enforce:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=slot_full_detail_dict(slot_info),
-            )
 
     issue = (
         await db.execute(
@@ -210,11 +196,25 @@ async def retry_task_record(
             session_mode="fresh",
         )
     else:
-        if tail_projection is None or (
-            source_projection["harness_key"] != tail_projection["harness_key"]
-            or source_projection["session_namespace"]
-            != tail_projection["session_namespace"]
-        ):
+        # A default `continue` retry is only allowed when the source projection
+        # matches the current tail projection on the FULL lineage tuple
+        # (harness_key, session_namespace, generation, reset_task_id) — spec
+        # §4.6. Otherwise the source belongs to an older lineage and the user
+        # must explicitly choose fresh_retry; silently re-binding the source to
+        # the current generation would rewrite session history.
+        source_tuple = (
+            source_projection["harness_key"],
+            source_projection["session_namespace"],
+            source_projection["generation"],
+            source_projection["reset_task_id"],
+        )
+        tail_tuple = (
+            tail_projection["harness_key"] if tail_projection is not None else None,
+            tail_projection["session_namespace"] if tail_projection is not None else None,
+            tail_projection["generation"] if tail_projection is not None else None,
+            tail_projection["reset_task_id"] if tail_projection is not None else None,
+        )
+        if tail_projection is None or source_tuple != tail_tuple:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
@@ -229,6 +229,7 @@ async def retry_task_record(
                         "reset_task_id": source_projection["reset_task_id"],
                     },
                     "tail_lineage": tail_projection,
+                    "allowed_actions": ["fresh_retry"],
                 },
             ) from None
         projection = project_tail_lineage(
@@ -251,6 +252,28 @@ async def retry_task_record(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=exc.detail,
             ) from exc
+        except IssueOrderIntegrityError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=exc.detail,
+            ) from exc
+
+        # Slot capacity is checked only after the Issue row lock and window
+        # validation (spec §5.4 / §6.3) so create and retry share one lock order
+        # and cannot deadlock against a concurrent reschedule.
+        from app.core.slot_capacity import check_slot_capacity, slot_full_detail_dict
+
+        slot_info = await check_slot_capacity(
+            db,
+            scheduled_at,
+            exclude_task_id=task_id,
+            acquire_lock=True,
+        )
+        if slot_info.is_full and slot_info.enforce:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=slot_full_detail_dict(slot_info),
+            )
 
     new_task = Task(
         issue_id=original_task.issue_id,

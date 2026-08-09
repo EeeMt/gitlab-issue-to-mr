@@ -21,7 +21,7 @@ from app.core.harness_registry import (
 
 
 def test_registry_knows_claude_and_codex():
-    assert HARNESS_KEYS == {"claude", "codex"}
+    assert {"claude", "codex"} == HARNESS_KEYS
 
 
 def test_compatible_harness_keys_reverse_lookup():

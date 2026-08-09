@@ -54,6 +54,8 @@ from app.api.task_queries import TaskListFilters, build_task_list_query
 from app.api.task_responses import (
     apply_queue_context,
     compute_task_queue_contexts,
+)
+from app.api.task_responses import (
     serialize_task as _serialize_task,
 )
 from app.api.task_runtime_summary_routes import (
@@ -357,7 +359,17 @@ async def list_scheduled_tasks(
     project_lookup = await build_project_lookup(is_unrestricted=True)
     settings = get_effective_settings()
 
-    return [_serialize_task(task, project_lookup.get(task.project_id), settings) for task in tasks]
+    serialized = [
+        _serialize_task(task, project_lookup.get(task.project_id), settings)
+        for task in tasks
+    ]
+    if tasks:
+        # Attach batch per-Issue queue context so Schedule/Heatmap views can show
+        # non-head tasks that wait behind a predecessor (§7).
+        queue_contexts = await compute_task_queue_contexts(db, tasks)
+        for task, data in zip(tasks, serialized):
+            apply_queue_context(data, task.id, queue_contexts)
+    return serialized
 
 
 @router.get("/tasks/slot-capacity")
@@ -465,16 +477,27 @@ async def get_schedule_constraints(
     Registered before ``/tasks/{task_id}`` so the static path is never captured
     as a Task ID.
     """
-    from app.core.issue_task_order import compute_schedule_window
+    from app.core.issue_task_order import IssueOrderIntegrityError, compute_schedule_window
 
+    if task_id is not None and issue_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide exactly one of issue_id or task_id, not both",
+        )
     if task_id is not None:
         task = await get_task_with_access_check(task_id, db, access_scope, current_user)
         validate_task_status_for_reschedule(task)
-        return await compute_schedule_window(
-            db,
-            issue_id=task.issue_id,
-            exclude_task_id=task.id,
-        )
+        try:
+            return await compute_schedule_window(
+                db,
+                issue_id=task.issue_id,
+                exclude_task_id=task.id,
+            )
+        except IssueOrderIntegrityError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=exc.detail,
+            ) from exc
     if issue_id is not None:
         issue = await db.get(Issue, issue_id)
         if issue is None:
@@ -483,7 +506,13 @@ async def get_schedule_constraints(
                 detail="Issue not found",
             )
         require_project_access(issue.project_id, access_scope)
-        return await compute_schedule_window(db, issue_id=issue.id)
+        try:
+            return await compute_schedule_window(db, issue_id=issue.id)
+        except IssueOrderIntegrityError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=exc.detail,
+            ) from exc
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail="Either issue_id or task_id is required",

@@ -30,8 +30,8 @@ from app.core.issue_execution_locks import (
     release_issue_execution_lock,
 )
 from app.core.issue_task_order import (
-    ACTIVE_STATUSES,
     ACTIVE_STATUS_VALUES,
+    ACTIVE_STATUSES,
     IssueOrderIntegrityError,
     ensure_issue_order_integrity_locked,
 )
@@ -512,7 +512,12 @@ class Scheduler:
         db: AsyncSession,
         task: Task,
     ) -> None:
-        """Clear one container reference and release its lock if it is the last one."""
+        """Clear one container reference and release its lock if it is the last one.
+
+        The lock release is owner-qualified: only this Task's ``(issue_id, task_id)``
+        pair may be deleted, so a lock re-acquired by a newer Task is never removed
+        (spec §6.6/§6.7).
+        """
         task.container_id = None
         other_container_exists = (
             select(Task.id)
@@ -523,21 +528,11 @@ class Scheduler:
             )
             .exists()
         )
-        terminal_lock_owner_exists = (
-            select(Task.id)
-            .where(
-                Task.id == IssueExecutionLock.task_id,
-                Task.status.in_(
-                    (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED)
-                ),
-            )
-            .exists()
-        )
         release_result = await db.execute(
             delete(IssueExecutionLock).where(
                 IssueExecutionLock.issue_id == task.issue_id,
+                IssueExecutionLock.task_id == task.id,
                 ~other_container_exists,
-                terminal_lock_owner_exists,
             )
         )
         await db.commit()
@@ -1199,7 +1194,7 @@ class Scheduler:
         2. scheduled tasks before immediate — users who booked a slot
            have a reasonable expectation their task runs on time
         3. scheduled_at ASC — earlier due times first
-        4. created_at ASC — FIFO tiebreaker
+        4. created_at ASC, id ASC — FIFO tiebreaker (§6.5)
         """
         task_alias = aliased(Task)
         stmt = select(Task).where(
@@ -1234,6 +1229,7 @@ class Scheduler:
                 case((Task.scheduled_at.is_not(None), 0), else_=1),
                 Task.scheduled_at.asc(),
                 Task.created_at.asc(),
+                Task.id.asc(),
             ).limit(1)
         )
         return result.scalar_one_or_none()
@@ -1276,7 +1272,14 @@ class Scheduler:
 
         task = (
             await db.execute(
-                select(Task).where(Task.id == task_id).with_for_update()
+                select(Task)
+                .where(Task.id == task_id)
+                .with_for_update()
+                # _get_next_task already loaded this row into the session identity
+                # map; without populate_existing the FOR UPDATE re-read returns the
+                # stale in-memory object and the CAS below can claim a task a
+                # concurrent cancel already committed as CANCELLED (§6.6).
+                .execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
         if task is None:
@@ -1284,8 +1287,22 @@ class Scheduler:
             return
 
         if task.status != TaskStatus.QUEUED:
+            # rollback() expires the task's attributes, so snapshot the status
+            # now; reading it in the log line below would otherwise attempt a
+            # synchronous lazy load and raise MissingGreenlet in an AsyncSession.
+            current_status = task.status
             await db.rollback()
-            logger.debug("Task %s no longer QUEUED; skipping claim", task_id)
+            self._emit_event(
+                "issue_task_claim_rejected",
+                reason="task_state_changed",
+                issue_id=issue_id,
+                task_id=task_id,
+            )
+            logger.warning(
+                "Task %s no longer QUEUED (status=%s); skipping claim",
+                task_id,
+                current_status.value,
+            )
             return
 
         if task.issue_sequence is None:
@@ -1681,14 +1698,12 @@ class Scheduler:
                     for task_id, daemon_key in task_daemon_keys.items()
                     if daemon_key == target.daemon_key
                 }
-                target_running_task_ids = target_owned_task_ids & running_task_ids
-                target_retained_task_ids = target_owned_task_ids & retained_task_ids
                 if target_error is not None:
-                    unavailable_task_ids.update(target_running_task_ids)
+                    unavailable_task_ids.update(target_owned_task_ids & running_task_ids)
                     logger.warning(
                         "Deferring recovery for tasks %s because Docker daemon %s "
                         "remains unreachable",
-                        sorted(target_running_task_ids),
+                        sorted(target_owned_task_ids & running_task_ids),
                         target.connection.host,
                     )
                     continue
@@ -1701,7 +1716,31 @@ class Scheduler:
                     task_id = _extract_task_id(container.name)
                     c_status = container.status
 
-                    if task_id is not None and task_id in target_running_task_ids:
+                    # Ownership is decided against the FULL set of DB-known running
+                    # and retained tasks, not just the tasks this target "owns" by
+                    # daemon key. One physical daemon can be reachable through several
+                    # connection strings (e.g. unix socket + tcp) that normalize to
+                    # different daemon keys; scanning it under one alias must never
+                    # orphan the containers of tasks another alias owns.
+                    if task_id is None:
+                        logger.warning(
+                            f"Removing {c_status} unowned container: {container.name} "
+                            f"(target={target.connection.host})"
+                        )
+                        try:
+                            container.remove(force=(c_status == "running"), v=True)
+                        except Exception as e:
+                            logger.warning(f"Failed to remove container {container.name}: {e}")
+                        continue
+                    if task_id in resumed_task_ids:
+                        logger.info(
+                            "Skipping container %s for task %s already resumed via "
+                            "another Docker target",
+                            container.name,
+                            task_id,
+                        )
+                        continue
+                    if task_id in running_task_ids:
                         if c_status in ("running", "exited"):
                             task = next(task for task in stuck_tasks if task.id == task_id)
                             cancellation_requested = isinstance(
@@ -1748,7 +1787,7 @@ class Scheduler:
                                 container.name,
                                 c_status,
                             )
-                    elif task_id is not None and task_id in target_retained_task_ids:
+                    elif task_id in retained_task_ids:
                         logger.info(
                             "Retaining owned container %s for task %s until raw logs finalize",
                             container.name,
@@ -1975,7 +2014,11 @@ class Scheduler:
 
             await db.commit()
 
-        failed_count = len(stuck_tasks) - len(resumed_task_ids) - len(unavailable_task_ids)
+        failed_count = sum(
+            1
+            for task in stuck_tasks
+            if task.id not in resumed_task_ids and task.id not in unavailable_task_ids
+        )
         logger.info(
             "Crash recovery complete: %s resumed, %s awaiting Docker, %s marked failed",
             len(resumed_task_ids),

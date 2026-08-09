@@ -421,6 +421,9 @@
                       {{ t('createTask.viewScheduleHeatmap') }}
                     </n-button>
                   </div>
+                  <p v-if="createScheduleConstraintHint" class="schedule-detail-panel__constraint">
+                    {{ createScheduleConstraintHint }}
+                  </p>
                 </div>
               </div>
             </Transition>
@@ -742,11 +745,12 @@ import HeatmapChart from './HeatmapChart.vue'
 import RunInstructionTemplateEditor from './RunInstructionTemplateEditor.vue'
 import {
   getRunInstructionTemplateDefaults,
+  getTaskScheduleConstraints,
   type AIProvider,
-  type Task, type TaskSkillSnapshot, type RunInstructionTemplateDefaults
+  type Task, type TaskScheduleWindow, type TaskSkillSnapshot, type RunInstructionTemplateDefaults
 } from '../api'
 import { useBreakpoints } from '../composables/useBreakpoints'
-import { formatDateTimeUtc8Compact, formatTimeUtc8 } from '../utils/datetime'
+import { formatDateTimeUtc8Compact, formatTimeUtc8, parseUtcDate } from '../utils/datetime'
 import { formatUsageResetAt } from '../utils/usageLimits'
 import { issueDetailTooltipContentStyle, issueDetailTooltipThemeOverrides } from './issue-detail/tooltip'
 import {
@@ -852,6 +856,7 @@ const taskSkillSnapshots = ref<TaskSkillSnapshot[]>([])
 const skillSnapshotResolutionApplied = ref(false)
 const scheduleType = ref<'now' | 'scheduled'>('now')
 const scheduledAt = ref<number | null>(null)
+const scheduleWindow = ref<TaskScheduleWindow | null>(null)
 const runInstructionTemplate = ref('')
 const initialRunInstructionTemplate = ref('')
 const runInstructionDirty = ref(false)
@@ -1248,7 +1253,9 @@ watch(() => props.show, (val) => {
         ?? 'claude'
       scheduleType.value = 'now'
       scheduledAt.value = null
+      scheduleWindow.value = null
       void loadScheduleContext()
+      void loadCreateScheduleWindow()
     }
     usageLimitDetail.value = null
     taskModeErrorVisible.value = false
@@ -1408,8 +1415,46 @@ function isScheduleDateDisabled(timestamp: number): boolean {
   const today = new Date()
   candidate.setHours(0, 0, 0, 0)
   today.setHours(0, 0, 0, 0)
-  return candidate.getTime() < today.getTime()
+  if (candidate.getTime() < today.getTime()) return true
+  const window = scheduleWindow.value
+  if (!window) return false
+  if (window.has_valid_window === false) return true
+  const dayStart = new Date(timestamp)
+  dayStart.setHours(0, 0, 0, 0)
+  const dayEnd = dayStart.getTime() + 24 * 60 * 60 * 1000 - 1
+  if (window.min_scheduled_at) {
+    const min = parseUtcDate(window.min_scheduled_at).getTime()
+    if (dayEnd < min) return true
+  }
+  if (window.max_scheduled_at) {
+    const max = parseUtcDate(window.max_scheduled_at).getTime()
+    if (dayStart.getTime() > max) return true
+  }
+  return false
 }
+
+async function loadCreateScheduleWindow() {
+  scheduleWindow.value = null
+  if (props.mode !== 'create' || !props.issueId) return
+  try {
+    scheduleWindow.value = await getTaskScheduleConstraints({ issue_id: props.issueId })
+  } catch {
+    scheduleWindow.value = null
+  }
+}
+
+const createScheduleConstraintHint = computed(() => {
+  const window = scheduleWindow.value
+  if (!window || window.has_valid_window === false) {
+    return window?.has_valid_window === false
+      ? t('scheduleConflict.noValidWindow')
+      : null
+  }
+  if (window.min_scheduled_at && window.min_source_task_id != null) {
+    return t('createTask.scheduleFloorNotBefore', { source: window.min_source_task_id })
+  }
+  return null
+})
 
 const {
   handleCreate,
@@ -2153,6 +2198,16 @@ onMounted(() => {
 .schedule-detail-reveal__inner {
   min-height: 0;
   overflow: hidden;
+}
+
+.schedule-detail-panel__constraint {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(32, 128, 240, 0.06);
+  color: rgba(29, 78, 216, 0.9);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 /* Execution environment */

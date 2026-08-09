@@ -116,6 +116,7 @@ async def ensure_issue_order_integrity_locked(
                 select(Task)
                 .where(Task.issue_id == issue_id)
                 .order_by(Task.created_at.asc(), Task.id.asc())
+                .with_for_update()
             )
         )
         .scalars()
@@ -273,12 +274,18 @@ async def _repair_lineage_projections(
 
 
 def _has_full_projection(task: Task) -> bool:
-    return (
-        task.projected_harness_key is not None
-        and task.projected_session_namespace is not None
-        and task.projected_lineage_generation is not None
-        and task.lineage_projection_reason is not None
-    )
+    if (
+        task.projected_harness_key is None
+        or task.projected_session_namespace is None
+        or task.projected_lineage_generation is None
+        or task.lineage_projection_reason is None
+    ):
+        return False
+    # A reset generation must always point at its establishing Task; only the
+    # legacy gen-0 initial projection may carry a NULL reset (design §5.1).
+    if task.projected_lineage_generation > 0 and task.projected_reset_task_id is None:
+        return False
+    return True
 
 
 def _task_projection(task: Task) -> dict[str, Any] | None:
@@ -321,9 +328,17 @@ async def compute_queue_context(
         )
     ).scalar_one_or_none()
 
-    active = [t for t in tasks if t.status in ACTIVE_STATUSES and t.issue_sequence is not None]
-    active.sort(key=lambda t: t.issue_sequence)
-    head = active[0] if active else None
+    # During the 068 compatibility window any active NULL-sequence Task makes the
+    # whole Issue fail closed (spec §3.2.10 / §5.3): no Task gets a healthy
+    # queue position, and every active Task projects sequence_repair_required.
+    active = [t for t in tasks if t.status in ACTIVE_STATUSES]
+    any_active_null = any(t.issue_sequence is None for t in active)
+    active_non_null = [t for t in active if t.issue_sequence is not None]
+    active_non_null.sort(key=lambda t: t.issue_sequence)
+    head = active_non_null[0] if active_non_null else None
+    # queue_position is the dynamic position inside the *active* queue only;
+    # terminal Tasks never consume a position (spec §7).
+    positions = {t.id: i for i, t in enumerate(active_non_null, start=1)}
 
     # The head's waiting reason when a terminal owner still holds the workspace
     # lock (container not yet drained) is workspace_cleanup.
@@ -337,8 +352,18 @@ async def compute_queue_context(
         if owner is not None and owner.status not in ACTIVE_STATUSES:
             workspace_cleanup = True
 
+    def _repair_projection(task: Task) -> dict[str, Any]:
+        return {
+            "issue_sequence": task.issue_sequence,
+            "queue_position": None,
+            "blocked_by_task_id": None,
+            "waiting_reason": "sequence_repair_required",
+            "lock_owner_task_id": None,
+            "waiting_since": None,
+        }
+
     result: dict[int, dict[str, Any]] = {}
-    for position, task in enumerate(tasks, start=1):
+    for task in tasks:
         if task.status not in ACTIVE_STATUSES:
             result[task.id] = {
                 "issue_sequence": task.issue_sequence,
@@ -350,17 +375,11 @@ async def compute_queue_context(
             }
             continue
 
-        if task.issue_sequence is None:
-            result[task.id] = {
-                "issue_sequence": None,
-                "queue_position": None,
-                "blocked_by_task_id": None,
-                "waiting_reason": "sequence_repair_required",
-                "lock_owner_task_id": None,
-                "waiting_since": None,
-            }
+        if task.issue_sequence is None or any_active_null:
+            result[task.id] = _repair_projection(task)
             continue
 
+        position = positions.get(task.id)
         if head is not None and task.id != head.id:
             result[task.id] = {
                 "issue_sequence": task.issue_sequence,
@@ -424,6 +443,11 @@ async def compute_schedule_window(
         .scalars()
         .all()
     )
+    # Strong-consistency query: an active NULL sequence during 068 makes the
+    # whole Issue fail closed (spec §5.3) instead of silently dropping the NULL
+    # predecessor's reservation and risking a monotonic-order violation.
+    if any(t.issue_sequence is None for t in tasks):
+        raise IssueOrderIntegrityError(issue_id, "active_null_sequence")
     scheduled = [
         t
         for t in tasks
@@ -482,8 +506,14 @@ async def validate_schedule_time_locked(
 ) -> dict[str, Any]:
     """Validate ``scheduled_at`` against the current window; raise structured 409.
 
-    Caller must hold the Issue row lock. On success returns the window used.
+    Caller must hold the Issue row lock. Fails closed on an active NULL sequence
+    (spec §5.3) before computing any window. On success returns the window used.
     """
+    await ensure_issue_order_integrity_locked(
+        db,
+        issue_id=issue_id,
+        repair_nulls=False,
+    )
     window = await compute_schedule_window(
         db, issue_id=issue_id, exclude_task_id=exclude_task_id
     )
@@ -591,9 +621,18 @@ def project_tail_lineage(
 
     ``reset_task_id`` is ``None`` for an ``initial``/``fresh`` generation that
     must be set to the new Task's id after it flushes. A ``continue`` whose
-    harness/namespace disagrees with the tail is a structured lineage conflict.
+    harness/namespace disagrees with a *verified* tail lineage is a structured
+    lineage conflict; a ``legacy`` placeholder tail carries no verifiable
+    session evidence (design §5.2 point 5), so the new Task establishes the
+    real harness lineage as an initial generation instead of conflicting.
     """
-    if tail_projection is None:
+    from app.core.harness_sessions import LEGACY_NAMESPACE
+
+    is_legacy_tail = (
+        tail_projection is not None
+        and tail_projection["session_namespace"] == LEGACY_NAMESPACE
+    )
+    if tail_projection is None or is_legacy_tail:
         generation = 1 if session_mode == "fresh" else 0
         reset_task_id: int | None = None
         reason = "initial"

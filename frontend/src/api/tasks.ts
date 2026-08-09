@@ -541,8 +541,15 @@ export async function overrideTaskStatus(
   await api.post(`/tasks/${id}/override-status`, { status, reason: reason || null })
 }
 
-export async function retryTask(id: number, scheduledDatetime?: string): Promise<Task> {
-  const body = scheduledDatetime ? { scheduled_datetime: scheduledDatetime } : undefined
+export async function retryTask(
+  id: number,
+  scheduledDatetime?: string,
+  lineageStrategy?: 'inherit' | 'fresh_retry',
+): Promise<Task> {
+  const body =
+    scheduledDatetime || lineageStrategy
+      ? { scheduled_datetime: scheduledDatetime, lineage_strategy: lineageStrategy }
+      : undefined
   const { data } = await api.post(`/tasks/${id}/retry`, body)
   return data
 }

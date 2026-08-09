@@ -403,7 +403,12 @@ class Task(Base):
     projected_lineage_generation: Mapped[int | None] = mapped_column(Integer, nullable=True)
     projected_reset_task_id: Mapped[int | None] = mapped_column(
         Integer,
-        ForeignKey("tasks.id", ondelete="SET NULL"),
+        ForeignKey(
+            "tasks.id",
+            ondelete="NO ACTION",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
         nullable=True,
     )
     # Why this lineage projection was chosen: initial / inherited / fresh /
@@ -494,6 +499,16 @@ class Task(Base):
 
     # Indexes for querying tasks
     __table_args__ = (
+        CheckConstraint(
+            "lineage_projection_reason IS NULL OR lineage_projection_reason IN "
+            "('initial', 'inherited', 'fresh', 'legacy_namespace_change')",
+            name="ck_tasks_lineage_projection_reason",
+        ),
+        CheckConstraint(
+            "input_lineage_reason IS NULL OR input_lineage_reason IN "
+            "('fresh', 'resumed', 'fresh_no_match')",
+            name="ck_tasks_input_lineage_reason",
+        ),
         Index("ix_tasks_status_created", "status", "created_at"),
         Index("ix_tasks_status_priority", "status", "priority", "scheduled_at"),
         Index("ix_tasks_issue_id_status", "issue_id", "status"),

@@ -320,9 +320,36 @@ class TestRescheduleTask:
         db = AsyncMock()
         db.execute.return_value = MagicMock(scalar_one_or_none=lambda: task)
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+        slot_info = MagicMock(is_full=False, enforce=True)
+        schedule_window = {
+            "has_valid_window": True,
+            "min_scheduled_at": None,
+            "min_source_task_id": None,
+            "max_scheduled_at": None,
+            "max_source_task_id": None,
+        }
 
-        with patch(
-            "app.api.task_action_routes.get_project_metadata", new=AsyncMock(return_value={})
+        with (
+            patch(
+                "app.api.task_action_routes.get_project_metadata",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.core.issue_task_order.validate_schedule_time_locked",
+                new=AsyncMock(),
+            ),
+            patch(
+                "app.core.slot_capacity.check_slot_capacity",
+                new=AsyncMock(return_value=slot_info),
+            ),
+            patch(
+                "app.api.task_responses.compute_task_queue_contexts",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.core.issue_task_order.compute_schedule_window",
+                new=AsyncMock(return_value=schedule_window),
+            ),
         ):
             result = await reschedule_task(
                 task_id=1,

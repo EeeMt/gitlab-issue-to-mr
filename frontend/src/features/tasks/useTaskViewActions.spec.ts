@@ -110,6 +110,87 @@ describe('useTaskViewActions', () => {
     expect(routerPush).not.toHaveBeenCalled()
   })
 
+  it('surfaces retry_lineage_conflict as a fresh-session confirm instead of a generic 409', async () => {
+    apiMocks.retryTask.mockRejectedValue({
+      response: {
+        status: 409,
+        data: {
+          detail: {
+            code: 'retry_lineage_conflict',
+            message: 'Retry source belongs to an older session lineage',
+            source_lineage: { harness_key: 'claude', session_namespace: 'claude-old', generation: 1, reset_task_id: 70 },
+            tail_lineage: { harness_key: 'codex', session_namespace: 'codex-new', generation: 2, reset_task_id: 80 },
+            allowed_actions: ['fresh_retry'],
+          },
+        },
+      },
+    })
+    const { actions } = createActions()
+
+    await actions.handleRetry()
+
+    expect(actions.showFreshRetryConfirm.value).toBe(true)
+    expect(actions.freshRetrySourceLineage.value?.harness_key).toBe('claude')
+    expect(actions.freshRetryTailLineage.value?.generation).toBe(2)
+    expect(messageMocks.warning).not.toHaveBeenCalledWith('taskView.retryAlreadyExists')
+    expect(routerPush).not.toHaveBeenCalled()
+  })
+
+  it('confirmFreshRetry resubmits with lineage_strategy=fresh_retry and navigates', async () => {
+    apiMocks.retryTask.mockResolvedValue({ id: 72 } as Task)
+    apiMocks.retryTask.mockRejectedValueOnce({
+      response: {
+        status: 409,
+        data: {
+          detail: {
+            code: 'retry_lineage_conflict',
+            source_lineage: { harness_key: 'claude', session_namespace: 'claude-old', generation: 1, reset_task_id: 70 },
+            tail_lineage: { harness_key: 'codex', session_namespace: 'codex-new', generation: 2, reset_task_id: 80 },
+            allowed_actions: ['fresh_retry'],
+          },
+        },
+      },
+    })
+    const { actions } = createActions()
+
+    await actions.handleRetry()
+    expect(actions.showFreshRetryConfirm.value).toBe(true)
+
+    await actions.confirmFreshRetry()
+
+    expect(apiMocks.retryTask).toHaveBeenLastCalledWith(7, undefined, 'fresh_retry')
+    expect(routerPush).toHaveBeenCalledWith('/tasks/72')
+    expect(actions.showFreshRetryConfirm.value).toBe(false)
+  })
+
+  it('confirmFreshRetry preserves the chosen schedule when retrying fresh', async () => {
+    apiMocks.retryTask.mockResolvedValue({ id: 73 } as Task)
+    apiMocks.retryTask.mockRejectedValueOnce({
+      response: {
+        status: 409,
+        data: {
+          detail: {
+            code: 'retry_lineage_conflict',
+            source_lineage: { harness_key: 'claude', session_namespace: 'claude-old', generation: 1, reset_task_id: 70 },
+            tail_lineage: { harness_key: 'codex', session_namespace: 'codex-new', generation: 2, reset_task_id: 80 },
+            allowed_actions: ['fresh_retry'],
+          },
+        },
+      },
+    })
+    const { actions } = createActions()
+    const scheduledAt = Date.now() + 60_000
+    actions.retryScheduleDatetime.value = scheduledAt
+
+    await actions.handleRetryWithSchedule()
+    expect(actions.showFreshRetryConfirm.value).toBe(true)
+
+    await actions.confirmFreshRetry()
+
+    expect(apiMocks.retryTask).toHaveBeenLastCalledWith(7, new Date(scheduledAt).toISOString(), 'fresh_retry')
+    expect(routerPush).toHaveBeenCalledWith('/tasks/73')
+  })
+
   it('does not reset or redirect the next task when retry completes after navigation', async () => {
     const retryResult = deferred<Task>()
     apiMocks.retryTask.mockReturnValueOnce(retryResult.promise)

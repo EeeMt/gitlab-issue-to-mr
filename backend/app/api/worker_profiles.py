@@ -114,7 +114,7 @@ class WorkerProfileRequestBase(BaseModel):
             raise ValueError(str(exc)) from exc
 
     @model_validator(mode="after")
-    def validate_harness_fields(self) -> "WorkerProfileRequestBase":
+    def validate_harness_fields(self) -> WorkerProfileRequestBase:
         enabled = self.enabled_harnesses
         default_key = self.default_harness_key
         if enabled is not None or default_key is not None:

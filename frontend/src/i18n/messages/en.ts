@@ -653,6 +653,26 @@ const en = {
     executeNow: 'Execute Now',
     executeNowDescription:
       'Remove scheduling delay and send the task straight to execution as soon as the worker is available.',
+    executeNowQueuedDescription:
+      'This task is behind its predecessors in the Issue queue — it will run right after Task #{blockedBy} completes (position {position}).',
+    freshRetryConfirmTitle: 'Retry with a new session?',
+    freshRetryConfirmDescription:
+      'The retry source belongs to an older session lineage than the current queue tail. Retrying it would start a brand new session using the source configuration instead of continuing the current one.',
+    freshRetrySourceLineageLabel: 'Retry source',
+    freshRetryTailLineageLabel: 'Current queue tail',
+    freshRetryConfirmAction: 'Use source config and start new session',
+    retryLineageConflict:
+      'The retry source belongs to an older session lineage. Only a fresh-session retry is available.',
+    queuePositionLabel: 'Queue position',
+    queueContextNonHead: 'Queued #{position} · waiting for Task #{blockedBy}',
+    queueContextHeadScheduled: 'Queue head · waiting for scheduled time',
+    queueContextHeadDue: 'Queue head · waiting for worker',
+    queueContextWaitingCleanup: 'Waiting for Task #{blockedBy} to clean up the workspace',
+    queueContextSequenceRepair:
+      'This Issue\'s sequence needs repair — scheduling is temporarily unavailable.',
+    rescheduleConstraintFloor: 'Cannot be earlier than the earliest execution of Task #{source}',
+    rescheduleConstraintCeiling: 'Cannot be later than the latest execution of Task #{source}',
+    rescheduleConstraintWindow: 'Available window: {min} – {max}',
     queuedStatus: 'Queued for Execution',
     queuedStatusDescription:
       'This task is eligible and waiting for a concurrency slot. It will start automatically when capacity becomes available.',
@@ -961,6 +981,7 @@ const en = {
     delayMinutes: 'minutes',
     delayHours: 'hours',
     selectDateTime: 'Select date and time',
+    scheduleFloorNotBefore: 'Cannot be earlier than the earliest execution of Task #{source}',
     runsImmediately: 'This task will execute immediately after creation.',
     delayGreaterThanZero: 'Enter a delay greater than 0 before creating the task.',
     taskWillRunAfter: 'This task will run after {value} {unit}.',
@@ -1190,6 +1211,12 @@ const en = {
     kanbanRunning: 'Running',
     kanbanReady: 'Ready',
     kanbanWaiting: 'Waiting',
+    kanbanWaitingPredecessors: 'Waiting on predecessors',
+    waitingPredecessor: 'Queued #{position} · waiting for Task #{blockedBy}',
+    waitingPredecessorGeneric: 'Waiting for Task #{blockedBy}',
+    waitingWorkspaceCleanup: 'Waiting for Task #{blockedBy} to clean up the workspace',
+    waitingSequenceRepair: 'Sequence repair required',
+    sequenceRepairBanner: '{count} task(s) require sequence repair — scheduling is temporarily unavailable.',
     kanbanSlots: '{count}/{max} slots',
     kanbanCount: '{count}',
     kanbanDue: 'Due: {time}',

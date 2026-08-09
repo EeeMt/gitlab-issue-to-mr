@@ -551,13 +551,35 @@ function copyRetryPrompt() {
 }
 
 const sortedTasks = computed(() => [...(issue.value?.tasks ?? [])].sort((a, b) => {
+  const seqA = a.issue_sequence
+  const seqB = b.issue_sequence
+  if (typeof seqA === 'number' && typeof seqB === 'number' && seqA !== seqB) {
+    return seqB - seqA
+  }
   const timeDiff = new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   return timeDiff || b.id - a.id
 }))
 const activeTask = computed(() => {
-  for (const status of ['running', 'queued', 'pending']) {
-    const matchingTask = sortedTasks.value.find(task => task.status === status)
-    if (matchingTask) return matchingTask
+  const tasks = sortedTasks.value
+  if (!tasks.length) return null
+  // §8.1: prefer the RUNNING task, otherwise the active task with the smallest
+  // queue_position. Never fall back to the newest-created PENDING task.
+  const running = tasks.find(task => task.status === 'running')
+  if (running) return running
+  const positioned = tasks.filter(task =>
+    ['pending', 'queued'].includes(task.status)
+    && typeof task.queue_position === 'number'
+    && task.queue_position >= 1,
+  )
+  if (positioned.length) {
+    return positioned.reduce((min, task) =>
+      (task.queue_position! < min.queue_position! ? task : min), positioned[0])
+  }
+  // Legacy rows without queue context: fall back to the oldest active task.
+  const legacy = tasks.filter(task => ['pending', 'queued'].includes(task.status))
+  if (legacy.length) {
+    return legacy.reduce((oldest, task) =>
+      (new Date(task.created_at).getTime() < new Date(oldest.created_at).getTime() ? task : oldest), legacy[0])
   }
   return null
 })

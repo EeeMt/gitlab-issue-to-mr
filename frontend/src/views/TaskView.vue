@@ -30,6 +30,14 @@
             <span>{{ taskModeLabel }}</span>
             <span aria-hidden="true">·</span>
             <span>{{ t('common.created') }} {{ formatDateTimeUtc8(task.created_at) }}</span>
+            <template v-if="queueContextLabel">
+              <span aria-hidden="true">·</span>
+              <n-tag
+                size="small"
+                :bordered="false"
+                :type="task?.waiting_reason === 'sequence_repair_required' ? 'error' : 'info'"
+              >{{ queueContextLabel }}</n-tag>
+            </template>
           </div>
         </template>
         <template #actions>
@@ -113,7 +121,7 @@
                 type="primary"
                 strong
                 @click="handleExecute"
-                :title="t('taskView.executeNowDescription')"
+                :title="executeButtonTitle"
                 :loading="actionLoading"
                 :disabled="!canManageTask"
               >
@@ -415,6 +423,47 @@
     </n-space>
   </n-modal>
 
+  <!-- Fresh-session retry confirm (retry_lineage_conflict) -->
+  <n-modal
+    v-model:show="showFreshRetryConfirm"
+    preset="card"
+    class="config-editor-modal"
+    :style="{ width: '520px', maxWidth: 'calc(100vw - 32px)' }"
+    :closable="!freshRetryLoading"
+    :mask-closable="!freshRetryLoading"
+  >
+    <template #header>
+      <span>{{ t('taskView.freshRetryConfirmTitle') }}</span>
+    </template>
+    <n-space vertical :size="14">
+      <p class="task-override-modal__description">
+        {{ t('taskView.freshRetryConfirmDescription') }}
+      </p>
+      <div class="fresh-retry-lineage">
+        <div class="fresh-retry-lineage__row">
+          <span class="fresh-retry-lineage__label">{{ t('taskView.freshRetrySourceLineageLabel') }}</span>
+          <code class="fresh-retry-lineage__value">{{ formatLineage(freshRetrySourceLineage) }}</code>
+        </div>
+        <div class="fresh-retry-lineage__row">
+          <span class="fresh-retry-lineage__label">{{ t('taskView.freshRetryTailLineageLabel') }}</span>
+          <code class="fresh-retry-lineage__value">{{ formatLineage(freshRetryTailLineage) }}</code>
+        </div>
+      </div>
+      <div class="task-override-modal__actions">
+        <n-button secondary :disabled="freshRetryLoading" @click="showFreshRetryConfirm = false">
+          {{ t('common.cancel') }}
+        </n-button>
+        <n-button
+          type="warning"
+          :loading="freshRetryLoading"
+          @click="confirmFreshRetry"
+        >
+          {{ t('taskView.freshRetryConfirmAction') }}
+        </n-button>
+      </div>
+    </n-space>
+  </n-modal>
+
   <!-- Schedule Drawer (retry with schedule) -->
   <n-drawer v-model:show="showScheduleDrawer" :width="isMobile ? '100%' : 680" placement="right">
     <n-drawer-content :title="t('taskView.retryWithSchedule')" closable>
@@ -626,7 +675,11 @@ const {
 const {
   actionLoading,
   archiveDownloadLoading,
+  confirmFreshRetry,
   confirmOverride,
+  freshRetryLoading,
+  freshRetrySourceLineage,
+  freshRetryTailLineage,
   handleAppendTaskCreated,
   handleCancel,
   handleDownloadArchive,
@@ -642,6 +695,7 @@ const {
   retryScheduleDatetime,
   showCreateDrawer,
   showEditDrawer,
+  showFreshRetryConfirm,
   showOverrideModal,
   showRescheduleDrawer,
   showScheduleDrawer,
@@ -801,6 +855,46 @@ const canAppendFollowupTask = computed(() =>
   && issueStatus.value !== 'closed'
   && canManageTask.value
 )
+
+const executeButtonTitle = computed(() => {
+  const qp = task.value?.queue_position
+  if (typeof qp === 'number' && qp > 1) {
+    return t('taskView.executeNowQueuedDescription', {
+      position: qp,
+      blockedBy: task.value?.blocked_by_task_id ?? '',
+    })
+  }
+  return t('taskView.executeNowDescription')
+})
+
+const queueContextLabel = computed(() => {
+  const taskValue = task.value
+  if (!taskValue) return null
+  const qp = taskValue.queue_position
+  const blockedBy = taskValue.blocked_by_task_id
+  if (taskValue.waiting_reason === 'sequence_repair_required') {
+    return t('taskView.queueContextSequenceRepair')
+  }
+  if (taskValue.waiting_reason === 'workspace_cleanup') {
+    return t('taskView.queueContextWaitingCleanup', { blockedBy: blockedBy ?? '' })
+  }
+  if (typeof qp === 'number' && qp > 1) {
+    return t('taskView.queueContextNonHead', {
+      position: qp,
+      blockedBy: blockedBy ?? '',
+    })
+  }
+  if (qp === 1) {
+    if (taskValue.scheduled_at) return t('taskView.queueContextHeadScheduled')
+    return t('taskView.queueContextHeadDue')
+  }
+  return null
+})
+
+function formatLineage(item: { harness_key: string; session_namespace: string; generation: number; reset_task_id: number | null } | null): string {
+  if (!item) return '—'
+  return `${item.harness_key} / ${item.session_namespace} / gen ${item.generation}${item.reset_task_id ? ` / reset #${item.reset_task_id}` : ''}`
+}
 
 
 function isScheduledDateDisabled(timestamp: number): boolean {
@@ -1545,6 +1639,33 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.fresh-retry-lineage {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(240, 160, 32, 0.07);
+}
+
+.fresh-retry-lineage__row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.fresh-retry-lineage__label {
+  flex: 0 0 auto;
+  color: rgba(15, 23, 42, 0.58);
+}
+
+.fresh-retry-lineage__value {
+  overflow-wrap: anywhere;
+  color: rgba(15, 23, 42, 0.86);
+  font-family: var(--n-font-family-mono, 'SF Mono', monospace);
 }
 
 .task-actions__date-picker {

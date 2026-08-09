@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from app.core.harness_protocol import replay_events, validate_event, validate_result
+from app.core.harness_protocol import replay_events, validate_event
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 HARNESS_DIR = REPO_ROOT / "deploy/worker-entrypoint/harness"

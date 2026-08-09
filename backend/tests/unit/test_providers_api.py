@@ -480,6 +480,7 @@ class ProviderAuthScopeTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 import asyncio
+
 import pytest
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine

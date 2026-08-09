@@ -252,8 +252,9 @@ class CancelTaskEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(task.status, TaskStatus.CANCELLED)
 
-    def test_cancel_task_releases_issue_execution_lock(self) -> None:
-        """POST /cancel should release the DB issue execution lock."""
+    def test_cancel_running_task_keeps_lock_until_converged(self) -> None:
+        """A RUNNING cancel records intent and keeps the Issue lock; the worker
+        finalizer converges the terminal and releases it (spec §6.7)."""
         from app.core.worker_docker_targets import TaskContainerNotFoundError
 
         task = MagicMock()
@@ -264,6 +265,7 @@ class CancelTaskEndpointTests(unittest.TestCase):
         task.scheduled_at = None
         task.container_id = "gone-container-2"
         task.cancel_requested_at = None
+        task.raw_logs_finalized_at = None
 
         client, app, _mock_db = self._get_client(task)
 
@@ -283,8 +285,9 @@ class CancelTaskEndpointTests(unittest.TestCase):
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 200)
-        mock_release.assert_awaited_once()
-        self.assertEqual(mock_release.await_args.kwargs["issue_id"], 33)
+        self.assertEqual(task.status, TaskStatus.RUNNING)
+        self.assertIsNotNone(task.cancel_requested_at)
+        mock_release.assert_not_awaited()
 
     def test_cancel_running_task_does_not_downgrade_completed(self) -> None:
         """Cancel of a RUNNING task must not downgrade a run the finalizer
@@ -1988,16 +1991,20 @@ class RetryTaskWithScheduleTests(unittest.TestCase):
         task = _make_serializable_task(task_status=TaskStatus.FAILED)
         task.id = 80
         task.project_id = 1
+        # A continue retry must match the tail lineage tuple (§4.6); pin the
+        # source projection to the tail projection used below.
+        task.projected_harness_key = "claude"
+        task.projected_session_namespace = "claude-ns"
+        task.projected_lineage_generation = 0
+        task.projected_reset_task_id = None
+        task.lineage_projection_reason = "initial"
 
         # First execute returns the task; second returns None (no existing retry);
-        # third is for slot capacity count query; fourth fetches Issue.
+        # third fetches the Issue under its row lock.
         mock_result_task = MagicMock()
         mock_result_task.scalar_one_or_none.return_value = task
         mock_result_no_retry = MagicMock()
         mock_result_no_retry.scalar_one_or_none.return_value = None
-        mock_result_default = MagicMock()
-        mock_result_default.scalar_one_or_none.return_value = None
-        mock_result_default.scalar.return_value = 0
         mock_result_issue = MagicMock()
         mock_result_issue.scalar_one_or_none.return_value = MagicMock(id=1, project_id=1)
 
@@ -2015,7 +2022,6 @@ class RetryTaskWithScheduleTests(unittest.TestCase):
             side_effect=[
                 mock_result_task,
                 mock_result_no_retry,
-                mock_result_default,
                 mock_result_issue,
                 _make_scalars_all_result([task]),
                 _make_rows_all_result([]),
@@ -2032,6 +2038,12 @@ class RetryTaskWithScheduleTests(unittest.TestCase):
         client, app = _make_app_client_with_db(mock_db)
 
         future_dt = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
+        tail_projection = {
+            "harness_key": "claude",
+            "session_namespace": "claude-ns",
+            "generation": 0,
+            "reset_task_id": None,
+        }
 
         with (
             patch("app.api.tasks.notify_task_retried", new=AsyncMock()),
@@ -2048,6 +2060,30 @@ class RetryTaskWithScheduleTests(unittest.TestCase):
             patch(
                 "app.api.tasks.replace_task_worker_snapshot",
                 new=AsyncMock(return_value=_make_worker_snapshot(task_id=102)),
+            ),
+            patch(
+                "app.api.task_creation_service.ensure_issue_order_integrity_locked",
+                new=AsyncMock(
+                    return_value={
+                        "max_sequence": 1,
+                        "tail_projection": tail_projection,
+                        "repaired_sequences": 0,
+                        "repaired_projections": 0,
+                        "blocked": False,
+                    }
+                ),
+            ),
+            patch(
+                "app.api.task_creation_service.validate_schedule_time_locked",
+                new=AsyncMock(),
+            ),
+            patch(
+                "app.api.task_creation_service.compute_task_queue_contexts",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.core.slot_capacity.check_slot_capacity",
+                new=AsyncMock(return_value=MagicMock(is_full=False, enforce=True)),
             ),
         ):
             response = client.post("/api/tasks/80/retry", json={"scheduled_datetime": future_dt})

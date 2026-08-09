@@ -75,7 +75,14 @@ async def cleanup_inactive_issue_execution_locks(db: AsyncSession) -> int:
     A terminal task with a durable container reference still owns its Issue: the
     container may need to be stopped and its raw logs finalized before another
     task can safely mutate the same daemon-local workspace.
+
+    The delete is scoped to the exact ``(issue_id, task_id)`` pairs observed to
+    be stale — never an Issue-scoped ``DELETE ... WHERE issue_id IN (...)`` — so
+    a lock that a newer task re-acquired after this SELECT cannot be removed
+    (spec §6.7, invariant 12).
     """
+    from sqlalchemy import tuple_
+
     result = await db.execute(select(IssueExecutionLock))
     locks = list(result.scalars().all())
     if not locks:
@@ -85,8 +92,8 @@ async def cleanup_inactive_issue_execution_locks(db: AsyncSession) -> int:
     task_result = await db.execute(select(Task).where(Task.id.in_(task_ids)))
     tasks_by_id = {task.id: task for task in task_result.scalars().all()}
 
-    stale_issue_ids = [
-        lock.issue_id
+    stale_pairs = [
+        (lock.issue_id, lock.task_id)
         for lock in locks
         if (task := tasks_by_id.get(lock.task_id)) is None
         or (
@@ -94,10 +101,12 @@ async def cleanup_inactive_issue_execution_locks(db: AsyncSession) -> int:
             and getattr(task, "container_id", None) is None
         )
     ]
-    if not stale_issue_ids:
+    if not stale_pairs:
         return 0
 
     await db.execute(
-        delete(IssueExecutionLock).where(IssueExecutionLock.issue_id.in_(stale_issue_ids))
+        delete(IssueExecutionLock).where(
+            tuple_(IssueExecutionLock.issue_id, IssueExecutionLock.task_id).in_(stale_pairs)
+        )
     )
-    return len(stale_issue_ids)
+    return len(stale_pairs)

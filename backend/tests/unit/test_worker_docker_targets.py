@@ -277,6 +277,136 @@ async def test_crash_recovery_does_not_orphan_task_when_tls_credentials_rotate()
     resume_task.assert_called_once_with(21, container.name, new_connection)
 
 
+@pytest.mark.parametrize("container_status", ["running", "exited"])
+@pytest.mark.asyncio
+async def test_crash_recovery_does_not_orphan_alias_target_container(container_status):
+    """D1: unix socket and tcp aliases of one daemon must not orphan each other's containers.
+
+    A task snapshotted against the tcp connection is owned only by the tcp target's
+    daemon key, yet both targets enumerate the same physical container. The unix
+    target must not treat it as an unclaimed orphan and remove it, and the container
+    must be resumed exactly once across the aliases.
+    """
+    unix_connection = DockerConnectionConfig(host="unix:///var/run/docker.sock")
+    tcp_connection = DockerConnectionConfig(host="tcp://192.168.50.129:2375")
+    task = SimpleNamespace(id=558, issue_id=96, status=TaskStatus.RUNNING)
+    task_result = MagicMock()
+    task_result.scalars.return_value.all.return_value = [task]
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=task_result)
+    db.commit = AsyncMock()
+    db_context = MagicMock()
+    db_context.__aenter__ = AsyncMock(return_value=db)
+    db_context.__aexit__ = AsyncMock(return_value=False)
+
+    container = SimpleNamespace(
+        name="codify-558-issue96",
+        status=container_status,
+        remove=MagicMock(),
+    )
+    unix_docker = MagicMock()
+    unix_docker.client.containers.list.return_value = [container]
+    tcp_docker = MagicMock()
+    tcp_docker.client.containers.list.return_value = [container]
+
+    def client_for_connection(connection):
+        if connection == unix_connection:
+            return unix_docker
+        assert connection == tcp_connection
+        return tcp_docker
+
+    scheduler = Scheduler()
+    with (
+        patch("app.scheduler.AsyncSessionLocal", return_value=db_context),
+        patch("app.scheduler.cleanup_inactive_issue_execution_locks", new=AsyncMock(return_value=0)),
+        patch(
+            "app.scheduler.list_known_docker_targets",
+            new=AsyncMock(
+                return_value=[
+                    KnownDockerTarget(unix_connection, ("System default",)),
+                    KnownDockerTarget(tcp_connection, ("ARM Worker",)),
+                ]
+            ),
+        ),
+        patch("app.scheduler.connection_for_task", new=AsyncMock(return_value=tcp_connection)),
+        patch("app.scheduler._RECOVERY_RETRY_OFFSETS_SECONDS", (0, 0, 0)),
+        patch("app.scheduler._get_recovery_docker_client", side_effect=client_for_connection),
+        patch.object(
+            scheduler,
+            "_resume_task_background",
+            new=MagicMock(return_value=object()),
+        ) as resume_task,
+        patch("app.scheduler.asyncio.create_task", return_value=MagicMock()),
+    ):
+        await scheduler._crash_recovery()
+
+    container.remove.assert_not_called()
+    assert resume_task.call_count == 1
+    assert task.status == TaskStatus.RUNNING
+    assert 558 in scheduler._running_tasks
+    assert 96 in scheduler._running_issues
+
+
+@pytest.mark.asyncio
+async def test_crash_recovery_keeps_alias_target_retained_container():
+    """A retained (terminal, unfinalized logs) container is not orphaned by an alias target."""
+    unix_connection = DockerConnectionConfig(host="unix:///var/run/docker.sock")
+    tcp_connection = DockerConnectionConfig(host="tcp://192.168.50.129:2375")
+    task = SimpleNamespace(
+        id=559,
+        issue_id=97,
+        status=TaskStatus.CANCELLED,
+        container_id="codify-559-issue97",
+        raw_logs_finalized_at=None,
+    )
+    task_result = MagicMock()
+    task_result.scalars.return_value.all.return_value = [task]
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=task_result)
+    db.commit = AsyncMock()
+    db_context = MagicMock()
+    db_context.__aenter__ = AsyncMock(return_value=db)
+    db_context.__aexit__ = AsyncMock(return_value=False)
+
+    container = SimpleNamespace(
+        name="codify-559-issue97",
+        status="exited",
+        remove=MagicMock(),
+    )
+    unix_docker = MagicMock()
+    unix_docker.client.containers.list.return_value = [container]
+    tcp_docker = MagicMock()
+    tcp_docker.client.containers.list.return_value = [container]
+
+    def client_for_connection(connection):
+        if connection == unix_connection:
+            return unix_docker
+        assert connection == tcp_connection
+        return tcp_docker
+
+    scheduler = Scheduler()
+    with (
+        patch("app.scheduler.AsyncSessionLocal", return_value=db_context),
+        patch("app.scheduler.cleanup_inactive_issue_execution_locks", new=AsyncMock(return_value=0)),
+        patch(
+            "app.scheduler.list_known_docker_targets",
+            new=AsyncMock(
+                return_value=[
+                    KnownDockerTarget(unix_connection, ("System default",)),
+                    KnownDockerTarget(tcp_connection, ("ARM Worker",)),
+                ]
+            ),
+        ),
+        patch("app.scheduler.connection_for_task", new=AsyncMock(return_value=tcp_connection)),
+        patch("app.scheduler._RECOVERY_RETRY_OFFSETS_SECONDS", (0, 0, 0)),
+        patch("app.scheduler._get_recovery_docker_client", side_effect=client_for_connection),
+    ):
+        await scheduler._crash_recovery()
+
+    container.remove.assert_not_called()
+    assert task.status == TaskStatus.CANCELLED
+
+
 @pytest.mark.asyncio
 async def test_crash_recovery_stops_running_container_for_persisted_cancel_intent():
     connection = DockerConnectionConfig(host="tcp://arm-worker:2376")

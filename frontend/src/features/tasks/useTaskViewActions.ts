@@ -9,6 +9,7 @@ import {
   overrideTaskStatus,
   retryTask,
   type Task,
+  type TaskProjectedLineage,
 } from '../../api'
 
 export interface TaskArchiveMetadata {
@@ -44,6 +45,60 @@ export function useTaskViewActions(options: TaskViewActionsOptions) {
   const overrideTargetStatus = ref<'completed' | 'failed' | null>(null)
   const overrideReason = ref('')
   const overrideLoading = ref(false)
+  const showFreshRetryConfirm = ref(false)
+  const freshRetryLoading = ref(false)
+  const freshRetrySourceLineage = ref<TaskProjectedLineage | null>(null)
+  const freshRetryTailLineage = ref<TaskProjectedLineage | null>(null)
+  const pendingRetryParams = ref<{ scheduledDatetime?: string } | null>(null)
+
+  function isRetryLineageConflict(error: unknown): boolean {
+    const detail = (error as any)?.response?.data?.detail
+    return (error as any)?.response?.status === 409
+      && typeof detail === 'object'
+      && detail !== null
+      && detail.code === 'retry_lineage_conflict'
+  }
+
+  function openFreshRetryConfirm(error: unknown, scheduledDatetime?: string) {
+    const detail = (error as any)?.response?.data?.detail
+    freshRetrySourceLineage.value = detail?.source_lineage ?? null
+    freshRetryTailLineage.value = detail?.tail_lineage ?? null
+    pendingRetryParams.value = { scheduledDatetime }
+    showFreshRetryConfirm.value = true
+  }
+
+  async function confirmFreshRetry() {
+    const requestedTaskId = options.taskId.value
+    const params = pendingRetryParams.value
+    freshRetryLoading.value = true
+    try {
+      const newTask = await retryTask(requestedTaskId, params?.scheduledDatetime, 'fresh_retry')
+      if (!isCurrentTask(requestedTaskId)) return
+      if (params?.scheduledDatetime) {
+        retryScheduleDatetime.value = null
+        showScheduleDrawer.value = false
+      }
+      showFreshRetryConfirm.value = false
+      pendingRetryParams.value = null
+      options.resetLogsState()
+      message.success(params?.scheduledDatetime
+        ? t('taskView.taskRetryRescheduled')
+        : t('taskView.taskRetryScheduled'))
+      void router.push(`/tasks/${newTask.id}`)
+    } catch (error: any) {
+      if (!isCurrentTask(requestedTaskId)) return
+      showFreshRetryConfirm.value = false
+      pendingRetryParams.value = null
+      if (error?.response?.status === 409) {
+        message.warning(t('taskView.retryAlreadyExists'))
+        await options.checkActiveRetry()
+      } else {
+        message.error(t('taskView.failedToRetryTask'))
+      }
+    } finally {
+      freshRetryLoading.value = false
+    }
+  }
 
   function isCurrentTask(taskId: number): boolean {
     return options.taskId.value === taskId
@@ -131,7 +186,9 @@ export function useTaskViewActions(options: TaskViewActionsOptions) {
       void router.push(`/tasks/${newTask.id}`)
     } catch (error: any) {
       if (!isCurrentTask(requestedTaskId)) return
-      if (error?.response?.status === 409) {
+      if (isRetryLineageConflict(error)) {
+        openFreshRetryConfirm(error)
+      } else if (error?.response?.status === 409) {
         message.warning(t('taskView.retryAlreadyExists'))
         await options.checkActiveRetry()
       } else {
@@ -167,7 +224,9 @@ export function useTaskViewActions(options: TaskViewActionsOptions) {
       void router.push(`/tasks/${newTask.id}`)
     } catch (error: any) {
       if (!isCurrentTask(requestedTaskId)) return
-      if (error?.response?.status === 409) {
+      if (isRetryLineageConflict(error)) {
+        openFreshRetryConfirm(error, new Date(scheduledDatetime).toISOString())
+      } else if (error?.response?.status === 409) {
         message.warning(t('taskView.retryAlreadyExists'))
         await options.checkActiveRetry()
       } else {
@@ -219,7 +278,11 @@ export function useTaskViewActions(options: TaskViewActionsOptions) {
   return {
     actionLoading,
     archiveDownloadLoading,
+    confirmFreshRetry,
     confirmOverride,
+    freshRetryLoading,
+    freshRetrySourceLineage,
+    freshRetryTailLineage,
     handleAppendTaskCreated,
     handleCancel,
     handleDownloadArchive,
@@ -235,6 +298,7 @@ export function useTaskViewActions(options: TaskViewActionsOptions) {
     retryScheduleDatetime,
     showCreateDrawer,
     showEditDrawer,
+    showFreshRetryConfirm,
     showOverrideModal,
     showRescheduleDrawer,
     showScheduleDrawer,
