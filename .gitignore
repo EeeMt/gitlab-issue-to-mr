@@ -65,6 +65,8 @@ temporary/*.png
 # Local agent skills/config
 .agents/
 .codex/
+/.agent_context/
+/.multica/
 
 # Offline bundle archives (large binaries)
 deploy/codify-offline-bundle*.tar.gz
