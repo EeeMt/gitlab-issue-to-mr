@@ -394,13 +394,70 @@ class GetIssueTests(unittest.IsolatedAsyncioTestCase):
         mock_user = MagicMock()
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
-        result = await get_issue(issue_id=5, db=mock_db, current_user=mock_user, access_scope=access_scope)
+        with patch("app.api.issues.compute_task_queue_contexts", new=AsyncMock(return_value={})):
+            result = await get_issue(issue_id=5, db=mock_db, current_user=mock_user, access_scope=access_scope)
 
         self.assertEqual(result["id"], 5)
         self.assertEqual(result["title"], "Feature Y")
         self.assertEqual(len(result["tasks"]), 2)
         self.assertEqual(result["tasks"][0]["id"], 100)
         self.assertEqual(result["tasks"][1]["id"], 101)
+
+    async def test_get_issue_tasks_include_queue_context(self):
+        """Issue detail tasks should carry ordered-turn queue context (§8.1)."""
+        from app.api.issues import get_issue
+        from app.dependencies.project_access import ProjectAccessScope
+
+        task1 = _make_task(id=100, status="queued")
+        task1.issue_sequence = 1
+        task2 = _make_task(id=101, status="queued")
+        task2.issue_sequence = 2
+        issue = _make_issue(id=5, title="Ordered", tasks=[task1, task2])
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+        mock_user = MagicMock()
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        contexts = {
+            100: {
+                "issue_sequence": 1,
+                "queue_position": 1,
+                "blocked_by_task_id": None,
+                "waiting_reason": None,
+                "lock_owner_task_id": None,
+                "waiting_since": None,
+            },
+            101: {
+                "issue_sequence": 2,
+                "queue_position": 2,
+                "blocked_by_task_id": 100,
+                "waiting_reason": "predecessor",
+                "lock_owner_task_id": None,
+                "waiting_since": None,
+            },
+        }
+        with patch(
+            "app.api.issues.compute_task_queue_contexts",
+            new=AsyncMock(return_value=contexts),
+        ):
+            result = await get_issue(
+                issue_id=5, db=mock_db, current_user=mock_user, access_scope=access_scope
+            )
+
+        self.assertEqual(result["tasks"][0]["issue_sequence"], 1)
+        self.assertEqual(result["tasks"][0]["queue_position"], 1)
+        self.assertIsNone(result["tasks"][0]["blocked_by_task_id"])
+        self.assertIsNone(result["tasks"][0]["waiting_reason"])
+        self.assertIsNone(result["tasks"][0]["lock_owner_task_id"])
+        self.assertIsNone(result["tasks"][0]["waiting_since"])
+        self.assertEqual(result["tasks"][1]["issue_sequence"], 2)
+        self.assertEqual(result["tasks"][1]["queue_position"], 2)
+        self.assertEqual(result["tasks"][1]["blocked_by_task_id"], 100)
+        self.assertEqual(result["tasks"][1]["waiting_reason"], "predecessor")
 
     async def test_get_issue_includes_task_schedule_and_initiator_metadata(self):
         """Issue detail tasks should include fields needed for task row actions."""
@@ -426,7 +483,8 @@ class GetIssueTests(unittest.IsolatedAsyncioTestCase):
         mock_user = MagicMock()
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
-        result = await get_issue(issue_id=44, db=mock_db, current_user=mock_user, access_scope=access_scope)
+        with patch("app.api.issues.compute_task_queue_contexts", new=AsyncMock(return_value={})):
+            result = await get_issue(issue_id=44, db=mock_db, current_user=mock_user, access_scope=access_scope)
 
         self.assertEqual(result["tasks"][0]["scheduled_at"], scheduled_at.isoformat())
         self.assertEqual(result["tasks"][0]["initiator_user_id"], 1)

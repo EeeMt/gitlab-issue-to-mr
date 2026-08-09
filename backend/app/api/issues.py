@@ -18,6 +18,7 @@ from app.api.list_filter_values import (
     parse_datetime_filter,
     validate_datetime_range,
 )
+from app.api.task_responses import apply_queue_context, compute_task_queue_contexts
 from app.config import get_effective_settings
 from app.core.gitlab_client import get_gitlab_client
 from app.core.harness_registry import HarnessRegistryError, validate_enabled_harnesses
@@ -266,8 +267,18 @@ def _task_duration_seconds(task: Task, now: datetime | None = None) -> float:
     return (ended_at - task.started_at).total_seconds()
 
 
-def _serialize_issue_detail(issue: Issue, current_harness: str | None = None) -> dict:
-    """Serialize an Issue with its eagerly-loaded tasks."""
+async def _serialize_issue_detail(
+    db: AsyncSession,
+    issue: Issue,
+    current_harness: str | None = None,
+) -> dict:
+    """Serialize an Issue with its eagerly-loaded tasks and queue context.
+
+    Queue context (``issue_sequence``/``queue_position``/``blocked_by_task_id``
+    /``waiting_reason``/``lock_owner_task_id``/``waiting_since``) is attached so
+    the Issue detail page can show ordered-turn state (§8.1). Computed once per
+    Issue, not per task.
+    """
     data = _serialize_issue(issue, current_harness=current_harness)
     tasks = issue.tasks or []
     data["tasks"] = [
@@ -283,6 +294,7 @@ def _serialize_issue_detail(issue: Issue, current_harness: str | None = None) ->
             "retry_source_task_id": t.retry_source_task_id,
             "trigger_source": t.trigger_source,
             "ci_failure_run_id": t.ci_failure_run_id,
+            "issue_sequence": t.issue_sequence if isinstance(t.issue_sequence, int) else None,
             "container_id": t.container_id,
             "commit_sha": t.commit_sha,
             "error_message": t.error_message,
@@ -300,6 +312,10 @@ def _serialize_issue_detail(issue: Issue, current_harness: str | None = None) ->
         }
         for t in tasks
     ]
+    if tasks:
+        contexts = await compute_task_queue_contexts(db, tasks)
+        for t, item in zip(tasks, data["tasks"]):
+            apply_queue_context(item, t.id, contexts)
     now = utcnow()
     data["totals"] = {
         "additions": sum(t.additions or 0 for t in tasks),
@@ -725,7 +741,7 @@ async def get_issue(
         )
     require_project_access(issue.project_id, access_scope)
     current_harness = await get_issue_latest_harness_key(db, issue.id)
-    return _serialize_issue_detail(issue, current_harness=current_harness)
+    return await _serialize_issue_detail(db, issue, current_harness=current_harness)
 
 
 @router.patch("/{issue_id}")
@@ -794,7 +810,7 @@ async def update_issue(
 
     await db.commit()
     await db.refresh(issue, attribute_names=["tasks", "worker_profile", "default_provider"])
-    return _serialize_issue_detail(issue)
+    return await _serialize_issue_detail(db, issue)
 
 
 @router.post("/{issue_id}/close")
@@ -829,7 +845,7 @@ async def close_issue(
         await _try_delete_issue_branch(issue, db, ignore_close_policy=True)
     await db.commit()
     await db.refresh(issue, attribute_names=["tasks", "worker_profile", "default_provider"])
-    return _serialize_issue_detail(issue)
+    return await _serialize_issue_detail(db, issue)
 
 
 @router.post("/{issue_id}/delete-branch")
@@ -864,7 +880,7 @@ async def delete_issue_branch(
 
     if issue.branch_deleted:
         # Already deleted: return the full serialized issue detail to match frontend expectations
-        return _serialize_issue_detail(issue)
+        return await _serialize_issue_detail(db, issue)
 
     try:
         client = get_gitlab_client()
@@ -880,7 +896,7 @@ async def delete_issue_branch(
     await db.commit()
     # Refresh tasks relationship (match pattern used by close_issue)
     await db.refresh(issue, attribute_names=["tasks", "worker_profile", "default_provider"])
-    return _serialize_issue_detail(issue)
+    return await _serialize_issue_detail(db, issue)
 
 
 @router.delete("/{issue_id}")
