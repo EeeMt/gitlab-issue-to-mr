@@ -220,6 +220,7 @@ from app.api import (
     providers,
     skills,
     stats,
+    system_statistics,
     tasks,
     usage_limits,
     webhook_handler,
@@ -309,6 +310,12 @@ app.include_router(
     admin_users.router,
     prefix="/api",
     tags=["admin-users"],
+    dependencies=[Depends(require_admin_user)],
+)
+app.include_router(
+    system_statistics.router,
+    prefix="/api",
+    tags=["system-statistics"],
     dependencies=[Depends(require_admin_user)],
 )
 app.include_router(

@@ -108,6 +108,12 @@ const router = createRouter({
       meta: { requiresAuth: true, requiresAdmin: true }
     },
     {
+      path: '/system-statistics',
+      name: 'SystemStatistics',
+      component: () => import('../views/SystemStatistics.vue'),
+      meta: { requiresAuth: true, requiresAdmin: true }
+    },
+    {
       path: '/oidc-diagnostics',
       name: 'OidcDiagnostics',
       redirect: '/configuration?tab=auth'

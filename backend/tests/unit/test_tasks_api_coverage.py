@@ -54,6 +54,7 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     task.additions = 0
     task.deletions = 0
     task.total_changes = 0
+    task.change_stats_recorded_at = None
     task.input_tokens = 0
     task.output_tokens = 0
     task.model_name = None

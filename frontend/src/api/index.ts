@@ -1545,4 +1545,144 @@ export async function getAnnouncement(): Promise<AnnouncementInfo> {
   return response.data
 }
 
+// ---------------------------------------------------------------------------
+// Admin system lifecycle statistics (reference statistics, admin only)
+// ---------------------------------------------------------------------------
+
+export type SystemStatisticsDataState = 'all' | 'retained' | 'deleted'
+
+export interface SystemStatisticsCurrentState {
+  pending: number
+  queued: number
+  running: number
+  long_running: number
+  active_issues: number
+  avg_queue_wait_seconds: number | null
+  queue_wait_samples: number
+}
+
+export interface SystemStatisticsLifetime {
+  issue_count: number
+  task_count: number
+  completed: number
+  failed: number
+  cancelled: number
+  finished: number
+  success_rate: number | null
+  failure_rate: number | null
+  issues_with_mr: number
+  known_total_tokens: number
+  known_total_changes: number
+  known_total_execution_seconds: number | null
+}
+
+export interface SystemStatisticsDeletion {
+  deleted_task_count: number
+  deleted_issue_count: number
+  deleted_before_terminal: number
+}
+
+export interface SystemStatisticsCoverageMetric {
+  eligible_samples: number
+  complete_samples?: number
+  partial_samples?: number
+  missing_samples?: number
+  available_samples?: number
+  coverage_rate: number | null
+}
+
+export interface SystemStatisticsOverview {
+  as_of: string
+  reporting_timezone: string
+  current_state: SystemStatisticsCurrentState
+  lifetime: SystemStatisticsLifetime
+  deletion: SystemStatisticsDeletion
+  coverage: {
+    capture_started_at: string | null
+    capture_enabled: boolean
+    statement: string
+    token: SystemStatisticsCoverageMetric
+    code: SystemStatisticsCoverageMetric
+  }
+}
+
+export interface SystemStatisticsTrendValue {
+  bucket: string
+  task_count?: number
+  issue_count?: number
+  completed?: number
+  failed?: number
+  cancelled?: number
+  known_total_tokens?: number
+  known_total_changes?: number
+  known_execution_seconds?: number | null
+}
+
+export interface SystemStatisticsTrendSeries {
+  time_basis: string
+  values: SystemStatisticsTrendValue[]
+}
+
+export interface SystemStatisticsTrends {
+  as_of: string
+  reporting_timezone: string
+  range: string
+  bucket: string
+  series: SystemStatisticsTrendSeries[]
+}
+
+export interface SystemStatisticsBreakdownRow {
+  key: string | null
+  label: string
+  project_id?: number | null
+  provider_id?: number | null
+  task_count: number
+  completed: number
+  failed: number
+  cancelled: number
+  success_rate: number | null
+  deleted_count: number
+  known_total_tokens: number
+  known_total_changes: number
+}
+
+export interface SystemStatisticsBreakdowns {
+  as_of: string
+  reporting_timezone: string
+  projects: SystemStatisticsBreakdownRow[]
+  providers: SystemStatisticsBreakdownRow[]
+  harnesses: SystemStatisticsBreakdownRow[]
+}
+
+export async function getSystemStatisticsOverview(params?: {
+  project_id?: number
+  provider_id?: number
+  harness_key?: string
+  data_state?: SystemStatisticsDataState
+}): Promise<SystemStatisticsOverview> {
+  const response = await api.get('/admin/system-statistics/overview', { params })
+  return response.data
+}
+
+export async function getSystemStatisticsTrends(params?: {
+  project_id?: number
+  provider_id?: number
+  harness_key?: string
+  data_state?: SystemStatisticsDataState
+  range?: '90d' | '1y' | 'all'
+}): Promise<SystemStatisticsTrends> {
+  const response = await api.get('/admin/system-statistics/trends', { params })
+  return response.data
+}
+
+export async function getSystemStatisticsBreakdowns(params?: {
+  project_id?: number
+  provider_id?: number
+  harness_key?: string
+  data_state?: SystemStatisticsDataState
+}): Promise<SystemStatisticsBreakdowns> {
+  const response = await api.get('/admin/system-statistics/breakdowns', { params })
+  return response.data
+}
+
 export default api

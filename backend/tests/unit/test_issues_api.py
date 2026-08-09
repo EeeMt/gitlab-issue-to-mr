@@ -654,10 +654,16 @@ class DeleteIssueTests(unittest.IsolatedAsyncioTestCase):
         mock_db.commit = AsyncMock()
         mock_user = MagicMock()
 
-        with patch(
-            "app.api.issues.remove_issue_workspace_remote",
-            new=AsyncMock(return_value=True),
-        ) as remove_workspace:
+        with (
+            patch(
+                "app.api.issues.remove_issue_workspace_remote",
+                new=AsyncMock(return_value=True),
+            ) as remove_workspace,
+            patch(
+                "app.api.issues.archive_issue_statistics_before_delete",
+                new=AsyncMock(return_value=0),
+            ) as archive,
+        ):
             result = await delete_issue(issue_id=1, db=mock_db, current_user=mock_user)
 
         self.assertEqual(result["status"], "deleted")
@@ -665,6 +671,10 @@ class DeleteIssueTests(unittest.IsolatedAsyncioTestCase):
         mock_db.delete.assert_awaited_once_with(issue)
         mock_db.commit.assert_awaited_once()
         remove_workspace.assert_awaited_once()
+        archive.assert_awaited_once_with(
+            mock_db, issue_id=issue.id, deletion_reason="manual",
+            deleted_by_user_id=mock_user.id,
+        )
 
     async def test_delete_issue_keeps_database_row_when_remote_cleanup_fails(self):
         """A daemon failure must not orphan the workspace by deleting its DB owner."""

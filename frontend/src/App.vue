@@ -307,7 +307,8 @@ import {
   RocketOutline,
   SettingsOutline,
   SpeedometerOutline,
-  MegaphoneOutline
+  MegaphoneOutline,
+  PulseOutline
 } from '@vicons/ionicons5'
 import { authState, canAccessSharedPage, initializeAuth, isAdmin, logoutAndClearAuth } from './auth'
 import { getMyUsageSummary, getAnnouncement, type CurrentUserUsageSummary, type AnnouncementInfo } from './api'
@@ -353,7 +354,8 @@ const menuLabels: Record<string, string> = {
   Analytics: 'nav.analytics',
   Config: 'nav.config',
   AccessManagement: 'nav.accessManagement',
-  UsageManagement: 'nav.usageManagement'
+  UsageManagement: 'nav.usageManagement',
+  SystemStatistics: 'nav.systemStatistics'
 }
 
 const onboardingTooltipStyle = {
@@ -521,6 +523,7 @@ const menuOptions = computed<MenuOption[]>(() => {
   if (!authState.oidcEnabled || isAdmin.value) {
     adminItems.push(buildMenuItem('nav.accessManagement', 'AccessManagement', PeopleOutline))
     adminItems.push(buildMenuItem('nav.usageManagement', 'UsageManagement', RocketOutline))
+    adminItems.push(buildMenuItem('nav.systemStatistics', 'SystemStatistics', PulseOutline))
     adminItems.push(buildMenuItem('nav.config', 'Config', SettingsOutline))
   }
 

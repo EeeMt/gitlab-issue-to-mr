@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_effective_settings
 from app.core.docker_client import get_docker_client_async
 from app.core.skills import delete_unreferenced_skill_versions
+from app.core.system_statistics_deletion import archive_issue_statistics_before_delete
 from app.core.utcnow import utcnow
 from app.core.worker_docker_targets import (
     TaskContainerNotFoundError,
@@ -235,6 +236,16 @@ async def cleanup_system_data(
                 )
                 await db.commit()
                 continue
+
+        # Archive lifecycle statistics in the same transaction as the delete
+        # (§7 of the system lifecycle statistics design). Runs before any bulk
+        # delete so the Task/Issue rows still exist to snapshot.
+        await archive_issue_statistics_before_delete(
+            db,
+            issue_id=issue.id,
+            deletion_reason="cleanup",
+            forced_with_active_tasks=bool(force),
+        )
 
         task_ids = [task.id for task in issue_tasks]
         archive_paths: list[str] = []

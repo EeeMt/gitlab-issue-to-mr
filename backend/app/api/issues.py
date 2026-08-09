@@ -24,6 +24,7 @@ from app.core.gitlab_client import get_gitlab_client
 from app.core.harness_registry import HarnessRegistryError, validate_enabled_harnesses
 from app.core.harness_sessions import get_issue_latest_harness_key
 from app.core.skills import delete_unreferenced_skill_versions
+from app.core.system_statistics_deletion import archive_issue_statistics_before_delete
 from app.core.task_helpers import _require_issue_operator
 from app.core.utcnow import utcnow
 from app.core.worker_kit import MOUNTED_KIT_MODE
@@ -955,6 +956,13 @@ async def delete_issue(
                 status_code=502,
                 detail=f"Worker workspace deletion failed: {exc}",
             ) from exc
+
+    await archive_issue_statistics_before_delete(
+        db,
+        issue_id=issue.id,
+        deletion_reason="manual",
+        deleted_by_user_id=current_user.id if current_user else None,
+    )
 
     await db.delete(issue)
     await db.flush()

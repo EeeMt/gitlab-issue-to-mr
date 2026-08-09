@@ -1,0 +1,334 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mount, flushPromises } from '@vue/test-utils'
+import { h, ref } from 'vue'
+import SystemStatistics from './SystemStatistics.vue'
+
+const { mockApi, resetMockApi } = vi.hoisted(() => {
+  const overview = {
+    as_of: '2026-08-09T00:00:00Z',
+    reporting_timezone: 'Asia/Shanghai',
+    current_state: {
+      pending: 1,
+      queued: 2,
+      running: 0,
+      long_running: 0,
+      active_issues: 1,
+      avg_queue_wait_seconds: null,
+      queue_wait_samples: 0,
+    },
+    lifetime: {
+      issue_count: 3,
+      task_count: 5,
+      completed: 2,
+      failed: 1,
+      cancelled: 0,
+      finished: 3,
+      success_rate: 2 / 3,
+      failure_rate: 1 / 3,
+      issues_with_mr: 2,
+      known_total_tokens: 100,
+      known_total_changes: 20,
+      known_total_execution_seconds: 300,
+    },
+    deletion: {
+      deleted_task_count: 1,
+      deleted_issue_count: 1,
+      deleted_before_terminal: 0,
+    },
+    coverage: {
+      capture_started_at: '2026-08-01T00:00:00Z',
+      capture_enabled: true,
+      statement: 'Coverage statement under test',
+      token: {
+        eligible_samples: 3,
+        complete_samples: 2,
+        partial_samples: 1,
+        missing_samples: 0,
+        coverage_rate: 2 / 3,
+      },
+      code: {
+        eligible_samples: 2,
+        available_samples: 1,
+        coverage_rate: 0.5,
+      },
+    },
+  }
+
+  const mock = {
+    getSystemStatisticsOverview: vi.fn(),
+    getSystemStatisticsTrends: vi.fn(),
+    getSystemStatisticsBreakdowns: vi.fn(),
+  }
+
+  mock.getSystemStatisticsOverview.mockResolvedValue(overview)
+  mock.getSystemStatisticsTrends.mockResolvedValue({
+    as_of: '2026-08-09T00:00:00Z',
+    reporting_timezone: 'Asia/Shanghai',
+    range: 'all',
+    bucket: 'day',
+    series: [],
+  })
+  mock.getSystemStatisticsBreakdowns.mockResolvedValue({
+    as_of: '2026-08-09T00:00:00Z',
+    reporting_timezone: 'Asia/Shanghai',
+    projects: [],
+    providers: [],
+    harnesses: [],
+  })
+
+  return {
+    mockApi: mock,
+    resetMockApi: () => Object.values(mock).forEach(fn => fn.mockReset()),
+  }
+})
+
+vi.mock('../api', () => ({
+  getSystemStatisticsOverview: mockApi.getSystemStatisticsOverview,
+  getSystemStatisticsTrends: mockApi.getSystemStatisticsTrends,
+  getSystemStatisticsBreakdowns: mockApi.getSystemStatisticsBreakdowns,
+}))
+
+vi.mock('vue-i18n', () => ({
+  useI18n: () => ({
+    t: (key: string) => key,
+  }),
+}))
+
+vi.mock('@vicons/ionicons5', () => ({
+  RefreshOutline: {},
+}))
+
+vi.mock('../composables/useBreakpoints', () => ({
+  useBreakpoints: () => ({
+    isMobile: ref(false),
+    isCompact: ref(false),
+    width: ref(1200),
+  }),
+}))
+
+vi.mock('../components/PageHeader.vue', () => ({
+  default: {
+    name: 'PageHeader',
+    props: ['title', 'subtitle'],
+    setup(props: any, { slots }: any) {
+      return () => h('div', { class: 'page-header' }, [
+        h('h1', props.title),
+        h('div', props.subtitle),
+        slots.actions?.(),
+      ])
+    },
+  },
+}))
+
+function slotStub(name: string, slots: ('default' | 'header' | 'icon' | 'actions')[] = ['default', 'header', 'icon', 'actions']) {
+  return {
+    name,
+    props: ['value', 'options', 'description', 'columns', 'data', 'loading', 'disabled'],
+    emits: ['update:value'],
+    setup(_props: any, { attrs, slots: s, emit }: any) {
+      return () =>
+        h('div', { ...attrs, class: [`naive-stub-${name}`, attrs.class] }, [
+          slots.includes('header') ? s.header?.() : null,
+          slots.includes('icon') ? s.icon?.() : null,
+          slots.includes('actions') ? s.actions?.() : null,
+          slots.includes('default') ? s.default?.() : null,
+        ])
+    },
+  }
+}
+
+vi.mock('naive-ui', () => ({
+  NAlert: slotStub('NAlert', ['header', 'default']),
+  NButton: slotStub('NButton', ['icon', 'default']),
+  NCard: slotStub('NCard', ['header', 'default', 'action']),
+  NDataTable: slotStub('NDataTable', []),
+  NEmpty: slotStub('NEmpty', ['default']),
+  NGi: slotStub('NGi', ['default']),
+  NGrid: slotStub('NGrid', ['default']),
+  NIcon: slotStub('NIcon', []),
+  NSpin: slotStub('NSpin', ['default']),
+  NSelect: {
+    name: 'NSelect',
+    props: ['value', 'options'],
+    emits: ['update:value'],
+    setup(props: any, { attrs, emit }: any) {
+      return () =>
+        h(
+          'select',
+          {
+            ...attrs,
+            value: props.value,
+            onChange: (event: any) => emit('update:value', event.target.value),
+          },
+          (props.options ?? []).map((opt: any) =>
+            h('option', { value: opt.value }, opt.label)
+          )
+        )
+    },
+  },
+}))
+
+let wrapper: ReturnType<typeof mount> | null = null
+
+beforeEach(() => {
+  resetMockApi()
+  mockApi.getSystemStatisticsOverview.mockResolvedValue({
+    as_of: '2026-08-09T00:00:00Z',
+    reporting_timezone: 'Asia/Shanghai',
+    current_state: {
+      pending: 1,
+      queued: 2,
+      running: 0,
+      long_running: 0,
+      active_issues: 1,
+      avg_queue_wait_seconds: null,
+      queue_wait_samples: 0,
+    },
+    lifetime: {
+      issue_count: 3,
+      task_count: 5,
+      completed: 2,
+      failed: 1,
+      cancelled: 0,
+      finished: 3,
+      success_rate: 2 / 3,
+      failure_rate: 1 / 3,
+      issues_with_mr: 2,
+      known_total_tokens: 100,
+      known_total_changes: 20,
+      known_total_execution_seconds: 300,
+    },
+    deletion: {
+      deleted_task_count: 1,
+      deleted_issue_count: 1,
+      deleted_before_terminal: 0,
+    },
+    coverage: {
+      capture_started_at: '2026-08-01T00:00:00Z',
+      capture_enabled: true,
+      statement: 'Coverage statement under test',
+      token: {
+        eligible_samples: 3,
+        complete_samples: 2,
+        partial_samples: 1,
+        missing_samples: 0,
+        coverage_rate: 2 / 3,
+      },
+      code: {
+        eligible_samples: 2,
+        available_samples: 1,
+        coverage_rate: 0.5,
+      },
+    },
+  })
+  mockApi.getSystemStatisticsTrends.mockResolvedValue({
+    as_of: '2026-08-09T00:00:00Z',
+    reporting_timezone: 'Asia/Shanghai',
+    range: 'all',
+    bucket: 'day',
+    series: [],
+  })
+  mockApi.getSystemStatisticsBreakdowns.mockResolvedValue({
+    as_of: '2026-08-09T00:00:00Z',
+    reporting_timezone: 'Asia/Shanghai',
+    projects: [],
+    providers: [],
+    harnesses: [],
+  })
+})
+
+afterEach(() => {
+  wrapper?.unmount()
+  wrapper = null
+})
+
+describe('SystemStatistics', () => {
+  it('renders the reference-statistics coverage statement from the overview API', async () => {
+    wrapper = mount(SystemStatistics)
+    await flushPromises()
+
+    expect(mockApi.getSystemStatisticsOverview).toHaveBeenCalledWith({
+      data_state: 'all',
+    })
+    const statement = wrapper.find('[data-testid="coverage-statement"]')
+    expect(statement.exists()).toBe(true)
+    expect(statement.text()).toContain('Coverage statement under test')
+  })
+
+  it('shows the coverage note when the deletion guarantee is not enabled', async () => {
+    mockApi.getSystemStatisticsOverview.mockResolvedValue({
+      as_of: '2026-08-09T00:00:00Z',
+      reporting_timezone: 'Asia/Shanghai',
+      current_state: {
+        pending: 0,
+        queued: 0,
+        running: 0,
+        long_running: 0,
+        active_issues: 0,
+        avg_queue_wait_seconds: null,
+        queue_wait_samples: 0,
+      },
+      lifetime: {
+        issue_count: 0,
+        task_count: 0,
+        completed: 0,
+        failed: 0,
+        cancelled: 0,
+        finished: 0,
+        success_rate: null,
+        failure_rate: null,
+        issues_with_mr: 0,
+        known_total_tokens: 0,
+        known_total_changes: 0,
+        known_total_execution_seconds: null,
+      },
+      deletion: {
+        deleted_task_count: 0,
+        deleted_issue_count: 0,
+        deleted_before_terminal: 0,
+      },
+      coverage: {
+        capture_started_at: null,
+        capture_enabled: false,
+        statement: '',
+        token: {
+          eligible_samples: 0,
+          complete_samples: 0,
+          partial_samples: 0,
+          missing_samples: 0,
+          coverage_rate: null,
+        },
+        code: {
+          eligible_samples: 0,
+          available_samples: 0,
+          coverage_rate: null,
+        },
+      },
+    })
+
+    wrapper = mount(SystemStatistics)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="coverage-statement"]').text()).toContain(
+      'systemStatistics.coverageNotEnabled'
+    )
+  })
+
+  it('shows the empty state when there is no trend data', async () => {
+    wrapper = mount(SystemStatistics)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="empty-state"]').exists()).toBe(true)
+  })
+
+  it('reloads trends when the trend time range filter changes', async () => {
+    wrapper = mount(SystemStatistics)
+    await flushPromises()
+
+    await wrapper.find('[data-testid="trend-range-select"]').setValue('90d')
+    await flushPromises()
+
+    const lastCall = mockApi.getSystemStatisticsTrends.mock.calls.at(-1)?.[0]
+    expect(lastCall).toEqual({ data_state: 'all', range: '90d' })
+  })
+})

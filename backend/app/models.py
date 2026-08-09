@@ -429,6 +429,12 @@ class Task(Base):
     additions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     deletions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     total_changes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Non-null once a trusted writer persisted valid change stats (including real
+    # zeros). Lets lifecycle statistics distinguish "zero changes" from
+    # "not collected"; see system lifecycle statistics design §6.4.
+    change_stats_recorded_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
 
     # Token usage (populated from Claude CLI output)
     input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -1507,3 +1513,130 @@ class TaskPayload(Base):
     char_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     byte_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+
+# Lifecycle statistics schema version. Bump only when an existing archive row's
+# read contract changes in a way that older readers would misinterpret.
+LIFECYCLE_STATISTICS_SCHEMA_VERSION = 1
+
+
+class DeletedTaskStatistics(Base):
+    """Lightweight snapshot of a Task archived immediately before its deletion.
+
+    Each row corresponds to one deleted Task. No FK is kept to ``tasks``, the
+    User, AIProvider or WorkerProfile so the archive survives business-data
+    cleanup. Whitelisted fields only — never Prompts, logs, secrets or error
+    bodies. See system lifecycle statistics design §6.1.
+    """
+
+    __tablename__ = "deleted_task_statistics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source_task_id: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
+    source_issue_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    project_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    initiator_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    provider_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    provider_name_snapshot: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    provider_model_snapshot: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    harness_key: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    adapter_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    cli_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    worker_profile_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    worker_profile_name_snapshot: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    task_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    trigger_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    priority: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_retry: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+    last_status: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    deleted_before_terminal: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    is_manually_overridden: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    terminal_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    additions: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    deletions: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_changes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    change_data_available: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+    source_deleted_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utcnow, index=True
+    )
+    deletion_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    deleted_by_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    schema_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=LIFECYCLE_STATISTICS_SCHEMA_VERSION
+    )
+    archived_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utcnow
+    )
+
+
+class DeletedIssueStatistics(Base):
+    """Lightweight snapshot of an Issue archived immediately before its deletion.
+
+    Task counts, tokens and code changes are not duplicated here — they are
+    aggregated from ``deleted_task_statistics`` by ``source_issue_id``. See
+    system lifecycle statistics design §6.2.
+    """
+
+    __tablename__ = "deleted_issue_statistics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source_issue_id: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
+    project_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    initiator_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    had_merge_request: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+    source_deleted_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utcnow, index=True
+    )
+    deletion_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    deleted_by_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    forced_with_active_tasks: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+    schema_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=LIFECYCLE_STATISTICS_SCHEMA_VERSION
+    )
+    archived_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utcnow
+    )
+
+
+class SystemStatisticsMetadata(Base):
+    """Single-row lifecycle-statistics metadata.
+
+    ``capture_started_at`` is the deployment-gated point from which deletions
+    via the standard entry points are guaranteed archived. It stays NULL after
+    migration 069 and is set by the deployment step (§12.2). See design §6.3.
+    """
+
+    __tablename__ = "system_statistics_metadata"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    capture_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    schema_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=LIFECYCLE_STATISTICS_SCHEMA_VERSION
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=utcnow,
+        onupdate=utcnow,
+    )

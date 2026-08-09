@@ -159,6 +159,7 @@ vi.mock('@vicons/ionicons5', () => ({
   SettingsOutline: {},
   InformationCircleOutline: {},
   SpeedometerOutline: {},
+  PulseOutline: {},
 }))
 
 vi.mock('naive-ui', () => ({
