@@ -35,6 +35,20 @@ def upgrade() -> None:
         sa.Column("change_stats_recorded_at", sa.DateTime(), nullable=True),
     )
 
+    # §6.4 conservative backfill: any pre-feature Task with a code-change field
+    # > 0 is treated as recorded (marked with its completion/update time), so it
+    # counts toward lifetime code-change sums and coverage. All-zero old data
+    # stays NULL and remains Unknown. Idempotent: never overwrites an existing
+    # marker.
+    op.execute(
+        sa.text(
+            "UPDATE tasks SET change_stats_recorded_at = "
+            "COALESCE(change_stats_recorded_at, "
+            "COALESCE(completed_at, updated_at, now())) "
+            "WHERE additions > 0 OR deletions > 0 OR total_changes > 0"
+        )
+    )
+
     op.create_table(
         "deleted_task_statistics",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),

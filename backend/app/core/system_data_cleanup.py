@@ -244,7 +244,9 @@ async def cleanup_system_data(
             db,
             issue_id=issue.id,
             deletion_reason="cleanup",
-            forced_with_active_tasks=bool(force),
+            # Record whether the delete actually had active Tasks at lock time,
+            # not whether the admin forced cleanup (§6.2).
+            forced_with_active_tasks=bool(active_tasks),
         )
 
         task_ids = [task.id for task in issue_tasks]

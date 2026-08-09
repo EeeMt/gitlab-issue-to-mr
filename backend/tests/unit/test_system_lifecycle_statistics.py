@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -452,6 +452,33 @@ class CleanupArchivesLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(issue_archive.deletion_reason, "cleanup")
             self.assertTrue(issue_archive.had_merge_request)
 
+    async def test_force_cleanup_without_active_tasks_marks_forced_false(self):
+        from app.core.system_data_cleanup import cleanup_system_data
+
+        now = utcnow()
+        async with self.Session() as db:
+            await _seed_base(db)
+            _seed_issue(db, 1, created_at=now - timedelta(days=40))
+            _seed_task(
+                db,
+                1,
+                1,
+                status=TaskStatus.COMPLETED,  # terminal, not active
+                created_at=now - timedelta(days=40),
+            )
+            await db.commit()
+
+            result = await cleanup_system_data(
+                db, older_than_days=30, force=True, workspace_root=""
+            )
+
+            self.assertEqual(result.deleted_issues, 1)
+            issue_archive = (
+                await db.execute(select(DeletedIssueStatistics))
+            ).scalar_one()
+            # force=True here, but there were no active Tasks at lock time (§6.2).
+            self.assertFalse(issue_archive.forced_with_active_tasks)
+
 
 # ---------------------------------------------------------------------------
 # §8–9 query builders
@@ -634,6 +661,324 @@ class QueryBuilderTests(unittest.IsolatedAsyncioTestCase):
         harness_map = {r.key: r.task_count for r in harnesses}
         self.assertEqual(harness_map["claude"], 1)
         self.assertEqual(harness_map["codex"], 1)
+
+
+# ---------------------------------------------------------------------------
+# §6.4 conservative backfill (F1)
+# ---------------------------------------------------------------------------
+
+
+class ConservativeBackfillTests(unittest.IsolatedAsyncioTestCase):
+    """Pre-feature Tasks with a code-change field > 0 are treated as recorded;
+    all-zero pre-feature Tasks stay Unknown."""
+
+    async def asyncSetUp(self):
+        self.engine = _make_engine()
+        await _create_schema(self.engine)
+        self.Session = async_sessionmaker(self.engine, expire_on_commit=False)
+        self.dialect = "sqlite"
+        self.now = utcnow()
+
+    async def asyncTearDown(self):
+        await self.engine.dispose()
+
+    async def _backfill(self, db):
+        await db.execute(
+            update(Task)
+            .where(or_(Task.additions > 0, Task.deletions > 0, Task.total_changes > 0))
+            .values(
+                change_stats_recorded_at=func.coalesce(
+                    Task.change_stats_recorded_at,
+                    func.coalesce(Task.completed_at, Task.updated_at, func.now()),
+                )
+            )
+        )
+        await db.commit()
+
+    async def _lifetime(self, db):
+        from app.api import system_statistics_queries as q
+
+        all_tasks = q.build_all_task_statistics_cte(
+            dialect=self.dialect,
+            project_id=None,
+            provider_id=None,
+            harness_key=None,
+            data_state="all",
+        )
+        return (
+            await db.execute(q.build_lifetime_task_query(self.dialect, all_tasks))
+        ).one()
+
+    async def test_backfill_flips_nonzero_pre_feature_tasks_into_recorded(self):
+        async with self.Session() as db:
+            await _seed_base(db)
+            _seed_issue(db, 1, created_at=self.now - timedelta(days=30))
+            _seed_task(
+                db,
+                1,
+                1,
+                status=TaskStatus.COMPLETED,
+                created_at=self.now - timedelta(days=30),
+                started_at=self.now - timedelta(hours=1),
+                completed_at=self.now - timedelta(minutes=30),
+                change_stats_recorded_at=None,  # pre-feature marker
+                additions=5,
+                deletions=2,
+                total_changes=7,
+                input_tokens=100,
+                output_tokens=50,
+            )
+            _seed_issue(db, 2, created_at=self.now - timedelta(days=30))
+            _seed_task(
+                db,
+                2,
+                2,
+                status=TaskStatus.COMPLETED,
+                created_at=self.now - timedelta(days=30),
+                started_at=self.now - timedelta(hours=1),
+                completed_at=self.now - timedelta(minutes=30),
+                change_stats_recorded_at=None,  # all-zero pre-feature
+                additions=0,
+                deletions=0,
+                total_changes=0,
+                input_tokens=None,
+                output_tokens=None,
+            )
+            await db.commit()
+
+            lt = await self._lifetime(db)
+            # Before backfill neither task is marked recorded.
+            self.assertEqual(lt.known_total_changes, 0)
+            self.assertEqual(lt.change_available_samples, 0)
+
+            await self._backfill(db)
+            lt = await self._lifetime(db)
+            # Non-zero pre-feature task now recorded; all-zero stays Unknown.
+            self.assertEqual(lt.known_total_changes, 7)
+            self.assertEqual(lt.change_available_samples, 1)
+
+            # Idempotent: re-running never overwrites the recorded marker.
+            first_marker = (
+                await db.execute(select(Task.change_stats_recorded_at).where(Task.id == 1))
+            ).scalar_one()
+            await self._backfill(db)
+            second_marker = (
+                await db.execute(select(Task.change_stats_recorded_at).where(Task.id == 1))
+            ).scalar_one()
+            self.assertEqual(second_marker, first_marker)
+
+
+# ---------------------------------------------------------------------------
+# §9.4 duration edge cases (F2)
+# ---------------------------------------------------------------------------
+
+
+class DurationEdgeCaseTests(unittest.IsolatedAsyncioTestCase):
+    """Durations where the end precedes the start are NULL, never negative."""
+
+    async def asyncSetUp(self):
+        self.engine = _make_engine()
+        await _create_schema(self.engine)
+        self.Session = async_sessionmaker(self.engine, expire_on_commit=False)
+        self.dialect = "sqlite"
+        self.now = utcnow()
+
+    async def asyncTearDown(self):
+        await self.engine.dispose()
+
+    async def test_inverted_execution_does_not_produce_negative_seconds(self):
+        from app.api import system_statistics_queries as q
+
+        async with self.Session() as db:
+            await _seed_base(db)
+            _seed_issue(db, 1, created_at=self.now - timedelta(days=5))
+            _seed_task(
+                db,
+                1,
+                1,
+                status=TaskStatus.COMPLETED,
+                created_at=self.now - timedelta(days=5),
+                started_at=self.now - timedelta(minutes=30),  # start AFTER...
+                completed_at=self.now - timedelta(hours=1),  # ...terminal (inverted)
+                change_stats_recorded_at=self.now,
+                additions=1,
+                deletions=0,
+                total_changes=1,
+            )
+            await db.commit()
+
+            all_tasks = q.build_all_task_statistics_cte(
+                dialect=self.dialect,
+                project_id=None,
+                provider_id=None,
+                harness_key=None,
+                data_state="all",
+            )
+            lt = (
+                await db.execute(q.build_lifetime_task_query(self.dialect, all_tasks))
+            ).one()
+            self.assertEqual(lt.known_execution_seconds, 0)
+            finished = list(
+                (
+                    await db.execute(
+                        q.build_task_finished_trend(all_tasks, self.dialect, "day", None)
+                    )
+                ).all()
+            )
+            self.assertEqual(len(finished), 1)
+            self.assertEqual(finished[0].known_execution_seconds, 0)
+
+    async def test_queue_wait_guard_against_inverted_start(self):
+        from app.api import system_statistics_queries as q
+
+        async with self.Session() as db:
+            await _seed_base(db)
+            _seed_issue(db, 1, created_at=self.now - timedelta(days=5))
+            _seed_task(
+                db,
+                1,
+                1,
+                status=TaskStatus.RUNNING,
+                created_at=self.now - timedelta(minutes=30),
+                started_at=self.now - timedelta(hours=2),  # start before queue base
+            )
+            await db.commit()
+
+            all_tasks = q.build_all_task_statistics_cte(
+                dialect=self.dialect,
+                project_id=None,
+                provider_id=None,
+                harness_key=None,
+                data_state="all",
+            )
+            rows = list(
+                (
+                    await db.execute(
+                        select(q.task_queue_wait_seconds(self.dialect, all_tasks)).select_from(
+                            all_tasks
+                        )
+                    )
+                ).all()
+            )
+            self.assertEqual(len(rows), 1)
+            self.assertIsNone(rows[0][0])
+
+    async def test_current_state_avg_wait_excludes_future_scheduled(self):
+        from app.api import system_statistics_queries as q
+        from app.models import Task as TaskModel
+
+        async with self.Session() as db:
+            await _seed_base(db)
+            _seed_issue(db, 1, created_at=self.now - timedelta(days=5))
+            _seed_task(
+                db,
+                1,
+                1,
+                status=TaskStatus.QUEUED,
+                created_at=self.now - timedelta(minutes=10),
+            )
+            task = (await db.execute(select(TaskModel).where(TaskModel.id == 1))).scalar_one()
+            task.scheduled_at = self.now + timedelta(hours=1)
+            await db.commit()
+
+            cs = (
+                await db.execute(
+                    q.build_current_state_task_query(
+                        dialect=self.dialect,
+                        project_id=None,
+                        provider_id=None,
+                        harness_key=None,
+                        now=self.now,
+                    )
+                )
+            ).one()
+            self.assertEqual(cs.queued, 1)
+            self.assertIsNone(cs.avg_queue_wait_seconds)
+            self.assertEqual(cs.queue_wait_samples, 0)
+
+
+# ---------------------------------------------------------------------------
+# §6.5 empty-string normalization consistency (F4)
+# ---------------------------------------------------------------------------
+
+
+class NormalizationEmptyStringTests(unittest.IsolatedAsyncioTestCase):
+    """Empty-string snapshot dimensions normalize identically in the current
+    query branch and the deletion archive (empty == missing)."""
+
+    async def asyncSetUp(self):
+        self.engine = _make_engine()
+        await _create_schema(self.engine)
+        self.Session = async_sessionmaker(self.engine, expire_on_commit=False)
+        self.dialect = "sqlite"
+        self.now = utcnow()
+
+    async def asyncTearDown(self):
+        await self.engine.dispose()
+
+    async def test_empty_string_dimensions_normalize_consistently(self):
+        from app.api import system_statistics_queries as q
+        from app.core.system_statistics_deletion import archive_issue_statistics_before_delete
+        from app.models import Task as TaskModel
+
+        async with self.Session() as db:
+            await _seed_base(db)
+            _seed_issue(db, 1, created_at=self.now - timedelta(days=5))
+            _seed_task(
+                db,
+                1,
+                1,
+                status=TaskStatus.COMPLETED,
+                created_at=self.now - timedelta(days=5),
+                change_stats_recorded_at=self.now,
+                additions=1,
+                deletions=0,
+                total_changes=1,
+                harness_key="",  # empty-string snapshot harness
+                provider_runtime_snapshot={
+                    "provider_id": 10,
+                    "provider_name": "",  # empty-string snapshot provider
+                    "configured_model": "",
+                },
+            )
+            task = (await db.execute(select(TaskModel).where(TaskModel.id == 1))).scalar_one()
+            task.projected_harness_key = "projected-claude"
+            await db.commit()
+
+            # Current branch: empty strings fall back to provider.name /
+            # projected_harness_key instead of keeping an empty-string group.
+            all_tasks = q.build_all_task_statistics_cte(
+                dialect=self.dialect,
+                project_id=None,
+                provider_id=None,
+                harness_key=None,
+                data_state="retained",
+            )
+            rows = list(
+                (
+                    await db.execute(
+                        select(
+                            all_tasks.c.harness_key,
+                            all_tasks.c.provider_name,
+                            all_tasks.c.provider_model,
+                        ).select_from(all_tasks)
+                    )
+                ).all()
+            )
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].provider_name, "SnapProvider")
+            self.assertEqual(rows[0].provider_model, "snap-model")
+            self.assertEqual(rows[0].harness_key, "projected-claude")
+
+            # Archive branch must normalize identically (no group move on delete).
+            await archive_issue_statistics_before_delete(
+                db, issue_id=1, deletion_reason="manual", now=self.now
+            )
+            await db.commit()
+            archived = (await db.execute(select(DeletedTaskStatistics))).scalar_one()
+            self.assertEqual(archived.provider_name_snapshot, "SnapProvider")
+            self.assertEqual(archived.provider_model_snapshot, "snap-model")
+            self.assertEqual(archived.harness_key, "projected-claude")
 
 
 # ---------------------------------------------------------------------------

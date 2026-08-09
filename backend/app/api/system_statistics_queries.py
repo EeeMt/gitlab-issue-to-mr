@@ -66,6 +66,16 @@ def _json_text(dialect: str, column, key: str) -> Any:
     return func.json_extract(column, f"$.{key}")
 
 
+def _non_empty(col) -> Any:
+    """True when ``col`` is a present value (not NULL and not the empty string).
+
+    Mirrors the archive service's Python-truthiness normalization (§6.5): an
+    empty-string snapshot dimension is treated the same as a missing one so a
+    Task does not move to another grouping when it is deleted.
+    """
+    return col.is_not(None) & (col != "")
+
+
 def _normalized_current_dimensions(
     dialect: str, task, snapshot, provider
 ) -> tuple[Any, Any, Any, Any]:
@@ -78,16 +88,16 @@ def _normalized_current_dimensions(
         else_=task.provider_id,
     )
     provider_name = case(
-        (snap_provider_name.is_not(None), snap_provider_name),
+        (_non_empty(snap_provider_name), snap_provider_name),
         else_=provider.name,
     )
     provider_model = case(
-        (task.model_name.is_not(None), task.model_name),
-        (snap_provider_model.is_not(None), snap_provider_model),
+        (_non_empty(task.model_name), task.model_name),
+        (_non_empty(snap_provider_model), snap_provider_model),
         else_=provider.model,
     )
     harness_key = case(
-        (snapshot.harness_key.is_not(None), snapshot.harness_key),
+        (_non_empty(snapshot.harness_key), snapshot.harness_key),
         else_=task.projected_harness_key,
     )
     return provider_id, provider_name, provider_model, harness_key
@@ -328,7 +338,9 @@ def _code_eligible(t: CTE) -> Any:
 def task_execution_seconds(dialect: str, t: CTE) -> Any:
     return case(
         (
-            t.c.started_at.is_not(None) & t.c.terminal_at.is_not(None),
+            t.c.started_at.is_not(None)
+            & t.c.terminal_at.is_not(None)
+            & (t.c.terminal_at > t.c.started_at),
             duration_seconds(dialect, t.c.started_at, t.c.terminal_at),
         ),
         else_=None,
@@ -345,7 +357,9 @@ def task_queue_wait_seconds(dialect: str, t: CTE) -> Any:
     )
     return case(
         (
-            t.c.started_at.is_not(None) & queue_base.is_not(None),
+            t.c.started_at.is_not(None)
+            & queue_base.is_not(None)
+            & (t.c.started_at > queue_base),
             duration_seconds(dialect, queue_base, t.c.started_at),
         ),
         else_=None,
@@ -431,8 +445,12 @@ def build_current_state_task_query(
         else_=task.created_at,
     )
     waiting = task.status.in_(ACTIVE_TASK_STATUSES[:-1])
+    # Only measure queue wait once the task is past its queue base; a
+    # future-scheduled task (queue_base > now) would otherwise yield negative
+    # seconds, which §9.4 requires to be NULL.
+    wait_eligible = waiting & queue_base.is_not(None) & (queue_base < now)
     queue_wait = case(
-        (waiting & queue_base.is_not(None), task_queue_wait_now(dialect, queue_base, now)),
+        (wait_eligible, task_queue_wait_now(dialect, queue_base, now)),
         else_=None,
     )
 
@@ -463,7 +481,7 @@ def build_current_state_task_query(
             ).label("long_running"),
             func.avg(queue_wait).label("avg_queue_wait_seconds"),
             func.coalesce(
-                func.sum(case((waiting & queue_base.is_not(None), 1), else_=0)), 0
+                func.sum(case((wait_eligible, 1), else_=0)), 0
             ).label("queue_wait_samples"),
         )
         .select_from(task)
