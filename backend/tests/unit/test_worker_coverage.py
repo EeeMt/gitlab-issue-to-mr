@@ -2545,6 +2545,39 @@ class TestExecuteTask(unittest.TestCase):
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
+    def test_continue_fresh_no_match_does_not_leak_stale_claude_session(
+        self,
+        mock_notify,
+        mock_get_settings,
+    ):
+        """A continue with no matching lineage row must not leak the stale
+        Issue.claude_session_id into the container as RESUME_SESSION."""
+        mock_get_settings.return_value = _make_settings()
+        mock_docker = MagicMock()
+        mock_docker.create_container.return_value = MagicMock(id="ctr-fresh-no-match")
+        worker = _make_worker(mock_docker=mock_docker)
+        # Default projected lineage has no IssueSessionLineage row yet, so a
+        # continue resolves to fresh_no_match with no resume session.
+        task = _make_task(target_branch=None, session_mode="continue")
+        # Simulate the stale legacy pointer from an older generation (EEE-28 M1).
+        task.issue.claude_session_id = "session-old"
+        db = _make_db(task)
+
+        with patch.object(
+            worker,
+            '_stream_logs_to_db',
+            new=AsyncMock(return_value=(0, "", 1, False)),
+        ):
+            result = asyncio.run(worker.execute_task(db, task.id))
+
+        self.assertTrue(result)
+        self.assertIsNone(task.input_session_id)
+        self.assertEqual(task.input_lineage_reason, "fresh_no_match")
+        environment = mock_docker.create_container.call_args.kwargs["environment"]
+        self.assertNotIn("RESUME_SESSION", environment)
+
+    @patch('app.core.worker.get_settings')
+    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
     def test_execute_task_upserts_usage_ledger_when_post_parse_commit_fails(
         self,
         mock_notify,

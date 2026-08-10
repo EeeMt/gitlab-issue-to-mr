@@ -212,8 +212,8 @@ def _build_container_env_with_settings(
     session_mode = getattr(task, "session_mode", "continue")
     if session_mode == "fresh":
         environment["START_FRESH_SESSION"] = "1"
-    elif issue.claude_session_id:
-        environment["RESUME_SESSION"] = issue.claude_session_id
+    elif getattr(task, "input_session_id", None):
+        environment["RESUME_SESSION"] = task.input_session_id
 
     if issue.base_branch:
         environment["BASE_BRANCH"] = issue.base_branch

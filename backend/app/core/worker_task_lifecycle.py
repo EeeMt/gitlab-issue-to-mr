@@ -362,9 +362,10 @@ async def create_execute_container(
         resume_session if session_mode == "continue" and issue is not None else None
     )
     task.input_lineage_reason = input_lineage_reason
-    # Mirror the resolved session to the legacy Claude pointer so the runtime
-    # env builder and old readers keep working during the 068 compat window;
-    # this is a compatibility write, not a resume-decision source.
+    # Mirror the resolved session to the legacy Claude pointer so legacy readers
+    # (e.g. the issue API) keep working during the 068 compat window; the
+    # container env reads task.input_session_id, so this write is not a
+    # resume-decision source.
     if issue is not None and harness_key == "claude" and resume_session:
         issue.claude_session_id = resume_session
     task.output_session_id = None
