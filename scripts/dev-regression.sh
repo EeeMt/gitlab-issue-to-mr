@@ -15,7 +15,7 @@
 #   PROJECT_ID=<n> ./scripts/dev-regression.sh           # create the smoke issue on a specific project
 #   ISSUE_ID=<n> ./scripts/dev-regression.sh             # reuse an existing issue (skip auto-create)
 #   CODIFY_BASE_URL=... CODIFY_USER=... CODIFY_PASS=... \
-#     PROVIDER_CLAUDE_ID=.. PROVIDER_CODEX_ID=.. ./scripts/dev-regression.sh
+#     PROVIDER_CLAUDE_ID=.. PROVIDER_CODEX_ID=.. WORKER_PROFILE_ID=.. ./scripts/dev-regression.sh
 #
 # Config precedence: env vars > gitignored deploy/dev-env-info.md > defaults.
 # Requires: curl, jq, python3. See docs/dev-env-core-regression.md (Tier 1/2).
@@ -31,6 +31,8 @@ PASS="${CODIFY_PASS:-}"
 [ -n "$BASE_URL" ] || BASE_URL="http://192.168.50.129:8880"
 ISSUE_ID="${ISSUE_ID:-}"
 PROJECT_ID="${PROJECT_ID:-}"
+WORKER_PROFILE_ID="${WORKER_PROFILE_ID:-}"
+DEFAULT_BRANCH=""            # project default branch; set as base+target so an MR is created
 P_CLAUDE="${PROVIDER_CLAUDE_ID:-}"
 P_CODEX="${PROVIDER_CODEX_ID:-}"
 POLL_INTERVAL="${POLL_INTERVAL:-15}"     # seconds between task status polls
@@ -113,15 +115,30 @@ resolve_project_id() { # resolve_project_id -> prints a project id
   echo "$BODY" | jq -r '.[0].id // empty' | head -1
 }
 
+resolve_default_branch() { # resolve_default_branch <project_id> -> prints the project default branch
+  api GET /api/projects
+  [ "$HTTP_CODE" = "200" ] || { echo "projects list failed (HTTP $HTTP_CODE): $BODY" >&2; return 1; }
+  echo "$BODY" | jq -r --argjson pid "$1" '.[] | select(.id==$pid) | .default_branch // empty' | head -1
+}
+
+resolve_worker_profile_id() { # resolve_worker_profile_id -> prints an enabled worker profile id
+  api GET /api/worker-profiles
+  [ "$HTTP_CODE" = "200" ] || { echo "worker-profiles list failed (HTTP $HTTP_CODE): $BODY" >&2; return 1; }
+  echo "$BODY" | jq -r '.[] | select(.enabled==true) | .id' | head -1
+}
+
 create_issue() { # create_issue <project_id>  -> sets ISSUE_ID
   local pid="$1" title
   title="Tier 1 smoke $(date +%s)"
-  api POST /api/issues "$(json_build --argjson p "$pid" --arg t "$title" \
-    '{project_id:$p,title:$t,description:"Automated Tier 1 regression smoke issue."}')"
+  # base+target set to the project default branch (mirrors CreateIssue.vue auto-set),
+  # otherwise the worker runs in no-MR mode and no merge_request_url is produced.
+  api POST /api/issues "$(json_build --argjson p "$pid" --argjson w "$WORKER_PROFILE_ID" --arg t "$title" \
+    --arg b "$DEFAULT_BRANCH" \
+    '{project_id:$p,worker_profile_id:$w,title:$t,description:"Automated Tier 1 regression smoke issue.",base_branch:$b,target_branch:$b}')"
   [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ] || die "create issue failed (HTTP $HTTP_CODE): $BODY"
   ISSUE_ID="$(echo "$BODY" | jq -r '.id')"
   [ -n "$ISSUE_ID" ] && [ "$ISSUE_ID" != "null" ] || die "no issue id in create response: $BODY"
-  ok "auto-created issue #$ISSUE_ID (project $pid)"
+  ok "auto-created issue #$ISSUE_ID (project $pid, target=$DEFAULT_BRANCH)"
 }
 
 preflight() {
@@ -131,6 +148,12 @@ preflight() {
   if [ -z "$ISSUE_ID" ]; then
     [ -n "$PROJECT_ID" ] || PROJECT_ID="$(resolve_project_id)"
     [ -n "$PROJECT_ID" ] || die "could not resolve PROJECT_ID — set PROJECT_ID or create $DEV_INFO"
+    [ -n "$DEFAULT_BRANCH" ] || DEFAULT_BRANCH="$(resolve_default_branch "$PROJECT_ID")"
+    [ -n "$DEFAULT_BRANCH" ] || die "could not resolve default branch for project $PROJECT_ID"
+    ok "project $PROJECT_ID default branch $DEFAULT_BRANCH"
+    [ -n "$WORKER_PROFILE_ID" ] || WORKER_PROFILE_ID="$(resolve_worker_profile_id)"
+    [ -n "$WORKER_PROFILE_ID" ] || die "no enabled worker profile found — create one or set WORKER_PROFILE_ID"
+    ok "worker profile $WORKER_PROFILE_ID"
     create_issue "$PROJECT_ID"
   else
     ok "issue #$ISSUE_ID"
