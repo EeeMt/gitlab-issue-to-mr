@@ -1638,6 +1638,39 @@ describe('IssueView', () => {
       // We verify the mock setup is correct
       expect(mockApi.retryTask).not.toHaveBeenCalled()
     })
+
+    it('passes selected lineage_strategy through and shows fresh success message', async () => {
+      setupDefaultMocks()
+      mockApi.retryTask.mockResolvedValue({ id: 999 })
+      wrapper = await mountComponent()
+
+      const { vm } = wrapper as any
+      vm.showRetryDrawer = true
+      vm.retryTargetTask = { id: 2 }
+      vm.retryScheduleType = 'now'
+      vm.retryLineageStrategy = 'fresh_retry'
+      await flushPromises()
+
+      await wrapper.find('[data-testid="issue-submit-retry-button"]').trigger('click')
+      await flushPromises()
+
+      expect(mockApi.retryTask).toHaveBeenCalledWith(2, undefined, 'fresh_retry')
+      expect(mockMessage.success).toHaveBeenCalledWith('issue.retrySuccessFresh')
+      expect((vm as any).showRetryDrawer).toBe(false)
+    })
+
+    it('defaults retry lineage_strategy to inherit', async () => {
+      setupDefaultMocks()
+      wrapper = await mountComponent()
+
+      const { vm } = wrapper as any
+      vm.retryTargetTask = { id: 2 }
+      vm.retryScheduleType = 'now'
+      vm.showRetryDrawer = true
+      await flushPromises()
+
+      expect((vm as any).retryLineageStrategy).toBe('inherit')
+    })
   })
 
   // =========================================================================
@@ -2078,7 +2111,7 @@ describe('IssueView', () => {
       await vm.handleRetryTask(2)
       await flushPromises()
 
-      expect(mockApi.retryTask).toHaveBeenCalledWith(2)
+      expect(mockApi.retryTask).toHaveBeenCalledWith(2, undefined, 'inherit')
       expect(mockMessage.success).toHaveBeenCalledWith('issue.retrySuccess')
       // Also re-fetches issue
       expect(mockApi.getIssue).toHaveBeenCalledTimes(2)
@@ -2159,7 +2192,7 @@ describe('IssueView', () => {
       await vm.handleSubmitRetry()
       await flushPromises()
 
-      expect(mockApi.retryTask).toHaveBeenCalledWith(2, new Date(futureMs).toISOString())
+      expect(mockApi.retryTask).toHaveBeenCalledWith(2, new Date(futureMs).toISOString(), 'inherit')
       expect(mockMessage.success).toHaveBeenCalledWith('issue.retrySuccess')
       expect(vm.showRetryDrawer).toBe(false)
       expect(vm.retryTargetTask).toBeNull()
@@ -2177,7 +2210,7 @@ describe('IssueView', () => {
       await vm.handleSubmitRetry()
       await flushPromises()
 
-      expect(mockApi.retryTask).toHaveBeenCalledWith(2)
+      expect(mockApi.retryTask).toHaveBeenCalledWith(2, undefined, 'inherit')
       expect(mockMessage.success).toHaveBeenCalledWith('issue.retrySuccess')
     })
 

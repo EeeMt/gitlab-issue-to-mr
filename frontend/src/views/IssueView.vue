@@ -372,6 +372,12 @@
                 </div>
               </div>
             </n-form-item>
+            <n-form-item :label="t('taskView.lineageStrategy')">
+              <n-radio-group v-model:value="retryLineageStrategy">
+                <n-radio value="inherit">{{ t('taskView.lineageStrategyInherit') }}</n-radio>
+                <n-radio value="fresh_retry">{{ t('taskView.lineageStrategyFreshRetry') }}</n-radio>
+              </n-radio-group>
+            </n-form-item>
           </n-form>
 
           <div v-if="retryScheduleType === 'scheduled'" class="retry-drawer__schedule-preview">
@@ -612,6 +618,7 @@ const showCreateDrawer = ref(false)
 const showRetryDrawer = ref(false)
 const retryTargetTask = ref<Task | null>(null)
 const retryScheduleType = ref<'now' | 'scheduled'>('now')
+const retryLineageStrategy = ref<'inherit' | 'fresh_retry'>('inherit')
 const retryTaskSchedule = ref<number | null>(null)
 const retryTaskLoading = ref(false)
 const showRescheduleDrawer = ref(false)
@@ -683,6 +690,7 @@ watch(showRetryDrawer, (val) => {
   if (!val) {
     retryTargetTask.value = null
     retryScheduleType.value = 'now'
+    retryLineageStrategy.value = 'inherit'
     retryTaskSchedule.value = null
   }
 })
@@ -711,6 +719,7 @@ function handleRetryHeatmapCellClick(startMs: number) {
 async function openRetryDrawer(task: Task) {
   retryTargetTask.value = task
   retryScheduleType.value = 'now'
+  retryLineageStrategy.value = 'inherit'
   retryTaskSchedule.value = null
   showRetryDrawer.value = true
   await loadScheduleContext(true)
@@ -818,14 +827,18 @@ async function handleSaveEdit() {
   }
 }
 
-async function handleRetryTask(taskId: number, scheduledDatetime?: string): Promise<boolean> {
+async function handleRetryTask(
+  taskId: number,
+  scheduledDatetime?: string,
+  lineageStrategy: 'inherit' | 'fresh_retry' = 'inherit',
+): Promise<boolean> {
   try {
-    if (scheduledDatetime) {
-      await retryTask(taskId, scheduledDatetime)
-    } else {
-      await retryTask(taskId)
-    }
-    message.success(t('issue.retrySuccess'))
+    await retryTask(taskId, scheduledDatetime, lineageStrategy)
+    message.success(
+      lineageStrategy === 'fresh_retry'
+        ? t('issue.retrySuccessFresh')
+        : t('issue.retrySuccess'),
+    )
     await fetchIssue()
     return true
   } catch (error: any) {
@@ -852,7 +865,11 @@ async function handleSubmitRetry() {
 
   retryTaskLoading.value = true
   try {
-    const success = await handleRetryTask(retryTargetTask.value.id, scheduledDatetime)
+    const success = await handleRetryTask(
+      retryTargetTask.value.id,
+      scheduledDatetime,
+      retryLineageStrategy.value,
+    )
     if (success) {
       showRetryDrawer.value = false
     }

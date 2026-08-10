@@ -52,6 +52,20 @@ export function useTaskFormSubmission(options: TaskFormSubmissionOptions) {
   const submitLoading = ref(false)
   const usageLimitDetail = ref<UsageLimitExceededDetail | null>(null)
 
+  function buildTaskCreatedMessage(task: Task): string {
+    const sequence = task.issue_sequence
+    const position = task.queue_position
+    if (sequence != null && position != null) {
+      return position === 1
+        ? t('issue.taskCreatedQueueHead', { sequence })
+        : t('issue.taskCreatedQueued', { sequence, position })
+    }
+    if (sequence != null) {
+      return t('issue.taskCreatedTurn', { sequence })
+    }
+    return t('issue.taskCreated')
+  }
+
   async function handleCreate() {
     const taskMode = options.taskMode.value
     if (taskMode === null) {
@@ -97,7 +111,7 @@ export function useTaskFormSubmission(options: TaskFormSubmissionOptions) {
         skillSelectionDirty: options.skillSelectionDirty.value,
       })
       const created = await createTask(request)
-      message.success(t('issue.taskCreated'))
+      message.success(buildTaskCreatedMessage(created))
       options.prompt.value = ''
       options.scheduledAt.value = null
       options.selectedProviderId.value = null

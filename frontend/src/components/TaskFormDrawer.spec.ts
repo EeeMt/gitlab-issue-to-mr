@@ -16,6 +16,7 @@ const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
     getConfig: vi.fn<() => Promise<any>>(),
     getRunInstructionTemplateDefaults: vi.fn<() => Promise<any>>(),
     previewRunInstructionTemplate: vi.fn<() => Promise<any>>(),
+    getTaskScheduleConstraints: vi.fn<() => Promise<any>>(),
   }
   const resetMockApi = () => {
     Object.values(mock).forEach(fn => fn.mockReset())
@@ -29,6 +30,7 @@ vi.mock('../i18n', () => ({ currentLocale: ref('en') }))
 vi.mock('../utils/datetime', () => ({
   formatDateTimeUtc8Compact: vi.fn((value: any) => `formatted-${value}`),
   formatTimeUtc8: vi.fn((value: any) => `time-${value}`),
+  parseUtcDate: vi.fn((value: string) => new Date(value)),
 }))
 
 vi.mock('../utils/slotError', () => ({
@@ -55,6 +57,7 @@ vi.mock('../api', () => ({
   getConfig: mockApi.getConfig,
   getRunInstructionTemplateDefaults: mockApi.getRunInstructionTemplateDefaults,
   previewRunInstructionTemplate: mockApi.previewRunInstructionTemplate,
+  getTaskScheduleConstraints: mockApi.getTaskScheduleConstraints,
 }))
 
 vi.mock('./RunInstructionTemplateEditor.vue', () => ({
@@ -118,12 +121,13 @@ vi.mock('naive-ui', () => ({
   },
   NDatePicker: {
     name: 'NDatePicker',
-    props: ['value', 'type', 'clearable', 'isDateDisabled'],
+    props: ['value', 'type', 'clearable', 'isDateDisabled', 'isTimeDisabled'],
     emits: ['update:value'],
     setup(props: any, { emit }: any) {
       return () => h('input', {
         class: 'n-date-picker',
         value: props.value ?? '',
+        'data-has-time-disabled': typeof props.isTimeDisabled === 'function',
         onInput: (event: Event) => emit('update:value', Number((event.target as HTMLInputElement).value)),
       })
     },
@@ -698,6 +702,30 @@ describe('TaskFormDrawer', () => {
       expect(scheduleDetail.find('.schedule-detail-panel').exists()).toBe(true)
     })
 
+    it('passes a time-disabled predicate derived from schedule constraints', async () => {
+      mockApi.getTaskScheduleConstraints.mockResolvedValue({
+        has_valid_window: true,
+        min_scheduled_at: '2026-04-01T10:00:00Z',
+        max_scheduled_at: '2026-04-02T18:00:00Z',
+        min_source_task_id: 1,
+        max_source_task_id: 2,
+      })
+      await mountDrawer()
+      await openDrawer()
+
+      wrapper.vm.scheduleType = 'scheduled'
+      await nextTick()
+
+      const picker = wrapper.find('.n-date-picker')
+      expect(picker.attributes('data-has-time-disabled')).toBe('true')
+      expect(typeof wrapper.vm.isTimeDisabled).toBe('function')
+      // On the min boundary day the hour before the floor is disabled.
+      const min = new Date('2026-04-01T10:00:00Z')
+      const validator = wrapper.vm.isTimeDisabled(min.getTime())
+      expect(validator.isHourDisabled?.(min.getHours() - 1)).toBe(true)
+      expect(validator.isHourDisabled?.(min.getHours() + 1)).toBe(false)
+    })
+
     it('warns when scheduled time is in the past', async () => {
       await mountDrawer()
       await openDrawer()
@@ -728,6 +756,28 @@ describe('TaskFormDrawer', () => {
         }),
       )
       expect(mockMessage.success).toHaveBeenCalledWith('issue.taskCreated')
+    })
+
+    it('appends issue_sequence and queue_position to the create success message', async () => {
+      mockApi.createTask.mockResolvedValue({ id: 10, issue_sequence: 3, queue_position: 2 })
+      await mountDrawer()
+      await openDrawer()
+
+      wrapper.vm.taskMode = 'execute'
+      await submitCreate()
+
+      expect(mockMessage.success).toHaveBeenCalledWith('issue.taskCreatedQueued')
+    })
+
+    it('flags the queue head as about to run in the create success message', async () => {
+      mockApi.createTask.mockResolvedValue({ id: 10, issue_sequence: 3, queue_position: 1 })
+      await mountDrawer()
+      await openDrawer()
+
+      wrapper.vm.taskMode = 'execute'
+      await submitCreate()
+
+      expect(mockMessage.success).toHaveBeenCalledWith('issue.taskCreatedQueueHead')
     })
 
     it('does not include scheduled_datetime when schedule type is now', async () => {

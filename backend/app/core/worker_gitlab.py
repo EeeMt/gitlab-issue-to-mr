@@ -6,7 +6,7 @@ import time
 
 import httpx
 from gitlab import Gitlab
-from sqlalchemy import select
+from sqlalchemy import nullslast, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_effective_settings as get_settings
@@ -252,7 +252,7 @@ async def build_previous_task_summaries(
                 await db.execute(
                     select(Task)
                     .where(Task.issue_id == issue.id, Task.id < task.id)
-                    .order_by(Task.id)
+                    .order_by(nullslast(Task.issue_sequence.asc()), Task.id)
                 )
             )
             .scalars()

@@ -409,6 +409,7 @@
                       clearable
                       :placeholder="t('createTask.selectDateTime')"
                       :is-date-disabled="isScheduleDateDisabled"
+                      :is-time-disabled="isTimeDisabled"
                     />
                     <n-button
                       class="schedule-detail-panel__heatmap"
@@ -751,6 +752,7 @@ import {
 } from '../api'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeUtc8Compact, formatTimeUtc8, parseUtcDate } from '../utils/datetime'
+import { buildScheduleTimeDisabled } from '../utils/scheduleWindow'
 import { formatUsageResetAt } from '../utils/usageLimits'
 import { issueDetailTooltipContentStyle, issueDetailTooltipThemeOverrides } from './issue-detail/tooltip'
 import {
@@ -1432,6 +1434,8 @@ function isScheduleDateDisabled(timestamp: number): boolean {
   }
   return false
 }
+
+const isTimeDisabled = computed(() => buildScheduleTimeDisabled(scheduleWindow.value))
 
 async function loadCreateScheduleWindow() {
   scheduleWindow.value = null

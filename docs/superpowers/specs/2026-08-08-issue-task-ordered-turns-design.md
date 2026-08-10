@@ -377,14 +377,19 @@ projected lineage：
 
 当前迁移头为 `067_harness_key`。推荐分两阶段发布：
 
-1. `068_task_issue_sequence_and_lineage`：新增 nullable sequence/投影字段与 `IssueSessionLineage`，回填
+1. `068_issue_sequence_lineage`：新增 nullable sequence/投影字段与 `IssueSessionLineage`，回填
    历史数据，建立允许 null 的唯一索引；新代码始终同时写入序号和投影。
 2. `068` 兼容期允许旧 Backend 继续插入 NULL，但**不允许任何代码把 NULL 当成可排序值**。新 Scheduler
    在每次 promote/claim 前通过 Issue 行锁修复或拒绝；依赖顺序的查询检测到活动 NULL 时失败关闭。
-3. 稳定观察一个发布周期后，`069_task_issue_sequence_lineage_not_null`：先停掉所有旧 Backend，确认
-   sequence 与必填投影字段 NULL 均为零且投影断言通过，再收紧 `NOT NULL` 和正式唯一/检查约束。
-   `projected_reset_task_id` 在 generation `0` 合法为 NULL；检查约束要求 generation `> 0` 时非 NULL
-   且指向同一 Issue 中不大于当前序号的 reset Task。
+3. **第二阶段（收紧 `NOT NULL`）当前显式延期，未实现**。原计划 `069_task_issue_sequence_lineage_not_null`
+   收紧 `issue_sequence` 与 projected 关键列为 `NOT NULL` 并建立正式唯一/检查约束
+   （`projected_reset_task_id` 在 generation `0` 合法为 NULL；generation `> 0` 时必须非 NULL 且指向
+   同一 Issue 中不大于当前序号的 reset Task）。因 069 迁移已被 system lifecycle statistics（EEE-18）占用，
+   且 ordered-turn 尚未稳定（运行时 lineage 强制 EEE-23 仍在返修），第一阶段预检条件
+   “稳定观察一个发布周期后”尚未满足，故收紧阶段被明确取消/推迟。待 ordered-turn 稳定后，由独立迁移
+   `070_task_issue_sequence_lineage_not_null` 执行：先停掉所有旧 Backend，确认 sequence 与必填投影字段
+   NULL 均为零且投影断言通过，再收紧；届时再移除对应的 NULL-repair 分支（`ensure_issue_order_integrity_locked`
+   的 repair 路径、`sequence_repair_required` 拒绝语义可保留为防御）。
 
 `068` 的混部兼容对象仅是旧 Backend 写入路径；生产仍只能有一个新 Scheduler。若无法实现以下运行期
 repair/fail-closed 协议，就必须改成停写、停调度、一次性回填再切换，不得继续声称支持混部。第二阶段
@@ -1089,8 +1094,8 @@ Scheduler 都不可运行时，才允许进入“旧 Scheduler 紧急只读排�
 Backend：
 
 - `backend/app/models.py`
-- `backend/alembic/versions/068_task_issue_sequence_and_lineage.py`
-- `backend/alembic/versions/069_task_issue_sequence_lineage_not_null.py`
+- `backend/alembic/versions/068_issue_sequence_lineage.py`
+- `backend/alembic/versions/069_system_lifecycle_statistics.py`（非 ordered-turn；ordered-turn 收紧阶段见 §5.3，后续为 `070_task_issue_sequence_lineage_not_null`）
 - `backend/app/core/issue_task_order.py`
 - `backend/app/core/issue_task_lineage.py`
 - `backend/app/core/harness_sessions.py`

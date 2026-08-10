@@ -33,6 +33,7 @@
               clearable
               style="width: 240px; max-width: 100%"
               :is-date-disabled="isDateDisabled"
+              :is-time-disabled="isTimeDisabled"
             />
           </n-form-item>
         </n-form>
@@ -79,6 +80,7 @@ import HeatmapChart from './HeatmapChart.vue'
 import { getTaskScheduleConstraints, rescheduleTask, type Task, type TaskScheduleWindow } from '../api'
 import { renderMarkdown } from './task-process/taskProcessUtils'
 import { parseUtcDate } from '../utils/datetime'
+import { buildScheduleTimeDisabled } from '../utils/scheduleWindow'
 import { extractSlotErrorMessage } from '../utils/slotError'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { useTaskScheduleContext } from '../features/tasks/useTaskScheduleContext'
@@ -187,6 +189,8 @@ function isDateDisabled(timestamp: number): boolean {
   }
   return false
 }
+
+const isTimeDisabled = computed(() => buildScheduleTimeDisabled(scheduleWindow.value))
 
 watch(() => props.show, async (val) => {
   if (!val) return
