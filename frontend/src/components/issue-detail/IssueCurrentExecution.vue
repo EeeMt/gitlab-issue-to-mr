@@ -89,7 +89,9 @@ const queueContextLabel = computed(() => {
     return t('taskView.queueContextSequenceRepair')
   }
   if (task.waiting_reason === 'workspace_cleanup') {
-    return t('taskView.queueContextWaitingCleanup', { blockedBy: blockedBy ?? '' })
+    return t('taskView.queueContextWaitingCleanup', {
+      blockedBy: task.lock_owner_task_id ?? '',
+    })
   }
   if (typeof qp === 'number' && qp > 1) {
     return t('taskView.queueContextNonHead', { position: qp, blockedBy: blockedBy ?? '' })

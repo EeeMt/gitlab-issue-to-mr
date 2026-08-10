@@ -17,8 +17,12 @@ from app.core.ci_failure_logs import append_ci_failure_log
 from app.core.harness_attempts import create_task_attempt
 from app.core.harness_sessions import (
     record_task_output_session,
-    resolve_resume_session,
     session_namespace_for,
+)
+from app.core.issue_task_lineage import (
+    projection_for_task,
+    record_projected_output_session,
+    resolve_projected_resume_session,
 )
 from app.core.utcnow import utcnow
 from app.core.worker_docker_targets import TaskContainerLookupError
@@ -332,35 +336,35 @@ async def create_execute_container(
     )
 
     session_mode = getattr(task, "session_mode", "continue")
-    # Resolve the per-harness resume session only when the frozen snapshot is
-    # actually loaded; a lazy relationship must never trigger sync IO here.
-    resume_session: str | None = None
-    harness_key = "claude"
-    try:
-        inspection = sa_inspect(task)
-        if "worker_profile_snapshot" not in inspection.unloaded:
-            snapshot = task.worker_profile_snapshot
-            harness_key = getattr(snapshot, "harness_key", None) or "claude"
-            endpoint_fingerprint = None
-            if isinstance(getattr(snapshot, "model_endpoint_snapshot", None), dict):
-                endpoint_fingerprint = snapshot.model_endpoint_snapshot.get("fingerprint")
-            resume_session, _lineage = await resolve_resume_session(
-                db,
-                issue=issue,
-                harness_key=harness_key,
-                session_namespace=session_namespace_for(
-                    harness_key, endpoint_fingerprint
-                ),
-                session_mode=session_mode,
-            )
-    except Exception:  # noqa: BLE001 - never block task execution on session bookkeeping
-        resume_session = issue.claude_session_id if issue is not None else None
-        harness_key = "claude"
+    # Resolve the resume session through the Task's frozen projected lineage
+    # (spec §5.5 / §6.8). A continue only resumes the exact
+    # (issue, generation, harness, namespace) lineage row, or starts with no
+    # resume ID (fresh_no_match); it never falls back to Issue.claude_session_id,
+    # which may point at an older generation. A task without a complete
+    # projection fails closed before a container is created.
+    projection = projection_for_task(task)
+    if projection is None:
+        raise ValueError(
+            f"Task {task.id} has no complete projected lineage; refusing to "
+            "start without a fail-closed resume decision"
+        )
+    harness_key = projection["harness_key"]
+    resume_session, input_lineage_reason = await resolve_projected_resume_session(
+        db,
+        task=task,
+        harness_key=projection["harness_key"],
+        session_namespace=projection["session_namespace"],
+        generation=projection["generation"],
+        reset_task_id=projection["reset_task_id"],
+        session_mode=session_mode,
+    )
     task.input_session_id = (
         resume_session if session_mode == "continue" and issue is not None else None
     )
-    # Mirror the legacy read source for the runtime env builder; only the Claude
-    # harness owns the legacy pointer.
+    task.input_lineage_reason = input_lineage_reason
+    # Mirror the resolved session to the legacy Claude pointer so the runtime
+    # env builder and old readers keep working during the 068 compat window;
+    # this is a compatibility write, not a resume-decision source.
     if issue is not None and harness_key == "claude" and resume_session:
         issue.claude_session_id = resume_session
     task.output_session_id = None
@@ -864,6 +868,22 @@ async def monitor_container_run(
     if issue and isinstance(output_session_id, str) and output_session_id:
         # The session returned by the task is the only safe pointer for subsequent work. This
         # also covers fresh runs and the CLI wrapper's resume-not-found fallback.
+        # Record it into the Task's projected lineage row first (spec §6.8); rows without a
+        # projection (legacy 068 rows) are only mirrored to the IssueHarnessSession compat
+        # table. Bookkeeping must never break completion.
+        if projection_for_task(task) is not None:
+            try:
+                await record_projected_output_session(
+                    db,
+                    task=task,
+                    session_id=output_session_id,
+                )
+            except Exception as exc:  # noqa: BLE001 - never break completion on lineage bookkeeping
+                logger.warning(
+                    "[Task %s] Failed to record projected output session: %s",
+                    task.id,
+                    exc,
+                )
         # Resolve the frozen harness key first so a codex task's session is never
         # recorded under the claude lineage (which would break codex resume).
         harness_key = "claude"
@@ -878,8 +898,6 @@ async def monitor_container_run(
                 endpoint_fingerprint = snapshot.model_endpoint_snapshot.get("fingerprint")
         except Exception:  # noqa: BLE001 - session bookkeeping must never break completion
             harness_key = "claude"
-        if harness_key == "claude":
-            issue.claude_session_id = output_session_id
         await record_task_output_session(
             db,
             issue=issue,

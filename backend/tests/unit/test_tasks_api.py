@@ -1453,6 +1453,81 @@ class RetryTaskAPITests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
 
+    def test_retry_task_rejects_stale_generation_lineage(self):
+        """POST /api/tasks/{id}/retry rejects a stale-generation source with 409."""
+        task = _make_serializable_task(task_status=TaskStatus.FAILED)
+        task.id = 71
+        task.project_id = 1
+        task.issue_id = 1
+        task.session_mode = "continue"
+        task.output_session_id = "session-old"
+        task.worker_profile_snapshot = _make_worker_snapshot(task_id=71)
+        # The source belongs to generation 0 of the issue lineage.
+        task.issue_sequence = 1
+        task.projected_harness_key = "claude"
+        task.projected_session_namespace = "claude-0000000000000000"
+        task.projected_lineage_generation = 0
+        task.projected_reset_task_id = None
+        task.lineage_projection_reason = "initial"
+        task.input_lineage_reason = "resumed"
+
+        mock_result_task = MagicMock()
+        mock_result_task.scalar_one_or_none.return_value = task
+        mock_result_no_retry = MagicMock()
+        mock_result_no_retry.scalar_one_or_none.return_value = None
+        mock_result_issue = MagicMock()
+        mock_result_issue.scalar_one_or_none.return_value = MagicMock(
+            id=1,
+            project_id=1,
+            status="open",
+        )
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(
+            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue]
+        )
+        mock_db.refresh = AsyncMock()
+        mock_db.add = MagicMock()
+        mock_db.flush = AsyncMock()
+        mock_db.commit = AsyncMock()
+
+        client, app = _make_app_client_with_db(mock_db)
+
+        # The queue tail has advanced to generation 1, so a default continue
+        # retry of the generation-0 source is an old-generation retry.
+        tail_projection = {
+            "harness_key": "claude",
+            "session_namespace": "claude-0000000000000000",
+            "generation": 1,
+            "reset_task_id": 70,
+            "reason": "fresh",
+        }
+        integrity_report = {
+            "repaired_sequences": 0,
+            "repaired_projections": 0,
+            "blocked": False,
+            "max_sequence": 2,
+            "tail_projection": tail_projection,
+        }
+        with (
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch(
+                "app.api.task_creation_service.ensure_issue_order_integrity_locked",
+                new=AsyncMock(return_value=integrity_report),
+            ),
+        ):
+            response = client.post("/api/tasks/71/retry")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 409)
+        detail = response.json()["detail"]
+        self.assertEqual(detail["code"], "retry_lineage_conflict")
+        self.assertEqual(detail["allowed_actions"], ["fresh_retry"])
+        self.assertEqual(detail["source_lineage"]["generation"], 0)
+        self.assertEqual(detail["tail_lineage"]["generation"], 1)
+        mock_db.add.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # POST /tasks/{task_id}/execute — immediate execution endpoint

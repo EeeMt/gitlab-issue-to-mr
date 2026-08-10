@@ -232,6 +232,13 @@ def _make_task(**kwargs):
         is_retry=False, retry_source_task_id=None,
         additions=0, deletions=0, total_changes=0,
         rendered_prompt="Fix the bug",
+        projected_harness_key="claude",
+        projected_session_namespace="claude-0000000000000000",
+        projected_lineage_generation=0,
+        projected_reset_task_id=None,
+        lineage_projection_reason="initial",
+        input_lineage_reason=None,
+        session_mode="continue",
     )
     defaults.update(kwargs)
     task = Task(**defaults)
@@ -298,6 +305,9 @@ def _make_db(task=None):
             mock_result.scalar_one_or_none.return_value = provider
             mock_result.scalars.return_value.all.return_value = [provider] if provider else []
         elif 'FROM worker_environment_variables' in statement_str:
+            mock_result.scalar_one_or_none.return_value = None
+            mock_result.scalars.return_value.all.return_value = []
+        elif 'FROM issue_session_lineages' in statement_str:
             mock_result.scalar_one_or_none.return_value = None
             mock_result.scalars.return_value.all.return_value = []
         else:

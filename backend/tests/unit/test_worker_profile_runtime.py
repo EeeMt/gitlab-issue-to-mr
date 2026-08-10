@@ -166,6 +166,14 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
     db.flush = AsyncMock()
     db.get = AsyncMock(return_value=None)
     db.refresh = AsyncMock()
+
+    async def _mock_execute(statement, *args, **kwargs):
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_result.scalars.return_value.all.return_value = []
+        return mock_result
+
+    db.execute = AsyncMock(side_effect=_mock_execute)
     bundle = SimpleNamespace(
         digest="d" * 64,
         contract_version="codify.worker.harness/v1",

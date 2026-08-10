@@ -1159,7 +1159,9 @@ function kanbanIssueLabel(task: Task): string {
 function waitingReasonLabel(task: Task): string {
   const blockedBy = task.blocked_by_task_id
   if (task.waiting_reason === 'workspace_cleanup') {
-    return t('monitor.waitingWorkspaceCleanup', { blockedBy: blockedBy ?? '' })
+    return t('monitor.waitingWorkspaceCleanup', {
+      blockedBy: task.lock_owner_task_id ?? '',
+    })
   }
   if (task.waiting_reason === 'sequence_repair_required') {
     return t('monitor.waitingSequenceRepair')

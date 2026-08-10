@@ -164,6 +164,15 @@ def _make_task(**kwargs):
         priority=0, status=TaskStatus.PENDING,
         is_retry=False, retry_source_task_id=None,
         additions=0, deletions=0, total_changes=0,
+        # Ordered-turn projected lineage defaults: the scheduler backfills these
+        # before a task is claimed, so worker tests exercise the projected-lineage
+        # resume path (the worker fails closed on a missing projection).
+        projected_harness_key="claude",
+        projected_session_namespace="claude-0000000000000000",
+        projected_lineage_generation=0,
+        projected_reset_task_id=None,
+        lineage_projection_reason="initial",
+        input_lineage_reason=None,
     )
     defaults.update(kwargs)
     task = Task(**defaults)
@@ -233,6 +242,11 @@ def _make_db(task=None):
             mock_result.scalar_one_or_none.return_value = provider
             mock_result.scalars.return_value.all.return_value = [provider] if provider else []
         elif 'FROM worker_environment_variables' in statement_str:
+            mock_result.scalar_one_or_none.return_value = None
+            mock_result.scalars.return_value.all.return_value = []
+        elif 'FROM issue_session_lineages' in statement_str:
+            # The worker resolves resume sessions through the projected-lineage
+            # table; by default there is no generation row yet (fresh_no_match).
             mock_result.scalar_one_or_none.return_value = None
             mock_result.scalars.return_value.all.return_value = []
         else:
