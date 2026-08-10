@@ -51,6 +51,10 @@ def _optional_float(value) -> float | None:
     return float(value) if value is not None else None
 
 
+def _optional_int(value) -> int | None:
+    return int(value) if value is not None else None
+
+
 def _ratio(numerator, denominator) -> float | None:
     if denominator in (None, 0) or numerator is None:
         return None
@@ -137,8 +141,14 @@ async def get_system_statistics_overview(
         + _int(lifetime_task_row.failed)
         + _int(lifetime_task_row.cancelled)
     )
-    known_total_tokens = _int(lifetime_task_row.known_input_tokens) + _int(
-        lifetime_task_row.known_output_tokens
+    # NULL when no complete-token / no code-change sample exists: an unknown
+    # aggregate must stay Unknown (§5.7), not read as an exact 0.
+    known_total_tokens = (
+        _int(lifetime_task_row.known_input_tokens)
+        + _int(lifetime_task_row.known_output_tokens)
+        if lifetime_task_row.known_input_tokens is not None
+        or lifetime_task_row.known_output_tokens is not None
+        else None
     )
     token_eligible = _int(lifetime_task_row.token_eligible_samples)
     code_eligible = _int(lifetime_task_row.code_eligible_samples)
@@ -170,7 +180,7 @@ async def get_system_statistics_overview(
             "failure_rate": _ratio(_int(lifetime_task_row.failed), finished),
             "issues_with_mr": _int(lifetime_issue_row.issues_with_mr),
             "known_total_tokens": known_total_tokens,
-            "known_total_changes": _int(lifetime_task_row.known_total_changes),
+            "known_total_changes": _optional_int(lifetime_task_row.known_total_changes),
             "known_total_execution_seconds": _optional_float(
                 lifetime_task_row.known_execution_seconds
             ),

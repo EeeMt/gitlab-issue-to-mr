@@ -239,14 +239,14 @@ async def cleanup_system_data(
 
         # Archive lifecycle statistics in the same transaction as the delete
         # (§7 of the system lifecycle statistics design). Runs before any bulk
-        # delete so the Task/Issue rows still exist to snapshot.
+        # delete so the Task/Issue rows still exist to snapshot. The archive
+        # service re-reads Tasks under FOR UPDATE and records whether active
+        # Tasks were present at lock time (§6.2), not whether the admin forced
+        # cleanup.
         await archive_issue_statistics_before_delete(
             db,
             issue_id=issue.id,
             deletion_reason="cleanup",
-            # Record whether the delete actually had active Tasks at lock time,
-            # not whether the admin forced cleanup (§6.2).
-            forced_with_active_tasks=bool(active_tasks),
         )
 
         task_ids = [task.id for task in issue_tasks]

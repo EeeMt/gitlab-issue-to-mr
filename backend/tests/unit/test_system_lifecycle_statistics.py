@@ -303,6 +303,31 @@ class ArchiveServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(issue_row.deleted_by_user_id, 7)
             self.assertFalse(issue_row.forced_with_active_tasks)
 
+    async def test_archive_marks_active_tasks_at_lock_time(self):
+        from app.core.system_statistics_deletion import archive_issue_statistics_before_delete
+
+        now = utcnow()
+        async with self.Session() as db:
+            await _seed_base(db)
+            _seed_issue(db, 1, created_at=now - timedelta(days=5))
+            _seed_task(
+                db,
+                1,
+                1,
+                status=TaskStatus.RUNNING,
+                created_at=now - timedelta(minutes=10),
+                started_at=now - timedelta(minutes=5),
+            )
+            await db.commit()
+
+            await archive_issue_statistics_before_delete(
+                db, issue_id=1, deletion_reason="cleanup", now=now
+            )
+            issue_row = (
+                await db.execute(select(DeletedIssueStatistics))
+            ).scalar_one()
+            self.assertTrue(issue_row.forced_with_active_tasks)
+
     async def test_rearchive_is_idempotent_upsert(self):
         from app.core.system_statistics_deletion import archive_issue_statistics_before_delete
 
@@ -683,9 +708,17 @@ class ConservativeBackfillTests(unittest.IsolatedAsyncioTestCase):
         await self.engine.dispose()
 
     async def _backfill(self, db):
+        # Mirrors migration 069 §6.4: only self-consistent non-zero triples are
+        # treated as recorded; inconsistent rows stay Unknown.
         await db.execute(
             update(Task)
-            .where(or_(Task.additions > 0, Task.deletions > 0, Task.total_changes > 0))
+            .where(
+                or_(Task.additions > 0, Task.deletions > 0, Task.total_changes > 0),
+                Task.additions >= 0,
+                Task.deletions >= 0,
+                Task.total_changes >= 0,
+                Task.total_changes == Task.additions + Task.deletions,
+            )
             .values(
                 change_stats_recorded_at=func.coalesce(
                     Task.change_stats_recorded_at,
@@ -747,8 +780,8 @@ class ConservativeBackfillTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
 
             lt = await self._lifetime(db)
-            # Before backfill neither task is marked recorded.
-            self.assertEqual(lt.known_total_changes, 0)
+            # Before backfill neither task is marked recorded -> unknown is NULL.
+            self.assertIsNone(lt.known_total_changes)
             self.assertEqual(lt.change_available_samples, 0)
 
             await self._backfill(db)
@@ -817,7 +850,9 @@ class DurationEdgeCaseTests(unittest.IsolatedAsyncioTestCase):
             lt = (
                 await db.execute(q.build_lifetime_task_query(self.dialect, all_tasks))
             ).one()
-            self.assertEqual(lt.known_execution_seconds, 0)
+            # The only task's execution is inverted (invalid) -> no valid sample,
+            # so the lifetime aggregate is NULL, never a negative (nor a bogus 0).
+            self.assertIsNone(lt.known_execution_seconds)
             finished = list(
                 (
                     await db.execute(

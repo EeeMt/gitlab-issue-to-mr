@@ -536,18 +536,18 @@ def build_lifetime_task_query(dialect: str, all_tasks: CTE) -> Any:
         func.coalesce(
             func.sum(case((t.c.deleted_before_terminal, 1), else_=0)), 0
         ).label("deleted_before_terminal"),
-        func.coalesce(
-            func.sum(task_execution_seconds(dialect, t)), 0
-        ).label("known_execution_seconds"),
-        func.coalesce(
-            func.sum(case((_token_complete(t), t.c.input_tokens), else_=None)), 0
-        ).label("known_input_tokens"),
-        func.coalesce(
-            func.sum(case((_token_complete(t), t.c.output_tokens), else_=None)), 0
-        ).label("known_output_tokens"),
-        func.coalesce(
-            func.sum(case((_change_available(t), t.c.total_changes), else_=None)), 0
-        ).label("known_total_changes"),
+        # No valid sample -> NULL, not 0, so an unknown aggregate is not
+        # presented as an exact zero (§5.7 / §9.5).
+        func.sum(task_execution_seconds(dialect, t)).label("known_execution_seconds"),
+        func.sum(case((_token_complete(t), t.c.input_tokens), else_=None)).label(
+            "known_input_tokens"
+        ),
+        func.sum(case((_token_complete(t), t.c.output_tokens), else_=None)).label(
+            "known_output_tokens"
+        ),
+        func.sum(case((_change_available(t), t.c.total_changes), else_=None)).label(
+            "known_total_changes"
+        ),
         func.coalesce(
             func.sum(case((_token_complete(t), 1), else_=0)), 0
         ).label("token_complete_samples"),

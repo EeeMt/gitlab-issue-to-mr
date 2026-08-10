@@ -1571,8 +1571,8 @@ export interface SystemStatisticsLifetime {
   success_rate: number | null
   failure_rate: number | null
   issues_with_mr: number
-  known_total_tokens: number
-  known_total_changes: number
+  known_total_tokens: number | null
+  known_total_changes: number | null
   known_total_execution_seconds: number | null
 }
 

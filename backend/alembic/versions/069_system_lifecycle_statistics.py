@@ -36,16 +36,21 @@ def upgrade() -> None:
     )
 
     # §6.4 conservative backfill: any pre-feature Task with a code-change field
-    # > 0 is treated as recorded (marked with its completion/update time), so it
-    # counts toward lifetime code-change sums and coverage. All-zero old data
-    # stays NULL and remains Unknown. Idempotent: never overwrites an existing
+    # > 0 AND a self-consistent triple (total == additions + deletions, the same
+    # invariant validate_change_statistics enforces) is treated as recorded
+    # (marked with its completion/update time), so it counts toward lifetime
+    # code-change sums and coverage. All-zero old data, and rows whose fields are
+    # inconsistent (e.g. NULL, negative, or total != additions + deletions),
+    # stay NULL and remain Unknown. Idempotent: never overwrites an existing
     # marker.
     op.execute(
         sa.text(
             "UPDATE tasks SET change_stats_recorded_at = "
             "COALESCE(change_stats_recorded_at, "
             "COALESCE(completed_at, updated_at, now())) "
-            "WHERE additions > 0 OR deletions > 0 OR total_changes > 0"
+            "WHERE (additions > 0 OR deletions > 0 OR total_changes > 0) "
+            "AND additions >= 0 AND deletions >= 0 AND total_changes >= 0 "
+            "AND total_changes = additions + deletions"
         )
     )
 

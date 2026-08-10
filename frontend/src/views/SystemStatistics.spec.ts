@@ -331,4 +331,76 @@ describe('SystemStatistics', () => {
     const lastCall = mockApi.getSystemStatisticsTrends.mock.calls.at(-1)?.[0]
     expect(lastCall).toEqual({ data_state: 'all', range: '90d' })
   })
+
+  it('renders lifetime execution time, failure rate and issues-with-MR cards', async () => {
+    wrapper = mount(SystemStatistics)
+    await flushPromises()
+
+    const text = wrapper.text()
+    expect(text).toContain('systemStatistics.lifetime.knownExecutionSeconds')
+    expect(text).toContain('systemStatistics.lifetime.failureRate')
+    expect(text).toContain('systemStatistics.lifetime.issuesWithMr')
+    expect(text).toContain('5m') // 300s known_total_execution_seconds
+    expect(text).toContain('33.3%') // 1/3 failure_rate
+  })
+
+  it('shows em-dashes for unknown lifetime execution seconds and failure rate', async () => {
+    mockApi.getSystemStatisticsOverview.mockResolvedValue({
+      as_of: '2026-08-09T00:00:00Z',
+      reporting_timezone: 'Asia/Shanghai',
+      current_state: {
+        pending: 0,
+        queued: 0,
+        running: 0,
+        long_running: 0,
+        active_issues: 0,
+        avg_queue_wait_seconds: null,
+        queue_wait_samples: 0,
+      },
+      lifetime: {
+        issue_count: 0,
+        task_count: 0,
+        completed: 0,
+        failed: 0,
+        cancelled: 0,
+        finished: 0,
+        success_rate: null,
+        failure_rate: null,
+        issues_with_mr: 0,
+        known_total_tokens: null,
+        known_total_changes: null,
+        known_total_execution_seconds: null,
+      },
+      deletion: {
+        deleted_task_count: 0,
+        deleted_issue_count: 0,
+        deleted_before_terminal: 0,
+      },
+      coverage: {
+        capture_started_at: null,
+        capture_enabled: false,
+        statement: '',
+        token: {
+          eligible_samples: 0,
+          complete_samples: 0,
+          partial_samples: 0,
+          missing_samples: 0,
+          coverage_rate: null,
+        },
+        code: {
+          eligible_samples: 0,
+          available_samples: 0,
+          coverage_rate: null,
+        },
+      },
+    })
+
+    wrapper = mount(SystemStatistics)
+    await flushPromises()
+
+    const text = wrapper.text()
+    expect(text).toContain('systemStatistics.lifetime.knownExecutionSeconds')
+    expect(text).toContain('systemStatistics.lifetime.failureRate')
+    expect(text).toContain('—')
+  })
 })

@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 import sqlalchemy as sa
@@ -232,3 +232,96 @@ async def test_archive_row_lock_and_same_transaction_delete(session_factory):
 
         await asyncio.wait_for(completed.wait(), timeout=10)
         await contender_task
+
+
+async def test_pg_day_bucket_uses_shanghai_timezone(session_factory):
+    """Day-bucket trends convert to Asia/Shanghai before date_trunc.
+
+    UTC 00:30 stays on the same Shanghai day; UTC 16:30 rolls over to the next
+    Shanghai day (the §15.1 boundary the SQLite fallback cannot exercise).
+    """
+    async with session_factory() as db:
+        profile = WorkerProfile(
+            name=f"wp-{uuid.uuid4().hex[:8]}",
+            image="test-image",
+            default_execute_run_instruction_template="",
+            default_plan_run_instruction_template="",
+            ci_auto_repair_run_instruction_template="",
+        )
+        db.add(profile)
+        provider = AIProvider(
+            name=f"prov-{uuid.uuid4().hex[:8]}",
+            model="test-model",
+            base_url="https://example.test",
+            is_default=False,
+            is_disabled=False,
+        )
+        db.add(provider)
+        await db.flush()
+        issue = Issue(
+            title="lifecycle-pg-bucket",
+            project_id=1,
+            worker_profile_id=profile.id,
+        )
+        db.add(issue)
+        await db.flush()
+
+        now = utcnow()
+        for i, created_at in enumerate(
+            (datetime(2026, 1, 1, 0, 30), datetime(2026, 1, 1, 16, 30))
+        ):
+            task = Task(
+                issue_id=issue.id,
+                project_id=1,
+                user_prompt=f"pg-bucket-{i}",
+                status=TaskStatus.COMPLETED,
+                provider_id=provider.id,
+                provider_runtime_snapshot={
+                    "provider_id": provider.id,
+                    "provider_name": provider.name,
+                    "configured_model": "test-model",
+                },
+                created_at=created_at,
+                started_at=now - timedelta(hours=1),
+                completed_at=now,
+            )
+            db.add(task)
+            await db.flush()
+            db.add(
+                TaskWorkerProfileSnapshot(
+                    task_id=task.id,
+                    worker_profile_id=profile.id,
+                    profile_name=profile.name,
+                    image="test-image",
+                    volume_mounts=[],
+                    environment_variables=[],
+                    pre_script="",
+                    post_script="",
+                    default_execute_run_instruction_template="",
+                    default_plan_run_instruction_template="",
+                    ci_auto_repair_run_instruction_template="",
+                    harness_key="claude",
+                )
+            )
+        await db.commit()
+
+    from app.api import system_statistics_queries as q
+
+    all_tasks = q.build_all_task_statistics_cte(
+        dialect="postgresql",
+        project_id=None,
+        provider_id=None,
+        harness_key=None,
+        data_state="all",
+    )
+    async with session_factory() as db:
+        rows = list(
+            (
+                await db.execute(
+                    q.build_task_created_trend(all_tasks, "postgresql", "day", None)
+                )
+            ).all()
+        )
+
+    buckets = {row.bucket.date() for row in rows}
+    assert buckets == {datetime(2026, 1, 1).date(), datetime(2026, 1, 2).date()}

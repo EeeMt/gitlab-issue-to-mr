@@ -30,6 +30,14 @@ from app.models import (
 
 _TERMINAL_STATUSES = {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}
 
+# Mirrors app.core.system_data_cleanup.ACTIVE_TASK_STATUS_VALUES so the archived
+# forced_with_active_tasks flag and the cleanup skip decision agree (§6.2).
+_ACTIVE_TASK_STATUS_VALUES = {
+    TaskStatus.PENDING.value,
+    TaskStatus.QUEUED.value,
+    TaskStatus.RUNNING.value,
+}
+
 _TASK_ARCHIVE_SET_COLUMNS = [
     "source_issue_id",
     "project_id",
@@ -225,21 +233,34 @@ def _issue_upsert_statement(dialect: str):
     )
 
 
+def _task_is_active(task: Task) -> bool:
+    """True when a Task is still active (pending/queued/running or containerized).
+
+    Evaluated over the lock-time ``FOR UPDATE`` read so the archived
+    ``forced_with_active_tasks`` flag reflects reality at lock time (§6.2).
+    """
+    if bool(task.container_id):
+        return True
+    if isinstance(task.status, TaskStatus):
+        return task.status.value in _ACTIVE_TASK_STATUS_VALUES
+    return str(task.status) in _ACTIVE_TASK_STATUS_VALUES
+
+
 async def archive_issue_statistics_before_delete(
     db: AsyncSession,
     *,
     issue_id: int,
     deletion_reason: str = "manual",
     deleted_by_user_id: int | None = None,
-    forced_with_active_tasks: bool = False,
     now: datetime | None = None,
 ) -> int:
     """Snapshot an Issue and all its Tasks right before business-row deletion.
 
     Must run inside the caller's deletion transaction, with the Issue row
-    already (or newly) locked. Returns the number of Tasks archived. Raises if
-    the archive rows cannot be written or validated, which rolls the enclosing
-    business delete back.
+    already (or newly) locked. Computes ``forced_with_active_tasks`` from the
+    lock-time Task state (§6.2) and writes it on the Issue archive row. Returns
+    the number of Tasks archived. Raises if the archive rows cannot be written
+    or validated, which rolls the enclosing business delete back.
     """
     deleted_at = now or utcnow()
 
@@ -263,6 +284,11 @@ async def archive_issue_statistics_before_delete(
         .scalars()
         .all()
     )
+
+    # Lock-time reality: the Task rows above are the FOR UPDATE, populate_existing
+    # read, so any state change made by a concurrent worker before we locked is
+    # already visible here (§6.2).
+    forced_with_active_tasks = any(_task_is_active(task) for task in tasks)
 
     snapshot_by_task: dict[int, TaskWorkerProfileSnapshot] = {}
     provider_by_id: dict[int, AIProvider] = {}
