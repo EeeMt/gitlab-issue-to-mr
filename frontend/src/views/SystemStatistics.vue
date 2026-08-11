@@ -162,10 +162,19 @@
           <div v-for="chart in trendCharts" :key="chart.labelKey" class="system-statistics-trend">
             <div class="system-statistics-trend__title">{{ chart.label }}</div>
             <v-chart
+              v-if="chart.option"
               :option="chart.option"
               autoresize
               class="system-statistics-trend__chart"
             />
+            <n-empty
+              v-else
+              class="system-statistics-trend__empty"
+              data-testid="trend-empty"
+              size="small"
+            >
+              {{ t('systemStatistics.trends.noData') }}
+            </n-empty>
           </div>
         </div>
         <div v-else class="system-statistics-empty" data-testid="empty-state">
@@ -183,8 +192,14 @@
             </div>
           </div>
         </template>
-        <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
-          <n-gi :span="isMobile ? 1 : 2">
+        <n-grid
+          class="system-statistics-breakdown-grid"
+          data-testid="breakdown-grid"
+          :cols="stackedBreakdowns ? 1 : 2"
+          :x-gap="16"
+          :y-gap="16"
+        >
+          <n-gi :span="stackedBreakdowns ? 1 : 2">
             <div class="system-statistics-breakdown">
               <div class="system-statistics-breakdown__title">{{ t('systemStatistics.breakdowns.projects') }}</div>
               <n-data-table
@@ -196,7 +211,7 @@
               />
             </div>
           </n-gi>
-          <n-gi :span="isMobile ? 1 : 1">
+          <n-gi :span="1">
             <div class="system-statistics-breakdown">
               <div class="system-statistics-breakdown__title">{{ t('systemStatistics.breakdowns.providers') }}</div>
               <n-data-table
@@ -208,7 +223,7 @@
               />
             </div>
           </n-gi>
-          <n-gi :span="isMobile ? 1 : 1">
+          <n-gi :span="1">
             <div class="system-statistics-breakdown">
               <div class="system-statistics-breakdown__title">{{ t('systemStatistics.breakdowns.harnesses') }}</div>
               <n-data-table
@@ -285,7 +300,13 @@ import { formatLargeNumber } from '../utils/usageLimits'
 use([LineChart, GridComponent, TooltipComponent, CanvasRenderer])
 
 const { t } = useI18n()
-const { isMobile } = useBreakpoints()
+const { isMobile, width } = useBreakpoints()
+
+// Below this width the two half-width breakdown tables cannot fit their
+// columns (≈520px minimum) without horizontal overflow, so they stack
+// full-width like the mobile layout (review EEE-32 P2).
+const BREAKDOWN_STACK_BREAKPOINT = 1440
+const stackedBreakdowns = computed(() => width.value < BREAKDOWN_STACK_BREAKPOINT)
 
 const loading = ref(false)
 const refreshing = ref(false)
@@ -414,10 +435,12 @@ const codeCoverageItems = computed<MetricItem[]>(() => {
 interface TrendChartView {
   labelKey: string
   label: string
-  option: Record<string, unknown>
+  option: Record<string, unknown> | null
 }
 
 const MAX_TREND_BARS = 90
+
+const TREND_TIME_BASES = ['created_at', 'terminal_at', 'source_deleted_at', 'issue_created_at']
 
 const TREND_TIME_BASIS_LABELS: Record<string, string> = {
   created_at: 'systemStatistics.trends.taskCreated',
@@ -454,6 +477,14 @@ function formatBucketLabel(bucket: string, granularity: string, allBuckets: stri
   return `${prefix}${mm}-${dd}`
 }
 
+function formatTooltipBucket(bucket: string): string {
+  const date = parseBucketDate(bucket)
+  if (!date) return bucket
+  const mm = String(date.getMonth() + 1).padStart(2, '0')
+  const dd = String(date.getDate()).padStart(2, '0')
+  return `${date.getFullYear()}-${mm}-${dd}`
+}
+
 function buildTrendOption(
   values: SystemStatisticsTrendValue[],
   label: string,
@@ -469,6 +500,21 @@ function buildTrendOption(
       appendTo: 'body',
       textStyle: { fontSize: 12 },
       padding: [6, 10],
+      formatter: (params: unknown) => {
+        const list = (Array.isArray(params) ? params : [params]) as Array<{
+          axisValue?: unknown
+          name?: string
+          marker?: string
+          seriesName?: string
+          value?: unknown
+        }>
+        const first = list[0]
+        const head = first
+          ? formatTooltipBucket(String(first.axisValue ?? first.name ?? ''))
+          : ''
+        const rows = list.map(p => `${p.marker ?? ''}${p.seriesName}: ${p.value ?? ''}`).join('<br/>')
+        return `<div style="font-weight:600;margin-bottom:4px">${head}</div>${rows}`
+      },
     },
     grid: { top: 12, left: 36, right: 12, bottom: 28 },
     xAxis: {
@@ -495,7 +541,9 @@ function buildTrendOption(
         type: 'line',
         data: counts,
         smooth: true,
-        symbol: 'none',
+        // A single bucket has no line segment; render a visible point so the
+        // chart is not blank.
+        symbol: values.length < 2 ? 'circle' : 'none',
         lineStyle: { width: 2, color: palette.line },
         itemStyle: { color: palette.line },
         areaStyle: { color: palette.area },
@@ -505,19 +553,23 @@ function buildTrendOption(
 }
 
 const trendCharts = computed<TrendChartView[]>(() => {
-  if (!trends.value) return []
-  const granularity = trends.value.bucket ?? 'day'
-  return trends.value.series
-    .filter(series => series.values.length > 0)
-    .map(series => {
-      const values = series.values.slice(-MAX_TREND_BARS)
-      const label = t(TREND_TIME_BASIS_LABELS[series.time_basis] ?? series.time_basis)
-      return {
-        labelKey: series.time_basis,
-        label,
-        option: buildTrendOption(values, label, series.time_basis, granularity),
-      }
-    })
+  const trendData = trends.value
+  if (!trendData) return []
+  // No series at all → single global empty state. Otherwise render all four
+  // canonical series, showing a placeholder for those without data so the
+  // 4-chart layout stays stable and empty series stay visible.
+  if (trendData.series.length === 0) return []
+  const granularity = trendData.bucket ?? 'day'
+  return TREND_TIME_BASES.map(timeBasis => {
+    const series = trendData.series.find(s => s.time_basis === timeBasis)
+    const values = (series?.values ?? []).slice(-MAX_TREND_BARS)
+    const label = t(TREND_TIME_BASIS_LABELS[timeBasis] ?? timeBasis)
+    return {
+      labelKey: timeBasis,
+      label,
+      option: values.length > 0 ? buildTrendOption(values, label, timeBasis, granularity) : null,
+    }
+  })
 })
 
 function breakdownColumns(labelColumn: { title: string }): DataTableColumns<SystemStatisticsBreakdownRow> {
@@ -798,7 +850,14 @@ watch(range, () => {
   height: 220px;
 }
 
-.system-statistics-trend__empty,
+.system-statistics-trend__empty {
+  height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(15, 23, 42, 0.45);
+}
+
 .system-statistics-empty {
   padding: 20px 0;
   text-align: center;

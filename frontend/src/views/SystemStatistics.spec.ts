@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { h, ref } from 'vue'
+import { computed, h, ref } from 'vue'
 import SystemStatistics from './SystemStatistics.vue'
 
 const { mockApi, resetMockApi } = vi.hoisted(() => {
@@ -108,11 +108,13 @@ vi.mock('@vicons/ionicons5', () => ({
   RefreshOutline: {},
 }))
 
+const breakpoints = vi.hoisted(() => ({ width: 1200 }))
+
 vi.mock('../composables/useBreakpoints', () => ({
   useBreakpoints: () => ({
     isMobile: ref(false),
     isCompact: ref(false),
-    width: ref(1200),
+    width: computed(() => breakpoints.width),
   }),
 }))
 
@@ -182,6 +184,7 @@ let wrapper: ReturnType<typeof mount> | null = null
 
 beforeEach(() => {
   resetMockApi()
+  breakpoints.width = 1200
   mockApi.getSystemStatisticsOverview.mockResolvedValue({
     as_of: '2026-08-09T00:00:00Z',
     reporting_timezone: 'Asia/Shanghai',
@@ -438,15 +441,47 @@ describe('SystemStatistics', () => {
     expect(chartWrapper.exists()).toBe(true)
     const option = chartWrapper.props('option') as {
       xAxis: { data: string[]; axisLabel: { formatter: (v: string) => string } }
-      series: { data: number[] }[]
+      tooltip: { formatter: (params: unknown) => string }
+      series: { data: number[]; symbol: string }[]
     }
     // The axis keeps the full bucket for the tooltip, while the label is short.
     expect(option.xAxis.data).toEqual(['2026-08-01T00:00:00', '2026-08-02T00:00:00'])
     expect(option.xAxis.axisLabel.formatter('2026-08-02T00:00:00')).toBe('08-02')
     expect(option.series[0].data).toEqual([2, 3])
+    // Two or more buckets draw a line without point markers.
+    expect(option.series[0].symbol).toBe('none')
+    // The tooltip header uses a readable date instead of the raw ISO bucket.
+    const tooltipHtml = option.tooltip.formatter([
+      { axisValue: '2026-08-02T00:00:00', seriesName: 'Tasks Created', value: 3, marker: '' },
+    ])
+    expect(tooltipHtml).toContain('2026-08-02')
+    expect(tooltipHtml).toContain('Tasks Created: 3')
   })
 
-  it('shows the empty state when no trend series has buckets', async () => {
+  it('shows a visible point for a single-bucket trend series', async () => {
+    mockApi.getSystemStatisticsTrends.mockResolvedValue({
+      as_of: '2026-08-09T00:00:00Z',
+      reporting_timezone: 'Asia/Shanghai',
+      range: '90d',
+      bucket: 'day',
+      series: [
+        {
+          time_basis: 'created_at',
+          values: [{ bucket: '2026-08-02T00:00:00', task_count: 3 }],
+        },
+      ],
+    })
+
+    wrapper = mount(SystemStatistics)
+    await flushPromises()
+
+    const option = wrapper.findComponent({ name: 'VChart' }).props('option') as {
+      series: { symbol: string }[]
+    }
+    expect(option.series[0].symbol).toBe('circle')
+  })
+
+  it('renders placeholders for empty trend series to keep the 4-chart layout', async () => {
     mockApi.getSystemStatisticsTrends.mockResolvedValue({
       as_of: '2026-08-09T00:00:00Z',
       reporting_timezone: 'Asia/Shanghai',
@@ -457,7 +492,28 @@ describe('SystemStatistics', () => {
           time_basis: 'source_deleted_at',
           values: [],
         },
+        {
+          time_basis: 'created_at',
+          values: [{ bucket: '2026-08-02T00:00:00', task_count: 3 }],
+        },
       ],
+    })
+
+    wrapper = mount(SystemStatistics)
+    await flushPromises()
+
+    expect(wrapper.findAll('.v-chart-stub').length).toBe(1)
+    expect(wrapper.findAll('[data-testid="trend-empty"]').length).toBe(3)
+    expect(wrapper.find('[data-testid="empty-state"]').exists()).toBe(false)
+  })
+
+  it('shows the global empty state when there is no trend series at all', async () => {
+    mockApi.getSystemStatisticsTrends.mockResolvedValue({
+      as_of: '2026-08-09T00:00:00Z',
+      reporting_timezone: 'Asia/Shanghai',
+      range: 'all',
+      bucket: 'week',
+      series: [],
     })
 
     wrapper = mount(SystemStatistics)
@@ -465,5 +521,21 @@ describe('SystemStatistics', () => {
 
     expect(wrapper.findAll('.v-chart-stub').length).toBe(0)
     expect(wrapper.find('[data-testid="empty-state"]').exists()).toBe(true)
+  })
+
+  it('stacks the breakdown tables below the stack breakpoint to avoid overflow', async () => {
+    breakpoints.width = 1366
+    wrapper = mount(SystemStatistics)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="breakdown-grid"]').attributes('cols')).toBe('1')
+  })
+
+  it('keeps the two-column breakdown layout at wide viewports', async () => {
+    breakpoints.width = 1440
+    wrapper = mount(SystemStatistics)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="breakdown-grid"]').attributes('cols')).toBe('2')
   })
 })
