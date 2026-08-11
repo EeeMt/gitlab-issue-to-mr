@@ -158,28 +158,14 @@
             </div>
           </div>
         </template>
-        <div v-if="trendSeries.length" class="system-statistics-trends">
-          <div v-for="series in trendSeries" :key="series.labelKey" class="system-statistics-trend">
-            <div class="system-statistics-trend__title">{{ series.label }}</div>
-            <div v-if="series.bars.length" class="system-statistics-trend__bars">
-              <div
-                v-for="bar in series.bars"
-                :key="bar.label"
-                class="system-statistics-trend__bar-row"
-              >
-                <span class="system-statistics-trend__bar-label">{{ bar.label }}</span>
-                <div class="system-statistics-trend__bar-track">
-                  <div
-                    class="system-statistics-trend__bar-fill"
-                    :style="{ width: `${bar.width}%` }"
-                  />
-                </div>
-                <span class="system-statistics-trend__bar-value">{{ bar.value }}</span>
-              </div>
-            </div>
-            <div v-else class="system-statistics-trend__empty" data-testid="trend-empty">
-              {{ t('systemStatistics.trends.noData') }}
-            </div>
+        <div v-if="trendCharts.length" class="system-statistics-trends">
+          <div v-for="chart in trendCharts" :key="chart.labelKey" class="system-statistics-trend">
+            <div class="system-statistics-trend__title">{{ chart.label }}</div>
+            <v-chart
+              :option="chart.option"
+              autoresize
+              class="system-statistics-trend__chart"
+            />
           </div>
         </div>
         <div v-else class="system-statistics-empty" data-testid="empty-state">
@@ -197,8 +183,8 @@
             </div>
           </div>
         </template>
-        <n-grid :cols="isMobile ? 1 : 3" :x-gap="16" :y-gap="16">
-          <n-gi>
+        <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
+          <n-gi :span="isMobile ? 1 : 2">
             <div class="system-statistics-breakdown">
               <div class="system-statistics-breakdown__title">{{ t('systemStatistics.breakdowns.projects') }}</div>
               <n-data-table
@@ -206,11 +192,11 @@
                 :data="breakdowns?.projects ?? []"
                 size="small"
                 :bordered="false"
-                :max-height="320"
+                :max-height="440"
               />
             </div>
           </n-gi>
-          <n-gi>
+          <n-gi :span="isMobile ? 1 : 1">
             <div class="system-statistics-breakdown">
               <div class="system-statistics-breakdown__title">{{ t('systemStatistics.breakdowns.providers') }}</div>
               <n-data-table
@@ -218,11 +204,11 @@
                 :data="breakdowns?.providers ?? []"
                 size="small"
                 :bordered="false"
-                :max-height="320"
+                :max-height="440"
               />
             </div>
           </n-gi>
-          <n-gi>
+          <n-gi :span="isMobile ? 1 : 1">
             <div class="system-statistics-breakdown">
               <div class="system-statistics-breakdown__title">{{ t('systemStatistics.breakdowns.harnesses') }}</div>
               <n-data-table
@@ -230,7 +216,7 @@
                 :data="breakdowns?.harnesses ?? []"
                 size="small"
                 :bordered="false"
-                :max-height="320"
+                :max-height="440"
               />
             </div>
           </n-gi>
@@ -273,6 +259,11 @@ import {
   NSpin,
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
+import VChart from 'vue-echarts'
+import { use } from 'echarts/core'
+import { LineChart } from 'echarts/charts'
+import { GridComponent, TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
 import { RefreshOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import {
@@ -283,12 +274,15 @@ import {
   type SystemStatisticsBreakdowns,
   type SystemStatisticsDataState,
   type SystemStatisticsOverview,
+  type SystemStatisticsTrendValue,
   type SystemStatisticsTrends,
 } from '../api'
 import PageHeader from '../components/PageHeader.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDurationSec } from '../utils/format'
 import { formatLargeNumber } from '../utils/usageLimits'
+
+use([LineChart, GridComponent, TooltipComponent, CanvasRenderer])
 
 const { t } = useI18n()
 const { isMobile } = useBreakpoints()
@@ -417,45 +411,111 @@ const codeCoverageItems = computed<MetricItem[]>(() => {
   ]
 })
 
-interface TrendBar {
-  label: string
-  value: string
-  width: number
-}
-
-interface TrendSeriesView {
+interface TrendChartView {
   labelKey: string
   label: string
-  bars: TrendBar[]
+  option: Record<string, unknown>
 }
 
 const MAX_TREND_BARS = 90
 
-const trendSeries = computed<TrendSeriesView[]>(() => {
-  if (!trends.value) return []
-  const timeBasisLabels: Record<string, string> = {
-    created_at: t('systemStatistics.trends.taskCreated'),
-    terminal_at: t('systemStatistics.trends.taskFinished'),
-    source_deleted_at: t('systemStatistics.trends.taskDeleted'),
-    issue_created_at: t('systemStatistics.trends.issueCreated'),
+const TREND_TIME_BASIS_LABELS: Record<string, string> = {
+  created_at: 'systemStatistics.trends.taskCreated',
+  terminal_at: 'systemStatistics.trends.taskFinished',
+  source_deleted_at: 'systemStatistics.trends.taskDeleted',
+  issue_created_at: 'systemStatistics.trends.issueCreated',
+}
+
+const TREND_PALETTE: Record<string, { line: string; area: string }> = {
+  created_at: { line: '#2080f0', area: 'rgba(32, 128, 240, 0.12)' },
+  terminal_at: { line: '#36ad6a', area: 'rgba(54, 173, 106, 0.12)' },
+  source_deleted_at: { line: '#f0a020', area: 'rgba(240, 160, 32, 0.12)' },
+  issue_created_at: { line: '#8b5cf6', area: 'rgba(139, 92, 246, 0.12)' },
+}
+
+function parseBucketDate(bucket: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(bucket)
+  if (!m) return null
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+}
+
+function formatBucketLabel(bucket: string, granularity: string, allBuckets: string[]): string {
+  const date = parseBucketDate(bucket)
+  if (!date) return bucket
+  const year = date.getFullYear()
+  const multiYear = allBuckets.some(b => {
+    const d = parseBucketDate(b)
+    return d !== null && d.getFullYear() !== year
+  })
+  const mm = String(date.getMonth() + 1).padStart(2, '0')
+  const dd = String(date.getDate()).padStart(2, '0')
+  if (granularity === 'month') return `${year}-${mm}`
+  const prefix = multiYear ? `${String(year).slice(2)}-` : ''
+  return `${prefix}${mm}-${dd}`
+}
+
+function buildTrendOption(
+  values: SystemStatisticsTrendValue[],
+  label: string,
+  timeBasis: string,
+  granularity: string,
+): Record<string, unknown> {
+  const buckets = values.map(v => v.bucket)
+  const counts = values.map(v => v.task_count ?? v.issue_count ?? 0)
+  const palette = TREND_PALETTE[timeBasis] ?? TREND_PALETTE.created_at
+  return {
+    tooltip: {
+      trigger: 'axis',
+      appendTo: 'body',
+      textStyle: { fontSize: 12 },
+      padding: [6, 10],
+    },
+    grid: { top: 12, left: 36, right: 12, bottom: 28 },
+    xAxis: {
+      type: 'category',
+      data: buckets,
+      boundaryGap: false,
+      axisLine: { show: false },
+      axisTick: { show: false },
+      axisLabel: {
+        fontSize: 10,
+        color: '#94a3b8',
+        formatter: (v: string) => formatBucketLabel(v, granularity, buckets),
+      },
+    },
+    yAxis: {
+      type: 'value',
+      minInterval: 1,
+      splitLine: { lineStyle: { color: '#e2e8f0' } },
+      axisLabel: { fontSize: 10, color: '#94a3b8' },
+    },
+    series: [
+      {
+        name: label,
+        type: 'line',
+        data: counts,
+        smooth: true,
+        symbol: 'none',
+        lineStyle: { width: 2, color: palette.line },
+        itemStyle: { color: palette.line },
+        areaStyle: { color: palette.area },
+      },
+    ],
   }
+}
+
+const trendCharts = computed<TrendChartView[]>(() => {
+  if (!trends.value) return []
+  const granularity = trends.value.bucket ?? 'day'
   return trends.value.series
     .filter(series => series.values.length > 0)
     .map(series => {
       const values = series.values.slice(-MAX_TREND_BARS)
-      const max = Math.max(...values.map(v => v.task_count ?? v.issue_count ?? 0), 1)
-      const bars: TrendBar[] = values.map(v => {
-        const count = v.task_count ?? v.issue_count ?? 0
-        return {
-          label: String(v.bucket),
-          value: fmtNum(count),
-          width: max > 0 ? Math.max((count / max) * 100, 2) : 0,
-        }
-      })
+      const label = t(TREND_TIME_BASIS_LABELS[series.time_basis] ?? series.time_basis)
       return {
         labelKey: series.time_basis,
-        label: timeBasisLabels[series.time_basis] ?? series.time_basis,
-        bars,
+        label,
+        option: buildTrendOption(values, label, series.time_basis, granularity),
       }
     })
 })
@@ -465,37 +525,38 @@ function breakdownColumns(labelColumn: { title: string }): DataTableColumns<Syst
     {
       title: labelColumn.title,
       key: 'label',
+      minWidth: 140,
       render: (row) => row.label || t('systemStatistics.breakdowns.unknown'),
       ellipsis: { tooltip: true },
     },
     {
       title: t('systemStatistics.breakdowns.taskCount'),
       key: 'task_count',
-      width: 80,
+      width: 70,
       render: (row) => fmtNum(row.task_count),
     },
     {
       title: t('systemStatistics.breakdowns.successRate'),
       key: 'success_rate',
-      width: 90,
+      width: 80,
       render: (row) => fmtRate(row.success_rate),
     },
     {
       title: t('systemStatistics.breakdowns.deleted'),
       key: 'deleted_count',
-      width: 80,
+      width: 70,
       render: (row) => fmtNum(row.deleted_count),
     },
     {
       title: t('systemStatistics.breakdowns.tokens'),
       key: 'known_total_tokens',
-      width: 90,
+      width: 80,
       render: (row) => fmtNum(row.known_total_tokens),
     },
     {
       title: t('systemStatistics.breakdowns.changes'),
       key: 'known_total_changes',
-      width: 90,
+      width: 80,
       render: (row) => fmtNum(row.known_total_changes),
     },
   ]
@@ -715,7 +776,7 @@ watch(range, () => {
 
 .system-statistics-trends {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: repeat(2, 1fr);
   gap: 16px;
 }
 
@@ -732,46 +793,9 @@ watch(range, () => {
   margin-bottom: 10px;
 }
 
-.system-statistics-trend__bars {
-  max-height: 260px;
-  overflow-y: auto;
-}
-
-.system-statistics-trend__bar-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 2px 0;
-}
-
-.system-statistics-trend__bar-label {
-  flex: 0 0 96px;
-  font-size: 11px;
-  color: rgba(15, 23, 42, 0.55);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.system-statistics-trend__bar-track {
-  flex: 1;
-  height: 8px;
-  border-radius: 4px;
-  background: rgba(148, 163, 184, 0.18);
-  overflow: hidden;
-}
-
-.system-statistics-trend__bar-fill {
-  height: 100%;
-  border-radius: 4px;
-  background: linear-gradient(90deg, #2080f0, #36ad6a);
-}
-
-.system-statistics-trend__bar-value {
-  flex: 0 0 44px;
-  font-size: 11px;
-  text-align: right;
-  color: rgba(15, 23, 42, 0.7);
+.system-statistics-trend__chart {
+  width: 100%;
+  height: 220px;
 }
 
 .system-statistics-trend__empty,
@@ -800,6 +824,10 @@ watch(range, () => {
     margin-left: 0;
     flex-direction: column;
     gap: 4px;
+  }
+
+  .system-statistics-trends {
+    grid-template-columns: 1fr;
   }
 }
 </style>

@@ -32,6 +32,7 @@ from app.api.system_statistics_queries import (
     build_task_finished_trend,
     pick_bucket_for_all,
 )
+from app.core.projects import build_project_lookup
 from app.core.utcnow import utcnow
 from app.database import get_db
 from app.models import SystemStatisticsMetadata
@@ -372,12 +373,25 @@ async def get_system_statistics_breakdowns(
     provider_rows = list((await db.execute(build_provider_breakdown(dialect, all_tasks))).all())
     harness_rows = list((await db.execute(build_harness_breakdown(dialect, all_tasks))).all())
 
+    # Resolve real project names from the cached GitLab project list; fall back
+    # to "Project {id}" when the name is unavailable (§10), so deleted projects
+    # still show a stable group label.
+    project_lookup = await build_project_lookup()
+
+    def _project_label(project_key) -> str | None:
+        if project_key is None:
+            return None
+        pid = int(project_key)
+        meta = project_lookup.get(pid) or {}
+        name = meta.get("project_name") or meta.get("project_path_with_namespace")
+        return name or f"Project {pid}"
+
     projects = [
         {
             **_serialize_breakdown_row(
                 row,
                 key=str(row.key) if row.key is not None else None,
-                label=f"Project {row.key}" if row.key is not None else None,
+                label=_project_label(row.key),
             ),
             "project_id": int(row.key) if row.key is not None else None,
         }

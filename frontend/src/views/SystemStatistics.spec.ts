@@ -88,6 +88,16 @@ vi.mock('../api', () => ({
   getSystemStatisticsBreakdowns: mockApi.getSystemStatisticsBreakdowns,
 }))
 
+vi.mock('vue-echarts', () => ({
+  default: {
+    name: 'VChart',
+    props: ['option', 'autoresize'],
+    setup(_props: any, { attrs }: any) {
+      return () => h('div', { ...attrs, class: 'v-chart-stub' })
+    },
+  },
+}))
+
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
     t: (key: string) => key,
@@ -402,5 +412,58 @@ describe('SystemStatistics', () => {
     expect(text).toContain('systemStatistics.lifetime.knownExecutionSeconds')
     expect(text).toContain('systemStatistics.lifetime.failureRate')
     expect(text).toContain('—')
+  })
+
+  it('renders a line chart per trend series with short bucket axis labels', async () => {
+    mockApi.getSystemStatisticsTrends.mockResolvedValue({
+      as_of: '2026-08-09T00:00:00Z',
+      reporting_timezone: 'Asia/Shanghai',
+      range: '90d',
+      bucket: 'day',
+      series: [
+        {
+          time_basis: 'created_at',
+          values: [
+            { bucket: '2026-08-01T00:00:00', task_count: 2 },
+            { bucket: '2026-08-02T00:00:00', task_count: 3 },
+          ],
+        },
+      ],
+    })
+
+    wrapper = mount(SystemStatistics)
+    await flushPromises()
+
+    const chartWrapper = wrapper.findComponent({ name: 'VChart' })
+    expect(chartWrapper.exists()).toBe(true)
+    const option = chartWrapper.props('option') as {
+      xAxis: { data: string[]; axisLabel: { formatter: (v: string) => string } }
+      series: { data: number[] }[]
+    }
+    // The axis keeps the full bucket for the tooltip, while the label is short.
+    expect(option.xAxis.data).toEqual(['2026-08-01T00:00:00', '2026-08-02T00:00:00'])
+    expect(option.xAxis.axisLabel.formatter('2026-08-02T00:00:00')).toBe('08-02')
+    expect(option.series[0].data).toEqual([2, 3])
+  })
+
+  it('shows the empty state when no trend series has buckets', async () => {
+    mockApi.getSystemStatisticsTrends.mockResolvedValue({
+      as_of: '2026-08-09T00:00:00Z',
+      reporting_timezone: 'Asia/Shanghai',
+      range: 'all',
+      bucket: 'week',
+      series: [
+        {
+          time_basis: 'source_deleted_at',
+          values: [],
+        },
+      ],
+    })
+
+    wrapper = mount(SystemStatistics)
+    await flushPromises()
+
+    expect(wrapper.findAll('.v-chart-stub').length).toBe(0)
+    expect(wrapper.find('[data-testid="empty-state"]').exists()).toBe(true)
   })
 })

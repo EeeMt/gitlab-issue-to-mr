@@ -1136,14 +1136,29 @@ class LifecycleStatsAPITests(unittest.TestCase):
 
     def test_breakdowns_for_admin(self):
         client, _ = self._client(user=self._user("platform_admin"))
-        r = client.get("/api/admin/system-statistics/breakdowns")
+        with patch(
+            "app.api.system_statistics.build_project_lookup",
+            new=AsyncMock(return_value={1: {"project_name": "Acme Corp"}}),
+        ):
+            r = client.get("/api/admin/system-statistics/breakdowns")
         self.assertEqual(r.status_code, 200)
         data = r.json()
-        self.assertEqual(data["projects"][0]["label"], "Project 1")
+        self.assertEqual(data["projects"][0]["label"], "Acme Corp")
         self.assertEqual(data["projects"][0]["task_count"], 2)
         provider_map = {p["provider_id"]: p for p in data["providers"]}
         self.assertEqual(provider_map[10]["label"], "Snap")
         self.assertEqual(provider_map[10]["known_total_changes"], 7)
+
+    def test_breakdown_project_label_falls_back_when_lookup_missing(self):
+        client, _ = self._client(user=self._user("platform_admin"))
+        with patch(
+            "app.api.system_statistics.build_project_lookup",
+            new=AsyncMock(return_value={}),
+        ):
+            r = client.get("/api/admin/system-statistics/breakdowns")
+        self.assertEqual(r.status_code, 200)
+        data = r.json()
+        self.assertEqual(data["projects"][0]["label"], "Project 1")
 
     def test_rejects_non_admin(self):
         client, _ = self._client(user=self._user("platform_user"))
