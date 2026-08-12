@@ -607,8 +607,8 @@ describe('TaskFormDrawer', () => {
       const nameRowChildren = nameRowEl ? Array.from(nameRowEl.children) : []
 
       // The copy button is the immediate next sibling of the name tooltip trigger —
-      // a structural assertion that still fails if the button is later pushed to the
-      // row's right edge (e.g. with `margin-left: auto` or a spacer).
+      // a structural assertion that still fails if a spacer is ever inserted between
+      // them. (A `margin-left: auto` push-to-right would not change the children order.)
       expect(nameRowEl).not.toBeNull()
       expect(nameRowChildren[1]).toBe(copyEl)
       expect(nameRowChildren[0]!.querySelector('.skill-option__name')).toBe(nameEl)
@@ -631,6 +631,29 @@ describe('TaskFormDrawer', () => {
       // The full-row wrapper forwards the click to the option node, so clicking
       // the name-row whitespace (outside the name itself) selects the option.
       await option!.find('.skill-option__name-row').trigger('click')
+      await nextTick()
+
+      expect(mockOptionNodeClick).toHaveBeenCalledTimes(1)
+      expect(clipboardWrite).not.toHaveBeenCalled()
+    })
+
+    it('selects the option exactly once when clicking the name itself', async () => {
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const option = wrapper.findAll('[data-testid="skill-select-option"]')
+        .find(item => item.attributes('data-value') === '11')
+      const nameEl = option!.find('.skill-option__name')
+      expect(nameEl.exists()).toBe(true)
+      const nodeEl = nameEl.find('span')
+      expect(nodeEl.exists()).toBe(true)
+
+      // The node's own handler toggles once; the wrapper forwards nothing because
+      // the click target is inside `node`. Guards against a silent double-toggle
+      // if the `node.el.contains` check is ever removed.
+      await nodeEl.trigger('click')
       await nextTick()
 
       expect(mockOptionNodeClick).toHaveBeenCalledTimes(1)
