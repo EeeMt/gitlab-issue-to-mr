@@ -305,7 +305,11 @@ const { isMobile, width } = useBreakpoints()
 // Below this width the two half-width breakdown tables cannot fit their
 // columns (≈520px minimum) without horizontal overflow, so they stack
 // full-width like the mobile layout (review EEE-32 P2).
-const BREAKDOWN_STACK_BREAKPOINT = 1440
+// The card chrome (12px padding + 1px border per side) takes 26px off each
+// half-column, so with the sidebar expanded the 2-col layout only becomes
+// safe once a half-column is ≥520px wide — which happens at ≈1468px
+// viewport. 1470 keeps a small margin (rework EEE-32 Round 3 P2).
+const BREAKDOWN_STACK_BREAKPOINT = 1470
 const stackedBreakdowns = computed(() => width.value < BREAKDOWN_STACK_BREAKPOINT)
 
 const loading = ref(false)

@@ -531,8 +531,19 @@ describe('SystemStatistics', () => {
     expect(wrapper.find('[data-testid="breakdown-grid"]').attributes('cols')).toBe('1')
   })
 
-  it('keeps the two-column breakdown layout at wide viewports', async () => {
+  it('stacks the breakdown tables at 1440 to prevent silent column clipping', async () => {
+    // Round-3 review: with the breakdown card chrome (12px padding + 1px
+    // border per side) a half-width table only fits its ≈520px columns once
+    // the viewport is ≥1470px wide, so 1440 must stay stacked.
     breakpoints.width = 1440
+    wrapper = mount(SystemStatistics)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="breakdown-grid"]').attributes('cols')).toBe('1')
+  })
+
+  it('keeps the two-column breakdown layout at wide viewports', async () => {
+    breakpoints.width = 1500
     wrapper = mount(SystemStatistics)
     await flushPromises()
 
