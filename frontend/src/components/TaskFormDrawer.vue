@@ -931,7 +931,7 @@ function renderSkillOption({ node, option, selected }: { node: VNode; option: Se
       }
     },
   }, [
-    h(NIcon, { size: 14 }, { default: () => copied ? h(Checkmark) : h(CopyOutline) }),
+    h(NIcon, { size: 14 }, { default: () => copied ? h(CheckmarkCircleOutline) : h(CopyOutline) }),
   ])
   return h('div', { class: 'skill-option', onClick: forwardOptionClick }, [
     h('div', { class: 'skill-option__name-row' }, [
@@ -939,8 +939,10 @@ function renderSkillOption({ node, option, selected }: { node: VNode; option: Se
         trigger: () => h('div', { class: 'skill-option__name' }, [node]),
         default: () => description,
       }),
-      copyButton,
-      selected ? h(NIcon, { class: 'skill-option__check', size: 16 }, { default: () => h(Checkmark) }) : null,
+      h('span', { class: 'skill-option__actions' }, [
+        copyButton,
+        selected ? h(NIcon, { class: 'skill-option__check', size: 16 }, { default: () => h(Checkmark) }) : null,
+      ]),
     ]),
     description ? h(NTooltip, tooltipProps, {
       trigger: () => h('div', { class: 'skill-option__desc' }, description),
@@ -977,7 +979,7 @@ function renderSkillTag({ option, handleClose }: { option: SelectOption; handleC
           }
         },
       }, [
-        h(NIcon, { size: 12 }, { default: () => copied ? h(Checkmark) : h(CopyOutline) }),
+        h(NIcon, { size: 14 }, { default: () => copied ? h(CheckmarkCircleOutline) : h(CopyOutline) }),
       ]),
     ],
   })
@@ -2903,7 +2905,7 @@ onBeforeUnmount(() => {
 
 .skill-option__name {
   display: flex;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   align-items: center;
   max-width: 100%;
   min-width: 0;
@@ -2929,10 +2931,17 @@ onBeforeUnmount(() => {
   display: none;
 }
 
-/* Selected-state checkmark: pushed to the row's far right, after the copy button. */
+.skill-option__actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* Selected-state checkmark stays in a distinct trailing slot after copy feedback. */
 .skill-option__check {
   flex: 0 0 auto;
-  margin-left: auto;
   color: var(--n-option-check-color, #18a058);
 }
 
@@ -2952,7 +2961,10 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 2px;
+  box-sizing: border-box;
+  width: 22px;
+  height: 22px;
+  padding: 0;
   border: 0;
   border-radius: 4px;
   background: transparent;
@@ -2976,6 +2988,12 @@ onBeforeUnmount(() => {
 .skill-option__copy--copied,
 .skill-tag__copy--copied {
   color: var(--n-primary-color, #18a058);
+  background: rgba(24, 160, 88, 0.1);
+}
+
+.skill-option__copy--copied:hover,
+.skill-tag__copy--copied:hover {
+  background: rgba(24, 160, 88, 0.16);
 }
 
 .skill-tag__name {

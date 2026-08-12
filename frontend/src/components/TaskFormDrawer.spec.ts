@@ -592,7 +592,7 @@ describe('TaskFormDrawer', () => {
       expect(mockOptionNodeClick).not.toHaveBeenCalled()
     })
 
-    it('positions the option copy button next to the name, outside the tooltip trigger', async () => {
+    it('positions the option copy action before the selected-state checkmark', async () => {
       await mountDrawer()
       await openDrawer()
       await wrapper.get('.execution-environment__summary').trigger('click')
@@ -604,14 +604,17 @@ describe('TaskFormDrawer', () => {
       const nameRowEl = optionEl.querySelector('.skill-option__name-row')
       const copyEl = optionEl.querySelector('.skill-option__copy')
       const nameEl = optionEl.querySelector('.skill-option__name')
+      const actionsEl = optionEl.querySelector('.skill-option__actions')
       const nameRowChildren = nameRowEl ? Array.from(nameRowEl.children) : []
+      const actionChildren = actionsEl ? Array.from(actionsEl.children) : []
 
-      // The copy button is the immediate next sibling of the name tooltip trigger —
-      // a structural assertion that still fails if a spacer is ever inserted between
-      // them. (A `margin-left: auto` push-to-right would not change the children order.)
+      // Keep the trailing controls together in the required visual order. This avoids
+      // a large elastic gap between copy and selected-state feedback.
       expect(nameRowEl).not.toBeNull()
-      expect(nameRowChildren[1]).toBe(copyEl)
+      expect(nameRowChildren[1]).toBe(actionsEl)
       expect(nameRowChildren[0]!.querySelector('.skill-option__name')).toBe(nameEl)
+      expect(actionChildren[0]).toBe(copyEl)
+      expect(actionChildren[1]?.classList.contains('skill-option__check')).toBe(true)
       // …and it stays outside the name tooltip trigger, so hovering the button
       // cannot open the description tooltip.
       expect(nameEl).not.toBeNull()
