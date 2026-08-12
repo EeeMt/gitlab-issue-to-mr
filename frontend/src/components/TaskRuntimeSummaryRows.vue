@@ -235,14 +235,38 @@
                 <div v-if="(workerSummary.skills ?? []).length" class="metadata-summary-popover__entries metadata-summary-popover__entries--compact">
                   <div v-for="skill in workerSummary.skills ?? []" :key="skill.name" class="metadata-summary-popover__entry">
                     <div class="metadata-summary-popover__entry-heading">
-                      <code>{{ skill.name }}</code>
+                      <n-tooltip
+                        trigger="hover"
+                        placement="right"
+                        :content-style="issueDetailTooltipContentStyle"
+                        :theme-overrides="issueDetailTooltipThemeOverrides"
+                        :disabled="!skill.description"
+                      >
+                        <template #trigger>
+                          <code class="metadata-summary-popover__entry-name">{{ skill.name }}</code>
+                        </template>
+                        {{ skill.description }}
+                      </n-tooltip>
                       <n-tag size="tiny" :bordered="false">
                         {{ workerSummary.skill_selection_source === 'task'
                           ? t('taskView.workerSkillsTaskOverride')
                           : t('taskView.workerSkillsProfileDefault') }}
                       </n-tag>
                     </div>
-                    <div class="metadata-summary-popover__entry-detail">{{ skill.description }}</div>
+                    <n-tooltip
+                      trigger="hover"
+                      placement="right"
+                      :content-style="issueDetailTooltipContentStyle"
+                      :theme-overrides="issueDetailTooltipThemeOverrides"
+                      :disabled="!skill.description"
+                    >
+                      <template #trigger>
+                        <div class="metadata-summary-popover__entry-detail metadata-summary-popover__entry-detail--skill">
+                          {{ skill.description }}
+                        </div>
+                      </template>
+                      {{ skill.description }}
+                    </n-tooltip>
                   </div>
                 </div>
                 <div v-else class="metadata-summary-popover__empty">
@@ -313,7 +337,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useWindowSize } from '@vueuse/core'
-import { NButton, NIcon, NPopover, NSpin, NTag } from 'naive-ui'
+import { NButton, NIcon, NPopover, NSpin, NTag, NTooltip } from 'naive-ui'
 import { ChevronForwardOutline, ServerOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import {
@@ -324,6 +348,7 @@ import {
   type TaskWorkerRuntimeSummary
 } from '../api'
 import { formatDateTimeUtc8 } from '../utils/datetime'
+import { issueDetailTooltipContentStyle, issueDetailTooltipThemeOverrides } from './issue-detail/tooltip'
 
 type SummaryLoadState = 'idle' | 'loading' | 'loaded' | 'error'
 type RuntimePopoverPlacement = 'left-start' | 'left-end'
@@ -851,6 +876,11 @@ function formatDate(dateStr: string): string {
   word-break: break-word;
 }
 
+.metadata-summary-popover__entry-heading .metadata-summary-popover__entry-name {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .metadata-summary-popover__entry-detail {
   min-width: 0;
   color: var(--n-text-color-3, #8a8f98);
@@ -859,6 +889,16 @@ function formatDate(dateStr: string): string {
   line-height: 1.4;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.metadata-summary-popover__entry-detail--skill {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .metadata-summary-popover__empty {

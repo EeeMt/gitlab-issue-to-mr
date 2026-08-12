@@ -883,6 +883,54 @@ describe('TaskView', () => {
       expect(mockApi.getTaskWorkerRuntimeSummary).toHaveBeenCalledOnce()
     })
 
+    it('shows worker skill names with their full description in hover tooltips', async () => {
+      ;(mockApi.getTaskWorkerRuntimeSummary as Mock).mockResolvedValue({
+        snapshot_available: true,
+        worker_profile_id: 3,
+        worker_profile_name: 'Java 21 Maven Worker',
+        image: 'registry.example.com/codify/worker-java21-maven:2026.07',
+        runtime_mode: 'mounted_kit',
+        worker_kit_version: '2026.07.18',
+        worker_kit_path: '/srv/codify/worker-kits/2026.07.18',
+        codegraph_enabled: true,
+        mounts: [],
+        environment_variables: [],
+        skills: [
+          { id: 11, name: 'review', description: 'Reviews every change for consistency with repository conventions before the run is considered complete.' },
+          { id: 12, name: 'test', description: 'Runs the focused test suite.' },
+        ],
+        skill_selection_source: 'task',
+        pre_script_configured: false,
+        post_script_configured: false,
+        snapshot_created_at: '2026-04-01T10:00:00Z',
+      })
+
+      await mountComponent({
+        worker_profile_id: 3,
+        worker_profile_name: 'Java 21 Maven Worker',
+        worker_image: 'registry.example.com/codify/worker-java21-maven:2026.07',
+      })
+
+      const workerTrigger = wrapper.find('.metadata-summary-trigger--worker')
+      vi.spyOn(workerTrigger.element, 'getBoundingClientRect').mockReturnValue({
+        top: 500,
+        bottom: 532,
+      } as DOMRect)
+      await workerTrigger.trigger('click')
+      await flushPromises()
+
+      const workerPopover = wrapper.find('[data-testid="worker-summary-popover"]')
+      const skillEntries = workerPopover.findAll('.metadata-summary-popover__entry-name')
+      expect(skillEntries).toHaveLength(2)
+      expect(skillEntries[0].text()).toBe('review')
+      expect(workerPopover.text()).toContain('review')
+      expect(workerPopover.text()).toContain('Runs the focused test suite.')
+
+      const tooltips = workerPopover.findAll('.n-tooltip')
+      expect(tooltips.length).toBeGreaterThan(0)
+      expect(tooltips.some(t => t.text().includes('Reviews every change for consistency'))).toBe(true)
+    })
+
     it('keeps a failed model-service summary request retryable inside the popover', async () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
       ;(mockApi.getTaskModelServiceSummary as Mock)

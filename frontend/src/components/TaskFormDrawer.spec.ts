@@ -3,7 +3,7 @@ import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { h, ref, nextTick } from 'vue'
 import TaskFormDrawer from './TaskFormDrawer.vue'
 
-const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
+const { mockApi, resetMockApi, mockMessage, clipboardWrite } = vi.hoisted(() => {
   const mock = {
     createTask: vi.fn<() => Promise<any>>(),
     updateTask: vi.fn<() => Promise<any>>(),
@@ -22,7 +22,8 @@ const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
     Object.values(mock).forEach(fn => fn.mockReset())
   }
   const mockMsg = { error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn() }
-  return { mockApi: mock, resetMockApi, mockMessage: mockMsg }
+  const clipboardWrite = vi.fn<() => Promise<void>>()
+  return { mockApi: mock, resetMockApi, mockMessage: mockMsg, clipboardWrite }
 })
 
 vi.mock('../i18n', () => ({ currentLocale: ref('en') }))
@@ -218,22 +219,59 @@ vi.mock('naive-ui', () => ({
   },
   NSelect: {
     name: 'NSelect',
-    props: ['value', 'options', 'clearable', 'placeholder', 'multiple', 'disabled'],
+    props: {
+      value: null,
+      options: null,
+      clearable: null,
+      placeholder: null,
+      multiple: Boolean,
+      disabled: null,
+      renderOption: null,
+      renderTag: null,
+    },
     emits: ['update:value'],
     setup(props: any, { attrs, emit }: any) {
-      return () => h('select', {
-        ...attrs,
-        class: 'n-select',
-        multiple: props.multiple,
-        disabled: props.disabled,
-        value: props.value ?? '',
-        onChange: (event: Event) => {
-          const select = event.target as HTMLSelectElement
-          emit('update:value', props.multiple
-            ? Array.from(select.selectedOptions).map(option => option.value)
-            : Number(select.value) || null)
-        },
-      }, props.options?.map((option: any) => h('option', { value: option.value, disabled: option.disabled }, option.label)))
+      return () => {
+        const nativeSelect = h('select', {
+          ...attrs,
+          class: 'n-select',
+          multiple: props.multiple,
+          disabled: props.disabled,
+          value: props.value ?? '',
+          onChange: (event: Event) => {
+            const select = event.target as HTMLSelectElement
+            emit('update:value', props.multiple
+              ? Array.from(select.selectedOptions).map(option => option.value)
+              : Number(select.value) || null)
+          },
+        }, props.options?.map((option: any) => h('option', { value: option.value, disabled: option.disabled }, option.label)))
+
+        if (!props.multiple) return nativeSelect
+
+        const selectedValues = Array.isArray(props.value) ? props.value : []
+        const tags = selectedValues.map((value: any) => {
+          const option = props.options?.find((o: any) => o.value === value)
+          if (!option) return null
+          return h('span', {
+            class: 'n-select-tag',
+            'data-testid': 'skill-select-tag',
+            'data-value': String(value),
+          }, props.renderTag ? props.renderTag({ option, handleClose: () => {} }) : option.label)
+        })
+        const menu = h('div', { class: 'n-select-menu' },
+          props.options?.map((option: any) =>
+            h('div', {
+              class: 'n-select-option',
+              'data-testid': 'skill-select-option',
+              'data-value': String(option.value),
+              'data-disabled': option.disabled ? 'true' : 'false',
+            }, props.renderOption
+              ? props.renderOption({ node: h('span', option.label), option, selected: selectedValues.includes(option.value) })
+              : option.label)
+          )
+        )
+        return h('div', { class: 'n-select n-select--multiple' }, [h('div', { class: 'n-select-tags' }, tags), nativeSelect, menu])
+      }
     },
   },
   NSpin: {
@@ -282,7 +320,9 @@ vi.mock('@vicons/ionicons5', () => {
     CalendarOutline: icon('CalendarOutline'),
     CloseOutline: icon('CloseOutline'),
     CodeSlashOutline: icon('CodeSlashOutline'),
+    Checkmark: icon('Checkmark'),
     CheckmarkCircleOutline: icon('CheckmarkCircleOutline'),
+    CopyOutline: icon('CopyOutline'),
     DocumentTextOutline: icon('DocumentTextOutline'),
     InformationCircleOutline: icon('InformationCircleOutline'),
     FlashOutline: icon('FlashOutline'),
@@ -384,6 +424,12 @@ describe('TaskFormDrawer', () => {
     vi.useRealTimers()
     resetMockApi()
     Object.values(mockMessage).forEach(fn => fn.mockReset())
+    clipboardWrite.mockReset()
+    clipboardWrite.mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: clipboardWrite },
+    })
     mockApi.getPromptTemplates.mockResolvedValue(mockTemplates)
     mockApi.getProviders.mockResolvedValue(mockProviders)
     mockApi.getWorkerProfiles.mockResolvedValue(mockWorkerProfiles)
@@ -501,6 +547,77 @@ describe('TaskFormDrawer', () => {
         .toContain('createTask.skillsUnsupportedHint')
       const controls = wrapper.findAll('[data-testid="task-skill-selection"] .n-switch')
       expect(controls[0].attributes('disabled')).toBeDefined()
+    })
+
+    it('shows the skill name and single-line description with a hover tooltip in dropdown options', async () => {
+      mockApi.getSkills.mockResolvedValue([
+        { id: 11, name: 'review', description: 'Review changes', version_id: 101 },
+        { id: 12, name: 'test', description: 'Run focused tests', version_id: 102 },
+      ])
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const option = wrapper.findAll('[data-testid="skill-select-option"]')
+        .find(item => item.attributes('data-value') === '11')
+      expect(option).toBeDefined()
+      expect(option!.text()).toContain('review')
+      expect(option!.text()).toContain('Review changes')
+      const tooltip = option!.find('.n-tooltip')
+      expect(tooltip.exists()).toBe(true)
+      expect(tooltip.text()).toContain('Review changes')
+    })
+
+    it('copies the bare skill name from the dropdown option copy button', async () => {
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const option = wrapper.findAll('[data-testid="skill-select-option"]')
+        .find(item => item.attributes('data-value') === '11')
+      const copyButton = option!.find('.skill-option__copy')
+      expect(copyButton.attributes('aria-label')).toBe('createTask.copySkillName')
+      await copyButton.trigger('click')
+      await flushPromises()
+      await nextTick()
+
+      expect(clipboardWrite).toHaveBeenCalledWith('review')
+      expect(mockMessage.success).toHaveBeenCalledWith('taskView.copied')
+      expect(option!.find('.skill-option__copy').classes()).toContain('skill-option__copy--copied')
+    })
+
+    it('copies a skill name from the selected tag copy button', async () => {
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const tag = wrapper.find('[data-testid="skill-select-tag"]')
+      expect(tag.exists()).toBe(true)
+      const copyButton = tag.find('.skill-tag__copy')
+      expect(copyButton.exists()).toBe(true)
+      expect(copyButton.attributes('aria-label')).toBe('createTask.copySkillName')
+      await copyButton.trigger('click')
+      await flushPromises()
+
+      expect(clipboardWrite).toHaveBeenCalledWith('review')
+      expect(mockMessage.success).toHaveBeenCalledWith('taskView.copied')
+    })
+
+    it('shows an error toast when copying a skill name fails', async () => {
+      clipboardWrite.mockRejectedValueOnce(new Error('denied'))
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const tag = wrapper.find('[data-testid="skill-select-tag"]')
+      await tag.find('.skill-tag__copy').trigger('click')
+      await flushPromises()
+
+      expect(mockMessage.error).toHaveBeenCalledWith('taskView.copyFailed')
     })
 
     it('does not require code changes by default', async () => {
@@ -1471,6 +1588,36 @@ describe('TaskFormDrawer', () => {
       await flushPromises()
 
       expect(mockApi.updateTask).toHaveBeenCalledWith(42, { skill_ids: [] })
+    })
+
+    it('renders a frozen snapshot skill without a description and copies its bare name', async () => {
+      await mountEditDrawer({
+        worker_profile_id: 3,
+        worker_runtime_mode: 'mounted_kit',
+        worker_kit_version: '0.3.5',
+        skill_selection_source: 'task',
+        skill_ids: [],
+        skill_snapshots: [{
+          id: 99,
+          name: 'deleted-review',
+          description: 'Deleted after task creation',
+          version_id: 91,
+        }],
+      })
+      await wrapper.setProps({ show: true })
+      await flushPromises()
+
+      const option = wrapper.findAll('[data-testid="skill-select-option"]')
+        .find(item => item.attributes('data-value') === '99')
+      expect(option).toBeDefined()
+      expect(option!.text()).toContain('deleted-review')
+      expect(option!.text()).not.toContain('Deleted after task creation')
+      expect(option!.find('.skill-option__desc').exists()).toBe(false)
+      await option!.find('.skill-option__copy').trigger('click')
+      await flushPromises()
+
+      expect(clipboardWrite).toHaveBeenCalledWith('deleted-review')
+      expect(mockMessage.success).toHaveBeenCalledWith('taskView.copied')
     })
 
     it('warns when current Worker Profile defaults differ from the task snapshot', async () => {

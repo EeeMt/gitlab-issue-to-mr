@@ -608,6 +608,8 @@
                         :disabled="inheritProfileSkills || !taskSkillSelectionSupported"
                         :options="taskSkillOptions"
                         :placeholder="t('createTask.selectSkills')"
+                        :render-option="renderSkillOption"
+                        :render-tag="renderSkillTag"
                         @update:value="handleSelectedSkillIdsUpdate"
                       />
                       <div
@@ -722,10 +724,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, toRef, useAttrs, useId, h } from 'vue'
+import { ref, computed, watch, onBeforeUnmount, onMounted, toRef, useAttrs, useId, h, type VNode } from 'vue'
 import {
   NButton, NDrawer, NDrawerContent, NForm, NFormItem,
-  NDatePicker, NInput, NSelect, NAlert, NTooltip, NSwitch, NSpin, NIcon, NScrollbar, NTag,
+  NDatePicker, NInput, NSelect, NAlert, NTooltip, NSwitch, NSpin, NIcon, NScrollbar, NTag, useMessage,
   type SelectOption,
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -738,6 +740,8 @@ import {
   CodeSlashOutline,
   BulbOutline,
   CheckmarkCircleOutline,
+  Checkmark,
+  CopyOutline,
   FlashOutline,
   TimeOutline
 } from '@vicons/ionicons5'
@@ -822,6 +826,110 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const { isMobile } = useBreakpoints()
 const attrs = useAttrs()
+
+// --- Skill selection: copy name + hover description (EEE-33) ---
+const message = useMessage()
+const copiedSkillValue = ref<number | string | null>(null)
+let copiedSkillTimer: ReturnType<typeof setTimeout> | undefined
+
+async function copySkillName(value: number | string, name: string) {
+  try {
+    await navigator.clipboard.writeText(name)
+    message.success(t('taskView.copied'))
+    copiedSkillValue.value = value
+    if (copiedSkillTimer) clearTimeout(copiedSkillTimer)
+    copiedSkillTimer = setTimeout(() => {
+      copiedSkillValue.value = null
+    }, 2000)
+  } catch {
+    message.error(t('taskView.copyFailed'))
+  }
+}
+
+function skillOptionName(option: SelectOption): string {
+  const skillName = option.skillName
+  if (typeof skillName === 'string' && skillName.trim()) return skillName
+  return typeof option.label === 'string' ? option.label : String(option.value ?? '')
+}
+
+function skillOptionDescription(option: SelectOption): string {
+  const description = option.description
+  return typeof description === 'string' && description.trim() ? description : ''
+}
+
+function renderSkillOption({ node, option }: { node: VNode; option: SelectOption; selected: boolean }) {
+  const name = skillOptionName(option)
+  const description = skillOptionDescription(option)
+  const copied = copiedSkillValue.value === option.value
+  return h('div', { class: 'skill-option' }, [
+    h(NTooltip, {
+      trigger: 'hover',
+      placement: 'right',
+      disabled: !description,
+      contentStyle: issueDetailTooltipContentStyle,
+      themeOverrides: issueDetailTooltipThemeOverrides,
+    }, {
+      trigger: () => h('div', { class: 'skill-option__main' }, [
+        node,
+        description ? h('div', { class: 'skill-option__desc' }, description) : null,
+      ]),
+      default: () => description,
+    }),
+    h('button', {
+      type: 'button',
+      class: ['skill-option__copy', { 'skill-option__copy--copied': copied }],
+      'aria-label': t('createTask.copySkillName'),
+      tabindex: -1,
+      onClick: (event: MouseEvent) => {
+        event.stopPropagation()
+        void copySkillName(option.value ?? '', name)
+      },
+      onMousedown: (event: MouseEvent) => event.stopPropagation(),
+      onKeydown: (event: KeyboardEvent) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.stopPropagation()
+          event.preventDefault()
+          void copySkillName(option.value ?? '', name)
+        }
+      },
+    }, [
+      h(NIcon, { size: 14 }, { default: () => copied ? h(Checkmark) : h(CopyOutline) }),
+    ]),
+  ])
+}
+
+function renderSkillTag({ option, handleClose }: { option: SelectOption; handleClose: () => void }) {
+  const name = skillOptionName(option)
+  const copied = copiedSkillValue.value === option.value
+  return h(NTag, {
+    size: 'small',
+    closable: true,
+    onClose: () => handleClose(),
+  }, {
+    default: () => [
+      h('span', { class: 'skill-tag__name' }, name),
+      h('button', {
+        type: 'button',
+        class: ['skill-tag__copy', { 'skill-tag__copy--copied': copied }],
+        'aria-label': t('createTask.copySkillName'),
+        onClick: (event: MouseEvent) => {
+          event.stopPropagation()
+          void copySkillName(option.value ?? '', name)
+        },
+        onMousedown: (event: MouseEvent) => event.stopPropagation(),
+        onKeydown: (event: KeyboardEvent) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.stopPropagation()
+            event.preventDefault()
+            void copySkillName(option.value ?? '', name)
+          }
+        },
+      }, [
+        h(NIcon, { size: 12 }, { default: () => copied ? h(Checkmark) : h(CopyOutline) }),
+      ]),
+    ],
+  })
+}
 
 const showProxy = computed({
   get: () => props.show,
@@ -1009,6 +1117,8 @@ const taskSkillOptions = computed(() => {
     options.push({
       label: `${snapshot.name} (${t('createTask.skillSnapshotUnavailable')})`,
       value: snapshot.id,
+      skillName: snapshot.name,
+      description: '',
       disabled: true,
     })
     optionIds.add(snapshot.id)
@@ -1497,6 +1607,10 @@ onMounted(() => {
   void loadExecutionOptions()
   void loadTemplates()
   void loadRunInstructionDefaults()
+})
+
+onBeforeUnmount(() => {
+  if (copiedSkillTimer) clearTimeout(copiedSkillTimer)
 })
 </script>
 
@@ -2704,4 +2818,62 @@ onMounted(() => {
   padding-top: 6px;
   padding-bottom: 6px;
 }
+
+/* Skill option / tag copy + hover description (render-function content, unscoped) */
+.skill-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.skill-option__main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.skill-option__desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--n-text-color-3);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.skill-option__copy,
+.skill-tag__copy {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--n-text-color-3);
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.skill-option__copy:hover,
+.skill-tag__copy:hover {
+  color: var(--n-primary-color);
+  background: rgba(128, 128, 128, 0.12);
+}
+
+.skill-option__copy--copied,
+.skill-tag__copy--copied {
+  color: var(--n-primary-color);
+}
+
+.skill-tag__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 </style>

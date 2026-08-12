@@ -1127,6 +1127,7 @@ const zhCN = {
     skillSnapshotUnavailable: '已不可用',
     skillSnapshotUpdated: '旧版本',
     applyCurrentSkillSelection: '应用当前可用版本',
+    copySkillName: '复制 Skill 名称',
     manualTaskBranchConflict: '手动任务的源分支和目标分支必须不同',
     failedToCreateTask: '创建任务失败',
     usageLimitExceededTitle: '用量已超限',

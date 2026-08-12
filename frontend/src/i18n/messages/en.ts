@@ -1143,6 +1143,7 @@ const en = {
     skillSnapshotUnavailable: 'unavailable',
     skillSnapshotUpdated: 'older version',
     applyCurrentSkillSelection: 'Apply current available versions',
+    copySkillName: 'Copy skill name',
     manualTaskBranchConflict:
       'Source branch and target branch must be different for manual tasks',
     failedToCreateTask: 'Failed to create task',
