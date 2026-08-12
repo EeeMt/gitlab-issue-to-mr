@@ -897,50 +897,54 @@ function renderSkillOption({ node, option }: { node: VNode; option: SelectOption
   const name = skillOptionName(option)
   const description = skillOptionDescription(option)
   const copied = copiedSkillValue.value === option.value
-  return h('div', { class: 'skill-option' }, [
-    h(NTooltip, {
-      trigger: 'hover',
-      placement: 'right',
-      disabled: !description,
-      contentStyle: issueDetailTooltipContentStyle,
-      themeOverrides: issueDetailTooltipThemeOverrides,
-    }, {
-      trigger: () => h('div', {
-        class: 'skill-option__main',
-        onClick: (event: MouseEvent) => {
-          // naive-ui binds the option select handler onto `node`; the description
-          // row is a sibling of `node`, so clicks landing there never reach it.
-          // Forward them (skipping clicks that already hit `node` to avoid a double toggle).
-          const nodeElement = (node as VNode & { el?: Element }).el
-          if (nodeElement?.contains(event.target as Node)) return
-          ;(node.props as { onClick?: (e: MouseEvent) => void } | null | undefined)?.onClick?.(event)
-        },
-      }, [
-        node,
-        description ? h('div', { class: 'skill-option__desc' }, description) : null,
-      ]),
-      default: () => description,
-    }),
-    h('button', {
-      type: 'button',
-      class: ['skill-option__copy', { 'skill-option__copy--copied': copied }],
-      'aria-label': t('createTask.copySkillName'),
-      tabindex: 0,
-      onClick: (event: MouseEvent) => {
+  const tooltipProps = {
+    trigger: 'hover' as const,
+    placement: 'right' as const,
+    disabled: !description,
+    contentStyle: issueDetailTooltipContentStyle,
+    themeOverrides: issueDetailTooltipThemeOverrides,
+  }
+  const forwardOptionClick = (event: MouseEvent) => {
+    // naive-ui binds the option select handler onto `node`; the description row
+    // and the name area outside `node` are siblings of `node`, so clicks landing
+    // there never reach it. Forward them (skipping clicks that already hit `node`
+    // to avoid a double toggle).
+    const nodeElement = (node as VNode & { el?: Element }).el
+    if (nodeElement?.contains(event.target as Node)) return
+    ;(node.props as { onClick?: (e: MouseEvent) => void } | null | undefined)?.onClick?.(event)
+  }
+  const copyButton = h('button', {
+    type: 'button',
+    class: ['skill-option__copy', { 'skill-option__copy--copied': copied }],
+    'aria-label': t('createTask.copySkillName'),
+    tabindex: 0,
+    onClick: (event: MouseEvent) => {
+      event.stopPropagation()
+      void copySkillName(option.value ?? '', name)
+    },
+    onMousedown: (event: MouseEvent) => event.stopPropagation(),
+    onKeydown: (event: KeyboardEvent) => {
+      if (event.key === 'Enter' || event.key === ' ') {
         event.stopPropagation()
+        event.preventDefault()
         void copySkillName(option.value ?? '', name)
-      },
-      onMousedown: (event: MouseEvent) => event.stopPropagation(),
-      onKeydown: (event: KeyboardEvent) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.stopPropagation()
-          event.preventDefault()
-          void copySkillName(option.value ?? '', name)
-        }
-      },
-    }, [
-      h(NIcon, { size: 14 }, { default: () => copied ? h(Checkmark) : h(CopyOutline) }),
+      }
+    },
+  }, [
+    h(NIcon, { size: 14 }, { default: () => copied ? h(Checkmark) : h(CopyOutline) }),
+  ])
+  return h('div', { class: 'skill-option' }, [
+    h('div', { class: 'skill-option__name-row' }, [
+      h(NTooltip, tooltipProps, {
+        trigger: () => h('span', { class: 'skill-option__name', onClick: forwardOptionClick }, [node]),
+        default: () => description,
+      }),
+      copyButton,
     ]),
+    description ? h(NTooltip, tooltipProps, {
+      trigger: () => h('div', { class: 'skill-option__desc', onClick: forwardOptionClick }, description),
+      default: () => description,
+    }) : null,
   ])
 }
 
@@ -2869,16 +2873,33 @@ onBeforeUnmount(() => {
 /* Skill option / tag copy + hover description (render-function content, unscoped) */
 .skill-option {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
   min-width: 0;
 }
 
-.skill-option__main {
+.skill-option__name-row {
   display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 1px;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.skill-option__name {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* Shrink the naive-ui option node to its label so the copy button sits next to the name */
+.skill-option__name .n-base-select-option {
+  display: inline-flex;
+  width: auto;
+  max-width: 100%;
   min-width: 0;
 }
 
@@ -2889,6 +2910,7 @@ onBeforeUnmount(() => {
   color: var(--n-text-color-3, #8a8f98);
   font-size: 11px;
   line-height: 1.4;
+  width: 100%;
 }
 
 .skill-option__copy,

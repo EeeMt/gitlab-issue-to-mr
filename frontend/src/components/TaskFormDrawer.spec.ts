@@ -590,6 +590,31 @@ describe('TaskFormDrawer', () => {
       expect(option!.find('.skill-option__copy').classes()).toContain('skill-option__copy--copied')
     })
 
+    it('positions the option copy button next to the name, outside the tooltip trigger', async () => {
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const option = wrapper.findAll('[data-testid="skill-select-option"]')
+        .find(item => item.attributes('data-value') === '11')
+      const optionEl = option!.element
+      const nameRowEl = optionEl.querySelector('.skill-option__name-row')
+      const copyEl = optionEl.querySelector('.skill-option__copy')
+      const nameEl = optionEl.querySelector('.skill-option__name')
+
+      // The copy button lives in the name row, adjacent to the name — not at the
+      // far right of the whole option row.
+      expect(nameRowEl).not.toBeNull()
+      expect(nameRowEl!.contains(copyEl)).toBe(true)
+      // …and is a sibling of the name tooltip trigger, never inside it — so
+      // hovering the button cannot open the description tooltip.
+      expect(nameEl).not.toBeNull()
+      expect(nameEl!.contains(copyEl)).toBe(false)
+      // The description still renders below the name row.
+      expect(optionEl.querySelector('.skill-option__desc')).not.toBeNull()
+    })
+
     it('copies a skill name from the selected tag copy button', async () => {
       await mountDrawer()
       await openDrawer()
