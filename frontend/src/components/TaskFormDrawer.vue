@@ -832,9 +832,45 @@ const message = useMessage()
 const copiedSkillValue = ref<number | string | null>(null)
 let copiedSkillTimer: ReturnType<typeof setTimeout> | undefined
 
+async function writeToClipboard(text: string): Promise<void> {
+  // navigator.clipboard is only available in secure contexts (https/localhost);
+  // on http (dev at http://192.168.50.129:8880) it is undefined, so fall back to
+  // the synchronous execCommand path, which keeps the user-gesture context intact.
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    try {
+      await navigator.clipboard.writeText(text)
+      return
+    } catch {
+      // API present but rejected (e.g. permission denied): fall through to execCommand
+    }
+  }
+  if (typeof document.execCommand !== 'function') throw new Error('copy API unavailable')
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.top = '-9999px'
+  textarea.style.left = '-9999px'
+  document.body.appendChild(textarea)
+  const selection = document.getSelection()
+  const previousRange = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null
+  textarea.select()
+  let copied = false
+  try {
+    copied = document.execCommand('copy')
+  } finally {
+    textarea.remove()
+    if (selection && previousRange) {
+      selection.removeAllRanges()
+      selection.addRange(previousRange)
+    }
+  }
+  if (!copied) throw new Error('execCommand copy failed')
+}
+
 async function copySkillName(value: number | string, name: string) {
   try {
-    await navigator.clipboard.writeText(name)
+    await writeToClipboard(name)
     message.success(t('taskView.copied'))
     copiedSkillValue.value = value
     if (copiedSkillTimer) clearTimeout(copiedSkillTimer)
@@ -869,7 +905,17 @@ function renderSkillOption({ node, option }: { node: VNode; option: SelectOption
       contentStyle: issueDetailTooltipContentStyle,
       themeOverrides: issueDetailTooltipThemeOverrides,
     }, {
-      trigger: () => h('div', { class: 'skill-option__main' }, [
+      trigger: () => h('div', {
+        class: 'skill-option__main',
+        onClick: (event: MouseEvent) => {
+          // naive-ui binds the option select handler onto `node`; the description
+          // row is a sibling of `node`, so clicks landing there never reach it.
+          // Forward them (skipping clicks that already hit `node` to avoid a double toggle).
+          const nodeElement = (node as VNode & { el?: Element }).el
+          if (nodeElement?.contains(event.target as Node)) return
+          ;(node.props as { onClick?: (e: MouseEvent) => void } | null | undefined)?.onClick?.(event)
+        },
+      }, [
         node,
         description ? h('div', { class: 'skill-option__desc' }, description) : null,
       ]),
@@ -879,7 +925,7 @@ function renderSkillOption({ node, option }: { node: VNode; option: SelectOption
       type: 'button',
       class: ['skill-option__copy', { 'skill-option__copy--copied': copied }],
       'aria-label': t('createTask.copySkillName'),
-      tabindex: -1,
+      tabindex: 0,
       onClick: (event: MouseEvent) => {
         event.stopPropagation()
         void copySkillName(option.value ?? '', name)
@@ -912,6 +958,7 @@ function renderSkillTag({ option, handleClose }: { option: SelectOption; handleC
         type: 'button',
         class: ['skill-tag__copy', { 'skill-tag__copy--copied': copied }],
         'aria-label': t('createTask.copySkillName'),
+        tabindex: 0,
         onClick: (event: MouseEvent) => {
           event.stopPropagation()
           void copySkillName(option.value ?? '', name)
@@ -2839,7 +2886,7 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--n-text-color-3);
+  color: var(--n-text-color-3, #8a8f98);
   font-size: 11px;
   line-height: 1.4;
 }
@@ -2854,20 +2901,26 @@ onBeforeUnmount(() => {
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: var(--n-text-color-3);
+  color: var(--n-text-color-3, #8a8f98);
   cursor: pointer;
   transition: color 0.15s ease, background-color 0.15s ease;
 }
 
 .skill-option__copy:hover,
 .skill-tag__copy:hover {
-  color: var(--n-primary-color);
+  color: var(--n-primary-color, #18a058);
   background: rgba(128, 128, 128, 0.12);
+}
+
+.skill-option__copy:focus-visible,
+.skill-tag__copy:focus-visible {
+  outline: 2px solid var(--n-primary-color, #18a058);
+  outline-offset: 1px;
 }
 
 .skill-option__copy--copied,
 .skill-tag__copy--copied {
-  color: var(--n-primary-color);
+  color: var(--n-primary-color, #18a058);
 }
 
 .skill-tag__name {

@@ -3,7 +3,7 @@ import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { h, ref, nextTick } from 'vue'
 import TaskFormDrawer from './TaskFormDrawer.vue'
 
-const { mockApi, resetMockApi, mockMessage, clipboardWrite } = vi.hoisted(() => {
+const { mockApi, resetMockApi, mockMessage, clipboardWrite, mockOptionNodeClick } = vi.hoisted(() => {
   const mock = {
     createTask: vi.fn<() => Promise<any>>(),
     updateTask: vi.fn<() => Promise<any>>(),
@@ -23,7 +23,8 @@ const { mockApi, resetMockApi, mockMessage, clipboardWrite } = vi.hoisted(() => 
   }
   const mockMsg = { error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn() }
   const clipboardWrite = vi.fn<() => Promise<void>>()
-  return { mockApi: mock, resetMockApi, mockMessage: mockMsg, clipboardWrite }
+  const mockOptionNodeClick = vi.fn()
+  return { mockApi: mock, resetMockApi, mockMessage: mockMsg, clipboardWrite, mockOptionNodeClick }
 })
 
 vi.mock('../i18n', () => ({ currentLocale: ref('en') }))
@@ -266,7 +267,7 @@ vi.mock('naive-ui', () => ({
               'data-value': String(option.value),
               'data-disabled': option.disabled ? 'true' : 'false',
             }, props.renderOption
-              ? props.renderOption({ node: h('span', option.label), option, selected: selectedValues.includes(option.value) })
+              ? props.renderOption({ node: h('span', { onClick: mockOptionNodeClick }, option.label), option, selected: selectedValues.includes(option.value) })
               : option.label)
           )
         )
@@ -426,6 +427,7 @@ describe('TaskFormDrawer', () => {
     Object.values(mockMessage).forEach(fn => fn.mockReset())
     clipboardWrite.mockReset()
     clipboardWrite.mockResolvedValue(undefined)
+    mockOptionNodeClick.mockReset()
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
       value: { writeText: clipboardWrite },
@@ -599,6 +601,7 @@ describe('TaskFormDrawer', () => {
       const copyButton = tag.find('.skill-tag__copy')
       expect(copyButton.exists()).toBe(true)
       expect(copyButton.attributes('aria-label')).toBe('createTask.copySkillName')
+      expect(copyButton.attributes('tabindex')).toBe('0')
       await copyButton.trigger('click')
       await flushPromises()
 
@@ -618,6 +621,89 @@ describe('TaskFormDrawer', () => {
       await flushPromises()
 
       expect(mockMessage.error).toHaveBeenCalledWith('taskView.copyFailed')
+    })
+
+    it('falls back to document.execCommand when navigator.clipboard is unavailable (http context)', async () => {
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined })
+      const execCommandSpy = vi.fn(() => true)
+      Object.defineProperty(document, 'execCommand', { configurable: true, value: execCommandSpy })
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const option = wrapper.findAll('[data-testid="skill-select-option"]')
+        .find(item => item.attributes('data-value') === '11')
+      await option!.find('.skill-option__copy').trigger('click')
+      await flushPromises()
+
+      expect(clipboardWrite).not.toHaveBeenCalled()
+      expect(execCommandSpy).toHaveBeenCalledWith('copy')
+      expect(mockMessage.success).toHaveBeenCalledWith('taskView.copied')
+    })
+
+    it('keeps a usable execCommand fallback path when the clipboard API rejects', async () => {
+      clipboardWrite.mockRejectedValueOnce(new Error('permission denied'))
+      const execCommandSpy = vi.fn(() => true)
+      Object.defineProperty(document, 'execCommand', { configurable: true, value: execCommandSpy })
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const option = wrapper.findAll('[data-testid="skill-select-option"]')
+        .find(item => item.attributes('data-value') === '11')
+      await option!.find('.skill-option__copy').trigger('click')
+      await flushPromises()
+
+      expect(execCommandSpy).toHaveBeenCalledWith('copy')
+      expect(mockMessage.success).toHaveBeenCalledWith('taskView.copied')
+    })
+
+    it('exposes the option copy button in the tab order', async () => {
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const option = wrapper.findAll('[data-testid="skill-select-option"]')
+        .find(item => item.attributes('data-value') === '11')
+      expect(option!.find('.skill-option__copy').attributes('tabindex')).toBe('0')
+    })
+
+    it('copies the bare skill name when the copy button is activated via keyboard', async () => {
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const option = wrapper.findAll('[data-testid="skill-select-option"]')
+        .find(item => item.attributes('data-value') === '11')
+      const copyButton = option!.find('.skill-option__copy')
+      await copyButton.trigger('keydown', { key: 'Enter' })
+      await flushPromises()
+
+      expect(clipboardWrite).toHaveBeenCalledWith('review')
+      expect(mockMessage.success).toHaveBeenCalledWith('taskView.copied')
+    })
+
+    it('selects the option when clicking its description row', async () => {
+      mockApi.getSkills.mockResolvedValue([
+        { id: 11, name: 'review', description: 'Review changes', version_id: 101 },
+      ])
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const option = wrapper.findAll('[data-testid="skill-select-option"]')
+        .find(item => item.attributes('data-value') === '11')
+      expect(option!.find('.skill-option__desc').exists()).toBe(true)
+      await option!.find('.skill-option__desc').trigger('click')
+      await nextTick()
+
+      expect(mockOptionNodeClick).toHaveBeenCalledTimes(1)
+      expect(clipboardWrite).not.toHaveBeenCalled()
     })
 
     it('does not require code changes by default', async () => {
