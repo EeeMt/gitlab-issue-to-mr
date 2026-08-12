@@ -538,4 +538,15 @@ describe('SystemStatistics', () => {
 
     expect(wrapper.find('[data-testid="breakdown-grid"]').attributes('cols')).toBe('2')
   })
+
+  it('wraps each breakdown table in its own card container', async () => {
+    wrapper = mount(SystemStatistics)
+    await flushPromises()
+
+    const cards = wrapper.findAll('[data-testid="breakdown-card"]')
+    expect(cards.length).toBe(3)
+    cards.forEach((card) => {
+      expect(card.classes()).toContain('system-statistics-breakdown')
+    })
+  })
 })

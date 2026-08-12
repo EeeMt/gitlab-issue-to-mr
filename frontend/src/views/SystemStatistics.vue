@@ -200,7 +200,7 @@
           :y-gap="16"
         >
           <n-gi :span="stackedBreakdowns ? 1 : 2">
-            <div class="system-statistics-breakdown">
+            <div class="system-statistics-breakdown" data-testid="breakdown-card">
               <div class="system-statistics-breakdown__title">{{ t('systemStatistics.breakdowns.projects') }}</div>
               <n-data-table
                 :columns="projectColumns"
@@ -212,7 +212,7 @@
             </div>
           </n-gi>
           <n-gi :span="1">
-            <div class="system-statistics-breakdown">
+            <div class="system-statistics-breakdown" data-testid="breakdown-card">
               <div class="system-statistics-breakdown__title">{{ t('systemStatistics.breakdowns.providers') }}</div>
               <n-data-table
                 :columns="providerColumns"
@@ -224,7 +224,7 @@
             </div>
           </n-gi>
           <n-gi :span="1">
-            <div class="system-statistics-breakdown">
+            <div class="system-statistics-breakdown" data-testid="breakdown-card">
               <div class="system-statistics-breakdown__title">{{ t('systemStatistics.breakdowns.harnesses') }}</div>
               <n-data-table
                 :columns="harnessColumns"
@@ -862,6 +862,15 @@ watch(range, () => {
   padding: 20px 0;
   text-align: center;
   color: rgba(15, 23, 42, 0.45);
+}
+
+.system-statistics-breakdown {
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(248, 250, 252, 0.8);
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  overflow: hidden;
 }
 
 .system-statistics-breakdown__title {
