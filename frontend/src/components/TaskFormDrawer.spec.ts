@@ -588,6 +588,8 @@ describe('TaskFormDrawer', () => {
       expect(clipboardWrite).toHaveBeenCalledWith('review')
       expect(mockMessage.success).toHaveBeenCalledWith('taskView.copied')
       expect(option!.find('.skill-option__copy').classes()).toContain('skill-option__copy--copied')
+      // The button stopPropagates, so the full-row select handler must not fire.
+      expect(mockOptionNodeClick).not.toHaveBeenCalled()
     })
 
     it('positions the option copy button next to the name, outside the tooltip trigger', async () => {
@@ -602,17 +604,37 @@ describe('TaskFormDrawer', () => {
       const nameRowEl = optionEl.querySelector('.skill-option__name-row')
       const copyEl = optionEl.querySelector('.skill-option__copy')
       const nameEl = optionEl.querySelector('.skill-option__name')
+      const nameRowChildren = nameRowEl ? Array.from(nameRowEl.children) : []
 
-      // The copy button lives in the name row, adjacent to the name — not at the
-      // far right of the whole option row.
+      // The copy button is the immediate next sibling of the name tooltip trigger —
+      // a structural assertion that still fails if the button is later pushed to the
+      // row's right edge (e.g. with `margin-left: auto` or a spacer).
       expect(nameRowEl).not.toBeNull()
-      expect(nameRowEl!.contains(copyEl)).toBe(true)
-      // …and is a sibling of the name tooltip trigger, never inside it — so
-      // hovering the button cannot open the description tooltip.
+      expect(nameRowChildren[1]).toBe(copyEl)
+      expect(nameRowChildren[0]!.querySelector('.skill-option__name')).toBe(nameEl)
+      // …and it stays outside the name tooltip trigger, so hovering the button
+      // cannot open the description tooltip.
       expect(nameEl).not.toBeNull()
       expect(nameEl!.contains(copyEl)).toBe(false)
       // The description still renders below the name row.
       expect(optionEl.querySelector('.skill-option__desc')).not.toBeNull()
+    })
+
+    it('selects the option when clicking anywhere on the row', async () => {
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const option = wrapper.findAll('[data-testid="skill-select-option"]')
+        .find(item => item.attributes('data-value') === '11')
+      // The full-row wrapper forwards the click to the option node, so clicking
+      // the name-row whitespace (outside the name itself) selects the option.
+      await option!.find('.skill-option__name-row').trigger('click')
+      await nextTick()
+
+      expect(mockOptionNodeClick).toHaveBeenCalledTimes(1)
+      expect(clipboardWrite).not.toHaveBeenCalled()
     })
 
     it('copies a skill name from the selected tag copy button', async () => {

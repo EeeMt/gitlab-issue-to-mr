@@ -905,10 +905,10 @@ function renderSkillOption({ node, option }: { node: VNode; option: SelectOption
     themeOverrides: issueDetailTooltipThemeOverrides,
   }
   const forwardOptionClick = (event: MouseEvent) => {
-    // naive-ui binds the option select handler onto `node`; the description row
-    // and the name area outside `node` are siblings of `node`, so clicks landing
-    // there never reach it. Forward them (skipping clicks that already hit `node`
-    // to avoid a double toggle).
+    // naive-ui binds the option select handler onto `node`, which is shrink-wrapped
+    // to the name. The `.skill-option` wrapper is the full-row click target; clicks
+    // landing outside `node` (name-row whitespace, description row) are forwarded.
+    // Skip clicks that already hit `node` to avoid a double toggle.
     const nodeElement = (node as VNode & { el?: Element }).el
     if (nodeElement?.contains(event.target as Node)) return
     ;(node.props as { onClick?: (e: MouseEvent) => void } | null | undefined)?.onClick?.(event)
@@ -933,16 +933,16 @@ function renderSkillOption({ node, option }: { node: VNode; option: SelectOption
   }, [
     h(NIcon, { size: 14 }, { default: () => copied ? h(Checkmark) : h(CopyOutline) }),
   ])
-  return h('div', { class: 'skill-option' }, [
+  return h('div', { class: 'skill-option', onClick: forwardOptionClick }, [
     h('div', { class: 'skill-option__name-row' }, [
       h(NTooltip, tooltipProps, {
-        trigger: () => h('span', { class: 'skill-option__name', onClick: forwardOptionClick }, [node]),
+        trigger: () => h('div', { class: 'skill-option__name' }, [node]),
         default: () => description,
       }),
       copyButton,
     ]),
     description ? h(NTooltip, tooltipProps, {
-      trigger: () => h('div', { class: 'skill-option__desc', onClick: forwardOptionClick }, description),
+      trigger: () => h('div', { class: 'skill-option__desc' }, description),
       default: () => description,
     }) : null,
   ])
@@ -2877,6 +2877,15 @@ onBeforeUnmount(() => {
   align-items: stretch;
   width: 100%;
   min-width: 0;
+  position: relative;
+  border-radius: var(--n-border-radius, 3px);
+  cursor: pointer;
+}
+
+/* Full-row hover highlight — the naive-ui node is shrink-wrapped to the name, so
+   the hover state must live on the wrapper to keep the whole row hittable. */
+.skill-option:hover {
+  background-color: var(--n-option-color-pending, rgba(0, 0, 0, 0.05));
 }
 
 .skill-option__name-row {
