@@ -893,7 +893,7 @@ function skillOptionDescription(option: SelectOption): string {
   return typeof description === 'string' && description.trim() ? description : ''
 }
 
-function renderSkillOption({ node, option }: { node: VNode; option: SelectOption; selected: boolean }) {
+function renderSkillOption({ node, option, selected }: { node: VNode; option: SelectOption; selected: boolean }) {
   const name = skillOptionName(option)
   const description = skillOptionDescription(option)
   const copied = copiedSkillValue.value === option.value
@@ -940,6 +940,7 @@ function renderSkillOption({ node, option }: { node: VNode; option: SelectOption
         default: () => description,
       }),
       copyButton,
+      selected ? h(NIcon, { class: 'skill-option__check', size: 16 }, { default: () => h(Checkmark) }) : null,
     ]),
     description ? h(NTooltip, tooltipProps, {
       trigger: () => h('div', { class: 'skill-option__desc' }, description),
@@ -2875,8 +2876,12 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   align-items: stretch;
+  justify-content: center;
+  box-sizing: border-box;
   width: 100%;
   min-width: 0;
+  min-height: var(--n-option-height, 36px);
+  padding: 6px 12px;
   position: relative;
   border-radius: var(--n-border-radius, 3px);
   cursor: pointer;
@@ -2904,12 +2909,31 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
-/* Shrink the naive-ui option node to its label so the copy button sits next to the name */
+/* Shrink the naive-ui option node to its label so the copy button sits next to
+   the name. `padding: 0` drops the reserved checkmark slot so the node does not
+   widen on select; the naive-ui checkmark itself is hidden (see below) in favor
+   of our own `.skill-option__check` rendered as a flex sibling. */
 .skill-option__name .n-base-select-option {
   display: inline-flex;
   width: auto;
   max-width: 100%;
   min-width: 0;
+  min-height: auto;
+  padding: 0;
+}
+
+/* Hide the naive-ui checkmark (absolute, right-aligned) — the selected state is
+   shown by our own `.skill-option__check`, which is a normal flex item so it can
+   never be painted over by the node's selected background. */
+.skill-option__name .n-base-select-option__check {
+  display: none;
+}
+
+/* Selected-state checkmark: pushed to the row's far right, after the copy button. */
+.skill-option__check {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--n-option-check-color, #18a058);
 }
 
 .skill-option__desc {
