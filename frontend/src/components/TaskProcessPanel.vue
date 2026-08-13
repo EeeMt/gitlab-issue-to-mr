@@ -167,6 +167,7 @@ const eventStreamPaneRef = ref<HTMLElement | null>(null)
 
 type ProcessTab = 'events' | 'raw'
 type ScrollPosition = { atTop: boolean; atBottom: boolean }
+const PROGRAMMATIC_SCROLL_GUARD_MS = 1000
 
 const rawPaneRef = ref<{ logContentRef: HTMLElement | null } | null>(null)
 const logContentRef = computed(() => rawPaneRef.value?.logContentRef ?? null)
@@ -214,7 +215,12 @@ const activeScrollPosition = computed(() => scrollPositions[activeTab.value])
 const autoScroll = computed(() => activeScrollPosition.value.atBottom)
 const canScrollToTop = computed(() => !activeScrollPosition.value.atTop)
 const canScrollToBottom = computed(() => !activeScrollPosition.value.atBottom)
-const showScrollNavigation = computed(() => canScrollToTop.value || canScrollToBottom.value)
+const activePaneHasContent = computed(() => (
+  activeTab.value === 'events' ? hasStructuredContent.value : Boolean(props.terminalHtml)
+))
+const showScrollNavigation = computed(() => (
+  activePaneHasContent.value && (canScrollToTop.value || canScrollToBottom.value)
+))
 
 function getExpandedText(entry: ParsedTextEntry): string {
   if (entry.payloadId) {
@@ -315,7 +321,7 @@ watch(isRawTabDisabled, (disabled) => {
 function setProgrammaticScroll() {
   isProgrammaticScroll = true
   if (programmaticScrollTimer) clearTimeout(programmaticScrollTimer)
-  programmaticScrollTimer = setTimeout(() => { isProgrammaticScroll = false }, 300)
+  programmaticScrollTimer = setTimeout(() => { isProgrammaticScroll = false }, PROGRAMMATIC_SCROLL_GUARD_MS)
 }
 
 function getScrollBehavior(): ScrollBehavior {
@@ -337,7 +343,12 @@ function getEventScrollElement(): HTMLElement | null {
 
 function updateActiveScrollPosition() {
   const el = activeTab.value === 'events' ? getEventScrollElement() : logContentRef.value
-  if (el) updateScrollPosition(activeTab.value, el)
+  if (el) {
+    updateScrollPosition(activeTab.value, el)
+    return
+  }
+  scrollPositions[activeTab.value].atTop = true
+  scrollPositions[activeTab.value].atBottom = true
 }
 
 function onEventStreamScroll(e: Event) {
