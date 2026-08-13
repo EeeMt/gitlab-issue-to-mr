@@ -1166,14 +1166,14 @@ describe('TaskList', () => {
       expect(options.map((o: any) => o.value)).toEqual(['0', '1', '2'])
     })
 
-    it('initiator options use stable user values and counts', async () => {
+    it('initiator options use stable values and truncated usernames without counts', async () => {
       await mountComponent()
       const config = (wrapper.vm as any).filterConfig
       const field = config.filterFields.find((f: any) => f.key === 'initiator')
       const options = field.options()
       expect(options).toHaveLength(3)
-      expect(options[0]).toEqual({ label: 'Alice (@alice)', value: 'user:1', count: 12 })
-      expect(options[2]).toEqual({ label: 'charlie', value: 'user:3', count: 1 })
+      expect(options[0]).toEqual({ label: 'alice', value: 'user:1', truncateLabel: true })
+      expect(options[2]).toEqual({ label: 'charlie', value: 'user:3', truncateLabel: true })
     })
 
     it('has_mr options returns true/false', async () => {

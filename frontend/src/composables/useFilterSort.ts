@@ -5,7 +5,13 @@ export interface FilterField {
   label: string
   icon?: Component
   type: 'multi-select' | 'single-select' | 'date-range'
-  options?: () => { label: string; value: any; color?: string; count?: number }[]
+  options?: () => {
+    label: string
+    value: any
+    color?: string
+    count?: number
+    truncateLabel?: boolean
+  }[]
   optionsLoading?: () => boolean
   optionsError?: () => boolean
   optionsRetry?: () => void | Promise<void>
