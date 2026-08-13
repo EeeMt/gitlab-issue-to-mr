@@ -929,6 +929,8 @@ const zhCN = {
     mergeRequest: '合并请求',
     taskNotStarted: '任务未开始',
     noProcessYet: '暂无进程',
+    scrollNavigation: '进程导航',
+    scrollToTop: '跳转到顶部',
     scrollToLatest: '跳转到最新',
     contextCompacted: '上下文已压缩',
     contextCompactCount: '上下文压缩',

@@ -6,8 +6,8 @@ import TaskProcessPanel from './TaskProcessPanel.vue'
 import taskProcessPanelSource from './TaskProcessPanel.vue?raw'
 
 // Use vi.hoisted so the mock factory runs before vi.mock hoisting
-const { mockGetTaskPayload } = vi.hoisted(() => {
-  return { mockGetTaskPayload: vi.fn() }
+const { mockGetTaskPayload, mockScrollbarScrollTo } = vi.hoisted(() => {
+  return { mockGetTaskPayload: vi.fn(), mockScrollbarScrollTo: vi.fn() }
 })
 
 vi.mock('../api', () => ({
@@ -102,7 +102,7 @@ vi.mock('naive-ui', () => {
       inheritAttrs: false,
       props: ['trigger'],
       setup(props: { trigger?: string }, { slots, attrs, expose }: { slots: Record<string, () => unknown>; attrs: Record<string, unknown>; expose: (obj: Record<string, unknown>) => void }) {
-        expose({ scrollTo: vi.fn(), scrollBy: vi.fn() })
+        expose({ scrollTo: mockScrollbarScrollTo, scrollBy: vi.fn() })
         return () => h('div', { ...attrs, class: ['NScrollbar', attrs.class], 'data-trigger': props.trigger }, slots.default?.())
       },
     },
@@ -170,6 +170,7 @@ function mountComponent(status: Task['status']) {
 describe('TaskProcessPanel', () => {
   beforeEach(() => {
     mockGetTaskPayload.mockReset()
+    mockScrollbarScrollTo.mockReset()
   })
 
   it('adds the running glow class to the card when the task is running', () => {
@@ -277,6 +278,78 @@ describe('TaskProcessPanel', () => {
     expect(taskProcessPanelSource).toContain(':deep(.process-tabs .n-tabs-rail)')
     expect(taskProcessPanelSource).toContain(':deep(.process-tabs .n-tabs-capsule)')
     expect(taskProcessPanelSource).toContain('border-radius: 999px;')
+  })
+
+  it('navigates a completed event stream to both ends and links bottom navigation to auto-scroll', async () => {
+    const task = createTask('completed')
+    const taskLogs: TaskLog[] = [{
+      id: 60,
+      task_id: 1,
+      log_level: 'info',
+      log_type: 'assistant_text',
+      metadata: JSON.stringify({ text: 'event content' }),
+      message: '',
+      created_at: '2026-04-23T10:00:00Z',
+    }]
+    const wrapper = mount(TaskProcessPanel, {
+      props: { task, taskLogs, isActive: false, terminalHtml: '', taskStatus: 'completed' },
+    })
+    ;(wrapper.vm as any).onEventStreamScroll({
+      target: { scrollHeight: 1000, scrollTop: 400, clientHeight: 200 },
+    } as unknown as Event)
+    await nextTick()
+
+    expect(wrapper.find('[data-testid="scroll-to-top"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="scroll-to-bottom"]').exists()).toBe(true)
+    expect((wrapper.vm as any).autoScroll).toBe(false)
+
+    await wrapper.get('[data-testid="scroll-to-top"]').trigger('click')
+    await nextTick()
+    expect(mockScrollbarScrollTo).toHaveBeenLastCalledWith({ top: 0, behavior: 'smooth' })
+    expect((wrapper.vm as any).autoScroll).toBe(false)
+
+    await wrapper.get('[data-testid="scroll-to-bottom"]').trigger('click')
+    await nextTick()
+    expect(mockScrollbarScrollTo).toHaveBeenLastCalledWith({ top: Number.MAX_SAFE_INTEGER, behavior: 'smooth' })
+    expect((wrapper.vm as any).autoScroll).toBe(true)
+  })
+
+  it('uses the same bidirectional navigation and auto-scroll behavior in the raw log pane', async () => {
+    const wrapper = mount(TaskProcessPanel, {
+      props: {
+        task: createTask('running'),
+        taskLogs: [],
+        isActive: true,
+        terminalHtml: 'raw log content',
+        taskStatus: 'running',
+      },
+    })
+
+    ;(wrapper.vm as any).activeTab = 'raw'
+    await nextTick()
+    const logEl = wrapper.get('pre.log-content').element as HTMLElement
+    Object.defineProperties(logEl, {
+      scrollHeight: { configurable: true, value: 1200 },
+      scrollTop: { configurable: true, writable: true, value: 500 },
+      clientHeight: { configurable: true, value: 300 },
+    })
+    const scrollTo = vi.fn()
+    logEl.scrollTo = scrollTo
+
+    ;(wrapper.vm as any).onLogContentScroll()
+    await nextTick()
+    expect(wrapper.find('[data-testid="scroll-to-top"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="scroll-to-bottom"]').exists()).toBe(true)
+
+    await wrapper.get('[data-testid="scroll-to-top"]').trigger('click')
+    await nextTick()
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 0, behavior: 'smooth' })
+    expect((wrapper.vm as any).autoScroll).toBe(false)
+
+    await wrapper.get('[data-testid="scroll-to-bottom"]').trigger('click')
+    await nextTick()
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 1200, behavior: 'smooth' })
+    expect((wrapper.vm as any).autoScroll).toBe(true)
   })
 
   it('renders input preview in tool_call header and output preview in body', async () => {

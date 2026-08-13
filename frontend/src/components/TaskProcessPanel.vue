@@ -39,7 +39,7 @@
             <n-empty v-else :description="t('taskView.noProcessYet')" class="empty-state" />
           </div>
         </template>
-        <div v-else class="process-content__pane">
+        <div v-else ref="eventStreamPaneRef" class="process-content__pane">
           <n-scrollbar
             class="event-stream-scrollbar"
             trigger="hover"
@@ -89,9 +89,39 @@
       </div>
     </div>
 
-    <div v-if="!autoScroll && isActive" class="scroll-to-latest">
-      <n-button size="small" type="primary" @click="scrollToLatest">
-        <template #icon><n-icon><ArrowDownCircleOutline /></n-icon></template>
+    <div
+      v-if="showScrollNavigation"
+      class="scroll-navigation"
+      role="group"
+      :aria-label="t('taskView.scrollNavigation')"
+    >
+      <n-button
+        v-if="canScrollToTop"
+        class="scroll-navigation__button"
+        size="small"
+        quaternary
+        round
+        data-testid="scroll-to-top"
+        :aria-label="t('taskView.scrollToTop')"
+        :title="t('taskView.scrollToTop')"
+        @click="scrollToTop"
+      >
+        <template #icon><n-icon><ChevronUpOutline /></n-icon></template>
+        {{ t('taskView.scrollToTop') }}
+      </n-button>
+      <span v-if="canScrollToTop && canScrollToBottom" class="scroll-navigation__divider" aria-hidden="true"></span>
+      <n-button
+        v-if="canScrollToBottom"
+        class="scroll-navigation__button scroll-navigation__button--latest"
+        size="small"
+        quaternary
+        round
+        data-testid="scroll-to-bottom"
+        :aria-label="t('taskView.scrollToLatest')"
+        :title="t('taskView.scrollToLatest')"
+        @click="scrollToLatest"
+      >
+        <template #icon><n-icon><ChevronDownOutline /></n-icon></template>
         {{ t('taskView.scrollToLatest') }}
       </n-button>
     </div>
@@ -99,12 +129,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue'
+import { computed, reactive, ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { NCard, NIcon, NTag, NEmpty, NTabs, NTab, NButton, NBadge, NScrollbar } from 'naive-ui'
 import type { ScrollbarInst } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { formatDurationMs } from '../utils/format'
-import { ArrowDownCircleOutline } from '@vicons/ionicons5'
+import { ChevronDownOutline, ChevronUpOutline } from '@vicons/ionicons5'
 import type { TaskLog, Task } from '../api'
 import TaskProcessSystemInitBanner from './task-process/TaskProcessSystemInitBanner.vue'
 import TaskProcessRawPane from './task-process/TaskProcessRawPane.vue'
@@ -133,14 +163,19 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const eventStreamRef = ref<ScrollbarInst | null>(null)
+const eventStreamPaneRef = ref<HTMLElement | null>(null)
 
-// Typed constant to force TypeScript to pick the `{ position }` overload of scrollTo
-const SCROLL_TO_BOTTOM: { position: 'top' | 'bottom'; behavior: ScrollBehavior } = { position: 'bottom', behavior: 'smooth' }
+type ProcessTab = 'events' | 'raw'
+type ScrollPosition = { atTop: boolean; atBottom: boolean }
+
 const rawPaneRef = ref<{ logContentRef: HTMLElement | null } | null>(null)
 const logContentRef = computed(() => rawPaneRef.value?.logContentRef ?? null)
-const activeTab = ref<'events' | 'raw'>('events')
+const activeTab = ref<ProcessTab>('events')
 const collapseRefs = ref<(HTMLElement | null)[]>([])
-const autoScroll = ref(true)
+const scrollPositions = reactive<Record<ProcessTab, ScrollPosition>>({
+  events: { atTop: true, atBottom: true },
+  raw: { atTop: true, atBottom: true },
+})
 const elapsedMs = ref(0)
 const expandedRowIndex = ref<number | null>(null)
 
@@ -175,6 +210,11 @@ const hasStructuredContent = computed(() => processRows.value.length > 0)
 const eventStreamCount = computed(() => processRows.value.filter(r => !isCompactRow(r)).length)
 const isRawTabDisabled = computed(() => !props.terminalHtml && !props.task?.container_id)
 const elapsedDisplay = computed(() => (!props.isActive || elapsedMs.value <= 0 ? '' : formatDurationMs(elapsedMs.value)))
+const activeScrollPosition = computed(() => scrollPositions[activeTab.value])
+const autoScroll = computed(() => activeScrollPosition.value.atBottom)
+const canScrollToTop = computed(() => !activeScrollPosition.value.atTop)
+const canScrollToBottom = computed(() => !activeScrollPosition.value.atBottom)
+const showScrollNavigation = computed(() => canScrollToTop.value || canScrollToBottom.value)
 
 function getExpandedText(entry: ParsedTextEntry): string {
   if (entry.payloadId) {
@@ -211,7 +251,7 @@ function onCollapseChange(expandedNames: (string | number)[], index: number) {
       lastRowScrollTimer = setTimeout(() => {
         if (eventStreamRef.value) {
           setProgrammaticScroll()
-          eventStreamRef.value.scrollTo(SCROLL_TO_BOTTOM)
+          eventStreamRef.value.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: getScrollBehavior() })
         }
       }, 260)
     } else {
@@ -263,9 +303,9 @@ watch(() => props.isActive, (active) => {
 }, { immediate: true })
 
 watch(activeTab, (val) => {
-  autoScroll.value = true
   if (val === 'raw') emit('raw-tab-open')
   else emit('raw-tab-close')
+  nextTick(updateActiveScrollPosition)
 })
 
 watch(isRawTabDisabled, (disabled) => {
@@ -278,16 +318,37 @@ function setProgrammaticScroll() {
   programmaticScrollTimer = setTimeout(() => { isProgrammaticScroll = false }, 300)
 }
 
+function getScrollBehavior(): ScrollBehavior {
+  if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+    return 'auto'
+  }
+  return 'smooth'
+}
+
+function updateScrollPosition(tab: ProcessTab, el: HTMLElement) {
+  const remaining = Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight)
+  scrollPositions[tab].atTop = el.scrollTop <= 8
+  scrollPositions[tab].atBottom = remaining <= 50
+}
+
+function getEventScrollElement(): HTMLElement | null {
+  return eventStreamPaneRef.value?.querySelector<HTMLElement>('.n-scrollbar-container') ?? null
+}
+
+function updateActiveScrollPosition() {
+  const el = activeTab.value === 'events' ? getEventScrollElement() : logContentRef.value
+  if (el) updateScrollPosition(activeTab.value, el)
+}
+
 function onEventStreamScroll(e: Event) {
   if (isProgrammaticScroll) return
   const el = e.target as HTMLElement
-  autoScroll.value = el.scrollHeight - el.scrollTop - el.clientHeight <= 50
+  updateScrollPosition('events', el)
 }
 
 function onLogContentScroll() {
   if (isProgrammaticScroll || !logContentRef.value) return
-  const el = logContentRef.value
-  autoScroll.value = el.scrollHeight - el.scrollTop - el.clientHeight <= 50
+  updateScrollPosition('raw', logContentRef.value)
 }
 
 watch(logContentRef, (el, oldEl) => {
@@ -295,22 +356,38 @@ watch(logContentRef, (el, oldEl) => {
   el?.addEventListener('scroll', onLogContentScroll)
 })
 
-function scrollToLatest() {
-  autoScroll.value = true
+function scrollToTop() {
+  scrollPositions[activeTab.value].atTop = true
+  scrollPositions[activeTab.value].atBottom = false
   setProgrammaticScroll()
   nextTick(() => {
-    eventStreamRef.value?.scrollTo(SCROLL_TO_BOTTOM)
-    logContentRef.value?.scrollTo?.({ top: logContentRef.value.scrollHeight, behavior: 'smooth' })
+    const behavior = getScrollBehavior()
+    if (activeTab.value === 'events') eventStreamRef.value?.scrollTo({ top: 0, behavior })
+    else logContentRef.value?.scrollTo?.({ top: 0, behavior })
+  })
+}
+
+function scrollToLatest() {
+  scrollPositions[activeTab.value].atTop = false
+  scrollPositions[activeTab.value].atBottom = true
+  setProgrammaticScroll()
+  nextTick(() => {
+    const behavior = getScrollBehavior()
+    if (activeTab.value === 'events') eventStreamRef.value?.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior })
+    else logContentRef.value?.scrollTo?.({ top: logContentRef.value.scrollHeight, behavior })
   })
 }
 
 watch(processRows, async () => {
-  if (!props.isActive || !autoScroll.value) return
+  const shouldFollowLatest = props.isActive && autoScroll.value
   await nextTick()
-  if (eventStreamRef.value) {
+  if (activeTab.value !== 'events') return
+  if (shouldFollowLatest && eventStreamRef.value) {
     setProgrammaticScroll()
-    eventStreamRef.value.scrollTo(SCROLL_TO_BOTTOM)
+    eventStreamRef.value.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: getScrollBehavior() })
+    return
   }
+  updateActiveScrollPosition()
 })
 
 // When payload content loads into an already-expanded last row, scroll to reveal it
@@ -319,17 +396,20 @@ watch(expandedPayloads, async () => {
   await nextTick()
   if (eventStreamRef.value) {
     setProgrammaticScroll()
-    eventStreamRef.value.scrollTo(SCROLL_TO_BOTTOM)
+    eventStreamRef.value.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: getScrollBehavior() })
   }
 })
 
 watch(() => props.terminalHtml, async () => {
-  if (!props.isActive || !autoScroll.value) return
+  const shouldFollowLatest = props.isActive && autoScroll.value
   await nextTick()
-  if (logContentRef.value) {
+  if (activeTab.value !== 'raw') return
+  if (shouldFollowLatest && logContentRef.value) {
     setProgrammaticScroll()
-    logContentRef.value.scrollTo?.({ top: logContentRef.value.scrollHeight, behavior: 'smooth' })
+    logContentRef.value.scrollTo?.({ top: logContentRef.value.scrollHeight, behavior: getScrollBehavior() })
+    return
   }
+  updateActiveScrollPosition()
 })
 
 onBeforeUnmount(() => {
@@ -339,7 +419,17 @@ onBeforeUnmount(() => {
   if (lastRowScrollTimer) clearTimeout(lastRowScrollTimer)
 })
 
-defineExpose({ onCollapseChange, activeTab })
+onMounted(() => nextTick(updateActiveScrollPosition))
+
+defineExpose({
+  onCollapseChange,
+  onEventStreamScroll,
+  onLogContentScroll,
+  scrollToTop,
+  scrollToLatest,
+  activeTab,
+  autoScroll,
+})
 </script>
 
 <style scoped>
@@ -567,10 +657,42 @@ defineExpose({ onCollapseChange, activeTab })
   flex-shrink: 0;
   padding: 0 4px;
 }
-.scroll-to-latest {
+.scroll-navigation {
   position: absolute;
   bottom: 16px;
   right: 16px;
   z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--n-color, #fff) 90%, transparent);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14), 0 2px 6px rgba(15, 23, 42, 0.08);
+  backdrop-filter: blur(10px);
+}
+.scroll-navigation__button {
+  --n-height: 30px !important;
+  --n-padding: 0 10px !important;
+  font-size: 12px;
+  font-weight: 600;
+}
+.scroll-navigation__button--latest {
+  color: var(--n-primary-color, #18a058);
+}
+.scroll-navigation__divider {
+  width: 1px;
+  height: 18px;
+  background: var(--n-border-color, rgba(148, 163, 184, 0.3));
+}
+@media (max-width: 640px) {
+  .scroll-navigation {
+    right: 12px;
+    bottom: 12px;
+  }
+  .scroll-navigation__button {
+    --n-padding: 0 8px !important;
+  }
 }
 </style>

@@ -943,6 +943,8 @@ const en = {
     mergeRequest: 'Merge Request',
     taskNotStarted: 'Task not started',
     noProcessYet: 'No events yet',
+    scrollNavigation: 'Process navigation',
+    scrollToTop: 'Jump to top',
     scrollToLatest: 'Jump to latest',
     contextCompacted: 'Context compressed',
     contextCompactCount: 'Context Compression',
