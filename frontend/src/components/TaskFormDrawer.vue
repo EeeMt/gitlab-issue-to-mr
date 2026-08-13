@@ -2891,7 +2891,8 @@ onBeforeUnmount(() => {
 
 /* Full-row hover highlight — the naive-ui node is shrink-wrapped to the name, so
    the hover state must live on the wrapper to keep the whole row hittable. */
-.skill-option:hover {
+.skill-option:hover,
+.skill-option:focus-within {
   background-color: var(--n-option-color-pending, rgba(0, 0, 0, 0.05));
 }
 
@@ -2922,6 +2923,12 @@ onBeforeUnmount(() => {
   min-width: 0;
   min-height: auto;
   padding: 0;
+}
+
+/* The selected node paints its own inset background via `::before`. The wrapper
+   owns hover/focus feedback so the highlight stays aligned to the whole row. */
+.skill-option__name .n-base-select-option::before {
+  display: none;
 }
 
 /* Hide the naive-ui checkmark (absolute, right-aligned) — the selected state is
@@ -2996,7 +3003,16 @@ onBeforeUnmount(() => {
   background: rgba(24, 160, 88, 0.16);
 }
 
+.execution-environment__skills .n-tag__content {
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+}
+
 .skill-tag__name {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
