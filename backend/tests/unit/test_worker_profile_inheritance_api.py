@@ -1,0 +1,299 @@
+"""Profile API inheritance semantics for the shared worker configuration.
+
+Covers §11.2/§11.3: creating a Profile with ``worker_kit_source=system``
+inherits its kit from the shared baseline and fails when none is configured,
+``volume_mount_masks`` and ``mask`` environment operations are preserved
+through create/update/duplicate, and ``expected_shared_revision`` enforces an
+optimistic-revision check (409) on the Profile write path.
+"""
+
+from __future__ import annotations
+
+import pytest
+from fastapi import HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.orm import selectinload
+from sqlalchemy.pool import StaticPool
+
+from app.api.worker_profiles import (
+    WorkerProfileCreateRequest,
+    WorkerProfileEnvironmentVariableRequest,
+    WorkerProfileUpdateRequest,
+    create_worker_profile,
+    duplicate_worker_profile,
+    update_worker_profile,
+)
+from app.core.worker_shared_configuration import (
+    ENV_OPERATION_MASK,
+    ENV_OPERATION_SET,
+    WorkerSharedConfigurationContext,
+    resolve_effective_configuration,
+)
+from app.models import (
+    Base,
+    WorkerProfile,
+    WorkerProfileEnvironmentVariable,
+    WorkerSharedConfiguration,
+    WorkerSharedEnvironmentVariable,
+)
+
+
+@pytest.fixture
+def db_factory():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool)
+
+    async def _create():
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        return async_sessionmaker(engine, expire_on_commit=False)
+
+    return _create
+
+
+async def _seed_shared(db, *, revision: int = 1) -> WorkerSharedConfiguration:
+    row = WorkerSharedConfiguration(
+        id=1,
+        revision=revision,
+        runtime_mode="mounted_kit",
+        worker_kit_version="0.4.0",
+        worker_kit_path="/opt/codify/worker-kits/0.4.0",
+        volume_mounts=[
+            {"host_path": "/srv/shared", "container_path": "/shared", "mode": "ro"}
+        ],
+        pre_script="shared-pre",
+        post_script="shared-post",
+        default_execute_run_instruction_template="shared execute {{user_prompt}}",
+        default_plan_run_instruction_template="shared plan {{user_prompt}}",
+        ci_auto_repair_run_instruction_template="shared repair {{issue_title}}",
+    )
+    db.add(row)
+    db.add(
+        WorkerSharedEnvironmentVariable(
+            worker_shared_configuration_id=1,
+            key="SHARED_A",
+            value="a",
+            is_secret=False,
+        )
+    )
+    await db.flush()
+    return row
+
+
+async def _reload_shared(db) -> WorkerSharedConfigurationContext:
+    row = await db.get(WorkerSharedConfiguration, 1)
+    env = tuple(
+        (
+            await db.execute(
+                select(WorkerSharedEnvironmentVariable).order_by(
+                    WorkerSharedEnvironmentVariable.key
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return WorkerSharedConfigurationContext(row=row, environment_variables=env)
+
+
+async def _effective(db, profile_id: int):
+    profile = await db.get(
+        WorkerProfile,
+        profile_id,
+        options=[selectinload(WorkerProfile.environment_variables)],
+    )
+    shared = await _reload_shared(db)
+    return resolve_effective_configuration(profile, shared)
+
+
+def _create_request(**overrides) -> WorkerProfileCreateRequest:
+    kwargs = dict(
+        name="Inheriting Worker",
+        image="codify-worker/java21:2026.07",
+        default_execute_run_instruction_template="execute {{user_prompt}}",
+        default_plan_run_instruction_template="plan {{user_prompt}}",
+        ci_auto_repair_run_instruction_template="repair {{issue_title}}",
+    )
+    kwargs.update(overrides)
+    return WorkerProfileCreateRequest(**kwargs)
+
+
+@pytest.mark.asyncio
+async def test_create_system_kit_profile_inherits_shared_runtime(db_factory):
+    session_factory = await db_factory()
+    async with session_factory() as db:
+        await _seed_shared(db)
+        response = await create_worker_profile(
+            _create_request(worker_kit_source="system", runtime_mode="baked_image"),
+            db=db,
+        )
+        effective = await _effective(db, response["id"])
+
+    assert response["worker_kit_source"] == "system"
+    assert effective.runtime_mode == "mounted_kit"
+    assert effective.worker_kit_version == "0.4.0"
+    assert effective.worker_kit_path == "/opt/codify/worker-kits/0.4.0"
+
+
+@pytest.mark.asyncio
+async def test_create_system_kit_profile_requires_shared_baseline(db_factory):
+    session_factory = await db_factory()
+    async with session_factory() as db:
+        with pytest.raises(HTTPException) as exc:
+            await create_worker_profile(_create_request(worker_kit_source="system"), db=db)
+
+    assert exc.value.status_code == 422
+    assert "requires a configured shared" in str(exc.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_create_profile_with_volume_mount_masks(db_factory):
+    session_factory = await db_factory()
+    async with session_factory() as db:
+        await _seed_shared(db)
+        response = await create_worker_profile(
+            _create_request(
+                volume_mounts=[
+                    {"host_path": "/srv/a", "container_path": "/shared/a", "mode": "rw"}
+                ],
+                volume_mount_masks=["/shared"],
+            ),
+            db=db,
+        )
+        effective = await _effective(db, response["id"])
+
+    assert response["volume_mount_masks"] == ["/shared"]
+    by_path = {mount["container_path"]: mount for mount in effective.volume_mounts}
+    assert "/shared" not in by_path
+    assert by_path["/shared/a"]["host_path"] == "/srv/a"
+
+
+@pytest.mark.asyncio
+async def test_create_profile_with_env_mask_operation(db_factory):
+    session_factory = await db_factory()
+    async with session_factory() as db:
+        await _seed_shared(db)
+        response = await create_worker_profile(
+            _create_request(
+                environment_variables=[
+                    WorkerProfileEnvironmentVariableRequest(
+                        key="SHARED_A",
+                        value=None,
+                        operation=ENV_OPERATION_MASK,
+                    )
+                ],
+            ),
+            db=db,
+        )
+        effective = await _effective(db, response["id"])
+
+    assert "SHARED_A" not in {item["key"] for item in effective.environment_variables}
+
+
+@pytest.mark.asyncio
+async def test_create_profile_expected_shared_revision_conflict(db_factory):
+    session_factory = await db_factory()
+    async with session_factory() as db:
+        await _seed_shared(db, revision=3)
+        with pytest.raises(HTTPException) as exc:
+            await create_worker_profile(
+                _create_request(
+                    worker_kit_source="system",
+                    expected_shared_revision=99,
+                ),
+                db=db,
+            )
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail == "shared_configuration_changed"
+
+
+@pytest.mark.asyncio
+async def test_update_profile_to_system_kit_validates_against_shared(db_factory):
+    session_factory = await db_factory()
+    async with session_factory() as db:
+        await _seed_shared(db)
+        profile = WorkerProfile(
+            name="Standalone Worker",
+            enabled=True,
+            is_default=False,
+            image="codify-worker/java21:2026.07",
+            worker_kit_source="profile",
+            runtime_mode="baked_image",
+            volume_mounts=[],
+            pre_script="",
+            post_script="",
+            default_execute_run_instruction_template="execute {{user_prompt}}",
+            default_plan_run_instruction_template="plan {{user_prompt}}",
+            ci_auto_repair_run_instruction_template="repair {{issue_title}}",
+        )
+        db.add(profile)
+        await db.commit()
+        profile_id = profile.id
+
+        response = await update_worker_profile(
+            profile_id,
+            WorkerProfileUpdateRequest(
+                worker_kit_source="system",
+                expected_shared_revision=1,
+            ),
+            db=db,
+        )
+        effective = await _effective(db, profile_id)
+
+    assert response["worker_kit_source"] == "system"
+    assert effective.runtime_mode == "mounted_kit"
+    assert effective.worker_kit_version == "0.4.0"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_preserves_inheritance_intent(db_factory):
+    session_factory = await db_factory()
+    async with session_factory() as db:
+        await _seed_shared(db)
+        source = WorkerProfile(
+            name="Inheriting Source",
+            enabled=True,
+            is_default=False,
+            image="codify-worker/java21:2026.07",
+            worker_kit_source="system",
+            runtime_mode="baked_image",
+            volume_mounts=[],
+            volume_mount_masks=["/shared"],
+            pre_script="",
+            post_script="",
+            default_execute_run_instruction_template="execute {{user_prompt}}",
+            default_plan_run_instruction_template="plan {{user_prompt}}",
+            ci_auto_repair_run_instruction_template="repair {{issue_title}}",
+            environment_variables=[
+                WorkerProfileEnvironmentVariable(
+                    key="SHARED_A",
+                    value=None,
+                    operation=ENV_OPERATION_MASK,
+                    is_secret=False,
+                ),
+                WorkerProfileEnvironmentVariable(
+                    key="PROFILE_ONLY",
+                    value="p",
+                    operation=ENV_OPERATION_SET,
+                    is_secret=False,
+                ),
+            ],
+        )
+        db.add(source)
+        await db.commit()
+        source_id = source.id
+
+        response = await duplicate_worker_profile(source_id, db=db)
+        copy = await db.get(
+            WorkerProfile,
+            response["id"],
+            options=[selectinload(WorkerProfile.environment_variables)],
+        )
+
+        env_by_key = {row.key: row for row in copy.environment_variables}
+
+    assert copy.worker_kit_source == "system"
+    assert copy.volume_mount_masks == ["/shared"]
+    assert env_by_key["SHARED_A"].operation == ENV_OPERATION_MASK
+    assert env_by_key["PROFILE_ONLY"].operation == ENV_OPERATION_SET

@@ -49,6 +49,12 @@ from app.core.worker_kit import (
     worker_kit_environment,
     worker_kit_mounts,
 )
+from app.core.worker_shared_configuration import (
+    effective_configuration_digest,
+    load_shared_configuration,
+    resolve_effective_configuration,
+    validate_effective_configuration,
+)
 from app.models import (
     AIProvider,
     Issue,
@@ -286,6 +292,52 @@ def parse_worker_profile_mounts(value: Any) -> list[dict[str, str]]:
     return validate_worker_profile_mounts(value)
 
 
+def validate_worker_profile_mount_masks(
+    raw_masks: Any,
+    *,
+    volume_mounts: Iterable[Mapping[str, Any]],
+) -> list[str]:
+    """Validate and normalize profile container-path masks.
+
+    A mask names a shared container path this profile hides. Masks are stored
+    normalized, must be absolute, must not repeat, and must not collide with a
+    ``set`` override for the same container path (design §7.3).
+    """
+    if raw_masks in (None, ""):
+        return []
+    if not isinstance(raw_masks, list):
+        raise WorkerProfileValidationError("volume_mount_masks must be a list")
+    set_container_paths = {
+        str(mount.get("container_path") or "").strip()
+        for mount in volume_mounts
+        if str(mount.get("container_path") or "").strip()
+    }
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_path in raw_masks:
+        container_path = str(raw_path or "").strip()
+        if not container_path:
+            raise WorkerProfileValidationError(
+                "volume mount masks require a container_path"
+            )
+        if not os.path.isabs(container_path):
+            raise WorkerProfileValidationError(
+                "volume mount mask container_path must be absolute"
+            )
+        container_path = os.path.normpath(container_path)
+        if container_path in seen:
+            raise WorkerProfileValidationError(
+                f"duplicate volume mount mask path: {container_path}"
+            )
+        if container_path in set_container_paths:
+            raise WorkerProfileValidationError(
+                f"volume mount path {container_path} cannot be both set and masked"
+            )
+        seen.add(container_path)
+        normalized.append(container_path)
+    return normalized
+
+
 def validate_profile_templates(
     *,
     execute_template: str,
@@ -312,6 +364,7 @@ def serialize_profile_environment_variable_for_api(
         "key": row.key,
         "value": None if row.is_secret else row.value,
         "is_secret": row.is_secret,
+        "operation": getattr(row, "operation", "set") or "set",
         "value_configured": row.value is not None,
         "created_at": row.created_at,
         "updated_at": row.updated_at,
@@ -331,11 +384,13 @@ def serialize_worker_profile_for_api(
         "enabled": profile.enabled,
         "is_default": profile.is_default,
         "image": profile.image,
+        "worker_kit_source": getattr(profile, "worker_kit_source", "profile") or "profile",
         "runtime_mode": getattr(profile, "runtime_mode", BAKED_IMAGE_MODE),
         "worker_kit_version": getattr(profile, "worker_kit_version", None),
         "worker_kit_path": getattr(profile, "worker_kit_path", None),
         "codegraph_enabled": bool(getattr(profile, "codegraph_enabled", False)),
         "volume_mounts": profile.volume_mounts or [],
+        "volume_mount_masks": getattr(profile, "volume_mount_masks", None) or [],
         "environment_variables": [
             serialize_profile_environment_variable_for_api(row)
             for row in profile.environment_variables
@@ -351,6 +406,9 @@ def serialize_worker_profile_for_api(
         "default_plan_run_instruction_template": profile.default_plan_run_instruction_template,
         "ci_auto_repair_run_instruction_template": (
             profile.ci_auto_repair_run_instruction_template
+        ),
+        "verified_runtime_configuration_digest": getattr(
+            profile, "verified_runtime_configuration_digest", None
         ),
         "enabled_harnesses": getattr(profile, "enabled_harnesses", None) or ["claude"],
         "default_harness_key": getattr(profile, "default_harness_key", None) or "claude",
@@ -371,14 +429,6 @@ def serialize_worker_profile_for_api(
             }
         )
     return payload
-
-
-def _profile_env_to_snapshot(row: WorkerProfileEnvironmentVariable) -> dict[str, Any]:
-    return {
-        "key": row.key,
-        "value": row.value,
-        "is_secret": row.is_secret,
-    }
 
 
 def build_worker_profile_environment_map(
@@ -536,6 +586,7 @@ def snapshot_from_profile(
     settings: Any | None = None,
     harness_key: str | None = None,
     endpoint: Any | None = None,
+    shared_configuration: Any | None = None,
 ) -> TaskWorkerProfileSnapshot:
     """Build an immutable task worker snapshot from a loaded profile.
 
@@ -543,17 +594,14 @@ def snapshot_from_profile(
     secret-free ``ModelEndpoint`` (or any object exposing ``as_snapshot``) whose
     snapshot and credential ref are frozen so later Profile/Provider edits never
     change a created Task's execution truth.
+
+    ``shared_configuration`` is a ``WorkerSharedConfigurationContext``. When it
+    is ``None`` the profile is resolved as fully explicit (pre-shared behavior).
+    The snapshot stores the fully expanded effective configuration plus the
+    shared revision and effective-configuration digest.
     """
-    try:
-        runtime_mode, kit_version, kit_path = validate_worker_kit_config(
-            runtime_mode=getattr(profile, "runtime_mode", BAKED_IMAGE_MODE),
-            worker_kit_version=getattr(profile, "worker_kit_version", None),
-            worker_kit_path=getattr(profile, "worker_kit_path", None),
-        )
-        mounts = parse_worker_profile_mounts(profile.volume_mounts)
-        validate_worker_kit_mounts(runtime_mode, mounts)
-    except WorkerKitValidationError as exc:
-        raise WorkerProfileValidationError(str(exc)) from exc
+    effective = resolve_effective_configuration(profile, shared_configuration)
+    validate_effective_configuration(effective)
     connection = (
         resolve_docker_connection(
             settings,
@@ -577,9 +625,9 @@ def snapshot_from_profile(
         worker_profile_id=profile.id,
         profile_name=profile.name,
         image=profile.image,
-        runtime_mode=runtime_mode,
-        worker_kit_version=kit_version,
-        worker_kit_path=kit_path,
+        runtime_mode=effective.runtime_mode,
+        worker_kit_version=effective.worker_kit_version,
+        worker_kit_path=effective.worker_kit_path,
         docker_host=(connection.host if connection else getattr(profile, "docker_host", None)),
         docker_tls_ca=(
             connection.tls_ca if connection else getattr(profile, "docker_tls_ca", None)
@@ -591,17 +639,21 @@ def snapshot_from_profile(
             connection.tls_key if connection else getattr(profile, "docker_tls_key", None)
         ),
         codegraph_enabled=bool(getattr(profile, "codegraph_enabled", False)),
-        volume_mounts=mounts,
-        environment_variables=[
-            _profile_env_to_snapshot(row) for row in profile.environment_variables
-        ],
+        volume_mounts=list(effective.volume_mounts),
+        environment_variables=list(effective.environment_variables),
+        shared_configuration_revision=effective.shared_configuration_revision,
+        effective_configuration_digest=effective_configuration_digest(effective),
         skill_references=[],
         skill_selection_source="profile",
-        pre_script=profile.pre_script or "",
-        post_script=profile.post_script or "",
-        default_execute_run_instruction_template=profile.default_execute_run_instruction_template,
-        default_plan_run_instruction_template=profile.default_plan_run_instruction_template,
-        ci_auto_repair_run_instruction_template=profile.ci_auto_repair_run_instruction_template,
+        pre_script=effective.pre_script,
+        post_script=effective.post_script,
+        default_execute_run_instruction_template=(
+            effective.default_execute_run_instruction_template
+        ),
+        default_plan_run_instruction_template=effective.default_plan_run_instruction_template,
+        ci_auto_repair_run_instruction_template=(
+            effective.ci_auto_repair_run_instruction_template
+        ),
         harness_key=resolved_harness_key,
         harness_config_snapshot={
             "capabilities": effective_capabilities,
@@ -627,6 +679,11 @@ async def replace_task_worker_snapshot(
     endpoint: Any | None = None,
 ) -> TaskWorkerProfileSnapshot:
     """Replace one task's worker profile snapshot."""
+    from app.core.worker_shared_configuration import profile_inherits_shared
+
+    shared = None
+    if profile_inherits_shared(profile):
+        shared = await load_shared_configuration(db)
     existing = await db.get(TaskWorkerProfileSnapshot, task.id)
     if existing is not None:
         await db.delete(existing)
@@ -637,6 +694,7 @@ async def replace_task_worker_snapshot(
         settings=get_effective_settings(),
         harness_key=harness_key,
         endpoint=endpoint,
+        shared_configuration=shared,
     )
     db.add(snapshot)
     task.worker_profile_id = profile.id
@@ -672,6 +730,8 @@ async def clone_task_worker_snapshot(
         codegraph_enabled=source.codegraph_enabled,
         volume_mounts=[dict(item) for item in (source.volume_mounts or [])],
         environment_variables=[dict(item) for item in (source.environment_variables or [])],
+        shared_configuration_revision=source.shared_configuration_revision,
+        effective_configuration_digest=source.effective_configuration_digest,
         skill_selection_source=source.skill_selection_source,
         pre_script=source.pre_script,
         post_script=source.post_script,
@@ -788,7 +848,14 @@ async def replace_profile_environment_variables(
     profile: WorkerProfile,
     items: Iterable[Any],
 ) -> None:
-    """Replace all environment variables for one worker profile."""
+    """Replace all environment variables for one worker profile.
+
+    Each item is ``{key, operation, value, is_secret}`` where ``operation`` is
+    ``set`` (profile overrides or adds) or ``mask`` (profile hides a shared
+    variable). A ``mask`` row stores no value. The submitted list is the full
+    desired state; any stored row whose key is absent is removed, which restores
+    inheritance for that key.
+    """
     result = await db.execute(
         select(WorkerProfileEnvironmentVariable).where(
             WorkerProfileEnvironmentVariable.worker_profile_id == profile.id
@@ -806,32 +873,47 @@ async def replace_profile_environment_variables(
             )
         seen_keys.add(key)
 
-        value = str(_profile_value(item, "value", "") or "")
-        is_secret = bool(_profile_value(item, "is_secret", False))
+        operation = str(_profile_value(item, "operation", "set") or "set").strip().lower()
+        if operation not in {"set", "mask"}:
+            raise WorkerProfileValidationError(
+                f"Invalid worker environment variable operation: {operation}"
+            )
         existing_row = existing_by_key.get(key)
 
-        if is_secret and value == "":
-            if existing_row is None or not existing_row.is_secret:
+        if operation == "mask":
+            if bool(_profile_value(item, "is_secret", False)):
                 raise WorkerProfileValidationError(
-                    f"New secret worker environment variable {key} cannot use a blank value"
+                    f"Masked worker environment variable {key} cannot be a secret"
                 )
-            stored_value = existing_row.value
+            stored_value = None
+            is_secret = False
         else:
-            stored_value = serialize_worker_environment_variable_value(
-                value,
-                is_secret=is_secret,
-            )
+            value = str(_profile_value(item, "value", "") or "")
+            is_secret = bool(_profile_value(item, "is_secret", False))
+            if is_secret and value == "":
+                if existing_row is None or not existing_row.is_secret:
+                    raise WorkerProfileValidationError(
+                        f"New secret worker environment variable {key} cannot use a blank value"
+                    )
+                stored_value = existing_row.value
+            else:
+                stored_value = serialize_worker_environment_variable_value(
+                    value,
+                    is_secret=is_secret,
+                )
 
         if existing_row is None:
             db.add(
                 WorkerProfileEnvironmentVariable(
                     worker_profile_id=profile.id,
                     key=key,
+                    operation=operation,
                     value=stored_value,
                     is_secret=is_secret,
                 )
             )
         else:
+            existing_row.operation = operation
             existing_row.value = stored_value
             existing_row.is_secret = is_secret
 

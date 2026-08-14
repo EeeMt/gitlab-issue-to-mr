@@ -46,20 +46,24 @@ async def prepare_task_runtime_snapshot(
     endpoint: Any | None = None,
 ) -> TaskWorkerProfileSnapshot:
     """Snapshot the worker profile and persist the task's rendered prompt."""
+    # Build the snapshot first so skill validation runs against the resolved
+    # effective worker configuration (shared-config inheritance) rather than the
+    # raw Profile columns.
+    snapshot = await replace_snapshot(
+        db, task, worker_profile, harness_key=harness_key, endpoint=endpoint
+    )
     if skill_snapshots is None:
         resolved_skills = await resolve_task_skill_snapshots(
             db,
             worker_profile,
             skill_ids if skill_ids_provided else None,
+            validate_runtime=snapshot,
         )
         resolved_source = "task" if skill_ids_provided else "profile"
     else:
         resolved_skills = normalize_skill_snapshots(skill_snapshots)
-        validate_runtime_supports_skills(worker_profile, resolved_skills)
+        validate_runtime_supports_skills(snapshot, resolved_skills)
         resolved_source = skill_selection_source or "task"
-    snapshot = await replace_snapshot(
-        db, task, worker_profile, harness_key=harness_key, endpoint=endpoint
-    )
     replace_task_skill_references(snapshot, resolved_skills)
     snapshot.skill_selection_source = resolved_source
     task.worker_profile_snapshot = snapshot

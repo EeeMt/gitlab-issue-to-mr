@@ -516,8 +516,16 @@ async def resolve_task_skill_snapshots(
     db: AsyncSession,
     worker_profile: Any,
     requested_skill_ids: list[int] | None,
+    *,
+    validate_runtime: Any = None,
 ) -> list[dict[str, Any]]:
-    """Resolve task override or enabled profile defaults into immutable content."""
+    """Resolve task override or enabled profile defaults into immutable content.
+
+    ``validate_runtime`` defaults to ``worker_profile``. Callers that resolve the
+    effective worker configuration (e.g. shared-config inheritance) pass the
+    resolved runtime so skills are validated against the effective Kit rather
+    than the raw Profile columns.
+    """
     if requested_skill_ids is not None:
         snapshots = await load_enabled_skill_snapshots(db, requested_skill_ids)
     else:
@@ -527,7 +535,8 @@ async def resolve_task_skill_snapshots(
             if bool(getattr(skill, "enabled", False))
         ]
         snapshots = await load_enabled_skill_snapshots(db, default_ids)
-    validate_runtime_supports_skills(worker_profile, snapshots)
+    runtime_target = validate_runtime if validate_runtime is not None else worker_profile
+    validate_runtime_supports_skills(runtime_target, snapshots)
     return snapshots
 
 

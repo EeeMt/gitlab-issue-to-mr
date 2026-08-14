@@ -797,6 +797,84 @@ class WorkerEnvironmentVariable(Base):
     )
 
 
+class WorkerSharedConfiguration(Base):
+    """Administrator-maintained system-wide worker configuration singleton."""
+
+    __tablename__ = "worker_shared_configurations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    runtime_mode: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="baked_image"
+    )
+    worker_kit_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    worker_kit_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    volume_mounts: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+    pre_script: Mapped[str | None] = mapped_column(Text, nullable=True)
+    post_script: Mapped[str | None] = mapped_column(Text, nullable=True)
+    default_execute_run_instruction_template: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
+    default_plan_run_instruction_template: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
+    ci_auto_repair_run_instruction_template: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=utcnow,
+        onupdate=utcnow,
+    )
+
+    environment_variables: Mapped[list["WorkerSharedEnvironmentVariable"]] = relationship(
+        "WorkerSharedEnvironmentVariable",
+        back_populates="shared_configuration",
+        cascade="all, delete-orphan",
+        order_by="WorkerSharedEnvironmentVariable.key",
+    )
+
+
+class WorkerSharedEnvironmentVariable(Base):
+    """Environment variable inherited from the system shared configuration."""
+
+    __tablename__ = "worker_shared_environment_variables"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    worker_shared_configuration_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("worker_shared_configurations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    key: Mapped[str] = mapped_column(String(255), nullable=False)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    is_secret: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=utcnow,
+        onupdate=utcnow,
+    )
+
+    shared_configuration: Mapped[WorkerSharedConfiguration] = relationship(
+        "WorkerSharedConfiguration",
+        back_populates="environment_variables",
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_worker_shared_environment_key",
+            "worker_shared_configuration_id",
+            "key",
+            unique=True,
+        ),
+    )
+
+
 class WorkerProfile(Base):
     """Editable worker runtime profile."""
 
@@ -808,6 +886,9 @@ class WorkerProfile(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     image: Mapped[str] = mapped_column(String(255), nullable=False)
+    worker_kit_source: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="profile", server_default=text("'profile'")
+    )
     runtime_mode: Mapped[str] = mapped_column(
         String(32), nullable=False, default="baked_image"
     )
@@ -819,11 +900,21 @@ class WorkerProfile(Base):
     docker_tls_key: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     codegraph_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     volume_mounts: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
-    pre_script: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    post_script: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    default_execute_run_instruction_template: Mapped[str] = mapped_column(Text, nullable=False)
-    default_plan_run_instruction_template: Mapped[str] = mapped_column(Text, nullable=False)
-    ci_auto_repair_run_instruction_template: Mapped[str] = mapped_column(Text, nullable=False)
+    volume_mount_masks: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    pre_script: Mapped[str | None] = mapped_column(Text, nullable=True)
+    post_script: Mapped[str | None] = mapped_column(Text, nullable=True)
+    default_execute_run_instruction_template: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
+    default_plan_run_instruction_template: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
+    ci_auto_repair_run_instruction_template: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
+    verified_runtime_configuration_digest: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
     enabled_harnesses: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     default_harness_key: Mapped[str] = mapped_column(
         String(32), nullable=False, default="claude", server_default=text("'claude'")
@@ -988,7 +1079,10 @@ class WorkerProfileEnvironmentVariable(Base):
         index=True,
     )
     key: Mapped[str] = mapped_column(String(255), nullable=False)
-    value: Mapped[str] = mapped_column(Text, nullable=False)
+    operation: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="set", server_default=text("'set'")
+    )
+    value: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_secret: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -1038,6 +1132,8 @@ class TaskWorkerProfileSnapshot(Base):
     codegraph_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     volume_mounts: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
     environment_variables: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+    shared_configuration_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    effective_configuration_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
     skill_selection_source: Mapped[str] = mapped_column(
         String(16),
         nullable=False,
