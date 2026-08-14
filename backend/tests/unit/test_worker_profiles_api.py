@@ -27,7 +27,7 @@ from app.api.worker_profiles import (
     test_worker_profile_docker_connection as run_docker_connection_test,
 )
 from app.core.worker_profiles import parse_worker_profile_mounts
-from app.core.worker_runtime_readiness import RuntimeReadiness
+from app.core.worker_runtime_readiness import RuntimeProbeTransientError, RuntimeReadiness
 from app.database import get_db
 from app.dependencies.auth import (
     require_admin_user,
@@ -1055,6 +1055,35 @@ async def test_verify_mounted_worker_profile_runs_preflight_on_profile_target():
     }
     container.remove.assert_called_once_with(force=True, v=True)
     client.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_verify_mounted_worker_profile_transient_daemon_returns_503():
+    """§13.5: an unreachable daemon surfaces as 503 transient, never a raw 500."""
+    profile = _make_profile(id=14, name="Transient Runtime")
+    profile.image = "team/java21-maven:2026.07"
+    profile.runtime_mode = "mounted_kit"
+    profile.worker_kit_version = "0.3.5"
+    profile.worker_kit_path = "/opt/codify/worker-kits/0.3.5-linux-amd64"
+    db = MagicMock()
+    db.get = AsyncMock(return_value=profile)
+    db.commit = AsyncMock()
+
+    with patch(
+        "app.api.worker_profiles.run_deterministic_kit_probe",
+        new=AsyncMock(side_effect=RuntimeProbeTransientError("daemon unreachable")),
+    ):
+        with pytest.raises(HTTPException) as exc_info:
+            await verify_worker_profile_runtime(
+                14,
+                WorkerRuntimeVerificationRequest(smoke_command="true"),
+                db=db,
+            )
+
+    assert exc_info.value.status_code == 503
+    assert (
+        exc_info.value.detail["code"] == "worker_runtime_verification_transient_failure"
+    )
 
 
 @pytest.mark.asyncio

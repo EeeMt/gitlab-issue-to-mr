@@ -443,6 +443,43 @@ def test_probe_requires_mounted_kit_mode():
         )
 
 
+def test_probe_unreachable_daemon_constructor_is_transient():
+    """§13.5: a DockerException during client construction (the version=auto
+    handshake) becomes RuntimeProbeTransientError, not a raw DockerException."""
+    with patch(
+        "app.core.worker_runtime_readiness.DockerClientWrapper",
+        side_effect=docker.errors.DockerException("connection refused"),
+    ):
+        with pytest.raises(RuntimeProbeTransientError) as exc_info:
+            probe_worker_kit(
+                SimpleNamespace(host="tcp://worker:2376", tls_ca=None),
+                image="worker:latest",
+                runtime_mode="mounted_kit",
+                worker_kit_version="0.3.5",
+                worker_kit_path="/opt/kit",
+            )
+    assert "daemon" in str(exc_info.value)
+
+
+def test_probe_unreachable_daemon_image_get_is_transient():
+    """§13.5: a connection failure while locating the probe image is transient."""
+    client = MagicMock()
+    client.client.images.get.side_effect = docker.errors.DockerException(
+        "connection reset by peer"
+    )
+    with patch(
+        "app.core.worker_runtime_readiness.DockerClientWrapper", return_value=client
+    ):
+        with pytest.raises(RuntimeProbeTransientError):
+            probe_worker_kit(
+                SimpleNamespace(host="tcp://worker:2376", tls_ca=None),
+                image="worker:latest",
+                runtime_mode="mounted_kit",
+                worker_kit_version="0.3.5",
+                worker_kit_path="/opt/kit",
+            )
+
+
 def _large_store_archive() -> tuple[bytes, int]:
     """Build a tar with one ~8MB member and return (bytes, payload_size)."""
     payload = b"x" * (8 * 1024 * 1024)
@@ -480,7 +517,7 @@ def test_nix_store_empty_archive_is_treated_as_missing():
     from app.core.worker_runtime_readiness import _archive_has_member
 
     empty = io.BytesIO()
-    with tarfile.open(fileobj=empty, mode="w") as archive:
+    with tarfile.open(fileobj=empty, mode="w"):
         pass  # no members
 
     container = MagicMock()
@@ -533,5 +570,89 @@ async def test_run_deterministic_kit_probe_persists_ready_through_cas():
             stored = await read_runtime_readiness(db, fingerprint)
         assert stored.status == READINESS_READY
         assert stored.check_generation == 1
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_run_deterministic_kit_probe_transient_leaves_no_orphan_row():
+    """§13.5: a transient probe re-raises and leaves no conclusion-less row."""
+    engine, session_factory = _db_session_factory()
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    connection = SimpleNamespace(host="tcp://worker:2376", tls_ca=None)
+    fingerprint = fingerprint_from_connection_and_kit(
+        connection,
+        runtime_mode="mounted_kit",
+        worker_kit_version="0.3.5",
+        worker_kit_path="/opt/kit",
+    )
+    try:
+        with patch(
+            "app.core.worker_runtime_readiness.probe_worker_kit",
+            side_effect=RuntimeProbeTransientError("daemon unreachable"),
+        ):
+            async with session_factory() as db:
+                with pytest.raises(RuntimeProbeTransientError):
+                    await run_deterministic_kit_probe(
+                        db,
+                        connection=connection,
+                        image="worker:latest",
+                        runtime_mode="mounted_kit",
+                        worker_kit_version="0.3.5",
+                        worker_kit_path="/opt/kit",
+                        ttl_seconds=900,
+                    )
+        async with session_factory() as db:
+            row = await db.get(WorkerRuntimeReadiness, fingerprint)
+        assert row is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_run_deterministic_kit_probe_transient_preserves_existing_conclusion():
+    """§13.5: a transient probe must not delete an existing ready conclusion."""
+    engine, session_factory = _db_session_factory()
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    connection = SimpleNamespace(host="tcp://worker:2376", tls_ca=None)
+    fingerprint = fingerprint_from_connection_and_kit(
+        connection,
+        runtime_mode="mounted_kit",
+        worker_kit_version="0.3.5",
+        worker_kit_path="/opt/kit",
+    )
+    try:
+        # Seed a ready conclusion under the fingerprint.
+        async with session_factory() as db:
+            db.add(
+                WorkerRuntimeReadiness(
+                    runtime_locator_fingerprint=fingerprint,
+                    status=READINESS_READY,
+                    check_generation=1,
+                    checked_at=utcnow(),
+                    ready_until=utcnow() + timedelta(minutes=5),
+                )
+            )
+            await db.commit()
+        with patch(
+            "app.core.worker_runtime_readiness.probe_worker_kit",
+            side_effect=RuntimeProbeTransientError("daemon unreachable"),
+        ):
+            async with session_factory() as db:
+                with pytest.raises(RuntimeProbeTransientError):
+                    await run_deterministic_kit_probe(
+                        db,
+                        connection=connection,
+                        image="worker:latest",
+                        runtime_mode="mounted_kit",
+                        worker_kit_version="0.3.5",
+                        worker_kit_path="/opt/kit",
+                        ttl_seconds=900,
+                    )
+        async with session_factory() as db:
+            stored = await read_runtime_readiness(db, fingerprint)
+        assert stored.status == READINESS_READY
     finally:
         await engine.dispose()

@@ -645,13 +645,18 @@ def probe_worker_kit(
     """
     if (runtime_mode or BAKED_IMAGE_MODE).strip() != MOUNTED_KIT_MODE:
         raise RuntimeProbeTransientError("Kit probe requires mounted_kit mode")
-    client = DockerClientWrapper(
-        connection,
-        connect_timeout=connect_timeout,
-        operation_timeout=operation_timeout,
-    )
+    client = None
     container = None
     try:
+        # Construct inside the try: ``version="auto"`` performs a Docker daemon
+        # handshake during construction, which raises raw ``DockerException`` on
+        # an unreachable daemon. §13.5/§13.6 treat connection failures as
+        # transient — "no new conclusion" — never an unclassified 500/crash.
+        client = DockerClientWrapper(
+            connection,
+            connect_timeout=connect_timeout,
+            operation_timeout=operation_timeout,
+        )
         _ensure_probe_image(client, image)
         try:
             container = client.client.containers.create(
@@ -690,12 +695,17 @@ def probe_worker_kit(
             worker_kit_version=worker_kit_version,
             worker_kit_path=worker_kit_path,
         )
+    except docker.errors.DockerException as exc:
+        raise RuntimeProbeTransientError(
+            f"Could not reach Docker daemon for Kit probe: {exc}"
+        ) from exc
     finally:
         if container is not None:
             with contextlib.suppress(Exception):
                 container.remove(force=True, v=True)
-        with contextlib.suppress(Exception):
-            client.close()
+        if client is not None:
+            with contextlib.suppress(Exception):
+                client.close()
 
 
 async def run_deterministic_kit_probe(
@@ -712,8 +722,9 @@ async def run_deterministic_kit_probe(
 
     Begins a check, performs the remote probe, writes the result through the CAS
     protocol, and returns the post-check effective readiness. A transient probe
-    re-raises ``RuntimeProbeTransientError`` and leaves any stored readiness
-    untouched. The caller owns the surrounding DB transaction/commit.
+    re-raises ``RuntimeProbeTransientError`` and leaves no new persistent state:
+    a conclusion-less row it created (or reused) is removed (§13.5/§13.6). The
+    caller owns the surrounding DB transaction/commit.
     """
     fingerprint = fingerprint_from_connection_and_kit(
         connection,
@@ -732,14 +743,18 @@ async def run_deterministic_kit_probe(
         worker_kit_path=worker_kit_path,
     )
     await db.commit()
-    result = await asyncio.to_thread(
-        probe_worker_kit,
-        connection,
-        image=image,
-        runtime_mode=runtime_mode,
-        worker_kit_version=worker_kit_version,
-        worker_kit_path=worker_kit_path,
-    )
+    try:
+        result = await asyncio.to_thread(
+            probe_worker_kit,
+            connection,
+            image=image,
+            runtime_mode=runtime_mode,
+            worker_kit_version=worker_kit_version,
+            worker_kit_path=worker_kit_path,
+        )
+    except RuntimeProbeTransientError:
+        await _discard_incomplete_runtime_check(db, fingerprint, generation)
+        raise
     now = utcnow()
     ready_until = now + timedelta(seconds=ttl_seconds) if result.status == READINESS_READY else None
     await finish_runtime_check(
@@ -753,6 +768,33 @@ async def run_deterministic_kit_probe(
     )
     await db.commit()
     return await read_runtime_readiness(db, fingerprint)
+
+
+async def _discard_incomplete_runtime_check(
+    db: AsyncSession,
+    fingerprint: str,
+    generation: int,
+) -> None:
+    """Remove a conclusion-less readiness row abandoned by a transient probe.
+
+    A transient probe never writes a conclusion (§13.5/§13.6), so the row it
+    created via ``begin_runtime_check`` (or an already-unknown row it reused)
+    would otherwise accumulate forever with ``status=unknown, checked_at=NULL``.
+    The row is deleted only while it still carries no conclusion and no newer
+    check has superseded our generation, so a concurrent conclusion or a newer
+    check is never destroyed.
+    """
+    row = await db.get(WorkerRuntimeReadiness, fingerprint, with_for_update=True)
+    if row is None:
+        await db.commit()
+        return
+    if (
+        row.check_generation == generation
+        and row.status == READINESS_UNKNOWN
+        and row.checked_at is None
+    ):
+        await db.delete(row)
+    await db.commit()
 
 
 class WorkerRuntimeUnavailableError(RuntimeError):

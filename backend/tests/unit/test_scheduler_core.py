@@ -1279,6 +1279,8 @@ class RuntimeReadinessGateTests(unittest.IsolatedAsyncioTestCase):
         db = MagicMock()
         db.execute = AsyncMock(side_effect=[snapshot_result])
         db.commit = AsyncMock()
+        emitted: list[str] = []
+        scheduler._emit_event = lambda *args, **kwargs: emitted.append(args[0])
 
         with (
             patch(
@@ -1293,8 +1295,11 @@ class RuntimeReadinessGateTests(unittest.IsolatedAsyncioTestCase):
             blocked = await scheduler._apply_runtime_readiness_gate(db, task)
 
         self.assertTrue(blocked)
-        # Transient conclusions never mutate task state; retry next cycle.
+        # Transient conclusions never mutate task state; retry next cycle. The
+        # gate emits the transient event instead of letting the raw error crash
+        # the whole scheduler cycle.
         self.assertEqual(task.status, TaskStatus.QUEUED)
+        self.assertIn("runtime_readiness_probe_transient", emitted)
         db.commit.assert_not_called()
 
     async def test_unknown_probe_superseded_leaves_task_queued(self) -> None:
