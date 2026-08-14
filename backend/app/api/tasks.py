@@ -713,7 +713,7 @@ async def verify_task_worker_runtime(
     )
     fingerprint = fingerprint_from_snapshot(snapshot, settings)
     try:
-        readiness = await run_deterministic_kit_probe(
+        outcome = await run_deterministic_kit_probe(
             db,
             connection=connection,
             image=snapshot.image,
@@ -737,7 +737,7 @@ async def verify_task_worker_runtime(
         "runtime_mode": snapshot.runtime_mode,
         "worker_kit_version": snapshot.worker_kit_version,
         "docker_host": connection.host,
-        "runtime_readiness": serialize_runtime_readiness(readiness),
+        "runtime_readiness": serialize_runtime_readiness(outcome.readiness),
     }
 
 

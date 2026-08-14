@@ -1200,6 +1200,7 @@ class RuntimeReadinessGateTests(unittest.IsolatedAsyncioTestCase):
         from app.core.worker_runtime_readiness import (
             READINESS_READY,
             READINESS_UNKNOWN,
+            RuntimeProbeOutcome,
             RuntimeReadiness,
         )
         from app.scheduler import Scheduler
@@ -1218,7 +1219,12 @@ class RuntimeReadinessGateTests(unittest.IsolatedAsyncioTestCase):
             ),
             patch(
                 "app.scheduler.run_deterministic_kit_probe",
-                new=AsyncMock(return_value=RuntimeReadiness(status=READINESS_READY)),
+                new=AsyncMock(
+                    return_value=RuntimeProbeOutcome(
+                        readiness=RuntimeReadiness(status=READINESS_READY),
+                        committed=True,
+                    )
+                ),
             ),
         ):
             blocked = await scheduler._apply_runtime_readiness_gate(db, task)
@@ -1231,6 +1237,7 @@ class RuntimeReadinessGateTests(unittest.IsolatedAsyncioTestCase):
             FAILURE_WORKER_KIT_INVALID,
             READINESS_UNAVAILABLE,
             READINESS_UNKNOWN,
+            RuntimeProbeOutcome,
             RuntimeReadiness,
         )
         from app.scheduler import Scheduler
@@ -1250,9 +1257,12 @@ class RuntimeReadinessGateTests(unittest.IsolatedAsyncioTestCase):
             patch(
                 "app.scheduler.run_deterministic_kit_probe",
                 new=AsyncMock(
-                    return_value=RuntimeReadiness(
-                        status=READINESS_UNAVAILABLE,
-                        failure_code=FAILURE_WORKER_KIT_INVALID,
+                    return_value=RuntimeProbeOutcome(
+                        readiness=RuntimeReadiness(
+                            status=READINESS_UNAVAILABLE,
+                            failure_code=FAILURE_WORKER_KIT_INVALID,
+                        ),
+                        committed=True,
                     )
                 ),
             ),
@@ -1307,6 +1317,7 @@ class RuntimeReadinessGateTests(unittest.IsolatedAsyncioTestCase):
         the Task QUEUED, not fail it and not emit a failure/park event."""
         from app.core.worker_runtime_readiness import (
             READINESS_UNKNOWN,
+            RuntimeProbeOutcome,
             RuntimeReadiness,
         )
         from app.scheduler import Scheduler
@@ -1329,7 +1340,12 @@ class RuntimeReadinessGateTests(unittest.IsolatedAsyncioTestCase):
                 "app.scheduler.run_deterministic_kit_probe",
                 # The probe's own write was discarded by a later generation
                 # (§13.3 CAS), so the effective readiness reads back unknown.
-                new=AsyncMock(return_value=RuntimeReadiness(status=READINESS_UNKNOWN)),
+                new=AsyncMock(
+                    return_value=RuntimeProbeOutcome(
+                        readiness=RuntimeReadiness(status=READINESS_UNKNOWN),
+                        committed=False,
+                    )
+                ),
             ),
         ):
             blocked = await scheduler._apply_runtime_readiness_gate(db, task)
@@ -1341,6 +1357,57 @@ class RuntimeReadinessGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("runtime_unavailable_task_parked", emitted)
         self.assertNotIn("runtime_readiness_probe_transient", emitted)
         db.commit.assert_not_called()
+
+    async def test_unknown_runtime_probe_superseded_unavailable_parks_task(self) -> None:
+        """F2: a superseded probe whose re-read is unavailable must PARK the Task
+        (QUEUED → PENDING), never FAIL it (§13.3/§13.5/§24.13)."""
+        from app.core.worker_runtime_readiness import (
+            FAILURE_WORKER_KIT_NOT_FOUND,
+            READINESS_UNAVAILABLE,
+            READINESS_UNKNOWN,
+            RuntimeProbeOutcome,
+            RuntimeReadiness,
+        )
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        task = _claimable_task(5, 20)
+        snapshot_result, empty = self._snapshot_db()
+        db = MagicMock()
+        db.execute = AsyncMock(side_effect=[snapshot_result, empty])
+        db.commit = AsyncMock()
+        emitted: list[str] = []
+        scheduler._emit_event = lambda *args, **kwargs: emitted.append(args[0])
+
+        with (
+            patch(
+                "app.scheduler.read_runtime_readiness",
+                new=AsyncMock(return_value=RuntimeReadiness(status=READINESS_UNKNOWN)),
+            ),
+            patch(
+                "app.scheduler.run_deterministic_kit_probe",
+                # Our probe was superseded (committed=False) by a concurrent check
+                # that concluded unavailable; the re-read reflects that conclusion.
+                new=AsyncMock(
+                    return_value=RuntimeProbeOutcome(
+                        readiness=RuntimeReadiness(
+                            status=READINESS_UNAVAILABLE,
+                            failure_code=FAILURE_WORKER_KIT_NOT_FOUND,
+                        ),
+                        committed=False,
+                    )
+                ),
+            ),
+        ):
+            blocked = await scheduler._apply_runtime_readiness_gate(db, task)
+
+        self.assertTrue(blocked)
+        # Parked back to PENDING (not failed) so it can recover when the Kit is
+        # installed — no manual retry needed.
+        self.assertEqual(task.status, TaskStatus.PENDING)
+        self.assertIn("runtime_unavailable_task_parked", emitted)
+        self.assertNotIn("runtime_readiness_check_failed", emitted)
+        db.commit.assert_awaited()
 
 
 # ---------------------------------------------------------------------------

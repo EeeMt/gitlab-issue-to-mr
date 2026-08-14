@@ -543,7 +543,7 @@ async def verify_worker_profile_runtime(
 
     # Layer 1: strict Kit probe through the generation/CAS readiness service.
     try:
-        readiness = await run_deterministic_kit_probe(
+        outcome = await run_deterministic_kit_probe(
             db,
             connection=connection,
             image=runtime.image,
@@ -560,11 +560,11 @@ async def verify_worker_profile_runtime(
                 "message": f"Worker Kit probe could not reach a conclusion: {exc}",
             },
         ) from exc
-    if readiness.is_unavailable:
+    if outcome.is_unavailable:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=_runtime_unavailable_detail(
-                readiness,
+                outcome.readiness,
                 worker_profile_id=profile_id,
                 worker_profile_name=profile.name,
             ),
@@ -686,7 +686,7 @@ async def verify_worker_profile_runtime(
             if bool(item.get("is_secret"))
         ),
         "logs": logs[-8000:],
-        "runtime_readiness": serialize_runtime_readiness(readiness),
+        "runtime_readiness": serialize_runtime_readiness(outcome.readiness),
     }
 
 

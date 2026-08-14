@@ -10,6 +10,7 @@ import asyncio
 import io
 import json
 import tarfile
+import threading
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -555,7 +556,7 @@ async def test_run_deterministic_kit_probe_persists_ready_through_cas():
             return_value=RuntimeCheckResult(status=READINESS_READY),
         ):
             async with session_factory() as db:
-                readiness = await run_deterministic_kit_probe(
+                outcome = await run_deterministic_kit_probe(
                     db,
                     connection=connection,
                     image="worker:latest",
@@ -564,12 +565,93 @@ async def test_run_deterministic_kit_probe_persists_ready_through_cas():
                     worker_kit_path="/opt/kit",
                     ttl_seconds=900,
                 )
-        assert readiness.status == READINESS_READY
-        assert readiness.ready_until is not None
+        assert outcome.committed is True
+        assert outcome.readiness.status == READINESS_READY
+        assert outcome.readiness.ready_until is not None
         async with session_factory() as db:
             stored = await read_runtime_readiness(db, fingerprint)
         assert stored.status == READINESS_READY
         assert stored.check_generation == 1
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_run_deterministic_kit_probe_superseded_reports_not_committed():
+    """§13.3/§13.5: a probe whose CAS write is rejected (superseded) reports
+    committed=False and reflects the concurrent conclusion, not its own."""
+    engine, session_factory = _db_session_factory()
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    connection = SimpleNamespace(host="tcp://worker:2376", tls_ca=None)
+    fingerprint = fingerprint_from_connection_and_kit(
+        connection,
+        runtime_mode="mounted_kit",
+        worker_kit_version="0.3.5",
+        worker_kit_path="/opt/kit",
+    )
+    try:
+        probe_started = threading.Event()
+        concurrent_done = threading.Event()
+
+        def delayed_probe(*_args, **_kwargs):
+            probe_started.set()
+            assert concurrent_done.wait(5), "concurrent writer did not finish"
+            return RuntimeCheckResult(status=READINESS_READY)
+
+        async def concurrent_supersede():
+            # A concurrent check begins after our probe (bumping the generation)
+            # and commits an unavailable conclusion before our probe returns.
+            async with session_factory() as db:
+                await begin_runtime_check(
+                    db,
+                    fingerprint=fingerprint,
+                    docker_daemon_key="daemon-key",
+                    runtime_mode="mounted_kit",
+                    worker_kit_version="0.3.5",
+                    worker_kit_path="/opt/kit",
+                )
+                await finish_runtime_check(
+                    db,
+                    fingerprint=fingerprint,
+                    generation=2,
+                    status=READINESS_UNAVAILABLE,
+                    failure_code=FAILURE_WORKER_KIT_NOT_FOUND,
+                    failure_message="kit gone",
+                )
+                await db.commit()
+
+        async def probing():
+            async with session_factory() as db:
+                return await run_deterministic_kit_probe(
+                    db,
+                    connection=connection,
+                    image="worker:latest",
+                    runtime_mode="mounted_kit",
+                    worker_kit_version="0.3.5",
+                    worker_kit_path="/opt/kit",
+                    ttl_seconds=900,
+                )
+
+        with patch(
+            "app.core.worker_runtime_readiness.probe_worker_kit",
+            side_effect=delayed_probe,
+        ):
+            probe_task = asyncio.create_task(probing())
+            # Wait until our probe is mid-flight (doing "remote I/O"), then let
+            # the concurrent check win the CAS race.
+            await asyncio.to_thread(probe_started.wait, 5)
+            await concurrent_supersede()
+            concurrent_done.set()
+            outcome = await probe_task
+
+        assert outcome.committed is False
+        # Effective readiness reflects the concurrent unavailable conclusion,
+        # not our superseded ready result.
+        assert outcome.readiness.status == READINESS_UNAVAILABLE
+        async with session_factory() as db:
+            stored = await read_runtime_readiness(db, fingerprint)
+        assert stored.status == READINESS_UNAVAILABLE
     finally:
         await engine.dispose()
 

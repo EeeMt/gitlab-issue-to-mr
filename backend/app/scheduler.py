@@ -1452,7 +1452,7 @@ class Scheduler:
         settings = get_settings()
         connection = connection_from_snapshot(snapshot, settings)
         try:
-            probe = await run_deterministic_kit_probe(
+            outcome = await run_deterministic_kit_probe(
                 db,
                 connection=connection,
                 image=snapshot.image,
@@ -1472,13 +1472,26 @@ class Scheduler:
                 message=str(exc)[:500],
             )
             return True
-        if probe.is_ready:
+        if outcome.is_ready:
             return False
-        if probe.is_unavailable:
-            # Deterministic unavailable conclusion from a live probe: fail the
-            # probed task and park unclaimed same-fingerprint tasks (§13.4).
-            await self._fail_task_for_runtime_check(db, task, probe)
-            await self._park_other_queued_tasks(db, task, fingerprint, probe)
+        if outcome.is_unavailable:
+            if outcome.committed:
+                # Deterministic unavailable conclusion from a live probe that
+                # this probe committed: fail the probed task and park unclaimed
+                # same-fingerprint tasks (§13.4).
+                await self._fail_task_for_runtime_check(db, task, outcome.readiness)
+                await self._park_other_queued_tasks(
+                    db, task, fingerprint, outcome.readiness
+                )
+            else:
+                # The probe was superseded by a concurrent check that concluded
+                # unavailable (§13.3 CAS). §13.3/§13.5: a late probe must not
+                # fail the current task — park it back to PENDING so it recovers
+                # once the Kit becomes available instead of requiring a manual
+                # retry (§24.13).
+                await self._park_tasks_for_unavailable_runtime(
+                    db, task, fingerprint, outcome.readiness
+                )
             return True
         # unknown: the probe result was superseded by a concurrent check or no
         # conclusion is stored yet (§13.3/§19). A late/superseded generation

@@ -116,6 +116,29 @@ class RuntimeReadiness:
         return self.status == READINESS_UNAVAILABLE
 
 
+@dataclass(frozen=True)
+class RuntimeProbeOutcome:
+    """Effective readiness after a generation/CAS Kit probe, plus whether this
+    probe's own conclusion was committed (§13.3/§13.5).
+
+    ``committed=False`` means a later check superseded this probe (the CAS write
+    was rejected); ``readiness`` then reflects the concurrent conclusion, and
+    callers must not treat it as this probe's own deterministic failure. §13.5:
+    only a *successfully committed* ``unavailable`` may fail the current task.
+    """
+
+    readiness: RuntimeReadiness
+    committed: bool
+
+    @property
+    def is_ready(self) -> bool:
+        return self.readiness.is_ready
+
+    @property
+    def is_unavailable(self) -> bool:
+        return self.readiness.is_unavailable
+
+
 def serialize_runtime_readiness(readiness: RuntimeReadiness) -> dict[str, Any]:
     """Serialize readiness for API responses (never secret material)."""
     return {
@@ -717,14 +740,15 @@ async def run_deterministic_kit_probe(
     worker_kit_version: str,
     worker_kit_path: str,
     ttl_seconds: int,
-) -> RuntimeReadiness:
+) -> RuntimeProbeOutcome:
     """Run the full generation/CAS Kit probe and return the derived readiness.
 
     Begins a check, performs the remote probe, writes the result through the CAS
-    protocol, and returns the post-check effective readiness. A transient probe
-    re-raises ``RuntimeProbeTransientError`` and leaves no new persistent state:
-    a conclusion-less row it created (or reused) is removed (§13.5/§13.6). The
-    caller owns the surrounding DB transaction/commit.
+    protocol, and returns the post-check effective readiness together with
+    whether this probe's conclusion was committed (§13.3/§13.5). A transient
+    probe re-raises ``RuntimeProbeTransientError`` and leaves no new persistent
+    state: a conclusion-less row it created (or reused) is removed
+    (§13.5/§13.6). The caller owns the surrounding DB transaction/commit.
     """
     fingerprint = fingerprint_from_connection_and_kit(
         connection,
@@ -733,7 +757,10 @@ async def run_deterministic_kit_probe(
         worker_kit_path=worker_kit_path,
     )
     if fingerprint is None:
-        return RuntimeReadiness(status=READINESS_UNKNOWN)
+        return RuntimeProbeOutcome(
+            readiness=RuntimeReadiness(status=READINESS_UNKNOWN),
+            committed=False,
+        )
     generation = await begin_runtime_check(
         db,
         fingerprint=fingerprint,
@@ -757,7 +784,7 @@ async def run_deterministic_kit_probe(
         raise
     now = utcnow()
     ready_until = now + timedelta(seconds=ttl_seconds) if result.status == READINESS_READY else None
-    await finish_runtime_check(
+    committed = await finish_runtime_check(
         db,
         fingerprint=fingerprint,
         generation=generation,
@@ -767,7 +794,10 @@ async def run_deterministic_kit_probe(
         ready_until=ready_until,
     )
     await db.commit()
-    return await read_runtime_readiness(db, fingerprint)
+    return RuntimeProbeOutcome(
+        readiness=await read_runtime_readiness(db, fingerprint),
+        committed=committed,
+    )
 
 
 async def _discard_incomplete_runtime_check(
@@ -864,7 +894,7 @@ async def recheck_runtime_on_container_error(
     runtime error.
     """
     try:
-        readiness = await run_deterministic_kit_probe(
+        outcome = await run_deterministic_kit_probe(
             db,
             connection=connection,
             image=image,
@@ -875,9 +905,9 @@ async def recheck_runtime_on_container_error(
         )
     except RuntimeProbeTransientError:
         return original_error
-    if readiness.is_unavailable:
+    if outcome.is_unavailable:
         return WorkerRuntimeUnavailableError(
-            failure_code=readiness.failure_code,
-            failure_message=readiness.failure_message,
+            failure_code=outcome.readiness.failure_code,
+            failure_message=outcome.readiness.failure_message,
         )
     return original_error

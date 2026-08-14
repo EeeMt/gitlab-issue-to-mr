@@ -27,7 +27,11 @@ from app.api.worker_profiles import (
     test_worker_profile_docker_connection as run_docker_connection_test,
 )
 from app.core.worker_profiles import parse_worker_profile_mounts
-from app.core.worker_runtime_readiness import RuntimeProbeTransientError, RuntimeReadiness
+from app.core.worker_runtime_readiness import (
+    RuntimeProbeOutcome,
+    RuntimeProbeTransientError,
+    RuntimeReadiness,
+)
 from app.database import get_db
 from app.dependencies.auth import (
     require_admin_user,
@@ -1002,14 +1006,17 @@ async def test_verify_mounted_worker_profile_runs_preflight_on_profile_target():
         patch(
             "app.api.worker_profiles.run_deterministic_kit_probe",
             new=AsyncMock(
-                return_value=RuntimeReadiness(
-                    status="ready",
-                    docker_daemon_key="daemon-key-12",
-                    runtime_mode="mounted_kit",
-                    worker_kit_version="0.3.5",
-                    worker_kit_path="/opt/codify/worker-kits/0.3.5-linux-amd64",
-                    checked_at=datetime(2026, 1, 1),
-                    ready_until=datetime(2026, 1, 2),
+                return_value=RuntimeProbeOutcome(
+                    readiness=RuntimeReadiness(
+                        status="ready",
+                        docker_daemon_key="daemon-key-12",
+                        runtime_mode="mounted_kit",
+                        worker_kit_version="0.3.5",
+                        worker_kit_path="/opt/codify/worker-kits/0.3.5-linux-amd64",
+                        checked_at=datetime(2026, 1, 1),
+                        ready_until=datetime(2026, 1, 2),
+                    ),
+                    committed=True,
                 )
             ),
         ),
@@ -1111,7 +1118,11 @@ async def test_verify_baked_worker_profile_is_rejected_without_docker_access():
 async def test_verify_task_worker_runtime_runs_probe_and_returns_readiness():
     """POST /tasks/{id}/verify-worker-runtime probes the frozen snapshot (§15.2)."""
     from app.api.tasks import verify_task_worker_runtime
-    from app.core.worker_runtime_readiness import READINESS_READY, RuntimeReadiness
+    from app.core.worker_runtime_readiness import (
+        READINESS_READY,
+        RuntimeProbeOutcome,
+        RuntimeReadiness,
+    )
 
     snapshot = SimpleNamespace(
         runtime_mode="mounted_kit",
@@ -1129,7 +1140,12 @@ async def test_verify_task_worker_runtime_runs_probe_and_returns_readiness():
 
     with patch(
         "app.api.tasks.run_deterministic_kit_probe",
-        new=AsyncMock(return_value=RuntimeReadiness(status=READINESS_READY)),
+        new=AsyncMock(
+            return_value=RuntimeProbeOutcome(
+                readiness=RuntimeReadiness(status=READINESS_READY),
+                committed=True,
+            )
+        ),
     ):
         response = await verify_task_worker_runtime(12, db=db, _admin=None)
 
