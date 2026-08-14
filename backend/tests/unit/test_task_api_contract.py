@@ -42,6 +42,7 @@ EXPECTED_TASK_ROUTES = {
     ("GET", "/tasks/{task_id}"),
     ("GET", "/tasks/{task_id}/model-service-summary"),
     ("GET", "/tasks/{task_id}/worker-runtime-summary"),
+    ("POST", "/tasks/{task_id}/verify-worker-runtime"),
     ("PATCH", "/tasks/{task_id}"),
     ("GET", "/tasks/{task_id}/logs"),
     ("GET", "/tasks/{task_id}/log-stream"),

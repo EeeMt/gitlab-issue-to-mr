@@ -34,6 +34,7 @@ from app.core.worker_profiles import (
     select_snapshot_run_instruction_template,
 )
 from app.core.worker_runtime_bundle import bind_runtime_bundle
+from app.core.worker_runtime_readiness import readiness_for_profile
 from app.core.worker_workspace import configured_workspace_root
 from app.database import AsyncSessionLocal
 from app.models import (
@@ -649,6 +650,26 @@ async def process_ci_failure_run(
             )
         except WorkerProfileValidationError as exc:
             raise RuntimeError(f"CI auto-repair cannot start: {exc}") from exc
+
+        # Runtime readiness gate (§12): a CI repair task must not be created for
+        # a Kit locator that is known unavailable; skip (ignore) the run instead.
+        readiness = await readiness_for_profile(db, worker_profile, settings)
+        if readiness.is_unavailable:
+            await _ignore_run(
+                db,
+                run,
+                reason="worker_runtime_unavailable",
+                step="auto_repair_runtime_checked",
+                message="Worker runtime is known unavailable; skipping CI auto-repair",
+                details={
+                    "failure_code": readiness.failure_code,
+                    "failure_message": readiness.failure_message,
+                    "checked_at": (
+                        readiness.checked_at.isoformat() if readiness.checked_at else None
+                    ),
+                },
+            )
+            return run
 
         # Validate the repair task's execution truth at creation time, exactly
         # like a manual task: the profile default harness must be enabled and the

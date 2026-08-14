@@ -1134,6 +1134,7 @@ class TaskWorkerProfileSnapshot(Base):
     environment_variables: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
     shared_configuration_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
     effective_configuration_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    runtime_locator_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
     skill_selection_source: Mapped[str] = mapped_column(
         String(16),
         nullable=False,
@@ -1175,6 +1176,39 @@ class TaskWorkerProfileSnapshot(Base):
         order_by="TaskSkillVersionReference.position",
         cascade="all, delete-orphan",
         passive_deletes=True,
+    )
+
+
+class WorkerRuntimeReadiness(Base):
+    """Deterministic runtime readiness observation keyed by locator fingerprint.
+
+    Keyed by ``runtime_locator_fingerprint`` (Docker daemon + runtime_mode +
+    worker_kit_version + worker_kit_path), not by worker_profile_id, so the same
+    combination can be shared by multiple Profiles and historical Task snapshots.
+    ``status=ready`` is only effective while ``ready_until > now``; a missing row,
+    ``unknown``, or an expired ``ready`` all read as ``unknown``. ``unavailable``
+    never auto-expires and requires a successful re-check to be replaced.
+    """
+
+    __tablename__ = "worker_runtime_readiness"
+
+    runtime_locator_fingerprint: Mapped[str] = mapped_column(String(64), primary_key=True)
+    docker_daemon_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    runtime_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    worker_kit_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    worker_kit_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="unknown")
+    failure_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    failure_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ready_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    check_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    check_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=utcnow,
+        onupdate=utcnow,
     )
 
 

@@ -464,6 +464,62 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(snapshot.worker_profile_id, 11)
             self.assertEqual(snapshot.image, "codify-worker:test")
 
+    async def test_code_failure_skips_auto_repair_when_runtime_unavailable(self):
+        from app.core.ci_failure_collector import process_ci_failure_run
+        from app.core.worker_runtime_readiness import (
+            FAILURE_WORKER_KIT_NOT_FOUND,
+            READINESS_UNAVAILABLE,
+            RuntimeReadiness,
+        )
+
+        jobs, traces = self._code_failure_jobs()
+        async with self.Session() as session:
+            _, run = await self._seed_issue_and_run(
+                session,
+                enabled=True,
+                default_provider_id=22,
+                worker_profile_id=11,
+                latest_task_provider_id=3,
+            )
+
+            with (
+                patch(
+                    "app.core.ci_failure_collector.get_project_metadata",
+                    new_callable=AsyncMock,
+                    return_value={
+                        "project_name": "test-project",
+                        "project_path_with_namespace": "group/test-project",
+                    },
+                ),
+                patch(
+                    "app.core.ci_failure_collector.readiness_for_profile",
+                    new=AsyncMock(
+                        return_value=RuntimeReadiness(
+                            status=READINESS_UNAVAILABLE,
+                            failure_code=FAILURE_WORKER_KIT_NOT_FOUND,
+                        )
+                    ),
+                ),
+            ):
+                await process_ci_failure_run(
+                    session,
+                    run.id,
+                    gitlab_client=FakeGitLabClient(jobs=jobs, traces=traces),
+                    settings=self._settings(),
+                    collector_id="test",
+                )
+
+            # The run is ignored, not repaired, when the runtime is unavailable.
+            refreshed = await session.get(CIFailureRun, run.id)
+            self.assertEqual(refreshed.status, "ignored")
+            self.assertEqual(refreshed.ignored_reason, "worker_runtime_unavailable")
+            tasks = (
+                await session.execute(
+                    select(Task).where(Task.trigger_source == "ci_auto_repair")
+                )
+            ).scalars().all()
+            self.assertEqual(tasks, [])
+
     async def test_merged_results_pipeline_allows_sha_mismatch_when_pipeline_is_current(self):
         from app.core.ci_failure_collector import process_ci_failure_run
 

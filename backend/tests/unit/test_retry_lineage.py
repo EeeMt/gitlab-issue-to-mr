@@ -174,6 +174,49 @@ async def test_continue_retry_inherits_tail_when_source_matches():
     services.notify_task_retried.assert_awaited_once()
 
 
+async def test_retry_rejects_known_unavailable_runtime():
+    """Retry reuses the source snapshot's frozen locator (§12): a known
+    unavailable runtime refuses the retry with 409 worker_runtime_unavailable."""
+    from app.core.worker_runtime_readiness import (
+        FAILURE_WORKER_KIT_NOT_FOUND,
+        READINESS_UNAVAILABLE,
+        RuntimeReadiness,
+    )
+
+    source = _source_task()
+    source.worker_profile_snapshot.runtime_locator_fingerprint = "fp-unavailable"
+    issue = MagicMock()
+    issue.id = 10
+    issue.status = "open"
+    issue.project_id = 3
+    mock_db = _make_db(issue)
+    services = _make_services(source)
+
+    with patch(
+        "app.api.task_creation_service.read_runtime_readiness",
+        new=AsyncMock(
+            return_value=RuntimeReadiness(
+                status=READINESS_UNAVAILABLE,
+                failure_code=FAILURE_WORKER_KIT_NOT_FOUND,
+            )
+        ),
+    ):
+        with pytest.raises(HTTPException) as exc_info:
+            await retry_task_record(
+                task_id=11,
+                request=None,
+                db=mock_db,
+                current_user=None,
+                access_scope=None,
+                services=services,
+            )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "worker_runtime_unavailable"
+    assert exc_info.value.detail["failure_code"] == FAILURE_WORKER_KIT_NOT_FOUND
+    services.notify_task_retried.assert_not_called()
+
+
 async def test_continue_retry_rejects_stale_generation():
     source = _source_task()
     issue = MagicMock()

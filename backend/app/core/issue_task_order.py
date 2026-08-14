@@ -15,8 +15,10 @@ from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.utcnow import utcnow
+from app.core.worker_runtime_readiness import read_runtime_readiness
 from app.models import IssueExecutionLock, Task, TaskStatus
 
 logger = logging.getLogger(__name__)
@@ -315,6 +317,7 @@ async def compute_queue_context(
         (
             await db.execute(
                 select(Task)
+                .options(selectinload(Task.worker_profile_snapshot))
                 .where(Task.issue_id == issue_id)
                 .order_by(Task.issue_sequence.asc().nulls_last(), Task.id.asc())
             )
@@ -339,6 +342,21 @@ async def compute_queue_context(
     # queue_position is the dynamic position inside the *active* queue only;
     # terminal Tasks never consume a position (spec §7).
     positions = {t.id: i for i, t in enumerate(active_non_null, start=1)}
+
+    # Runtime readiness for the active head's frozen Kit locator, so the head
+    # can surface worker_runtime_unavailable with failure detail (§14). Only the
+    # head is probed; later tasks keep their predecessor reason.
+    head_readiness = None
+    head_fingerprint = None
+    if head is not None:
+        head_snapshot = getattr(head, "worker_profile_snapshot", None)
+        head_fingerprint = (
+            getattr(head_snapshot, "runtime_locator_fingerprint", None)
+            if head_snapshot is not None
+            else None
+        )
+        if head_fingerprint:
+            head_readiness = await read_runtime_readiness(db, head_fingerprint)
 
     # The head's waiting reason when a terminal owner still holds the workspace
     # lock (container not yet drained) is workspace_cleanup.
@@ -409,6 +427,27 @@ async def compute_queue_context(
                 "waiting_reason": "scheduled",
                 "lock_owner_task_id": None,
                 "waiting_since": None,
+            }
+        elif head_readiness is not None and head_readiness.is_unavailable:
+            result[task.id] = {
+                "issue_sequence": task.issue_sequence,
+                "queue_position": position,
+                "blocked_by_task_id": None,
+                "waiting_reason": "worker_runtime_unavailable",
+                "lock_owner_task_id": None,
+                "waiting_since": (
+                    head_readiness.checked_at.isoformat()
+                    if head_readiness.checked_at
+                    else None
+                ),
+                "runtime_failure_code": head_readiness.failure_code,
+                "runtime_failure_message": head_readiness.failure_message,
+                "runtime_checked_at": (
+                    head_readiness.checked_at.isoformat()
+                    if head_readiness.checked_at
+                    else None
+                ),
+                "runtime_locator_fingerprint": head_fingerprint,
             }
         else:
             result[task.id] = {

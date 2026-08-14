@@ -67,6 +67,10 @@ def apply_queue_context(
     data["waiting_reason"] = ctx.get("waiting_reason")
     data["lock_owner_task_id"] = ctx.get("lock_owner_task_id")
     data["waiting_since"] = ctx.get("waiting_since")
+    data["runtime_failure_code"] = ctx.get("runtime_failure_code")
+    data["runtime_failure_message"] = ctx.get("runtime_failure_message")
+    data["runtime_checked_at"] = ctx.get("runtime_checked_at")
+    data["runtime_locator_fingerprint"] = ctx.get("runtime_locator_fingerprint")
     return data
 
 

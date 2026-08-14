@@ -304,10 +304,7 @@ def _make_db(task=None):
             provider = getattr(task, 'provider', None) if task else None
             mock_result.scalar_one_or_none.return_value = provider
             mock_result.scalars.return_value.all.return_value = [provider] if provider else []
-        elif 'FROM worker_environment_variables' in statement_str:
-            mock_result.scalar_one_or_none.return_value = None
-            mock_result.scalars.return_value.all.return_value = []
-        elif 'FROM issue_session_lineages' in statement_str:
+        elif 'FROM worker_environment_variables' in statement_str or 'FROM issue_session_lineages' in statement_str:
             mock_result.scalar_one_or_none.return_value = None
             mock_result.scalars.return_value.all.return_value = []
         else:

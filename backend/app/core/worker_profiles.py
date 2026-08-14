@@ -49,6 +49,7 @@ from app.core.worker_kit import (
     worker_kit_environment,
     worker_kit_mounts,
 )
+from app.core.worker_runtime_readiness import fingerprint_from_docker_target
 from app.core.worker_shared_configuration import (
     load_shared_configuration,
     resolve_effective_configuration,
@@ -620,6 +621,16 @@ def snapshot_from_profile(
         resolved_harness_key,
         getattr(profile, "harness_constraints", None) or {},
     )
+    runtime_locator_fingerprint = fingerprint_from_docker_target(
+        settings or get_effective_settings(),
+        docker_host=getattr(profile, "docker_host", None),
+        docker_tls_ca=getattr(profile, "docker_tls_ca", None),
+        docker_tls_cert=getattr(profile, "docker_tls_cert", None),
+        docker_tls_key=getattr(profile, "docker_tls_key", None),
+        runtime_mode=effective.runtime_mode,
+        worker_kit_version=effective.worker_kit_version,
+        worker_kit_path=effective.worker_kit_path,
+    )
     snapshot = TaskWorkerProfileSnapshot(
         task_id=task.id,
         worker_profile_id=profile.id,
@@ -643,6 +654,7 @@ def snapshot_from_profile(
         environment_variables=list(effective.environment_variables),
         shared_configuration_revision=effective.shared_configuration_revision,
         effective_configuration_digest=None,
+        runtime_locator_fingerprint=runtime_locator_fingerprint,
         skill_references=[],
         skill_selection_source="profile",
         pre_script=effective.pre_script,
@@ -739,6 +751,7 @@ async def clone_task_worker_snapshot(
         environment_variables=[dict(item) for item in (source.environment_variables or [])],
         shared_configuration_revision=source.shared_configuration_revision,
         effective_configuration_digest=source.effective_configuration_digest,
+        runtime_locator_fingerprint=source.runtime_locator_fingerprint,
         skill_selection_source=source.skill_selection_source,
         pre_script=source.pre_script,
         post_script=source.post_script,

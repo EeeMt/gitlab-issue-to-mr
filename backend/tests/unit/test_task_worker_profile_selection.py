@@ -117,6 +117,108 @@ async def test_create_task_uses_issue_pinned_worker_and_default_provider():
 
 
 @pytest.mark.asyncio
+async def test_create_task_rejects_known_unavailable_runtime():
+    """Create refuses a Kit locator that is known unavailable (§12) with 409."""
+    from app.core.worker_runtime_readiness import (
+        FAILURE_WORKER_KIT_NOT_FOUND,
+        READINESS_UNAVAILABLE,
+        RuntimeReadiness,
+    )
+
+    request = CreateTaskRequest(
+        issue_id=1,
+        user_prompt="Implement worker profiles",
+        priority=1,
+    )
+    issue = MagicMock()
+    issue.id = 1
+    issue.project_id = 101
+    issue.description = "Implement worker profiles"
+    issue.status = "open"
+    issue.worker_profile_id = 33
+    issue.default_provider_id = 44
+
+    worker_profile = MagicMock()
+    worker_profile.id = 33
+    worker_profile.name = "Java Worker"
+    worker_profile.enabled = True
+    worker_profile.image = "codify-worker-java:latest"
+    worker_profile.runtime_mode = "mounted_kit"
+    worker_profile.worker_kit_version = "0.3.5"
+    worker_profile.worker_kit_path = "/opt/kit"
+    worker_profile.volume_mounts = []
+    worker_profile.environment_variables = []
+    worker_profile.pre_script = ""
+    worker_profile.post_script = ""
+    worker_profile.docker_host = None
+    worker_profile.codegraph_enabled = False
+    worker_profile.harness_key = "claude"
+    worker_profile.harness_config_snapshot = None
+    worker_profile.default_execute_run_instruction_template = "Execute {{user_prompt}}"
+    worker_profile.default_plan_run_instruction_template = "Plan {{user_prompt}}"
+    worker_profile.ci_auto_repair_run_instruction_template = "Repair {{issue_title}}"
+
+    provider = MagicMock()
+    provider.id = 44
+    provider.is_disabled = False
+
+    db = MagicMock()
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+    db.flush = AsyncMock()
+    db.get = AsyncMock(return_value=issue)
+    _empty_issue_tasks = MagicMock()
+    _empty_issue_tasks.scalars.return_value.all.return_value = []
+    _empty_issue_tasks.all.return_value = []
+    db.execute = AsyncMock(return_value=_empty_issue_tasks)
+    db.refresh = AsyncMock()
+    access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+    current_user = SimpleNamespace(
+        id=7,
+        gitlab_user_id=77,
+        username="alice",
+        display_name=None,
+        email=None,
+    )
+
+    with (
+        patch(
+            "app.api.tasks.resolve_worker_profile_for_issue",
+            new=AsyncMock(return_value=worker_profile),
+        ),
+        patch("app.api.tasks.resolve_provider_for_issue", new=AsyncMock(return_value=provider)),
+        patch("app.api.tasks.replace_task_worker_snapshot", new=AsyncMock(return_value=worker_profile)),
+        patch("app.api.tasks.bind_runtime_bundle", new=AsyncMock(return_value=MagicMock(id=1))),
+        patch("app.api.tasks.select_snapshot_run_instruction_template", return_value="Execute {{user_prompt}}"),
+        patch(
+            "app.api.task_creation_service.get_issue_latest_harness_key",
+            new=AsyncMock(return_value=None),
+        ),
+        patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
+        patch(
+            "app.api.tasks.get_usage_quota_service",
+            return_value=MagicMock(raise_if_over_limit=AsyncMock()),
+        ),
+        patch(
+            "app.api.task_creation_service.readiness_for_profile",
+            new=AsyncMock(
+                return_value=RuntimeReadiness(
+                    status=READINESS_UNAVAILABLE,
+                    failure_code=FAILURE_WORKER_KIT_NOT_FOUND,
+                )
+            ),
+        ),
+    ):
+        with pytest.raises(HTTPException) as exc_info:
+            await create_task(request=request, db=db, current_user=current_user, access_scope=access_scope)
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "worker_runtime_unavailable"
+    assert exc_info.value.detail["failure_code"] == FAILURE_WORKER_KIT_NOT_FOUND
+    db.add.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_continue_without_harness_key_rejects_lineage_mismatch():
     request = CreateTaskRequest(
         issue_id=1,

@@ -66,6 +66,7 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
         worker_profile_id=1,
         skill_references=[],
         skill_selection_source="profile",
+        runtime_locator_fingerprint=None,
     )
     task.provider_runtime_snapshot = {}
     task.rendered_prompt = "Rendered prompt"

@@ -49,14 +49,31 @@ from app.core.worker_docker_targets import (
     TaskContainerLookupError,
     TaskContainerNotFoundError,
     connection_for_task,
+    connection_from_snapshot,
     docker_daemon_key,
     find_task_container,
     list_known_docker_targets,
 )
+from app.core.worker_runtime_readiness import (
+    READINESS_UNAVAILABLE,
+    RuntimeProbeTransientError,
+    RuntimeReadiness,
+    read_runtime_readiness,
+    run_deterministic_kit_probe,
+)
 from app.core.worker_workspace import cleanup_expired_ci_failure_bundles
 from app.core.worker_workspace_remote import remove_issue_workspace_remote
 from app.database import AsyncSessionLocal
-from app.models import Issue, IssueExecutionLock, IssueStatus, Task, TaskRunArchive, TaskStatus
+from app.models import (
+    Issue,
+    IssueExecutionLock,
+    IssueStatus,
+    Task,
+    TaskRunArchive,
+    TaskStatus,
+    TaskWorkerProfileSnapshot,
+    WorkerRuntimeReadiness,
+)
 from app.runtime_config import load_runtime_config_from_db
 
 logger = logging.getLogger(__name__)
@@ -1139,6 +1156,18 @@ class Scheduler:
                 ~exists(
                     select(1).where(IssueExecutionLock.issue_id == Task.issue_id)
                 ),
+                # A PENDING task whose frozen Kit locator is known unavailable
+                # stays PENDING: promotion would only queue a run that must be
+                # parked again (§13.2).
+                ~exists(
+                    select(1).where(
+                        TaskWorkerProfileSnapshot.task_id == Task.id,
+                        TaskWorkerProfileSnapshot.runtime_locator_fingerprint.is_not(None),
+                        TaskWorkerProfileSnapshot.runtime_locator_fingerprint
+                        == WorkerRuntimeReadiness.runtime_locator_fingerprint,
+                        WorkerRuntimeReadiness.status == READINESS_UNAVAILABLE,
+                    )
+                ),
             )
             .values(status=TaskStatus.QUEUED)
         )
@@ -1239,6 +1268,13 @@ class Scheduler:
         task_id = task.id
         issue_id = task.issue_id
         logger.info("Executing task %s for issue %s", task_id, issue_id)
+
+        # Runtime readiness gate (§13): a mounted-kit task must be confirmed
+        # (ready via TTL or a successful deterministic first-probe) before a
+        # worker container is created. A deterministic unavailable conclusion
+        # fails the probed task and parks unclaimed same-fingerprint tasks.
+        if await self._apply_runtime_readiness_gate(db, task):
+            return
 
         # --- Atomic claim: one DB transaction ------------------------------
         # Lock the Issue row first (never the reverse order), re-verify ordering
@@ -1389,6 +1425,163 @@ class Scheduler:
             .limit(1)
         )
         return result.first() is not None
+
+    async def _apply_runtime_readiness_gate(self, db: AsyncSession, task: Task) -> bool:
+        """Run the pre-execution runtime readiness gate (§13).
+
+        Returns True when the task must not be claimed this cycle (it was failed
+        or parked), False when execution may proceed.
+        """
+        snapshot = await self._load_task_snapshot(db, task.id)
+        fingerprint = (
+            getattr(snapshot, "runtime_locator_fingerprint", None)
+            if snapshot is not None
+            else None
+        )
+        if not fingerprint:
+            # baked-image target (or a pre-071 legacy snapshot): no host Kit to
+            # locate, so no readiness gate applies.
+            return False
+        readiness = await read_runtime_readiness(db, fingerprint)
+        if readiness.is_ready:
+            return False
+        if readiness.is_unavailable:
+            await self._park_tasks_for_unavailable_runtime(db, task, fingerprint, readiness)
+            return True
+        # unknown / expired ready → deterministic first-probe (§13.4).
+        settings = get_settings()
+        connection = connection_from_snapshot(snapshot, settings)
+        try:
+            probe = await run_deterministic_kit_probe(
+                db,
+                connection=connection,
+                image=snapshot.image,
+                runtime_mode=snapshot.runtime_mode,
+                worker_kit_version=snapshot.worker_kit_version or "",
+                worker_kit_path=snapshot.worker_kit_path or "",
+                ttl_seconds=settings.worker_runtime_readiness_ttl_seconds,
+            )
+        except RuntimeProbeTransientError as exc:
+            # No new conclusion (§13.5): leave the task QUEUED and retry next
+            # cycle rather than run a worker container against an unverified Kit.
+            self._emit_event(
+                "runtime_readiness_probe_transient",
+                reason="probe_transient",
+                issue_id=task.issue_id,
+                task_id=task.id,
+                message=str(exc)[:500],
+            )
+            return True
+        if probe.is_ready:
+            return False
+        # Deterministic unavailable conclusion from a live probe: fail the
+        # probed task and park unclaimed same-fingerprint tasks (§13.4).
+        await self._fail_task_for_runtime_check(db, task, probe)
+        await self._park_other_queued_tasks(db, task, fingerprint, probe)
+        return True
+
+    async def _load_task_snapshot(
+        self,
+        db: AsyncSession,
+        task_id: int,
+    ) -> TaskWorkerProfileSnapshot | None:
+        result = await db.execute(
+            select(TaskWorkerProfileSnapshot).where(
+                TaskWorkerProfileSnapshot.task_id == task_id
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def _park_tasks_for_unavailable_runtime(
+        self,
+        db: AsyncSession,
+        task: Task,
+        fingerprint: str,
+        readiness: RuntimeReadiness,
+    ) -> None:
+        """Demote the current and unclaimed same-fingerprint QUEUED Tasks to PENDING."""
+        await self._park_queued_task(db, task, readiness)
+        await self._park_other_queued_tasks(db, task, fingerprint, readiness)
+
+    async def _park_other_queued_tasks(
+        self,
+        db: AsyncSession,
+        task: Task,
+        fingerprint: str,
+        readiness: RuntimeReadiness,
+    ) -> None:
+        """Return every unclaimed QUEUED Task sharing the fingerprint to PENDING."""
+        result = await db.execute(
+            select(Task).where(
+                Task.status == TaskStatus.QUEUED,
+                Task.id != task.id,
+                Task.issue_id.is_not(None),
+                Task.id.in_(
+                    select(TaskWorkerProfileSnapshot.task_id).where(
+                        TaskWorkerProfileSnapshot.runtime_locator_fingerprint == fingerprint,
+                    )
+                ),
+            )
+        )
+        for other in result.scalars().all():
+            await self._park_queued_task(db, other, readiness)
+
+    async def _park_queued_task(self, db: AsyncSession, task: Task, readiness: RuntimeReadiness) -> None:
+        """Return one QUEUED Task to PENDING because its runtime is unavailable."""
+        if task.status != TaskStatus.QUEUED:
+            return
+        task.status = TaskStatus.PENDING
+        await db.commit()
+        self._emit_event(
+            "runtime_unavailable_task_parked",
+            reason="worker_runtime_unavailable",
+            issue_id=task.issue_id,
+            task_id=task.id,
+            issue_sequence=task.issue_sequence,
+            failure_code=readiness.failure_code,
+            failure_message=(readiness.failure_message or "")[:500],
+        )
+        logger.warning(
+            "Task %s returned to PENDING (worker_runtime_unavailable)",
+            task.id,
+        )
+
+    async def _fail_task_for_runtime_check(
+        self,
+        db: AsyncSession,
+        task: Task,
+        readiness: RuntimeReadiness,
+    ) -> None:
+        """Fail the probed task when the live Kit probe is deterministically unavailable."""
+        task.status = TaskStatus.FAILED
+        task.error_message = json.dumps(
+            {
+                "code": "worker_runtime_check_failed",
+                "message": "Worker Kit runtime check failed",
+                "failure_code": readiness.failure_code,
+                "failure_message": readiness.failure_message,
+            },
+            ensure_ascii=False,
+        )
+        task.completed_at = utcnow()
+        task.raw_logs_finalized_at = (
+            getattr(task, "raw_logs_finalized_at", None) or utcnow()
+        )
+        await db.commit()
+        self._emit_event(
+            "runtime_readiness_check_failed",
+            reason=readiness.failure_code or "worker_runtime_check_failed",
+            issue_id=task.issue_id,
+            task_id=task.id,
+            issue_sequence=task.issue_sequence,
+            failure_message=(readiness.failure_message or "")[:500],
+        )
+        logger.warning(
+            "Task %s failed worker runtime check (%s)",
+            task.id,
+            readiness.failure_code,
+        )
+        await maybe_update_issue_status(db, task.issue_id)
 
     async def _demote_queued_task(
         self,

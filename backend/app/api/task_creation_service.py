@@ -20,6 +20,7 @@ from app.api.task_responses import (
     serialize_task,
 )
 from app.api.task_schemas import CreateTaskRequest, RetryTaskRequest
+from app.config import get_effective_settings
 from app.core.harness_registry import (
     HarnessRegistryError,
     validate_enabled_harnesses,
@@ -43,6 +44,11 @@ from app.core.task_prompt import TaskPromptValidationError
 from app.core.usage_limits import UsageLimitExceeded, usage_limit_exceeded_detail
 from app.core.utcnow import utcnow
 from app.core.worker_profiles import WorkerProfileValidationError
+from app.core.worker_runtime_readiness import (
+    read_runtime_readiness,
+    readiness_for_profile,
+    runtime_unavailable_http_detail,
+)
 from app.dependencies.project_access import ProjectAccessScope, require_project_access
 from app.models import Issue, Task, User
 
@@ -145,6 +151,18 @@ async def retry_task_record(
     # configuration. Load it explicitly before copying execution truth; implicit
     # async lazy loading here would raise MissingGreenlet.
     await db.refresh(original_task, attribute_names=["provider_runtime_snapshot"])
+
+    # Runtime readiness gate (§12): a retry reuses the source snapshot's frozen
+    # Kit locator; refuse to create a retry when that runtime is known
+    # unavailable.
+    source_fingerprint = getattr(source_snapshot, "runtime_locator_fingerprint", None)
+    if source_fingerprint:
+        readiness = await read_runtime_readiness(db, source_fingerprint)
+        if readiness.is_unavailable:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=runtime_unavailable_http_detail(readiness),
+            )
 
     original_session_mode = getattr(original_task, "session_mode", "continue")
     original_output_session_id = getattr(original_task, "output_session_id", None)
@@ -436,6 +454,15 @@ async def create_task_record(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
+
+    # Runtime readiness gate (§12): refuse to create a Task for a Kit locator
+    # that is known unavailable. Unknown/expired readiness never blocks.
+    readiness = await readiness_for_profile(db, worker_profile, get_effective_settings())
+    if readiness.is_unavailable:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=runtime_unavailable_http_detail(readiness),
+        )
 
     scheduled_at = resolve_scheduled_at(
         request.scheduled_datetime,

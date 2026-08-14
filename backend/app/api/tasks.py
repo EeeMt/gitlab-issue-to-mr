@@ -75,6 +75,7 @@ from app.api.task_stats_routes import (
 )
 from app.api.task_update_service import TaskUpdateServices, update_task_record
 from app.config import get_effective_settings
+from app.core.docker_client import resolve_docker_connection
 from app.core.projects import build_project_lookup, get_project_metadata
 from app.core.task_creation import prepare_task_runtime_snapshot
 from app.core.task_failure_summary import load_task_failure_summary
@@ -90,6 +91,7 @@ from app.core.usage_limits import (
     get_usage_quota_service,
 )
 from app.core.utcnow import utcnow
+from app.core.worker_kit import MOUNTED_KIT_MODE
 from app.core.worker_profiles import (
     clone_task_worker_snapshot,
     replace_task_worker_snapshot,
@@ -98,13 +100,23 @@ from app.core.worker_profiles import (
     select_snapshot_run_instruction_template,
 )
 from app.core.worker_runtime_bundle import bind_runtime_bundle
+from app.core.worker_runtime_readiness import (
+    RuntimeProbeTransientError,
+    fingerprint_from_snapshot,
+    run_deterministic_kit_probe,
+    serialize_runtime_readiness,
+)
 from app.core.worker_workspace import configured_workspace_root
 from app.core.worker_workspace_remote import (
     inspect_issue_workspace,
     remove_issue_workspace_remote,
 )
 from app.database import get_db
-from app.dependencies.auth import get_optional_current_user, require_page_access
+from app.dependencies.auth import (
+    get_optional_current_user,
+    require_admin_user,
+    require_page_access,
+)
 from app.dependencies.project_access import (
     ProjectAccessScope,
     require_project_access,
@@ -658,6 +670,73 @@ async def retry_task(
         access_scope=access_scope,
         services=_task_creation_services(),
     )
+
+
+@router.post("/tasks/{task_id}/verify-worker-runtime")
+async def verify_task_worker_runtime(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    _admin=Depends(require_admin_user),
+):
+    """Verify a frozen task snapshot's Worker Kit through the readiness service (§15.2).
+
+    Runs the strict, side-effect-free Kit probe against the snapshot's frozen
+    Docker target and returns the post-check readiness. Does not touch the
+    task's lifecycle state; a later retry/schedule re-reads the readiness
+    record.
+    """
+    task = await db.get(
+        Task,
+        task_id,
+        options=[selectinload(Task.worker_profile_snapshot)],
+    )
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found",
+        )
+    snapshot = task.worker_profile_snapshot
+    if snapshot is None or snapshot.runtime_mode != MOUNTED_KIT_MODE:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Task worker runtime verification requires mounted_kit mode",
+        )
+    settings = get_effective_settings()
+    connection = resolve_docker_connection(
+        settings,
+        docker_host=snapshot.docker_host,
+        docker_tls_ca=snapshot.docker_tls_ca,
+        docker_tls_cert=snapshot.docker_tls_cert,
+        docker_tls_key=snapshot.docker_tls_key,
+    )
+    fingerprint = fingerprint_from_snapshot(snapshot, settings)
+    try:
+        readiness = await run_deterministic_kit_probe(
+            db,
+            connection=connection,
+            image=snapshot.image,
+            runtime_mode=snapshot.runtime_mode,
+            worker_kit_version=snapshot.worker_kit_version or "",
+            worker_kit_path=snapshot.worker_kit_path or "",
+            ttl_seconds=settings.worker_runtime_readiness_ttl_seconds,
+        )
+    except RuntimeProbeTransientError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "worker_runtime_verification_transient_failure",
+                "message": f"Worker Kit probe could not reach a conclusion: {exc}",
+            },
+        ) from exc
+    return {
+        "ok": True,
+        "task_id": task_id,
+        "runtime_locator_fingerprint": fingerprint,
+        "runtime_mode": snapshot.runtime_mode,
+        "worker_kit_version": snapshot.worker_kit_version,
+        "docker_host": connection.host,
+        "runtime_readiness": serialize_runtime_readiness(readiness),
+    }
 
 
 @router.post("/tasks")

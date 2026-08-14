@@ -27,6 +27,7 @@ from app.api.worker_profiles import (
     test_worker_profile_docker_connection as run_docker_connection_test,
 )
 from app.core.worker_profiles import parse_worker_profile_mounts
+from app.core.worker_runtime_readiness import RuntimeReadiness
 from app.database import get_db
 from app.dependencies.auth import (
     require_admin_user,
@@ -996,7 +997,23 @@ async def test_verify_mounted_worker_profile_runs_preflight_on_profile_target():
         "team/java21-maven@sha256:abc123def456"
     )
 
-    with patch("app.api.worker_profiles.DockerClientWrapper", return_value=client):
+    with (
+        patch("app.api.worker_profiles.DockerClientWrapper", return_value=client),
+        patch(
+            "app.api.worker_profiles.run_deterministic_kit_probe",
+            new=AsyncMock(
+                return_value=RuntimeReadiness(
+                    status="ready",
+                    docker_daemon_key="daemon-key-12",
+                    runtime_mode="mounted_kit",
+                    worker_kit_version="0.3.5",
+                    worker_kit_path="/opt/codify/worker-kits/0.3.5-linux-amd64",
+                    checked_at=datetime(2026, 1, 1),
+                    ready_until=datetime(2026, 1, 2),
+                )
+            ),
+        ),
+    ):
         response = await verify_worker_profile_runtime(
             12,
             WorkerRuntimeVerificationRequest(smoke_command="java -version"),
@@ -1059,6 +1076,55 @@ async def test_verify_baked_worker_profile_is_rejected_without_docker_access():
     assert exc.value.status_code == 422
     assert "mounted_kit" in str(exc.value.detail)
     client_class.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_verify_task_worker_runtime_runs_probe_and_returns_readiness():
+    """POST /tasks/{id}/verify-worker-runtime probes the frozen snapshot (§15.2)."""
+    from app.api.tasks import verify_task_worker_runtime
+    from app.core.worker_runtime_readiness import READINESS_READY, RuntimeReadiness
+
+    snapshot = SimpleNamespace(
+        runtime_mode="mounted_kit",
+        image="worker:latest",
+        worker_kit_version="0.3.5",
+        worker_kit_path="/opt/kit",
+        docker_host="tcp://worker:2376",
+        docker_tls_ca=None,
+        docker_tls_cert=None,
+        docker_tls_key=None,
+    )
+    task = SimpleNamespace(worker_profile_snapshot=snapshot)
+    db = MagicMock()
+    db.get = AsyncMock(return_value=task)
+
+    with patch(
+        "app.api.tasks.run_deterministic_kit_probe",
+        new=AsyncMock(return_value=RuntimeReadiness(status=READINESS_READY)),
+    ):
+        response = await verify_task_worker_runtime(12, db=db, _admin=None)
+
+    assert response["ok"] is True
+    assert response["task_id"] == 12
+    assert response["runtime_mode"] == "mounted_kit"
+    assert response["worker_kit_version"] == "0.3.5"
+    assert response["runtime_locator_fingerprint"] is not None
+    assert response["runtime_readiness"]["status"] == READINESS_READY
+
+
+@pytest.mark.asyncio
+async def test_verify_task_worker_runtime_rejects_baked_snapshot():
+    from app.api.tasks import verify_task_worker_runtime
+
+    task = SimpleNamespace(worker_profile_snapshot=SimpleNamespace(runtime_mode="baked_image"))
+    db = MagicMock()
+    db.get = AsyncMock(return_value=task)
+
+    with pytest.raises(HTTPException) as exc:
+        await verify_task_worker_runtime(12, db=db, _admin=None)
+
+    assert exc.value.status_code == 422
+    assert "mounted_kit" in str(exc.value.detail)
 
 
 def test_list_worker_profiles_exposes_secret_configured_not_plaintext():

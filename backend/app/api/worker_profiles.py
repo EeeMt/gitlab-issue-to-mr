@@ -37,6 +37,7 @@ from app.core.task_prompt import (
     BUILT_IN_EXECUTE_RUN_INSTRUCTION_TEMPLATE,
     BUILT_IN_PLAN_RUN_INSTRUCTION_TEMPLATE,
 )
+from app.core.utcnow import utcnow
 from app.core.worker_docker_targets import docker_daemon_key
 from app.core.worker_kit import (
     BAKED_IMAGE_MODE,
@@ -61,6 +62,13 @@ from app.core.worker_profiles import (
 )
 from app.core.worker_profiles import (
     list_worker_profiles as list_worker_profiles_domain,
+)
+from app.core.worker_runtime_readiness import (
+    RuntimeProbeTransientError,
+    RuntimeReadiness,
+    run_deterministic_kit_probe,
+    runtime_verification_input_digest,
+    serialize_runtime_readiness,
 )
 from app.core.worker_shared_configuration import (
     WORKER_KIT_SOURCE_PROFILE,
@@ -267,6 +275,7 @@ async def _load_profile_or_404(
     profile_id: int,
     *,
     for_update: bool = False,
+    populate_existing: bool = False,
 ) -> WorkerProfile:
     profile = await db.get(
         WorkerProfile,
@@ -276,6 +285,7 @@ async def _load_profile_or_404(
             selectinload(WorkerProfile.default_skills),
         ],
         with_for_update=for_update,
+        populate_existing=populate_existing,
     )
     if profile is None:
         raise HTTPException(
@@ -417,6 +427,84 @@ async def test_worker_profile_docker_connection(
     }
 
 
+def _build_verification_runtime(
+    profile: Any,
+    effective: EffectiveWorkerConfiguration,
+    settings: Any,
+) -> TaskWorkerRuntime:
+    """Build the resolved runtime the verification container executes (§15.1)."""
+    return TaskWorkerRuntime(
+        image=effective.image,
+        runtime_mode=effective.runtime_mode,
+        worker_kit_version=effective.worker_kit_version,
+        worker_kit_path=effective.worker_kit_path,
+        codegraph_enabled=bool(getattr(profile, "codegraph_enabled", False)),
+        volume_mounts=list(effective.volume_mounts),
+        environment=build_worker_profile_environment_map(
+            effective.environment_variables,
+            include_secrets=False,
+        ),
+        pre_script=effective.pre_script,
+        post_script=effective.post_script,
+        docker_host=getattr(profile, "docker_host", None),
+        docker_tls_ca=getattr(profile, "docker_tls_ca", None),
+        docker_tls_cert=getattr(profile, "docker_tls_cert", None),
+        docker_tls_key=getattr(profile, "docker_tls_key", None),
+    )
+
+
+def _verification_digest(
+    profile: Any,
+    effective: EffectiveWorkerConfiguration,
+    runtime: TaskWorkerRuntime,
+    settings: Any,
+) -> str:
+    """Compute the verification input digest (§10.2) for the resolved config."""
+    connection = runtime.docker_connection(settings)
+    return runtime_verification_input_digest(
+        docker_daemon_key=docker_daemon_key(connection),
+        image=runtime.image,
+        runtime_mode=runtime.runtime_mode,
+        worker_kit_version=runtime.worker_kit_version,
+        worker_kit_path=runtime.worker_kit_path,
+        volume_mounts=list(effective.volume_mounts),
+        environment_variables=[
+            {"key": str(item.get("key") or ""), "value": str(item.get("value") or "")}
+            for item in effective.environment_variables
+            if not bool(item.get("is_secret"))
+        ],
+        harness_key=getattr(profile, "default_harness_key", None) or "claude",
+        enabled_harnesses=list(getattr(profile, "enabled_harnesses", None) or ["claude"]),
+        harness_constraints=dict(getattr(profile, "harness_constraints", None) or {}),
+        harness_runtimes=dict(getattr(profile, "harness_runtimes", None) or {}),
+        require_skill_support=runtime_uses_skill_capable_worker_kit(runtime),
+    )
+
+
+def _runtime_unavailable_detail(
+    readiness: RuntimeReadiness,
+    *,
+    worker_profile_id: int,
+    worker_profile_name: str,
+) -> dict[str, Any]:
+    return {
+        "code": "worker_runtime_unavailable",
+        "message": "Worker runtime is unavailable; resolve the failure and re-verify",
+        "worker_profile_id": worker_profile_id,
+        "worker_profile_name": worker_profile_name,
+        "failure_code": readiness.failure_code,
+        "failure_message": readiness.failure_message,
+        "checked_at": readiness.checked_at.isoformat() if readiness.checked_at else None,
+    }
+
+
+async def _clear_profile_verification(db: AsyncSession, profile: WorkerProfile) -> None:
+    """Clear the profile's verification state after a deterministic failure."""
+    profile.verified_at = None
+    profile.verified_runtime_configuration_digest = None
+    await db.commit()
+
+
 @router.post("/worker-profiles/{profile_id}/verify-runtime")
 async def verify_worker_profile_runtime(
     profile_id: int,
@@ -424,46 +512,74 @@ async def verify_worker_profile_runtime(
     db: AsyncSession = Depends(get_db),
     _admin=Depends(require_admin_user),
 ):
-    """Run the mounted kit preflight on the profile's actual Docker target."""
+    """Two-layer runtime verification (§15.1).
+
+    Layer 1 runs the strict, side-effect-free Kit probe through the
+    generation/CAS readiness service against the profile's resolved Docker
+    target. Layer 2 runs the profile-specific ``--verify`` container (image,
+    mounts, harness/CLI, optional smoke) and, on success, stores the immutable
+    image digest, the verification timestamp, and the verification input digest.
+    Re-verification is always explicit and always re-probes the Kit.
+    """
     profile = await _load_profile_or_404(db, profile_id)
+    shared = (
+        await load_shared_configuration(db) if profile_inherits_shared(profile) else None
+    )
     try:
-        runtime = TaskWorkerRuntime(
-            image=profile.image,
-            runtime_mode=getattr(profile, "runtime_mode", BAKED_IMAGE_MODE),
-            worker_kit_version=getattr(profile, "worker_kit_version", None),
-            worker_kit_path=getattr(profile, "worker_kit_path", None),
-            codegraph_enabled=bool(getattr(profile, "codegraph_enabled", False)),
-            volume_mounts=parse_worker_profile_mounts(profile.volume_mounts),
-            environment=build_worker_profile_environment_map(
-                profile.environment_variables,
-                include_secrets=False,
-            ),
-            pre_script="",
-            post_script="",
-            docker_host=getattr(profile, "docker_host", None),
-            docker_tls_ca=getattr(profile, "docker_tls_ca", None),
-            docker_tls_cert=getattr(profile, "docker_tls_cert", None),
-            docker_tls_key=getattr(profile, "docker_tls_key", None),
-        )
-        overrides = runtime.container_overrides()
-        verification_volumes = build_worker_profile_volume_map(runtime.volume_mounts)
-        verification_volumes.update(overrides["volumes"])
+        effective = resolve_effective_configuration(profile, shared)
+        validate_effective_configuration(effective)
     except WorkerProfileValidationError as exc:
         raise _http_profile_error(exc) from exc
-    if runtime.runtime_mode == BAKED_IMAGE_MODE:
+    if effective.runtime_mode == BAKED_IMAGE_MODE:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Runtime verification requires mounted_kit mode",
         )
+    settings = get_effective_settings()
+    runtime = _build_verification_runtime(profile, effective, settings)
+    connection = runtime.docker_connection(settings)
+    verification_digest = _verification_digest(profile, effective, runtime, settings)
+    started_at = time.monotonic()
 
+    # Layer 1: strict Kit probe through the generation/CAS readiness service.
+    try:
+        readiness = await run_deterministic_kit_probe(
+            db,
+            connection=connection,
+            image=runtime.image,
+            runtime_mode=runtime.runtime_mode,
+            worker_kit_version=runtime.worker_kit_version or "",
+            worker_kit_path=runtime.worker_kit_path or "",
+            ttl_seconds=settings.worker_runtime_readiness_ttl_seconds,
+        )
+    except RuntimeProbeTransientError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "worker_runtime_verification_transient_failure",
+                "message": f"Worker Kit probe could not reach a conclusion: {exc}",
+            },
+        ) from exc
+    if readiness.is_unavailable:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_runtime_unavailable_detail(
+                readiness,
+                worker_profile_id=profile_id,
+                worker_profile_name=profile.name,
+            ),
+        )
+
+    # Layer 2: profile-specific verification container.
+    overrides = runtime.container_overrides()
+    verification_volumes = build_worker_profile_volume_map(runtime.volume_mounts)
+    verification_volumes.update(overrides["volumes"])
     command = ["--verify"]
     if runtime_uses_skill_capable_worker_kit(runtime):
         command.append("--require-skill-support")
     smoke_command = (request.smoke_command or "").strip()
     if smoke_command:
         command.extend(["--smoke", smoke_command])
-    connection = runtime.docker_connection(get_effective_settings())
-    started_at = time.monotonic()
 
     def verify_runtime() -> tuple[int, str, str]:
         client = DockerClientWrapper(connection)
@@ -483,7 +599,7 @@ async def verify_worker_profile_runtime(
                 entrypoint=overrides["entrypoint"],
                 user=overrides["user"],
                 tmpfs={"/workspace": "rw,exec,mode=1777"},
-                name=f"codify-worker-kit-verify-{profile.id}-{uuid.uuid4().hex[:8]}",
+                name=f"codify-worker-kit-verify-{profile_id}-{uuid.uuid4().hex[:8]}",
                 labels={
                     "codify.worker_kit_verification": "true",
                     "codify.worker_kit_version": runtime.worker_kit_version or "",
@@ -504,11 +620,17 @@ async def verify_worker_profile_runtime(
             timeout=200,
         )
     except Exception as exc:
+        # Transient: keep any previously verified digest/timestamp (§15.1).
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Worker runtime verification could not start: {exc}",
+            detail={
+                "code": "worker_runtime_verification_transient_failure",
+                "message": f"Worker runtime verification could not start: {exc}",
+            },
         ) from exc
     if exit_code != 0:
+        # Deterministic profile-specific failure: clear verification (§15.1).
+        await _clear_profile_verification(db, profile)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
@@ -518,12 +640,35 @@ async def verify_worker_profile_runtime(
             },
         )
 
-    # Persist the immutable image digest + verification timestamp so Task
-    # creation can gate on a verified Profile.
-    from app.core.utcnow import utcnow as _utcnow
+    # Reload profile+shared and recompute the digest: if the verification
+    # inputs changed while verifying, the result is superseded (§15.1).
+    fresh_profile = await _load_profile_or_404(db, profile_id, populate_existing=True)
+    fresh_shared = (
+        await load_shared_configuration(db)
+        if profile_inherits_shared(fresh_profile)
+        else None
+    )
+    try:
+        fresh_effective = resolve_effective_configuration(fresh_profile, fresh_shared)
+        validate_effective_configuration(fresh_effective)
+    except WorkerProfileValidationError as exc:
+        raise _http_profile_error(exc) from exc
+    fresh_runtime = _build_verification_runtime(fresh_profile, fresh_effective, settings)
+    fresh_digest = _verification_digest(
+        fresh_profile,
+        fresh_effective,
+        fresh_runtime,
+        settings,
+    )
+    if fresh_digest != verification_digest:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="worker_profile_verification_superseded",
+        )
 
+    profile.verified_at = utcnow()
+    profile.verified_runtime_configuration_digest = verification_digest
     profile.image_digest = repo_digest
-    profile.verified_at = _utcnow()
     await db.commit()
 
     return {
@@ -531,15 +676,17 @@ async def verify_worker_profile_runtime(
         "image": runtime.image,
         "image_digest": repo_digest,
         "verified_at": profile.verified_at.isoformat() if profile.verified_at else None,
+        "verified_runtime_configuration_digest": verification_digest,
         "worker_kit_version": runtime.worker_kit_version,
         "docker_host": connection.host,
         "elapsed_ms": round((time.monotonic() - started_at) * 1000),
         "omitted_secret_environment_keys": sorted(
-            str(row.key)
-            for row in profile.environment_variables
-            if bool(row.is_secret)
+            str(item.get("key") or "")
+            for item in effective.environment_variables
+            if bool(item.get("is_secret"))
         ),
         "logs": logs[-8000:],
+        "runtime_readiness": serialize_runtime_readiness(readiness),
     }
 
 

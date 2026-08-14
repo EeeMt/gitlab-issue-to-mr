@@ -1035,12 +1035,14 @@ class TestExecuteTask(unittest.IsolatedAsyncioTestCase):
 
     def _claim_execute(self, task):
         """Ordered db.execute results for _execute_task's atomic claim."""
+        snapshot_result = MagicMock()
+        snapshot_result.scalar_one_or_none.return_value = None
         issue_lock = MagicMock()
         task_result = MagicMock()
         task_result.scalar_one_or_none.return_value = task
         pred_result = MagicMock()
         pred_result.first.return_value = None
-        return [issue_lock, task_result, pred_result]
+        return [snapshot_result, issue_lock, task_result, pred_result]
 
     async def test_execute_task_marks_failed_on_commit_error(self) -> None:
         """If the atomic claim commit raises, task is rolled back and no worker starts."""

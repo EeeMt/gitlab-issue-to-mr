@@ -40,12 +40,14 @@ def _claimable_task(task_id: int, issue_id: int, status=TaskStatus.QUEUED) -> Ma
 
 def _claim_execute(db: MagicMock, task: MagicMock) -> None:
     """Configure db.execute for _execute_task's atomic claim returning `task`."""
+    snapshot_result = MagicMock()
+    snapshot_result.scalar_one_or_none.return_value = None
     issue_lock = MagicMock()
     task_result = MagicMock()
     task_result.scalar_one_or_none.return_value = task
     pred_result = MagicMock()
     pred_result.first.return_value = None
-    db.execute = AsyncMock(side_effect=[issue_lock, task_result, pred_result])
+    db.execute = AsyncMock(side_effect=[snapshot_result, issue_lock, task_result, pred_result])
 
 
 class SchedulerPriorityQueueTests(unittest.IsolatedAsyncioTestCase):
@@ -1083,7 +1085,11 @@ class SchedulerExecuteTaskTests(unittest.IsolatedAsyncioTestCase):
         task_result.scalar_one_or_none.return_value = task
         pred_result = MagicMock()
         pred_result.first.return_value = None
-        mock_db.execute = AsyncMock(side_effect=[MagicMock(), task_result, pred_result])
+        snapshot_result = MagicMock()
+        snapshot_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(
+            side_effect=[snapshot_result, MagicMock(), task_result, pred_result]
+        )
 
         async def deny_lock(_db, current_task):
             current_task.expired = True
@@ -1122,6 +1128,174 @@ class SchedulerExecuteTaskTests(unittest.IsolatedAsyncioTestCase):
         mock_create_task.assert_not_called()
         self.assertNotIn(18, scheduler._running_tasks)
         self.assertNotIn(45, scheduler._running_issues)
+
+
+class RuntimeReadinessGateTests(unittest.IsolatedAsyncioTestCase):
+    """Scheduler pre-execution runtime readiness gate (§13)."""
+
+    def _snapshot_db(self, fingerprint="fp-1"):
+        snapshot = MagicMock()
+        snapshot.runtime_locator_fingerprint = fingerprint
+        snapshot.image = "worker:latest"
+        snapshot.runtime_mode = "mounted_kit"
+        snapshot.worker_kit_version = "0.3.5"
+        snapshot.worker_kit_path = "/opt/kit"
+        snapshot_result = MagicMock()
+        snapshot_result.scalar_one_or_none.return_value = snapshot
+        empty = MagicMock()
+        empty.scalars.return_value.all.return_value = []
+        return snapshot_result, empty
+
+    async def test_ready_runtime_does_not_block(self) -> None:
+        from app.core.worker_runtime_readiness import READINESS_READY, RuntimeReadiness
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        task = _claimable_task(5, 20)
+        snapshot_result, _ = self._snapshot_db()
+        db = MagicMock()
+        db.execute = AsyncMock(side_effect=[snapshot_result])
+        db.commit = AsyncMock()
+
+        with patch(
+            "app.scheduler.read_runtime_readiness",
+            new=AsyncMock(return_value=RuntimeReadiness(status=READINESS_READY)),
+        ):
+            blocked = await scheduler._apply_runtime_readiness_gate(db, task)
+
+        self.assertFalse(blocked)
+        db.commit.assert_not_called()
+
+    async def test_unavailable_runtime_parks_task(self) -> None:
+        from app.core.worker_runtime_readiness import (
+            FAILURE_WORKER_KIT_NOT_FOUND,
+            READINESS_UNAVAILABLE,
+            RuntimeReadiness,
+        )
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        task = _claimable_task(5, 20)
+        snapshot_result, empty = self._snapshot_db()
+        db = MagicMock()
+        db.execute = AsyncMock(side_effect=[snapshot_result, empty])
+        db.commit = AsyncMock()
+
+        with patch(
+            "app.scheduler.read_runtime_readiness",
+            new=AsyncMock(
+                return_value=RuntimeReadiness(
+                    status=READINESS_UNAVAILABLE,
+                    failure_code=FAILURE_WORKER_KIT_NOT_FOUND,
+                )
+            ),
+        ):
+            blocked = await scheduler._apply_runtime_readiness_gate(db, task)
+
+        self.assertTrue(blocked)
+        self.assertEqual(task.status, TaskStatus.PENDING)
+        db.commit.assert_awaited()
+
+    async def test_unknown_runtime_probes_and_ready_proceeds(self) -> None:
+        from app.core.worker_runtime_readiness import (
+            READINESS_READY,
+            READINESS_UNKNOWN,
+            RuntimeReadiness,
+        )
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        task = _claimable_task(5, 20)
+        snapshot_result, _ = self._snapshot_db()
+        db = MagicMock()
+        db.execute = AsyncMock(side_effect=[snapshot_result])
+        db.commit = AsyncMock()
+
+        with (
+            patch(
+                "app.scheduler.read_runtime_readiness",
+                new=AsyncMock(return_value=RuntimeReadiness(status=READINESS_UNKNOWN)),
+            ),
+            patch(
+                "app.scheduler.run_deterministic_kit_probe",
+                new=AsyncMock(return_value=RuntimeReadiness(status=READINESS_READY)),
+            ),
+        ):
+            blocked = await scheduler._apply_runtime_readiness_gate(db, task)
+
+        self.assertFalse(blocked)
+        self.assertEqual(task.status, TaskStatus.QUEUED)
+
+    async def test_unknown_runtime_probe_unavailable_fails_task(self) -> None:
+        from app.core.worker_runtime_readiness import (
+            FAILURE_WORKER_KIT_INVALID,
+            READINESS_UNAVAILABLE,
+            READINESS_UNKNOWN,
+            RuntimeReadiness,
+        )
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        task = _claimable_task(5, 20)
+        snapshot_result, empty = self._snapshot_db()
+        db = MagicMock()
+        db.execute = AsyncMock(side_effect=[snapshot_result, empty])
+        db.commit = AsyncMock()
+
+        with (
+            patch(
+                "app.scheduler.read_runtime_readiness",
+                new=AsyncMock(return_value=RuntimeReadiness(status=READINESS_UNKNOWN)),
+            ),
+            patch(
+                "app.scheduler.run_deterministic_kit_probe",
+                new=AsyncMock(
+                    return_value=RuntimeReadiness(
+                        status=READINESS_UNAVAILABLE,
+                        failure_code=FAILURE_WORKER_KIT_INVALID,
+                    )
+                ),
+            ),
+            patch("app.scheduler.maybe_update_issue_status", new=AsyncMock()),
+        ):
+            blocked = await scheduler._apply_runtime_readiness_gate(db, task)
+
+        self.assertTrue(blocked)
+        self.assertEqual(task.status, TaskStatus.FAILED)
+        self.assertIn("worker_runtime_check_failed", task.error_message)
+        db.commit.assert_awaited()
+
+    async def test_unknown_runtime_transient_probe_leaves_task_queued(self) -> None:
+        from app.core.worker_runtime_readiness import (
+            READINESS_UNKNOWN,
+            RuntimeProbeTransientError,
+            RuntimeReadiness,
+        )
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        task = _claimable_task(5, 20)
+        snapshot_result, _ = self._snapshot_db()
+        db = MagicMock()
+        db.execute = AsyncMock(side_effect=[snapshot_result])
+        db.commit = AsyncMock()
+
+        with (
+            patch(
+                "app.scheduler.read_runtime_readiness",
+                new=AsyncMock(return_value=RuntimeReadiness(status=READINESS_UNKNOWN)),
+            ),
+            patch(
+                "app.scheduler.run_deterministic_kit_probe",
+                new=AsyncMock(side_effect=RuntimeProbeTransientError("daemon down")),
+            ),
+        ):
+            blocked = await scheduler._apply_runtime_readiness_gate(db, task)
+
+        self.assertTrue(blocked)
+        # Transient conclusions never mutate task state; retry next cycle.
+        self.assertEqual(task.status, TaskStatus.QUEUED)
+        db.commit.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
