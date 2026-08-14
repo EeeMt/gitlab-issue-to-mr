@@ -507,6 +507,56 @@ def _read_archive_file(
         return extracted.read()
 
 
+class _ChunkedReader:
+    """Minimal ``read()``-only stream over an iterable of byte chunks.
+
+    Tar streaming mode pulls only as many chunks as it needs to parse the next
+    header, so a directory probe never buffers the full archive.
+    """
+
+    def __init__(self, chunks: Any) -> None:
+        self._chunks = iter(chunks)
+        self._buffer = b""
+
+    def read(self, n: int = -1) -> bytes:
+        if n < 0:
+            data = b"".join(self._chunks)
+            self._buffer, data = b"", self._buffer + data
+            return data
+        while len(self._buffer) < n:
+            try:
+                self._buffer += next(self._chunks)
+            except StopIteration:
+                break
+        data, self._buffer = self._buffer[:n], self._buffer[n:]
+        return data
+
+
+def _archive_has_member(container: Any, path: str) -> bool:
+    """Return True when the archive at ``path`` has at least one member.
+
+    Streams only the leading tar headers (up to the first member) instead of
+    buffering the whole archive, so the large ``nix/store`` tree is never pulled
+    into memory (§13.6). A missing path (``NotFound``) or an archive with no
+    members means the path has no usable content.
+    """
+    try:
+        bits, _stat = container.get_archive(path)
+    except docker.errors.NotFound:
+        return False
+    except Exception as exc:  # noqa: BLE001 - connection/API incompatibility
+        raise RuntimeProbeTransientError(
+            f"Could not read {path!r} from probe container: {exc}"
+        ) from exc
+    try:
+        with tarfile.open(fileobj=_ChunkedReader(bits), mode="r|") as tar:
+            return tar.next() is not None
+    except tarfile.TarError:
+        # A path that cannot be parsed as a tar is treated as absent content,
+        # not a transient probe failure.
+        return False
+
+
 def _inspect_kit_contents(
     client: DockerClientWrapper,
     container: Any,
@@ -565,9 +615,7 @@ def _inspect_kit_contents(
                     f"under {worker_kit_path!r}"
                 ),
             )
-    try:
-        _read_archive_file(client, container, f"{root}/nix/store")
-    except docker.errors.NotFound:
+    if not _archive_has_member(container, f"{root}/nix/store"):
         return RuntimeCheckResult(
             status=READINESS_UNAVAILABLE,
             failure_code=FAILURE_WORKER_KIT_INVALID,
@@ -705,3 +753,89 @@ async def run_deterministic_kit_probe(
     )
     await db.commit()
     return await read_runtime_readiness(db, fingerprint)
+
+
+class WorkerRuntimeUnavailableError(RuntimeError):
+    """A re-check after a container create/start Kit error found the Kit gone.
+
+    Raised in the container error path (§13.4) when the strict probe
+    deterministically concludes the frozen Kit locator is unavailable, so the
+    task fails with a structured Kit error instead of a vague Docker message.
+    """
+
+    def __init__(
+        self,
+        *,
+        failure_code: str | None,
+        failure_message: str | None,
+    ) -> None:
+        self.failure_code = failure_code
+        self.failure_message = failure_message
+        super().__init__(failure_message or "Worker runtime is unavailable")
+
+
+_KIT_ERROR_HINTS = (
+    "mount",
+    "bind",
+    "entrypoint",
+    "not a directory",
+    "no such file",
+)
+
+
+def is_kit_mount_error(exc: Exception, worker_kit_path: str | None) -> bool:
+    """Best-effort classification of a create/start error as a Kit error (§13.4).
+
+    The daemon's ``bind source path does not exist`` message is the strongest
+    signal (missing bind source is rejected at create). Otherwise the error must
+    mention the Kit path in a mount/bind/entrypoint context to avoid probing on
+    unrelated image or network failures.
+    """
+    if not worker_kit_path:
+        return False
+    text = str(exc).lower()
+    if _MISSING_BIND_SOURCE_HINT in text:
+        return True
+    if worker_kit_path.lower() not in text:
+        return False
+    return any(hint in text for hint in _KIT_ERROR_HINTS)
+
+
+async def recheck_runtime_on_container_error(
+    db: AsyncSession,
+    *,
+    connection: DockerConnectionConfig,
+    image: str,
+    runtime_mode: str,
+    worker_kit_version: str,
+    worker_kit_path: str,
+    ttl_seconds: int,
+    original_error: Exception,
+) -> Exception:
+    """Re-probe the frozen Kit after a container create/start Kit error (§13.4).
+
+    Runs the same strict probe used by the scheduler gate. When it
+    deterministically concludes the Kit is gone (writing ``unavailable``), the
+    caller is returned a structured ``WorkerRuntimeUnavailableError`` to replace
+    the vague container error. Any other outcome (ready, unknown, transient)
+    keeps ``original_error`` so the failure stays classified as a Profile/image
+    runtime error.
+    """
+    try:
+        readiness = await run_deterministic_kit_probe(
+            db,
+            connection=connection,
+            image=image,
+            runtime_mode=runtime_mode,
+            worker_kit_version=worker_kit_version,
+            worker_kit_path=worker_kit_path,
+            ttl_seconds=ttl_seconds,
+        )
+    except RuntimeProbeTransientError:
+        return original_error
+    if readiness.is_unavailable:
+        return WorkerRuntimeUnavailableError(
+            failure_code=readiness.failure_code,
+            failure_message=readiness.failure_message,
+        )
+    return original_error

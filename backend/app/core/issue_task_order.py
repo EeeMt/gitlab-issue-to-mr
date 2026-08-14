@@ -419,15 +419,6 @@ async def compute_queue_context(
                 "lock_owner_task_id": lock_owner_task_id,
                 "waiting_since": waiting_since,
             }
-        elif task.scheduled_at is not None and task.scheduled_at > utcnow():
-            result[task.id] = {
-                "issue_sequence": task.issue_sequence,
-                "queue_position": position,
-                "blocked_by_task_id": None,
-                "waiting_reason": "scheduled",
-                "lock_owner_task_id": None,
-                "waiting_since": None,
-            }
         elif head_readiness is not None and head_readiness.is_unavailable:
             result[task.id] = {
                 "issue_sequence": task.issue_sequence,
@@ -448,6 +439,15 @@ async def compute_queue_context(
                     else None
                 ),
                 "runtime_locator_fingerprint": head_fingerprint,
+            }
+        elif task.scheduled_at is not None and task.scheduled_at > utcnow():
+            result[task.id] = {
+                "issue_sequence": task.issue_sequence,
+                "queue_position": position,
+                "blocked_by_task_id": None,
+                "waiting_reason": "scheduled",
+                "lock_owner_task_id": None,
+                "waiting_since": None,
             }
         else:
             result[task.id] = {

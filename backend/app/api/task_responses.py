@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.skills import skill_snapshots_from_task_snapshot
 from app.core.task_helpers import _serialize_task as _serialize_task_base
-from app.models import Task, TaskWorkerProfileSnapshot
+from app.models import Task, TaskWorkerProfileSnapshot, User
 
 TASK_RESPONSE_REFRESH_ATTRIBUTES = ["id", "status", "created_at", "updated_at"]
 SNAPSHOT_RESPONSE_REFRESH_ATTRIBUTES = [
@@ -59,6 +59,7 @@ def apply_queue_context(
     data: dict[str, Any],
     task_id: int,
     contexts: dict[int, dict[str, Any]],
+    current_user: User | None = None,
 ) -> dict[str, Any]:
     """Merge per-task queue context fields into a serialized Task dict."""
     ctx = contexts.get(task_id) or {}
@@ -70,7 +71,12 @@ def apply_queue_context(
     data["runtime_failure_code"] = ctx.get("runtime_failure_code")
     data["runtime_failure_message"] = ctx.get("runtime_failure_message")
     data["runtime_checked_at"] = ctx.get("runtime_checked_at")
-    data["runtime_locator_fingerprint"] = ctx.get("runtime_locator_fingerprint")
+    # §13.3/F4: the locator fingerprint exposes the daemon host/TLS identity of
+    # the frozen worker snapshot, so it is restricted to platform admins. A
+    # caller that does not resolve an admin user (anonymous, non-admin, or an
+    # unresolved dependency in direct-call contexts) fails closed to non-admin.
+    if getattr(current_user, "platform_role", None) == "platform_admin":
+        data["runtime_locator_fingerprint"] = ctx.get("runtime_locator_fingerprint")
     return data
 
 

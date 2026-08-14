@@ -540,7 +540,7 @@ async def reschedule_task(
         include_prompt_details=True,
     )
     queue_contexts = await compute_task_queue_contexts(db, [task])
-    apply_queue_context(response, task.id, queue_contexts)
+    apply_queue_context(response, task.id, queue_contexts, current_user=current_user)
     response["blocked_successor_count"] = blocked_successor_count
     try:
         response["schedule_constraints"] = await compute_schedule_window(

@@ -196,6 +196,7 @@ async def list_tasks(
     page_size: int = 20,
     db: AsyncSession = Depends(get_db),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+    _current_user: User | None = Depends(get_optional_current_user),
 ):
     """List tasks with optional filtering, sorting, and pagination.
 
@@ -252,7 +253,7 @@ async def list_tasks(
         ]
         queue_contexts = await compute_task_queue_contexts(db, list(tasks))
         for task, item in zip(tasks, items):
-            apply_queue_context(item, task.id, queue_contexts)
+            apply_queue_context(item, task.id, queue_contexts, current_user=_current_user)
 
         return {
             "items": items,
@@ -268,7 +269,7 @@ async def list_tasks(
     items = [_serialize_task(task, project_lookup.get(task.project_id), settings) for task in tasks]
     queue_contexts = await compute_task_queue_contexts(db, list(tasks))
     for task, item in zip(tasks, items):
-        apply_queue_context(item, task.id, queue_contexts)
+        apply_queue_context(item, task.id, queue_contexts, current_user=_current_user)
 
     return items
 
@@ -380,7 +381,7 @@ async def list_scheduled_tasks(
         # non-head tasks that wait behind a predecessor (§7).
         queue_contexts = await compute_task_queue_contexts(db, tasks)
         for task, data in zip(tasks, serialized):
-            apply_queue_context(data, task.id, queue_contexts)
+            apply_queue_context(data, task.id, queue_contexts, current_user=_current_user)
     return serialized
 
 
@@ -536,6 +537,7 @@ async def get_task(
     task_id: int,
     db: AsyncSession = Depends(get_db),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+    _current_user: User | None = Depends(get_optional_current_user),
 ):
     """Get task by ID.
 
@@ -602,7 +604,7 @@ async def get_task(
     t3 = time.time()
     result_data = _serialize_task(task, metadata, include_prompt_details=True)
     queue_contexts = await compute_task_queue_contexts(db, [task])
-    apply_queue_context(result_data, task.id, queue_contexts)
+    apply_queue_context(result_data, task.id, queue_contexts, current_user=_current_user)
     if task.status in (TaskStatus.PENDING, TaskStatus.QUEUED):
         from app.core.issue_task_order import compute_schedule_window
 

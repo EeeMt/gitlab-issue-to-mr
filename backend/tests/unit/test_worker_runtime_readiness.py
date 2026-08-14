@@ -443,6 +443,60 @@ def test_probe_requires_mounted_kit_mode():
         )
 
 
+def _large_store_archive() -> tuple[bytes, int]:
+    """Build a tar with one ~8MB member and return (bytes, payload_size)."""
+    payload = b"x" * (8 * 1024 * 1024)
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        info = tarfile.TarInfo("store/0abc123-foo")
+        info.size = len(payload)
+        archive.addfile(info, io.BytesIO(payload))
+    return buffer.getvalue(), len(payload)
+
+
+def test_nix_store_probe_streams_large_archive_bounded():
+    """F3: the nix/store sentinel check must not buffer the whole archive."""
+    from app.core.worker_runtime_readiness import _archive_has_member
+
+    archive_bytes, payload_size = _large_store_archive()
+    consumed = 0
+
+    def chunks():
+        nonlocal consumed
+        for i in range(0, len(archive_bytes), 512):
+            consumed += 512
+            yield archive_bytes[i : i + 512]
+
+    container = MagicMock()
+    container.get_archive.return_value = (chunks(), {})
+    assert _archive_has_member(container, "/opt/codify-probe/kit/nix/store") is True
+    # Only the leading tar headers were consumed; the 8MB payload was never
+    # pulled into memory.
+    assert consumed < payload_size // 100
+
+
+def test_nix_store_empty_archive_is_treated_as_missing():
+    """F3: an archive with no members (empty directory) reports no content."""
+    from app.core.worker_runtime_readiness import _archive_has_member
+
+    empty = io.BytesIO()
+    with tarfile.open(fileobj=empty, mode="w") as archive:
+        pass  # no members
+
+    container = MagicMock()
+    container.get_archive.return_value = (iter([empty.getvalue()]), {})
+    assert _archive_has_member(container, "/opt/codify-probe/kit/nix/store") is False
+
+
+def test_nix_store_missing_path_reports_no_content():
+    """F3: a NotFound archive read means the nix/store is absent."""
+    from app.core.worker_runtime_readiness import _archive_has_member
+
+    container = MagicMock()
+    container.get_archive.side_effect = docker.errors.NotFound("no such path")
+    assert _archive_has_member(container, "/opt/codify-probe/kit/nix/store") is False
+
+
 # ── run_deterministic_kit_probe ─────────────────────────────────────────────
 
 

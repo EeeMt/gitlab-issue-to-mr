@@ -365,7 +365,7 @@ async def retry_task_record(
         include_prompt_details=True,
     )
     queue_contexts = await compute_task_queue_contexts(db, [new_task])
-    apply_queue_context(response, new_task.id, queue_contexts)
+    apply_queue_context(response, new_task.id, queue_contexts, current_user=current_user)
     return response
 
 
@@ -625,5 +625,5 @@ async def create_task_record(
     if slot_warning:
         response["slot_warning"] = slot_warning
     queue_contexts = await compute_task_queue_contexts(db, [task])
-    apply_queue_context(response, task.id, queue_contexts)
+    apply_queue_context(response, task.id, queue_contexts, current_user=current_user)
     return response

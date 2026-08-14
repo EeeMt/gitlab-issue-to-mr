@@ -1474,10 +1474,16 @@ class Scheduler:
             return True
         if probe.is_ready:
             return False
-        # Deterministic unavailable conclusion from a live probe: fail the
-        # probed task and park unclaimed same-fingerprint tasks (§13.4).
-        await self._fail_task_for_runtime_check(db, task, probe)
-        await self._park_other_queued_tasks(db, task, fingerprint, probe)
+        if probe.is_unavailable:
+            # Deterministic unavailable conclusion from a live probe: fail the
+            # probed task and park unclaimed same-fingerprint tasks (§13.4).
+            await self._fail_task_for_runtime_check(db, task, probe)
+            await self._park_other_queued_tasks(db, task, fingerprint, probe)
+            return True
+        # unknown: the probe result was superseded by a concurrent check or no
+        # conclusion is stored yet (§13.3/§19). A late/superseded generation
+        # must never change readiness or Task state, so leave the Task QUEUED
+        # and re-evaluate next cycle instead of failing it.
         return True
 
     async def _load_task_snapshot(

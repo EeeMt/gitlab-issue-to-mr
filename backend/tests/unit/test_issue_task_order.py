@@ -121,6 +121,50 @@ class ComputeQueueContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ctx[1]["queue_position"], 1)
         self.assertEqual(ctx[1]["waiting_reason"], "scheduled")
 
+    async def test_unavailable_runtime_outranks_scheduled_reason(self):
+        """F5: a head that is both future-scheduled and runtime-unavailable
+        reports worker_runtime_unavailable, not scheduled."""
+        from app.core.issue_task_order import compute_queue_context
+        from app.core.worker_runtime_readiness import (
+            FAILURE_WORKER_KIT_NOT_FOUND,
+            READINESS_UNAVAILABLE,
+            RuntimeReadiness,
+        )
+
+        future = datetime(2099, 1, 1, 12, 0, 0)
+        head = _make_task(
+            1,
+            issue_sequence=1,
+            status=TaskStatus.QUEUED,
+            scheduled_at=future,
+        )
+        head.worker_profile_snapshot = SimpleNamespace(
+            runtime_locator_fingerprint="fp-unavailable-scheduled"
+        )
+        db = MagicMock()
+        db.execute = AsyncMock(
+            side_effect=[
+                _make_scalars_all_result([head]),
+                _make_scalar_one_or_none_result(None),
+            ]
+        )
+        checked_at = datetime(2026, 1, 1, 10, 0, 0)
+        with patch(
+            "app.core.issue_task_order.read_runtime_readiness",
+            new=AsyncMock(
+                return_value=RuntimeReadiness(
+                    status=READINESS_UNAVAILABLE,
+                    failure_code=FAILURE_WORKER_KIT_NOT_FOUND,
+                    checked_at=checked_at,
+                )
+            ),
+        ):
+            ctx = await compute_queue_context(db, issue_id=1)
+
+        self.assertEqual(ctx[1]["waiting_reason"], "worker_runtime_unavailable")
+        self.assertEqual(ctx[1]["runtime_failure_code"], FAILURE_WORKER_KIT_NOT_FOUND)
+        self.assertEqual(ctx[1]["runtime_locator_fingerprint"], "fp-unavailable-scheduled")
+
     async def test_head_with_unavailable_runtime_reports_worker_runtime_unavailable(self):
         from app.core.issue_task_order import compute_queue_context
         from app.core.worker_runtime_readiness import (

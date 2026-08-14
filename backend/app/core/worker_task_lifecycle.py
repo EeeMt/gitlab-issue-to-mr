@@ -25,7 +25,10 @@ from app.core.issue_task_lineage import (
     resolve_projected_resume_session,
 )
 from app.core.utcnow import utcnow
-from app.core.worker_docker_targets import TaskContainerLookupError
+from app.core.worker_docker_targets import (
+    DockerConnectionsUnavailableError,
+    TaskContainerLookupError,
+)
 from app.core.worker_profiles import load_task_worker_runtime
 from app.core.worker_runtime import (
     TASK_SKILLS_CONTAINER_PATH,
@@ -34,6 +37,10 @@ from app.core.worker_runtime import (
     worker_custom_scripts_configured,
 )
 from app.core.worker_runtime_bundle import load_bound_runtime_bundle
+from app.core.worker_runtime_readiness import (
+    is_kit_mount_error,
+    recheck_runtime_on_container_error,
+)
 from app.core.worker_task_artifacts import (
     _stop_artifact_poller,
     finalize_task_raw_logs,
@@ -432,37 +439,58 @@ async def create_execute_container(
     if await finalize_pre_container_cancellation(db, task, phase="container creation"):
         return None
     container_name = worker._get_container_name(task)
-    container = _create_stopped_container(
-        worker,
-        task,
-        container_name,
-        image=worker_runtime.image,
-        command="",
-        environment=environment,
-        volumes=volumes if volumes else None,
-        network=settings.worker_network,
-        entrypoint=container_overrides["entrypoint"],
-        user=container_overrides["user"],
-        labels={
-            "codify.task_id": str(task.id),
-            "codify.worker_runtime_mode": worker_runtime.runtime_mode,
-            "codify.worker_kit_version": worker_runtime.worker_kit_version or "",
-            "codify.attempt_id": attempt.attempt_id,
-            "codify.runtime_bundle_digest": runtime_bundle.digest,
-        },
-    )
-
-    await _persist_created_container_reference(worker, db, task, container)
-    if await finalize_pre_container_cancellation(db, task, phase="container start"):
-        await _remove_created_container(worker, db, task, container)
-        return None
     try:
-        worker.docker.put_archive(container, "/tmp", runtime_bundle.bundle_bytes)
-        worker.docker.put_archive(container, "/tmp", runtime_archive)
-    except Exception:
-        await _remove_created_container(worker, db, task, container)
+        container = _create_stopped_container(
+            worker,
+            task,
+            container_name,
+            image=worker_runtime.image,
+            command="",
+            environment=environment,
+            volumes=volumes if volumes else None,
+            network=settings.worker_network,
+            entrypoint=container_overrides["entrypoint"],
+            user=container_overrides["user"],
+            labels={
+                "codify.task_id": str(task.id),
+                "codify.worker_runtime_mode": worker_runtime.runtime_mode,
+                "codify.worker_kit_version": worker_runtime.worker_kit_version or "",
+                "codify.attempt_id": attempt.attempt_id,
+                "codify.runtime_bundle_digest": runtime_bundle.digest,
+            },
+        )
+
+        await _persist_created_container_reference(worker, db, task, container)
+        if await finalize_pre_container_cancellation(db, task, phase="container start"):
+            await _remove_created_container(worker, db, task, container)
+            return None
+        try:
+            worker.docker.put_archive(container, "/tmp", runtime_bundle.bundle_bytes)
+            worker.docker.put_archive(container, "/tmp", runtime_archive)
+        except Exception:
+            await _remove_created_container(worker, db, task, container)
+            raise
+        await _start_created_container(worker, db, task, container)
+    except (DockerConnectionsUnavailableError, TaskContainerLookupError):
+        # Ambiguous/inconclusive Docker view: deferred recovery owns the outcome.
         raise
-    await _start_created_container(worker, db, task, container)
+    except Exception as exc:
+        # §13.4: a Kit mount/entrypoint error must trigger the same strict probe
+        # used by the scheduler gate. A deterministically missing Kit becomes a
+        # structured unavailable error; any other outcome keeps the original
+        # error classified as a Profile/image runtime error.
+        if is_kit_mount_error(exc, worker_runtime.worker_kit_path):
+            raise await recheck_runtime_on_container_error(
+                db,
+                connection=worker_runtime.docker_connection(settings),
+                image=worker_runtime.image,
+                runtime_mode=worker_runtime.runtime_mode,
+                worker_kit_version=worker_runtime.worker_kit_version or "",
+                worker_kit_path=worker_runtime.worker_kit_path or "",
+                ttl_seconds=settings.worker_runtime_readiness_ttl_seconds,
+                original_error=exc,
+            )
+        raise
     return container
 
 

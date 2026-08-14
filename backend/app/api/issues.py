@@ -272,6 +272,7 @@ async def _serialize_issue_detail(
     db: AsyncSession,
     issue: Issue,
     current_harness: str | None = None,
+    current_user: User | None = None,
 ) -> dict:
     """Serialize an Issue with its eagerly-loaded tasks and queue context.
 
@@ -316,7 +317,7 @@ async def _serialize_issue_detail(
     if tasks:
         contexts = await compute_task_queue_contexts(db, tasks)
         for t, item in zip(tasks, data["tasks"]):
-            apply_queue_context(item, t.id, contexts)
+            apply_queue_context(item, t.id, contexts, current_user=current_user)
     now = utcnow()
     data["totals"] = {
         "additions": sum(t.additions or 0 for t in tasks),
@@ -742,7 +743,9 @@ async def get_issue(
         )
     require_project_access(issue.project_id, access_scope)
     current_harness = await get_issue_latest_harness_key(db, issue.id)
-    return await _serialize_issue_detail(db, issue, current_harness=current_harness)
+    return await _serialize_issue_detail(
+        db, issue, current_harness=current_harness, current_user=current_user
+    )
 
 
 @router.patch("/{issue_id}")
@@ -811,7 +814,7 @@ async def update_issue(
 
     await db.commit()
     await db.refresh(issue, attribute_names=["tasks", "worker_profile", "default_provider"])
-    return await _serialize_issue_detail(db, issue)
+    return await _serialize_issue_detail(db, issue, current_user=current_user)
 
 
 @router.post("/{issue_id}/close")
@@ -846,7 +849,7 @@ async def close_issue(
         await _try_delete_issue_branch(issue, db, ignore_close_policy=True)
     await db.commit()
     await db.refresh(issue, attribute_names=["tasks", "worker_profile", "default_provider"])
-    return await _serialize_issue_detail(db, issue)
+    return await _serialize_issue_detail(db, issue, current_user=current_user)
 
 
 @router.post("/{issue_id}/delete-branch")
@@ -881,7 +884,7 @@ async def delete_issue_branch(
 
     if issue.branch_deleted:
         # Already deleted: return the full serialized issue detail to match frontend expectations
-        return await _serialize_issue_detail(db, issue)
+        return await _serialize_issue_detail(db, issue, current_user=current_user)
 
     try:
         client = get_gitlab_client()
@@ -897,7 +900,7 @@ async def delete_issue_branch(
     await db.commit()
     # Refresh tasks relationship (match pattern used by close_issue)
     await db.refresh(issue, attribute_names=["tasks", "worker_profile", "default_provider"])
-    return await _serialize_issue_detail(db, issue)
+    return await _serialize_issue_detail(db, issue, current_user=current_user)
 
 
 @router.delete("/{issue_id}")

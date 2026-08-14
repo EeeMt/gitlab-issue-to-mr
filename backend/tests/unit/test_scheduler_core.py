@@ -1297,6 +1297,46 @@ class RuntimeReadinessGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task.status, TaskStatus.QUEUED)
         db.commit.assert_not_called()
 
+    async def test_unknown_probe_superseded_leaves_task_queued(self) -> None:
+        """F1: a superseded (late-generation) probe returning unknown must keep
+        the Task QUEUED, not fail it and not emit a failure/park event."""
+        from app.core.worker_runtime_readiness import (
+            READINESS_UNKNOWN,
+            RuntimeReadiness,
+        )
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        task = _claimable_task(5, 20)
+        snapshot_result, _ = self._snapshot_db()
+        db = MagicMock()
+        db.execute = AsyncMock(side_effect=[snapshot_result])
+        db.commit = AsyncMock()
+        emitted: list[str] = []
+        scheduler._emit_event = lambda *args, **kwargs: emitted.append(args[0])
+
+        with (
+            patch(
+                "app.scheduler.read_runtime_readiness",
+                new=AsyncMock(return_value=RuntimeReadiness(status=READINESS_UNKNOWN)),
+            ),
+            patch(
+                "app.scheduler.run_deterministic_kit_probe",
+                # The probe's own write was discarded by a later generation
+                # (§13.3 CAS), so the effective readiness reads back unknown.
+                new=AsyncMock(return_value=RuntimeReadiness(status=READINESS_UNKNOWN)),
+            ),
+        ):
+            blocked = await scheduler._apply_runtime_readiness_gate(db, task)
+
+        self.assertTrue(blocked)
+        # Not failed, not parked: left QUEUED for next cycle.
+        self.assertEqual(task.status, TaskStatus.QUEUED)
+        self.assertNotIn("runtime_readiness_check_failed", emitted)
+        self.assertNotIn("runtime_unavailable_task_parked", emitted)
+        self.assertNotIn("runtime_readiness_probe_transient", emitted)
+        db.commit.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # _run_task_background
