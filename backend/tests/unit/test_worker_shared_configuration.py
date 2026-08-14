@@ -332,6 +332,61 @@ def test_digest_changes_when_any_execution_field_changes():
     assert changed != compute_effective_configuration_digest(**base)
 
 
+def test_digest_covers_docker_harness_codegraph_and_skills():
+    base = dict(
+        image="img",
+        runtime_mode=MOUNTED_KIT_MODE,
+        worker_kit_version="0.4.0",
+        worker_kit_path="/opt/kit",
+        volume_mounts=[],
+        environment_variables=[],
+        pre_script="",
+        post_script="",
+        default_execute_run_instruction_template="E",
+        default_plan_run_instruction_template="P",
+        ci_auto_repair_run_instruction_template="C",
+    )
+    reference = compute_effective_configuration_digest(**base)
+    # The optional §10.1 fields default to the pre-shared-config values, so the
+    # explicit defaults produce the same digest as the bare call.
+    assert reference == compute_effective_configuration_digest(
+        **{
+            **base,
+            "docker_host": None,
+            "codegraph_enabled": False,
+            "harness_key": "claude",
+            "harness_config": {},
+            "skills": [],
+        }
+    )
+    assert (
+        compute_effective_configuration_digest(
+            **{**base, "docker_host": "tcp://worker:2376"}
+        )
+        != reference
+    )
+    assert (
+        compute_effective_configuration_digest(**{**base, "codegraph_enabled": True})
+        != reference
+    )
+    assert (
+        compute_effective_configuration_digest(**{**base, "harness_key": "codex"})
+        != reference
+    )
+    assert (
+        compute_effective_configuration_digest(
+            **{**base, "harness_config": {"sandbox_mode": "sandboxed"}}
+        )
+        != reference
+    )
+    assert (
+        compute_effective_configuration_digest(
+            **{**base, "skills": [{"skill_id": 1, "skill_version_id": 2}]}
+        )
+        != reference
+    )
+
+
 def test_effective_configuration_digest_convenience_matches_compute():
     effective = resolve_effective_configuration(_profile(), _shared())
 

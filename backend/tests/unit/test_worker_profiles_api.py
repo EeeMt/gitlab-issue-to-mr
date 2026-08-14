@@ -149,6 +149,8 @@ async def test_create_worker_profile_rejects_duplicate_env_keys():
             WorkerProfileEnvironmentVariableRequest(key="MAVEN_OPTS", value="-Xmx1g"),
             WorkerProfileEnvironmentVariableRequest(key="MAVEN_OPTS", value="-Xmx2g"),
         ],
+        pre_script="",
+        post_script="",
         default_execute_run_instruction_template="Execute {{user_prompt}}",
         default_plan_run_instruction_template="Plan {{user_prompt}}",
         ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
@@ -585,6 +587,8 @@ async def test_create_mounted_worker_profile_rejects_kit_mount_collision():
             {"host_path": "/tmp/override", "container_path": "/nix", "mode": "rw"}
         ],
         environment_variables=[],
+        pre_script="",
+        post_script="",
         default_execute_run_instruction_template="Execute {{user_prompt}}",
         default_plan_run_instruction_template="Plan {{user_prompt}}",
         ci_auto_repair_run_instruction_template="Repair {{issue_title}}",

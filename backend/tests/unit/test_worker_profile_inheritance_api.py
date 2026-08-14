@@ -297,3 +297,104 @@ async def test_duplicate_preserves_inheritance_intent(db_factory):
     assert copy.volume_mount_masks == ["/shared"]
     assert env_by_key["SHARED_A"].operation == ENV_OPERATION_MASK
     assert env_by_key["PROFILE_ONLY"].operation == ENV_OPERATION_SET
+
+
+@pytest.mark.asyncio
+async def test_create_profile_with_null_scripts_validates_shared_kit_collision(
+    db_factory,
+):
+    """F1: NULL scripts inherit the shared baseline (§11.2).
+
+    A create that only sets the mounted-kit coordinates but leaves the scripts
+    NULL must resolve the shared baseline, so a shared mount that collides with
+    the kit path fails the create instead of being silently ignored.
+    """
+    session_factory = await db_factory()
+    async with session_factory() as db:
+        db.add(
+            WorkerSharedConfiguration(
+                id=1,
+                revision=1,
+                runtime_mode="mounted_kit",
+                worker_kit_version="0.4.0",
+                worker_kit_path="/opt/codify/worker-kits/0.4.0",
+                volume_mounts=[
+                    {
+                        "host_path": "/srv/kit",
+                        "container_path": "/opt/codify-kit",
+                        "mode": "ro",
+                    }
+                ],
+                pre_script="shared-pre",
+                post_script="shared-post",
+                default_execute_run_instruction_template="shared execute {{user_prompt}}",
+                default_plan_run_instruction_template="shared plan {{user_prompt}}",
+                ci_auto_repair_run_instruction_template="shared repair {{issue_title}}",
+            )
+        )
+        await db.flush()
+
+        with pytest.raises(HTTPException) as exc:
+            await create_worker_profile(
+                _create_request(
+                    worker_kit_source="profile",
+                    runtime_mode="mounted_kit",
+                    worker_kit_version="0.4.0",
+                    worker_kit_path="/opt/codify/worker-kits/0.4.0",
+                    pre_script=None,
+                    post_script=None,
+                ),
+                db=db,
+            )
+
+    assert exc.value.status_code == 422
+    assert "worker-kit path" in str(exc.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_update_profile_mounts_only_rejects_set_mask_conflict(db_factory):
+    """F2: a mounts-only PATCH that sets a path the profile also masks must 422.
+
+    Before the fix the PATCH applied ``volume_mounts`` without revalidating the
+    mask set, leaving the profile with a path that was both set and masked
+    (§7.3/§24.17).
+    """
+    session_factory = await db_factory()
+    async with session_factory() as db:
+        await _seed_shared(db)
+        profile = WorkerProfile(
+            name="Masked Worker",
+            enabled=True,
+            is_default=False,
+            image="codify-worker/java21:2026.07",
+            worker_kit_source="profile",
+            runtime_mode="baked_image",
+            volume_mounts=[],
+            volume_mount_masks=["/data"],
+            pre_script="",
+            post_script="",
+            default_execute_run_instruction_template="execute {{user_prompt}}",
+            default_plan_run_instruction_template="plan {{user_prompt}}",
+            ci_auto_repair_run_instruction_template="repair {{issue_title}}",
+        )
+        db.add(profile)
+        await db.commit()
+        profile_id = profile.id
+
+        with pytest.raises(HTTPException) as exc:
+            await update_worker_profile(
+                profile_id,
+                WorkerProfileUpdateRequest(
+                    volume_mounts=[
+                        {
+                            "host_path": "/srv/data",
+                            "container_path": "/data",
+                            "mode": "rw",
+                        }
+                    ],
+                ),
+                db=db,
+            )
+
+    assert exc.value.status_code == 422
+    assert "cannot be both set and masked" in str(exc.value.detail)

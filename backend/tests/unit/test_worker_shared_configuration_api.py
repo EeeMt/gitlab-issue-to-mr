@@ -21,9 +21,11 @@ from app.api.worker_shared_configuration import (
     get_shared_configuration,
     update_shared_configuration,
 )
+from app.core.harness_registry import capability_policy
 from app.core.worker_shared_configuration import (
     WorkerSharedConfigurationContext,
     effective_configuration_digest,
+    profile_inherits_shared,
     resolve_effective_configuration,
 )
 from app.models import (
@@ -32,6 +34,34 @@ from app.models import (
     WorkerSharedConfiguration,
     WorkerSharedEnvironmentVariable,
 )
+
+
+def _profile_digest(profile: WorkerProfile, effective=None) -> str:
+    """Digest the API uses for one Profile in the shared-PATCH response."""
+    effective = effective or resolve_effective_configuration(profile)
+    constraints = dict(profile.harness_constraints or {})
+    harness_key = profile.default_harness_key or "claude"
+    capabilities = capability_policy(harness_key, constraints)
+    skills = [
+        {
+            "skill_id": skill.id,
+            "skill_version_id": getattr(getattr(skill, "current_version", None), "id", None),
+        }
+        for skill in (getattr(profile, "default_skills", None) or [])
+        if bool(getattr(skill, "enabled", False))
+    ]
+    return effective_configuration_digest(
+        effective,
+        docker_host=profile.docker_host,
+        codegraph_enabled=bool(profile.codegraph_enabled),
+        harness_key=harness_key,
+        harness_config={
+            "capabilities": capabilities,
+            "sandbox_mode": capabilities.get("sandbox_mode"),
+            "constraints": constraints,
+        },
+        skills=skills,
+    )
 
 
 @pytest.fixture
@@ -156,29 +186,19 @@ async def test_patch_shared_configuration_increments_revision_and_validates_prof
             ),
             db=db,
         )
-        # The response digest is resolved against the prospective shared state;
-        # after commit the same state must resolve to the same digest.
-        shared_row = await db.get(WorkerSharedConfiguration, 1)
-        shared_env = tuple(
-            (
-                await db.execute(
-                    select(WorkerSharedEnvironmentVariable).order_by(
-                        WorkerSharedEnvironmentVariable.key
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        shared = WorkerSharedConfigurationContext(row=shared_row, environment_variables=shared_env)
+        # The profile is fully explicit (worker_kit_source=profile, every scalar
+        # set, no masks), so the shared PATCH resolves it WITHOUT the shared
+        # baseline (§7.2/§7.3 gate) and the digest reflects only its own config.
         profile = await db.get(
             WorkerProfile,
             1,
-            options=[selectinload(WorkerProfile.environment_variables)],
+            options=[
+                selectinload(WorkerProfile.environment_variables),
+                selectinload(WorkerProfile.default_skills),
+            ],
         )
-        expected_digest = effective_configuration_digest(
-            resolve_effective_configuration(profile, shared)
-        )
+        assert profile_inherits_shared(profile) is False
+        expected_digest = _profile_digest(profile)
 
     assert response["revision"] == 2
     assert response["pre_script"] == "shared-pre-v2"
@@ -311,3 +331,59 @@ async def test_patch_shared_configuration_rejects_statically_invalid_profile(
 
     assert exc.value.status_code == 422
     assert "Explicit Worker" in str(exc.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_patch_shared_configuration_does_not_merge_for_explicit_profile(
+    db_factory,
+):
+    """A fully explicit Profile is validated and digested without the shared merge."""
+    session_factory = await db_factory()
+    async with session_factory() as db:
+        await _seed_shared_configuration(db)
+        await _seed_enabled_profile(db)
+        await db.commit()
+
+        response = await update_shared_configuration(
+            WorkerSharedConfigurationPatchRequest(
+                expected_revision=1,
+                pre_script="shared-pre-v2",
+            ),
+            db=db,
+        )
+        profile = await db.get(
+            WorkerProfile,
+            1,
+            options=[
+                selectinload(WorkerProfile.environment_variables),
+                selectinload(WorkerProfile.default_skills),
+            ],
+        )
+        shared_row = await db.get(WorkerSharedConfiguration, 1)
+        shared_env = tuple(
+            (
+                await db.execute(
+                    select(WorkerSharedEnvironmentVariable).order_by(
+                        WorkerSharedEnvironmentVariable.key
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        shared = WorkerSharedConfigurationContext(
+            row=shared_row, environment_variables=shared_env
+        )
+
+    assert profile_inherits_shared(profile) is False
+    returned_digest = response["profiles"][0]["effective_configuration_digest"]
+    # The response resolves the non-inheriting Profile without the shared
+    # baseline, so its digest reflects the Profile's own explicit config only.
+    assert returned_digest == _profile_digest(profile)
+    # Merging the shared baseline (which would add SHARED_A/SHARED_SECRET) must
+    # produce a different digest, proving the PATCH did not fold shared in.
+    merged_digest = _profile_digest(
+        profile,
+        resolve_effective_configuration(profile, shared),
+    )
+    assert returned_digest != merged_digest

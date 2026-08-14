@@ -372,7 +372,10 @@ async def test_070_backfills_snapshot_digests_for_active_and_closed_tasks(
         assert closed_digest is not None and len(closed_digest) == 64
         assert active_digest is not None and len(active_digest) == 64
         assert closed_digest == active_digest
-        assert revision == 1
+        # §18.8/F5: pre-feature snapshots were fully explicit, so the backfill
+        # leaves shared_configuration_revision NULL — matching a freshly created
+        # explicit Profile snapshot instead of implying a shared merge.
+        assert revision is None
 
 
 async def test_070_active_incomplete_snapshot_fails_closed(seeded_069, migration_db):

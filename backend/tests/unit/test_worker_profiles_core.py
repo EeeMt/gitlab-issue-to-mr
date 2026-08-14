@@ -20,6 +20,7 @@ from app.core.worker_shared_configuration import (
     WORKER_KIT_SOURCE_SYSTEM,
     WorkerSharedConfigurationContext,
     compute_effective_configuration_digest,
+    snapshot_effective_configuration_digest,
 )
 
 
@@ -482,6 +483,10 @@ def test_snapshot_from_profile_freezes_shared_effective_configuration():
     assert snapshot.default_execute_run_instruction_template == "shared execute {{user_prompt}}"
     assert snapshot.shared_configuration_revision == 4
     assert len(snapshot.effective_configuration_digest) == 64
+    assert snapshot.effective_configuration_digest == snapshot_effective_configuration_digest(
+        snapshot
+    )
+    # The digest folds in the frozen Docker target and harness decision (§10.1).
     assert snapshot.effective_configuration_digest == compute_effective_configuration_digest(
         image=snapshot.image,
         runtime_mode=snapshot.runtime_mode,
@@ -496,4 +501,9 @@ def test_snapshot_from_profile_freezes_shared_effective_configuration():
         ),
         default_plan_run_instruction_template=snapshot.default_plan_run_instruction_template,
         ci_auto_repair_run_instruction_template=snapshot.ci_auto_repair_run_instruction_template,
+        docker_host=snapshot.docker_host,
+        codegraph_enabled=snapshot.codegraph_enabled,
+        harness_key=snapshot.harness_key,
+        harness_config=snapshot.harness_config_snapshot,
+        skills=[],
     )

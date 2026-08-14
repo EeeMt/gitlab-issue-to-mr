@@ -50,9 +50,9 @@ from app.core.worker_kit import (
     worker_kit_mounts,
 )
 from app.core.worker_shared_configuration import (
-    effective_configuration_digest,
     load_shared_configuration,
     resolve_effective_configuration,
+    snapshot_effective_configuration_digest,
     validate_effective_configuration,
 )
 from app.models import (
@@ -620,7 +620,7 @@ def snapshot_from_profile(
         resolved_harness_key,
         getattr(profile, "harness_constraints", None) or {},
     )
-    return TaskWorkerProfileSnapshot(
+    snapshot = TaskWorkerProfileSnapshot(
         task_id=task.id,
         worker_profile_id=profile.id,
         profile_name=profile.name,
@@ -642,7 +642,7 @@ def snapshot_from_profile(
         volume_mounts=list(effective.volume_mounts),
         environment_variables=list(effective.environment_variables),
         shared_configuration_revision=effective.shared_configuration_revision,
-        effective_configuration_digest=effective_configuration_digest(effective),
+        effective_configuration_digest=None,
         skill_references=[],
         skill_selection_source="profile",
         pre_script=effective.pre_script,
@@ -668,6 +668,13 @@ def snapshot_from_profile(
             else None
         ),
     )
+    # The digest covers the full frozen execution truth including the resolved
+    # Docker target and harness decision; skill references are empty here and are
+    # folded in by the caller once skills are attached (§10.1).
+    snapshot.effective_configuration_digest = snapshot_effective_configuration_digest(
+        snapshot
+    )
+    return snapshot
 
 
 async def replace_task_worker_snapshot(

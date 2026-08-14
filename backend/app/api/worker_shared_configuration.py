@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.harness_registry import capability_policy
 from app.core.skills import SkillValidationError, validate_runtime_supports_skills
 from app.core.worker_environment_variables import (
     serialize_worker_environment_variable_value,
@@ -37,12 +38,14 @@ from app.core.worker_profiles import (
 from app.core.worker_shared_configuration import (
     WorkerSharedConfigurationContext,
     effective_configuration_digest,
+    profile_inherits_shared,
     resolve_effective_configuration,
     validate_effective_configuration,
 )
 from app.database import get_db
 from app.dependencies.auth import require_admin_user
 from app.models import (
+    Skill,
     WorkerProfile,
     WorkerSharedConfiguration,
     WorkerSharedEnvironmentVariable,
@@ -280,14 +283,20 @@ async def update_shared_configuration(
             select(WorkerProfile)
             .where(WorkerProfile.enabled.is_(True))
             .options(
-                selectinload(WorkerProfile.default_skills),
+                selectinload(WorkerProfile.default_skills).selectinload(
+                    Skill.current_version
+                ),
                 selectinload(WorkerProfile.environment_variables),
             )
         )
         errors: list[str] = []
         profiles: list[dict[str, Any]] = []
         for profile in result.scalars().all():
-            effective = resolve_effective_configuration(profile, shared_context)
+            # §7.2/§7.3: a fully explicit Profile does not resolve against the
+            # shared baseline, so a shared change cannot make it invalid. Match
+            # task creation's gate: only inheriting Profiles merge shared.
+            profile_shared = shared_context if profile_inherits_shared(profile) else None
+            effective = resolve_effective_configuration(profile, profile_shared)
             try:
                 validate_effective_configuration(effective)
                 validate_runtime_supports_skills(
@@ -297,12 +306,36 @@ async def update_shared_configuration(
             except (WorkerProfileValidationError, SkillValidationError) as exc:
                 errors.append(f"Worker Profile '{profile.name}': {exc}")
                 continue
+            constraints = dict(getattr(profile, "harness_constraints", None) or {})
+            harness_key = getattr(profile, "default_harness_key", None) or "claude"
+            capabilities = capability_policy(harness_key, constraints)
+            skills = [
+                {
+                    "skill_id": skill.id,
+                    "skill_version_id": getattr(
+                        getattr(skill, "current_version", None), "id", None
+                    ),
+                }
+                for skill in profile.default_skills
+                if bool(getattr(skill, "enabled", False))
+            ]
             profiles.append(
                 {
                     "id": profile.id,
                     "name": profile.name,
                     "effective_configuration_digest": effective_configuration_digest(
-                        effective
+                        effective,
+                        docker_host=getattr(profile, "docker_host", None),
+                        codegraph_enabled=bool(
+                            getattr(profile, "codegraph_enabled", False)
+                        ),
+                        harness_key=harness_key,
+                        harness_config={
+                            "capabilities": capabilities,
+                            "sandbox_mode": capabilities.get("sandbox_mode"),
+                            "constraints": constraints,
+                        },
+                        skills=skills,
                     ),
                     "valid": True,
                 }

@@ -202,11 +202,19 @@ def _http_profile_error(exc: WorkerProfileValidationError) -> HTTPException:
 
 
 def _create_needs_shared(request: WorkerProfileCreateRequest) -> bool:
-    """Return whether a create request inherits anything from the shared baseline."""
+    """Return whether a create request inherits anything from the shared baseline.
+
+    Mirrors ``profile_inherits_shared``: a NULL scalar (script or template),
+    ``worker_kit_source=system``, a mount mask, or a ``mask`` environment row
+    all mean the profile resolves against the shared configuration, so creation
+    must validate the combined effective configuration (§11.2).
+    """
     if request.worker_kit_source == WORKER_KIT_SOURCE_SYSTEM:
         return True
     if (
-        request.default_execute_run_instruction_template is None
+        request.pre_script is None
+        or request.post_script is None
+        or request.default_execute_run_instruction_template is None
         or request.default_plan_run_instruction_template is None
         or request.ci_auto_repair_run_instruction_template is None
     ):
@@ -825,6 +833,14 @@ async def update_worker_profile(
         if "volume_mount_masks" in fields and request.volume_mount_masks is not None:
             profile.volume_mount_masks = validate_worker_profile_mount_masks(
                 request.volume_mount_masks,
+                volume_mounts=profile.volume_mounts or [],
+            )
+        # §7.3/§24.17: a normalized container_path must never be both set and
+        # masked. Revalidate the full set whenever either field is patched so a
+        # mounts-only PATCH cannot leave a set/mask conflict behind.
+        if "volume_mounts" in fields or "volume_mount_masks" in fields:
+            profile.volume_mount_masks = validate_worker_profile_mount_masks(
+                profile.volume_mount_masks,
                 volume_mounts=profile.volume_mounts or [],
             )
         if "pre_script" in fields:

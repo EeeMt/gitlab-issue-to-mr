@@ -22,7 +22,7 @@ keeps every existing Profile fully explicit for zero behavior drift:
 from __future__ import annotations
 
 import json
-from typing import Sequence, Union
+from typing import Any, Sequence, Union
 
 import sqlalchemy as sa
 
@@ -253,10 +253,27 @@ def _seed_shared_configuration() -> None:
 
 
 def _backfill_snapshot_digests() -> None:
-    """Backfill snapshot digests from the frozen snapshot values (§18.8)."""
+    """Backfill snapshot digests from the frozen snapshot values (§18.8).
+
+    All pre-feature snapshots were fully explicit, so the digest is computed
+    from the frozen snapshot values alone (no shared merge) and
+    ``shared_configuration_revision`` stays NULL — matching a freshly created
+    explicit Profile snapshot.
+    """
     from app.core.worker_shared_configuration import compute_effective_configuration_digest
 
     conn = op.get_bind()
+    skills_by_task: dict[int, list[dict[str, Any]]] = {}
+    skill_rows = conn.execute(
+        sa.text(
+            "SELECT task_id, skill_id, skill_version_id "
+            "FROM task_skill_version_references ORDER BY task_id, position"
+        )
+    ).fetchall()
+    for task_id, skill_id, skill_version_id in skill_rows:
+        skills_by_task.setdefault(task_id, []).append(
+            {"skill_id": skill_id, "skill_version_id": skill_version_id}
+        )
     rows = conn.execute(
         sa.text(
             "SELECT s.task_id, s.image, s.runtime_mode, s.worker_kit_version, "
@@ -264,7 +281,9 @@ def _backfill_snapshot_digests() -> None:
             "s.pre_script, s.post_script, "
             "s.default_execute_run_instruction_template, "
             "s.default_plan_run_instruction_template, "
-            "s.ci_auto_repair_run_instruction_template, t.status "
+            "s.ci_auto_repair_run_instruction_template, t.status, "
+            "s.docker_host, s.codegraph_enabled, s.harness_key, "
+            "s.harness_config_snapshot "
             "FROM task_worker_profile_snapshots s "
             "JOIN tasks t ON t.id = s.task_id"
         )
@@ -286,6 +305,9 @@ def _backfill_snapshot_digests() -> None:
                     "leave effective_configuration_digest unbackfilled"
                 )
             continue
+        harness_config = row[16]
+        if isinstance(harness_config, str):
+            harness_config = json.loads(harness_config) if harness_config else None
         digest = compute_effective_configuration_digest(
             image=row[1],
             runtime_mode=row[2],
@@ -298,15 +320,20 @@ def _backfill_snapshot_digests() -> None:
             default_execute_run_instruction_template=row[9],
             default_plan_run_instruction_template=row[10],
             ci_auto_repair_run_instruction_template=row[11],
+            docker_host=row[13],
+            codegraph_enabled=bool(row[14]),
+            harness_key=row[15] or "claude",
+            harness_config=harness_config,
+            skills=skills_by_task.get(row[0], []),
         )
         conn.execute(
             sa.text(
                 "UPDATE task_worker_profile_snapshots "
                 "SET effective_configuration_digest = :digest, "
-                "shared_configuration_revision = :revision "
+                "shared_configuration_revision = NULL "
                 "WHERE task_id = :task_id"
             ),
-            {"digest": digest, "revision": _SHARED_CONFIGURATION_ID, "task_id": row[0]},
+            {"digest": digest, "task_id": row[0]},
         )
 
 

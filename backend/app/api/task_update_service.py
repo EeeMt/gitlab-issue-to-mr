@@ -30,6 +30,7 @@ from app.core.skills import (
 )
 from app.core.task_prompt import TaskPromptValidationError
 from app.core.worker_profiles import WorkerProfileValidationError
+from app.core.worker_shared_configuration import snapshot_effective_configuration_digest
 from app.dependencies.project_access import ProjectAccessScope
 from app.models import Issue, TaskStatus, TaskWorkerProfileSnapshot, User
 
@@ -170,6 +171,9 @@ async def update_task_record(
             ) from exc
         replace_task_skill_references(snapshot, selected_skills)
         snapshot.skill_selection_source = selection_source
+        snapshot.effective_configuration_digest = snapshot_effective_configuration_digest(
+            snapshot
+        )
 
     if task.task_mode == "plan":
         task.require_changes = False

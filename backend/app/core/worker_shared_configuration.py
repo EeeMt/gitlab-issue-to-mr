@@ -36,7 +36,7 @@ from app.models import (
 
 logger = logging.getLogger(__name__)
 
-EFFECTIVE_CONFIG_SCHEMA = "codify.worker-effective-config/v1"
+EFFECTIVE_CONFIG_SCHEMA = "codify.worker-effective-config/v2"
 
 WORKER_KIT_SOURCE_SYSTEM = "system"
 WORKER_KIT_SOURCE_PROFILE = "profile"
@@ -341,12 +341,21 @@ def compute_effective_configuration_digest(
     default_execute_run_instruction_template: str,
     default_plan_run_instruction_template: str,
     ci_auto_repair_run_instruction_template: str,
+    docker_host: str | None = None,
+    codegraph_enabled: bool = False,
+    harness_key: str = "claude",
+    harness_config: Mapping[str, Any] | None = None,
+    skills: Sequence[Mapping[str, Any]] = (),
 ) -> str:
     """Compute the SHA-256 of the versioned, normalized effective config.
 
-    Secret environment variable values are replaced with the digest of their
-    stored ciphertext so the digest is stable across reads yet never embeds
-    plaintext (design §10.1).
+    The digest covers every frozen execution field (§10.1): image, runtime
+    mode, worker kit coordinates, merged mounts, merged environment, scripts,
+    run-instruction templates, the Docker daemon identity (never TLS secret
+    material), the CodeGraph toggle, the harness decision, and the attached
+    Skill versions. Secret environment variable values are replaced with the
+    digest of their stored ciphertext so the digest is stable across reads yet
+    never embeds plaintext.
     """
     mounts = [
         {
@@ -366,6 +375,22 @@ def compute_effective_configuration_digest(
             value = hashlib.sha256(value.encode("utf-8")).hexdigest()
         environment.append({"key": key, "value": value, "is_secret": is_secret})
     environment.sort(key=lambda entry: entry["key"])
+    skill_entries: list[dict[str, Any]] = []
+    for item in skills:
+        skill_id = item.get("skill_id")
+        version_id = item.get("skill_version_id")
+        skill_entries.append(
+            {
+                "skill_id": int(skill_id) if skill_id is not None else None,
+                "skill_version_id": int(version_id) if version_id is not None else None,
+            }
+        )
+    skill_entries.sort(
+        key=lambda entry: (
+            entry["skill_version_id"] if entry["skill_version_id"] is not None else -1,
+            entry["skill_id"] if entry["skill_id"] is not None else -1,
+        )
+    )
     payload = {
         "schema": EFFECTIVE_CONFIG_SCHEMA,
         "image": image,
@@ -381,6 +406,13 @@ def compute_effective_configuration_digest(
             "plan": default_plan_run_instruction_template,
             "ci_auto_repair": ci_auto_repair_run_instruction_template,
         },
+        "docker_target": {"docker_host": docker_host or ""},
+        "codegraph_enabled": bool(codegraph_enabled),
+        "harness": {
+            "key": harness_key or "claude",
+            "config": dict(harness_config or {}),
+        },
+        "skills": skill_entries,
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -388,8 +420,19 @@ def compute_effective_configuration_digest(
 
 def effective_configuration_digest(
     effective: EffectiveWorkerConfiguration,
+    *,
+    docker_host: str | None = None,
+    codegraph_enabled: bool = False,
+    harness_key: str = "claude",
+    harness_config: Mapping[str, Any] | None = None,
+    skills: Sequence[Mapping[str, Any]] = (),
 ) -> str:
-    """Convenience digest for an already resolved effective configuration."""
+    """Convenience digest for an already resolved effective configuration.
+
+    ``docker_host``/``codegraph_enabled``/``harness_*``/``skills`` are the
+    profile-independent execution fields §10.1 requires in the digest; they
+    default to the pre-shared-config values so bare resolutions stay stable.
+    """
     return compute_effective_configuration_digest(
         image=effective.image,
         runtime_mode=effective.runtime_mode,
@@ -406,4 +449,43 @@ def effective_configuration_digest(
         ci_auto_repair_run_instruction_template=(
             effective.ci_auto_repair_run_instruction_template
         ),
+        docker_host=docker_host,
+        codegraph_enabled=codegraph_enabled,
+        harness_key=harness_key,
+        harness_config=harness_config,
+        skills=skills,
+    )
+
+
+def snapshot_effective_configuration_digest(snapshot: Any) -> str:
+    """Compute the effective-config digest for a frozen Task snapshot.
+
+    Reads every digest-relevant field off the snapshot (including its
+    ``skill_references``), so the digest reflects the full frozen execution
+    truth and can be recomputed after skills are attached.
+    """
+    skills = [
+        {
+            "skill_id": getattr(reference, "skill_id", None),
+            "skill_version_id": getattr(reference, "skill_version_id", None),
+        }
+        for reference in (getattr(snapshot, "skill_references", None) or [])
+    ]
+    return compute_effective_configuration_digest(
+        image=snapshot.image,
+        runtime_mode=snapshot.runtime_mode,
+        worker_kit_version=snapshot.worker_kit_version,
+        worker_kit_path=snapshot.worker_kit_path,
+        volume_mounts=snapshot.volume_mounts or [],
+        environment_variables=snapshot.environment_variables or [],
+        pre_script=snapshot.pre_script or "",
+        post_script=snapshot.post_script or "",
+        default_execute_run_instruction_template=snapshot.default_execute_run_instruction_template,
+        default_plan_run_instruction_template=snapshot.default_plan_run_instruction_template,
+        ci_auto_repair_run_instruction_template=snapshot.ci_auto_repair_run_instruction_template,
+        docker_host=getattr(snapshot, "docker_host", None),
+        codegraph_enabled=bool(getattr(snapshot, "codegraph_enabled", False)),
+        harness_key=getattr(snapshot, "harness_key", None) or "claude",
+        harness_config=getattr(snapshot, "harness_config_snapshot", None),
+        skills=skills,
     )
