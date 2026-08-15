@@ -455,6 +455,7 @@ describe('TaskFormDrawer', () => {
     mockApi.getConfig.mockResolvedValue({ runtime: { slot_max_tasks: 5, slot_max_tasks_enforce: false } })
     mockApi.getRunInstructionTemplateDefaults.mockResolvedValue({
       execute: { content: 'Execute {{user_prompt}}', available_placeholders: ['user_prompt'] },
+      freeform: { content: '{{user_prompt}}', available_placeholders: ['user_prompt'] },
       plan: { content: 'Plan {{user_prompt}}', available_placeholders: ['user_prompt'] }
     })
     mockApi.previewRunInstructionTemplate.mockResolvedValue({
@@ -1958,6 +1959,89 @@ describe('TaskFormDrawer', () => {
   })
 
   describe('run instruction templates', () => {
+    it('submits freeform with an empty local template and no copied canonical template', async () => {
+      mockApi.getWorkerProfiles.mockResolvedValue([])
+      mockApi.getRunInstructionTemplateDefaults.mockResolvedValue({
+        execute: { content: '', available_placeholders: ['user_prompt'] },
+        freeform: { content: '', available_placeholders: ['user_prompt'] },
+        plan: { content: '', available_placeholders: ['user_prompt'] },
+      })
+      await mountDrawer({ workerProfileId: null })
+      await openDrawer()
+
+      wrapper.vm.taskMode = 'freeform'
+      wrapper.vm.requireChanges = true
+      wrapper.vm.runInstructionTemplate = ''
+      await submitCreate()
+
+      expect(mockApi.createTask).toHaveBeenCalledWith(expect.objectContaining({
+        task_mode: 'freeform',
+        require_changes: false,
+      }))
+      expect(mockApi.createTask).toHaveBeenCalledWith(
+        expect.not.objectContaining({ run_instruction_template: expect.anything() }),
+      )
+      expect(mockMessage.warning).not.toHaveBeenCalledWith('runInstruction.defaultsLoadFailed')
+    })
+
+    it('does not let the Worker Profile execute default override freeform preview', async () => {
+      await mountDrawer()
+      await openDrawer()
+
+      wrapper.vm.taskMode = 'freeform'
+      wrapper.vm.requireChanges = true
+      wrapper.vm.runInstructionTemplate = 'Worker execute {{user_prompt}}'
+      await wrapper.vm.handleRunInstructionPreview()
+
+      expect(mockApi.previewRunInstructionTemplate).toHaveBeenCalledWith({
+        issue_id: 1,
+        task_mode: 'freeform',
+        user_prompt: 'Issue description',
+        require_changes: false,
+      })
+    })
+
+    it.each(['execute', 'plan'] as const)(
+      'previews the current unsaved %s template',
+      async (taskMode) => {
+        await mountDrawer()
+        await openDrawer()
+
+        wrapper.vm.taskMode = taskMode
+        wrapper.vm.runInstructionTemplate = `Unsaved ${taskMode} {{user_prompt}}`
+        wrapper.vm.requireChanges = true
+        await wrapper.vm.handleRunInstructionPreview()
+
+        expect(mockApi.previewRunInstructionTemplate).toHaveBeenCalledWith({
+          issue_id: 1,
+          task_mode: taskMode,
+          user_prompt: 'Issue description',
+          run_instruction_template: `Unsaved ${taskMode} {{user_prompt}}`,
+          require_changes: taskMode === 'plan' ? false : true,
+        })
+      },
+    )
+
+    it.each(['execute', 'plan'] as const)(
+      'still blocks %s when no effective default template exists',
+      async (taskMode) => {
+        mockApi.getWorkerProfiles.mockResolvedValue([])
+        mockApi.getRunInstructionTemplateDefaults.mockResolvedValue({
+          execute: { content: '', available_placeholders: ['user_prompt'] },
+          freeform: { content: '{{user_prompt}}', available_placeholders: ['user_prompt'] },
+          plan: { content: '', available_placeholders: ['user_prompt'] },
+        })
+        await mountDrawer({ workerProfileId: null })
+        await openDrawer()
+
+        wrapper.vm.taskMode = taskMode
+        await submitCreate()
+
+        expect(mockApi.createTask).not.toHaveBeenCalled()
+        expect(mockMessage.warning).toHaveBeenCalledWith('runInstruction.defaultsLoadFailed')
+      },
+    )
+
     it('shows run instructions only after a task mode is selected', async () => {
       await mountDrawer()
       await openDrawer()

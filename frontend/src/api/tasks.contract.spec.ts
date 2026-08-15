@@ -16,13 +16,22 @@ vi.mock('./client', () => ({
 
 import {
   createTask,
+  getRunInstructionTemplateDefaults,
   getSlotCapacity,
   getTaskArchive,
+  previewRunInstructionTemplate,
   retryTask,
   streamTaskLogs,
   updateTask,
+  type CreateTaskRequest,
+  type RunInstructionTemplateDefaults,
+  type RunInstructionTemplatePreviewRequest,
+  type Task,
   type TaskLog,
+  type TaskMode,
+  type UpdateTaskRequest,
 } from './tasks'
+import { createMockTask } from '../test/mocks/api'
 
 class FakeEventSource {
   static latest: FakeEventSource | null = null
@@ -94,6 +103,54 @@ describe('task API boundary contract', () => {
       { params: { scheduled_at: '2026-07-05T10:00:00.000Z' } }
     )
     expect(mockGet).toHaveBeenNthCalledWith(2, '/tasks/12/archive')
+  })
+
+  it('accepts freeform across task, create, update and preview contracts', async () => {
+    const mode: TaskMode = 'freeform'
+    const task: Task = createMockTask({ task_mode: mode })
+    const createPayload: CreateTaskRequest = {
+      issue_id: 7,
+      task_mode: mode,
+      require_changes: false,
+    }
+    const updatePayload: UpdateTaskRequest = { task_mode: mode }
+    const previewPayload: RunInstructionTemplatePreviewRequest = {
+      issue_id: 7,
+      task_mode: mode,
+      user_prompt: 'Explain the repository',
+      require_changes: false,
+    }
+    mockPost.mockResolvedValue({ data: { id: 12 } })
+    mockPatch.mockResolvedValue({ data: { id: 12 } })
+
+    await createTask(createPayload)
+    await updateTask(12, updatePayload)
+    await previewRunInstructionTemplate(previewPayload)
+
+    expect(task.task_mode).toBe('freeform')
+    expect(mockPost).toHaveBeenNthCalledWith(1, '/tasks', createPayload)
+    expect(mockPatch).toHaveBeenCalledWith('/tasks/12', updatePayload)
+    expect(mockPost).toHaveBeenNthCalledWith(
+      2,
+      '/tasks/render-run-instruction-template-preview',
+      previewPayload,
+    )
+  })
+
+  it('returns the read-only freeform run-instruction default', async () => {
+    const defaults: RunInstructionTemplateDefaults = {
+      execute: { content: 'Execute {{user_prompt}}', available_placeholders: ['user_prompt'] },
+      freeform: { content: '{{user_prompt}}', available_placeholders: ['user_prompt'] },
+      plan: { content: 'Plan {{user_prompt}}', available_placeholders: ['user_prompt'] },
+    }
+    mockGet.mockResolvedValue({ data: defaults })
+
+    const result = await getRunInstructionTemplateDefaults()
+
+    expect(result.freeform).toEqual({
+      content: '{{user_prompt}}',
+      available_placeholders: ['user_prompt'],
+    })
   })
 
   it('preserves batch, update and done SSE event semantics', () => {

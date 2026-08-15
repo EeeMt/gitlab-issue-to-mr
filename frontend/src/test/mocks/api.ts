@@ -13,7 +13,7 @@ import type {
 } from '@/api'
 
 // Mock data factories
-export const createMockTask = (overrides = {}): Task => ({
+export const createMockTask = (overrides: Partial<Task> = {}): Task => ({
   id: 1,
   issue_id: 1,
   project_id: 1,

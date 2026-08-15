@@ -58,6 +58,23 @@ describe('task form request contracts', () => {
     }).require_changes).toBe(false)
   })
 
+  it('builds a canonical-free freeform create request', () => {
+    expect(buildCreateTaskRequest(7, {
+      ...baseDraft,
+      taskMode: 'freeform',
+      requireChanges: true,
+      runInstructionTemplate: '{{user_prompt}}',
+      runInstructionDirty: true,
+    })).toEqual({
+      issue_id: 7,
+      priority: 1,
+      task_mode: 'freeform',
+      require_changes: false,
+      session_mode: 'continue',
+      user_prompt: 'Implement it',
+    })
+  })
+
   it('includes only explicitly selected create options', () => {
     const scheduledAt = Date.UTC(2026, 6, 5, 10)
     expect(buildCreateTaskRequest(7, {
@@ -77,6 +94,20 @@ describe('task form request contracts', () => {
       scheduled_datetime: new Date(scheduledAt).toISOString(),
       run_instruction_template: 'Execute {{user_prompt}}',
     })
+  })
+
+  it('keeps an explicitly edited plan template while forcing require_changes false', () => {
+    expect(buildCreateTaskRequest(7, {
+      ...baseDraft,
+      taskMode: 'plan',
+      requireChanges: true,
+      runInstructionTemplate: 'Custom plan {{user_prompt}}',
+      runInstructionDirty: true,
+    })).toEqual(expect.objectContaining({
+      task_mode: 'plan',
+      require_changes: false,
+      run_instruction_template: 'Custom plan {{user_prompt}}',
+    }))
   })
 
   it('includes harness_key when a non-default harness is selected', () => {
@@ -168,4 +199,57 @@ describe('task form request contracts', () => {
       require_changes: false,
     })
   })
+
+  it('lets the backend normalize a switch to freeform from only the mode patch', () => {
+    expect(buildUpdateTaskRequest(existingTask, {
+      ...baseDraft,
+      taskMode: 'freeform',
+      requireChanges: true,
+      selectedProviderId: 3,
+    }, baseDraft.runInstructionTemplate)).toEqual({
+      task_mode: 'freeform',
+    })
+  })
+
+  it.each(['execute', 'plan'] as const)(
+    'does not carry the freeform canonical template when switching back to %s',
+    (taskMode) => {
+      const freeformTask = {
+        ...existingTask,
+        require_changes: false,
+        task_mode: 'freeform',
+        run_instruction_template: '{{user_prompt}}',
+      } as Task
+
+      expect(buildUpdateTaskRequest(freeformTask, {
+        ...baseDraft,
+        taskMode,
+        requireChanges: false,
+        selectedProviderId: 3,
+        runInstructionTemplate: taskMode === 'execute'
+          ? 'Execute {{user_prompt}}'
+          : 'Plan {{user_prompt}}',
+        runInstructionDirty: false,
+      }, '{{user_prompt}}')).toEqual({
+        task_mode: taskMode,
+      })
+    },
+  )
+
+  it.each(['execute', 'plan'] as const)(
+    'keeps sending an explicitly edited %s template',
+    (taskMode) => {
+      expect(buildUpdateTaskRequest(existingTask, {
+        ...baseDraft,
+        taskMode,
+        requireChanges: taskMode === 'execute',
+        selectedProviderId: 3,
+        runInstructionTemplate: `Custom ${taskMode}`,
+        runInstructionDirty: true,
+      }, baseDraft.runInstructionTemplate)).toEqual({
+        ...(taskMode === 'plan' ? { task_mode: 'plan', require_changes: false } : {}),
+        run_instruction_template: `Custom ${taskMode}`,
+      })
+    },
+  )
 })

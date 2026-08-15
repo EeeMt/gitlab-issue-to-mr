@@ -34,15 +34,17 @@ export function useRunInstructionPreview(options: RunInstructionPreviewOptions) 
     previewLoading.value = true
     previewError.value = ''
     try {
-      const result = await previewRunInstructionTemplate({
+      const taskMode = options.taskMode.value
+      const request = {
         issue_id: options.issueId.value ?? options.task.value!.issue_id,
-        task_mode: options.taskMode.value,
+        task_mode: taskMode,
         user_prompt: options.prompt.value.trim() || options.issueDescription.value || '',
-        run_instruction_template: options.runInstructionTemplate.value,
-        require_changes: options.taskMode.value === 'plan'
-          ? false
-          : options.requireChanges.value,
-      })
+        require_changes: taskMode === 'execute' ? options.requireChanges.value : false,
+        ...(taskMode === 'freeform'
+          ? {}
+          : { run_instruction_template: options.runInstructionTemplate.value }),
+      }
+      const result = await previewRunInstructionTemplate(request)
       if (generation !== requestGeneration) return
       previewResult.value = result.rendered_prompt
     } catch (error: unknown) {

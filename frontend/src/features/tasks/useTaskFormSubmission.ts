@@ -39,7 +39,7 @@ interface TaskFormSubmissionOptions {
   selectedSkillIds: Ref<number[]>
   skillSelectionDirty: Ref<boolean>
   defaultsError: Readonly<Ref<string>>
-  getDefaultRunInstructionTemplate: (mode: TaskMode) => string
+  getDefaultRunInstructionTemplate: (mode: Exclude<TaskMode, 'freeform'>) => string
   clearScheduledTasks: () => void
   close: () => void
   created: (task: Task) => void
@@ -73,12 +73,14 @@ export function useTaskFormSubmission(options: TaskFormSubmissionOptions) {
       message.warning(t('issue.pleaseSelectTaskMode'))
       return
     }
-    if (!options.runInstructionTemplate.value) {
-      options.runInstructionTemplate.value = options.getDefaultRunInstructionTemplate(taskMode)
-    }
-    if (!options.runInstructionTemplate.value.trim()) {
-      message.warning(options.defaultsError.value || t('runInstruction.defaultsLoadFailed'))
-      return
+    if (taskMode !== 'freeform') {
+      if (!options.runInstructionTemplate.value) {
+        options.runInstructionTemplate.value = options.getDefaultRunInstructionTemplate(taskMode)
+      }
+      if (!options.runInstructionTemplate.value.trim()) {
+        message.warning(options.defaultsError.value || t('runInstruction.defaultsLoadFailed'))
+        return
+      }
     }
     if (options.scheduleType.value === 'scheduled') {
       if (!options.scheduledAt.value) {

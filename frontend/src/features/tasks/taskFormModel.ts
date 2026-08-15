@@ -1,10 +1,11 @@
 import type {
   CreateTaskRequest,
   Task,
+  TaskMode,
   UpdateTaskRequest,
 } from '../../api/tasks'
 
-export type TaskMode = 'execute' | 'plan'
+export type { TaskMode } from '../../api/tasks'
 export type TaskScheduleType = 'now' | 'scheduled'
 
 export const DEFAULT_TASK_PRIORITY = 1
@@ -35,12 +36,12 @@ export function buildCreateTaskRequest(
     issue_id: issueId,
     priority: draft.priority,
     task_mode: draft.taskMode,
-    require_changes: draft.taskMode === 'plan' ? false : draft.requireChanges,
+    require_changes: draft.taskMode === 'execute' ? draft.requireChanges : false,
     session_mode: draft.sessionMode,
   }
   const prompt = draft.prompt.trim()
   if (prompt) request.user_prompt = prompt
-  if (draft.runInstructionDirty) {
+  if (draft.taskMode !== 'freeform' && draft.runInstructionDirty) {
     request.run_instruction_template = draft.runInstructionTemplate
   }
   if (draft.scheduleType === 'scheduled' && draft.scheduledAt !== null) {
@@ -71,7 +72,10 @@ export function buildUpdateTaskRequest(
   if (draft.selectedProviderId !== (original.provider_id ?? null)) {
     request.provider_id = draft.selectedProviderId
   }
-  if (draft.requireChanges !== original.require_changes) {
+  if (
+    draft.taskMode === 'execute'
+    && draft.requireChanges !== original.require_changes
+  ) {
     request.require_changes = draft.requireChanges
   }
   if (draft.taskMode !== (original.task_mode ?? 'execute')) {
@@ -80,7 +84,11 @@ export function buildUpdateTaskRequest(
   if (draft.taskMode === 'plan' && original.require_changes !== false) {
     request.require_changes = false
   }
-  if (draft.runInstructionTemplate !== initialRunInstructionTemplate) {
+  if (
+    draft.taskMode !== 'freeform'
+    && draft.runInstructionDirty
+    && draft.runInstructionTemplate !== initialRunInstructionTemplate
+  ) {
     request.run_instruction_template = draft.runInstructionTemplate
   }
   if (draft.inheritProfileSkills) {

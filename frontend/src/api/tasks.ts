@@ -1,6 +1,7 @@
 import { api } from './client'
 
 export type TaskStatus = 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+export type TaskMode = 'execute' | 'freeform' | 'plan'
 
 export interface TaskModelServiceSummary {
   configuration_source: 'execution_snapshot' | 'current_provider' | 'unavailable'
@@ -94,7 +95,7 @@ export interface Task {
   model_name?: string | null
   commit_message?: string | null
   require_changes: boolean
-  task_mode: 'execute' | 'plan'
+  task_mode: TaskMode
   session_mode: 'continue' | 'fresh'
   input_session_id: string | null
   output_session_id: string | null
@@ -217,7 +218,7 @@ export interface CreateTaskRequest {
   provider_id?: number | null
   harness_key?: string
   require_changes?: boolean
-  task_mode?: 'execute' | 'plan'
+  task_mode?: TaskMode
   session_mode?: 'continue' | 'fresh'
   run_instruction_template?: string
   skill_ids?: number[]
@@ -232,7 +233,7 @@ export interface UpdateTaskRequest {
   priority?: number
   provider_id?: number | null
   require_changes?: boolean
-  task_mode?: 'execute' | 'plan'
+  task_mode?: TaskMode
   run_instruction_template?: string
   skill_ids?: number[] | null
 }
@@ -344,18 +345,20 @@ export interface RunInstructionTemplateMetadata {
 
 export interface RunInstructionTemplateDefaults {
   execute: RunInstructionTemplateMetadata
+  readonly freeform: Readonly<RunInstructionTemplateMetadata>
   plan: RunInstructionTemplateMetadata
 }
 
-export interface RunInstructionTemplateBuiltIns extends RunInstructionTemplateDefaults {
+export interface RunInstructionTemplateBuiltIns
+  extends Pick<RunInstructionTemplateDefaults, 'execute' | 'plan'> {
   ci_auto_repair: RunInstructionTemplateMetadata
 }
 
 export interface RunInstructionTemplatePreviewRequest {
   issue_id: number
-  task_mode: 'execute' | 'plan'
+  task_mode: TaskMode
   user_prompt: string
-  run_instruction_template: string
+  run_instruction_template?: string
   require_changes?: boolean
 }
 
