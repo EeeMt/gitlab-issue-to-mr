@@ -117,6 +117,7 @@ vi.mock('naive-ui', () => ({
     setup(props: any, { attrs, slots }: any) {
       return () => h('button', {
         ...attrs,
+        type: 'button',
         class: ['n-button', attrs.class, { loading: props.loading, disabled: props.disabled }],
         disabled: props.disabled || props.loading,
       }, [slots.icon?.(), slots.default?.()])
@@ -300,6 +301,7 @@ vi.mock('naive-ui', () => ({
     setup(props: any, { attrs, emit }: any) {
       return () => h('button', {
         ...attrs,
+        type: 'button',
         class: 'n-switch',
         disabled: props.disabled,
         onClick: () => {
@@ -330,6 +332,7 @@ vi.mock('@vicons/ionicons5', () => {
   return {
     BulbOutline: icon('BulbOutline'),
     CalendarOutline: icon('CalendarOutline'),
+    ChatbubbleEllipsesOutline: icon('ChatbubbleEllipsesOutline'),
     CloseOutline: icon('CloseOutline'),
     CodeSlashOutline: icon('CodeSlashOutline'),
     Checkmark: icon('Checkmark'),
@@ -474,6 +477,7 @@ describe('TaskFormDrawer', () => {
 
   async function mountDrawer(props: Record<string, any> = {}) {
     wrapper = mount(TaskFormDrawer, {
+      attachTo: document.body,
       props: {
         show: false,
         mode: 'create',
@@ -494,11 +498,136 @@ describe('TaskFormDrawer', () => {
   }
 
   async function submitCreate() {
+    if (!wrapper.find('[data-testid="issue-create-task-button"]').exists() && wrapper.vm.taskMode) {
+      wrapper.vm.selectTaskMode(wrapper.vm.taskMode)
+      await nextTick()
+    }
     await wrapper.find('[data-testid="issue-create-task-button"]').trigger('click')
     await flushPromises()
   }
 
   describe('create mode', () => {
+    it('opens on an unselected, mode-first entry while defaults load in the background', async () => {
+      await mountDrawer()
+      await openDrawer()
+
+      expect(wrapper.vm.taskMode).toBeNull()
+      expect(wrapper.vm.drawerView).toBe('mode-choice')
+      expect(wrapper.get('[data-testid="task-mode-choice"]').isVisible()).toBe(true)
+      expect(wrapper.get('[data-testid="task-full-form"]').attributes('aria-hidden')).toBe('true')
+      expect(wrapper.get('[data-testid="task-full-form"]').attributes()).toHaveProperty('inert')
+      expect(wrapper.find('[data-testid="issue-create-task-button"]').exists()).toBe(false)
+      expect(mockApi.getProviders).toHaveBeenCalled()
+      expect(mockApi.getWorkerProfiles).toHaveBeenCalled()
+      expect(mockApi.getSkills).toHaveBeenCalled()
+      expect(mockApi.getRunInstructionTemplateDefaults).toHaveBeenCalled()
+
+      const options = wrapper.findAll('[data-testid^="task-mode-option-"]')
+      expect(options.map(option => option.text())).toEqual([
+        expect.stringContaining('issue.taskModeFreeform'),
+        expect.stringContaining('issue.taskModeExecute'),
+        expect.stringContaining('issue.taskModePlan'),
+      ])
+      expect(options.map(option => option.attributes('aria-checked'))).toEqual([
+        'false', 'false', 'false',
+      ])
+      expect(options.every(option => option.attributes('role') === 'radio')).toBe(true)
+    })
+
+    it.each([
+      ['click', 'freeform'],
+      ['keydown.enter', 'execute'],
+      ['keydown.space', 'plan'],
+    ] as const)('enters the full form on %s and focuses the prompt for %s', async (event, mode) => {
+      await mountDrawer()
+      await openDrawer()
+
+      await wrapper.get(`[data-testid="task-mode-option-${mode}"]`).trigger(event)
+      await nextTick()
+
+      expect(wrapper.vm.taskMode).toBe(mode)
+      expect(wrapper.vm.drawerView).toBe('full-form')
+      expect(wrapper.get('[data-testid="task-mode-choice"]').attributes('aria-hidden')).toBe('true')
+      expect(wrapper.get('[data-testid="task-mode-choice"]').attributes()).toHaveProperty('inert')
+      expect(wrapper.get('[data-testid="task-full-form"]').attributes('aria-hidden')).toBe('false')
+      expect(wrapper.find('[data-testid="issue-create-task-button"]').exists()).toBe(true)
+      expect(document.activeElement).toBe(wrapper.get('.variable-editor-mock').element)
+    })
+
+    it('returns to the current option, preserves common state and scroll, then restores mode drafts', async () => {
+      await mountDrawer()
+      await openDrawer()
+
+      await wrapper.get('[data-testid="task-mode-option-execute"]').trigger('click')
+      wrapper.vm.handleRunInstructionInput('Custom execute {{user_prompt}}')
+      wrapper.vm.requireChanges = true
+      wrapper.vm.priority = 0
+      wrapper.vm.selectedProviderId = 7
+      const fullForm = wrapper.get('[data-testid="task-full-form"]')
+      Object.defineProperty(fullForm.element, 'scrollTop', { configurable: true, writable: true, value: 213 })
+
+      await wrapper.get('[data-testid="task-mode-change"]').trigger('click')
+      await nextTick()
+      expect(document.activeElement).toBe(wrapper.get('[data-testid="task-mode-option-execute"]').element)
+
+      await wrapper.get('[data-testid="task-mode-option-plan"]').trigger('click')
+      wrapper.vm.handleRunInstructionInput('Custom plan {{user_prompt}}')
+      await wrapper.get('[data-testid="task-mode-change"]').trigger('click')
+      await wrapper.get('[data-testid="task-mode-option-execute"]').trigger('click')
+      await nextTick()
+
+      expect(wrapper.vm.runInstructionTemplate).toBe('Custom execute {{user_prompt}}')
+      expect(wrapper.vm.runInstructionDirty).toBe(true)
+      expect(wrapper.vm.requireChanges).toBe(true)
+      expect(wrapper.vm.priority).toBe(0)
+      expect(wrapper.vm.selectedProviderId).toBe(7)
+      expect(fullForm.element.scrollTop).toBe(213)
+
+      await wrapper.get('[data-testid="task-mode-change"]').trigger('click')
+      await wrapper.get('[data-testid="task-mode-option-plan"]').trigger('click')
+      expect(wrapper.vm.runInstructionTemplate).toBe('Custom plan {{user_prompt}}')
+      expect(wrapper.vm.runInstructionDirty).toBe(true)
+    })
+
+    it('shows only the controls supported by the selected mode', async () => {
+      await mountDrawer()
+      await openDrawer()
+
+      await wrapper.get('[data-testid="task-mode-option-freeform"]').trigger('click')
+      expect(wrapper.vm.requireChanges).toBe(false)
+      expect(wrapper.vm.runInstructionTemplate).toBe('')
+      expect(wrapper.find('[data-testid="task-require-changes"]').exists()).toBe(false)
+      expect(wrapper.find('.run-instruction-advanced-reveal').exists()).toBe(false)
+
+      await wrapper.get('[data-testid="task-mode-change"]').trigger('click')
+      await wrapper.get('[data-testid="task-mode-option-execute"]').trigger('click')
+      expect(wrapper.find('[data-testid="task-require-changes"]').exists()).toBe(true)
+      expect(wrapper.find('.run-instruction-advanced-reveal').exists()).toBe(true)
+
+      await wrapper.get('[data-testid="task-mode-change"]').trigger('click')
+      await wrapper.get('[data-testid="task-mode-option-plan"]').trigger('click')
+      expect(wrapper.find('[data-testid="task-require-changes"]').exists()).toBe(false)
+      expect(wrapper.find('.run-instruction-advanced-reveal').exists()).toBe(true)
+      wrapper.vm.runInstructionExpanded = true
+      await nextTick()
+      expect(wrapper.find('.run-instruction-header__actions').text()).not.toContain('runInstruction.usePromptOnly')
+    })
+
+    it('requires another mode choice after the create drawer is closed and reopened', async () => {
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('[data-testid="task-mode-option-freeform"]').trigger('click')
+
+      await wrapper.setProps({ show: false })
+      await wrapper.setProps({ show: true })
+      await nextTick()
+
+      expect(wrapper.vm.taskMode).toBeNull()
+      expect(wrapper.vm.drawerView).toBe('mode-choice')
+      expect(wrapper.get('[data-testid="task-mode-choice"]').isVisible()).toBe(true)
+      expect(wrapper.find('[data-testid="issue-create-task-button"]').exists()).toBe(false)
+    })
+
     it('uses the issue default harness before the worker profile default', async () => {
       await mountDrawer({ issueDefaultHarness: 'codex' })
       await openDrawer()
@@ -922,35 +1051,12 @@ describe('TaskFormDrawer', () => {
       expect((wrapper.find('.variable-editor-mock').element as HTMLTextAreaElement).value).toBe('Existing prompt')
     })
 
-    it('shows a field-level error when task mode is not selected and clears it after selection', async () => {
+    it('does not expose the create action until a mode has been selected', async () => {
       await mountDrawer()
       await openDrawer()
 
-      await submitCreate()
-
-      expect(mockMessage.warning).toHaveBeenCalledWith('issue.pleaseSelectTaskMode')
       expect(mockApi.createTask).not.toHaveBeenCalled()
-      expect(wrapper.vm.taskModeErrorVisible).toBe(true)
-      expect(wrapper.find('.task-mode-label-row').text()).toContain('issue.taskMode')
-      expect(wrapper.find('.task-mode-label-hint').text()).toBe('issue.taskModeManualHint')
-      expect(wrapper.find('.task-mode-label-hint').classes()).toContain('task-mode-label-hint--error')
-      expect(wrapper.findAll('.task-mode-card--error')).toHaveLength(2)
-
-      await wrapper.find('.task-mode-card').trigger('click')
-      await nextTick()
-
-      expect(wrapper.vm.taskMode).toBe('execute')
-      expect(wrapper.vm.taskModeErrorVisible).toBe(false)
-      expect(wrapper.findAll('.task-mode-card--error')).toHaveLength(0)
-      expect(wrapper.findAll('.task-mode-selector .n-radio')).toHaveLength(0)
-      expect(wrapper.findAll('.task-mode-card__check')).toHaveLength(1)
-      expect(wrapper.find('.task-mode-detail-reveal').exists()).toBe(true)
-
-      await wrapper.findAll('.task-mode-card')[1].trigger('click')
-      await nextTick()
-      expect(wrapper.vm.taskMode).toBe('plan')
-      expect(wrapper.find('.task-mode-detail-reveal').exists()).toBe(false)
-      expect(wrapper.findAll('.task-mode-card__check')).toHaveLength(1)
+      expect(wrapper.find('[data-testid="issue-create-task-button"]').exists()).toBe(false)
     })
 
     it('shows a single top-right check on the selected priority card', async () => {
@@ -1416,6 +1522,20 @@ describe('TaskFormDrawer', () => {
       expect(quotaAlert.text()).toContain('reset-2026-04-29T00:00:00+08:00')
       expect(mockMessage.error).not.toHaveBeenCalled()
     })
+
+    it('keeps the selected mode and full form visible after creation fails', async () => {
+      mockApi.createTask.mockRejectedValue(new Error('network down'))
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('[data-testid="task-mode-option-freeform"]').trigger('click')
+
+      await submitCreate()
+
+      expect(wrapper.vm.taskMode).toBe('freeform')
+      expect(wrapper.vm.drawerView).toBe('full-form')
+      expect(wrapper.get('[data-testid="task-full-form"]').isVisible()).toBe(true)
+      expect(mockMessage.error).toHaveBeenCalledWith('createTask.failedToCreateTask')
+    })
   })
 
   describe('template handling', () => {
@@ -1721,6 +1841,17 @@ describe('TaskFormDrawer', () => {
       expect(wrapper.vm.priority).toBe(1)
       expect(wrapper.vm.requireChanges).toBe(true)
       expect(wrapper.vm.selectedProviderId).toBe(7)
+    })
+
+    it('opens an editable task directly in the full form with its mode summary', async () => {
+      await mountEditDrawer({ task_mode: 'plan' })
+      await wrapper.setProps({ show: true })
+      await flushPromises()
+
+      expect(wrapper.vm.drawerView).toBe('full-form')
+      expect(wrapper.get('[data-testid="task-full-form"]').isVisible()).toBe(true)
+      expect(wrapper.get('[data-testid="task-mode-choice"]').isVisible()).toBe(false)
+      expect(wrapper.get('[data-testid="task-mode-summary"]').text()).toContain('issue.taskModePlan')
     })
 
     it('keeps harness locked when editing an existing task', async () => {
@@ -2082,15 +2213,17 @@ describe('TaskFormDrawer', () => {
       expect(wrapper.get('.run-instruction-advanced__summary').attributes('aria-expanded')).toBe('false')
     })
 
-    it('keeps an edited template when mode replacement is declined', async () => {
+    it('keeps edited templates in independent mode drafts without a confirmation dialog', async () => {
       await mountDrawer()
       await openDrawer()
-      wrapper.vm.selectTaskMode('execute')
+      await wrapper.vm.selectTaskMode('execute')
       wrapper.vm.handleRunInstructionInput('Custom instruction')
-      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
-      wrapper.vm.selectTaskMode('plan')
-      expect(confirm).toHaveBeenCalled()
+      const confirm = vi.spyOn(window, 'confirm')
+      await wrapper.vm.selectTaskMode('plan')
+      expect(confirm).not.toHaveBeenCalled()
       expect(wrapper.vm.taskMode).toBe('plan')
+      expect(wrapper.vm.runInstructionTemplate).toBe('Worker plan {{user_prompt}}')
+      await wrapper.vm.selectTaskMode('execute')
       expect(wrapper.vm.runInstructionTemplate).toBe('Custom instruction')
       confirm.mockRestore()
     })

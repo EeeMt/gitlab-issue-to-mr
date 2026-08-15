@@ -86,7 +86,81 @@
       :native-scrollbar="false"
       closable
     >
+      <Transition name="task-form-view">
+        <section
+          v-show="isModeChoiceVisible"
+          ref="modeChoicePanelRef"
+          class="task-mode-choice"
+          data-testid="task-mode-choice"
+          :aria-hidden="!isModeChoiceVisible"
+          :inert="!isModeChoiceVisible"
+        >
+          <header class="task-mode-choice__header">
+            <h2 class="task-mode-choice__title">{{ t('issue.taskModeChoiceTitle') }}</h2>
+            <p class="task-mode-choice__hint">{{ t('issue.taskModeChoiceHint') }}</p>
+          </header>
+          <div class="task-mode-choice__list" role="radiogroup" :aria-label="t('issue.taskMode')">
+            <button
+              v-for="option in taskModeOptions"
+              :key="option.mode"
+              type="button"
+              class="task-mode-choice__option"
+              :class="{ 'task-mode-choice__option--active': taskMode === option.mode }"
+              role="radio"
+              :aria-checked="taskMode === option.mode"
+              :data-task-mode="option.mode"
+              :data-testid="`task-mode-option-${option.mode}`"
+              @click="selectTaskMode(option.mode)"
+              @keydown.enter.prevent="selectTaskMode(option.mode)"
+              @keydown.space.prevent="selectTaskMode(option.mode)"
+            >
+              <span class="task-mode-choice__icon" aria-hidden="true">
+                <n-icon :component="option.icon" size="20" />
+              </span>
+              <span class="task-mode-choice__copy">
+                <span class="task-mode-choice__label">{{ option.label }}</span>
+                <span class="task-mode-choice__description">{{ option.description }}</span>
+              </span>
+              <n-icon
+                v-if="taskMode === option.mode"
+                :component="CheckmarkCircleOutline"
+                size="18"
+                class="task-mode-choice__check"
+              />
+            </button>
+          </div>
+        </section>
+      </Transition>
+
+      <Transition name="task-form-view">
+        <div
+          v-show="isFullFormVisible"
+          ref="fullFormPanelRef"
+          class="task-full-form"
+          data-testid="task-full-form"
+          :aria-hidden="!isFullFormVisible"
+          :inert="!isFullFormVisible"
+        >
       <n-form label-placement="top" class="task-form-drawer__form">
+        <div v-if="currentTaskModeOption" class="task-mode-summary" data-testid="task-mode-summary">
+          <span class="task-mode-summary__icon" aria-hidden="true">
+            <n-icon :component="currentTaskModeOption.icon" size="18" />
+          </span>
+          <span class="task-mode-summary__copy">
+            <span class="task-mode-summary__label">{{ currentTaskModeOption.label }}</span>
+            <span class="task-mode-summary__separator" aria-hidden="true">·</span>
+            <span class="task-mode-summary__description">{{ currentTaskModeOption.summary }}</span>
+          </span>
+          <n-button
+            quaternary
+            size="small"
+            class="task-mode-summary__change"
+            data-testid="task-mode-change"
+            @click="changeTaskMode"
+          >
+            {{ t('issue.changeTaskMode') }}
+          </n-button>
+        </div>
         <section class="task-form-section task-form-section--content">
           <header class="task-form-section__header">
             <span class="task-form-section__title">{{ t('createTask.contentSection') }}</span>
@@ -127,103 +201,34 @@
           </div>
         </div>
 
-        <!-- Task mode + require changes -->
-        <n-form-item
-          class="task-mode-form-item"
-          :validation-status="taskModeErrorVisible ? 'error' : undefined"
-        >
-          <template #label>
-            <div class="task-mode-label-row">
-              <span>{{ t('issue.taskMode') }}</span>
-              <span
-                class="task-mode-label-hint"
-                :class="{ 'task-mode-label-hint--error': taskModeErrorVisible }"
-              >{{ t('issue.taskModeManualHint') }}</span>
-            </div>
-          </template>
-          <div class="task-mode-section">
-            <div class="task-mode-selector" role="radiogroup" :aria-label="t('issue.taskMode')">
-              <div
-                class="task-mode-card"
-                role="radio"
-                tabindex="0"
-                :aria-checked="taskMode === 'execute'"
-                :class="{
-                  'task-mode-card--active': taskMode === 'execute',
-                  'task-mode-card--error': taskModeErrorVisible
-                }"
-                @click="selectTaskMode('execute')"
-                @keydown.enter.prevent="selectTaskMode('execute')"
-                @keydown.space.prevent="selectTaskMode('execute')"
-              >
-                <n-icon :component="CodeSlashOutline" size="18" class="task-mode-card__icon" />
-                <div class="task-mode-card__body">
-                  <div class="task-mode-card__label">{{ t('issue.taskModeExecute') }}</div>
-                  <div class="task-mode-card__desc">{{ t('issue.taskModeExecuteDesc') }}</div>
-                </div>
-                <Transition name="selection-check">
-                  <n-icon
-                    v-if="taskMode === 'execute'"
-                    :component="CheckmarkCircleOutline"
-                    size="16"
-                    class="task-mode-card__check"
-                  />
-                </Transition>
-              </div>
-              <div
-                class="task-mode-card"
-                role="radio"
-                tabindex="0"
-                :aria-checked="taskMode === 'plan'"
-                :class="{
-                  'task-mode-card--active': taskMode === 'plan',
-                  'task-mode-card--error': taskModeErrorVisible
-                }"
-                @click="selectTaskMode('plan')"
-                @keydown.enter.prevent="selectTaskMode('plan')"
-                @keydown.space.prevent="selectTaskMode('plan')"
-              >
-                <n-icon :component="BulbOutline" size="18" class="task-mode-card__icon" />
-                <div class="task-mode-card__body">
-                  <div class="task-mode-card__label">{{ t('issue.taskModePlan') }}</div>
-                  <div class="task-mode-card__desc">{{ t('issue.taskModePlanDesc') }}</div>
-                </div>
-                <Transition name="selection-check">
-                  <n-icon
-                    v-if="taskMode === 'plan'"
-                    :component="CheckmarkCircleOutline"
-                    size="16"
-                    class="task-mode-card__check"
-                  />
-                </Transition>
+        <Transition name="task-mode-detail">
+          <div
+            v-if="taskMode === 'execute'"
+            class="task-mode-detail-reveal"
+            data-testid="task-require-changes"
+          >
+            <div class="task-mode-detail-reveal__inner">
+              <div class="require-changes-row">
+                <span class="prompt-label-require-text">{{ t('issue.requireChanges') }}</span>
+                <n-tooltip
+                  trigger="hover"
+                  placement="top"
+                  :content-style="issueDetailTooltipContentStyle"
+                  :theme-overrides="issueDetailTooltipThemeOverrides"
+                >
+                  <template #trigger>
+                    <n-icon :component="InformationCircleOutline" size="13" class="require-changes-info-icon" />
+                  </template>
+                  {{ t('issue.requireChangesHint') }}
+                </n-tooltip>
+                <n-switch v-model:value="requireChanges" size="small" />
               </div>
             </div>
-            <Transition name="task-mode-detail">
-              <div v-if="taskMode === 'execute'" class="task-mode-detail-reveal">
-                <div class="task-mode-detail-reveal__inner">
-                  <div class="require-changes-row">
-                    <span class="prompt-label-require-text">{{ t('issue.requireChanges') }}</span>
-                    <n-tooltip
-                      trigger="hover"
-                      placement="top"
-                      :content-style="issueDetailTooltipContentStyle"
-                      :theme-overrides="issueDetailTooltipThemeOverrides"
-                    >
-                      <template #trigger>
-                        <n-icon :component="InformationCircleOutline" size="13" class="require-changes-info-icon" />
-                      </template>
-                      {{ t('issue.requireChangesHint') }}
-                    </n-tooltip>
-                    <n-switch v-model:value="requireChanges" size="small" />
-                  </div>
-                </div>
-              </div>
-            </Transition>
           </div>
-        </n-form-item>
+        </Transition>
 
         <Transition name="advanced-option">
-          <div v-if="taskMode !== null" class="run-instruction-advanced-reveal">
+          <div v-if="taskMode !== null && taskMode !== 'freeform'" class="run-instruction-advanced-reveal">
             <div class="run-instruction-advanced-reveal__inner">
               <div
                 class="run-instruction-advanced"
@@ -260,9 +265,6 @@
                             <div class="run-instruction-header">
                               <span class="run-instruction-header__title">{{ t('runInstruction.template') }}</span>
                               <div class="run-instruction-header__actions">
-                                <n-button size="tiny" quaternary @click="usePromptOnly">
-                                  {{ t('runInstruction.usePromptOnly') }}
-                                </n-button>
                                 <n-button size="tiny" quaternary @click="restoreRunInstructionDefault">
                                   {{ t('runInstruction.restoreDefault') }}
                                 </n-button>
@@ -706,9 +708,11 @@
           </div>
         </div>
       </n-alert>
+        </div>
+      </Transition>
 
       <template #footer>
-        <div style="display: flex; justify-content: flex-end;">
+        <div v-if="isFullFormVisible" class="task-form-drawer__footer">
           <n-button
             type="primary"
             :loading="submitLoading"
@@ -724,7 +728,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onBeforeUnmount, onMounted, toRef, useAttrs, useId, h, type VNode } from 'vue'
+import {
+  ref, computed, watch, nextTick, onBeforeUnmount, onMounted, toRef, useAttrs, useId, h,
+  type Component, type VNode,
+} from 'vue'
 import {
   NButton, NDrawer, NDrawerContent, NForm, NFormItem,
   NDatePicker, NInput, NSelect, NAlert, NTooltip, NSwitch, NSpin, NIcon, NScrollbar, NTag, useMessage,
@@ -735,6 +742,7 @@ import {
   DocumentTextOutline,
   WarningOutline,
   CalendarOutline,
+  ChatbubbleEllipsesOutline,
   CloseOutline,
   InformationCircleOutline,
   CodeSlashOutline,
@@ -760,8 +768,11 @@ import { buildScheduleTimeDisabled } from '../utils/scheduleWindow'
 import { formatUsageResetAt } from '../utils/usageLimits'
 import { issueDetailTooltipContentStyle, issueDetailTooltipThemeOverrides } from './issue-detail/tooltip'
 import {
+  createTaskModeDrafts,
   DEFAULT_REQUIRE_CHANGES,
   DEFAULT_TASK_PRIORITY,
+  type TaskMode,
+  type TaskModeDrafts,
 } from '../features/tasks/taskFormModel'
 import { useTaskScheduleContext } from '../features/tasks/useTaskScheduleContext'
 import { usePromptTemplatePicker } from '../features/tasks/usePromptTemplatePicker'
@@ -1002,10 +1013,53 @@ const drawerTestId = computed(() => {
 })
 
 // Form state
+type DrawerView = 'mode-choice' | 'full-form'
+
+interface TaskModeOption {
+  mode: TaskMode
+  label: string
+  description: string
+  summary: string
+  icon: Component
+}
+
 const prompt = ref('')
 const priority = ref(DEFAULT_TASK_PRIORITY)
 const requireChanges = ref(DEFAULT_REQUIRE_CHANGES)
-const taskMode = ref<'execute' | 'plan' | null>(null)
+const taskMode = ref<TaskMode | null>(null)
+const drawerView = ref<DrawerView>(props.mode === 'edit' ? 'full-form' : 'mode-choice')
+const modeChoicePanelRef = ref<HTMLElement | null>(null)
+const fullFormPanelRef = ref<HTMLElement | null>(null)
+const taskModeDrafts = ref<TaskModeDrafts>(createTaskModeDrafts())
+let fullFormScrollTop = 0
+const isModeChoiceVisible = computed(() => drawerView.value === 'mode-choice')
+const isFullFormVisible = computed(() => drawerView.value === 'full-form')
+const taskModeOptions = computed<TaskModeOption[]>(() => [
+  {
+    mode: 'freeform',
+    label: t('issue.taskModeFreeform'),
+    description: t('issue.taskModeFreeformDesc'),
+    summary: t('issue.taskModeFreeformSummary'),
+    icon: ChatbubbleEllipsesOutline,
+  },
+  {
+    mode: 'execute',
+    label: t('issue.taskModeExecute'),
+    description: t('issue.taskModeExecuteDesc'),
+    summary: t('issue.taskModeExecuteSummary'),
+    icon: CodeSlashOutline,
+  },
+  {
+    mode: 'plan',
+    label: t('issue.taskModePlan'),
+    description: t('issue.taskModePlanDesc'),
+    summary: t('issue.taskModePlanSummary'),
+    icon: BulbOutline,
+  },
+])
+const currentTaskModeOption = computed(() =>
+  taskModeOptions.value.find(option => option.mode === taskMode.value) ?? null
+)
 const startFreshSession = ref(false)
 const taskModeErrorVisible = ref(false)
 const runInstructionExpanded = ref(false)
@@ -1291,7 +1345,7 @@ watch(taskMode, (val) => {
   invalidateRunInstructionPreview()
   if (val !== null) {
     taskModeErrorVisible.value = false
-    if (!runInstructionTemplate.value && runInstructionDefaults.value) {
+    if (val !== 'freeform' && !runInstructionTemplate.value && runInstructionDefaults.value) {
       runInstructionTemplate.value = getDefaultRunInstructionTemplate(val)
     }
   }
@@ -1374,6 +1428,10 @@ watch([selectableProviders, effectiveProvider], () => {
   reconcileProviderForHarness(resolvedHarnessKey.value)
 })
 
+watch([effectiveWorkerProfile, runInstructionDefaults], () => {
+  refreshPristineTaskModeDrafts()
+})
+
 watch(() => props.show, (val) => {
   invalidateRunInstructionPreview()
   runInstructionExpanded.value = false
@@ -1383,10 +1441,11 @@ watch(() => props.show, (val) => {
     providerAutoAdjustSource = undefined
     providerAutoAdjustedForHarness = null
     if (props.mode === 'edit' && props.task) {
+      drawerView.value = 'full-form'
       prompt.value = props.task.user_prompt ?? ''
       priority.value = props.task.priority ?? DEFAULT_TASK_PRIORITY
       requireChanges.value = props.task.require_changes ?? true
-      taskMode.value = (props.task.task_mode as 'execute' | 'plan') ?? 'execute'
+      taskMode.value = props.task.task_mode ?? 'execute'
       selectedProviderId.value = props.task.provider_id ?? null
       harnessKey.value = props.task.harness_key
         ?? effectiveWorkerProfile.value?.default_harness_key
@@ -1397,13 +1456,30 @@ watch(() => props.show, (val) => {
       taskSkillSnapshots.value = [...(props.task.skill_snapshots ?? [])]
       skillSelectionDirty.value = false
       skillSnapshotResolutionApplied.value = false
-      const snapshot = props.task.run_instruction_template
-        ?? getDefaultRunInstructionTemplate(taskMode.value)
-        ?? ''
+      const snapshot = taskMode.value === 'freeform'
+        ? ''
+        : props.task.run_instruction_template
+          ?? getDefaultRunInstructionTemplate(taskMode.value)
+          ?? ''
       runInstructionTemplate.value = snapshot
       initialRunInstructionTemplate.value = snapshot
       runInstructionDirty.value = false
+      resetTaskModeDrafts()
+      if (taskMode.value === 'execute') {
+        taskModeDrafts.value.execute = {
+          runInstructionTemplate: snapshot,
+          runInstructionDirty: false,
+          requireChanges: requireChanges.value,
+        }
+      } else if (taskMode.value === 'plan') {
+        taskModeDrafts.value.plan = {
+          runInstructionTemplate: snapshot,
+          runInstructionDirty: false,
+        }
+      }
     } else if (props.mode === 'create') {
+      drawerView.value = 'mode-choice'
+      fullFormScrollTop = 0
       if (!prompt.value && props.issueDescription) {
         prompt.value = props.issueDescription
       }
@@ -1418,6 +1494,7 @@ watch(() => props.show, (val) => {
       initialRunInstructionTemplate.value = ''
       runInstructionDirty.value = false
       requireChanges.value = DEFAULT_REQUIRE_CHANGES
+      resetTaskModeDrafts()
       startFreshSession.value = false
       harnessKey.value = props.issueCurrentHarness
         ?? props.issueDefaultHarness
@@ -1431,6 +1508,9 @@ watch(() => props.show, (val) => {
     }
     usageLimitDetail.value = null
     taskModeErrorVisible.value = false
+    if (props.mode === 'edit') void focusFullForm()
+  } else if (props.mode === 'create') {
+    drawerView.value = 'mode-choice'
   }
 })
 
@@ -1441,15 +1521,24 @@ async function loadRunInstructionDefaults() {
   try {
     runInstructionDefaults.value = await getRunInstructionTemplateDefaults()
     if (props.show && props.mode === 'edit' && props.task && !runInstructionTemplate.value) {
-      const mode = (props.task.task_mode ?? 'execute') as 'execute' | 'plan'
-      const snapshot = props.task.run_instruction_template ?? getDefaultRunInstructionTemplate(mode)
-      runInstructionTemplate.value = snapshot
-      initialRunInstructionTemplate.value = snapshot
+      const mode = props.task.task_mode ?? 'execute'
+      if (mode !== 'freeform') {
+        const snapshot = props.task.run_instruction_template ?? getDefaultRunInstructionTemplate(mode)
+        runInstructionTemplate.value = snapshot
+        initialRunInstructionTemplate.value = snapshot
+      }
     }
-    if (props.show && props.mode === 'create' && taskMode.value && !runInstructionTemplate.value) {
+    if (
+      props.show
+      && props.mode === 'create'
+      && taskMode.value
+      && taskMode.value !== 'freeform'
+      && !runInstructionTemplate.value
+    ) {
       runInstructionTemplate.value = getDefaultRunInstructionTemplate(taskMode.value)
       initialRunInstructionTemplate.value = runInstructionTemplate.value
     }
+    refreshPristineTaskModeDrafts()
   } catch {
     defaultsError.value = t('runInstruction.defaultsLoadFailed')
   } finally {
@@ -1473,16 +1562,109 @@ function selectScheduleType(type: 'now' | 'scheduled') {
   scheduleType.value = type
 }
 
-function selectTaskMode(mode: 'execute' | 'plan') {
-  if (taskMode.value === mode) return
-  const nextDefault = getDefaultRunInstructionTemplate(mode)
-  if (runInstructionDirty.value && runInstructionTemplate.value) {
-    const replace = window.confirm(t('runInstruction.modeSwitchConfirm'))
-    if (replace) runInstructionTemplate.value = nextDefault
-  } else {
-    runInstructionTemplate.value = nextDefault
+function resetTaskModeDrafts() {
+  taskModeDrafts.value = createTaskModeDrafts({
+    executeTemplate: getDefaultRunInstructionTemplate('execute'),
+    planTemplate: getDefaultRunInstructionTemplate('plan'),
+    requireChanges: DEFAULT_REQUIRE_CHANGES,
+  })
+}
+
+function refreshPristineTaskModeDrafts() {
+  const executeDraft = taskModeDrafts.value.execute
+  const planDraft = taskModeDrafts.value.plan
+  if (!executeDraft.runInstructionDirty) {
+    executeDraft.runInstructionTemplate = getDefaultRunInstructionTemplate('execute')
   }
+  if (!planDraft.runInstructionDirty) {
+    planDraft.runInstructionTemplate = getDefaultRunInstructionTemplate('plan')
+  }
+  if (taskMode.value === 'execute' && !runInstructionDirty.value) {
+    runInstructionTemplate.value = executeDraft.runInstructionTemplate
+  } else if (taskMode.value === 'plan' && !runInstructionDirty.value) {
+    runInstructionTemplate.value = planDraft.runInstructionTemplate
+  }
+}
+
+function saveCurrentTaskModeDraft() {
+  if (taskMode.value === 'execute') {
+    taskModeDrafts.value.execute = {
+      runInstructionTemplate: runInstructionTemplate.value,
+      runInstructionDirty: runInstructionDirty.value,
+      requireChanges: requireChanges.value,
+    }
+  } else if (taskMode.value === 'plan') {
+    taskModeDrafts.value.plan = {
+      runInstructionTemplate: runInstructionTemplate.value,
+      runInstructionDirty: runInstructionDirty.value,
+    }
+  }
+}
+
+function restoreTaskModeDraft(mode: TaskMode) {
+  if (mode === 'freeform') {
+    requireChanges.value = false
+    runInstructionTemplate.value = ''
+    runInstructionDirty.value = false
+    return
+  }
+  if (mode === 'execute') {
+    const draft = taskModeDrafts.value.execute
+    runInstructionTemplate.value = draft.runInstructionTemplate
+      || getDefaultRunInstructionTemplate(mode)
+    runInstructionDirty.value = draft.runInstructionDirty
+    requireChanges.value = draft.requireChanges
+    return
+  }
+  const draft = taskModeDrafts.value.plan
+  runInstructionTemplate.value = draft.runInstructionTemplate
+    || getDefaultRunInstructionTemplate(mode)
+  runInstructionDirty.value = draft.runInstructionDirty
+  requireChanges.value = false
+}
+
+function fullFormScrollContainer(): HTMLElement | null {
+  if (!fullFormPanelRef.value) return null
+  return fullFormPanelRef.value.closest<HTMLElement>('.n-drawer-body-content-wrapper')
+    ?? fullFormPanelRef.value
+}
+
+function focusWithoutScroll(element: HTMLElement | null) {
+  if (!element) return
+  element.focus({ preventScroll: true })
+}
+
+async function focusFullForm() {
+  await nextTick()
+  const scrollContainer = fullFormScrollContainer()
+  const promptEditor = fullFormPanelRef.value?.querySelector<HTMLElement>(
+    '.prompt-form-section textarea:not([disabled]), .prompt-form-section [contenteditable="true"]'
+  ) ?? null
+  const firstEditable = promptEditor ?? fullFormPanelRef.value?.querySelector<HTMLElement>(
+    'textarea:not([disabled]), input:not([disabled]), button:not([disabled]), [tabindex="0"]'
+  ) ?? null
+  focusWithoutScroll(firstEditable)
+  if (scrollContainer) scrollContainer.scrollTop = fullFormScrollTop
+}
+
+async function selectTaskMode(mode: TaskMode) {
+  saveCurrentTaskModeDraft()
   taskMode.value = mode
+  restoreTaskModeDraft(mode)
+  runInstructionExpanded.value = false
+  drawerView.value = 'full-form'
+  await focusFullForm()
+}
+
+async function changeTaskMode() {
+  saveCurrentTaskModeDraft()
+  fullFormScrollTop = fullFormScrollContainer()?.scrollTop ?? 0
+  drawerView.value = 'mode-choice'
+  await nextTick()
+  const selector = taskMode.value
+    ? `[data-task-mode="${taskMode.value}"]`
+    : '[data-task-mode]'
+  focusWithoutScroll(modeChoicePanelRef.value?.querySelector<HTMLElement>(selector) ?? null)
 }
 
 function handleRunInstructionInput(value: string) {
@@ -1492,14 +1674,13 @@ function handleRunInstructionInput(value: string) {
 }
 
 function restoreRunInstructionDefault() {
-  if (!taskMode.value) return
+  if (!taskMode.value || taskMode.value === 'freeform') return
   runInstructionTemplate.value = getDefaultRunInstructionTemplate(taskMode.value)
   runInstructionDirty.value = true
   invalidateRunInstructionPreview()
 }
 
-function getDefaultRunInstructionTemplate(mode: 'execute' | 'plan' | null): string {
-  if (!mode) return ''
+function getDefaultRunInstructionTemplate(mode: Exclude<TaskMode, 'freeform'>): string {
   const profile = effectiveWorkerProfile.value
   if (profile) {
     const profileTemplate = mode === 'plan'
@@ -1575,12 +1756,6 @@ async function loadExecutionOptions() {
   executionOptionsReady.value = false
   await Promise.all([loadProviders(), loadWorkerProfiles(), loadSkills()])
   executionOptionsReady.value = true
-}
-
-function usePromptOnly() {
-  runInstructionTemplate.value = '{{user_prompt}}'
-  runInstructionDirty.value = true
-  invalidateRunInstructionPreview()
 }
 
 function isScheduleDateDisabled(timestamp: number): boolean {
@@ -1703,6 +1878,183 @@ onBeforeUnmount(() => {
   max-width: 100%;
 }
 
+.task-mode-choice,
+.task-full-form {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow-x: clip;
+}
+
+.task-mode-choice__header {
+  margin-bottom: 18px;
+}
+
+.task-mode-choice__title {
+  margin: 0;
+  color: var(--n-text-color);
+  font-size: 20px;
+  font-weight: 650;
+  line-height: 28px;
+}
+
+.task-mode-choice__hint {
+  margin: 5px 0 0;
+  color: var(--n-text-color-3);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.task-mode-choice__list {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+}
+
+.task-mode-choice__option {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  min-height: 78px;
+  padding: 14px 16px;
+  border: 1px solid var(--n-border-color);
+  border-radius: 10px;
+  color: inherit;
+  background: rgba(128, 128, 128, 0.025);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
+}
+
+.task-mode-choice__option:hover,
+.task-mode-choice__option--active {
+  border-color: var(--n-primary-color);
+  background: rgba(99, 226, 183, 0.06);
+}
+
+.task-mode-choice__option:focus-visible {
+  outline: 2px solid var(--n-primary-color);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(99, 226, 183, 0.14);
+}
+
+.task-mode-choice__icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 9px;
+  color: var(--n-primary-color);
+  background: rgba(99, 226, 183, 0.1);
+}
+
+.task-mode-choice__copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.task-mode-choice__label {
+  color: var(--n-text-color);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 20px;
+}
+
+.task-mode-choice__description {
+  min-width: 0;
+  color: var(--n-text-color-3);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.task-mode-choice__check {
+  color: var(--n-primary-color);
+}
+
+.task-mode-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 52px;
+  margin-bottom: 20px;
+  padding: 8px 10px 8px 12px;
+  border: 1px solid rgba(128, 128, 128, 0.24);
+  border-radius: 9px;
+  background: rgba(128, 128, 128, 0.035);
+}
+
+.task-mode-summary__icon {
+  display: grid;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--n-primary-color);
+  background: rgba(99, 226, 183, 0.1);
+}
+
+.task-mode-summary__copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.task-mode-summary__label {
+  flex-shrink: 0;
+  color: var(--n-text-color);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.task-mode-summary__separator,
+.task-mode-summary__description {
+  color: var(--n-text-color-3);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.task-mode-summary__description {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.task-mode-summary__change {
+  min-width: 44px;
+  min-height: 44px;
+  flex-shrink: 0;
+}
+
+.task-form-view-enter-active,
+.task-form-view-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.task-form-view-enter-from,
+.task-form-view-leave-to {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+.task-form-drawer__footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-bottom: max(0px, env(safe-area-inset-bottom));
+}
+
 .task-form-section {
   width: 100%;
 }
@@ -1779,33 +2131,6 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-}
-
-.task-mode-label-row {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.task-mode-label-hint {
-  color: var(--n-text-color-3);
-  font-size: 12px;
-  font-weight: 400;
-}
-
-.task-mode-label-hint--error {
-  color: var(--n-feedback-text-color-error, #d03050);
-}
-
-.task-mode-section {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  gap: 0;
-}
-
-.task-mode-form-item {
-  margin-bottom: 12px;
 }
 
 .run-instruction-advanced {
@@ -1949,8 +2274,9 @@ onBeforeUnmount(() => {
 @media (prefers-reduced-motion: reduce) {
   .run-instruction-advanced,
   .run-instruction-advanced__chevron,
-  .task-mode-card,
-  .task-mode-card__icon,
+  .task-mode-choice__option,
+  .task-form-view-enter-active,
+  .task-form-view-leave-active,
   .selection-check-enter-active,
   .selection-check-leave-active,
   .task-mode-detail-enter-active,
@@ -1963,67 +2289,9 @@ onBeforeUnmount(() => {
   }
 }
 
-.task-mode-selector {
-  display: flex;
-  gap: 8px;
-  width: 100%;
-}
-
 :deep(.n-form-item-blank) {
   flex-direction: column;
   align-items: flex-start;
-}
-
-.task-mode-card {
-  flex: 1;
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  position: relative;
-  padding: 10px 32px 10px 12px;
-  border: 1px solid var(--n-border-color);
-  border-radius: 8px;
-  cursor: pointer;
-  transition:
-    border-color 0.15s ease,
-    background-color 0.15s ease,
-    box-shadow 0.15s ease,
-    transform 0.15s ease;
-}
-
-.task-mode-card:hover {
-  border-color: var(--n-primary-color);
-}
-
-.task-mode-card--error {
-  border-color: var(--n-feedback-text-color-error, #d03050);
-}
-
-.task-mode-card--error:hover {
-  border-color: var(--n-feedback-text-color-error, #d03050);
-}
-
-.task-mode-card--active {
-  border-color: var(--n-primary-color);
-  background: rgba(99, 226, 183, 0.06);
-}
-
-.task-mode-card__icon {
-  margin-top: 2px;
-  flex-shrink: 0;
-  color: var(--n-text-color-3);
-  transition: color 0.15s ease;
-}
-
-.task-mode-card--active .task-mode-card__icon {
-  color: var(--n-primary-color);
-}
-
-.task-mode-card__check {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  color: var(--n-primary-color);
 }
 
 .selection-check-enter-active,
@@ -2035,22 +2303,6 @@ onBeforeUnmount(() => {
 .selection-check-leave-to {
   opacity: 0;
   transform: scale(0.72);
-}
-
-.task-mode-card__body {
-  flex: 1;
-  min-width: 0;
-}
-
-.task-mode-card__label {
-  font-weight: 600;
-  font-size: 13px;
-}
-
-.task-mode-card__desc {
-  font-size: 11px;
-  color: var(--n-text-color-3);
-  margin-top: 2px;
 }
 
 .require-changes-row {
@@ -2631,6 +2883,32 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 520px) {
+  .task-mode-choice__option {
+    grid-template-columns: 36px minmax(0, 1fr) 18px;
+    gap: 10px;
+    min-height: 88px;
+    padding: 12px;
+  }
+
+  .task-mode-choice__icon {
+    width: 36px;
+    height: 36px;
+  }
+
+  .task-mode-summary {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .task-mode-summary__copy {
+    flex-basis: calc(100% - 98px);
+    flex-wrap: wrap;
+  }
+
+  .task-mode-summary__change {
+    margin-left: auto;
+  }
+
   .task-form-section__header {
     align-items: flex-start;
     flex-wrap: wrap;

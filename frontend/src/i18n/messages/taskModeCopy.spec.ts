@@ -9,16 +9,26 @@ describe('task mode copy', () => {
     expect(en.issue.prompt).toBe('Prompt')
   })
 
-  it('presents execute and plan as implementation and analysis modes', () => {
+  it('presents all three task modes with mode-first creation copy', () => {
+    expect(zhCN.issue.taskModeChoiceTitle).toBe('选择任务模式')
+    expect(zhCN.issue.taskModeChoiceHint).toContain('Harness')
+    expect(zhCN.issue.taskModeFreeform).toBe('自由模式')
+    expect(zhCN.issue.taskModeFreeformDesc).toContain('无代码变更也可完成任务')
     expect(zhCN.issue.taskModeExecute).toBe('实施模式')
     expect(zhCN.issue.taskModePlan).toBe('分析模式')
+    expect(zhCN.issue.changeTaskMode).toBe('更改')
     expect(zhCN.taskView.taskModeExecute).toBe('实施模式')
     expect(zhCN.taskView.taskModePlan).toBe('分析模式')
     expect(zhCN.config.runInstructionImplementationTab).toBe('实施模式')
     expect(zhCN.config.runInstructionAnalysisTab).toBe('分析模式')
 
+    expect(en.issue.taskModeChoiceTitle).toBe('Choose a task mode')
+    expect(en.issue.taskModeChoiceHint).toContain('Harness')
+    expect(en.issue.taskModeFreeform).toBe('Freeform')
+    expect(en.issue.taskModeFreeformDesc).toContain('without code changes')
     expect(en.issue.taskModeExecute).toBe('Implementation')
     expect(en.issue.taskModePlan).toBe('Analysis')
+    expect(en.issue.changeTaskMode).toBe('Change')
     expect(en.taskView.taskModeExecute).toBe('Implementation')
     expect(en.taskView.taskModePlan).toBe('Analysis')
     expect(en.config.runInstructionImplementationTab).toBe('Implementation')

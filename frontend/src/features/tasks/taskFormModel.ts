@@ -11,6 +11,34 @@ export type TaskScheduleType = 'now' | 'scheduled'
 export const DEFAULT_TASK_PRIORITY = 1
 export const DEFAULT_REQUIRE_CHANGES = false
 
+export interface EditableTaskModeDraft {
+  runInstructionTemplate: string
+  runInstructionDirty: boolean
+}
+
+export interface TaskModeDrafts {
+  execute: EditableTaskModeDraft & { requireChanges: boolean }
+  plan: EditableTaskModeDraft
+}
+
+export function createTaskModeDrafts(options: {
+  executeTemplate?: string
+  planTemplate?: string
+  requireChanges?: boolean
+} = {}): TaskModeDrafts {
+  return {
+    execute: {
+      runInstructionTemplate: options.executeTemplate ?? '',
+      runInstructionDirty: false,
+      requireChanges: options.requireChanges ?? DEFAULT_REQUIRE_CHANGES,
+    },
+    plan: {
+      runInstructionTemplate: options.planTemplate ?? '',
+      runInstructionDirty: false,
+    },
+  }
+}
+
 export interface TaskFormDraft {
   prompt: string
   priority: number

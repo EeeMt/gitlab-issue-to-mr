@@ -5,6 +5,7 @@ import {
   DEFAULT_REQUIRE_CHANGES,
   buildCreateTaskRequest,
   buildUpdateTaskRequest,
+  createTaskModeDrafts,
   type TaskFormDraft,
 } from './taskFormModel'
 
@@ -39,6 +40,28 @@ const existingTask = {
 } as Task
 
 describe('task form request contracts', () => {
+  it('creates independent editable drafts for implementation and analysis modes', () => {
+    const drafts = createTaskModeDrafts({
+      executeTemplate: 'Execute {{user_prompt}}',
+      planTemplate: 'Plan {{user_prompt}}',
+    })
+
+    expect(drafts).toEqual({
+      execute: {
+        runInstructionTemplate: 'Execute {{user_prompt}}',
+        runInstructionDirty: false,
+        requireChanges: false,
+      },
+      plan: {
+        runInstructionTemplate: 'Plan {{user_prompt}}',
+        runInstructionDirty: false,
+      },
+    })
+
+    drafts.execute.runInstructionTemplate = 'Custom execute'
+    expect(drafts.plan.runInstructionTemplate).toBe('Plan {{user_prompt}}')
+  })
+
   it('builds the default execute request without requiring changes', () => {
     expect(buildCreateTaskRequest(7, baseDraft)).toEqual({
       issue_id: 7,
