@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 ARG NIX_IMAGE=nixos/nix:2.24.11
-ARG WORKER_KIT_VERSION=0.3.9
+ARG WORKER_KIT_VERSION=0.3.10
 
 FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS launcher-builder
 ARG TARGETOS
@@ -32,7 +32,7 @@ RUN nix-build default.nix -o /tmp/codify-worker-kit-runtime \
     && cp -a --parents $(nix-store -qR /tmp/codify-worker-kit-runtime) /out
 
 FROM alpine:3.21 AS artifact
-ARG WORKER_KIT_VERSION=0.3.9
+ARG WORKER_KIT_VERSION=0.3.10
 ARG TARGETARCH
 RUN apk add --no-cache jq
 COPY --from=launcher-builder /out/launcher /worker-kit/launcher
@@ -54,7 +54,7 @@ RUN runtime_store="$(cat /tmp/runtime-store-path)" \
       --arg bash "${runtime_store}/bin/bash" \
       --arg nixpkgs_version "${nixpkgs_version}" \
       --arg nixpkgs_revision "${nixpkgs_revision}" \
-      '{schema_version: 2, kit_version: $version, platform: $platform, runtime_bin: $runtime_bin, bash: $bash, entrypoint: "/opt/codify-kit/entrypoint.sh", runtime_compatibility: {harness_contracts:["codify.worker.harness/v1"], event_schemas:["codify.worker.event/v1"], bootstrap_version:"1.0.0"}, cli_runtimes:{claude:{minimum_version:"2.1.33"}}, components: {nixpkgs: $nixpkgs_version, nixpkgs_revision: $nixpkgs_revision}}' \
+      '{schema_version: 2, kit_version: $version, platform: $platform, runtime_bin: $runtime_bin, bash: $bash, entrypoint: "/opt/codify-kit/entrypoint.sh", runtime_compatibility: {harness_contracts:["codify.worker.harness/v1"], event_schemas:["codify.worker.event/v1"], bootstrap_version:"1.0.0"}, cli_runtimes:{claude:{source:"image",minimum_version:"2.1.33"},codex:{source:"host_mount",minimum_version:"0.146.0"}}, components: {nixpkgs: $nixpkgs_version, nixpkgs_revision: $nixpkgs_revision}}' \
       > /worker-kit/manifest.json \
     && rm -rf /worker-kit/worker-entrypoint/harness/adapters \
       /worker-kit/worker-entrypoint/harness/manifest.json \

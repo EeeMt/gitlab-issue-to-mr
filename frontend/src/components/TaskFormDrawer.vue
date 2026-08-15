@@ -409,6 +409,7 @@
                       clearable
                       :placeholder="t('createTask.selectDateTime')"
                       :is-date-disabled="isScheduleDateDisabled"
+                      :is-time-disabled="isTimeDisabled"
                     />
                     <n-button
                       class="schedule-detail-panel__heatmap"
@@ -421,6 +422,9 @@
                       {{ t('createTask.viewScheduleHeatmap') }}
                     </n-button>
                   </div>
+                  <p v-if="createScheduleConstraintHint" class="schedule-detail-panel__constraint">
+                    {{ createScheduleConstraintHint }}
+                  </p>
                 </div>
               </div>
             </Transition>
@@ -534,15 +538,53 @@
                           :value="effectiveWorkerProfile?.name ?? t('common.unavailable')"
                           disabled
                         />
+                        <div class="execution-environment__field-hint" data-testid="task-worker-profile-hint">
+                          {{ t('createTask.workerProfileLockedHint') }}
+                        </div>
                       </label>
                       <label class="execution-environment__field">
                         <span>{{ t('config.providers.providerLabel') }}</span>
                         <n-select
-                          v-model:value="selectedProviderId"
+                          :value="selectedProviderId"
                           :options="providerOptions"
                           clearable
                           :placeholder="t('createTask.selectProvider')"
+                          :render-label="renderProviderLabel"
+                          :menu-props="{ class: 'task-provider-select-menu' }"
+                          class="task-provider-select"
+                          @update:value="handleProviderChange"
                         />
+                        <div
+                          v-if="providerAutoAdjusted"
+                          class="execution-environment__field-hint"
+                          data-testid="task-provider-auto-adjusted-hint"
+                        >
+                          {{ t('createTask.providerAutoAdjustedHint') }}
+                        </div>
+                      </label>
+                      <label v-if="harnessOptions.length > 1" class="execution-environment__field">
+                        <span>{{ t('createTask.harness') }}</span>
+                        <n-select
+                          v-model:value="harnessKey"
+                          :options="harnessOptions"
+                          :placeholder="t('createTask.harness')"
+                          :disabled="harnessLocked"
+                          data-testid="task-harness-select"
+                        />
+                        <div
+                          v-if="harnessLocked"
+                          class="execution-environment__field-hint"
+                          data-testid="task-harness-locked-hint"
+                        >
+                          {{ t('createTask.harnessLockedHint') }}
+                        </div>
+                        <div
+                          v-if="harnessProviderMismatch"
+                          class="execution-environment__field-hint"
+                          data-testid="task-harness-provider-mismatch-hint"
+                        >
+                          {{ t('createTask.harnessProviderMismatchHint') }}
+                        </div>
                       </label>
                     </div>
                     <div class="execution-environment__skills" data-testid="task-skill-selection">
@@ -566,6 +608,8 @@
                         :disabled="inheritProfileSkills || !taskSkillSelectionSupported"
                         :options="taskSkillOptions"
                         :placeholder="t('createTask.selectSkills')"
+                        :render-option="renderSkillOption"
+                        :render-tag="renderSkillTag"
                         @update:value="handleSelectedSkillIdsUpdate"
                       />
                       <div
@@ -680,10 +724,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, toRef, useAttrs, useId } from 'vue'
+import { ref, computed, watch, onBeforeUnmount, onMounted, toRef, useAttrs, useId, h, type VNode } from 'vue'
 import {
   NButton, NDrawer, NDrawerContent, NForm, NFormItem,
-  NDatePicker, NInput, NSelect, NAlert, NTooltip, NSwitch, NSpin, NIcon, NScrollbar, NTag,
+  NDatePicker, NInput, NSelect, NAlert, NTooltip, NSwitch, NSpin, NIcon, NScrollbar, NTag, useMessage,
+  type SelectOption,
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import {
@@ -695,6 +740,8 @@ import {
   CodeSlashOutline,
   BulbOutline,
   CheckmarkCircleOutline,
+  Checkmark,
+  CopyOutline,
   FlashOutline,
   TimeOutline
 } from '@vicons/ionicons5'
@@ -703,10 +750,13 @@ import HeatmapChart from './HeatmapChart.vue'
 import RunInstructionTemplateEditor from './RunInstructionTemplateEditor.vue'
 import {
   getRunInstructionTemplateDefaults,
-  type Task, type TaskSkillSnapshot, type RunInstructionTemplateDefaults
+  getTaskScheduleConstraints,
+  type AIProvider,
+  type Task, type TaskScheduleWindow, type TaskSkillSnapshot, type RunInstructionTemplateDefaults
 } from '../api'
 import { useBreakpoints } from '../composables/useBreakpoints'
-import { formatDateTimeUtc8Compact, formatTimeUtc8 } from '../utils/datetime'
+import { formatDateTimeUtc8Compact, formatTimeUtc8, parseUtcDate } from '../utils/datetime'
+import { buildScheduleTimeDisabled } from '../utils/scheduleWindow'
 import { formatUsageResetAt } from '../utils/usageLimits'
 import { issueDetailTooltipContentStyle, issueDetailTooltipThemeOverrides } from './issue-detail/tooltip'
 import {
@@ -720,6 +770,33 @@ import { useRunInstructionPreview } from '../features/tasks/useRunInstructionPre
 import { useTaskSlotCapacity } from '../features/tasks/useTaskSlotCapacity'
 import { useTaskFormSubmission } from '../features/tasks/useTaskFormSubmission'
 
+function providerProtocol(provider: AIProvider): string | null {
+  const protocol = provider.wire_protocol
+  return typeof protocol === 'string' && protocol.trim() ? protocol.trim() : 'anthropic_messages'
+}
+
+function providerCompatibleWithHarness(
+  provider: AIProvider,
+  harnessKey: string | null | undefined,
+): boolean {
+  if (!harnessKey) return true
+  // Harness/Endpoint compatibility is computed by the Backend
+  // (harness_registry.compatible_harness_keys); the Frontend must not
+  // reimplement the wire-protocol matrix.
+  return (provider.compatible_harnesses ?? []).includes(harnessKey)
+}
+
+function renderProviderLabel(option: SelectOption) {
+  const label = typeof option.label === 'string' ? option.label : String(option.value ?? '')
+  const protocolText = typeof option.protocolText === 'string' ? option.protocolText : ''
+  return h('div', { class: 'provider-option-label' }, [
+    h('span', { class: 'provider-option-label__name' }, label),
+    protocolText
+      ? h('span', { class: 'provider-option-label__protocol' }, protocolText)
+      : null,
+  ])
+}
+
 defineOptions({ inheritAttrs: false })
 
 const props = withDefaults(defineProps<{
@@ -728,12 +805,16 @@ const props = withDefaults(defineProps<{
   issueId?: number
   issueDescription?: string
   hasClaudeSession?: boolean
+  issueCurrentHarness?: string | null
+  issueDefaultHarness?: string | null
   workerProfileId?: number | null
   defaultProviderId?: number | null
   task?: Task
 }>(), {
   mode: 'create',
-  hasClaudeSession: false
+  hasClaudeSession: false,
+  issueCurrentHarness: null,
+  issueDefaultHarness: null
 })
 
 const emit = defineEmits<{
@@ -745,6 +826,170 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const { isMobile } = useBreakpoints()
 const attrs = useAttrs()
+
+// --- Skill selection: copy name + hover description (EEE-33) ---
+const message = useMessage()
+const copiedSkillValue = ref<number | string | null>(null)
+let copiedSkillTimer: ReturnType<typeof setTimeout> | undefined
+
+async function writeToClipboard(text: string): Promise<void> {
+  // navigator.clipboard is only available in secure contexts (https/localhost);
+  // on http (dev at http://192.168.50.129:8880) it is undefined, so fall back to
+  // the synchronous execCommand path, which keeps the user-gesture context intact.
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    try {
+      await navigator.clipboard.writeText(text)
+      return
+    } catch {
+      // API present but rejected (e.g. permission denied): fall through to execCommand
+    }
+  }
+  if (typeof document.execCommand !== 'function') throw new Error('copy API unavailable')
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.top = '-9999px'
+  textarea.style.left = '-9999px'
+  document.body.appendChild(textarea)
+  const selection = document.getSelection()
+  const previousRange = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null
+  textarea.select()
+  let copied = false
+  try {
+    copied = document.execCommand('copy')
+  } finally {
+    textarea.remove()
+    if (selection && previousRange) {
+      selection.removeAllRanges()
+      selection.addRange(previousRange)
+    }
+  }
+  if (!copied) throw new Error('execCommand copy failed')
+}
+
+async function copySkillName(value: number | string, name: string) {
+  try {
+    await writeToClipboard(name)
+    message.success(t('taskView.copied'))
+    copiedSkillValue.value = value
+    if (copiedSkillTimer) clearTimeout(copiedSkillTimer)
+    copiedSkillTimer = setTimeout(() => {
+      copiedSkillValue.value = null
+    }, 2000)
+  } catch {
+    message.error(t('taskView.copyFailed'))
+  }
+}
+
+function skillOptionName(option: SelectOption): string {
+  const skillName = option.skillName
+  if (typeof skillName === 'string' && skillName.trim()) return skillName
+  return typeof option.label === 'string' ? option.label : String(option.value ?? '')
+}
+
+function skillOptionDescription(option: SelectOption): string {
+  const description = option.description
+  return typeof description === 'string' && description.trim() ? description : ''
+}
+
+function renderSkillOption({ node, option, selected }: { node: VNode; option: SelectOption; selected: boolean }) {
+  const name = skillOptionName(option)
+  const description = skillOptionDescription(option)
+  const copied = copiedSkillValue.value === option.value
+  const nodeClass = node.props?.class
+  const pending = typeof nodeClass === 'string'
+    && nodeClass.split(/\s+/).includes('n-base-select-option--pending')
+  const tooltipProps = {
+    trigger: 'hover' as const,
+    placement: 'right' as const,
+    disabled: !description,
+    contentStyle: issueDetailTooltipContentStyle,
+    themeOverrides: issueDetailTooltipThemeOverrides,
+  }
+  const forwardOptionClick = (event: MouseEvent) => {
+    // naive-ui binds the option select handler onto `node`, which is shrink-wrapped
+    // to the name. The `.skill-option` wrapper is the full-row click target; clicks
+    // landing outside `node` (name-row whitespace, description row) are forwarded.
+    // Skip clicks that already hit `node` to avoid a double toggle.
+    const nodeElement = (node as VNode & { el?: Element }).el
+    if (nodeElement?.contains(event.target as Node)) return
+    ;(node.props as { onClick?: (e: MouseEvent) => void } | null | undefined)?.onClick?.(event)
+  }
+  const copyButton = h('button', {
+    type: 'button',
+    class: ['skill-option__copy', { 'skill-option__copy--copied': copied }],
+    'aria-label': t('createTask.copySkillName'),
+    tabindex: 0,
+    onClick: (event: MouseEvent) => {
+      event.stopPropagation()
+      void copySkillName(option.value ?? '', name)
+    },
+    onMousedown: (event: MouseEvent) => event.stopPropagation(),
+    onKeydown: (event: KeyboardEvent) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.stopPropagation()
+        event.preventDefault()
+        void copySkillName(option.value ?? '', name)
+      }
+    },
+  }, [
+    h(NIcon, { size: 14 }, { default: () => copied ? h(CheckmarkCircleOutline) : h(CopyOutline) }),
+  ])
+  return h('div', {
+    class: ['skill-option', { 'skill-option--pending': pending }],
+    onClick: forwardOptionClick,
+  }, [
+    h('div', { class: 'skill-option__name-row' }, [
+      h(NTooltip, tooltipProps, {
+        trigger: () => h('div', { class: 'skill-option__name' }, [node]),
+        default: () => description,
+      }),
+      h('span', { class: 'skill-option__actions' }, [
+        copyButton,
+        selected ? h(NIcon, { class: 'skill-option__check', size: 16 }, { default: () => h(Checkmark) }) : null,
+      ]),
+    ]),
+    description ? h(NTooltip, tooltipProps, {
+      trigger: () => h('div', { class: 'skill-option__desc' }, description),
+      default: () => description,
+    }) : null,
+  ])
+}
+
+function renderSkillTag({ option, handleClose }: { option: SelectOption; handleClose: () => void }) {
+  const name = skillOptionName(option)
+  const copied = copiedSkillValue.value === option.value
+  return h(NTag, {
+    size: 'small',
+    closable: true,
+    onClose: () => handleClose(),
+  }, {
+    default: () => [
+      h('span', { class: 'skill-tag__name' }, name),
+      h('button', {
+        type: 'button',
+        class: ['skill-tag__copy', { 'skill-tag__copy--copied': copied }],
+        'aria-label': t('createTask.copySkillName'),
+        tabindex: 0,
+        onClick: (event: MouseEvent) => {
+          event.stopPropagation()
+          void copySkillName(option.value ?? '', name)
+        },
+        onMousedown: (event: MouseEvent) => event.stopPropagation(),
+        onKeydown: (event: KeyboardEvent) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.stopPropagation()
+            event.preventDefault()
+            void copySkillName(option.value ?? '', name)
+          }
+        },
+      }, [
+        h(NIcon, { size: 14 }, { default: () => copied ? h(CheckmarkCircleOutline) : h(CopyOutline) }),
+      ]),
+    ],
+  })
+}
 
 const showProxy = computed({
   get: () => props.show,
@@ -769,6 +1014,11 @@ const executionEnvironmentExpanded = ref(false)
 const executionEnvironmentContentId = `${useId()}-execution-environment-content`
 const executionOptionsReady = ref(false)
 const selectedProviderId = ref<number | null>(null)
+const harnessKey = ref<string | null>(null)
+const harnessLocked = computed(
+  () => props.mode === 'edit'
+    || (!startFreshSession.value && !!props.issueCurrentHarness),
+)
 const inheritProfileSkills = ref(true)
 const selectedSkillIds = ref<number[]>([])
 const skillSelectionDirty = ref(false)
@@ -776,6 +1026,7 @@ const taskSkillSnapshots = ref<TaskSkillSnapshot[]>([])
 const skillSnapshotResolutionApplied = ref(false)
 const scheduleType = ref<'now' | 'scheduled'>('now')
 const scheduledAt = ref<number | null>(null)
+const scheduleWindow = ref<TaskScheduleWindow | null>(null)
 const runInstructionTemplate = ref('')
 const initialRunInstructionTemplate = ref('')
 const runInstructionDirty = ref(false)
@@ -821,7 +1072,7 @@ const {
   loadProviders,
   loadSkills,
   loadWorkerProfiles,
-  providerOptions,
+  selectableProviders,
   skillOptions,
   skills,
   skillsLoadSucceeded,
@@ -832,13 +1083,66 @@ const {
   workerProfileId: toRef(props, 'workerProfileId'),
   selectedProviderId,
 })
+const resolvedHarnessKey = computed(() =>
+  harnessKey.value
+  ?? props.issueCurrentHarness
+  ?? props.issueDefaultHarness
+  ?? effectiveWorkerProfile.value?.default_harness_key
+  ?? 'claude',
+)
+const harnessCompatibleProviders = computed(() =>
+  selectableProviders.value.filter(provider =>
+    providerCompatibleWithHarness(provider, resolvedHarnessKey.value),
+  ),
+)
+const providerOptions = computed(() =>
+  harnessCompatibleProviders.value.map(provider => {
+    const protocol = providerProtocol(provider)
+    return {
+      label: [
+        `${provider.name} (${provider.model})`,
+        provider.is_default ? ' ★' : '',
+        provider.is_disabled ? ` - ${t('config.providers.disabled')}` : '',
+      ].join(''),
+      protocolText: protocol ?? '',
+      value: provider.id,
+      disabled: provider.is_disabled,
+    }
+  }),
+)
+const harnessProviderMismatch = computed(() =>
+  selectableProviders.value.length > 0
+  && !harnessCompatibleProviders.value.some(provider => !provider.is_disabled),
+)
 const executionEnvironmentMissing = computed(() =>
   executionOptionsReady.value
-  && (!effectiveWorkerProfile.value || !effectiveProvider.value)
+  && (
+    !effectiveWorkerProfile.value
+    || !effectiveProvider.value
+    || harnessProviderMismatch.value
+  )
 )
+const harnessOptions = computed(() => {
+  const enabled = effectiveWorkerProfile.value?.enabled_harnesses
+  if (!enabled || !enabled.length) return []
+  return enabled.map(key => {
+    const compatibleProviderAvailable = selectableProviders.value.length === 0
+      || selectableProviders.value.some(
+        provider => !provider.is_disabled && providerCompatibleWithHarness(provider, key),
+      )
+    return {
+      label: key === 'codex' ? t('createTask.harnessCodex') : t('createTask.harnessClaude'),
+      value: key,
+      disabled: !harnessLocked.value && !compatibleProviderAvailable,
+    }
+  })
+})
 const executionEnvironmentOverridden = computed(() =>
   selectedProviderId.value !== null || !inheritProfileSkills.value
 )
+const providerAutoAdjusted = ref(false)
+let providerAutoAdjustSource: number | null | undefined
+let providerAutoAdjustedForHarness: string | null = null
 function isSkillCapableWorkerKitVersion(value: string | null | undefined): boolean {
   const match = value?.trim().match(/^(\d+)\.(\d+)\.(\d+)$/)
   if (!match) return false
@@ -873,6 +1177,8 @@ const taskSkillOptions = computed(() => {
     options.push({
       label: `${snapshot.name} (${t('createTask.skillSnapshotUnavailable')})`,
       value: snapshot.id,
+      skillName: snapshot.name,
+      description: '',
       disabled: true,
     })
     optionIds.add(snapshot.id)
@@ -1008,17 +1314,83 @@ watch(
   { immediate: true },
 )
 
+watch(
+  [startFreshSession, () => props.issueCurrentHarness],
+  ([fresh, currentHarness]) => {
+    if (!fresh && currentHarness) {
+      harnessKey.value = currentHarness
+    }
+  },
+)
+
+function reconcileProviderForHarness(harnessKey: string, forceRestore = false) {
+  const current = selectedProviderId.value !== null
+    ? selectableProviders.value.find(provider => provider.id === selectedProviderId.value) ?? null
+    : effectiveProvider.value
+  if (!current || providerCompatibleWithHarness(current, harnessKey)) return
+
+  if (forceRestore && providerAutoAdjustSource !== undefined) {
+    const restoreValue = providerAutoAdjustSource
+    providerAutoAdjustSource = undefined
+    providerAutoAdjustedForHarness = null
+    providerAutoAdjusted.value = false
+    if (restoreValue === null) {
+      selectedProviderId.value = null
+      return
+    }
+    const restoreProvider = selectableProviders.value.find(provider => provider.id === restoreValue)
+    if (restoreProvider && providerCompatibleWithHarness(restoreProvider, harnessKey)) {
+      selectedProviderId.value = restoreValue
+      return
+    }
+    selectedProviderId.value = null
+    return
+  }
+
+  const fallback = harnessCompatibleProviders.value.find(provider => !provider.is_disabled)
+  if (fallback) {
+    if (providerAutoAdjustSource === undefined) {
+      providerAutoAdjustSource = selectedProviderId.value
+    }
+    selectedProviderId.value = fallback.id
+    providerAutoAdjustedForHarness = harnessKey
+    providerAutoAdjusted.value = true
+  } else {
+    selectedProviderId.value = null
+    providerAutoAdjustSource = undefined
+    providerAutoAdjustedForHarness = null
+    providerAutoAdjusted.value = false
+  }
+}
+
+watch(resolvedHarnessKey, (harnessKey, previous) => {
+  const shouldRestore = previous !== undefined
+    && providerAutoAdjustSource !== undefined
+    && providerAutoAdjustedForHarness === previous
+  reconcileProviderForHarness(harnessKey, shouldRestore)
+})
+
+watch([selectableProviders, effectiveProvider], () => {
+  reconcileProviderForHarness(resolvedHarnessKey.value)
+})
+
 watch(() => props.show, (val) => {
   invalidateRunInstructionPreview()
   runInstructionExpanded.value = false
   executionEnvironmentExpanded.value = false
   if (val) {
+    providerAutoAdjusted.value = false
+    providerAutoAdjustSource = undefined
+    providerAutoAdjustedForHarness = null
     if (props.mode === 'edit' && props.task) {
       prompt.value = props.task.user_prompt ?? ''
       priority.value = props.task.priority ?? DEFAULT_TASK_PRIORITY
       requireChanges.value = props.task.require_changes ?? true
       taskMode.value = (props.task.task_mode as 'execute' | 'plan') ?? 'execute'
       selectedProviderId.value = props.task.provider_id ?? null
+      harnessKey.value = props.task.harness_key
+        ?? effectiveWorkerProfile.value?.default_harness_key
+        ?? 'claude'
       inheritProfileSkills.value =
         (props.task.skill_selection_source ?? 'profile') === 'profile'
       selectedSkillIds.value = [...(props.task.skill_ids ?? [])]
@@ -1047,9 +1419,15 @@ watch(() => props.show, (val) => {
       runInstructionDirty.value = false
       requireChanges.value = DEFAULT_REQUIRE_CHANGES
       startFreshSession.value = false
+      harnessKey.value = props.issueCurrentHarness
+        ?? props.issueDefaultHarness
+        ?? effectiveWorkerProfile.value?.default_harness_key
+        ?? 'claude'
       scheduleType.value = 'now'
       scheduledAt.value = null
+      scheduleWindow.value = null
       void loadScheduleContext()
+      void loadCreateScheduleWindow()
     }
     usageLimitDetail.value = null
     taskModeErrorVisible.value = false
@@ -1124,9 +1502,10 @@ function getDefaultRunInstructionTemplate(mode: 'execute' | 'plan' | null): stri
   if (!mode) return ''
   const profile = effectiveWorkerProfile.value
   if (profile) {
-    return mode === 'plan'
+    const profileTemplate = mode === 'plan'
       ? profile.default_plan_run_instruction_template
       : profile.default_execute_run_instruction_template
+    if (profileTemplate) return profileTemplate
   }
   return runInstructionDefaults.value?.[mode].content ?? ''
 }
@@ -1141,10 +1520,20 @@ function toggleExecutionEnvironment() {
 
 function restoreExecutionEnvironmentDefaults() {
   selectedProviderId.value = null
+  providerAutoAdjusted.value = false
+  providerAutoAdjustSource = undefined
+  providerAutoAdjustedForHarness = null
   handleSkillInheritanceUpdate(true)
   if (!executionEnvironmentMissing.value) {
     executionEnvironmentExpanded.value = false
   }
+}
+
+function handleProviderChange(value: number | null) {
+  selectedProviderId.value = value
+  providerAutoAdjusted.value = false
+  providerAutoAdjustSource = undefined
+  providerAutoAdjustedForHarness = null
 }
 
 function handleSkillInheritanceUpdate(value: boolean) {
@@ -1199,8 +1588,48 @@ function isScheduleDateDisabled(timestamp: number): boolean {
   const today = new Date()
   candidate.setHours(0, 0, 0, 0)
   today.setHours(0, 0, 0, 0)
-  return candidate.getTime() < today.getTime()
+  if (candidate.getTime() < today.getTime()) return true
+  const window = scheduleWindow.value
+  if (!window) return false
+  if (window.has_valid_window === false) return true
+  const dayStart = new Date(timestamp)
+  dayStart.setHours(0, 0, 0, 0)
+  const dayEnd = dayStart.getTime() + 24 * 60 * 60 * 1000 - 1
+  if (window.min_scheduled_at) {
+    const min = parseUtcDate(window.min_scheduled_at).getTime()
+    if (dayEnd < min) return true
+  }
+  if (window.max_scheduled_at) {
+    const max = parseUtcDate(window.max_scheduled_at).getTime()
+    if (dayStart.getTime() > max) return true
+  }
+  return false
 }
+
+const isTimeDisabled = computed(() => buildScheduleTimeDisabled(scheduleWindow.value))
+
+async function loadCreateScheduleWindow() {
+  scheduleWindow.value = null
+  if (props.mode !== 'create' || !props.issueId) return
+  try {
+    scheduleWindow.value = await getTaskScheduleConstraints({ issue_id: props.issueId })
+  } catch {
+    scheduleWindow.value = null
+  }
+}
+
+const createScheduleConstraintHint = computed(() => {
+  const window = scheduleWindow.value
+  if (!window || window.has_valid_window === false) {
+    return window?.has_valid_window === false
+      ? t('scheduleConflict.noValidWindow')
+      : null
+  }
+  if (window.min_scheduled_at && window.min_source_task_id != null) {
+    return t('createTask.scheduleFloorNotBefore', { source: window.min_source_task_id })
+  }
+  return null
+})
 
 const {
   handleCreate,
@@ -1217,6 +1646,7 @@ const {
   startFreshSession,
   taskModeErrorVisible,
   selectedProviderId,
+  harnessKey,
   scheduleType,
   scheduledAt,
   runInstructionTemplate,
@@ -1238,6 +1668,10 @@ onMounted(() => {
   void loadExecutionOptions()
   void loadTemplates()
   void loadRunInstructionDefaults()
+})
+
+onBeforeUnmount(() => {
+  if (copiedSkillTimer) clearTimeout(copiedSkillTimer)
 })
 </script>
 
@@ -1945,6 +2379,16 @@ onMounted(() => {
   overflow: hidden;
 }
 
+.schedule-detail-panel__constraint {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(32, 128, 240, 0.06);
+  color: rgba(29, 78, 216, 0.9);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 /* Execution environment */
 .execution-environment {
   width: 100%;
@@ -2096,18 +2540,35 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+  align-items: start;
 }
 
 .execution-environment__field {
   display: grid;
   gap: 5px;
   min-width: 0;
+  align-content: start;
+}
+
+.execution-environment__field :deep(.n-input),
+.execution-environment__field :deep(.n-select) {
+  height: 34px;
+}
+
+.execution-environment__field :deep(.n-base-selection) {
+  min-height: 34px;
 }
 
 .execution-environment__field > span {
   color: var(--n-text-color-3);
   font-size: 11px;
   line-height: 16px;
+}
+
+.execution-environment__field-hint {
+  color: var(--n-text-color-3);
+  font-size: 10px;
+  line-height: 14px;
 }
 
 .execution-environment__skills {
@@ -2361,4 +2822,208 @@ onMounted(() => {
   font-size: 13px;
   flex-wrap: wrap;
 }
+</style>
+
+<style>
+.provider-option-label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 0;
+  line-height: 1.35;
+}
+
+.provider-option-label__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: rgba(15, 23, 42, 0.88);
+}
+
+.provider-option-label__protocol {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 1px 7px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.07);
+  color: rgba(15, 23, 42, 0.6);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.task-provider-select .n-base-selection-input__content .provider-option-label {
+  display: block;
+  padding: 0;
+  line-height: 1.5;
+}
+
+.task-provider-select .n-base-selection-input__content .provider-option-label__name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-provider-select .n-base-selection-input__content .provider-option-label__protocol {
+  display: none;
+}
+
+.task-provider-select-menu .n-base-select-option {
+  min-height: 50px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+/* Skill option / tag copy + hover description (render-function content, unscoped) */
+.skill-option {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--n-option-height, 36px);
+  padding: 6px 12px;
+  position: relative;
+  border-radius: var(--n-border-radius, 3px);
+  cursor: pointer;
+}
+
+/* Full-row hover highlight — the naive-ui node is shrink-wrapped to the name, so
+   the hover state must live on the wrapper to keep the whole row hittable. */
+.skill-option:hover,
+.skill-option:focus-within,
+.skill-option--pending {
+  background-color: var(--n-option-color-pending, rgba(0, 0, 0, 0.05));
+}
+
+.skill-option__name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.skill-option__name {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* Shrink the naive-ui option node to its label so the copy button sits next to
+   the name. `padding: 0` drops the reserved checkmark slot so the node does not
+   widen on select; the naive-ui checkmark itself is hidden (see below) in favor
+   of our own `.skill-option__check` rendered as a flex sibling. */
+.skill-option__name .n-base-select-option {
+  display: inline-flex;
+  width: auto;
+  max-width: 100%;
+  min-width: 0;
+  min-height: auto;
+  padding: 0;
+}
+
+/* The selected node paints its own inset background via `::before`. The wrapper
+   owns hover/focus feedback so the highlight stays aligned to the whole row. */
+.skill-option__name .n-base-select-option::before {
+  display: none;
+}
+
+/* Hide the naive-ui checkmark (absolute, right-aligned) — the selected state is
+   shown by our own `.skill-option__check`, which is a normal flex item so it can
+   never be painted over by the node's selected background. */
+.skill-option__name .n-base-select-option__check {
+  display: none;
+}
+
+.skill-option__actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* Selected-state checkmark stays in a distinct trailing slot after copy feedback. */
+.skill-option__check {
+  flex: 0 0 auto;
+  color: var(--n-option-check-color, #18a058);
+}
+
+.skill-option__desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--n-text-color-3, #8a8f98);
+  font-size: 11px;
+  line-height: 1.4;
+  width: 100%;
+}
+
+.skill-option__copy,
+.skill-tag__copy {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--n-text-color-3, #8a8f98);
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.skill-option__copy:hover,
+.skill-tag__copy:hover {
+  color: var(--n-primary-color, #18a058);
+  background: rgba(128, 128, 128, 0.12);
+}
+
+.skill-option__copy:focus-visible,
+.skill-tag__copy:focus-visible {
+  outline: 2px solid var(--n-primary-color, #18a058);
+  outline-offset: 1px;
+}
+
+.skill-option__copy--copied,
+.skill-tag__copy--copied {
+  color: var(--n-primary-color, #18a058);
+  background: rgba(24, 160, 88, 0.1);
+}
+
+.skill-option__copy--copied:hover,
+.skill-tag__copy--copied:hover {
+  background: rgba(24, 160, 88, 0.16);
+}
+
+.execution-environment__skills .n-tag__content {
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+}
+
+.skill-tag__name {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 </style>

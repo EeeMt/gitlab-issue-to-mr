@@ -166,6 +166,14 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
     db.flush = AsyncMock()
     db.get = AsyncMock(return_value=None)
     db.refresh = AsyncMock()
+
+    async def _mock_execute(statement, *args, **kwargs):
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_result.scalars.return_value.all.return_value = []
+        return mock_result
+
+    db.execute = AsyncMock(side_effect=_mock_execute)
     bundle = SimpleNamespace(
         digest="d" * 64,
         contract_version="codify.worker.harness/v1",
@@ -242,6 +250,249 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
     assert worker.docker.create_container.call_args.kwargs["volumes"][
         "/opt/codify/worker-kits/0.1.0-linux-amd64/nix/store"
     ] == {"bind": "/nix/store", "mode": "ro"}
+
+
+def _kit_runtime_and_settings():
+    runtime = TaskWorkerRuntime(
+        image="custom-worker:latest",
+        runtime_mode="mounted_kit",
+        worker_kit_version="0.1.0",
+        worker_kit_path="/opt/codify/worker-kits/0.1.0-linux-amd64",
+        docker_host="tcp://worker:2376",
+        codegraph_enabled=True,
+        volume_mounts=[{"host_path": "/cache", "container_path": "/cache", "mode": "rw"}],
+        environment={"CUSTOM_ENV": "value"},
+        pre_script="echo pre",
+        post_script="echo post",
+    )
+    settings = SimpleNamespace(
+        worker_image="old-worker:latest",
+        worker_skip_image_pull=False,
+        worker_network="bridge",
+        worker_runtime_readiness_ttl_seconds=900,
+    )
+    return runtime, settings
+
+
+def _kit_failure_execute_fixtures(runtime, settings, tmp_path):
+    task = MagicMock()
+    task.id = 12
+    task.project_id = 100
+    task.ci_failure_run_id = None
+    task.trigger_source = "manual"
+    task.rendered_prompt = "Prompt"
+    task.status = TaskStatus.RUNNING
+    task.cancel_requested_at = None
+
+    issue = MagicMock()
+    issue.id = 1
+    issue.merge_request_iid = None
+    issue.merge_request_url = None
+    issue.target_branch = "main"
+
+    worker = MagicMock()
+    worker.gitlab.ensure_project_label = MagicMock()
+    worker._create_mr_if_needed = MagicMock(return_value=(None, None))
+    worker._build_previous_task_summaries = AsyncMock(return_value="Previous summary")
+    worker._prepare_container_inputs = AsyncMock(return_value=({"TASK_ID": "12"}, "main"))
+    worker._build_container_volumes = MagicMock(
+        return_value={"/cache": {"bind": "/cache", "mode": "rw"}}
+    )
+    worker._get_container_name = MagicMock(return_value="codify-12-issue1")
+    worker.docker.pull_image = MagicMock()
+    worker.docker.put_archive = MagicMock()
+    worker.docker.start_container = MagicMock()
+
+    db = MagicMock()
+    db.commit = AsyncMock()
+    db.flush = AsyncMock()
+    db.get = AsyncMock(return_value=None)
+    db.refresh = AsyncMock()
+
+    async def _mock_execute(statement, *args, **kwargs):
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_result.scalars.return_value.all.return_value = []
+        return mock_result
+
+    db.execute = AsyncMock(side_effect=_mock_execute)
+    bundle = SimpleNamespace(
+        digest="d" * 64,
+        contract_version="codify.worker.harness/v1",
+        manifest={
+            "archive_manifest_digest": "m" * 64,
+            "adapters": {"claude": {"version": "1.0.0", "digest": "a" * 64}},
+        },
+        bundle_bytes=b"runtime-bundle",
+    )
+    attempt = SimpleNamespace(
+        attempt_id="task-12-attempt-1",
+        harness_key="claude",
+        adapter_version="1.0.0",
+    )
+    return worker, db, task, issue, bundle, attempt
+
+
+@pytest.mark.asyncio
+async def test_create_execute_container_missing_bind_source_raises_structured_kit_error(
+    tmp_path,
+):
+    """F2 §13.4: a create-time bind-source-missing error re-probes the Kit and,
+    when the Kit is gone, fails with a structured unavailable error."""
+    from app.core.worker_runtime_readiness import WorkerRuntimeUnavailableError
+
+    runtime, settings = _kit_runtime_and_settings()
+    worker, db, task, issue, bundle, attempt = _kit_failure_execute_fixtures(
+        runtime, settings, tmp_path
+    )
+    worker.docker.create_container.side_effect = RuntimeError(
+        "Error response from daemon: create command failed: "
+        "bind source path does not exist: /opt/codify/worker-kits/0.1.0-linux-amd64"
+    )
+    recheck = AsyncMock(
+        return_value=WorkerRuntimeUnavailableError(
+            failure_code="worker_kit_not_found",
+            failure_message="Worker Kit directory does not exist on the Docker host",
+        )
+    )
+
+    with (
+        patch(
+            "app.core.worker_task_lifecycle.load_task_worker_runtime",
+            new=AsyncMock(return_value=runtime),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.build_issue_workspace_paths",
+            return_value=SimpleNamespace(issue_root=str(tmp_path)),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.load_bound_runtime_bundle",
+            new=AsyncMock(return_value=bundle),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.create_task_attempt",
+            new=AsyncMock(return_value=attempt),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.recheck_runtime_on_container_error",
+            new=recheck,
+        ),
+    ):
+        with pytest.raises(WorkerRuntimeUnavailableError) as exc_info:
+            await create_execute_container(
+                worker,
+                db,
+                settings=settings,
+                task=task,
+                issue=issue,
+                sudo_gl=None,
+            )
+
+    assert exc_info.value.failure_code == "worker_kit_not_found"
+    recheck.assert_awaited_once()
+    assert recheck.await_args.kwargs["worker_kit_path"] == (
+        "/opt/codify/worker-kits/0.1.0-linux-amd64"
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_execute_container_kit_error_recheck_ready_keeps_original_error(
+    tmp_path,
+):
+    """F2 §13.4: when the re-probe keeps ready, the original create error is kept
+    as a Profile/image runtime error instead of a structured Kit error."""
+    runtime, settings = _kit_runtime_and_settings()
+    worker, db, task, issue, bundle, attempt = _kit_failure_execute_fixtures(
+        runtime, settings, tmp_path
+    )
+    original_error = RuntimeError(
+        "Error response from daemon: create command failed: "
+        "bind source path does not exist: /opt/codify/worker-kits/0.1.0-linux-amd64"
+    )
+    worker.docker.create_container.side_effect = original_error
+    recheck = AsyncMock(return_value=original_error)
+
+    with (
+        patch(
+            "app.core.worker_task_lifecycle.load_task_worker_runtime",
+            new=AsyncMock(return_value=runtime),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.build_issue_workspace_paths",
+            return_value=SimpleNamespace(issue_root=str(tmp_path)),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.load_bound_runtime_bundle",
+            new=AsyncMock(return_value=bundle),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.create_task_attempt",
+            new=AsyncMock(return_value=attempt),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.recheck_runtime_on_container_error",
+            new=recheck,
+        ),
+    ):
+        with pytest.raises(RuntimeError, match="bind source path does not exist"):
+            await create_execute_container(
+                worker,
+                db,
+                settings=settings,
+                task=task,
+                issue=issue,
+                sudo_gl=None,
+            )
+
+    recheck.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_create_execute_container_non_kit_error_does_not_recheck(tmp_path):
+    """F2: an unrelated create error (image/network) must not trigger the Kit
+    re-probe and must propagate unchanged."""
+    runtime, settings = _kit_runtime_and_settings()
+    worker, db, task, issue, bundle, attempt = _kit_failure_execute_fixtures(
+        runtime, settings, tmp_path
+    )
+    worker.docker.create_container.side_effect = RuntimeError(
+        "Error response from daemon: image 'custom-worker:latest' not found"
+    )
+    recheck = AsyncMock()
+
+    with (
+        patch(
+            "app.core.worker_task_lifecycle.load_task_worker_runtime",
+            new=AsyncMock(return_value=runtime),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.build_issue_workspace_paths",
+            return_value=SimpleNamespace(issue_root=str(tmp_path)),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.load_bound_runtime_bundle",
+            new=AsyncMock(return_value=bundle),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.create_task_attempt",
+            new=AsyncMock(return_value=attempt),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.recheck_runtime_on_container_error",
+            new=recheck,
+        ),
+    ):
+        with pytest.raises(RuntimeError, match="image 'custom-worker:latest' not found"):
+            await create_execute_container(
+                worker,
+                db,
+                settings=settings,
+                task=task,
+                issue=issue,
+                sudo_gl=None,
+            )
+
+    recheck.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -482,6 +733,48 @@ async def test_failure_handler_defers_when_container_cannot_be_stopped():
     assert task.status == TaskStatus.RUNNING
     assert task.container_id == "container-1"
     db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_failure_handler_renders_worker_runtime_unavailable_as_structured_error():
+    import json as json_module
+
+    from app.core.worker_runtime_readiness import WorkerRuntimeUnavailableError
+
+    task = SimpleNamespace(
+        id=12,
+        status=TaskStatus.RUNNING,
+        completed_at=None,
+        container_id=None,
+        raw_logs_finalized_at=None,
+    )
+    worker = MagicMock()
+    worker._sanitize_sensitive_data.side_effect = lambda value: value
+    worker._send_failure_notifications = AsyncMock()
+    db = MagicMock()
+    db.commit = AsyncMock()
+
+    error = WorkerRuntimeUnavailableError(
+        failure_code="worker_kit_not_found",
+        failure_message="Worker Kit directory does not exist on the Docker host",
+    )
+    result = await fail_execute_task(
+        worker,
+        db,
+        task,
+        error,
+        had_existing_mr=False,
+        container=None,
+    )
+
+    assert result is False
+    assert task.status == TaskStatus.FAILED
+    payload = json_module.loads(task.error_message)
+    assert payload["code"] == "worker_runtime_unavailable"
+    assert payload["failure_code"] == "worker_kit_not_found"
+    assert "does not exist" in payload["failure_message"]
+    # The structured path never runs sanitize on a raw Docker string.
+    worker._sanitize_sensitive_data.assert_not_called()
 
 
 @pytest.mark.asyncio

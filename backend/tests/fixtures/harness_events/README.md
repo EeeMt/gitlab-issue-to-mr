@@ -31,6 +31,12 @@ CLI `0.146.0-alpha.3.1`. It was captured on Darwin/arm64 against DeepSeek using 
 invalid credentials or a loopback probe server. Every entry is marked
 `collection_state=sanitized-reviewed-real-probe`.
 
+Codex additionally has `turn_failed_after_completion`, a synthetic offline sample (marked
+`collection_state=synthetic-offline-contract-sample`) that pins the semantics that a
+`turn.failed` after the last completed turn is the harness terminal (the task fails). It is not a
+live capture because no provider credentials are available in the review environment; it is
+excluded from the strict real-probe audit (`CODIFY_REQUIRE_REAL_HARNESS_FIXTURES=1`).
+
 The sanitizer removes credentials, operator paths, correlation identifiers, reasoning signatures,
 and hidden reasoning content while preserving stable event and tool relationships. In the observed
 Codex stream, context compaction is exposed through a CLI advisory item rather than a dedicated

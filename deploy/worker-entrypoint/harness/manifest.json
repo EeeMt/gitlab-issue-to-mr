@@ -5,7 +5,7 @@
   "orchestration_version": "1.0.0",
   "adapters": {
     "claude": {
-      "version": "1.0.0",
+      "version": "1.0.1",
       "cli_version_range": ">=2.1.33 <3.0.0",
       "provider_protocols": ["anthropic-messages"],
       "capabilities": {
@@ -16,6 +16,21 @@
         "usage_cost": true,
         "run_text": true,
         "codegraph": true,
+        "sandbox_mode": "container-boundary"
+      }
+    },
+    "codex": {
+      "version": "1.0.0",
+      "cli_version_range": ">=0.146.0 <0.160.0",
+      "provider_protocols": ["openai-responses"],
+      "capabilities": {
+        "resume": true,
+        "task_skills": true,
+        "max_turns": false,
+        "usage_tokens": true,
+        "usage_cost": true,
+        "run_text": false,
+        "codegraph": false,
         "sandbox_mode": "container-boundary"
       }
     }

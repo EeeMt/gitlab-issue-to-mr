@@ -11,6 +11,7 @@ const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
     getTask: vi.fn<() => Promise<any>>(),
     getTaskModelServiceSummary: vi.fn<() => Promise<any>>(),
     getTaskWorkerRuntimeSummary: vi.fn<() => Promise<any>>(),
+    verifyTaskWorkerRuntime: vi.fn<() => Promise<any>>(),
     getTaskLogs: vi.fn<() => Promise<any[]>>(),
     getTaskContainerLogs: vi.fn<() => Promise<any>>(),
     getTaskStats: vi.fn<() => Promise<any>>(),
@@ -68,6 +69,7 @@ vi.mock('../api', () => ({
   getTask: mockApi.getTask,
   getTaskModelServiceSummary: mockApi.getTaskModelServiceSummary,
   getTaskWorkerRuntimeSummary: mockApi.getTaskWorkerRuntimeSummary,
+  verifyTaskWorkerRuntime: mockApi.verifyTaskWorkerRuntime,
   getTaskLogs: mockApi.getTaskLogs,
   getTaskContainerLogs: mockApi.getTaskContainerLogs,
   getTaskStats: mockApi.getTaskStats,
@@ -604,6 +606,94 @@ describe('TaskView', () => {
     await nextTick()
   }
 
+  it('shows a blocked runtime recovery card and admin actions for unavailable Kit tasks', async () => {
+    const { authState, isAdmin } = await import('../auth')
+    authState.user = { id: 1, username: 'admin' } as any
+    ;(isAdmin as unknown as { value: boolean }).value = true
+    ;(mockApi.getTaskWorkerRuntimeSummary as Mock).mockResolvedValue({
+      snapshot_available: true,
+      worker_profile_id: 1,
+      worker_profile_name: 'Mounted Kit',
+      image: 'codify-worker:latest',
+      runtime_mode: 'mounted_kit',
+      worker_kit_version: '0.4.0',
+      worker_kit_path: '/opt/codify/worker-kits/0.4.0',
+      codegraph_enabled: false,
+      mounts: [],
+      environment_variables: [],
+      skills: [],
+      skill_selection_source: 'profile',
+      pre_script_configured: false,
+      post_script_configured: false,
+      snapshot_created_at: '2026-08-15T00:00:00Z'
+    })
+    ;(mockApi.verifyTaskWorkerRuntime as Mock).mockResolvedValue({
+      ok: true,
+      runtime_readiness: {
+        status: 'ready',
+        checked_at: '2026-08-15T01:00:00Z',
+        ready_until: '2026-08-15T01:05:00Z'
+      }
+    })
+
+    await mountComponent({
+      waiting_reason: 'worker_runtime_unavailable',
+      worker_runtime_mode: 'mounted_kit',
+      worker_kit_version: '0.4.0',
+      runtime_failure_message: 'Kit manifest is missing',
+      runtime_checked_at: '2026-08-15T00:30:00Z'
+    })
+
+    const blocker = wrapper.find('[data-testid="worker-runtime-blocker"]')
+    expect(blocker.exists()).toBe(true)
+    expect(blocker.text()).toContain('0.4.0')
+    expect(blocker.text()).toContain('/opt/codify/worker-kits/0.4.0')
+    expect(blocker.text()).toContain('Kit manifest is missing')
+    expect(blocker.text()).toContain('taskView.recheckTaskRuntime')
+    expect(blocker.text()).toContain('taskView.cancelBlockedTask')
+    const executeButton = wrapper.find('.task-actions__command--primary')
+    expect(executeButton.attributes('disabled')).toBeDefined()
+    expect(executeButton.attributes('title')).toBe('taskView.executeBlockedByWorkerRuntime')
+
+    await (wrapper.vm as any).handleVerifyTaskRuntime()
+    expect(mockApi.verifyTaskWorkerRuntime).toHaveBeenCalledWith(1)
+    expect(mockMessage.success).toHaveBeenCalledWith('taskView.taskRuntimeReady')
+  })
+
+  it('shows ordinary users a safe recovery hint without administrator controls', async () => {
+    ;(mockApi.getTaskWorkerRuntimeSummary as Mock).mockResolvedValue({
+      snapshot_available: true,
+      worker_profile_id: 1,
+      worker_profile_name: 'Mounted Kit',
+      image: 'codify-worker:latest',
+      runtime_mode: 'mounted_kit',
+      worker_kit_version: '0.4.0',
+      worker_kit_path: '/opt/codify/worker-kits/0.4.0',
+      codegraph_enabled: false,
+      mounts: [],
+      environment_variables: [],
+      skills: [],
+      skill_selection_source: 'profile',
+      pre_script_configured: false,
+      post_script_configured: false,
+      snapshot_created_at: '2026-08-15T00:00:00Z'
+    })
+
+    await mountComponent({
+      waiting_reason: 'worker_runtime_unavailable',
+      worker_runtime_mode: 'mounted_kit',
+      worker_kit_version: '0.4.0',
+      runtime_failure_message: 'Worker Kit is not ready'
+    })
+
+    const blocker = wrapper.find('[data-testid="worker-runtime-blocker"]')
+    expect(blocker.text()).toContain('taskView.workerRuntimeUnavailableUserHint')
+    expect(blocker.text()).not.toContain('taskView.recheckTaskRuntime')
+    expect(blocker.text()).not.toContain('taskView.cancelBlockedTask')
+    expect(blocker.text()).not.toContain('tcp://')
+    expect(blocker.text()).not.toContain('tls')
+  })
+
   it('does not let a stale task request overwrite a newly routed task', async () => {
     await mountComponent()
 
@@ -756,6 +846,18 @@ describe('TaskView', () => {
       expect(wrapper.find('[data-testid="task-actions-card"]').exists()).toBe(false)
     })
 
+    it('shows the harness engine used by the task in the overview', async () => {
+      await mountComponent({ harness_key: 'codex' })
+
+      const harnessRow = wrapper.find('[data-testid="task-harness-row"]')
+      expect(harnessRow.exists()).toBe(true)
+      expect(harnessRow.find('.metadata-label-icon').exists()).toBe(true)
+      expect(harnessRow.find('.task-mode-chip__icon').exists()).toBe(true)
+      expect(harnessRow.text()).toContain('taskView.harness')
+      expect(harnessRow.text()).toContain('taskView.harnessCodex')
+      expect(harnessRow.text()).not.toContain('taskView.harnessClaude')
+    })
+
     it('loads worker and model-service runtime summaries only after each popover is opened', async () => {
       ;(mockApi.getTaskModelServiceSummary as Mock).mockResolvedValue({
         configuration_source: 'execution_snapshot',
@@ -871,6 +973,54 @@ describe('TaskView', () => {
       expect(mockApi.getTaskWorkerRuntimeSummary).toHaveBeenCalledOnce()
     })
 
+    it('shows worker skill names with their full description in hover tooltips', async () => {
+      ;(mockApi.getTaskWorkerRuntimeSummary as Mock).mockResolvedValue({
+        snapshot_available: true,
+        worker_profile_id: 3,
+        worker_profile_name: 'Java 21 Maven Worker',
+        image: 'registry.example.com/codify/worker-java21-maven:2026.07',
+        runtime_mode: 'mounted_kit',
+        worker_kit_version: '2026.07.18',
+        worker_kit_path: '/srv/codify/worker-kits/2026.07.18',
+        codegraph_enabled: true,
+        mounts: [],
+        environment_variables: [],
+        skills: [
+          { id: 11, name: 'review', description: 'Reviews every change for consistency with repository conventions before the run is considered complete.' },
+          { id: 12, name: 'test', description: 'Runs the focused test suite.' },
+        ],
+        skill_selection_source: 'task',
+        pre_script_configured: false,
+        post_script_configured: false,
+        snapshot_created_at: '2026-04-01T10:00:00Z',
+      })
+
+      await mountComponent({
+        worker_profile_id: 3,
+        worker_profile_name: 'Java 21 Maven Worker',
+        worker_image: 'registry.example.com/codify/worker-java21-maven:2026.07',
+      })
+
+      const workerTrigger = wrapper.find('.metadata-summary-trigger--worker')
+      vi.spyOn(workerTrigger.element, 'getBoundingClientRect').mockReturnValue({
+        top: 500,
+        bottom: 532,
+      } as DOMRect)
+      await workerTrigger.trigger('click')
+      await flushPromises()
+
+      const workerPopover = wrapper.find('[data-testid="worker-summary-popover"]')
+      const skillEntries = workerPopover.findAll('.metadata-summary-popover__entry-name')
+      expect(skillEntries).toHaveLength(2)
+      expect(skillEntries[0].text()).toBe('review')
+      expect(workerPopover.text()).toContain('review')
+      expect(workerPopover.text()).toContain('Runs the focused test suite.')
+
+      const tooltips = workerPopover.findAll('.n-tooltip')
+      expect(tooltips.length).toBeGreaterThan(0)
+      expect(tooltips.some(t => t.text().includes('Reviews every change for consistency'))).toBe(true)
+    })
+
     it('keeps a failed model-service summary request retryable inside the popover', async () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
       ;(mockApi.getTaskModelServiceSummary as Mock)
@@ -940,13 +1090,20 @@ describe('TaskView', () => {
     it('should display error message for failed tasks', async () => {
       await mountComponent({
         status: 'failed',
-        error_message: 'Task failed due to network error'
+        error_message: 'Task failed due to network error',
+        failure_kind: 'network_error',
+        failure_message: 'Connection refused by provider'
       })
 
       await vi.waitFor(() => {
-        return wrapper.find('.error-message').exists()
+        return wrapper.find('.error-summary').exists()
       })
 
+      expect(wrapper.find('.error-kind-chip').text()).toContain('network_error')
+      expect(wrapper.find('.error-summary__message').text()).toContain(
+        'Connection refused by provider'
+      )
+      await wrapper.find('.error-raw__toggle').trigger('click')
       expect(wrapper.find('.error-message').text()).toContain('Task failed due to network error')
     })
   })
@@ -2286,6 +2443,38 @@ describe('TaskView', () => {
       createDrawer!.vm.$emit('created', createMockTask({ id: 99, issue_id: 10 }))
       await flushPromises()
       expect(router.currentRoute.value.path).toBe('/tasks/99')
+    })
+
+    it('passes the issue harness lineage into the create task drawer', async () => {
+      await mountComponent({
+        id: 1,
+        issue_id: 10,
+        status: 'completed',
+        created_at: '2026-04-01T10:00:00Z',
+        completed_at: '2026-04-01T10:05:00Z',
+      })
+      ;(mockApi.getIssue as Mock).mockResolvedValue({
+        tasks: [
+          createMockTask({ id: 1, issue_id: 10, created_at: '2026-04-01T10:00:00Z' }),
+        ],
+        description: 'Issue context for follow-up',
+        status: 'open',
+        claude_session_id: 'legacy-session',
+        current_harness: 'codex',
+        default_harness_key: 'claude',
+      })
+
+      await wrapper.vm.refreshIssueTasks(1)
+      await flushPromises()
+      wrapper.vm.showCreateDrawer = true
+      await nextTick()
+
+      const createDrawer = wrapper
+        .findAllComponents({ name: 'TaskFormDrawer' })
+        .find((drawer) => drawer.props('mode') === 'create')
+      expect(createDrawer).toBeTruthy()
+      expect(createDrawer!.props('issueCurrentHarness')).toBe('codex')
+      expect(createDrawer!.props('issueDefaultHarness')).toBe('claude')
     })
 
     it('does not enable the append shortcut when a newer issue task exists', async () => {

@@ -172,23 +172,24 @@ const BOOLEAN_FILTER_VALUES = ['true', 'false'] as const
 
 function initiatorOptionLabel(option: InitiatorFilterOption): string {
   if (option.kind === 'unknown') return t('filter.unknownInitiator')
-  if (option.display_name && option.username && option.display_name !== option.username) {
-    return `${option.display_name} (@${option.username})`
-  }
   return option.username || t('filter.unknownInitiator')
 }
 
 function creatorOptions() {
-  const options: { label: string; value: string; count?: number }[] = initiatorFilterOptions.value.map((option) => ({
+  const options: { label: string; value: string; truncateLabel?: boolean }[] = initiatorFilterOptions.value.map((option) => ({
     label: initiatorOptionLabel(option),
     value: option.value,
-    count: option.count,
+    truncateLabel: true,
   }))
   const selected = filterState.filters.value.initiator
   if (Array.isArray(selected)) {
     for (const value of selected) {
       if (!options.some((option) => option.value === value)) {
-        options.push({ label: String(value).replace(/^(?:username|snapshot):/, ''), value })
+        options.push({
+          label: String(value).replace(/^(?:username|snapshot):/, ''),
+          value,
+          truncateLabel: true,
+        })
       }
     }
   }

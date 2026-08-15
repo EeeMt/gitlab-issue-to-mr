@@ -61,36 +61,91 @@ async def cancel_task(
     current_user: User | None = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
-    """Cancel a task and finalize its authoritative raw log when possible."""
+    """Cancel a task and finalize its authoritative raw log when possible.
+
+    Implements the two-phase cancel protocol from spec §6.7:
+
+    - Phase A: lock the Issue row, then lock the Task row and re-read the
+      authoritative status. ``PENDING``/``QUEUED`` are CAS'd directly to
+      ``CANCELLED``; ``RUNNING`` only persists ``cancel_requested_at`` and keeps
+      its owner lock. The container is stopped only after this commit.
+    - Phase B: re-lock Issue then Task and re-read; the owner lock is released
+      only when the Task is terminal AND ``container_id`` is null. State cached
+      before Phase A is never used to decide the transition or the release.
+    """
+    from sqlalchemy import select
+
+    from app.models import Issue, Task
+
     task = await get_task_with_access_check(task_id, db, access_scope, current_user)
     validate_task_status_for_cancel(task)
-
     settings = get_effective_settings()
-    container_name = f"{settings.worker_container_prefix}-{task_id}-issue{task.issue_id}"
-    task_container_id = getattr(task, "container_id", None)
-    if not isinstance(task_container_id, str) or not task_container_id.strip():
-        task_container_id = None
-    container_reference = task_container_id or container_name
-    container = None
+    issue_id = task.issue_id
+
+    # --- Phase A: Issue lock -> Task lock -> re-read authoritative status ----
+    await db.execute(select(Issue).where(Issue.id == issue_id).with_for_update())
+    task = (
+        await db.execute(
+            select(Task)
+            .where(Task.id == task_id)
+            .with_for_update()
+            # get_task_with_access_check already loaded this row into the session
+            # identity map; without populate_existing the FOR UPDATE re-read returns
+            # the stale cached object and could CAS a concurrently-claimed RUNNING
+            # task straight to CANCELLED (§6.7: cached state must never decide the
+            # transition).
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Task {task_id} not found",
+        )
+    validate_task_status_for_cancel(task)
+
+    container_to_stop = None
+    docker = None
     raw_console_log: bytes | None = None
-    container_absent = task.status != TaskStatus.RUNNING and task_container_id is None
-    logger.info(
-        "Cancellation requested for task %s (status=%s, container=%s)",
-        task_id,
-        task.status.value,
-        container_reference,
-    )
-    if task.status == TaskStatus.RUNNING and task.cancel_requested_at is None:
-        task.cancel_requested_at = utcnow()
+    container_absent = False
+
+    if task.status in (TaskStatus.PENDING, TaskStatus.QUEUED):
+        # No active worker owns a container for a PENDING/QUEUED Task: finalize
+        # directly as cancelled inside this transaction. These Tasks never hold
+        # the IssueExecutionLock, so Phase B's owner-conditioned release is a
+        # no-op for them.
+        task.status = TaskStatus.CANCELLED
+        task.completed_at = utcnow()
+        task.error_message = "Cancelled by user"
+        await db.commit()
+        container_absent = True
+        logger.info(
+            "Cancelled PENDING/QUEUED task %s for issue %s",
+            task_id,
+            issue_id,
+        )
+    else:
+        # RUNNING: persist only the cancellation intent and keep the owner lock
+        # until the worker finalizer converges the authoritative terminal.
+        if task.cancel_requested_at is None:
+            task.cancel_requested_at = utcnow()
         await db.commit()
         await db.refresh(task)
         logger.info(
-            "Persisted cancellation intent for running task %s before stopping container %s",
+            "Persisted cancellation intent for running task %s before stopping container",
             task_id,
-            container_reference,
         )
 
-    if not container_absent:
+        container_name = f"{settings.worker_container_prefix}-{task_id}-issue{issue_id}"
+        task_container_id = getattr(task, "container_id", None)
+        if not isinstance(task_container_id, str) or not task_container_id.strip():
+            task_container_id = None
+        container_reference = task_container_id or container_name
+        container = None
+        # RUNNING tasks always attempt container resolution (§6.7): when the
+        # worker has not yet published a stable ID the lookup still locates the
+        # container by its deterministic name, and a NotFound during bootstrap
+        # defers cancellation rather than releasing anything.
         try:
             docker, container, connection = await find_task_container(
                 db,
@@ -121,7 +176,8 @@ async def cancel_task(
                 )
             container_absent = True
             logger.info(
-                "Container %s for task %s is confirmed absent; completing cancellation",
+                "Container %s for task %s is confirmed absent; "
+                "the worker finalizer will converge the terminal state",
                 container_reference,
                 task_id,
             )
@@ -153,11 +209,16 @@ async def cancel_task(
                     "state is unknown; the task remains active"
                 ),
             ) from exc
+        container_to_stop = container
 
-    if container is not None:
+    if container_to_stop is not None:
         try:
-            await asyncio.to_thread(container.stop, timeout=10)
-            logger.info("Stopped container %s for cancelled task %s", container_reference, task_id)
+            await asyncio.to_thread(container_to_stop.stop, timeout=10)
+            logger.info(
+                "Stopped container %s for cancelled task %s",
+                container_reference,
+                task_id,
+            )
         except Exception as stop_error:  # noqa: BLE001
             logger.warning(
                 "Graceful stop failed for task %s container %s: %s; forcing stop",
@@ -166,7 +227,7 @@ async def cancel_task(
                 stop_error,
             )
             try:
-                await asyncio.to_thread(container.kill)
+                await asyncio.to_thread(container_to_stop.kill)
                 logger.info(
                     "Force-stopped container %s for task %s",
                     container_reference,
@@ -192,7 +253,7 @@ async def cancel_task(
         try:
             raw_console_log = await asyncio.to_thread(
                 docker.read_file_from_container,
-                container,
+                container_to_stop,
                 "/tmp/codify-runtime/console.log",
             )
         except Exception as log_error:  # noqa: BLE001
@@ -203,79 +264,71 @@ async def cancel_task(
                 log_error,
             )
 
-    task.status = TaskStatus.CANCELLED
-    task.completed_at = utcnow()
-    task.error_message = "Cancelled by user"
-    task.raw_logs_finalized_at = None
-    await db.commit()
-    await db.refresh(task)
-    logger.info(
-        "Committed cancellation for task %s after worker container convergence",
-        task_id,
-    )
-
-    raw_logs_finalized = container_absent
-    if raw_console_log is not None:
-        await persist_raw_log_snapshot(
-            db,
-            task_id=task_id,
-            content=raw_console_log,
+    # --- Phase B: re-lock Issue -> Task -> re-read, owner-conditioned release ---
+    await db.execute(select(Issue).where(Issue.id == issue_id).with_for_update())
+    task = (
+        await db.execute(
+            select(Task)
+            .where(Task.id == task_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
-        raw_logs_finalized = True
-
-    if not raw_logs_finalized:
-        await db.refresh(task, attribute_names=["raw_logs_finalized_at"])
-        raw_logs_finalized = task.raw_logs_finalized_at is not None
-    if raw_logs_finalized and task.raw_logs_finalized_at is None:
-        task.raw_logs_finalized_at = utcnow()
-    if container_absent and raw_logs_finalized:
-        task.container_id = None
-    await db.commit()
-
-    if container is not None and raw_logs_finalized:
-        try:
-            await asyncio.to_thread(container.remove, force=True, v=True)
-            logger.info(
-                "Removed container %s for cancelled task %s",
-                container_reference,
-                task_id,
+    ).scalar_one_or_none()
+    if task is not None:
+        raw_logs_finalized = container_absent
+        if raw_console_log is not None:
+            await persist_raw_log_snapshot(
+                db,
+                task_id=task_id,
+                content=raw_console_log,
             )
-        except Exception as remove_error:  # noqa: BLE001
-            logger.warning(
-                "Could not remove container for cancelled task %s: %s",
+            raw_logs_finalized = True
+
+        if not raw_logs_finalized:
+            await db.refresh(task, attribute_names=["raw_logs_finalized_at"])
+            raw_logs_finalized = task.raw_logs_finalized_at is not None
+        if raw_logs_finalized and task.raw_logs_finalized_at is None:
+            task.raw_logs_finalized_at = utcnow()
+        if container_absent and raw_logs_finalized:
+            task.container_id = None
+
+        # Only a Task that is truly terminal with no retained container may have
+        # its owner lock released. A RUNNING Task keeps the lock; the worker
+        # finalizer converges the terminal and clears the container reference.
+        if (
+            task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED)
+            and task.container_id is None
+        ):
+            await release_issue_execution_lock(
+                db,
+                issue_id=issue_id,
+                owner_task_id=task.id,
+            )
+            logger.info(
+                "Released issue %s execution lock for task %s (terminal, no container)",
+                issue_id,
                 task_id,
-                remove_error,
             )
         else:
-            task.container_id = None
-            await db.commit()
-    elif container is not None:
-        logger.error(
-            "Retaining container %s for cancelled task %s because raw logs were not finalized",
-            container_reference,
-            task_id,
-        )
-
-    if task.container_id is None:
-        await release_issue_execution_lock(db, issue_id=task.issue_id)
+            logger.warning(
+                "Keeping issue %s locked because task %s is not yet converged "
+                "(status=%s, container=%s)",
+                issue_id,
+                task_id,
+                task.status.value,
+                getattr(task, "container_id", None),
+            )
         await db.commit()
+        await db.refresh(task)
+        if task.status == TaskStatus.CANCELLED:
+            await notify_task_cancelled(task)
         logger.info(
-            "Released issue %s execution lock for cancelled task %s",
-            task.issue_id,
+            "Committed cancellation for task %s after worker container convergence",
             task_id,
         )
-    else:
-        logger.warning(
-            "Keeping issue %s locked because cancelled task %s retains container %s",
-            task.issue_id,
-            task_id,
-            task.container_id,
-        )
-    await notify_task_cancelled(task)
-    logger.info(f"Task {task_id} cancelled via API")
 
-    if task.issue_id is not None:
-        await maybe_update_issue_status(db, task.issue_id)
+    if issue_id is not None:
+        await maybe_update_issue_status(db, issue_id)
     return {"status": "success", "message": f"Task {task_id} cancelled"}
 
 
@@ -331,7 +384,14 @@ async def execute_task(
     current_user: User | None = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
-    """Trigger immediate execution of a pending task."""
+    """Trigger immediate execution of a pending task.
+
+    Execute-now only clears the Task's own ``scheduled_at``. A non-head Task
+    still waits for its active predecessors; the response reports that blocking
+    fact instead of claiming the Task bypassed the Issue queue (§7.2).
+    """
+    from app.api.task_responses import compute_task_queue_contexts
+
     task = await get_task_with_access_check(task_id, db, access_scope, current_user)
     validate_task_status_for_execute(task)
 
@@ -340,11 +400,29 @@ async def execute_task(
     await db.commit()
     await db.refresh(task)
 
+    queue_contexts = await compute_task_queue_contexts(db, [task])
+    ctx = queue_contexts.get(task.id) or {}
+    queue_position = ctx.get("queue_position")
+
+    if queue_position is not None and queue_position > 1:
+        await notify_task_execute_now(task, previous_scheduled_at)
+        logger.info(
+            "Task %s cleared scheduled_at; still waits for predecessors",
+            task_id,
+        )
+        return {
+            "status": "success",
+            "message": "Task will run after its predecessors complete",
+            "queue_position": queue_position,
+            "blocked_by_task_id": ctx.get("blocked_by_task_id"),
+        }
+
     await notify_task_execute_now(task, previous_scheduled_at)
     logger.info(f"Task {task_id} scheduled for immediate execution")
     return {
         "status": "success",
         "message": f"Task {task_id} scheduled for immediate execution",
+        "queue_position": queue_position,
     }
 
 
@@ -356,10 +434,58 @@ async def reschedule_task(
     current_user: User | None = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
-    """Update the execution time for a pending scheduled task."""
+    """Update the execution time for a pending scheduled task.
+
+    The new time must stay inside the Issue queue window: not before the latest
+    scheduled time of any earlier active Task and not after the earliest
+    scheduled time of any later active Task (§4.2). The window is re-validated
+    under the Issue row lock (before the Slot advisory lock, §6.3) so a
+    concurrent append or reschedule cannot submit a monotonic-order violation.
+    """
+    from sqlalchemy import select
+
+    from app.api.task_responses import (
+        apply_queue_context,
+        compute_task_queue_contexts,
+    )
+    from app.core.issue_task_order import (
+        IssueOrderIntegrityError,
+        ScheduleWindowConflict,
+        compute_schedule_window,
+        count_active_successors,
+        validate_schedule_time_locked,
+    )
+    from app.models import Issue
+
     task = await get_task_with_access_check(task_id, db, access_scope, current_user)
     validate_task_status_for_reschedule(task)
     normalized_scheduled = validate_scheduled_datetime_in_future(request.scheduled_datetime)
+
+    issue = (
+        await db.execute(select(Issue).where(Issue.id == task.issue_id).with_for_update())
+    ).scalar_one_or_none()
+    if issue is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Issue not found",
+        )
+    try:
+        await validate_schedule_time_locked(
+            db,
+            issue_id=issue.id,
+            scheduled_at=normalized_scheduled,
+            exclude_task_id=task.id,
+        )
+    except ScheduleWindowConflict as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=exc.detail,
+        ) from exc
+    except IssueOrderIntegrityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=exc.detail,
+        ) from exc
 
     from app.core.slot_capacity import check_slot_capacity, slot_full_detail_dict
 
@@ -373,6 +499,20 @@ async def reschedule_task(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=slot_full_detail_dict(slot_info),
+        )
+
+    # An active head that moves to a future time re-enters PENDING and keeps
+    # every active successor blocked behind it; report the blast radius (§7.3).
+    blocked_successor_count = 0
+    is_head = task.status == TaskStatus.QUEUED
+    if not is_head:
+        pre_contexts = await compute_task_queue_contexts(db, [task])
+        is_head = (pre_contexts.get(task.id) or {}).get("queue_position") == 1
+    if is_head:
+        blocked_successor_count = await count_active_successors(
+            db,
+            issue_id=issue.id,
+            task_id=task.id,
         )
 
     previous_scheduled_at = task.scheduled_at
@@ -394,8 +534,25 @@ async def reschedule_task(
         task_id,
         normalized_scheduled.isoformat(),
     )
-    return serialize_task(
+    response = serialize_task(
         task,
         await get_project_metadata(task.project_id),
         include_prompt_details=True,
     )
+    queue_contexts = await compute_task_queue_contexts(db, [task])
+    apply_queue_context(response, task.id, queue_contexts, current_user=current_user)
+    response["blocked_successor_count"] = blocked_successor_count
+    try:
+        response["schedule_constraints"] = await compute_schedule_window(
+            db,
+            issue_id=issue.id,
+            exclude_task_id=task.id,
+        )
+    except IssueOrderIntegrityError as exc:
+        # Ordering was verified under the lock moments ago; this is a defensive
+        # fail-closed projection for a racing legacy-NULL writer.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=exc.detail,
+        ) from exc
+    return response

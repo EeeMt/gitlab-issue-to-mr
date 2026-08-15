@@ -63,10 +63,20 @@ Session lookup uses at least:
 issue_id + harness_key + session_namespace
 ```
 
-`session_namespace` is a digest of Harness key, Endpoint fingerprint, authentication domain,
-workspace identity, and Adapter state major version. A session ID is opaque and is never converted
-or reused across domains. Invalid resume fails deterministically unless the Adapter contract for the
-frozen version explicitly records a safe new-session fallback; the v1 default is fail closed.
+`session_namespace` is a digest of Harness key, Endpoint fingerprint, and Adapter state major
+version. Two inputs the original design listed are intentionally covered elsewhere:
+
+- **workspace identity** is implied by `issue_id`, which already scopes the session row (and the
+  per-issue workspace); hashing it into the namespace would duplicate the isolation the lookup key
+  already provides.
+- **authentication domain** is captured by the Endpoint fingerprint's non-sensitive auth-scheme
+  fields (`provider_kind`, `wire_protocol`, `provider_driver`). The volatile credential (ref or
+  secret) is deliberately excluded so credential rotation does not reset a long-lived issue
+  conversation — a session transcript is not bound to a specific credential instance.
+
+A session ID is opaque and is never converted or reused across domains. Invalid resume fails
+deterministically unless the Adapter contract for the frozen version explicitly records a safe
+new-session fallback; the v1 default is fail closed.
 Claude Adapter `1.0.0` is the one documented compatibility exception: it preserves the pre-Adapter
 resume-not-found retry as a fresh session, retains the failed resume evidence in the same attempt,
 emits `diagnostic(code=resume_fallback)`, and returns the newly resolved opaque session ID. Other

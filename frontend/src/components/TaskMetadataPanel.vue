@@ -90,6 +90,23 @@
 
       <TaskRuntimeSummaryRows :task="task" />
 
+      <!-- Harness engine -->
+      <div v-if="task.harness_key" class="metadata-row" data-testid="task-harness-row">
+        <span class="metadata-label">
+          <n-icon size="14" class="metadata-label-icon"><CubeOutline /></n-icon>
+          {{ t('taskView.harness') }}
+        </span>
+        <span class="metadata-value">
+          <span
+            class="task-mode-chip"
+            :class="{ 'task-mode-chip--codex': task.harness_key === 'codex' }"
+          >
+            <n-icon size="15" class="task-mode-chip__icon"><CubeOutline /></n-icon>
+            <span>{{ harnessMeta }}</span>
+          </span>
+        </span>
+      </div>
+
       <!-- Task mode -->
       <div class="metadata-row">
         <span class="metadata-label">
@@ -230,7 +247,8 @@ import {
   RefreshOutline,
   ChatbubbleEllipsesOutline,
   CodeSlashOutline,
-  BulbOutline
+  BulbOutline,
+  CubeOutline
 } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import type { Task } from '../api'
@@ -267,6 +285,13 @@ const taskModeMeta = computed(() => {
     label: isPlan ? t('taskView.taskModePlan') : t('taskView.taskModeExecute'),
     modifierClass: isPlan ? 'task-mode-chip--plan' : 'task-mode-chip--execute'
   }
+})
+
+const harnessMeta = computed(() => {
+  const key = props.task.harness_key
+  if (key === 'codex') return t('taskView.harnessCodex')
+  if (key === 'claude') return t('taskView.harnessClaude')
+  return key || t('common.notAvailable')
 })
 
 const sessionModeText = computed(() =>
@@ -359,6 +384,7 @@ function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean 
 .metadata-label {
   display: inline-flex;
   align-items: center;
+  gap: 4px;
   font-size: 13px;
   color: var(--n-text-color-3, #999);
   white-space: nowrap;
@@ -423,6 +449,10 @@ function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean 
 
 .task-mode-chip--plan {
   --task-mode-chip-accent: #78716c;
+}
+
+.task-mode-chip--codex {
+  --task-mode-chip-accent: #2563eb;
 }
 
 .branch-flow {
@@ -672,8 +702,7 @@ function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean 
 }
 
 .metadata-label-icon {
-  vertical-align: middle;
-  margin-right: 3px;
+  flex: 0 0 auto;
   opacity: 0.65;
 }
 

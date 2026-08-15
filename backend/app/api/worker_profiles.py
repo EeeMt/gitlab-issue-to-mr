@@ -10,13 +10,19 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field, StrictInt, field_validator
+from pydantic import BaseModel, Field, StrictInt, field_validator, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import get_effective_settings
 from app.core.docker_client import DockerClientWrapper, resolve_docker_connection
+from app.core.harness_registry import (
+    HarnessRegistryError,
+    validate_enabled_harnesses,
+    validate_harness_constraints,
+    validate_harness_runtimes,
+)
 from app.core.skills import (
     SkillValidationError,
     acquire_worker_profile_skill_package_lock,
@@ -26,17 +32,12 @@ from app.core.skills import (
     runtime_uses_skill_capable_worker_kit,
     validate_runtime_supports_skills,
 )
-from app.core.task_prompt import (
-    BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE,
-    BUILT_IN_EXECUTE_RUN_INSTRUCTION_TEMPLATE,
-    BUILT_IN_PLAN_RUN_INSTRUCTION_TEMPLATE,
-)
+from app.core.utcnow import utcnow
 from app.core.worker_docker_targets import docker_daemon_key
 from app.core.worker_kit import (
     BAKED_IMAGE_MODE,
     WorkerKitValidationError,
     validate_worker_kit_config,
-    validate_worker_kit_mounts,
 )
 from app.core.worker_profiles import (
     TaskWorkerRuntime,
@@ -45,16 +46,37 @@ from app.core.worker_profiles import (
     build_worker_profile_volume_map,
     parse_worker_profile_mounts,
     replace_profile_environment_variables,
+    serialize_profile_environment_variable_for_api,
     serialize_worker_profile_for_api,
     set_default_worker_profile,
     validate_profile_templates,
     validate_worker_profile_docker_target,
+    validate_worker_profile_mount_masks,
 )
 from app.core.worker_profiles import (
     disable_worker_profile as disable_worker_profile_domain,
 )
 from app.core.worker_profiles import (
     list_worker_profiles as list_worker_profiles_domain,
+)
+from app.core.worker_runtime_readiness import (
+    READINESS_UNKNOWN,
+    RuntimeProbeTransientError,
+    RuntimeReadiness,
+    fingerprint_from_docker_target,
+    read_runtime_readiness,
+    run_deterministic_kit_probe,
+    runtime_verification_input_digest,
+    serialize_runtime_readiness,
+)
+from app.core.worker_shared_configuration import (
+    WORKER_KIT_SOURCE_PROFILE,
+    WORKER_KIT_SOURCE_SYSTEM,
+    WORKER_KIT_SOURCES,
+    EffectiveWorkerConfiguration,
+    load_shared_configuration,
+    resolve_effective_configuration,
+    validate_effective_configuration,
 )
 from app.database import get_db
 from app.dependencies.auth import require_admin_user
@@ -66,8 +88,9 @@ router = APIRouter()
 class WorkerProfileEnvironmentVariableRequest(BaseModel):
     id: int | None = None
     key: str = Field(max_length=255)
-    value: str = ""
+    value: str | None = None
     is_secret: bool = False
+    operation: str = "set"
 
 
 class WorkerProfileRequestBase(BaseModel):
@@ -75,6 +98,7 @@ class WorkerProfileRequestBase(BaseModel):
     description: str | None = None
     enabled: bool | None = None
     image: str | None = Field(default=None, max_length=255)
+    worker_kit_source: str | None = Field(default=None, max_length=16)
     runtime_mode: str | None = Field(default=None, max_length=32)
     worker_kit_version: str | None = Field(default=None, max_length=128)
     worker_kit_path: str | None = Field(default=None, max_length=1024)
@@ -84,6 +108,7 @@ class WorkerProfileRequestBase(BaseModel):
     docker_tls_key: str | None = Field(default=None, max_length=1024)
     codegraph_enabled: bool | None = None
     volume_mounts: list[dict[str, Any]] | None = None
+    volume_mount_masks: list[str] | None = None
     environment_variables: list[WorkerProfileEnvironmentVariableRequest] | None = None
     default_skill_ids: list[StrictInt] | None = None
     pre_script: str | None = None
@@ -91,6 +116,23 @@ class WorkerProfileRequestBase(BaseModel):
     default_execute_run_instruction_template: str | None = None
     default_plan_run_instruction_template: str | None = None
     ci_auto_repair_run_instruction_template: str | None = None
+    enabled_harnesses: list[str] | None = None
+    default_harness_key: str | None = Field(default=None, max_length=32)
+    harness_constraints: dict[str, Any] | None = None
+    image_digest: str | None = Field(default=None, max_length=128)
+    harness_runtimes: dict[str, Any] | None = None
+    expected_shared_revision: int | None = None
+
+    @field_validator("volume_mount_masks")
+    @classmethod
+    def validate_volume_mount_masks_type(
+        cls, value: list[str] | None
+    ) -> list[str] | None:
+        if value is None:
+            return None
+        if any(not isinstance(item, str) for item in value):
+            raise ValueError("volume_mount_masks must be a list of strings")
+        return value
 
     @field_validator("default_skill_ids")
     @classmethod
@@ -102,22 +144,44 @@ class WorkerProfileRequestBase(BaseModel):
         except SkillValidationError as exc:
             raise ValueError(str(exc)) from exc
 
+    @model_validator(mode="after")
+    def validate_harness_fields(self) -> WorkerProfileRequestBase:
+        enabled = self.enabled_harnesses
+        default_key = self.default_harness_key
+        if enabled is not None or default_key is not None:
+            try:
+                validate_enabled_harnesses(
+                    enabled if enabled is not None else ["claude"],
+                    default_harness_key=default_key or "claude",
+                )
+            except HarnessRegistryError as exc:
+                raise ValueError(str(exc)) from exc
+        if self.harness_constraints is not None:
+            try:
+                validate_harness_constraints(self.harness_constraints)
+            except HarnessRegistryError as exc:
+                raise ValueError(str(exc)) from exc
+        if self.harness_runtimes is not None:
+            try:
+                validate_harness_runtimes(self.harness_runtimes)
+            except HarnessRegistryError as exc:
+                raise ValueError(str(exc)) from exc
+        return self
+
 
 class WorkerProfileCreateRequest(WorkerProfileRequestBase):
     name: str = Field(max_length=100)
     image: str = Field(max_length=255)
+    worker_kit_source: str = WORKER_KIT_SOURCE_SYSTEM
     runtime_mode: str = BAKED_IMAGE_MODE
     volume_mounts: list[dict[str, Any]] = Field(default_factory=list)
+    volume_mount_masks: list[str] = Field(default_factory=list)
     environment_variables: list[WorkerProfileEnvironmentVariableRequest] = Field(
         default_factory=list
     )
-    default_execute_run_instruction_template: str = (
-        BUILT_IN_EXECUTE_RUN_INSTRUCTION_TEMPLATE
-    )
-    default_plan_run_instruction_template: str = BUILT_IN_PLAN_RUN_INSTRUCTION_TEMPLATE
-    ci_auto_repair_run_instruction_template: str = (
-        BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE
-    )
+    # The three run-instruction templates stay nullable (inherited from
+    # WorkerProfileRequestBase): NULL = inherit the shared baseline, matching the
+    # update contract. Validation happens on the resolved effective configuration.
 
 
 class WorkerProfileUpdateRequest(WorkerProfileRequestBase):
@@ -139,11 +203,52 @@ def _http_profile_error(exc: WorkerProfileValidationError) -> HTTPException:
     return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc))
 
 
+async def _load_shared_for_validation(
+    db: AsyncSession,
+    *,
+    expected_shared_revision: int | None,
+):
+    """Load the shared baseline under lock and enforce the optimistic check (§11.2).
+
+    The singleton row is locked with ``SELECT ... FOR UPDATE`` so the baseline
+    read, the expected-revision check, and the static combination validation are
+    one transactional unit: a concurrent shared-configuration PATCH cannot commit
+    between the read and the check, and a Profile save cannot mix a row revision
+    with environment variables from a different revision.
+    """
+    shared = await load_shared_configuration(db, for_update=True)
+    if expected_shared_revision is not None and (
+        shared.row is None or shared.revision != expected_shared_revision
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="shared_configuration_changed",
+        )
+    return shared
+
+
+def _validate_combined_configuration(
+    profile: WorkerProfile,
+    shared,
+    *,
+    default_skills: list[Any],
+) -> EffectiveWorkerConfiguration:
+    """Resolve the profile's effective config and run static combination checks."""
+    effective = resolve_effective_configuration(profile, shared)
+    validate_effective_configuration(effective)
+    validate_runtime_supports_skills(
+        effective,
+        [skill for skill in default_skills if bool(getattr(skill, "enabled", False))],
+    )
+    return effective
+
+
 async def _load_profile_or_404(
     db: AsyncSession,
     profile_id: int,
     *,
     for_update: bool = False,
+    populate_existing: bool = False,
 ) -> WorkerProfile:
     profile = await db.get(
         WorkerProfile,
@@ -153,6 +258,7 @@ async def _load_profile_or_404(
             selectinload(WorkerProfile.default_skills),
         ],
         with_for_update=for_update,
+        populate_existing=populate_existing,
     )
     if profile is None:
         raise HTTPException(
@@ -235,10 +341,13 @@ async def list_worker_profiles_for_admin(
     db: AsyncSession = Depends(get_db),
     _admin=Depends(require_admin_user),
 ):
-    """List worker profiles including administrator-only Docker target fields."""
+    """List worker profiles with admin-only Docker target fields and the §16.2
+    overrides/effective/sources/shared_revision/runtime sections."""
     profiles = await list_worker_profiles_domain(db)
+    settings = get_effective_settings()
+    shared = await load_shared_configuration(db)
     return [
-        serialize_worker_profile_for_api(profile, include_docker_target=True)
+        await _admin_profile_payload(db, profile, settings=settings, shared=shared)
         for profile in profiles
     ]
 
@@ -294,6 +403,220 @@ async def test_worker_profile_docker_connection(
     }
 
 
+def _build_verification_runtime(
+    profile: Any,
+    effective: EffectiveWorkerConfiguration,
+    settings: Any,
+) -> TaskWorkerRuntime:
+    """Build the resolved runtime the verification container executes (§15.1)."""
+    return TaskWorkerRuntime(
+        image=effective.image,
+        runtime_mode=effective.runtime_mode,
+        worker_kit_version=effective.worker_kit_version,
+        worker_kit_path=effective.worker_kit_path,
+        codegraph_enabled=bool(getattr(profile, "codegraph_enabled", False)),
+        volume_mounts=list(effective.volume_mounts),
+        environment=build_worker_profile_environment_map(
+            effective.environment_variables,
+            include_secrets=False,
+        ),
+        pre_script=effective.pre_script,
+        post_script=effective.post_script,
+        docker_host=getattr(profile, "docker_host", None),
+        docker_tls_ca=getattr(profile, "docker_tls_ca", None),
+        docker_tls_cert=getattr(profile, "docker_tls_cert", None),
+        docker_tls_key=getattr(profile, "docker_tls_key", None),
+    )
+
+
+def _verification_digest(
+    profile: Any,
+    effective: EffectiveWorkerConfiguration,
+    runtime: TaskWorkerRuntime,
+    settings: Any,
+) -> str:
+    """Compute the verification input digest (§10.2) for the resolved config."""
+    connection = runtime.docker_connection(settings)
+    return runtime_verification_input_digest(
+        docker_daemon_key=docker_daemon_key(connection),
+        image=runtime.image,
+        runtime_mode=runtime.runtime_mode,
+        worker_kit_version=runtime.worker_kit_version,
+        worker_kit_path=runtime.worker_kit_path,
+        volume_mounts=list(effective.volume_mounts),
+        environment_variables=[
+            {"key": str(item.get("key") or ""), "value": str(item.get("value") or "")}
+            for item in effective.environment_variables
+            if not bool(item.get("is_secret"))
+        ],
+        harness_key=getattr(profile, "default_harness_key", None) or "claude",
+        enabled_harnesses=list(getattr(profile, "enabled_harnesses", None) or ["claude"]),
+        harness_constraints=dict(getattr(profile, "harness_constraints", None) or {}),
+        harness_runtimes=dict(getattr(profile, "harness_runtimes", None) or {}),
+        require_skill_support=runtime_uses_skill_capable_worker_kit(runtime),
+    )
+
+
+def _profile_scalar_source(profile: Any, field: str) -> str:
+    """Source vocabulary (§7.6) for one Profile scalar.
+
+    ``None`` inherits the shared baseline (``system``); any explicit value,
+    including an explicit empty disable, is a ``profile_override``.
+    """
+    if getattr(profile, field, None) is None:
+        return "system"
+    return "profile_override"
+
+
+async def _profile_api_sections(
+    db: AsyncSession,
+    profile: WorkerProfile,
+    *,
+    settings: Any,
+    shared: Any | None = None,
+) -> dict[str, Any]:
+    """Build the §16.2 overrides/effective/sources/shared_revision/runtime sections.
+
+    ``matches_current_input`` recomputes the §10.2 verification input digest from
+    the current shared baseline + Profile overrides + resolved Docker target and
+    compares it to the stored digest, so a Profile whose verification inputs have
+    changed since the last successful verification reports ``False`` without the
+    client having to diff anything. ``runtime_readiness.status`` is the
+    read-time derived status: an expired ``ready`` row reads as ``unknown``.
+    """
+    shared = shared if shared is not None else await load_shared_configuration(db)
+    try:
+        effective = resolve_effective_configuration(profile, shared)
+        validate_effective_configuration(effective)
+    except WorkerProfileValidationError:
+        effective = None
+
+    kit_source = (
+        str(getattr(profile, "worker_kit_source", WORKER_KIT_SOURCE_PROFILE) or "")
+        .strip()
+        or WORKER_KIT_SOURCE_PROFILE
+    )
+    overrides = {
+        "worker_kit": (
+            None
+            if kit_source == WORKER_KIT_SOURCE_SYSTEM
+            else {
+                "runtime_mode": getattr(profile, "runtime_mode", None),
+                "worker_kit_version": getattr(profile, "worker_kit_version", None),
+                "worker_kit_path": getattr(profile, "worker_kit_path", None),
+            }
+        ),
+        "pre_script": getattr(profile, "pre_script", None),
+        "post_script": getattr(profile, "post_script", None),
+        "volume_mounts": list(getattr(profile, "volume_mounts", None) or []),
+        "masked_volume_mount_paths": list(
+            getattr(profile, "volume_mount_masks", None) or []
+        ),
+        "environment_variables": [
+            serialize_profile_environment_variable_for_api(row)
+            for row in (getattr(profile, "environment_variables", None) or [])
+        ],
+    }
+    effective_section = (
+        {
+            "worker_kit_version": effective.worker_kit_version,
+            "worker_kit_path": effective.worker_kit_path,
+        }
+        if effective is not None
+        else {"worker_kit_version": None, "worker_kit_path": None}
+    )
+    sources = {
+        "worker_kit": (
+            "system" if kit_source == WORKER_KIT_SOURCE_SYSTEM else "profile_override"
+        ),
+        "pre_script": _profile_scalar_source(profile, "pre_script"),
+        "post_script": _profile_scalar_source(profile, "post_script"),
+    }
+
+    stored_digest = getattr(profile, "verified_runtime_configuration_digest", None)
+    matches_current_input = False
+    if effective is not None and stored_digest:
+        try:
+            runtime = _build_verification_runtime(profile, effective, settings)
+            current_digest = _verification_digest(profile, effective, runtime, settings)
+            matches_current_input = current_digest == stored_digest
+        except Exception:  # noqa: BLE001 - unresolvable inputs never match
+            matches_current_input = False
+
+    readiness = RuntimeReadiness(status=READINESS_UNKNOWN)
+    if effective is not None:
+        try:
+            fingerprint = fingerprint_from_docker_target(
+                settings,
+                docker_host=getattr(profile, "docker_host", None),
+                docker_tls_ca=getattr(profile, "docker_tls_ca", None),
+                docker_tls_cert=getattr(profile, "docker_tls_cert", None),
+                docker_tls_key=getattr(profile, "docker_tls_key", None),
+                runtime_mode=effective.runtime_mode,
+                worker_kit_version=effective.worker_kit_version,
+                worker_kit_path=effective.worker_kit_path,
+            )
+            readiness = await read_runtime_readiness(db, fingerprint)
+        except Exception:  # noqa: BLE001 - unresolvable locator is never a known state
+            readiness = RuntimeReadiness(status=READINESS_UNKNOWN)
+
+    return {
+        "overrides": overrides,
+        "effective": effective_section,
+        "sources": sources,
+        "shared_revision": shared.revision,
+        "runtime_verification": {
+            "verified_at": getattr(profile, "verified_at", None),
+            "verified_runtime_configuration_digest": stored_digest,
+            "matches_current_input": matches_current_input,
+        },
+        "runtime_readiness": {
+            "status": readiness.status,
+            "checked_at": readiness.checked_at.isoformat() if readiness.checked_at else None,
+            "ready_until": readiness.ready_until.isoformat() if readiness.ready_until else None,
+        },
+    }
+
+
+async def _admin_profile_payload(
+    db: AsyncSession,
+    profile: WorkerProfile,
+    *,
+    settings: Any,
+    shared: Any | None = None,
+) -> dict[str, Any]:
+    """Admin Profile response: the flat fields plus the §16.2 sections."""
+    payload = serialize_worker_profile_for_api(profile, include_docker_target=True)
+    payload.update(
+        await _profile_api_sections(db, profile, settings=settings, shared=shared)
+    )
+    return payload
+
+
+def _runtime_unavailable_detail(
+    readiness: RuntimeReadiness,
+    *,
+    worker_profile_id: int,
+    worker_profile_name: str,
+) -> dict[str, Any]:
+    return {
+        "code": "worker_runtime_unavailable",
+        "message": "Worker runtime is unavailable; resolve the failure and re-verify",
+        "worker_profile_id": worker_profile_id,
+        "worker_profile_name": worker_profile_name,
+        "failure_code": readiness.failure_code,
+        "failure_message": readiness.failure_message,
+        "checked_at": readiness.checked_at.isoformat() if readiness.checked_at else None,
+    }
+
+
+async def _clear_profile_verification(db: AsyncSession, profile: WorkerProfile) -> None:
+    """Clear the profile's verification state after a deterministic failure."""
+    profile.verified_at = None
+    profile.verified_runtime_configuration_digest = None
+    await db.commit()
+
+
 @router.post("/worker-profiles/{profile_id}/verify-runtime")
 async def verify_worker_profile_runtime(
     profile_id: int,
@@ -301,52 +624,79 @@ async def verify_worker_profile_runtime(
     db: AsyncSession = Depends(get_db),
     _admin=Depends(require_admin_user),
 ):
-    """Run the mounted kit preflight on the profile's actual Docker target."""
+    """Two-layer runtime verification (§15.1).
+
+    Layer 1 runs the strict, side-effect-free Kit probe through the
+    generation/CAS readiness service against the profile's resolved Docker
+    target. Layer 2 runs the profile-specific ``--verify`` container (image,
+    mounts, harness/CLI, optional smoke) and, on success, stores the immutable
+    image digest, the verification timestamp, and the verification input digest.
+    Re-verification is always explicit and always re-probes the Kit.
+    """
     profile = await _load_profile_or_404(db, profile_id)
+    shared = await load_shared_configuration(db)
     try:
-        runtime = TaskWorkerRuntime(
-            image=profile.image,
-            runtime_mode=getattr(profile, "runtime_mode", BAKED_IMAGE_MODE),
-            worker_kit_version=getattr(profile, "worker_kit_version", None),
-            worker_kit_path=getattr(profile, "worker_kit_path", None),
-            codegraph_enabled=bool(getattr(profile, "codegraph_enabled", False)),
-            volume_mounts=parse_worker_profile_mounts(profile.volume_mounts),
-            environment=build_worker_profile_environment_map(
-                profile.environment_variables,
-                include_secrets=False,
-            ),
-            pre_script="",
-            post_script="",
-            docker_host=getattr(profile, "docker_host", None),
-            docker_tls_ca=getattr(profile, "docker_tls_ca", None),
-            docker_tls_cert=getattr(profile, "docker_tls_cert", None),
-            docker_tls_key=getattr(profile, "docker_tls_key", None),
-        )
-        overrides = runtime.container_overrides()
-        verification_volumes = build_worker_profile_volume_map(runtime.volume_mounts)
-        verification_volumes.update(overrides["volumes"])
+        effective = resolve_effective_configuration(profile, shared)
+        validate_effective_configuration(effective)
     except WorkerProfileValidationError as exc:
         raise _http_profile_error(exc) from exc
-    if runtime.runtime_mode == BAKED_IMAGE_MODE:
+    if effective.runtime_mode == BAKED_IMAGE_MODE:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Runtime verification requires mounted_kit mode",
         )
+    settings = get_effective_settings()
+    runtime = _build_verification_runtime(profile, effective, settings)
+    connection = runtime.docker_connection(settings)
+    verification_digest = _verification_digest(profile, effective, runtime, settings)
+    started_at = time.monotonic()
 
+    # Layer 1: strict Kit probe through the generation/CAS readiness service.
+    try:
+        outcome = await run_deterministic_kit_probe(
+            db,
+            connection=connection,
+            image=runtime.image,
+            runtime_mode=runtime.runtime_mode,
+            worker_kit_version=runtime.worker_kit_version or "",
+            worker_kit_path=runtime.worker_kit_path or "",
+            ttl_seconds=settings.worker_runtime_readiness_ttl_seconds,
+        )
+    except RuntimeProbeTransientError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "worker_runtime_verification_transient_failure",
+                "message": f"Worker Kit probe could not reach a conclusion: {exc}",
+            },
+        ) from exc
+    if outcome.is_unavailable:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_runtime_unavailable_detail(
+                outcome.readiness,
+                worker_profile_id=profile_id,
+                worker_profile_name=profile.name,
+            ),
+        )
+
+    # Layer 2: profile-specific verification container.
+    overrides = runtime.container_overrides()
+    verification_volumes = build_worker_profile_volume_map(runtime.volume_mounts)
+    verification_volumes.update(overrides["volumes"])
     command = ["--verify"]
     if runtime_uses_skill_capable_worker_kit(runtime):
         command.append("--require-skill-support")
     smoke_command = (request.smoke_command or "").strip()
     if smoke_command:
         command.extend(["--smoke", smoke_command])
-    connection = runtime.docker_connection(get_effective_settings())
-    started_at = time.monotonic()
 
-    def verify_runtime() -> tuple[int, str]:
+    def verify_runtime() -> tuple[int, str, str]:
         client = DockerClientWrapper(connection)
         container = None
         try:
             client.client.images.get(runtime.image)
+            repo_digest = client.resolve_image_repo_digest(runtime.image)
             container = client.create_container(
                 image=runtime.image,
                 command=command,
@@ -359,13 +709,14 @@ async def verify_worker_profile_runtime(
                 entrypoint=overrides["entrypoint"],
                 user=overrides["user"],
                 tmpfs={"/workspace": "rw,exec,mode=1777"},
-                name=f"codify-worker-kit-verify-{profile.id}-{uuid.uuid4().hex[:8]}",
+                name=f"codify-worker-kit-verify-{profile_id}-{uuid.uuid4().hex[:8]}",
                 labels={
                     "codify.worker_kit_verification": "true",
                     "codify.worker_kit_version": runtime.worker_kit_version or "",
                 },
             )
-            return client.wait_for_container(container, timeout=180)
+            exit_code, logs = client.wait_for_container(container, timeout=180)
+            return exit_code, logs, repo_digest
         finally:
             if container is not None:
                 with contextlib.suppress(Exception):
@@ -374,16 +725,22 @@ async def verify_worker_profile_runtime(
                 client.close()
 
     try:
-        exit_code, logs = await asyncio.wait_for(
+        exit_code, logs, repo_digest = await asyncio.wait_for(
             asyncio.to_thread(verify_runtime),
             timeout=200,
         )
     except Exception as exc:
+        # Transient: keep any previously verified digest/timestamp (§15.1).
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Worker runtime verification could not start: {exc}",
+            detail={
+                "code": "worker_runtime_verification_transient_failure",
+                "message": f"Worker runtime verification could not start: {exc}",
+            },
         ) from exc
     if exit_code != 0:
+        # Deterministic profile-specific failure: clear verification (§15.1).
+        await _clear_profile_verification(db, profile)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
@@ -392,18 +749,50 @@ async def verify_worker_profile_runtime(
                 "logs": logs[-8000:],
             },
         )
+
+    # Reload profile+shared and recompute the digest: if the verification
+    # inputs changed while verifying, the result is superseded (§15.1).
+    fresh_profile = await _load_profile_or_404(db, profile_id, populate_existing=True)
+    fresh_shared = await load_shared_configuration(db)
+    try:
+        fresh_effective = resolve_effective_configuration(fresh_profile, fresh_shared)
+        validate_effective_configuration(fresh_effective)
+    except WorkerProfileValidationError as exc:
+        raise _http_profile_error(exc) from exc
+    fresh_runtime = _build_verification_runtime(fresh_profile, fresh_effective, settings)
+    fresh_digest = _verification_digest(
+        fresh_profile,
+        fresh_effective,
+        fresh_runtime,
+        settings,
+    )
+    if fresh_digest != verification_digest:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="worker_profile_verification_superseded",
+        )
+
+    profile.verified_at = utcnow()
+    profile.verified_runtime_configuration_digest = verification_digest
+    profile.image_digest = repo_digest
+    await db.commit()
+
     return {
         "ok": True,
         "image": runtime.image,
+        "image_digest": repo_digest,
+        "verified_at": profile.verified_at.isoformat() if profile.verified_at else None,
+        "verified_runtime_configuration_digest": verification_digest,
         "worker_kit_version": runtime.worker_kit_version,
         "docker_host": connection.host,
         "elapsed_ms": round((time.monotonic() - started_at) * 1000),
         "omitted_secret_environment_keys": sorted(
-            str(row.key)
-            for row in profile.environment_variables
-            if bool(row.is_secret)
+            str(item.get("key") or "")
+            for item in effective.environment_variables
+            if bool(item.get("is_secret"))
         ),
         "logs": logs[-8000:],
+        "runtime_readiness": serialize_runtime_readiness(outcome.readiness),
     }
 
 
@@ -424,11 +813,30 @@ async def create_worker_profile(
             raise WorkerProfileValidationError("Worker profile image cannot be blank")
 
         await _ensure_profile_name_available(db, name)
-        execute_template, plan_template, ci_template = validate_profile_templates(
-            execute_template=request.default_execute_run_instruction_template,
-            plan_template=request.default_plan_run_instruction_template,
-            ci_template=request.ci_auto_repair_run_instruction_template,
-        )
+        kit_source = request.worker_kit_source or WORKER_KIT_SOURCE_SYSTEM
+        if kit_source not in WORKER_KIT_SOURCES:
+            raise WorkerProfileValidationError(
+                f"worker_kit_source must be one of: {', '.join(sorted(WORKER_KIT_SOURCES))}"
+            )
+        if all(
+            template is not None
+            for template in (
+                request.default_execute_run_instruction_template,
+                request.default_plan_run_instruction_template,
+                request.ci_auto_repair_run_instruction_template,
+            )
+        ):
+            execute_template, plan_template, ci_template = validate_profile_templates(
+                execute_template=request.default_execute_run_instruction_template,
+                plan_template=request.default_plan_run_instruction_template,
+                ci_template=request.ci_auto_repair_run_instruction_template,
+            )
+        else:
+            # A NULL template inherits the shared value; validation happens on the
+            # resolved effective configuration below.
+            execute_template = request.default_execute_run_instruction_template
+            plan_template = request.default_plan_run_instruction_template
+            ci_template = request.ci_auto_repair_run_instruction_template
         docker_host, tls_ca, tls_cert, tls_key = validate_worker_profile_docker_target(
             docker_host=request.docker_host,
             docker_tls_ca=request.docker_tls_ca,
@@ -441,13 +849,17 @@ async def create_worker_profile(
             worker_kit_path=request.worker_kit_path,
         )
         mounts = parse_worker_profile_mounts(request.volume_mounts)
-        validate_worker_kit_mounts(runtime_mode, mounts)
+        masks = validate_worker_profile_mount_masks(
+            request.volume_mount_masks,
+            volume_mounts=mounts,
+        )
         profile = WorkerProfile(
             name=name,
             description=request.description,
             enabled=True if request.enabled is None else request.enabled,
             is_default=False,
             image=image,
+            worker_kit_source=kit_source,
             runtime_mode=runtime_mode,
             worker_kit_version=kit_version,
             worker_kit_path=kit_path,
@@ -457,21 +869,43 @@ async def create_worker_profile(
             docker_tls_key=tls_key,
             codegraph_enabled=bool(request.codegraph_enabled),
             volume_mounts=mounts,
-            pre_script=request.pre_script or "",
-            post_script=request.post_script or "",
+            volume_mount_masks=masks,
+            pre_script=request.pre_script,
+            post_script=request.post_script,
             default_execute_run_instruction_template=execute_template,
             default_plan_run_instruction_template=plan_template,
             ci_auto_repair_run_instruction_template=ci_template,
+            enabled_harnesses=(
+                list(request.enabled_harnesses)
+                if request.enabled_harnesses is not None
+                else ["claude"]
+            ),
+            default_harness_key=request.default_harness_key or "claude",
+            harness_constraints=request.harness_constraints or {},
+            image_digest=request.image_digest,
+            harness_runtimes=request.harness_runtimes or {},
             default_skills=[],
         )
+        shared = await _load_shared_for_validation(
+            db,
+            expected_shared_revision=request.expected_shared_revision,
+        )
+        effective = _validate_combined_configuration(profile, shared, default_skills=[])
         db.add(profile)
         await db.flush()
         profile.default_skills.extend(
             await load_enabled_skills(db, request.default_skill_ids or [])
         )
+        # The resolved effective configuration is unchanged by the environment
+        # replacement below, so skills are validated against it directly to avoid
+        # a lazy load of the freshly flushed relationship.
         validate_runtime_supports_skills(
-            profile,
-            getattr(profile, "default_skills", None) or [],
+            effective,
+            [
+                skill
+                for skill in (getattr(profile, "default_skills", None) or [])
+                if bool(getattr(skill, "enabled", False))
+            ],
         )
         await replace_profile_environment_variables(
             db,
@@ -483,7 +917,9 @@ async def create_worker_profile(
             profile,
             attribute_names=["environment_variables", "default_skills"],
         )
-        return serialize_worker_profile_for_api(profile, include_docker_target=True)
+        return await _admin_profile_payload(
+            db, profile, settings=get_effective_settings()
+        )
     except HTTPException:
         await _rollback(db)
         raise
@@ -547,6 +983,44 @@ async def update_worker_profile(
             profile.runtime_mode = runtime_mode
             profile.worker_kit_version = kit_version
             profile.worker_kit_path = kit_path
+        harness_fields = {
+            "enabled_harnesses",
+            "default_harness_key",
+            "harness_constraints",
+            "image_digest",
+            "harness_runtimes",
+        }
+        if harness_fields & fields:
+            # Partial updates revalidate the merged view so default_harness_key
+            # can never end up outside enabled_harnesses.
+            merged_enabled = (
+                list(request.enabled_harnesses)
+                if "enabled_harnesses" in fields
+                and request.enabled_harnesses is not None
+                else list(getattr(profile, "enabled_harnesses", None) or ["claude"])
+            )
+            merged_default = (
+                request.default_harness_key
+                if "default_harness_key" in fields
+                and request.default_harness_key
+                else getattr(profile, "default_harness_key", None) or "claude"
+            )
+            try:
+                validate_enabled_harnesses(
+                    merged_enabled, default_harness_key=merged_default
+                )
+            except HarnessRegistryError as exc:
+                raise WorkerProfileValidationError(str(exc)) from exc
+            if "enabled_harnesses" in fields:
+                profile.enabled_harnesses = merged_enabled
+            if "default_harness_key" in fields:
+                profile.default_harness_key = merged_default
+            if "harness_constraints" in fields:
+                profile.harness_constraints = request.harness_constraints or {}
+            if "image_digest" in fields:
+                profile.image_digest = request.image_digest
+            if "harness_runtimes" in fields:
+                profile.harness_runtimes = request.harness_runtimes or {}
         docker_target_fields = {
             "docker_host",
             "docker_tls_ca",
@@ -599,41 +1073,74 @@ async def update_worker_profile(
             profile.docker_tls_key = tls_key
         if "codegraph_enabled" in fields and request.codegraph_enabled is not None:
             profile.codegraph_enabled = request.codegraph_enabled
+        if "worker_kit_source" in fields:
+            kit_source = request.worker_kit_source or WORKER_KIT_SOURCE_SYSTEM
+            if kit_source not in WORKER_KIT_SOURCES:
+                raise WorkerProfileValidationError(
+                    "worker_kit_source must be one of: "
+                    + ", ".join(sorted(WORKER_KIT_SOURCES))
+                )
+            profile.worker_kit_source = kit_source
         if "volume_mounts" in fields and request.volume_mounts is not None:
             profile.volume_mounts = parse_worker_profile_mounts(request.volume_mounts)
-        validate_worker_kit_mounts(
-            getattr(profile, "runtime_mode", BAKED_IMAGE_MODE),
-            profile.volume_mounts or [],
-        )
+        if "volume_mount_masks" in fields and request.volume_mount_masks is not None:
+            profile.volume_mount_masks = validate_worker_profile_mount_masks(
+                request.volume_mount_masks,
+                volume_mounts=profile.volume_mounts or [],
+            )
+        # §7.3/§24.17: a normalized container_path must never be both set and
+        # masked. Revalidate the full set whenever either field is patched so a
+        # mounts-only PATCH cannot leave a set/mask conflict behind.
+        if "volume_mounts" in fields or "volume_mount_masks" in fields:
+            profile.volume_mount_masks = validate_worker_profile_mount_masks(
+                profile.volume_mount_masks,
+                volume_mounts=profile.volume_mounts or [],
+            )
         if "pre_script" in fields:
-            profile.pre_script = request.pre_script or ""
+            # NULL inherits the shared script; "" is an explicit disable.
+            profile.pre_script = request.pre_script
         if "post_script" in fields:
-            profile.post_script = request.post_script or ""
-        if {
+            profile.post_script = request.post_script
+        template_fields = {
             "default_execute_run_instruction_template",
             "default_plan_run_instruction_template",
             "ci_auto_repair_run_instruction_template",
-        } & fields:
-            execute_template, plan_template, ci_template = validate_profile_templates(
-                execute_template=(
-                    request.default_execute_run_instruction_template
-                    if request.default_execute_run_instruction_template is not None
-                    else profile.default_execute_run_instruction_template
-                ),
-                plan_template=(
-                    request.default_plan_run_instruction_template
-                    if request.default_plan_run_instruction_template is not None
-                    else profile.default_plan_run_instruction_template
-                ),
-                ci_template=(
-                    request.ci_auto_repair_run_instruction_template
-                    if request.ci_auto_repair_run_instruction_template is not None
-                    else profile.ci_auto_repair_run_instruction_template
-                ),
-            )
-            profile.default_execute_run_instruction_template = execute_template
-            profile.default_plan_run_instruction_template = plan_template
-            profile.ci_auto_repair_run_instruction_template = ci_template
+        }
+        if template_fields & fields:
+            merged_templates: dict[str, str | None] = {}
+            for field in template_fields:
+                if field in fields:
+                    # A request value of None restores inheritance from the
+                    # shared configuration; distinguish it from "not provided"
+                    # (keep the profile's current value).
+                    merged_templates[field] = getattr(request, field)
+                else:
+                    merged_templates[field] = getattr(profile, field)
+            if all(merged_templates.values()):
+                # All three are explicit: validate the merged non-NULL view now.
+                execute_template, plan_template, ci_template = validate_profile_templates(
+                    execute_template=merged_templates["default_execute_run_instruction_template"],
+                    plan_template=merged_templates["default_plan_run_instruction_template"],
+                    ci_template=merged_templates["ci_auto_repair_run_instruction_template"],
+                )
+                profile.default_execute_run_instruction_template = execute_template
+                profile.default_plan_run_instruction_template = plan_template
+                profile.ci_auto_repair_run_instruction_template = ci_template
+            else:
+                # At least one template inherits the shared value; apply the
+                # explicit ones as-is and validate the resolved combination later.
+                if "default_execute_run_instruction_template" in fields:
+                    profile.default_execute_run_instruction_template = (
+                        request.default_execute_run_instruction_template
+                    )
+                if "default_plan_run_instruction_template" in fields:
+                    profile.default_plan_run_instruction_template = (
+                        request.default_plan_run_instruction_template
+                    )
+                if "ci_auto_repair_run_instruction_template" in fields:
+                    profile.ci_auto_repair_run_instruction_template = (
+                        request.ci_auto_repair_run_instruction_template
+                    )
         if "environment_variables" in fields and request.environment_variables is not None:
             await replace_profile_environment_variables(
                 db,
@@ -647,21 +1154,43 @@ async def update_worker_profile(
                 request.default_skill_ids,
                 retained_disabled_skill_ids=existing_skill_ids,
             )
-        validate_runtime_supports_skills(
-            profile,
-            [
-                skill
-                for skill in (getattr(profile, "default_skills", None) or [])
-                if skill.enabled
-            ],
+        shared = await _load_shared_for_validation(
+            db,
+            expected_shared_revision=request.expected_shared_revision,
         )
+        _validate_combined_configuration(
+            profile,
+            shared,
+            default_skills=getattr(profile, "default_skills", None) or [],
+        )
+
+        # Changing the image, Kit, or Harness allowlist/constraints invalidates
+        # the prior verification; existing Task snapshots are unaffected.
+        stale_fields = {
+            "image",
+            "worker_kit_source",
+            "runtime_mode",
+            "worker_kit_version",
+            "worker_kit_path",
+            "volume_mounts",
+            "volume_mount_masks",
+            "enabled_harnesses",
+            "default_harness_key",
+            "harness_constraints",
+            "harness_runtimes",
+        }
+        if stale_fields & fields:
+            profile.image_digest = None
+            profile.verified_at = None
 
         await db.commit()
         await db.refresh(
             profile,
             attribute_names=["environment_variables", "default_skills"],
         )
-        return serialize_worker_profile_for_api(profile, include_docker_target=True)
+        return await _admin_profile_payload(
+            db, profile, settings=get_effective_settings()
+        )
     except HTTPException:
         await _rollback(db)
         raise
@@ -685,7 +1214,9 @@ async def set_default_worker_profile_endpoint(
             profile,
             attribute_names=["environment_variables", "default_skills"],
         )
-        return serialize_worker_profile_for_api(profile, include_docker_target=True)
+        return await _admin_profile_payload(
+            db, profile, settings=get_effective_settings()
+        )
     except WorkerProfileValidationError as exc:
         await _rollback(db)
         raise _http_profile_error(exc) from exc
@@ -709,7 +1240,9 @@ async def disable_worker_profile(
             profile,
             attribute_names=["environment_variables", "default_skills"],
         )
-        return serialize_worker_profile_for_api(profile, include_docker_target=True)
+        return await _admin_profile_payload(
+            db, profile, settings=get_effective_settings()
+        )
     except WorkerProfileValidationError as exc:
         await _rollback(db)
         raise _http_profile_error(exc) from exc
@@ -761,16 +1294,13 @@ async def duplicate_worker_profile(
             source_skill_ids,
             retained_disabled_skill_ids=source_skill_ids,
         )
-        validate_runtime_supports_skills(
-            source,
-            [skill for skill in default_skills if skill.enabled],
-        )
         copy = WorkerProfile(
             name=await _unique_copy_name(db, source.name),
             description=source.description,
             enabled=True,
             is_default=False,
             image=source.image,
+            worker_kit_source=getattr(source, "worker_kit_source", WORKER_KIT_SOURCE_PROFILE),
             runtime_mode=getattr(source, "runtime_mode", BAKED_IMAGE_MODE),
             worker_kit_version=getattr(source, "worker_kit_version", None),
             worker_kit_path=getattr(source, "worker_kit_path", None),
@@ -780,8 +1310,9 @@ async def duplicate_worker_profile(
             docker_tls_key=getattr(source, "docker_tls_key", None),
             codegraph_enabled=bool(getattr(source, "codegraph_enabled", False)),
             volume_mounts=list(source.volume_mounts or []),
-            pre_script=source.pre_script or "",
-            post_script=source.post_script or "",
+            volume_mount_masks=list(getattr(source, "volume_mount_masks", None) or []),
+            pre_script=source.pre_script,
+            post_script=source.post_script,
             default_execute_run_instruction_template=(
                 source.default_execute_run_instruction_template
             ),
@@ -794,15 +1325,36 @@ async def duplicate_worker_profile(
                     key=row.key,
                     value=row.value,
                     is_secret=row.is_secret,
+                    operation=getattr(row, "operation", "set") or "set",
                 )
                 for row in source.environment_variables
             ],
+            # §11.3: the copy carries the source's Harness intent verbatim so a
+            # duplicate of a non-default-Harness profile still executes with the
+            # same adapter allowlist, default harness, constraints, and runtimes.
+            enabled_harnesses=list(getattr(source, "enabled_harnesses", None) or ["claude"]),
+            default_harness_key=getattr(source, "default_harness_key", None) or "claude",
+            harness_constraints=dict(getattr(source, "harness_constraints", None) or {}),
+            harness_runtimes=dict(getattr(source, "harness_runtimes", None) or {}),
             default_skills=default_skills,
+        )
+        # §11.3: the copy carries the source's inheritance/override/mask intent.
+        # Re-validate its resolved effective configuration and its skills against
+        # that resolved config (not the raw source columns), under the shared
+        # lock so the baseline cannot change between validation and save.
+        shared = await load_shared_configuration(db, for_update=True)
+        effective = resolve_effective_configuration(copy, shared)
+        validate_effective_configuration(effective)
+        validate_runtime_supports_skills(
+            effective,
+            [skill for skill in default_skills if bool(getattr(skill, "enabled", False))],
         )
         db.add(copy)
         await db.commit()
         await db.refresh(copy, attribute_names=["environment_variables", "default_skills"])
-        return serialize_worker_profile_for_api(copy, include_docker_target=True)
+        return await _admin_profile_payload(
+            db, copy, settings=get_effective_settings(), shared=shared
+        )
     except (WorkerProfileValidationError, SkillValidationError) as exc:
         await _rollback(db)
         raise _http_profile_error(exc) from exc

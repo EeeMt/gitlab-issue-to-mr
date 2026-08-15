@@ -22,6 +22,7 @@ from app.core.docker_client import (
     canonicalize_docker_host,
     resolve_docker_connection,
 )
+from app.core.harness_registry import capability_policy
 from app.core.skills import (
     SkillValidationError,
     hydrate_skill_snapshots,
@@ -47,6 +48,13 @@ from app.core.worker_kit import (
     validate_worker_kit_mounts,
     worker_kit_environment,
     worker_kit_mounts,
+)
+from app.core.worker_runtime_readiness import fingerprint_from_docker_target
+from app.core.worker_shared_configuration import (
+    load_shared_configuration,
+    resolve_effective_configuration,
+    snapshot_effective_configuration_digest,
+    validate_effective_configuration,
 )
 from app.models import (
     AIProvider,
@@ -285,6 +293,52 @@ def parse_worker_profile_mounts(value: Any) -> list[dict[str, str]]:
     return validate_worker_profile_mounts(value)
 
 
+def validate_worker_profile_mount_masks(
+    raw_masks: Any,
+    *,
+    volume_mounts: Iterable[Mapping[str, Any]],
+) -> list[str]:
+    """Validate and normalize profile container-path masks.
+
+    A mask names a shared container path this profile hides. Masks are stored
+    normalized, must be absolute, must not repeat, and must not collide with a
+    ``set`` override for the same container path (design §7.3).
+    """
+    if raw_masks in (None, ""):
+        return []
+    if not isinstance(raw_masks, list):
+        raise WorkerProfileValidationError("volume_mount_masks must be a list")
+    set_container_paths = {
+        str(mount.get("container_path") or "").strip()
+        for mount in volume_mounts
+        if str(mount.get("container_path") or "").strip()
+    }
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_path in raw_masks:
+        container_path = str(raw_path or "").strip()
+        if not container_path:
+            raise WorkerProfileValidationError(
+                "volume mount masks require a container_path"
+            )
+        if not os.path.isabs(container_path):
+            raise WorkerProfileValidationError(
+                "volume mount mask container_path must be absolute"
+            )
+        container_path = os.path.normpath(container_path)
+        if container_path in seen:
+            raise WorkerProfileValidationError(
+                f"duplicate volume mount mask path: {container_path}"
+            )
+        if container_path in set_container_paths:
+            raise WorkerProfileValidationError(
+                f"volume mount path {container_path} cannot be both set and masked"
+            )
+        seen.add(container_path)
+        normalized.append(container_path)
+    return normalized
+
+
 def validate_profile_templates(
     *,
     execute_template: str,
@@ -311,6 +365,7 @@ def serialize_profile_environment_variable_for_api(
         "key": row.key,
         "value": None if row.is_secret else row.value,
         "is_secret": row.is_secret,
+        "operation": getattr(row, "operation", "set") or "set",
         "value_configured": row.value is not None,
         "created_at": row.created_at,
         "updated_at": row.updated_at,
@@ -330,11 +385,13 @@ def serialize_worker_profile_for_api(
         "enabled": profile.enabled,
         "is_default": profile.is_default,
         "image": profile.image,
+        "worker_kit_source": getattr(profile, "worker_kit_source", "profile") or "profile",
         "runtime_mode": getattr(profile, "runtime_mode", BAKED_IMAGE_MODE),
         "worker_kit_version": getattr(profile, "worker_kit_version", None),
         "worker_kit_path": getattr(profile, "worker_kit_path", None),
         "codegraph_enabled": bool(getattr(profile, "codegraph_enabled", False)),
         "volume_mounts": profile.volume_mounts or [],
+        "volume_mount_masks": getattr(profile, "volume_mount_masks", None) or [],
         "environment_variables": [
             serialize_profile_environment_variable_for_api(row)
             for row in profile.environment_variables
@@ -351,6 +408,15 @@ def serialize_worker_profile_for_api(
         "ci_auto_repair_run_instruction_template": (
             profile.ci_auto_repair_run_instruction_template
         ),
+        "verified_runtime_configuration_digest": getattr(
+            profile, "verified_runtime_configuration_digest", None
+        ),
+        "enabled_harnesses": getattr(profile, "enabled_harnesses", None) or ["claude"],
+        "default_harness_key": getattr(profile, "default_harness_key", None) or "claude",
+        "harness_constraints": getattr(profile, "harness_constraints", None) or {},
+        "image_digest": getattr(profile, "image_digest", None),
+        "verified_at": getattr(profile, "verified_at", None),
+        "harness_runtimes": getattr(profile, "harness_runtimes", None) or {},
         "created_at": profile.created_at,
         "updated_at": profile.updated_at,
     }
@@ -364,14 +430,6 @@ def serialize_worker_profile_for_api(
             }
         )
     return payload
-
-
-def _profile_env_to_snapshot(row: WorkerProfileEnvironmentVariable) -> dict[str, Any]:
-    return {
-        "key": row.key,
-        "value": row.value,
-        "is_secret": row.is_secret,
-    }
 
 
 def build_worker_profile_environment_map(
@@ -527,18 +585,26 @@ def snapshot_from_profile(
     profile: WorkerProfile,
     *,
     settings: Any | None = None,
+    harness_key: str | None = None,
+    endpoint: Any | None = None,
+    shared_configuration: Any | None = None,
 ) -> TaskWorkerProfileSnapshot:
-    """Build an immutable task worker snapshot from a loaded profile."""
-    try:
-        runtime_mode, kit_version, kit_path = validate_worker_kit_config(
-            runtime_mode=getattr(profile, "runtime_mode", BAKED_IMAGE_MODE),
-            worker_kit_version=getattr(profile, "worker_kit_version", None),
-            worker_kit_path=getattr(profile, "worker_kit_path", None),
-        )
-        mounts = parse_worker_profile_mounts(profile.volume_mounts)
-        validate_worker_kit_mounts(runtime_mode, mounts)
-    except WorkerKitValidationError as exc:
-        raise WorkerProfileValidationError(str(exc)) from exc
+    """Build an immutable task worker snapshot from a loaded profile.
+
+    ``harness_key`` defaults to the Profile's default harness. ``endpoint`` is a
+    secret-free ``ModelEndpoint`` (or any object exposing ``as_snapshot``) whose
+    snapshot and credential ref are frozen so later Profile/Provider edits never
+    change a created Task's execution truth.
+
+    ``shared_configuration`` is a ``WorkerSharedConfigurationContext``; callers
+    that create Task snapshots always pass the loaded shared baseline so the
+    per-item merge is applied. When it is ``None`` (direct calls in tests) the
+    profile is resolved against an empty baseline. The snapshot stores the fully
+    expanded effective configuration plus the shared revision and
+    effective-configuration digest.
+    """
+    effective = resolve_effective_configuration(profile, shared_configuration)
+    validate_effective_configuration(effective)
     connection = (
         resolve_docker_connection(
             settings,
@@ -550,14 +616,31 @@ def snapshot_from_profile(
         if settings is not None
         else None
     )
-    return TaskWorkerProfileSnapshot(
+    resolved_harness_key = (
+        harness_key or getattr(profile, "default_harness_key", None) or "claude"
+    )
+    effective_capabilities = capability_policy(
+        resolved_harness_key,
+        getattr(profile, "harness_constraints", None) or {},
+    )
+    runtime_locator_fingerprint = fingerprint_from_docker_target(
+        settings or get_effective_settings(),
+        docker_host=getattr(profile, "docker_host", None),
+        docker_tls_ca=getattr(profile, "docker_tls_ca", None),
+        docker_tls_cert=getattr(profile, "docker_tls_cert", None),
+        docker_tls_key=getattr(profile, "docker_tls_key", None),
+        runtime_mode=effective.runtime_mode,
+        worker_kit_version=effective.worker_kit_version,
+        worker_kit_path=effective.worker_kit_path,
+    )
+    snapshot = TaskWorkerProfileSnapshot(
         task_id=task.id,
         worker_profile_id=profile.id,
         profile_name=profile.name,
         image=profile.image,
-        runtime_mode=runtime_mode,
-        worker_kit_version=kit_version,
-        worker_kit_path=kit_path,
+        runtime_mode=effective.runtime_mode,
+        worker_kit_version=effective.worker_kit_version,
+        worker_kit_path=effective.worker_kit_path,
         docker_host=(connection.host if connection else getattr(profile, "docker_host", None)),
         docker_tls_ca=(
             connection.tls_ca if connection else getattr(profile, "docker_tls_ca", None)
@@ -569,31 +652,78 @@ def snapshot_from_profile(
             connection.tls_key if connection else getattr(profile, "docker_tls_key", None)
         ),
         codegraph_enabled=bool(getattr(profile, "codegraph_enabled", False)),
-        volume_mounts=mounts,
-        environment_variables=[
-            _profile_env_to_snapshot(row) for row in profile.environment_variables
-        ],
+        volume_mounts=list(effective.volume_mounts),
+        environment_variables=list(effective.environment_variables),
+        shared_configuration_revision=effective.shared_configuration_revision,
+        effective_configuration_digest=None,
+        runtime_locator_fingerprint=runtime_locator_fingerprint,
         skill_references=[],
         skill_selection_source="profile",
-        pre_script=profile.pre_script or "",
-        post_script=profile.post_script or "",
-        default_execute_run_instruction_template=profile.default_execute_run_instruction_template,
-        default_plan_run_instruction_template=profile.default_plan_run_instruction_template,
-        ci_auto_repair_run_instruction_template=profile.ci_auto_repair_run_instruction_template,
+        pre_script=effective.pre_script,
+        post_script=effective.post_script,
+        default_execute_run_instruction_template=(
+            effective.default_execute_run_instruction_template
+        ),
+        default_plan_run_instruction_template=effective.default_plan_run_instruction_template,
+        ci_auto_repair_run_instruction_template=(
+            effective.ci_auto_repair_run_instruction_template
+        ),
+        harness_key=resolved_harness_key,
+        harness_config_snapshot={
+            "capabilities": effective_capabilities,
+            "sandbox_mode": effective_capabilities.get("sandbox_mode"),
+            "constraints": dict(getattr(profile, "harness_constraints", None) or {}),
+        },
+        image_digest=getattr(profile, "image_digest", None),
+        model_endpoint_snapshot=endpoint.as_snapshot() if endpoint is not None else None,
+        credential_ref=(
+            endpoint.credential_ref
+            if endpoint is not None and getattr(endpoint, "credential_ref", None)
+            else None
+        ),
     )
+    # The digest covers the full frozen execution truth including the resolved
+    # Docker target and harness decision; skill references are empty here and are
+    # folded in by the caller once skills are attached (§10.1).
+    snapshot.effective_configuration_digest = snapshot_effective_configuration_digest(
+        snapshot
+    )
+    return snapshot
 
 
 async def replace_task_worker_snapshot(
     db: AsyncSession,
     task: Task,
     profile: WorkerProfile,
+    *,
+    harness_key: str | None = None,
+    endpoint: Any | None = None,
+    shared_configuration: Any | None = None,
 ) -> TaskWorkerProfileSnapshot:
-    """Replace one task's worker profile snapshot."""
+    """Replace one task's worker profile snapshot.
+
+    ``shared_configuration`` is the caller's already-locked shared context (see
+    ``load_shared_configuration(..., for_update=True)``). Task create / F6 switch
+    / CI repair pass the same context they used for the readiness gate so the
+    snapshot freezes the identical baseline. When omitted the baseline is loaded
+    unlocked (retry/clone paths that reuse a frozen snapshot).
+    """
+    if shared_configuration is None:
+        shared = await load_shared_configuration(db)
+    else:
+        shared = shared_configuration
     existing = await db.get(TaskWorkerProfileSnapshot, task.id)
     if existing is not None:
         await db.delete(existing)
         await db.flush()
-    snapshot = snapshot_from_profile(task, profile, settings=get_effective_settings())
+    snapshot = snapshot_from_profile(
+        task,
+        profile,
+        settings=get_effective_settings(),
+        harness_key=harness_key,
+        endpoint=endpoint,
+        shared_configuration=shared,
+    )
     db.add(snapshot)
     task.worker_profile_id = profile.id
     await db.flush()
@@ -628,12 +758,37 @@ async def clone_task_worker_snapshot(
         codegraph_enabled=source.codegraph_enabled,
         volume_mounts=[dict(item) for item in (source.volume_mounts or [])],
         environment_variables=[dict(item) for item in (source.environment_variables or [])],
+        shared_configuration_revision=source.shared_configuration_revision,
+        effective_configuration_digest=source.effective_configuration_digest,
+        runtime_locator_fingerprint=source.runtime_locator_fingerprint,
         skill_selection_source=source.skill_selection_source,
         pre_script=source.pre_script,
         post_script=source.post_script,
         default_execute_run_instruction_template=source.default_execute_run_instruction_template,
         default_plan_run_instruction_template=source.default_plan_run_instruction_template,
         ci_auto_repair_run_instruction_template=source.ci_auto_repair_run_instruction_template,
+        harness_key=source.harness_key,
+        harness_adapter_version=source.harness_adapter_version,
+        harness_adapter_digest=source.harness_adapter_digest,
+        harness_config_snapshot=(
+            dict(source.harness_config_snapshot)
+            if isinstance(source.harness_config_snapshot, dict)
+            else None
+        ),
+        model_endpoint_snapshot=(
+            dict(source.model_endpoint_snapshot)
+            if isinstance(source.model_endpoint_snapshot, dict)
+            else None
+        ),
+        credential_ref=source.credential_ref,
+        cli_source=source.cli_source,
+        cli_executable_path=source.cli_executable_path,
+        cli_version=source.cli_version,
+        cli_binary_digest=source.cli_binary_digest,
+        image_digest=source.image_digest,
+        runtime_contract_version=source.runtime_contract_version,
+        orchestration_version=source.orchestration_version,
+        runtime_bundle_digest=source.runtime_bundle_digest,
         skill_references=[
             TaskSkillVersionReference(
                 task_id=target_task.id,
@@ -672,6 +827,8 @@ async def load_task_worker_runtime(db: AsyncSession, task: Task) -> TaskWorkerRu
     snapshot = await db.get(TaskWorkerProfileSnapshot, task.id)
     if snapshot is None:
         raise WorkerProfileValidationError(f"Task {task.id} has no worker profile snapshot")
+    # Attach so downstream code can read the frozen harness without a lazy load.
+    task.worker_profile_snapshot = snapshot
     try:
         skills_unloaded = "skill_references" in sa_inspect(snapshot).unloaded
     except Exception:
@@ -720,7 +877,14 @@ async def replace_profile_environment_variables(
     profile: WorkerProfile,
     items: Iterable[Any],
 ) -> None:
-    """Replace all environment variables for one worker profile."""
+    """Replace all environment variables for one worker profile.
+
+    Each item is ``{key, operation, value, is_secret}`` where ``operation`` is
+    ``set`` (profile overrides or adds) or ``mask`` (profile hides a shared
+    variable). A ``mask`` row stores no value. The submitted list is the full
+    desired state; any stored row whose key is absent is removed, which restores
+    inheritance for that key.
+    """
     result = await db.execute(
         select(WorkerProfileEnvironmentVariable).where(
             WorkerProfileEnvironmentVariable.worker_profile_id == profile.id
@@ -738,32 +902,47 @@ async def replace_profile_environment_variables(
             )
         seen_keys.add(key)
 
-        value = str(_profile_value(item, "value", "") or "")
-        is_secret = bool(_profile_value(item, "is_secret", False))
+        operation = str(_profile_value(item, "operation", "set") or "set").strip().lower()
+        if operation not in {"set", "mask"}:
+            raise WorkerProfileValidationError(
+                f"Invalid worker environment variable operation: {operation}"
+            )
         existing_row = existing_by_key.get(key)
 
-        if is_secret and value == "":
-            if existing_row is None or not existing_row.is_secret:
+        if operation == "mask":
+            if bool(_profile_value(item, "is_secret", False)):
                 raise WorkerProfileValidationError(
-                    f"New secret worker environment variable {key} cannot use a blank value"
+                    f"Masked worker environment variable {key} cannot be a secret"
                 )
-            stored_value = existing_row.value
+            stored_value = None
+            is_secret = False
         else:
-            stored_value = serialize_worker_environment_variable_value(
-                value,
-                is_secret=is_secret,
-            )
+            value = str(_profile_value(item, "value", "") or "")
+            is_secret = bool(_profile_value(item, "is_secret", False))
+            if is_secret and value == "":
+                if existing_row is None or not existing_row.is_secret:
+                    raise WorkerProfileValidationError(
+                        f"New secret worker environment variable {key} cannot use a blank value"
+                    )
+                stored_value = existing_row.value
+            else:
+                stored_value = serialize_worker_environment_variable_value(
+                    value,
+                    is_secret=is_secret,
+                )
 
         if existing_row is None:
             db.add(
                 WorkerProfileEnvironmentVariable(
                     worker_profile_id=profile.id,
                     key=key,
+                    operation=operation,
                     value=stored_value,
                     is_secret=is_secret,
                 )
             )
         else:
+            existing_row.operation = operation
             existing_row.value = stored_value
             existing_row.is_secret = is_secret
 

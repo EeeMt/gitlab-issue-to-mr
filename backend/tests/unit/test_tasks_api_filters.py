@@ -65,7 +65,10 @@ async def test_list_tasks_serializes_initiator_fields():
     task.initiator_user_id = 7
     task.initiator_gitlab_user_id = 77
     db = AsyncMock()
-    db.execute.return_value = SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [task]))
+    db.execute.return_value = SimpleNamespace(
+        scalars=lambda: SimpleNamespace(all=lambda: [task]),
+        scalar_one_or_none=lambda: None,
+    )
     access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
     with patch(
@@ -91,7 +94,10 @@ async def test_list_tasks_serializes_initiator_fields():
 async def test_list_tasks_applies_project_and_initiator_filters():
     task = _make_task(2, 202, TaskStatus.RUNNING, initiator_username="alice")
     db = AsyncMock()
-    db.execute.return_value = SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [task]))
+    db.execute.return_value = SimpleNamespace(
+        scalars=lambda: SimpleNamespace(all=lambda: [task]),
+        scalar_one_or_none=lambda: None,
+    )
     access_scope = ProjectAccessScope(
         is_unrestricted=False,
         accessible_projects=[{"id": 202, "name": "Project Beta"}],
@@ -105,7 +111,7 @@ async def test_list_tasks_applies_project_and_initiator_filters():
             access_scope=access_scope,
         )
 
-    executed_query = db.execute.await_args.args[0]
+    executed_query = db.execute.await_args_list[0].args[0]
 
     assert len(result) == 1
     assert "tasks.project_id =" in str(executed_query)

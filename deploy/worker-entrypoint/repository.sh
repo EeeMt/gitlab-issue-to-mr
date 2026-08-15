@@ -217,6 +217,14 @@ REPO_REQUESTED_FILTER="${CODIFY_GIT_CLONE_FILTER:-none}"
 
 # Clone or reuse repository with authentication.
 if [ -d /workspace/.git ]; then
+    # Legacy guard: workspaces created by pre-codify-run harnesses (codex/claude
+    # executed as root) may still carry root-owned .git entries. Only normalize
+    # when a root-owned entry is actually present, so a normal run does not pay
+    # a full-tree chown on a large repository. `-print -quit` stops at the first
+    # root-owned entry instead of scanning everything.
+    if [ -n "$(find /workspace/.git -user root -print -quit 2>/dev/null)" ]; then
+        chown -R "${CODIFY_RUN_UID}:${CODIFY_RUN_GID}" /workspace/.git 2>/dev/null || true
+    fi
     REPO_PREPARATION_PHASE="fetch"
     REPO_WORKSPACE_STATE="reused"
     REPO_ACTION="fetch"
@@ -380,7 +388,7 @@ repo_write_preparation_artifact \
     "${REPO_PREPARATION_PHASE}" \
     "0"
 
-# Run Claude Code CLI in direct execution mode
-echo "Running Claude Code CLI in direct execution mode..."
+# Run AI code generation in direct execution mode
+echo "Running AI code generation in direct execution mode..."
 echo "Prompt: ${USER_PROMPT}"
 echo ""

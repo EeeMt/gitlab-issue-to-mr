@@ -37,4 +37,19 @@ describe('task mode copy', () => {
       'Analysis only outputs answers, analysis, or proposals'
     )
   })
+
+  it('labels the harness engine consistently as Harness', () => {
+    expect(zhCN.createTask.harness).toBe('Harness')
+    expect(en.createTask.harness).toBe('Harness')
+    expect(zhCN.taskView.harness).toBe('Harness')
+    expect(en.taskView.harness).toBe('Harness')
+    expect(zhCN.issue.defaultHarness).toBe('默认 Harness')
+    expect(en.issue.defaultHarness).toBe('Default Harness')
+    expect(zhCN.taskView.failureEngineError).toBe('Harness 错误')
+    expect(en.taskView.failureEngineError).toBe('Harness error')
+    expect(zhCN.createTask.harnessClaude).toBe('Claude')
+    expect(en.createTask.harnessClaude).toBe('Claude')
+    expect(zhCN.createTask.harnessCodex).toBe('Codex')
+    expect(en.createTask.harnessCodex).toBe('Codex')
+  })
 })

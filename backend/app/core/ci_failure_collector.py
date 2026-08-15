@@ -17,6 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_effective_settings
 from app.core.ci_failure_logs import append_ci_failure_log
 from app.core.gitlab_client import get_gitlab_client
+from app.core.harness_registry import HarnessRegistryError, validate_enabled_harnesses
+from app.core.model_endpoints import (
+    ensure_harness_protocol_compatibility,
+    normalize_endpoint,
+)
 from app.core.projects import get_project_metadata
 from app.core.task_creation import prepare_task_runtime_snapshot
 from app.core.task_prompt import render_and_store_task_prompt
@@ -29,6 +34,8 @@ from app.core.worker_profiles import (
     select_snapshot_run_instruction_template,
 )
 from app.core.worker_runtime_bundle import bind_runtime_bundle
+from app.core.worker_runtime_readiness import readiness_for_profile
+from app.core.worker_shared_configuration import load_shared_configuration
 from app.core.worker_workspace import configured_workspace_root
 from app.database import AsyncSessionLocal
 from app.models import (
@@ -645,6 +652,87 @@ async def process_ci_failure_run(
         except WorkerProfileValidationError as exc:
             raise RuntimeError(f"CI auto-repair cannot start: {exc}") from exc
 
+        # Runtime readiness gate (§12): a CI repair task must not be created for
+        # a Kit locator that is known unavailable; skip (ignore) the run instead.
+        # The shared baseline is loaded once under lock and handed to both the
+        # gate and the frozen snapshot below (§11.2).
+        shared = await load_shared_configuration(db, for_update=True)
+        readiness = await readiness_for_profile(db, worker_profile, settings, shared=shared)
+        if readiness.is_unavailable:
+            await _ignore_run(
+                db,
+                run,
+                reason="worker_runtime_unavailable",
+                step="auto_repair_runtime_checked",
+                message="Worker runtime is known unavailable; skipping CI auto-repair",
+                details={
+                    "failure_code": readiness.failure_code,
+                    "failure_message": readiness.failure_message,
+                    "checked_at": (
+                        readiness.checked_at.isoformat() if readiness.checked_at else None
+                    ),
+                },
+            )
+            return run
+
+        # Validate the repair task's execution truth at creation time, exactly
+        # like a manual task: the profile default harness must be enabled and the
+        # provider's wire protocol must be able to talk to that harness. Otherwise
+        # the repair task is created and fails at runtime, which is the opposite of
+        # the "fail at creation" invariant.
+        profile_default_key = getattr(worker_profile, "default_harness_key", None)
+        if not isinstance(profile_default_key, str) or not profile_default_key:
+            profile_default_key = "claude"
+        enabled_harnesses = getattr(worker_profile, "enabled_harnesses", None)
+        if not isinstance(enabled_harnesses, list) or not enabled_harnesses:
+            enabled_harnesses = ["claude"]
+        endpoint = normalize_endpoint(provider)
+        try:
+            validate_enabled_harnesses(
+                enabled_harnesses,
+                default_harness_key=profile_default_key,
+            )
+            ensure_harness_protocol_compatibility(profile_default_key, endpoint)
+        except (HarnessRegistryError, ValueError) as exc:
+            raise RuntimeError(f"CI auto-repair cannot start: {exc}") from exc
+
+        # CI repair is a new tail turn in the Issue input stream (spec §5.4 /
+        # §6.2): inside the Issue row lock, repair legacy NULL sequences and
+        # project lineage from the tail before allocating the tail sequence.
+        from app.core.harness_sessions import session_namespace_for
+        from app.core.issue_task_order import (
+            IssueOrderIntegrityError,
+            LineageConflict,
+            ensure_issue_order_integrity_locked,
+            project_tail_lineage,
+        )
+
+        try:
+            integrity_report = await ensure_issue_order_integrity_locked(
+                db,
+                issue_id=issue.id,
+                repair_nulls=True,
+            )
+        except IssueOrderIntegrityError as exc:
+            raise RuntimeError(f"CI auto-repair blocked by Issue ordering: {exc.reason}") from exc
+
+        repair_namespace = session_namespace_for(
+            profile_default_key,
+            endpoint.fingerprint,
+        )
+        try:
+            repair_projection = project_tail_lineage(
+                integrity_report["tail_projection"],
+                issue_id=issue.id,
+                harness_key=profile_default_key,
+                session_namespace=repair_namespace,
+                session_mode="continue",
+            )
+        except LineageConflict as exc:
+            raise RuntimeError(
+                f"CI auto-repair blocked by lineage conflict: {exc.detail.get('message')}"
+            ) from exc
+
         repair_task = Task(
             issue_id=issue.id,
             project_id=issue.project_id,
@@ -658,6 +746,12 @@ async def process_ci_failure_run(
             require_changes=True,
             trigger_source="ci_auto_repair",
             ci_failure_run_id=run.id,
+            issue_sequence=integrity_report["max_sequence"] + 1,
+            projected_harness_key=repair_projection["harness_key"],
+            projected_session_namespace=repair_projection["session_namespace"],
+            projected_lineage_generation=repair_projection["generation"],
+            projected_reset_task_id=repair_projection["reset_task_id"],
+            lineage_projection_reason=repair_projection["reason"],
         )
         issue.workspace_last_used_at = utcnow()
         issue.workspace_delete_attempted_at = None
@@ -665,6 +759,10 @@ async def process_ci_failure_run(
         issue.workspace_delete_error = None
         db.add(repair_task)
         await db.flush()
+        if repair_projection["reset_task_id"] is None:
+            # A fresh/initial generation is its own reset point; the id only
+            # exists after flush.
+            repair_task.projected_reset_task_id = repair_task.id
         await prepare_task_runtime_snapshot(
             db,
             repair_task,
@@ -676,6 +774,9 @@ async def process_ci_failure_run(
             replace_snapshot=replace_task_worker_snapshot,
             select_template=select_snapshot_run_instruction_template,
             render_prompt=render_and_store_task_prompt,
+            harness_key=profile_default_key,
+            endpoint=endpoint,
+            shared_configuration=shared,
         )
         await bind_runtime_bundle(db, repair_task)
         run.repair_task_id = repair_task.id

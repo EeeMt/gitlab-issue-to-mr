@@ -55,7 +55,7 @@ build_running_mr_description() {
 
 ---
 
-*Claude Code CLI 正在直接实施变更...*
+*AI 正在直接实施变更...*
 $(build_issue_reference_block)
 EOF
 }

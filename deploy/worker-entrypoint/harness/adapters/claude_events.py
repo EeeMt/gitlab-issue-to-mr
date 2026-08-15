@@ -4,109 +4,48 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
-from urllib.parse import urlsplit
+
+from sanitize import redact_hidden_reasoning, sanitize
+
+_REAL_SESSION_ID: str = ""
 
 
-def _stable_placeholder(kind: str, value: str) -> str:
-    if value.startswith(f"<{kind}:"):
-        return value
-    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
-    return f"<{kind}:{digest}>"
+def _capture_real_session_id(raw_text: str) -> None:
+    """Keep the unmasked session id before sanitization so resume stays possible.
 
-TOKEN_PATTERNS = (
-    (re.compile(r"\bglpat-[A-Za-z0-9_-]{8,}\b"), "<GITLAB_TOKEN>"),
-    (re.compile(r"\bsk-ant-[A-Za-z0-9_-]{8,}\b"), "<ANTHROPIC_API_KEY>"),
-    (re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{16,}\b"), "<OPENAI_API_KEY>"),
-    (re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/-]{8,}"), "Bearer <REDACTED>"),
-    (
-        re.compile(r"(?i)\b((?:set-)?cookie\s*[:=]\s*)[^\s;\"']+"),
-        lambda match: f"{match.group(1)}<REDACTED>",
-    ),
-    (
-        re.compile(
-            r"(?i)\b([A-Z0-9_]*(?:API_KEY|AUTH_TOKEN|ACCESS_TOKEN|PASSWORD|SECRET)"
-            r"\s*[:=]\s*[\"']?)[^\s,;\"']{6,}"
-        ),
-        lambda match: f"{match.group(1)}<REDACTED>",
-    ),
-    (re.compile(r"/Users/[^/\s\"']+"), "/Users/<USER>"),
-    (re.compile(r"/home/[^/\s\"']+"), "/home/<USER>"),
-    (
-        re.compile(
-            r"(?:/private)?/var/folders/[^\s\"']*?/codify-harness-(?:probe|workspace)\.[A-Za-z0-9]+"
-            r"|/(?:private/)?tmp/codify-harness-(?:probe|workspace)\.[A-Za-z0-9]+"
-        ),
-        "<PROBE_DIR>",
-    ),
-    (
-        re.compile(r"-private-tmp-codify-harness-(?:probe|workspace)-[A-Za-z0-9]+"),
-        "<PROBE_PROJECT_KEY>",
-    ),
-    (
-        re.compile(r"\b(?:call|toolu)_[A-Za-z0-9_-]{8,}\b"),
-        lambda match: _stable_placeholder("TOOL_ID", match.group(0)),
-    ),
-    (
-        re.compile(
-            r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
-            r"[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\b"
-        ),
-        lambda match: _stable_placeholder("UUID", match.group(0).lower()),
-    ),
-)
-PRIVATE_HOST = re.compile(
-    r"(?i)(?:localhost|127(?:\.\d{1,3}){3}|10(?:\.\d{1,3}){3}|"
-    r"192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}|"
-    r"[^./\s]+\.(?:local|internal|corp))"
-)
-URL_PATTERN = re.compile(r"https?://[^\s\"'<>]+")
-
-
-def _sanitize_url(match: re.Match[str]) -> str:
-    raw = match.group(0)
+    UUIDs are redacted to stable ``<UUID:...>`` placeholders in events and raw
+    streams, but the harness result must carry the real session id so the backend
+    persists ``output_session_id`` and ``--resume`` receives a valid value. The
+    translator is one streaming process reading stdin to EOF, so the value lives
+    in memory; the first real id seen wins.
+    """
+    global _REAL_SESSION_ID
+    if _REAL_SESSION_ID:
+        return
     try:
-        parsed = urlsplit(raw)
-    except ValueError:
-        return "<PRIVATE_URL>"
-    if parsed.username or parsed.password or PRIVATE_HOST.fullmatch(parsed.hostname or ""):
-        return "<PRIVATE_URL>"
-    return raw
+        record = json.loads(raw_text)
+    except json.JSONDecodeError:
+        return
+    session_id = record.get("session_id")
+    if isinstance(session_id, str) and session_id and "<" not in session_id:
+        _REAL_SESSION_ID = session_id
 
 
-def sanitize(text: str) -> str:
-    text = URL_PATTERN.sub(_sanitize_url, text)
-    for pattern, replacement in TOKEN_PATTERNS:
-        text = pattern.sub(replacement, text)
-    return text
+def _session_id(record: dict) -> str | None:
+    """Real session id when captured, else the (possibly masked) record value.
 
-
-def redact_hidden_reasoning(value):
-    if isinstance(value, dict):
-        return {
-            key: (
-                "<REDACTED_SIGNATURE>"
-                if key == "signature"
-                else "<HIDDEN_REASONING_OMITTED>"
-                if key in {
-                    "thinking",
-                    "chain_of_thought",
-                    "hidden_reasoning",
-                    "encrypted_content",
-                }
-                else redact_hidden_reasoning(child)
-            )
-            for key, child in value.items()
-        }
-    if isinstance(value, list):
-        return [redact_hidden_reasoning(child) for child in value]
-    return value
+    The backend projects ``output_session_id`` from canonical events, so the
+    resume capability requires the real value here; other UUIDs stay masked.
+    """
+    if _REAL_SESSION_ID:
+        return _REAL_SESSION_ID
+    value = record.get("session_id")
+    return value if isinstance(value, str) and value else None
 
 
 def _emit(event_type: str, payload: dict, raw_line: int) -> None:
@@ -152,7 +91,7 @@ def _write_result(record: dict, *, success: bool, usage: dict) -> None:
         kind = _failure_kind(record)
         failure = {
             "kind": kind,
-            "message": record.get("result") or record.get("subtype") or "Claude execution failed",
+            "message": record.get("result") or record.get("subtype") or "AI execution failed",
         }
     result = {
         "schema": "codify.worker.result/v1",
@@ -168,9 +107,9 @@ def _write_result(record: dict, *, success: bool, usage: dict) -> None:
         "success": success,
         "result": record.get("result") or "",
         "harness_key": "claude",
-        "adapter_version": os.environ.get("CODIFY_ADAPTER_VERSION", "1.0.0"),
+        "adapter_version": os.environ.get("CODIFY_ADAPTER_VERSION", "1.0.1"),
         "cli_version": os.environ.get("CODIFY_CLI_VERSION", "unknown"),
-        "session_id": record.get("session_id"),
+        "session_id": _session_id(record),
         "model": os.environ.get("ANTHROPIC_MODEL") or None,
         "usage": usage,
         "failure": failure,
@@ -219,11 +158,11 @@ def translate(record: dict, raw_line: int) -> None:
     if record_type == "system" and subtype == "init":
         _emit(
             "model.resolved",
-            {"model": record.get("model"), "session_id": record.get("session_id")},
+            {"model": record.get("model"), "session_id": _session_id(record)},
             raw_line,
         )
     elif record_type == "system" and subtype == "compact_boundary":
-        _emit("context.compacted", {"session_id": record.get("session_id")}, raw_line)
+        _emit("context.compacted", {"session_id": _session_id(record)}, raw_line)
     elif record_type == "system" and subtype == "api_retry":
         _emit(
             "provider.retry",
@@ -268,7 +207,7 @@ def translate(record: dict, raw_line: int) -> None:
             elif block_type == "thinking":
                 _emit(
                     "diagnostic",
-                    {"code": "hidden_reasoning_omitted", "message": "Claude thinking omitted"},
+                    {"code": "hidden_reasoning_omitted", "message": "AI thinking omitted"},
                     raw_line,
                 )
     elif record_type == "user":
@@ -290,14 +229,14 @@ def translate(record: dict, raw_line: int) -> None:
         success = subtype == "success" and record.get("is_error") is not True
         payload = {
             "result": record.get("result") or "",
-            "session_id": record.get("session_id"),
+            "session_id": _session_id(record),
         }
         if success:
             _emit("harness.completed", payload, raw_line)
         else:
             payload["failure"] = {
                 "kind": _failure_kind(record),
-                "message": record.get("result") or subtype or "Claude execution failed",
+                "message": record.get("result") or subtype or "AI execution failed",
             }
             _emit("harness.failed", payload, raw_line)
         _write_result(record, success=success, usage=usage)
@@ -313,32 +252,40 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--raw-file", required=True, type=Path)
     args = parser.parse_args()
-    input_text = sanitize(sys.stdin.read().rstrip("\n"))
-    if not input_text:
-        return 0
-    try:
-        record = json.loads(input_text)
-    except json.JSONDecodeError:
-        record = None
-        raw_text = input_text
-    else:
-        record = redact_hidden_reasoning(record)
-        raw_text = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
     args.raw_file.parent.mkdir(parents=True, exist_ok=True)
+
+    line_no = 0
     with args.raw_file.open("a", encoding="utf-8") as handle:
-        handle.write(raw_text + "\n")
-    raw_line = sum(1 for _ in args.raw_file.open(encoding="utf-8"))
-    if record is None:
-        _emit(
-            "diagnostic",
-            {"code": "non_json_raw_line", "text": raw_text[:500]},
-            raw_line,
-        )
-        return 0
-    if not isinstance(record, dict):
-        _emit("diagnostic", {"code": "non_object_raw_event"}, raw_line)
-        return 0
-    translate(record, raw_line)
+        for raw_input in sys.stdin:
+            raw_input = raw_input.rstrip("\n")
+            if not raw_input.strip():
+                continue
+            _capture_real_session_id(raw_input)
+            input_text = sanitize(raw_input)
+            if not input_text:
+                continue
+            try:
+                record = json.loads(input_text)
+            except json.JSONDecodeError:
+                record = None
+                raw_text = input_text
+            else:
+                record = redact_hidden_reasoning(record)
+                raw_text = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+            handle.write(raw_text + "\n")
+            handle.flush()
+            line_no += 1
+            if record is None:
+                _emit(
+                    "diagnostic",
+                    {"code": "non_json_raw_line", "text": raw_text[:500]},
+                    line_no,
+                )
+                continue
+            if not isinstance(record, dict):
+                _emit("diagnostic", {"code": "non_object_raw_event"}, line_no)
+                continue
+            translate(record, line_no)
     return 0
 
 

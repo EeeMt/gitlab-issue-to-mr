@@ -54,6 +54,7 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     task.additions = 0
     task.deletions = 0
     task.total_changes = 0
+    task.change_stats_recorded_at = None
     task.input_tokens = 0
     task.output_tokens = 0
     task.model_name = None
@@ -66,6 +67,14 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     task.completed_at = None
     task.cancel_requested_at = None
     task.raw_logs_finalized_at = None
+    # Issue input-stream ordering / projected lineage (nullable compat fields).
+    task.issue_sequence = None
+    task.projected_harness_key = None
+    task.projected_session_namespace = None
+    task.projected_lineage_generation = None
+    task.projected_reset_task_id = None
+    task.lineage_projection_reason = None
+    task.input_lineage_reason = None
     return task
 
 
@@ -657,9 +666,10 @@ class CancelTaskDockerStopTests(unittest.TestCase):
         # Docker should have tried to get container "codify-40-issue100"
         mock_docker.client.containers.get.assert_called_once_with("codify-40-issue100")
         mock_container.stop.assert_called_once_with(timeout=10)
-        mock_container.remove.assert_called_once_with(force=True, v=True)
+        # Removal is deferred to the scheduler's worker finalization so it can
+        # drain the log stream and ingest the cancelled canonical terminal.
+        mock_container.remove.assert_not_called()
         self.assertIsNotNone(task.raw_logs_finalized_at)
-        self.assertIsNone(task.container_id)
 
     def test_cancel_task_with_different_issue_id(self):
         """Cancel task builds container name from issue_id."""
@@ -745,7 +755,7 @@ class CancelTaskDockerStopTests(unittest.TestCase):
             content=b"complete console\n",
         )
         mock_container.stop.assert_called_once_with(timeout=10)
-        mock_container.remove.assert_called_once_with(force=True, v=True)
+        mock_container.remove.assert_not_called()
         self.assertIsNotNone(task.raw_logs_finalized_at)
         self.assertIsNone(task.container_id)
 
@@ -865,7 +875,8 @@ class CancelTaskDockerStopTests(unittest.TestCase):
         app.dependency_overrides.clear()
         self.assertEqual(response.status_code, 200)
         mock_docker.client.containers.get.assert_called_once_with("stable-container-45")
-        self.assertIsNone(task.container_id)
+        # container_id is retained until the scheduler removes the container.
+        self.assertEqual(task.container_id, "stable-container-45")
 
     def test_cancel_task_defers_when_running_container_has_no_stable_id(self):
         """NotFound during worker bootstrap must not release the issue lock."""

@@ -33,7 +33,7 @@ class MaintenanceApiTests(unittest.IsolatedAsyncioTestCase):
             response = await cleanup_system_data_endpoint(
                 body=CleanupSystemDataRequest(older_than_days=30, force=True),
                 db=db,
-                _current_user=MagicMock(),
+                current_user=MagicMock(id=7),
             )
 
         cleanup.assert_awaited_once_with(
@@ -42,6 +42,7 @@ class MaintenanceApiTests(unittest.IsolatedAsyncioTestCase):
             force=True,
             workspace_root="/workspaces",
             settings=settings.return_value,
+            deleted_by_user_id=7,
         )
         self.assertEqual(response.deleted_issues, 1)
         self.assertEqual(response.deleted_tasks, 2)

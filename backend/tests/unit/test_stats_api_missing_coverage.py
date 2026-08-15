@@ -123,6 +123,7 @@ class TestGetAnalyticsEmptyInitiatorUsername(unittest.IsolatedAsyncioTestCase):
             self._empty_rows(),  # task status
             self._empty_rows(),  # errors
             self._empty_rows(),  # providers
+            self._empty_rows(),  # harnesses
         ])
 
         mock_user = User(id=1, username="admin", platform_role="platform_admin")

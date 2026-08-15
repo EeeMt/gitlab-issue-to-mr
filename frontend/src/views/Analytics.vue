@@ -28,6 +28,7 @@
             <n-select
               v-model:value="selectedInitiatorUsername"
               :options="initiatorOptions"
+              :render-label="renderInitiatorOptionLabel"
               :placeholder="t('analytics.initiatorFilterPlaceholder')"
               clearable
               filterable
@@ -549,7 +550,8 @@ import {
   NSpin,
   NIcon,
   useMessage,
-  type DataTableColumns
+  type DataTableColumns,
+  type SelectOption
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import {
@@ -570,6 +572,7 @@ import {
 } from '../api'
 import PageHeader from '../components/PageHeader.vue'
 import SummaryCard from '../components/SummaryCard.vue'
+import TruncatedOptionLabel from '../components/filter/TruncatedOptionLabel.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeLocal, formatMonthDayLocal } from '../utils/datetime'
 import { formatDurationSec } from '../utils/format'
@@ -663,10 +666,14 @@ const projectOptions = computed(() =>
 )
 const initiatorOptions = computed(() =>
   (analytics.value?.available_initiators || []).map((initiator: AnalyticsInitiatorOption) => ({
-    label: `${initiator.initiator_username} (${initiator.task_count})`,
+    label: initiator.initiator_username,
     value: initiator.initiator_username
   }))
 )
+
+function renderInitiatorOptionLabel(option: SelectOption) {
+  return h(TruncatedOptionLabel, { label: String(option.label ?? '') })
+}
 
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 const trendChartMinWidth = computed(() => {

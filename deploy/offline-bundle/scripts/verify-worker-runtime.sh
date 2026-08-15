@@ -4,15 +4,19 @@ set -euo pipefail
 KIT_PATH=""
 IMAGE=""
 SMOKE=""
-CLAUDE_HOST_PATH=""
-CLAUDE_CONTAINER_PATH="/usr/local/bin/claude"
+HARNESS_KEY="claude"
+HARNESS_HOST_PATH=""
+HARNESS_CONTAINER_PATH=""
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --kit) KIT_PATH="${2:?missing --kit value}"; shift 2 ;;
         --image) IMAGE="${2:?missing --image value}"; shift 2 ;;
-        --claude-host-path) CLAUDE_HOST_PATH="${2:?missing --claude-host-path value}"; shift 2 ;;
-        --claude-container-path) CLAUDE_CONTAINER_PATH="${2:?missing --claude-container-path value}"; shift 2 ;;
+        --harness-key) HARNESS_KEY="${2:?missing --harness-key value}"; shift 2 ;;
+        --harness-host-path) HARNESS_HOST_PATH="${2:?missing --harness-host-path value}"; shift 2 ;;
+        --harness-container-path) HARNESS_CONTAINER_PATH="${2:?missing --harness-container-path value}"; shift 2 ;;
+        --claude-host-path) HARNESS_KEY="claude"; HARNESS_HOST_PATH="${2:?missing --claude-host-path value}"; shift 2 ;;
+        --claude-container-path) HARNESS_CONTAINER_PATH="${2:?missing --claude-container-path value}"; shift 2 ;;
         --smoke) SMOKE="${2:?missing --smoke value}"; shift 2 ;;
         *) echo "Unknown argument: $1" >&2; exit 2 ;;
     esac
@@ -22,11 +26,21 @@ done
 [ -n "${IMAGE}" ] || { echo "--image is required" >&2; exit 2; }
 [ -x "${KIT_PATH}/launcher" ] || { echo "Invalid worker kit: ${KIT_PATH}" >&2; exit 1; }
 [ -d "${KIT_PATH}/nix/store" ] || { echo "Worker kit Nix store is missing" >&2; exit 1; }
-if [ -n "${CLAUDE_HOST_PATH}" ]; then
-    [ -x "${CLAUDE_HOST_PATH}" ] || { echo "Claude executable is not executable: ${CLAUDE_HOST_PATH}" >&2; exit 1; }
-    case "${CLAUDE_CONTAINER_PATH}" in
+case "${HARNESS_KEY}" in
+    claude|codex) ;;
+    *) echo "Unsupported --harness-key: ${HARNESS_KEY} (expected claude|codex)" >&2; exit 2 ;;
+esac
+if [ -n "${HARNESS_HOST_PATH}" ] && [ -z "${HARNESS_CONTAINER_PATH}" ]; then
+    case "${HARNESS_KEY}" in
+        claude) HARNESS_CONTAINER_PATH="/usr/local/bin/claude" ;;
+        codex) HARNESS_CONTAINER_PATH="/usr/local/bin/codex" ;;
+    esac
+fi
+if [ -n "${HARNESS_HOST_PATH}" ]; then
+    [ -x "${HARNESS_HOST_PATH}" ] || { echo "Harness executable is not executable: ${HARNESS_HOST_PATH}" >&2; exit 1; }
+    case "${HARNESS_CONTAINER_PATH}" in
         /*) ;;
-        *) echo "--claude-container-path must be absolute" >&2; exit 2 ;;
+        *) echo "--harness-container-path must be absolute" >&2; exit 2 ;;
     esac
 fi
 docker image inspect "${IMAGE}" >/dev/null
@@ -53,16 +67,25 @@ ARGS=(
     --volume "${KIT_PATH}:/opt/codify-kit:ro"
     --volume "${KIT_PATH}/nix/store:/nix/store:ro"
 )
-if [ -n "${CLAUDE_HOST_PATH}" ]; then
-    ARGS+=(--volume "${CLAUDE_HOST_PATH}:${CLAUDE_CONTAINER_PATH}:ro")
+if [ -n "${HARNESS_HOST_PATH}" ]; then
+    ARGS+=(--volume "${HARNESS_HOST_PATH}:${HARNESS_CONTAINER_PATH}:ro")
 fi
 ARGS+=(
     --entrypoint /opt/codify-kit/launcher
     --env "CODIFY_KIT_VERSION=${VERSION}"
     --env "CODIFY_RUNTIME_IMAGE=${IMAGE}"
+    --env "CODIFY_HARNESS_KEY=${HARNESS_KEY}"
 )
-if [ -n "${CLAUDE_HOST_PATH}" ]; then
-    ARGS+=(--env "CODIFY_CLAUDE_BIN=${CLAUDE_CONTAINER_PATH}")
+if [ -n "${HARNESS_HOST_PATH}" ]; then
+    case "${HARNESS_KEY}" in
+        claude) ARGS+=(--env "CODIFY_CLAUDE_BIN=${HARNESS_CONTAINER_PATH}") ;;
+        codex)
+            ARGS+=(
+                --env "CODIFY_CODEX_BIN=${HARNESS_CONTAINER_PATH}"
+                --env "CODIFY_HARNESS_CLI_BIN=${HARNESS_CONTAINER_PATH}"
+            )
+            ;;
+    esac
 fi
 ARGS+=("${IMAGE}" --verify)
 if [ "${skill_capable_kit}" -eq 1 ]; then

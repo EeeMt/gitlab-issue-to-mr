@@ -153,6 +153,22 @@ class DockerClientWrapper:
                 logger.warning(f"Image not found locally or in registry: {image}")
                 raise
 
+    def resolve_image_repo_digest(self, image: str) -> str:
+        """Resolve the immutable ``repo@sha256:...`` digest for an image on this host.
+
+        Raises ``RuntimeError`` when the image has no pinned repo digest (e.g. an
+        unpushed local build), which must be resolved before a Profile can be
+        considered verified.
+        """
+        image_obj = self.client.images.get(image)
+        repo_digests = (image_obj.attrs or {}).get("RepoDigests") or []
+        for digest in repo_digests:
+            if "@sha256:" in digest:
+                return digest
+        raise RuntimeError(
+            f"image {image!r} has no immutable repo digest on this host"
+        )
+
     def create_container(
         self,
         image: str,

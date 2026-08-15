@@ -62,11 +62,12 @@
               :key="opt.value"
               class="filter-popover__option-row"
             >
-              <n-checkbox :value="opt.value" :label="opt.label">
+              <n-checkbox :value="opt.value">
                 <template #default>
                   <div class="filter-popover__option-content">
                     <span v-if="opt.color" class="filter-popover__color-dot" :style="{ background: opt.color }" />
-                    <span>{{ opt.label }}</span>
+                    <TruncatedOptionLabel v-if="opt.truncateLabel" :label="opt.label" />
+                    <span v-else>{{ opt.label }}</span>
                   </div>
                 </template>
               </n-checkbox>
@@ -127,6 +128,7 @@ import { ref, computed } from 'vue'
 import { NIcon, NCheckboxGroup, NCheckbox, NInput, NDatePicker, NSpin, NButton } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import type { FilterField } from '../../composables/useFilterSort'
+import TruncatedOptionLabel from './TruncatedOptionLabel.vue'
 
 const props = defineProps<{
   fields: FilterField[]
@@ -310,6 +312,15 @@ function clearCurrent() {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  width: 100%;
+}
+.filter-popover__option-row :deep(.n-checkbox) {
+  flex: 1;
+  min-width: 0;
+}
+.filter-popover__option-row :deep(.n-checkbox__label) {
+  min-width: 0;
 }
 .filter-popover__color-dot {
   width: 8px;

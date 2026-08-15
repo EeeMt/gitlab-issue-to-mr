@@ -164,6 +164,15 @@ def _make_task(**kwargs):
         priority=0, status=TaskStatus.PENDING,
         is_retry=False, retry_source_task_id=None,
         additions=0, deletions=0, total_changes=0,
+        # Ordered-turn projected lineage defaults: the scheduler backfills these
+        # before a task is claimed, so worker tests exercise the projected-lineage
+        # resume path (the worker fails closed on a missing projection).
+        projected_harness_key="claude",
+        projected_session_namespace="claude-0000000000000000",
+        projected_lineage_generation=0,
+        projected_reset_task_id=None,
+        lineage_projection_reason="initial",
+        input_lineage_reason=None,
     )
     defaults.update(kwargs)
     task = Task(**defaults)
@@ -233,6 +242,11 @@ def _make_db(task=None):
             mock_result.scalar_one_or_none.return_value = provider
             mock_result.scalars.return_value.all.return_value = [provider] if provider else []
         elif 'FROM worker_environment_variables' in statement_str:
+            mock_result.scalar_one_or_none.return_value = None
+            mock_result.scalars.return_value.all.return_value = []
+        elif 'FROM issue_session_lineages' in statement_str:
+            # The worker resolves resume sessions through the projected-lineage
+            # table; by default there is no generation row yet (fresh_no_match).
             mock_result.scalar_one_or_none.return_value = None
             mock_result.scalars.return_value.all.return_value = []
         else:
@@ -1216,9 +1230,9 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
             "codify_harness_run_text /tmp/overall_summary_prompt.txt 60",
             content,
         )
-        self.assertIn('echo "Claude overall summary generation succeeded"', content)
+        self.assertIn('echo "Harness overall summary generation succeeded"', content)
         self.assertIn('echo "Overall MR summary generated (${#FINAL_OVERALL_SUMMARY} chars)"', content)
-        self.assertIn('echo "Claude overall summary normalized to empty; keeping previous MR summary"', content)
+        self.assertIn('echo "Harness overall summary normalized to empty; keeping previous MR summary"', content)
         self.assertIn('overall_summary_chars=${#FINAL_OVERALL_SUMMARY}', content)
         self.assertIn('--arg overall_summary "${FINAL_OVERALL_SUMMARY:-}"', content)
         self.assertIn('overall_summary: $overall_summary', content)
@@ -1280,12 +1294,12 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
         content = _read_worker_entrypoint_sources(script)
 
-        self.assertIn('echo "Generating commit message with Claude..."', content)
+        self.assertIn('echo "Generating commit message with the harness model..."', content)
         self.assertIn('echo "Commit message prompt written to /tmp/commit_message_prompt.txt"', content)
-        self.assertIn('echo "Claude commit message generation succeeded"', content)
-        self.assertIn('echo "Claude raw commit message response:"', content)
+        self.assertIn('echo "Harness commit message generation succeeded"', content)
+        self.assertIn('echo "Harness raw commit message response:"', content)
         self.assertIn("printf '%s\\n' \"${GENERATED_COMMIT_MESSAGE}\" | sed 's/^/  /'", content)
-        self.assertIn('echo "Claude commit message generation failed with exit code ${COMMIT_MESSAGE_RESULT}; using fallback"', content)
+        self.assertIn('echo "Harness commit message generation failed with exit code ${COMMIT_MESSAGE_RESULT}; using fallback"', content)
         self.assertIn('echo "Generated commit message was empty after normalization; using fallback"', content)
         self.assertIn('echo "Commit message written to /tmp/commit_message.txt"', content)
         self.assertIn('echo "Final commit message:"', content)
@@ -2527,6 +2541,39 @@ class TestExecuteTask(unittest.TestCase):
         self.assertIsNone(task.input_session_id)
         environment = mock_docker.create_container.call_args.kwargs["environment"]
         self.assertEqual(environment["START_FRESH_SESSION"], "1")
+        self.assertNotIn("RESUME_SESSION", environment)
+
+    @patch('app.core.worker.get_settings')
+    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
+    def test_continue_fresh_no_match_does_not_leak_stale_claude_session(
+        self,
+        mock_notify,
+        mock_get_settings,
+    ):
+        """A continue with no matching lineage row must not leak the stale
+        Issue.claude_session_id into the container as RESUME_SESSION."""
+        mock_get_settings.return_value = _make_settings()
+        mock_docker = MagicMock()
+        mock_docker.create_container.return_value = MagicMock(id="ctr-fresh-no-match")
+        worker = _make_worker(mock_docker=mock_docker)
+        # Default projected lineage has no IssueSessionLineage row yet, so a
+        # continue resolves to fresh_no_match with no resume session.
+        task = _make_task(target_branch=None, session_mode="continue")
+        # Simulate the stale legacy pointer from an older generation (EEE-28 M1).
+        task.issue.claude_session_id = "session-old"
+        db = _make_db(task)
+
+        with patch.object(
+            worker,
+            '_stream_logs_to_db',
+            new=AsyncMock(return_value=(0, "", 1, False)),
+        ):
+            result = asyncio.run(worker.execute_task(db, task.id))
+
+        self.assertTrue(result)
+        self.assertIsNone(task.input_session_id)
+        self.assertEqual(task.input_lineage_reason, "fresh_no_match")
+        environment = mock_docker.create_container.call_args.kwargs["environment"]
         self.assertNotIn("RESUME_SESSION", environment)
 
     @patch('app.core.worker.get_settings')

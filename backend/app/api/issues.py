@@ -18,9 +18,13 @@ from app.api.list_filter_values import (
     parse_datetime_filter,
     validate_datetime_range,
 )
+from app.api.task_responses import apply_queue_context, compute_task_queue_contexts
 from app.config import get_effective_settings
 from app.core.gitlab_client import get_gitlab_client
+from app.core.harness_registry import HarnessRegistryError, validate_enabled_harnesses
+from app.core.harness_sessions import get_issue_latest_harness_key
 from app.core.skills import delete_unreferenced_skill_versions
+from app.core.system_statistics_deletion import archive_issue_statistics_before_delete
 from app.core.task_helpers import _require_issue_operator
 from app.core.utcnow import utcnow
 from app.core.worker_kit import MOUNTED_KIT_MODE
@@ -63,6 +67,7 @@ class CreateIssueRequest(BaseModel):
     ci_auto_repair_enabled: bool = False
     worker_profile_id: int
     default_provider_id: int | None = None
+    default_harness_key: str | None = None
     git_clone_depth: int | None = Field(default=None, ge=1, le=10_000, strict=True)
     git_clone_filter: Literal["blob:none"] | None = None
 
@@ -75,6 +80,7 @@ class UpdateIssueRequest(BaseModel):
     status: str | None = None
     ci_auto_repair_enabled: bool | None = None
     default_provider_id: int | None = None
+    default_harness_key: str | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -107,7 +113,11 @@ class CloseIssueRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _serialize_issue(issue: Issue, task_count: int | None = None) -> dict:
+def _serialize_issue(
+    issue: Issue,
+    task_count: int | None = None,
+    current_harness: str | None = None,
+) -> dict:
     """Serialize an Issue row for API responses."""
     worker_profile = _loaded_issue_relationship(issue, "worker_profile")
     default_provider = _loaded_issue_relationship(issue, "default_provider")
@@ -128,11 +138,13 @@ def _serialize_issue(issue: Issue, task_count: int | None = None) -> dict:
         "ci_auto_repair_enabled": issue.ci_auto_repair_enabled,
         "worker_profile_id": issue.worker_profile_id,
         "default_provider_id": issue.default_provider_id,
+        "default_harness_key": issue.default_harness_key,
         "git_clone_depth": issue.git_clone_depth,
         "git_clone_filter": issue.git_clone_filter,
         "worker_profile_name": worker_profile.name if worker_profile is not None else None,
         "default_provider_name": default_provider.name if default_provider is not None else None,
         "claude_session_id": issue.claude_session_id,
+        "current_harness": current_harness,
         "session_storage_path": issue.session_storage_path,
         "initiator_user_id": issue.initiator_user_id,
         "initiator_username": issue.initiator_username,
@@ -219,6 +231,33 @@ async def _resolve_issue_default_provider_id(
     return provider.id if provider else None
 
 
+async def _resolve_issue_default_harness_key(
+    db: AsyncSession,
+    worker_profile_id: int,
+    explicit_key: str | None,
+) -> str:
+    """Resolve and validate the issue's default harness against its worker profile."""
+    profile = await db.get(WorkerProfile, worker_profile_id)
+    if profile is None or not profile.enabled:
+        raise HTTPException(status_code=422, detail="Worker profile is not available")
+    enabled_harnesses = getattr(profile, "enabled_harnesses", None) or ["claude"]
+    if not isinstance(enabled_harnesses, list) or not enabled_harnesses:
+        enabled_harnesses = ["claude"]
+    default_key = (
+        explicit_key
+        or getattr(profile, "default_harness_key", None)
+        or "claude"
+    )
+    try:
+        validate_enabled_harnesses(
+            enabled_harnesses,
+            default_harness_key=default_key,
+        )
+    except (HarnessRegistryError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return default_key
+
+
 def _task_duration_seconds(task: Task, now: datetime | None = None) -> float:
     """Return runtime seconds for one task, including currently running tasks."""
     if not task.started_at:
@@ -229,9 +268,20 @@ def _task_duration_seconds(task: Task, now: datetime | None = None) -> float:
     return (ended_at - task.started_at).total_seconds()
 
 
-def _serialize_issue_detail(issue: Issue) -> dict:
-    """Serialize an Issue with its eagerly-loaded tasks."""
-    data = _serialize_issue(issue)
+async def _serialize_issue_detail(
+    db: AsyncSession,
+    issue: Issue,
+    current_harness: str | None = None,
+    current_user: User | None = None,
+) -> dict:
+    """Serialize an Issue with its eagerly-loaded tasks and queue context.
+
+    Queue context (``issue_sequence``/``queue_position``/``blocked_by_task_id``
+    /``waiting_reason``/``lock_owner_task_id``/``waiting_since``) is attached so
+    the Issue detail page can show ordered-turn state (§8.1). Computed once per
+    Issue, not per task.
+    """
+    data = _serialize_issue(issue, current_harness=current_harness)
     tasks = issue.tasks or []
     data["tasks"] = [
         {
@@ -246,6 +296,7 @@ def _serialize_issue_detail(issue: Issue) -> dict:
             "retry_source_task_id": t.retry_source_task_id,
             "trigger_source": t.trigger_source,
             "ci_failure_run_id": t.ci_failure_run_id,
+            "issue_sequence": t.issue_sequence if isinstance(t.issue_sequence, int) else None,
             "container_id": t.container_id,
             "commit_sha": t.commit_sha,
             "error_message": t.error_message,
@@ -263,6 +314,10 @@ def _serialize_issue_detail(issue: Issue) -> dict:
         }
         for t in tasks
     ]
+    if tasks:
+        contexts = await compute_task_queue_contexts(db, tasks)
+        for t, item in zip(tasks, data["tasks"]):
+            apply_queue_context(item, t.id, contexts, current_user=current_user)
     now = utcnow()
     data["totals"] = {
         "additions": sum(t.additions or 0 for t in tasks),
@@ -324,6 +379,11 @@ async def create_issue(
         db,
         body.default_provider_id,
     )
+    default_harness_key = await _resolve_issue_default_harness_key(
+        db,
+        worker_profile_id,
+        body.default_harness_key,
+    )
     issue = Issue(
         title=body.title,
         description=body.description,
@@ -335,6 +395,7 @@ async def create_issue(
         ci_auto_repair_enabled=body.ci_auto_repair_enabled,
         worker_profile_id=worker_profile_id,
         default_provider_id=default_provider_id,
+        default_harness_key=default_harness_key,
         git_clone_depth=body.git_clone_depth,
         git_clone_filter=body.git_clone_filter,
         initiator_user_id=current_user.id if current_user else None,
@@ -681,7 +742,10 @@ async def get_issue(
             detail=f"Issue {issue_id} not found",
         )
     require_project_access(issue.project_id, access_scope)
-    return _serialize_issue_detail(issue)
+    current_harness = await get_issue_latest_harness_key(db, issue.id)
+    return await _serialize_issue_detail(
+        db, issue, current_harness=current_harness, current_user=current_user
+    )
 
 
 @router.patch("/{issue_id}")
@@ -741,10 +805,16 @@ async def update_issue(
             db,
             body.default_provider_id,
         )
+    if "default_harness_key" in body.model_fields_set:
+        issue.default_harness_key = await _resolve_issue_default_harness_key(
+            db,
+            issue.worker_profile_id,
+            body.default_harness_key,
+        )
 
     await db.commit()
     await db.refresh(issue, attribute_names=["tasks", "worker_profile", "default_provider"])
-    return _serialize_issue_detail(issue)
+    return await _serialize_issue_detail(db, issue, current_user=current_user)
 
 
 @router.post("/{issue_id}/close")
@@ -779,7 +849,7 @@ async def close_issue(
         await _try_delete_issue_branch(issue, db, ignore_close_policy=True)
     await db.commit()
     await db.refresh(issue, attribute_names=["tasks", "worker_profile", "default_provider"])
-    return _serialize_issue_detail(issue)
+    return await _serialize_issue_detail(db, issue, current_user=current_user)
 
 
 @router.post("/{issue_id}/delete-branch")
@@ -814,7 +884,7 @@ async def delete_issue_branch(
 
     if issue.branch_deleted:
         # Already deleted: return the full serialized issue detail to match frontend expectations
-        return _serialize_issue_detail(issue)
+        return await _serialize_issue_detail(db, issue, current_user=current_user)
 
     try:
         client = get_gitlab_client()
@@ -830,7 +900,7 @@ async def delete_issue_branch(
     await db.commit()
     # Refresh tasks relationship (match pattern used by close_issue)
     await db.refresh(issue, attribute_names=["tasks", "worker_profile", "default_provider"])
-    return _serialize_issue_detail(issue)
+    return await _serialize_issue_detail(db, issue, current_user=current_user)
 
 
 @router.delete("/{issue_id}")
@@ -889,6 +959,13 @@ async def delete_issue(
                 status_code=502,
                 detail=f"Worker workspace deletion failed: {exc}",
             ) from exc
+
+    await archive_issue_statistics_before_delete(
+        db,
+        issue_id=issue.id,
+        deletion_reason="manual",
+        deleted_by_user_id=current_user.id if current_user else None,
+    )
 
     await db.delete(issue)
     await db.flush()

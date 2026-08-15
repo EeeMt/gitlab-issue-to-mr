@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import router from './index'
+import router, { isDynamicImportFailure } from './index'
 
 describe('router', () => {
   it('lazy-loads view components to keep initial page loads responsive', () => {
@@ -27,5 +27,19 @@ describe('router', () => {
     for (const route of routesWithViewComponents) {
       expect(typeof route.components!.default).toBe('function')
     }
+  })
+
+  describe('isDynamicImportFailure', () => {
+    it('detects a stale hashed chunk after a deploy', () => {
+      const error = new TypeError(
+        'Failed to fetch dynamically imported module: http://192.168.50.129:8880/assets/ScheduleOverview-CDVDzA2U.js',
+      )
+
+      expect(isDynamicImportFailure(error)).toBe(true)
+    })
+
+    it('ignores unrelated navigation failures', () => {
+      expect(isDynamicImportFailure(new Error('API request failed'))).toBe(false)
+    })
   })
 })

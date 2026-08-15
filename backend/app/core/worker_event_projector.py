@@ -365,7 +365,11 @@ class WorkerEventProjector:
             )
             if result.exit_code != 0 or not result.output:
                 return
-            chunk = result.output.decode("utf-8", errors="strict")
+            # errors="replace" keeps a torn final line (a crash mid-write that
+            # split a multi-byte char) from crashing the whole ingest: the
+            # partial line becomes the unconsumed remainder and is re-read from
+            # the cursor offset after the writer finishes it.
+            chunk = result.output.decode("utf-8", errors="replace")
             if chunk:
                 await self.ingest_event_records_from_chunk(
                     task_id=task_id,
@@ -398,7 +402,7 @@ class WorkerEventProjector:
         cursor = await get_or_create_cursor(db, task_id=task_id, stream_name="event_jsonl")
         if cursor.last_offset >= len(full_bytes):
             return
-        new_data = full_bytes[cursor.last_offset :].decode("utf-8", errors="strict")
+        new_data = full_bytes[cursor.last_offset :].decode("utf-8", errors="replace")
         await self.ingest_event_records_from_chunk(
             task_id=task_id,
             chunk=new_data,

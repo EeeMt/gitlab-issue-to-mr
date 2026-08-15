@@ -65,6 +65,9 @@
             <span class="task-history-record__meta-label">{{ t('dashboard.duration') }}</span>
             <span class="task-history-record__meta-value">{{ duration }}</span>
           </span>
+          <span v-if="queueContextLabel" class="task-history-record__queue-context">
+            {{ queueContextLabel }}
+          </span>
         </div>
       </div>
     </button>
@@ -158,6 +161,27 @@ const duration = computed(() => {
 function formatCompactDateTime(value?: string | null): string {
   return value ? formatDateTimeUtc8Compact(value) : '—'
 }
+
+const queueContextLabel = computed(() => {
+  const task = props.task
+  const qp = task.queue_position
+  const blockedBy = task.blocked_by_task_id
+  if (task.waiting_reason === 'sequence_repair_required') {
+    return t('taskView.queueContextSequenceRepair')
+  }
+  if (task.waiting_reason === 'workspace_cleanup') {
+    return t('taskView.queueContextWaitingCleanup', {
+      blockedBy: task.lock_owner_task_id ?? '',
+    })
+  }
+  if (typeof qp === 'number' && qp > 1) {
+    return t('taskView.queueContextNonHead', { position: qp, blockedBy: blockedBy ?? '' })
+  }
+  if (qp === 1) {
+    return task.scheduled_at ? t('taskView.queueContextHeadScheduled') : t('taskView.queueContextHeadDue')
+  }
+  return null
+})
 </script>
 
 <style scoped>
@@ -306,6 +330,17 @@ function formatCompactDateTime(value?: string | null): string {
   color: var(--n-text-color-3);
   font-size: 11px;
   line-height: 1.35;
+}
+
+.task-history-record__queue-context {
+  grid-column: 1 / -1;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: rgba(32, 128, 240, 0.07);
+  color: rgba(29, 78, 216, 0.9);
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: nowrap;
 }
 
 .task-history-record__meta-label {

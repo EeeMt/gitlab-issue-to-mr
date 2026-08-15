@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import case, false, func, select
 
 from app.dependencies.project_access import ProjectAccessScope
-from app.models import AIProvider, Issue, Task, TaskStatus
+from app.models import AIProvider, Issue, Task, TaskStatus, TaskWorkerProfileSnapshot
 
 FINISHED_TASK_STATUSES = (
     TaskStatus.COMPLETED,
@@ -41,6 +41,7 @@ class AnalyticsQueries:
     task_statuses: Any
     errors: Any
     providers: Any
+    harnesses: Any
 
 
 def apply_project_column_scope(query, project_column, access_scope: ProjectAccessScope):
@@ -506,6 +507,75 @@ def _build_provider_query(
     )
 
 
+def _build_harness_query(
+    since: datetime,
+    access_scope: ProjectAccessScope,
+    project_id: int | None,
+    initiator_username: str | None,
+    expressions: AnalyticsExpressions,
+):
+    """Per-harness/adapter operational stats from the frozen Task snapshot."""
+    query = (
+        select(
+            TaskWorkerProfileSnapshot.harness_key.label("harness_key"),
+            TaskWorkerProfileSnapshot.harness_adapter_version.label("adapter_version"),
+            func.count(Task.id).label("task_count"),
+            func.coalesce(func.sum(case((Task.status == TaskStatus.COMPLETED, 1), else_=0)), 0).label(
+                "completed_tasks"
+            ),
+            func.coalesce(func.sum(case((Task.status == TaskStatus.FAILED, 1), else_=0)), 0).label(
+                "failed_tasks"
+            ),
+            func.coalesce(func.sum(case((Task.status == TaskStatus.CANCELLED, 1), else_=0)), 0).label(
+                "cancelled_tasks"
+            ),
+            func.coalesce(func.sum(expressions.finished_task), 0).label("finished_tasks"),
+            func.avg(
+                case(
+                    (expressions.execution_seconds.is_not(None), expressions.execution_seconds),
+                    else_=None,
+                )
+            ).label("avg_execution_seconds"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            (expressions.finished_task == 1)
+                            & (expressions.execution_seconds.is_not(None))
+                            & (expressions.execution_seconds > 0),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("succeeded_tasks"),
+        )
+        .select_from(Task)
+        .join(TaskWorkerProfileSnapshot, TaskWorkerProfileSnapshot.task_id == Task.id)
+        .where(
+            Task.created_at >= since,
+            Task.status.in_(FINISHED_TASK_STATUSES),
+            TaskWorkerProfileSnapshot.harness_key.isnot(None),
+        )
+        .group_by(
+            TaskWorkerProfileSnapshot.harness_key,
+            TaskWorkerProfileSnapshot.harness_adapter_version,
+        )
+        .order_by(
+            func.count(Task.id).desc(),
+            TaskWorkerProfileSnapshot.harness_key.asc(),
+            TaskWorkerProfileSnapshot.harness_adapter_version.asc(),
+        )
+    )
+    return apply_analytics_filters(
+        query,
+        access_scope,
+        project_id=project_id,
+        initiator_username=initiator_username,
+    )
+
+
 def build_analytics_queries(
     *,
     since: datetime,
@@ -543,6 +613,9 @@ def build_analytics_queries(
             since, access_scope, project_id, initiator_username
         ),
         providers=_build_provider_query(
+            since, access_scope, project_id, initiator_username, expressions
+        ),
+        harnesses=_build_harness_query(
             since, access_scope, project_id, initiator_username, expressions
         ),
     )

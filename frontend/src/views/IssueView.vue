@@ -308,6 +308,8 @@
       :issue-id="issueId"
       :issue-description="issue?.description ?? undefined"
       :has-claude-session="Boolean(issue?.claude_session_id)"
+      :issue-current-harness="issue?.current_harness ?? null"
+      :issue-default-harness="issue?.default_harness_key ?? null"
       :worker-profile-id="issue?.worker_profile_id ?? null"
       :default-provider-id="issue?.default_provider_id ?? null"
       data-testid="issue-create-task-drawer"
@@ -369,6 +371,12 @@
                   />
                 </div>
               </div>
+            </n-form-item>
+            <n-form-item :label="t('taskView.lineageStrategy')">
+              <n-radio-group v-model:value="retryLineageStrategy">
+                <n-radio value="inherit">{{ t('taskView.lineageStrategyInherit') }}</n-radio>
+                <n-radio value="fresh_retry">{{ t('taskView.lineageStrategyFreshRetry') }}</n-radio>
+              </n-radio-group>
             </n-form-item>
           </n-form>
 
@@ -549,13 +557,35 @@ function copyRetryPrompt() {
 }
 
 const sortedTasks = computed(() => [...(issue.value?.tasks ?? [])].sort((a, b) => {
+  const seqA = a.issue_sequence
+  const seqB = b.issue_sequence
+  if (typeof seqA === 'number' && typeof seqB === 'number' && seqA !== seqB) {
+    return seqB - seqA
+  }
   const timeDiff = new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   return timeDiff || b.id - a.id
 }))
 const activeTask = computed(() => {
-  for (const status of ['running', 'queued', 'pending']) {
-    const matchingTask = sortedTasks.value.find(task => task.status === status)
-    if (matchingTask) return matchingTask
+  const tasks = sortedTasks.value
+  if (!tasks.length) return null
+  // §8.1: prefer the RUNNING task, otherwise the active task with the smallest
+  // queue_position. Never fall back to the newest-created PENDING task.
+  const running = tasks.find(task => task.status === 'running')
+  if (running) return running
+  const positioned = tasks.filter(task =>
+    ['pending', 'queued'].includes(task.status)
+    && typeof task.queue_position === 'number'
+    && task.queue_position >= 1,
+  )
+  if (positioned.length) {
+    return positioned.reduce((min, task) =>
+      (task.queue_position! < min.queue_position! ? task : min), positioned[0])
+  }
+  // Legacy rows without queue context: fall back to the oldest active task.
+  const legacy = tasks.filter(task => ['pending', 'queued'].includes(task.status))
+  if (legacy.length) {
+    return legacy.reduce((oldest, task) =>
+      (new Date(task.created_at).getTime() < new Date(oldest.created_at).getTime() ? task : oldest), legacy[0])
   }
   return null
 })
@@ -588,6 +618,7 @@ const showCreateDrawer = ref(false)
 const showRetryDrawer = ref(false)
 const retryTargetTask = ref<Task | null>(null)
 const retryScheduleType = ref<'now' | 'scheduled'>('now')
+const retryLineageStrategy = ref<'inherit' | 'fresh_retry'>('inherit')
 const retryTaskSchedule = ref<number | null>(null)
 const retryTaskLoading = ref(false)
 const showRescheduleDrawer = ref(false)
@@ -659,6 +690,7 @@ watch(showRetryDrawer, (val) => {
   if (!val) {
     retryTargetTask.value = null
     retryScheduleType.value = 'now'
+    retryLineageStrategy.value = 'inherit'
     retryTaskSchedule.value = null
   }
 })
@@ -687,6 +719,7 @@ function handleRetryHeatmapCellClick(startMs: number) {
 async function openRetryDrawer(task: Task) {
   retryTargetTask.value = task
   retryScheduleType.value = 'now'
+  retryLineageStrategy.value = 'inherit'
   retryTaskSchedule.value = null
   showRetryDrawer.value = true
   await loadScheduleContext(true)
@@ -794,14 +827,18 @@ async function handleSaveEdit() {
   }
 }
 
-async function handleRetryTask(taskId: number, scheduledDatetime?: string): Promise<boolean> {
+async function handleRetryTask(
+  taskId: number,
+  scheduledDatetime?: string,
+  lineageStrategy: 'inherit' | 'fresh_retry' = 'inherit',
+): Promise<boolean> {
   try {
-    if (scheduledDatetime) {
-      await retryTask(taskId, scheduledDatetime)
-    } else {
-      await retryTask(taskId)
-    }
-    message.success(t('issue.retrySuccess'))
+    await retryTask(taskId, scheduledDatetime, lineageStrategy)
+    message.success(
+      lineageStrategy === 'fresh_retry'
+        ? t('issue.retrySuccessFresh')
+        : t('issue.retrySuccess'),
+    )
     await fetchIssue()
     return true
   } catch (error: any) {
@@ -828,7 +865,11 @@ async function handleSubmitRetry() {
 
   retryTaskLoading.value = true
   try {
-    const success = await handleRetryTask(retryTargetTask.value.id, scheduledDatetime)
+    const success = await handleRetryTask(
+      retryTargetTask.value.id,
+      scheduledDatetime,
+      retryLineageStrategy.value,
+    )
     if (success) {
       showRetryDrawer.value = false
     }

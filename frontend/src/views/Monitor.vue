@@ -74,6 +74,15 @@
 
                 <!-- Kanban View -->
                 <div v-else-if="queueViewMode === 'kanban'" class="queue-kanban">
+                  <!-- Sequence repair banner -->
+                  <n-alert
+                    v-if="sequenceRepairTasks.length"
+                    type="error"
+                    :bordered="false"
+                    class="queue-kanban__repair-banner"
+                  >
+                    {{ t('monitor.sequenceRepairBanner', { count: sequenceRepairTasks.length }) }}
+                  </n-alert>
                   <!-- Running Column -->
                   <div class="queue-kanban__column queue-kanban__column--running">
                     <div class="queue-kanban__column-header">
@@ -153,6 +162,47 @@
                     </div>
                     <n-empty
                       v-if="readyTasks.length === 0"
+                      :description="'—'"
+                      :show-icon="false"
+                      size="small"
+                      style="padding: 16px 0"
+                    />
+                    </n-scrollbar>
+                  </div>
+
+                  <!-- Waiting for Predecessors Column -->
+                  <div class="queue-kanban__column queue-kanban__column--predecessors">
+                    <div class="queue-kanban__column-header">
+                      <span>{{ t('monitor.kanbanWaitingPredecessors') }}</span>
+                      <n-tag size="tiny" round :bordered="false">{{ waitingForPredecessors.length }}</n-tag>
+                    </div>
+                    <n-scrollbar class="queue-kanban__column-cards" trigger="hover">
+                    <div
+                      v-for="task in waitingForPredecessors"
+                      :key="task.id"
+                      class="queue-kanban__card queue-kanban__card--blocked"
+                      role="button"
+                      tabindex="0"
+                      @click="goToTask(task.id)"
+                      @keydown.enter="goToTask(task.id)"
+                      @keydown.space.prevent="goToTask(task.id)"
+                    >
+                      <div class="queue-kanban__card-top">
+                        <span
+                          :class="['queue-kanban__priority-badge', priorityClass(task.priority)]"
+                        >
+                          <span class="queue-kanban__priority-dot"></span>
+                          {{ formatPriority(task.priority) }}
+                        </span>
+                        <span class="queue-kanban__task-id">#{{ task.id }}</span>
+                      </div>
+                      <div class="queue-kanban__card-project">{{ kanbanProjectLabel(task) }} {{ kanbanIssueLabel(task) }}</div>
+                      <div class="queue-kanban__card-meta">
+                        {{ waitingReasonLabel(task) }}
+                      </div>
+                    </div>
+                    <n-empty
+                      v-if="waitingForPredecessors.length === 0"
                       :description="'—'"
                       :show-icon="false"
                       size="small"
@@ -271,7 +321,7 @@
 
                         <!-- Empty state -->
                         <div
-                          v-if="!runningTasks.length && !readyTasks.length && !waitingTasks.length"
+                          v-if="!runningTasks.length && !readyTasks.length && !waitingTasks.length && !waitingForPredecessors.length"
                           class="queue-timeline__empty"
                         >
                           <n-empty size="small" :description="t('monitor.noActiveTasks')" />
@@ -648,9 +698,11 @@ const {
   runningTasks,
   runningTasksWithoutContainer,
   runtimeCards,
+  sequenceRepairTasks,
   sortedContainers,
   statusBreakdown,
   tasksById,
+  waitingForPredecessors,
   waitingTasks,
 } = useMonitorHealth({
   stats,
@@ -1104,6 +1156,25 @@ function kanbanIssueLabel(task: Task): string {
   return '—'
 }
 
+function waitingReasonLabel(task: Task): string {
+  const blockedBy = task.blocked_by_task_id
+  if (task.waiting_reason === 'workspace_cleanup') {
+    return t('monitor.waitingWorkspaceCleanup', {
+      blockedBy: task.lock_owner_task_id ?? '',
+    })
+  }
+  if (task.waiting_reason === 'sequence_repair_required') {
+    return t('monitor.waitingSequenceRepair')
+  }
+  if (typeof task.queue_position === 'number' && task.queue_position > 1) {
+    return t('monitor.waitingPredecessor', {
+      position: task.queue_position,
+      blockedBy: blockedBy ?? '',
+    })
+  }
+  return t('monitor.waitingPredecessorGeneric', { blockedBy: blockedBy ?? '' })
+}
+
 </script>
 
 <style scoped>
@@ -1322,9 +1393,14 @@ function kanbanIssueLabel(task: Task): string {
 /* ----- Kanban View ----- */
 .queue-kanban {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
   gap: 16px;
   height: 340px;
+}
+
+.queue-kanban__repair-banner {
+  grid-column: 1 / -1;
+  align-self: start;
 }
 
 .queue-kanban__column {
@@ -1378,6 +1454,10 @@ function kanbanIssueLabel(task: Task): string {
 .queue-kanban__card:hover {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
   border-color: rgba(15, 23, 42, 0.16);
+}
+
+.queue-kanban__card--blocked {
+  border-left: 3px solid rgba(217, 119, 6, 0.6);
 }
 
 .queue-kanban__card:last-child {

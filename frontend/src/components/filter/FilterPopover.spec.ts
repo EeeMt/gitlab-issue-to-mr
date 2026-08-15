@@ -54,11 +54,11 @@ vi.mock('naive-ui', () => ({
   },
   NCheckbox: {
     name: 'NCheckbox',
-    props: ['value', 'label'],
+    props: ['value'],
     setup(props: any, { slots }: any) {
       return () =>
         h('div', { class: 'n-checkbox', 'data-value': props.value }, [
-          slots.default?.() ?? props.label
+          slots.default?.()
         ])
     }
   },
@@ -175,6 +175,25 @@ describe('FilterPopover', () => {
     expect(wrapper.find('.filter-popover__options').exists()).toBe(true)
     expect(wrapper.find('.filter-popover__categories').exists()).toBe(false)
     expect(wrapper.find('.n-checkbox-group').exists()).toBe(true)
+  })
+
+  it('truncates marked option labels and exposes the full label on hover', async () => {
+    const longUsername = 'a-very-long-initiator-username-that-needs-truncation'
+    wrapper = mountComponent({
+      fields: [{
+        key: 'initiator',
+        label: 'filter.initiator',
+        type: 'multi-select',
+        options: () => [{ label: longUsername, value: 'user:1', truncateLabel: true }],
+      }],
+    })
+
+    await wrapper.find('.filter-popover__item').trigger('click')
+    await nextTick()
+
+    const label = wrapper.find('.truncated-option-label')
+    expect(label.text()).toBe(longUsername)
+    expect(label.attributes('title')).toBe(longUsername)
   })
 
   // 4. Clicking category opens options panel (single-select)

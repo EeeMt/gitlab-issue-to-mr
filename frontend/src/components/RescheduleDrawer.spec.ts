@@ -8,6 +8,7 @@ const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
     rescheduleTask: vi.fn<() => Promise<any>>(),
     getScheduledTasks: vi.fn<() => Promise<any[]>>(),
     getConfig: vi.fn<() => Promise<any>>(),
+    getTaskScheduleConstraints: vi.fn<() => Promise<any>>(),
   }
   const resetMockApi = () => {
     Object.values(mock).forEach(fn => fn.mockReset())
@@ -20,6 +21,7 @@ vi.mock('../api', () => ({
   rescheduleTask: mockApi.rescheduleTask,
   getScheduledTasks: mockApi.getScheduledTasks,
   getConfig: mockApi.getConfig,
+  getTaskScheduleConstraints: mockApi.getTaskScheduleConstraints,
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -115,11 +117,12 @@ vi.mock('naive-ui', () => ({
   },
   NDatePicker: {
     name: 'NDatePicker',
-    props: ['value', 'type', 'clearable', 'isDateDisabled'],
+    props: ['value', 'type', 'clearable', 'isDateDisabled', 'isTimeDisabled'],
     setup(props: any) {
       return () => h('div', {
         class: 'n-date-picker',
         'data-value': props.value,
+        'data-has-time-disabled': typeof props.isTimeDisabled === 'function',
       })
     },
   },
@@ -169,6 +172,7 @@ describe('RescheduleDrawer', () => {
       runtime: { slot_max_tasks: 3, slot_max_tasks_enforce: true },
     })
     mockApi.rescheduleTask.mockResolvedValue(createTask())
+    mockApi.getTaskScheduleConstraints.mockResolvedValue(null)
   })
 
   afterEach(() => {
@@ -203,6 +207,27 @@ describe('RescheduleDrawer', () => {
     expect(wrapper.vm.scheduledTasks).toEqual([{ id: 31 }])
     expect(wrapper.vm.slotMaxTasks).toBe(3)
     expect(wrapper.vm.slotEnforce).toBe(true)
+  })
+
+  it('passes a time-disabled predicate when schedule constraints are loaded', async () => {
+    mockApi.getTaskScheduleConstraints.mockResolvedValue({
+      has_valid_window: true,
+      min_scheduled_at: '2026-04-01T10:00:00Z',
+      max_scheduled_at: '2026-04-02T18:00:00Z',
+      min_source_task_id: 1,
+      max_source_task_id: 2,
+    })
+    await mountDrawer()
+    await openDrawer()
+
+    const picker = wrapper.find('.n-date-picker')
+    expect(picker.attributes('data-has-time-disabled')).toBe('true')
+    expect(typeof wrapper.vm.isTimeDisabled).toBe('function')
+    // On the min boundary day the hour before the floor is disabled.
+    const min = new Date('2026-04-01T10:00:00Z')
+    const validator = wrapper.vm.isTimeDisabled(min.getTime())
+    expect(validator.isHourDisabled?.(min.getHours() - 1)).toBe(true)
+    expect(validator.isHourDisabled?.(min.getHours() + 1)).toBe(false)
   })
 
   it('sets selected time to null when the task has no scheduled_at', async () => {

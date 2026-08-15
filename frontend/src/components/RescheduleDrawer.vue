@@ -33,9 +33,14 @@
               clearable
               style="width: 240px; max-width: 100%"
               :is-date-disabled="isDateDisabled"
+              :is-time-disabled="isTimeDisabled"
             />
           </n-form-item>
         </n-form>
+
+        <p v-if="scheduleConstraintHint" class="reschedule-drawer__constraint">
+          {{ scheduleConstraintHint }}
+        </p>
 
         <div class="reschedule-drawer__schedule-preview">
           <n-spin v-if="scheduledTasksLoading" :description="t('createTask.schedulePreviewLoading')" />
@@ -72,9 +77,10 @@ import { useI18n } from 'vue-i18n'
 import { NDrawer, NDrawerContent, NButton, NIcon, NSpin, NForm, NFormItem, NDatePicker, NTooltip, useMessage } from 'naive-ui'
 import { CopyOutline } from '@vicons/ionicons5'
 import HeatmapChart from './HeatmapChart.vue'
-import { rescheduleTask, type Task } from '../api'
+import { getTaskScheduleConstraints, rescheduleTask, type Task, type TaskScheduleWindow } from '../api'
 import { renderMarkdown } from './task-process/taskProcessUtils'
 import { parseUtcDate } from '../utils/datetime'
+import { buildScheduleTimeDisabled } from '../utils/scheduleWindow'
 import { extractSlotErrorMessage } from '../utils/slotError'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { useTaskScheduleContext } from '../features/tasks/useTaskScheduleContext'
@@ -104,6 +110,7 @@ const localShow = computed({
 
 const scheduleDatetime = ref<number | null>(null)
 const loading = ref(false)
+const scheduleWindow = ref<TaskScheduleWindow | null>(null)
 const {
   scheduledTasks,
   scheduledTasksLoading,
@@ -120,19 +127,84 @@ function copyPromptSource() {
   message.success(t('taskView.copied'))
 }
 
+function startOfDay(ts: number): number {
+  const d = new Date(ts)
+  d.setHours(0, 0, 0, 0)
+  return d.getTime()
+}
+
+function endOfDay(ts: number): number {
+  return startOfDay(ts) + 24 * 60 * 60 * 1000 - 1
+}
+
+const scheduleConstraintHint = computed(() => {
+  const window = scheduleWindow.value
+  if (!window || window.has_valid_window === false) {
+    return window?.has_valid_window === false
+      ? t('scheduleConflict.noValidWindow')
+      : null
+  }
+  if (window.min_scheduled_at && window.max_scheduled_at) {
+    return t('taskView.rescheduleConstraintWindow', {
+      min: formatConstraintTime(window.min_scheduled_at),
+      max: formatConstraintTime(window.max_scheduled_at),
+    })
+  }
+  if (window.min_scheduled_at && window.min_source_task_id != null) {
+    return t('taskView.rescheduleConstraintFloor', { source: window.min_source_task_id })
+  }
+  if (window.max_scheduled_at && window.max_source_task_id != null) {
+    return t('taskView.rescheduleConstraintCeiling', { source: window.max_source_task_id })
+  }
+  return null
+})
+
+function formatConstraintTime(value: string): string {
+  try {
+    const d = parseUtcDate(value)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  } catch {
+    return value
+  }
+}
+
 function isDateDisabled(timestamp: number): boolean {
   const candidate = new Date(timestamp)
   const today = new Date()
   candidate.setHours(0, 0, 0, 0)
   today.setHours(0, 0, 0, 0)
-  return candidate.getTime() < today.getTime()
+  if (candidate.getTime() < today.getTime()) return true
+  const window = scheduleWindow.value
+  if (!window) return false
+  if (window.has_valid_window === false) return true
+  const dayStart = startOfDay(timestamp)
+  const dayEnd = endOfDay(timestamp)
+  if (window.min_scheduled_at) {
+    const min = parseUtcDate(window.min_scheduled_at).getTime()
+    if (dayEnd < min) return true
+  }
+  if (window.max_scheduled_at) {
+    const max = parseUtcDate(window.max_scheduled_at).getTime()
+    if (dayStart > max) return true
+  }
+  return false
 }
+
+const isTimeDisabled = computed(() => buildScheduleTimeDisabled(scheduleWindow.value))
 
 watch(() => props.show, async (val) => {
   if (!val) return
   scheduleDatetime.value = props.task?.scheduled_at
     ? parseUtcDate(props.task.scheduled_at).getTime()
     : null
+  scheduleWindow.value = null
+  if (props.task) {
+    try {
+      scheduleWindow.value = await getTaskScheduleConstraints({ task_id: props.task.id })
+    } catch {
+      scheduleWindow.value = null
+    }
+  }
   await loadScheduleContext(true)
   if (slotConfigLoadFailed.value) {
     console.warn('[RescheduleDrawer] Failed to load slot config; heatmap capacity limits may be inaccurate')
@@ -205,6 +277,16 @@ function handleHeatmapCellClick(startMs: number) {
   margin: 0 0 10px;
   font-size: 12px;
   color: rgba(15, 23, 42, 0.45);
+}
+
+.reschedule-drawer__constraint {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(32, 128, 240, 0.06);
+  color: rgba(29, 78, 216, 0.9);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .reschedule-drawer__footer {

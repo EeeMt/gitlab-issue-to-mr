@@ -91,6 +91,10 @@ codify_harness_finalize_attempt() {
     if [ "${CODIFY_HARNESS_TERMINAL_SEEN}" -eq 0 ]; then
         if codify_event_type_exists "harness.completed" || codify_event_type_exists "harness.failed"; then
             CODIFY_HARNESS_TERMINAL_SEEN=1
+        elif [ "${CODIFY_CANCELLED:-0}" -eq 1 ]; then
+            codify_emit_event "harness.failed" \
+                '{"failure":{"kind":"cancelled","message":"Cancelled by user"}}'
+            CODIFY_HARNESS_TERMINAL_SEEN=1
         else
             codify_emit_event "harness.failed" \
                 '{"failure":{"kind":"protocol_error","message":"Harness exited without a terminal event"}}'
@@ -121,7 +125,9 @@ codify_harness_finalize_attempt() {
         '{exit_code:$exit_code,commit_sha:(if $commit_sha == "" then null else $commit_sha end),commit_message:$commit_message,diff:{additions:$additions,deletions:$deletions,total:$total}}')
     codify_emit_event "worker.finalization" "${finalization_payload}"
 
-    if [ "${exit_code}" -eq 0 ] && codify_event_type_exists "harness.completed"; then
+    if [ "${exit_code}" -eq 0 ] \
+        && [ "${CODIFY_CANCELLED:-0}" -ne 1 ] \
+        && codify_event_type_exists "harness.completed"; then
         terminal_payload=$(jq -nc --arg status completed '{status:$status,success:true}')
         codify_emit_event "run.completed" "${terminal_payload}"
     else
@@ -138,6 +144,9 @@ codify_harness_finalize_attempt() {
             124) failure_kind="timeout" ;;
             130 | 137 | 143) failure_kind="cancelled" ;;
         esac
+        if [ "${CODIFY_CANCELLED:-0}" -eq 1 ]; then
+            failure_kind="cancelled"
+        fi
         failure_kind="${failure_kind:-engine_error}"
         case "${failure_kind}" in
             cancelled) task_status="cancelled" ;;

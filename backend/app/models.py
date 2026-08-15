@@ -100,6 +100,7 @@ class Issue(Base):
         nullable=True,
         index=True,
     )
+    default_harness_key: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # Repository bootstrap policy. ``None`` keeps the existing full-clone behavior.
     git_clone_depth: Mapped[int | None] = mapped_column(Integer, nullable=True)
     git_clone_filter: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -162,6 +163,90 @@ class Issue(Base):
         Index("ix_issues_project_status", "project_id", "status"),
     )
 
+    harness_sessions: Mapped[list["IssueHarnessSession"]] = relationship(
+        "IssueHarnessSession",
+        back_populates="issue",
+        cascade="all, delete-orphan",
+    )
+
+
+class IssueHarnessSession(Base):
+    """Per-issue, per-harness, per-namespace session lineage pointer."""
+
+    __tablename__ = "issue_harness_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    issue_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("issues.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    harness_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    session_namespace: Mapped[str] = mapped_column(String(128), nullable=False)
+    session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    lineage_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    session_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "issue_id",
+            "harness_key",
+            "session_namespace",
+            name="uq_issue_harness_session",
+        ),
+    )
+
+    issue: Mapped["Issue"] = relationship("Issue", back_populates="harness_sessions")
+
+
+class IssueSessionLineage(Base):
+    """Per-issue, per-generation actual session facts for the new scheduler.
+
+    One row per ``(issue_id, lineage_generation)``. ``session_id`` is only
+    backfilled from a completed Task's ``output_session_id`` in the same
+    generation; generation ``0`` may also import an exactly matching legacy
+    ``IssueHarnessSession``. ``reset_task_id`` points at the fresh/compat-reset
+    Task that established the generation (null for generation ``0``).
+    """
+
+    __tablename__ = "issue_session_lineages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    issue_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("issues.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    lineage_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    harness_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    session_namespace: Mapped[str] = mapped_column(String(128), nullable=False)
+    reset_task_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("tasks.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    last_output_task_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("tasks.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    last_output_issue_sequence: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    lineage_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    lineage_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "issue_id",
+            "lineage_generation",
+            name="uq_issue_session_lineage_generation",
+        ),
+    )
+
 
 class AIProvider(Base):
     """Named AI provider configuration."""
@@ -177,6 +262,15 @@ class AIProvider(Base):
     system_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_disabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    provider_kind: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="anthropic_compatible"
+    )
+    wire_protocol: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="anthropic_messages"
+    )
+    provider_driver: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    provider_options: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    credential_ref: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=utcnow
@@ -190,6 +284,31 @@ class AIProvider(Base):
         "Issue",
         back_populates="default_provider",
         foreign_keys="Issue.default_provider_id",
+    )
+
+
+class ModelCredential(Base):
+    """Persistent, independently-rotatable model credential referenced by Task snapshots.
+
+    Task snapshots keep only a stable ``credential_ref``; the secret lives here.
+    Deleting a Provider does not cascade-delete a credential: referenced
+    credentials can only be soft-retired, never hard-deleted.
+    """
+
+    __tablename__ = "model_credentials"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    ref: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
+    secret_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False, default="api_key")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    provider_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    version_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utcnow, onupdate=utcnow
     )
 
 
@@ -270,6 +389,35 @@ class Task(Base):
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
 
+    # Issue input-stream ordering. ``issue_sequence`` is the immutable turn number
+    # within the Issue and the single source of truth for execution order. It is
+    # nullable only during the 068 compatibility window so legacy writers can keep
+    # inserting rows; the Scheduler and append service always backfill/allocate it
+    # and fail closed while an active NULL exists.
+    issue_sequence: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Projected lineage frozen at creation time (harness, session namespace,
+    # generation and the fresh/reset task that established this generation).
+    # Kept nullable for the same 068 compatibility window.
+    projected_harness_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    projected_session_namespace: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    projected_lineage_generation: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    projected_reset_task_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey(
+            "tasks.id",
+            ondelete="NO ACTION",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+        nullable=True,
+    )
+    # Why this lineage projection was chosen: initial / inherited / fresh /
+    # legacy_namespace_change. ``input_lineage_reason`` records the actual
+    # execution-time resume decision (fresh / resumed / fresh_no_match) and is
+    # never derived from the projection fields.
+    lineage_projection_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    input_lineage_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
     # Container tracking
     container_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
@@ -281,6 +429,12 @@ class Task(Base):
     additions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     deletions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     total_changes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Non-null once a trusted writer persisted valid change stats (including real
+    # zeros). Lets lifecycle statistics distinguish "zero changes" from
+    # "not collected"; see system lifecycle statistics design §6.4.
+    change_stats_recorded_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
 
     # Token usage (populated from Claude CLI output)
     input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -351,12 +505,39 @@ class Task(Base):
 
     # Indexes for querying tasks
     __table_args__ = (
+        CheckConstraint(
+            "lineage_projection_reason IS NULL OR lineage_projection_reason IN "
+            "('initial', 'inherited', 'fresh', 'legacy_namespace_change')",
+            name="ck_tasks_lineage_projection_reason",
+        ),
+        CheckConstraint(
+            "input_lineage_reason IS NULL OR input_lineage_reason IN "
+            "('fresh', 'resumed', 'fresh_no_match')",
+            name="ck_tasks_input_lineage_reason",
+        ),
         Index("ix_tasks_status_created", "status", "created_at"),
         Index("ix_tasks_status_priority", "status", "priority", "scheduled_at"),
         Index("ix_tasks_issue_id_status", "issue_id", "status"),
         Index("ix_tasks_issue_trigger_source", "issue_id", "trigger_source"),
         Index("ix_tasks_created_at_project", "created_at", "project_id"),
         Index("ix_tasks_created_at_status", "created_at", "status"),
+        # Issue input-stream ordering: ``issue_sequence`` is unique per issue
+        # (partial while the 068 compatibility window allows legacy NULL rows).
+        Index(
+            "uq_tasks_issue_sequence",
+            "issue_id",
+            "issue_sequence",
+            unique=True,
+            postgresql_where=text("issue_sequence IS NOT NULL"),
+            sqlite_where=text("issue_sequence IS NOT NULL"),
+        ),
+        Index("ix_tasks_issue_status_sequence", "issue_id", "status", "issue_sequence"),
+        Index(
+            "ix_tasks_issue_generation_sequence",
+            "issue_id",
+            "projected_lineage_generation",
+            "issue_sequence",
+        ),
     )
 
 
@@ -616,6 +797,84 @@ class WorkerEnvironmentVariable(Base):
     )
 
 
+class WorkerSharedConfiguration(Base):
+    """Administrator-maintained system-wide worker configuration singleton."""
+
+    __tablename__ = "worker_shared_configurations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    runtime_mode: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="baked_image"
+    )
+    worker_kit_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    worker_kit_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    volume_mounts: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+    pre_script: Mapped[str | None] = mapped_column(Text, nullable=True)
+    post_script: Mapped[str | None] = mapped_column(Text, nullable=True)
+    default_execute_run_instruction_template: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
+    default_plan_run_instruction_template: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
+    ci_auto_repair_run_instruction_template: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=utcnow,
+        onupdate=utcnow,
+    )
+
+    environment_variables: Mapped[list["WorkerSharedEnvironmentVariable"]] = relationship(
+        "WorkerSharedEnvironmentVariable",
+        back_populates="shared_configuration",
+        cascade="all, delete-orphan",
+        order_by="WorkerSharedEnvironmentVariable.key",
+    )
+
+
+class WorkerSharedEnvironmentVariable(Base):
+    """Environment variable inherited from the system shared configuration."""
+
+    __tablename__ = "worker_shared_environment_variables"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    worker_shared_configuration_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("worker_shared_configurations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    key: Mapped[str] = mapped_column(String(255), nullable=False)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    is_secret: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=utcnow,
+        onupdate=utcnow,
+    )
+
+    shared_configuration: Mapped[WorkerSharedConfiguration] = relationship(
+        "WorkerSharedConfiguration",
+        back_populates="environment_variables",
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_worker_shared_environment_key",
+            "worker_shared_configuration_id",
+            "key",
+            unique=True,
+        ),
+    )
+
+
 class WorkerProfile(Base):
     """Editable worker runtime profile."""
 
@@ -627,6 +886,9 @@ class WorkerProfile(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     image: Mapped[str] = mapped_column(String(255), nullable=False)
+    worker_kit_source: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="profile", server_default=text("'profile'")
+    )
     runtime_mode: Mapped[str] = mapped_column(
         String(32), nullable=False, default="baked_image"
     )
@@ -638,11 +900,29 @@ class WorkerProfile(Base):
     docker_tls_key: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     codegraph_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     volume_mounts: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
-    pre_script: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    post_script: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    default_execute_run_instruction_template: Mapped[str] = mapped_column(Text, nullable=False)
-    default_plan_run_instruction_template: Mapped[str] = mapped_column(Text, nullable=False)
-    ci_auto_repair_run_instruction_template: Mapped[str] = mapped_column(Text, nullable=False)
+    volume_mount_masks: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    pre_script: Mapped[str | None] = mapped_column(Text, nullable=True)
+    post_script: Mapped[str | None] = mapped_column(Text, nullable=True)
+    default_execute_run_instruction_template: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
+    default_plan_run_instruction_template: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
+    ci_auto_repair_run_instruction_template: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
+    verified_runtime_configuration_digest: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+    enabled_harnesses: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    default_harness_key: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="claude", server_default=text("'claude'")
+    )
+    harness_constraints: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    image_digest: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    harness_runtimes: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
@@ -799,7 +1079,10 @@ class WorkerProfileEnvironmentVariable(Base):
         index=True,
     )
     key: Mapped[str] = mapped_column(String(255), nullable=False)
-    value: Mapped[str] = mapped_column(Text, nullable=False)
+    operation: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="set", server_default=text("'set'")
+    )
+    value: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_secret: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -849,6 +1132,9 @@ class TaskWorkerProfileSnapshot(Base):
     codegraph_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     volume_mounts: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
     environment_variables: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+    shared_configuration_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    effective_configuration_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    runtime_locator_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
     skill_selection_source: Mapped[str] = mapped_column(
         String(16),
         nullable=False,
@@ -860,6 +1146,20 @@ class TaskWorkerProfileSnapshot(Base):
     default_execute_run_instruction_template: Mapped[str] = mapped_column(Text, nullable=False)
     default_plan_run_instruction_template: Mapped[str] = mapped_column(Text, nullable=False)
     ci_auto_repair_run_instruction_template: Mapped[str] = mapped_column(Text, nullable=False)
+    harness_key: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    harness_adapter_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    harness_adapter_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    harness_config_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    model_endpoint_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    credential_ref: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    cli_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    cli_executable_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    cli_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    cli_binary_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    image_digest: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    runtime_contract_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    orchestration_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    runtime_bundle_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
@@ -876,6 +1176,39 @@ class TaskWorkerProfileSnapshot(Base):
         order_by="TaskSkillVersionReference.position",
         cascade="all, delete-orphan",
         passive_deletes=True,
+    )
+
+
+class WorkerRuntimeReadiness(Base):
+    """Deterministic runtime readiness observation keyed by locator fingerprint.
+
+    Keyed by ``runtime_locator_fingerprint`` (Docker daemon + runtime_mode +
+    worker_kit_version + worker_kit_path), not by worker_profile_id, so the same
+    combination can be shared by multiple Profiles and historical Task snapshots.
+    ``status=ready`` is only effective while ``ready_until > now``; a missing row,
+    ``unknown``, or an expired ``ready`` all read as ``unknown``. ``unavailable``
+    never auto-expires and requires a successful re-check to be replaced.
+    """
+
+    __tablename__ = "worker_runtime_readiness"
+
+    runtime_locator_fingerprint: Mapped[str] = mapped_column(String(64), primary_key=True)
+    docker_daemon_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    runtime_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    worker_kit_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    worker_kit_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="unknown")
+    failure_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    failure_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ready_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    check_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    check_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=utcnow,
+        onupdate=utcnow,
     )
 
 
@@ -1310,3 +1643,130 @@ class TaskPayload(Base):
     char_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     byte_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+
+# Lifecycle statistics schema version. Bump only when an existing archive row's
+# read contract changes in a way that older readers would misinterpret.
+LIFECYCLE_STATISTICS_SCHEMA_VERSION = 1
+
+
+class DeletedTaskStatistics(Base):
+    """Lightweight snapshot of a Task archived immediately before its deletion.
+
+    Each row corresponds to one deleted Task. No FK is kept to ``tasks``, the
+    User, AIProvider or WorkerProfile so the archive survives business-data
+    cleanup. Whitelisted fields only — never Prompts, logs, secrets or error
+    bodies. See system lifecycle statistics design §6.1.
+    """
+
+    __tablename__ = "deleted_task_statistics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source_task_id: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
+    source_issue_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    project_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    initiator_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    provider_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    provider_name_snapshot: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    provider_model_snapshot: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    harness_key: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    adapter_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    cli_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    worker_profile_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    worker_profile_name_snapshot: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    task_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    trigger_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    priority: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_retry: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+    last_status: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    deleted_before_terminal: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    is_manually_overridden: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    terminal_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    additions: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    deletions: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_changes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    change_data_available: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+    source_deleted_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utcnow, index=True
+    )
+    deletion_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    deleted_by_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    schema_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=LIFECYCLE_STATISTICS_SCHEMA_VERSION
+    )
+    archived_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utcnow
+    )
+
+
+class DeletedIssueStatistics(Base):
+    """Lightweight snapshot of an Issue archived immediately before its deletion.
+
+    Task counts, tokens and code changes are not duplicated here — they are
+    aggregated from ``deleted_task_statistics`` by ``source_issue_id``. See
+    system lifecycle statistics design §6.2.
+    """
+
+    __tablename__ = "deleted_issue_statistics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source_issue_id: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
+    project_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    initiator_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    had_merge_request: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+    source_deleted_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utcnow, index=True
+    )
+    deletion_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    deleted_by_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    forced_with_active_tasks: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+    schema_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=LIFECYCLE_STATISTICS_SCHEMA_VERSION
+    )
+    archived_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utcnow
+    )
+
+
+class SystemStatisticsMetadata(Base):
+    """Single-row lifecycle-statistics metadata.
+
+    ``capture_started_at`` is the deployment-gated point from which deletions
+    via the standard entry points are guaranteed archived. It stays NULL after
+    migration 069 and is set by the deployment step (§12.2). See design §6.3.
+    """
+
+    __tablename__ = "system_statistics_metadata"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    capture_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    schema_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=LIFECYCLE_STATISTICS_SCHEMA_VERSION
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=utcnow,
+        onupdate=utcnow,
+    )

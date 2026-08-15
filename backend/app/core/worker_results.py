@@ -13,6 +13,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import WORKER_RUNTIME_ARCHIVE_MAX_BYTES
+from app.core.change_stats import validate_change_statistics
 from app.core.task_event_archive import archive_bundle_name
 from app.core.usage_limits import upsert_task_usage_ledger
 from app.core.utcnow import utcnow
@@ -172,9 +173,19 @@ async def update_task_stats_from_logs_or_api(
 ) -> None:
     """Update task with change statistics from logs or GitLab API."""
     if structured_diff:
-        task.additions = int(structured_diff.get("additions") or 0)
-        task.deletions = int(structured_diff.get("deletions") or 0)
-        task.total_changes = int(structured_diff.get("total") or (task.additions + task.deletions))
+        additions = int(structured_diff.get("additions") or 0)
+        deletions = int(structured_diff.get("deletions") or 0)
+        total = int(structured_diff.get("total") or (additions + deletions))
+        error = validate_change_statistics(additions, deletions, total)
+        if error is not None:
+            logger.warning(
+                f"[Task {task.id}] Rejected change stats from structured log: {error}"
+            )
+            return
+        task.additions = additions
+        task.deletions = deletions
+        task.total_changes = total
+        task.change_stats_recorded_at = utcnow()
         logger.info(
             f"[Task {task.id}] Diff stats (from structured log): "
             f"+{task.additions} -{task.deletions} ({task.total_changes} total)"
@@ -189,9 +200,19 @@ async def update_task_stats_from_logs_or_api(
                 stats = await gitlab_client.get_merge_request_stats(task.project_id, mr_iid)
                 logger.info(f"[Task {task.id}] MR stats result: {stats}")
                 if stats:
-                    task.additions = stats.get("additions", 0)
-                    task.deletions = stats.get("deletions", 0)
-                    task.total_changes = stats.get("total", 0)
+                    additions = int(stats.get("additions", 0))
+                    deletions = int(stats.get("deletions", 0))
+                    total = int(stats.get("total", 0))
+                    error = validate_change_statistics(additions, deletions, total)
+                    if error is not None:
+                        logger.warning(
+                            f"[Task {task.id}] Rejected change stats from API: {error}"
+                        )
+                        return
+                    task.additions = additions
+                    task.deletions = deletions
+                    task.total_changes = total
+                    task.change_stats_recorded_at = utcnow()
                     logger.info(
                         f"[Task {task.id}] MR stats (from API): "
                         f"+{task.additions} -{task.deletions} ({task.total_changes} total)"

@@ -73,9 +73,15 @@ codify_harness_initialize() {
         # advisory writer lock in that case; a recovered live container keeps
         # its stream intact (seq is derived from the stream, not a side file).
         rm -f "${CODIFY_RUNTIME_DIR}/.event.lock"
-        codify_emit_event "run.started" \
-            "$(jq -nc --arg runtime_bundle_digest "${CODIFY_RUNTIME_BUNDLE_DIGEST:-}" '{runtime_bundle_digest:$runtime_bundle_digest}')" \
-            || return 1
+        if [ -n "${CODIFY_HARNESS_SANDBOX_MODE:-}" ]; then
+            codify_emit_event "run.started" \
+                "$(jq -nc --arg runtime_bundle_digest "${CODIFY_RUNTIME_BUNDLE_DIGEST:-}" --arg sandbox_mode "${CODIFY_HARNESS_SANDBOX_MODE:-}" '{runtime_bundle_digest:$runtime_bundle_digest, sandbox_mode:$sandbox_mode}')" \
+                || return 1
+        else
+            codify_emit_event "run.started" \
+                "$(jq -nc --arg runtime_bundle_digest "${CODIFY_RUNTIME_BUNDLE_DIGEST:-}" '{runtime_bundle_digest:$runtime_bundle_digest}')" \
+                || return 1
+        fi
         echo "Canonical attempt initialized: ${CODIFY_ATTEMPT_ID}"
     fi
     CODIFY_HARNESS_INITIALIZED=1
@@ -113,7 +119,13 @@ codify_harness_run() {
         return 1
     fi
     set +e
-    adapter_run "${prompt_file}" "${result_file}"
+    # Run the adapter as a background job and wait on it so the SIGTERM trap
+    # interrupts immediately. A foreground child would otherwise defer the trap
+    # until the CLI exits, letting `docker stop` escalate to SIGKILL before the
+    # finalizer can emit a cancelled terminal.
+    adapter_run "${prompt_file}" "${result_file}" &
+    local adapter_pid=$!
+    wait "${adapter_pid}"
     local result=$?
     adapter_normalize_result "${result_file}"
     local normalize_result=$?

@@ -8,14 +8,39 @@
     </template>
 
     <div class="result-body">
-      <!-- Failed tasks lead with the blocking error. -->
-      <div v-if="task.status === 'failed' && task.error_message" class="result-card result-card--error">
+      <!-- Failed/cancelled tasks lead with a concise reason; raw output stays expandable. -->
+      <div
+        v-if="hasFailure && (task.failure_kind || task.failure_message || task.error_message)"
+        class="result-card result-card--error"
+      >
         <div class="result-card__title">
           <n-icon size="16" class="result-card__icon result-card__icon--error"><AlertCircleOutline /></n-icon>
           {{ t('taskView.error') }}
         </div>
         <div class="result-card__content">
-          <pre class="error-message">{{ task.error_message }}</pre>
+          <div v-if="task.failure_kind || task.failure_message" class="error-summary">
+            <span class="error-summary__label">{{ t('taskView.failureReason') }}</span>
+            <span v-if="task.failure_kind" class="error-kind-chip">{{ failureKindLabel }}</span>
+            <span class="error-summary__message">{{ failureSummaryMessage }}</span>
+          </div>
+          <div v-if="task.error_message" class="error-raw">
+            <button
+              type="button"
+              class="error-raw__toggle"
+              :aria-expanded="rawErrorExpanded"
+              @click="rawErrorExpanded = !rawErrorExpanded"
+            >
+              <n-icon
+                size="14"
+                class="error-raw__chevron"
+                :class="{ 'error-raw__chevron--open': rawErrorExpanded }"
+              >
+                <ChevronForward />
+              </n-icon>
+              {{ rawErrorExpanded ? t('taskView.hideRawError') : t('taskView.showRawError') }}
+            </button>
+            <pre v-show="rawErrorExpanded" class="error-message">{{ task.error_message }}</pre>
+          </div>
         </div>
       </div>
 
@@ -304,6 +329,34 @@ const props = defineProps<{
 
 const { t } = useI18n()
 
+const rawErrorExpanded = ref(false)
+const hasFailure = computed(
+  () => props.task.status === 'failed' || props.task.status === 'cancelled',
+)
+const failureKindLabel = computed(() => {
+  if (!props.task.failure_kind) return ''
+  const labels: Record<string, string> = {
+    timeout: t('taskView.failureTimeout'),
+    protocol_error: t('taskView.failureProtocolError'),
+    cancelled: t('taskView.failureCancelled'),
+    auth: t('taskView.failureAuth'),
+    rate_limit: t('taskView.failureRateLimit'),
+    sandbox: t('taskView.failureSandbox'),
+    engine_error: t('taskView.failureEngineError'),
+  }
+  return labels[props.task.failure_kind] || props.task.failure_kind
+})
+const failureSummaryMessage = computed(() => {
+  if (props.task.failure_kind === 'timeout') {
+    const firstLine = (props.task.error_message || '')
+      .split('\n')
+      .map((line) => line.trim())
+      .find(Boolean)
+    if (firstLine) return firstLine
+  }
+  return props.task.failure_message || t('taskView.taskCancelled')
+})
+
 // Delivery summary, falling back to the last assistant text event for older tasks.
 const summaryExpanded = ref(false)
 const summaryContentRef = ref<HTMLElement | null>(null)
@@ -494,8 +547,73 @@ const hasChanges = computed(() =>
   font-size: 14px;
 }
 
+.error-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.error-summary__label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--n-text-color-3, #666);
+  line-height: 1.5;
+}
+
+.error-kind-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  font-family: var(--n-font-family-mono, monospace);
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 5px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.22);
+  color: #dc2626;
+  text-transform: lowercase;
+}
+
+.error-summary__message {
+  flex: 1 1 240px;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--n-text-color-1, #222);
+  word-break: break-word;
+}
+
+.error-raw__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--n-text-color-3, #666);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.error-raw__toggle:hover {
+  color: var(--n-text-color-2, #444);
+}
+
+.error-raw__chevron {
+  transition: transform 0.18s ease;
+}
+
+.error-raw__chevron--open {
+  transform: rotate(90deg);
+}
+
 .error-message {
   margin: 0;
+  margin-top: 8px;
   padding: 10px;
   font-size: 12px;
   font-family: var(--n-font-family-mono, monospace);

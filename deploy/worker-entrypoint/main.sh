@@ -1,4 +1,4 @@
-# Execute Claude, validate delivery, commit/push changes, and persist metadata.
+# Execute the selected harness, validate delivery, commit/push changes, and persist metadata.
 
 # Freeze and validate the Adapter/capability view before any Harness-specific
 # optional tooling is prepared. codify_harness_run reuses this initialization.
@@ -181,7 +181,7 @@ if [ -n "$CHANGES" ]; then
     FINAL_CHANGED_FILES_TEXT="$(build_changed_files_table "${NEW_FILES}" "${MODIFIED_FILES}" "${DELETED_FILES}" "${FINAL_SUMMARY_CONTENT}")"
 
     COMMIT_DIFF_STATS=$(codify_run_shell 'cd /workspace && git diff --cached --stat' || echo "0 files changed")
-    echo "Generating commit message with Claude..."
+    echo "Generating commit message with the harness model..."
     COMMIT_MESSAGE_PROMPT=$(build_commit_message_prompt "${CHANGED_FILES_TEXT}" "${COMMIT_DIFF_STATS}" "${FINAL_SUMMARY_CONTENT}")
     printf '%s\n' "${COMMIT_MESSAGE_PROMPT}" > /tmp/commit_message_prompt.txt
     chmod 644 /tmp/commit_message_prompt.txt
@@ -194,12 +194,12 @@ if [ -n "$CHANGES" ]; then
     set -e
 
     if [ ${COMMIT_MESSAGE_RESULT} -eq 0 ]; then
-        echo "Claude commit message generation succeeded"
-        echo "Claude raw commit message response:"
+        echo "Harness commit message generation succeeded"
+        echo "Harness raw commit message response:"
         printf '%s\n' "${GENERATED_COMMIT_MESSAGE}" | sed 's/^/  /'
         FINAL_COMMIT_MESSAGE=$(normalize_model_commit_message "${GENERATED_COMMIT_MESSAGE}")
     else
-        echo "Claude commit message generation failed with exit code ${COMMIT_MESSAGE_RESULT}; using fallback"
+        echo "Harness commit message generation failed with exit code ${COMMIT_MESSAGE_RESULT}; using fallback"
     fi
 
     if [ -z "${FINAL_COMMIT_MESSAGE}" ]; then
@@ -218,7 +218,7 @@ AI-Generated: true"
 AI-Generated: true"
     fi
 
-    echo "Generating overall MR summary with Claude..."
+    echo "Generating overall MR summary with the harness model..."
     PREVIOUS_SUMMARY_FILE="${CODIFY_RUNTIME_DIR}/previous-task-summaries.md"
     if [ -f "${PREVIOUS_SUMMARY_FILE}" ]; then
         PREVIOUS_SUMMARY_BYTES=$(wc -c < "${PREVIOUS_SUMMARY_FILE}" | tr -d ' ')
@@ -238,15 +238,15 @@ AI-Generated: true"
     set -e
 
     if [ ${OVERALL_SUMMARY_RESULT} -eq 0 ]; then
-        echo "Claude overall summary generation succeeded"
+        echo "Harness overall summary generation succeeded"
         FINAL_OVERALL_SUMMARY=$(normalize_model_overall_summary "${GENERATED_OVERALL_SUMMARY}")
         if [ -n "${FINAL_OVERALL_SUMMARY}" ]; then
             echo "Overall MR summary generated (${#FINAL_OVERALL_SUMMARY} chars)"
         else
-            echo "Claude overall summary normalized to empty; keeping previous MR summary"
+            echo "Harness overall summary normalized to empty; keeping previous MR summary"
         fi
     else
-        echo "Claude overall summary generation failed with exit code ${OVERALL_SUMMARY_RESULT}; keeping previous MR summary"
+        echo "Harness overall summary generation failed with exit code ${OVERALL_SUMMARY_RESULT}; keeping previous MR summary"
     fi
 
     {
@@ -307,7 +307,7 @@ AI-Generated: true"
     fi
 
     # Write per-task metadata for MR description aggregation across tasks.
-    # FINAL_SUMMARY_CONTENT is Claude's execution narrative (truncated to 3000 chars).
+    # FINAL_SUMMARY_CONTENT is the harness execution narrative (truncated to 3000 chars).
     SUMMARY_TRUNCATED="${FINAL_SUMMARY_CONTENT:0:3000}"
     TASK_METADATA=$(jq -nc \
         --argjson task_id "${TASK_ID:-0}" \
@@ -350,6 +350,15 @@ elif repo_has_unpublished_local_head; then
     echo "========================================"
     echo "Task completed successfully!"
     echo "========================================"
+elif repo_work_branch_ahead_of_base; then
+    echo "Publishing the harness-created commit"
+    repo_log "delivery work_branch=${BRANCH_NAME} action=push_harness_commit"
+    repo_push_work_branch_with_lease || true
+    write_existing_commit_delivery_metadata
+    echo "========================================"
+    echo "Task completed successfully!"
+    echo "========================================"
+    exit 0
 else
     echo "No changes made by Harness"
     if [ "${REQUIRE_CHANGES:-true}" = "false" ]; then

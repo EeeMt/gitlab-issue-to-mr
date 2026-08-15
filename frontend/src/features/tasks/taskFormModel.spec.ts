@@ -14,6 +14,7 @@ const baseDraft: TaskFormDraft = {
   requireChanges: DEFAULT_REQUIRE_CHANGES,
   taskMode: 'execute',
   sessionMode: 'continue',
+  harnessKey: null,
   selectedProviderId: null,
   scheduleType: 'now',
   scheduledAt: null,
@@ -76,6 +77,15 @@ describe('task form request contracts', () => {
       scheduled_datetime: new Date(scheduledAt).toISOString(),
       run_instruction_template: 'Execute {{user_prompt}}',
     })
+  })
+
+  it('includes harness_key when a non-default harness is selected', () => {
+    expect(buildCreateTaskRequest(7, { ...baseDraft, harnessKey: 'codex' })).toEqual(
+      expect.objectContaining({
+        issue_id: 7,
+        harness_key: 'codex',
+      }),
+    )
   })
 
   it('requests a fresh Claude session when selected', () => {

@@ -33,6 +33,7 @@ export interface TaskWorkerRuntimeSummary {
   snapshot_available: boolean
   worker_profile_id: number | null
   worker_profile_name: string | null
+  harness_key?: string | null
   image: string | null
   runtime_mode: 'baked_image' | 'mounted_kit' | string | null
   worker_kit_version: string | null
@@ -83,6 +84,8 @@ export interface Task {
   container_name: string | null
   commit_sha: string | null
   error_message: string | null
+  failure_kind?: string | null
+  failure_message?: string | null
   additions: number
   deletions: number
   total_changes: number
@@ -99,6 +102,7 @@ export interface Task {
   provider_name?: string | null
   worker_profile_id: number | null
   worker_profile_name?: string | null
+  harness_key?: string | null
   worker_image?: string | null
   worker_runtime_mode?: 'baked_image' | 'mounted_kit' | string | null
   worker_kit_version?: string | null
@@ -113,6 +117,19 @@ export interface Task {
   completed_at: string | null
   is_manually_overridden?: boolean
   override_reason?: string | null
+  // Issue input-stream ordering / queue context (null for terminal or legacy rows).
+  issue_sequence?: number | null
+  queue_position?: number | null
+  blocked_by_task_id?: number | null
+  waiting_reason?: TaskWaitingReason | null
+  lock_owner_task_id?: number | null
+  waiting_since?: string | null
+  runtime_failure_code?: string | null
+  runtime_failure_message?: string | null
+  runtime_checked_at?: string | null
+  runtime_locator_fingerprint?: string | null
+  schedule_constraints?: TaskScheduleWindow | null
+  projected_lineage?: TaskProjectedLineage | null
   issue?: {
     id: number
     title: string
@@ -124,6 +141,73 @@ export interface Task {
   }
 }
 
+export type TaskWaitingReason =
+  | 'predecessor'
+  | 'scheduled'
+  | 'global_capacity'
+  | 'workspace_cleanup'
+  | 'worker_runtime_unavailable'
+  | 'sequence_repair_required'
+  | string
+
+export interface TaskProjectedLineage {
+  harness_key: string
+  session_namespace: string
+  generation: number
+  reset_task_id: number | null
+}
+
+export interface TaskScheduleWindow {
+  has_valid_window: boolean
+  min_scheduled_at: string | null
+  min_source_task_id: number | null
+  max_scheduled_at: string | null
+  max_source_task_id: number | null
+}
+
+export interface ExecuteTaskResponse {
+  status: string
+  message: string
+  queue_position?: number | null
+  blocked_by_task_id?: number | null
+}
+
+export type TaskConflictCode =
+  | 'issue_schedule_order_conflict'
+  | 'issue_sequence_repair_required'
+  | 'issue_lineage_conflict'
+  | 'retry_lineage_conflict'
+  | 'SLOT_FULL'
+  | string
+
+export interface TaskConflictDetail {
+  code: TaskConflictCode
+  message?: string
+  issue_id?: number
+  task_id?: number
+  has_valid_window?: boolean
+  min_scheduled_at?: string | null
+  min_source_task_id?: number | null
+  max_scheduled_at?: string | null
+  max_source_task_id?: number | null
+  tail_lineage?: TaskProjectedLineage
+  source_lineage?: TaskProjectedLineage
+}
+
+export interface TaskWorkerRuntimeVerificationResult {
+  ok: boolean
+  task_id: number
+  runtime_mode: string
+  worker_kit_version: string | null
+  runtime_readiness: {
+    status: 'ready' | 'unknown' | 'unavailable'
+    failure_code: string | null
+    failure_message: string | null
+    checked_at: string | null
+    ready_until: string | null
+  }
+}
+
 export interface CreateTaskRequest {
   issue_id: number
   user_prompt?: string
@@ -131,6 +215,7 @@ export interface CreateTaskRequest {
   delay_seconds?: number
   scheduled_datetime?: string
   provider_id?: number | null
+  harness_key?: string
   require_changes?: boolean
   task_mode?: 'execute' | 'plan'
   session_mode?: 'continue' | 'fresh'
@@ -347,6 +432,13 @@ export async function getTaskWorkerRuntimeSummary(id: number): Promise<TaskWorke
   return response.data
 }
 
+export async function verifyTaskWorkerRuntime(
+  id: number
+): Promise<TaskWorkerRuntimeVerificationResult> {
+  const response = await api.post(`/tasks/${id}/verify-worker-runtime`)
+  return response.data
+}
+
 export async function getTaskLogs(id: number): Promise<TaskLog[]> {
   const response = await api.get(`/tasks/${id}/logs`)
   return response.data
@@ -475,14 +567,30 @@ export async function overrideTaskStatus(
   await api.post(`/tasks/${id}/override-status`, { status, reason: reason || null })
 }
 
-export async function retryTask(id: number, scheduledDatetime?: string): Promise<Task> {
-  const body = scheduledDatetime ? { scheduled_datetime: scheduledDatetime } : undefined
+export async function retryTask(
+  id: number,
+  scheduledDatetime?: string,
+  lineageStrategy?: 'inherit' | 'fresh_retry',
+): Promise<Task> {
+  const body =
+    scheduledDatetime || lineageStrategy
+      ? { scheduled_datetime: scheduledDatetime, lineage_strategy: lineageStrategy }
+      : undefined
   const { data } = await api.post(`/tasks/${id}/retry`, body)
   return data
 }
 
-export async function executeTask(id: number): Promise<void> {
-  await api.post(`/tasks/${id}/execute`)
+export async function executeTask(id: number): Promise<ExecuteTaskResponse> {
+  const response = await api.post(`/tasks/${id}/execute`)
+  return response.data
+}
+
+export async function getTaskScheduleConstraints(params: {
+  issue_id?: number
+  task_id?: number
+}): Promise<TaskScheduleWindow> {
+  const response = await api.get('/tasks/schedule-constraints', { params })
+  return response.data
 }
 
 export async function createTask(request: CreateTaskRequest): Promise<Task> {

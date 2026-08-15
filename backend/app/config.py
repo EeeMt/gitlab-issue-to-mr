@@ -76,6 +76,7 @@ PERSISTED_CONFIG_TYPES: dict[str, type[RuntimeConfigValue]] = {
     "default_execute_run_instruction_template": str,
     "default_plan_run_instruction_template": str,
     "ci_auto_repair_run_instruction_template": str,
+    "worker_runtime_readiness_ttl_seconds": int,  # Positive cache TTL for ready Kit probes
     "session_storage_root": str,
     "announcement_enabled": bool,
     "announcement_text": str,
@@ -204,6 +205,9 @@ class Settings(BaseSettings):
     ci_auto_repair_run_instruction_template: str = Field(
         default=BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE
     )
+    # Positive-cache TTL for a successful Worker Kit probe (seconds). Only controls
+    # how long a `ready` observation is trusted; it never auto-clears `unavailable`.
+    worker_runtime_readiness_ttl_seconds: int = Field(default=900, ge=30, le=86_400)
 
     @field_validator(
         "worker_artifacts_max_total_bytes",

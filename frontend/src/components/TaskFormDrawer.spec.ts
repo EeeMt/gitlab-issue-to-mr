@@ -3,7 +3,7 @@ import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { h, ref, nextTick } from 'vue'
 import TaskFormDrawer from './TaskFormDrawer.vue'
 
-const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
+const { mockApi, resetMockApi, mockMessage, clipboardWrite, mockOptionNodeClick, mockPendingOptionValue } = vi.hoisted(() => {
   const mock = {
     createTask: vi.fn<() => Promise<any>>(),
     updateTask: vi.fn<() => Promise<any>>(),
@@ -16,12 +16,16 @@ const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
     getConfig: vi.fn<() => Promise<any>>(),
     getRunInstructionTemplateDefaults: vi.fn<() => Promise<any>>(),
     previewRunInstructionTemplate: vi.fn<() => Promise<any>>(),
+    getTaskScheduleConstraints: vi.fn<() => Promise<any>>(),
   }
   const resetMockApi = () => {
     Object.values(mock).forEach(fn => fn.mockReset())
   }
   const mockMsg = { error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn() }
-  return { mockApi: mock, resetMockApi, mockMessage: mockMsg }
+  const clipboardWrite = vi.fn<() => Promise<void>>()
+  const mockOptionNodeClick = vi.fn()
+  const mockPendingOptionValue = { value: null as number | null }
+  return { mockApi: mock, resetMockApi, mockMessage: mockMsg, clipboardWrite, mockOptionNodeClick, mockPendingOptionValue }
 })
 
 vi.mock('../i18n', () => ({ currentLocale: ref('en') }))
@@ -29,6 +33,7 @@ vi.mock('../i18n', () => ({ currentLocale: ref('en') }))
 vi.mock('../utils/datetime', () => ({
   formatDateTimeUtc8Compact: vi.fn((value: any) => `formatted-${value}`),
   formatTimeUtc8: vi.fn((value: any) => `time-${value}`),
+  parseUtcDate: vi.fn((value: string) => new Date(value)),
 }))
 
 vi.mock('../utils/slotError', () => ({
@@ -55,6 +60,7 @@ vi.mock('../api', () => ({
   getConfig: mockApi.getConfig,
   getRunInstructionTemplateDefaults: mockApi.getRunInstructionTemplateDefaults,
   previewRunInstructionTemplate: mockApi.previewRunInstructionTemplate,
+  getTaskScheduleConstraints: mockApi.getTaskScheduleConstraints,
 }))
 
 vi.mock('./RunInstructionTemplateEditor.vue', () => ({
@@ -118,12 +124,13 @@ vi.mock('naive-ui', () => ({
   },
   NDatePicker: {
     name: 'NDatePicker',
-    props: ['value', 'type', 'clearable', 'isDateDisabled'],
+    props: ['value', 'type', 'clearable', 'isDateDisabled', 'isTimeDisabled'],
     emits: ['update:value'],
     setup(props: any, { emit }: any) {
       return () => h('input', {
         class: 'n-date-picker',
         value: props.value ?? '',
+        'data-has-time-disabled': typeof props.isTimeDisabled === 'function',
         onInput: (event: Event) => emit('update:value', Number((event.target as HTMLInputElement).value)),
       })
     },
@@ -214,21 +221,69 @@ vi.mock('naive-ui', () => ({
   },
   NSelect: {
     name: 'NSelect',
-    props: ['value', 'options', 'clearable', 'placeholder', 'multiple', 'disabled'],
+    props: {
+      value: null,
+      options: null,
+      clearable: null,
+      placeholder: null,
+      multiple: Boolean,
+      disabled: null,
+      renderOption: null,
+      renderTag: null,
+    },
     emits: ['update:value'],
-    setup(props: any, { emit }: any) {
-      return () => h('select', {
-        class: 'n-select',
-        multiple: props.multiple,
-        disabled: props.disabled,
-        value: props.value ?? '',
-        onChange: (event: Event) => {
-          const select = event.target as HTMLSelectElement
-          emit('update:value', props.multiple
-            ? Array.from(select.selectedOptions).map(option => option.value)
-            : Number(select.value) || null)
-        },
-      }, props.options?.map((option: any) => h('option', { value: option.value, disabled: option.disabled }, option.label)))
+    setup(props: any, { attrs, emit }: any) {
+      return () => {
+        const nativeSelect = h('select', {
+          ...attrs,
+          class: 'n-select',
+          multiple: props.multiple,
+          disabled: props.disabled,
+          value: props.value ?? '',
+          onChange: (event: Event) => {
+            const select = event.target as HTMLSelectElement
+            emit('update:value', props.multiple
+              ? Array.from(select.selectedOptions).map(option => option.value)
+              : Number(select.value) || null)
+          },
+        }, props.options?.map((option: any) => h('option', { value: option.value, disabled: option.disabled }, option.label)))
+
+        if (!props.multiple) return nativeSelect
+
+        const selectedValues = Array.isArray(props.value) ? props.value : []
+        const tags = selectedValues.map((value: any) => {
+          const option = props.options?.find((o: any) => o.value === value)
+          if (!option) return null
+          return h('span', {
+            class: 'n-select-tag',
+            'data-testid': 'skill-select-tag',
+            'data-value': String(value),
+          }, props.renderTag ? props.renderTag({ option, handleClose: () => {} }) : option.label)
+        })
+        const menu = h('div', { class: 'n-select-menu' },
+          props.options?.map((option: any) =>
+            h('div', {
+              class: 'n-select-option',
+              'data-testid': 'skill-select-option',
+              'data-value': String(option.value),
+              'data-disabled': option.disabled ? 'true' : 'false',
+            }, props.renderOption
+              ? props.renderOption({
+                node: h('span', {
+                  class: [
+                    'n-base-select-option',
+                    { 'n-base-select-option--pending': mockPendingOptionValue.value === option.value },
+                  ],
+                  onClick: mockOptionNodeClick,
+                }, option.label),
+                option,
+                selected: selectedValues.includes(option.value),
+              })
+              : option.label)
+          )
+        )
+        return h('div', { class: 'n-select n-select--multiple' }, [h('div', { class: 'n-select-tags' }, tags), nativeSelect, menu])
+      }
     },
   },
   NSpin: {
@@ -277,7 +332,9 @@ vi.mock('@vicons/ionicons5', () => {
     CalendarOutline: icon('CalendarOutline'),
     CloseOutline: icon('CloseOutline'),
     CodeSlashOutline: icon('CodeSlashOutline'),
+    Checkmark: icon('Checkmark'),
     CheckmarkCircleOutline: icon('CheckmarkCircleOutline'),
+    CopyOutline: icon('CopyOutline'),
     DocumentTextOutline: icon('DocumentTextOutline'),
     InformationCircleOutline: icon('InformationCircleOutline'),
     FlashOutline: icon('FlashOutline'),
@@ -322,7 +379,7 @@ const mockTemplates = [
 ]
 
 const mockProviders = [
-  { id: 7, name: 'Default Provider', model: 'model-a', is_default: true, is_disabled: false },
+  { id: 7, name: 'Default Provider', model: 'model-a', is_default: true, is_disabled: false, compatible_harnesses: ['claude'] },
 ]
 
 const mockWorkerProfiles = [
@@ -379,6 +436,14 @@ describe('TaskFormDrawer', () => {
     vi.useRealTimers()
     resetMockApi()
     Object.values(mockMessage).forEach(fn => fn.mockReset())
+    clipboardWrite.mockReset()
+    clipboardWrite.mockResolvedValue(undefined)
+    mockOptionNodeClick.mockReset()
+    mockPendingOptionValue.value = null
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: clipboardWrite },
+    })
     mockApi.getPromptTemplates.mockResolvedValue(mockTemplates)
     mockApi.getProviders.mockResolvedValue(mockProviders)
     mockApi.getWorkerProfiles.mockResolvedValue(mockWorkerProfiles)
@@ -433,6 +498,13 @@ describe('TaskFormDrawer', () => {
   }
 
   describe('create mode', () => {
+    it('uses the issue default harness before the worker profile default', async () => {
+      await mountDrawer({ issueDefaultHarness: 'codex' })
+      await openDrawer()
+
+      expect(wrapper.vm.harnessKey).toBe('codex')
+    })
+
     it('inherits skills for a capable mounted-kit profile without sending an override', async () => {
       await mountDrawer()
       await openDrawer()
@@ -491,6 +563,247 @@ describe('TaskFormDrawer', () => {
       expect(controls[0].attributes('disabled')).toBeDefined()
     })
 
+    it('shows the skill name and single-line description with a hover tooltip in dropdown options', async () => {
+      mockApi.getSkills.mockResolvedValue([
+        { id: 11, name: 'review', description: 'Review changes', version_id: 101 },
+        { id: 12, name: 'test', description: 'Run focused tests', version_id: 102 },
+      ])
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const option = wrapper.findAll('[data-testid="skill-select-option"]')
+        .find(item => item.attributes('data-value') === '11')
+      expect(option).toBeDefined()
+      expect(option!.text()).toContain('review')
+      expect(option!.text()).toContain('Review changes')
+      const tooltip = option!.find('.n-tooltip')
+      expect(tooltip.exists()).toBe(true)
+      expect(tooltip.text()).toContain('Review changes')
+    })
+
+    it('copies the bare skill name from the dropdown option copy button', async () => {
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const option = wrapper.findAll('[data-testid="skill-select-option"]')
+        .find(item => item.attributes('data-value') === '11')
+      const copyButton = option!.find('.skill-option__copy')
+      expect(copyButton.attributes('aria-label')).toBe('createTask.copySkillName')
+      await copyButton.trigger('click')
+      await flushPromises()
+      await nextTick()
+
+      expect(clipboardWrite).toHaveBeenCalledWith('review')
+      expect(mockMessage.success).toHaveBeenCalledWith('taskView.copied')
+      expect(option!.find('.skill-option__copy').classes()).toContain('skill-option__copy--copied')
+      // The button stopPropagates, so the full-row select handler must not fire.
+      expect(mockOptionNodeClick).not.toHaveBeenCalled()
+    })
+
+    it('positions the option copy action before the selected-state checkmark', async () => {
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const option = wrapper.findAll('[data-testid="skill-select-option"]')
+        .find(item => item.attributes('data-value') === '11')
+      const optionEl = option!.element
+      const nameRowEl = optionEl.querySelector('.skill-option__name-row')
+      const copyEl = optionEl.querySelector('.skill-option__copy')
+      const nameEl = optionEl.querySelector('.skill-option__name')
+      const actionsEl = optionEl.querySelector('.skill-option__actions')
+      const nameRowChildren = nameRowEl ? Array.from(nameRowEl.children) : []
+      const actionChildren = actionsEl ? Array.from(actionsEl.children) : []
+
+      // Keep the trailing controls together in the required visual order. This avoids
+      // a large elastic gap between copy and selected-state feedback.
+      expect(nameRowEl).not.toBeNull()
+      expect(nameRowChildren[1]).toBe(actionsEl)
+      expect(nameRowChildren[0]!.querySelector('.skill-option__name')).toBe(nameEl)
+      expect(actionChildren[0]).toBe(copyEl)
+      expect(actionChildren[1]?.classList.contains('skill-option__check')).toBe(true)
+      // …and it stays outside the name tooltip trigger, so hovering the button
+      // cannot open the description tooltip.
+      expect(nameEl).not.toBeNull()
+      expect(nameEl!.contains(copyEl)).toBe(false)
+      // The description still renders below the name row.
+      expect(optionEl.querySelector('.skill-option__desc')).not.toBeNull()
+    })
+
+    it('maps the Naive UI keyboard-pending option state onto the full row', async () => {
+      mockPendingOptionValue.value = 11
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const option = wrapper.findAll('[data-testid="skill-select-option"]')
+        .find(item => item.attributes('data-value') === '11')
+      expect(option!.find('.n-base-select-option--pending').exists()).toBe(true)
+      expect(option!.find('.skill-option').classes()).toContain('skill-option--pending')
+    })
+
+    it('selects the option when clicking anywhere on the row', async () => {
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const option = wrapper.findAll('[data-testid="skill-select-option"]')
+        .find(item => item.attributes('data-value') === '11')
+      // The full-row wrapper forwards the click to the option node, so clicking
+      // the name-row whitespace (outside the name itself) selects the option.
+      await option!.find('.skill-option__name-row').trigger('click')
+      await nextTick()
+
+      expect(mockOptionNodeClick).toHaveBeenCalledTimes(1)
+      expect(clipboardWrite).not.toHaveBeenCalled()
+    })
+
+    it('selects the option exactly once when clicking the name itself', async () => {
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const option = wrapper.findAll('[data-testid="skill-select-option"]')
+        .find(item => item.attributes('data-value') === '11')
+      const nameEl = option!.find('.skill-option__name')
+      expect(nameEl.exists()).toBe(true)
+      const nodeEl = nameEl.find('span')
+      expect(nodeEl.exists()).toBe(true)
+
+      // The node's own handler toggles once; the wrapper forwards nothing because
+      // the click target is inside `node`. Guards against a silent double-toggle
+      // if the `node.el.contains` check is ever removed.
+      await nodeEl.trigger('click')
+      await nextTick()
+
+      expect(mockOptionNodeClick).toHaveBeenCalledTimes(1)
+      expect(clipboardWrite).not.toHaveBeenCalled()
+    })
+
+    it('copies a skill name from the selected tag copy button', async () => {
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const tag = wrapper.find('[data-testid="skill-select-tag"]')
+      expect(tag.exists()).toBe(true)
+      const copyButton = tag.find('.skill-tag__copy')
+      expect(copyButton.exists()).toBe(true)
+      expect(copyButton.attributes('aria-label')).toBe('createTask.copySkillName')
+      expect(copyButton.attributes('tabindex')).toBe('0')
+      await copyButton.trigger('click')
+      await flushPromises()
+
+      expect(clipboardWrite).toHaveBeenCalledWith('review')
+      expect(mockMessage.success).toHaveBeenCalledWith('taskView.copied')
+    })
+
+    it('shows an error toast when copying a skill name fails', async () => {
+      clipboardWrite.mockRejectedValueOnce(new Error('denied'))
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const tag = wrapper.find('[data-testid="skill-select-tag"]')
+      await tag.find('.skill-tag__copy').trigger('click')
+      await flushPromises()
+
+      expect(mockMessage.error).toHaveBeenCalledWith('taskView.copyFailed')
+    })
+
+    it('falls back to document.execCommand when navigator.clipboard is unavailable (http context)', async () => {
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined })
+      const execCommandSpy = vi.fn(() => true)
+      Object.defineProperty(document, 'execCommand', { configurable: true, value: execCommandSpy })
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const option = wrapper.findAll('[data-testid="skill-select-option"]')
+        .find(item => item.attributes('data-value') === '11')
+      await option!.find('.skill-option__copy').trigger('click')
+      await flushPromises()
+
+      expect(clipboardWrite).not.toHaveBeenCalled()
+      expect(execCommandSpy).toHaveBeenCalledWith('copy')
+      expect(mockMessage.success).toHaveBeenCalledWith('taskView.copied')
+    })
+
+    it('keeps a usable execCommand fallback path when the clipboard API rejects', async () => {
+      clipboardWrite.mockRejectedValueOnce(new Error('permission denied'))
+      const execCommandSpy = vi.fn(() => true)
+      Object.defineProperty(document, 'execCommand', { configurable: true, value: execCommandSpy })
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const option = wrapper.findAll('[data-testid="skill-select-option"]')
+        .find(item => item.attributes('data-value') === '11')
+      await option!.find('.skill-option__copy').trigger('click')
+      await flushPromises()
+
+      expect(execCommandSpy).toHaveBeenCalledWith('copy')
+      expect(mockMessage.success).toHaveBeenCalledWith('taskView.copied')
+    })
+
+    it('exposes the option copy button in the tab order', async () => {
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const option = wrapper.findAll('[data-testid="skill-select-option"]')
+        .find(item => item.attributes('data-value') === '11')
+      expect(option!.find('.skill-option__copy').attributes('tabindex')).toBe('0')
+    })
+
+    it('copies the bare skill name when the copy button is activated via keyboard', async () => {
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const option = wrapper.findAll('[data-testid="skill-select-option"]')
+        .find(item => item.attributes('data-value') === '11')
+      const copyButton = option!.find('.skill-option__copy')
+      await copyButton.trigger('keydown', { key: 'Enter' })
+      await flushPromises()
+
+      expect(clipboardWrite).toHaveBeenCalledWith('review')
+      expect(mockMessage.success).toHaveBeenCalledWith('taskView.copied')
+    })
+
+    it('selects the option when clicking its description row', async () => {
+      mockApi.getSkills.mockResolvedValue([
+        { id: 11, name: 'review', description: 'Review changes', version_id: 101 },
+      ])
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const option = wrapper.findAll('[data-testid="skill-select-option"]')
+        .find(item => item.attributes('data-value') === '11')
+      expect(option!.find('.skill-option__desc').exists()).toBe(true)
+      await option!.find('.skill-option__desc').trigger('click')
+      await nextTick()
+
+      expect(mockOptionNodeClick).toHaveBeenCalledTimes(1)
+      expect(clipboardWrite).not.toHaveBeenCalled()
+    })
+
     it('does not require code changes by default', async () => {
       await mountDrawer()
       await openDrawer()
@@ -536,6 +849,57 @@ describe('TaskFormDrawer', () => {
       expect(mockApi.createTask).toHaveBeenCalledWith(
         expect.objectContaining({ session_mode: 'fresh' })
       )
+    })
+
+    it('locks harness to the issue lineage unless a fresh session is enabled', async () => {
+      mockApi.getWorkerProfiles.mockResolvedValue([
+        { ...mockWorkerProfiles[0], enabled_harnesses: ['claude', 'codex'] },
+        mockWorkerProfiles[1],
+      ])
+      await mountDrawer({ issueCurrentHarness: 'codex', issueDefaultHarness: 'claude' })
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const harnessSelect = wrapper.get('[data-testid="task-harness-select"]')
+      const lockedHint = wrapper.find('[data-testid="task-harness-locked-hint"]')
+      expect(harnessSelect.attributes('disabled')).toBeDefined()
+      expect(lockedHint.exists()).toBe(true)
+      expect(lockedHint.text()).toContain('createTask.harnessLockedHint')
+      expect(wrapper.vm.harnessKey).toBe('codex')
+
+      await wrapper.find('[data-testid="task-session-mode-switch"]').trigger('click')
+      await nextTick()
+      expect(harnessSelect.attributes('disabled')).toBeUndefined()
+      expect(wrapper.find('[data-testid="task-harness-locked-hint"]').exists()).toBe(false)
+    })
+
+    it('restores the issue harness when fresh-session mode is turned off', async () => {
+      mockApi.getWorkerProfiles.mockResolvedValue([
+        { ...mockWorkerProfiles[0], enabled_harnesses: ['claude', 'codex'] },
+        mockWorkerProfiles[1],
+      ])
+      await mountDrawer({ issueCurrentHarness: 'codex', issueDefaultHarness: 'claude' })
+      await openDrawer()
+      await wrapper.find('[data-testid="task-session-mode-switch"]').trigger('click')
+      await nextTick()
+
+      wrapper.vm.harnessKey = 'claude'
+      await wrapper.find('[data-testid="task-session-mode-switch"]').trigger('click')
+      await nextTick()
+
+      expect(wrapper.vm.harnessLocked).toBe(true)
+      expect(wrapper.vm.harnessKey).toBe('codex')
+    })
+
+    it('explains why the Worker field is locked in the execution environment', async () => {
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const workerHint = wrapper.get('[data-testid="task-worker-profile-hint"]')
+      expect(workerHint.text()).toContain('createTask.workerProfileLockedHint')
     })
 
     it('pre-fills prompt from issue description when opened', async () => {
@@ -639,6 +1003,30 @@ describe('TaskFormDrawer', () => {
       expect(scheduleDetail.find('.schedule-detail-panel').exists()).toBe(true)
     })
 
+    it('passes a time-disabled predicate derived from schedule constraints', async () => {
+      mockApi.getTaskScheduleConstraints.mockResolvedValue({
+        has_valid_window: true,
+        min_scheduled_at: '2026-04-01T10:00:00Z',
+        max_scheduled_at: '2026-04-02T18:00:00Z',
+        min_source_task_id: 1,
+        max_source_task_id: 2,
+      })
+      await mountDrawer()
+      await openDrawer()
+
+      wrapper.vm.scheduleType = 'scheduled'
+      await nextTick()
+
+      const picker = wrapper.find('.n-date-picker')
+      expect(picker.attributes('data-has-time-disabled')).toBe('true')
+      expect(typeof wrapper.vm.isTimeDisabled).toBe('function')
+      // On the min boundary day the hour before the floor is disabled.
+      const min = new Date('2026-04-01T10:00:00Z')
+      const validator = wrapper.vm.isTimeDisabled(min.getTime())
+      expect(validator.isHourDisabled?.(min.getHours() - 1)).toBe(true)
+      expect(validator.isHourDisabled?.(min.getHours() + 1)).toBe(false)
+    })
+
     it('warns when scheduled time is in the past', async () => {
       await mountDrawer()
       await openDrawer()
@@ -671,6 +1059,28 @@ describe('TaskFormDrawer', () => {
       expect(mockMessage.success).toHaveBeenCalledWith('issue.taskCreated')
     })
 
+    it('appends issue_sequence and queue_position to the create success message', async () => {
+      mockApi.createTask.mockResolvedValue({ id: 10, issue_sequence: 3, queue_position: 2 })
+      await mountDrawer()
+      await openDrawer()
+
+      wrapper.vm.taskMode = 'execute'
+      await submitCreate()
+
+      expect(mockMessage.success).toHaveBeenCalledWith('issue.taskCreatedQueued')
+    })
+
+    it('flags the queue head as about to run in the create success message', async () => {
+      mockApi.createTask.mockResolvedValue({ id: 10, issue_sequence: 3, queue_position: 1 })
+      await mountDrawer()
+      await openDrawer()
+
+      wrapper.vm.taskMode = 'execute'
+      await submitCreate()
+
+      expect(mockMessage.success).toHaveBeenCalledWith('issue.taskCreatedQueueHead')
+    })
+
     it('does not include scheduled_datetime when schedule type is now', async () => {
       await mountDrawer()
       await openDrawer()
@@ -685,21 +1095,115 @@ describe('TaskFormDrawer', () => {
 
     it('filters disabled providers from create options', async () => {
       mockApi.getProviders.mockResolvedValue([
-        { id: 7, name: 'Default Provider', model: 'model-a', is_default: true, is_disabled: false },
-        { id: 8, name: 'Disabled Provider', model: 'model-b', is_default: false, is_disabled: true },
+        { id: 7, name: 'Default Provider', model: 'model-a', is_default: true, is_disabled: false, compatible_harnesses: ['claude'] },
+        { id: 8, name: 'Disabled Provider', model: 'model-b', is_default: false, is_disabled: true, compatible_harnesses: ['claude'] },
       ])
       await mountDrawer()
       await openDrawer()
 
       expect(wrapper.vm.providerOptions).toEqual([
-        { label: 'Default Provider (model-a) ★', value: 7, disabled: false },
+        { label: 'Default Provider (model-a) ★', protocolText: 'anthropic_messages', value: 7, disabled: false },
       ])
+    })
+
+    it('filters providers by harness protocol and auto-selects a compatible provider', async () => {
+      mockApi.getProviders.mockResolvedValue([
+        { id: 6, name: 'ds', model: 'deepseek-v4-flash', is_default: true, is_disabled: false, wire_protocol: 'anthropic_messages', compatible_harnesses: ['claude'] },
+        { id: 7, name: 'ds-openai', model: 'deepseek-v4-flash', is_default: false, is_disabled: false, wire_protocol: 'openai_responses', compatible_harnesses: ['codex'] },
+      ])
+      mockApi.getWorkerProfiles.mockResolvedValue([
+        { ...mockWorkerProfiles[0], enabled_harnesses: ['claude', 'codex'] },
+        mockWorkerProfiles[1],
+      ])
+      await mountDrawer({ issueCurrentHarness: 'claude', defaultProviderId: 6 })
+      await openDrawer()
+
+      expect(wrapper.vm.providerOptions.map(option => option.value)).toEqual([6])
+      expect(wrapper.vm.providerOptions[0].protocolText).toBe('anthropic_messages')
+      expect(wrapper.vm.selectedProviderId).toBeNull()
+
+      await wrapper.find('[data-testid="task-session-mode-switch"]').trigger('click')
+      wrapper.vm.harnessKey = 'codex'
+      await nextTick()
+
+      expect(wrapper.vm.providerOptions.map(option => option.value)).toEqual([7])
+      expect(wrapper.vm.providerOptions[0].protocolText).toBe('openai_responses')
+      expect(wrapper.vm.selectedProviderId).toBe(7)
+
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+      expect(wrapper.find('[data-testid="task-provider-auto-adjusted-hint"]').exists()).toBe(true)
+
+      wrapper.vm.harnessKey = 'claude'
+      await nextTick()
+      expect(wrapper.vm.selectedProviderId).toBeNull()
+      expect(wrapper.vm.providerAutoAdjusted).toBe(false)
+    })
+
+    it('disables a harness when no enabled provider uses its required protocol', async () => {
+      mockApi.getProviders.mockResolvedValue([
+        { id: 6, name: 'ds', model: 'deepseek-v4-flash', is_default: true, is_disabled: false, wire_protocol: 'anthropic_messages', compatible_harnesses: ['claude'] },
+      ])
+      mockApi.getWorkerProfiles.mockResolvedValue([
+        { ...mockWorkerProfiles[0], enabled_harnesses: ['claude', 'codex'] },
+        mockWorkerProfiles[1],
+      ])
+      await mountDrawer({ issueDefaultHarness: 'claude' })
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const harnessSelect = wrapper.get('[data-testid="task-harness-select"]')
+      const codexOption = harnessSelect.findAll('option')
+        .find(option => option.text() === 'createTask.harnessCodex')
+      expect(codexOption).toBeDefined()
+      expect(codexOption!.attributes('disabled')).toBeDefined()
+    })
+
+    it('treats legacy providers without a wire protocol as Anthropic', async () => {
+      mockApi.getProviders.mockResolvedValue([
+        { id: 6, name: 'legacy-ds', model: 'deepseek-v4-flash', is_default: true, is_disabled: false, compatible_harnesses: ['claude'] },
+        { id: 7, name: 'ds-openai', model: 'deepseek-v4-flash', is_default: false, is_disabled: false, wire_protocol: 'openai_responses', compatible_harnesses: ['codex'] },
+      ])
+      mockApi.getWorkerProfiles.mockResolvedValue([
+        { ...mockWorkerProfiles[0], enabled_harnesses: ['claude', 'codex'] },
+        mockWorkerProfiles[1],
+      ])
+      await mountDrawer({ issueCurrentHarness: 'claude', defaultProviderId: 6 })
+      await openDrawer()
+
+      expect(wrapper.vm.providerOptions.map(option => option.value)).toEqual([6])
+      expect(wrapper.vm.providerOptions[0].protocolText).toBe('anthropic_messages')
+    })
+
+    it('restores a manually selected provider after switching harness back', async () => {
+      mockApi.getProviders.mockResolvedValue([
+        { id: 6, name: 'ds', model: 'deepseek-v4-flash', is_default: true, is_disabled: false, wire_protocol: 'anthropic_messages', compatible_harnesses: ['claude'] },
+        { id: 7, name: 'ds-openai', model: 'deepseek-v4-flash', is_default: false, is_disabled: false, wire_protocol: 'openai_responses', compatible_harnesses: ['codex'] },
+      ])
+      mockApi.getWorkerProfiles.mockResolvedValue([
+        { ...mockWorkerProfiles[0], enabled_harnesses: ['claude', 'codex'] },
+        mockWorkerProfiles[1],
+      ])
+      await mountDrawer({ issueCurrentHarness: 'claude', defaultProviderId: 6 })
+      await openDrawer()
+
+      wrapper.vm.handleProviderChange(6)
+      await wrapper.find('[data-testid="task-session-mode-switch"]').trigger('click')
+      wrapper.vm.harnessKey = 'codex'
+      await nextTick()
+      expect(wrapper.vm.selectedProviderId).toBe(7)
+
+      wrapper.vm.harnessKey = 'claude'
+      await nextTick()
+      expect(wrapper.vm.selectedProviderId).toBe(6)
+      expect(wrapper.vm.providerAutoAdjusted).toBe(false)
     })
 
     it('collapses the effective execution environment and updates its override summary', async () => {
       mockApi.getProviders.mockResolvedValue([
-        { id: 7, name: 'Default Provider', model: 'model-a', is_default: true, is_disabled: false },
-        { id: 8, name: 'Fast Provider', model: 'model-b', is_default: false, is_disabled: false },
+        { id: 7, name: 'Default Provider', model: 'model-a', is_default: true, is_disabled: false, compatible_harnesses: ['claude'] },
+        { id: 8, name: 'Fast Provider', model: 'model-b', is_default: false, is_disabled: false, compatible_harnesses: ['claude'] },
       ])
       await mountDrawer()
       await openDrawer()
@@ -749,7 +1253,7 @@ describe('TaskFormDrawer', () => {
 
     it('automatically expands a warning when the default execution environment is incomplete', async () => {
       mockApi.getProviders.mockResolvedValue([
-        { id: 7, name: 'Default Provider', model: 'model-a', is_default: true, is_disabled: true },
+        { id: 7, name: 'Default Provider', model: 'model-a', is_default: true, is_disabled: true, compatible_harnesses: ['claude'] },
       ])
       await mountDrawer()
       await openDrawer()
@@ -764,7 +1268,7 @@ describe('TaskFormDrawer', () => {
 
     it('does not block creation when provider is left to issue default', async () => {
       mockApi.getProviders.mockResolvedValue([
-        { id: 7, name: 'Default Provider', model: 'model-a', is_default: true, is_disabled: true },
+        { id: 7, name: 'Default Provider', model: 'model-a', is_default: true, is_disabled: true, compatible_harnesses: ['claude'] },
       ])
       await mountDrawer()
       await openDrawer()
@@ -1218,6 +1722,14 @@ describe('TaskFormDrawer', () => {
       expect(wrapper.vm.selectedProviderId).toBe(7)
     })
 
+    it('keeps harness locked when editing an existing task', async () => {
+      await mountEditDrawer()
+      await wrapper.setProps({ show: true })
+      await flushPromises()
+
+      expect(wrapper.vm.harnessLocked).toBe(true)
+    })
+
     it('uses the immutable task runtime when checking skill support in edit mode', async () => {
       await mountEditDrawer({
         worker_profile_id: 4,
@@ -1260,6 +1772,36 @@ describe('TaskFormDrawer', () => {
       await flushPromises()
 
       expect(mockApi.updateTask).toHaveBeenCalledWith(42, { skill_ids: [] })
+    })
+
+    it('renders a frozen snapshot skill without a description and copies its bare name', async () => {
+      await mountEditDrawer({
+        worker_profile_id: 3,
+        worker_runtime_mode: 'mounted_kit',
+        worker_kit_version: '0.3.5',
+        skill_selection_source: 'task',
+        skill_ids: [],
+        skill_snapshots: [{
+          id: 99,
+          name: 'deleted-review',
+          description: 'Deleted after task creation',
+          version_id: 91,
+        }],
+      })
+      await wrapper.setProps({ show: true })
+      await flushPromises()
+
+      const option = wrapper.findAll('[data-testid="skill-select-option"]')
+        .find(item => item.attributes('data-value') === '99')
+      expect(option).toBeDefined()
+      expect(option!.text()).toContain('deleted-review')
+      expect(option!.text()).not.toContain('Deleted after task creation')
+      expect(option!.find('.skill-option__desc').exists()).toBe(false)
+      await option!.find('.skill-option__copy').trigger('click')
+      await flushPromises()
+
+      expect(clipboardWrite).toHaveBeenCalledWith('deleted-review')
+      expect(mockMessage.success).toHaveBeenCalledWith('taskView.copied')
     })
 
     it('warns when current Worker Profile defaults differ from the task snapshot', async () => {

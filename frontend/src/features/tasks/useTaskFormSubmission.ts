@@ -29,6 +29,7 @@ interface TaskFormSubmissionOptions {
   startFreshSession: Ref<boolean>
   taskModeErrorVisible: Ref<boolean>
   selectedProviderId: Ref<number | null>
+  harnessKey: Ref<string | null>
   scheduleType: Ref<TaskScheduleType>
   scheduledAt: Ref<number | null>
   runInstructionTemplate: Ref<string>
@@ -50,6 +51,20 @@ export function useTaskFormSubmission(options: TaskFormSubmissionOptions) {
   const message = useMessage()
   const submitLoading = ref(false)
   const usageLimitDetail = ref<UsageLimitExceededDetail | null>(null)
+
+  function buildTaskCreatedMessage(task: Task): string {
+    const sequence = task.issue_sequence
+    const position = task.queue_position
+    if (sequence != null && position != null) {
+      return position === 1
+        ? t('issue.taskCreatedQueueHead', { sequence })
+        : t('issue.taskCreatedQueued', { sequence, position })
+    }
+    if (sequence != null) {
+      return t('issue.taskCreatedTurn', { sequence })
+    }
+    return t('issue.taskCreated')
+  }
 
   async function handleCreate() {
     const taskMode = options.taskMode.value
@@ -85,6 +100,7 @@ export function useTaskFormSubmission(options: TaskFormSubmissionOptions) {
         requireChanges: options.requireChanges.value,
         taskMode,
         sessionMode: options.startFreshSession.value ? 'fresh' : 'continue',
+        harnessKey: options.harnessKey?.value ?? null,
         selectedProviderId: options.selectedProviderId.value,
         scheduleType: options.scheduleType.value,
         scheduledAt: options.scheduledAt.value,
@@ -95,7 +111,7 @@ export function useTaskFormSubmission(options: TaskFormSubmissionOptions) {
         skillSelectionDirty: options.skillSelectionDirty.value,
       })
       const created = await createTask(request)
-      message.success(t('issue.taskCreated'))
+      message.success(buildTaskCreatedMessage(created))
       options.prompt.value = ''
       options.scheduledAt.value = null
       options.selectedProviderId.value = null
@@ -135,6 +151,7 @@ export function useTaskFormSubmission(options: TaskFormSubmissionOptions) {
       requireChanges: options.requireChanges.value,
       taskMode: options.taskMode.value ?? 'execute',
       sessionMode: 'continue',
+      harnessKey: null,
       selectedProviderId: options.selectedProviderId.value,
       runInstructionTemplate: options.runInstructionTemplate.value,
       runInstructionDirty: options.runInstructionDirty.value,

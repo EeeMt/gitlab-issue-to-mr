@@ -63,6 +63,21 @@ describe('TaskMetadataPanel', () => {
     expect(taskRuntimeSummaryRowsSource).toContain('grid-template-columns: 1fr;')
   })
 
+  it('shows the harness engine used by the task in the overview', () => {
+    expect(taskMetadataPanelSource).toContain('v-if="task.harness_key"')
+    expect(taskMetadataPanelSource).toContain("t('taskView.harness')")
+    expect(taskMetadataPanelSource).toContain('taskView.harnessCodex')
+    expect(taskMetadataPanelSource).toContain('taskView.harnessClaude')
+    expect(taskMetadataPanelSource).toContain("task.harness_key === 'codex'")
+  })
+
+  it('keeps label icons aligned and evenly spaced across the panel and runtime rows', () => {
+    expect(taskMetadataPanelSource).toContain('.metadata-label {\n  display: inline-flex;\n  align-items: center;\n  gap: 4px;')
+    expect(taskRuntimeSummaryRowsSource).toContain('.metadata-label {\n  display: inline-flex;\n  align-items: center;\n  gap: 4px;')
+    expect(taskMetadataPanelSource).toContain('.metadata-label-icon {\n  flex: 0 0 auto;\n  opacity: 0.65;')
+    expect(taskRuntimeSummaryRowsSource).toContain('.metadata-label-icon {\n  flex: 0 0 auto;\n  opacity: 0.65;')
+  })
+
   it('renders task mode as a chip with the same mode icons used by task creation', () => {
     expect(taskMetadataPanelSource).toContain('CodeSlashOutline')
     expect(taskMetadataPanelSource).toContain('BulbOutline')

@@ -355,6 +355,8 @@ const mockWorkerProfiles = [
     default_execute_run_instruction_template: 'Execute {{user_prompt}}',
     default_plan_run_instruction_template: 'Plan {{user_prompt}}',
     ci_auto_repair_run_instruction_template: 'Repair {{issue_title}}',
+    enabled_harnesses: ['claude', 'codex'],
+    default_harness_key: 'codex',
     created_at: '',
     updated_at: '',
   },
@@ -431,6 +433,22 @@ describe('CreateIssue', () => {
       await mountComponent()
 
       expect(wrapper.find('.create-issue-page').exists()).toBe(true)
+    })
+
+    it('lays out execution environment fields in three columns on desktop', async () => {
+      await mountComponent()
+
+      const grid = wrapper.findComponent({ name: 'NGrid' })
+      expect(grid.props('cols')).toBe(3)
+    })
+
+    it('shows hints for all execution environment fields', async () => {
+      await mountComponent()
+
+      const panel = wrapper.find('.execution-environment-panel')
+      expect(panel.text()).toContain('issue.workerDefaultHint')
+      expect(panel.text()).toContain('issue.defaultProviderHint')
+      expect(panel.text()).toContain('issue.defaultHarnessHint')
     })
 
     it('should load the project list without webhook status expansion', async () => {
@@ -1067,6 +1085,37 @@ describe('CreateIssue', () => {
       expect(call.base_branch).toBe('main')
       expect(call.git_clone_depth).toBeNull()
       expect(call.git_clone_filter).toBeNull()
+    })
+
+    it('defaults the harness engine to the selected worker profile default', async () => {
+      await mountComponent()
+
+      const harnessSelect = wrapper.get('[data-testid="default-harness-select"]')
+      expect(harnessSelect.attributes('disabled')).toBeDefined()
+
+      wrapper.vm.workerProfileId = 3
+      await nextTick()
+
+      expect(wrapper.vm.harnessKey).toBe('codex')
+      const optionLabels = harnessSelect.findAll('option').map(option => option.text())
+      expect(optionLabels).toEqual(['createTask.harnessClaude', 'createTask.harnessCodex'])
+    })
+
+    it('includes the selected default harness in the create request', async () => {
+      await mountComponent()
+
+      wrapper.vm.formValue.title = 'Test Issue Title'
+      wrapper.vm.formValue.project_id = 1
+      wrapper.vm.formValue.base_branch = 'main'
+      wrapper.vm.workerProfileId = 3
+      await nextTick()
+      wrapper.vm.harnessKey = 'claude'
+
+      await wrapper.vm.handleSubmit()
+      await flushPromises()
+
+      const call = (mockApi.createIssue as Mock).mock.calls[0][0]
+      expect(call.default_harness_key).toBe('claude')
     })
 
     it('should include shallow and blobless clone settings in the create request', async () => {

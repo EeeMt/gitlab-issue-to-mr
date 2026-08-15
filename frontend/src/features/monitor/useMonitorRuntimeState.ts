@@ -14,6 +14,13 @@ export interface MonitorRuntimeOptions {
 
 const ACTIVE_STATUSES = ['pending', 'queued', 'running']
 
+// §8.3: a task awaiting sequence repair is neither ready, waiting on time, nor
+// blocked by a predecessor — it is a disjoint repair partition surfaced via
+// sequenceRepairTasks.
+function isSequenceRepairRequired(task: Task): boolean {
+  return task.waiting_reason === 'sequence_repair_required'
+}
+
 export function useMonitorRuntimeState(options: MonitorRuntimeOptions) {
   const tasksById = computed(
     () => new Map(options.tasks.value.map((task) => [task.id, task])),
@@ -74,17 +81,37 @@ export function useMonitorRuntimeState(options: MonitorRuntimeOptions) {
     const now = options.nowMs.value
     return pendingQueuedTasks.value.filter(
       (task) =>
-        !task.scheduled_at || parseUtcDate(task.scheduled_at).getTime() <= now,
+        !isSequenceRepairRequired(task)
+        && (task.queue_position == null || task.queue_position === 1)
+        && (!task.scheduled_at || parseUtcDate(task.scheduled_at).getTime() <= now),
     )
   })
   const waitingTasks = computed(() => {
     const now = options.nowMs.value
     return pendingQueuedTasks.value.filter(
       (task) =>
-        task.scheduled_at != null &&
-        parseUtcDate(task.scheduled_at).getTime() > now,
+        !isSequenceRepairRequired(task)
+        && (task.queue_position == null || task.queue_position === 1)
+        && task.scheduled_at != null
+        && parseUtcDate(task.scheduled_at).getTime() > now,
     )
   })
+  // §8.3: queue_position > 1 tasks are blocked by a predecessor (or workspace
+  // cleanup), not ready even when their own scheduled_at has passed.
+  const waitingForPredecessors = computed(() =>
+    pendingQueuedTasks.value.filter(
+      (task) =>
+        !isSequenceRepairRequired(task)
+        && (task.waiting_reason === 'predecessor'
+          || task.waiting_reason === 'workspace_cleanup'
+          || (typeof task.queue_position === 'number' && task.queue_position > 1)),
+    ),
+  )
+  const sequenceRepairTasks = computed(() =>
+    pendingQueuedTasks.value.filter(
+      (task) => task.waiting_reason === 'sequence_repair_required',
+    ),
+  )
   const runningContainers = computed(() =>
     options.containers.value.filter((container) => container.status === 'running'),
   )
@@ -163,9 +190,11 @@ export function useMonitorRuntimeState(options: MonitorRuntimeOptions) {
     runningContainers,
     runningTasks,
     runningTasksWithoutContainer,
+    sequenceRepairTasks,
     sortedContainers,
     statusBreakdown,
     tasksById,
+    waitingForPredecessors,
     waitingTasks,
   }
 }

@@ -247,6 +247,8 @@ def test_verify_runtime_scripts_mount_claude_without_breaking_docker_args():
                 "--env",
                 "CODIFY_RUNTIME_IMAGE=team/runtime:1",
                 "--env",
+                "CODIFY_HARNESS_KEY=claude",
+                "--env",
                 "CODIFY_CLAUDE_BIN=/usr/local/bin/claude",
                 "team/runtime:1",
                 "--verify",

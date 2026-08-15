@@ -10,12 +10,25 @@ from typing import Any
 from docker.errors import NotFound
 from gitlab import Gitlab
 from sqlalchemy import delete, select
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ci_failure_logs import append_ci_failure_log
 from app.core.harness_attempts import create_task_attempt
+from app.core.harness_sessions import (
+    record_task_output_session,
+    session_namespace_for,
+)
+from app.core.issue_task_lineage import (
+    projection_for_task,
+    record_projected_output_session,
+    resolve_projected_resume_session,
+)
 from app.core.utcnow import utcnow
-from app.core.worker_docker_targets import TaskContainerLookupError
+from app.core.worker_docker_targets import (
+    DockerConnectionsUnavailableError,
+    TaskContainerLookupError,
+)
 from app.core.worker_profiles import load_task_worker_runtime
 from app.core.worker_runtime import (
     TASK_SKILLS_CONTAINER_PATH,
@@ -24,6 +37,10 @@ from app.core.worker_runtime import (
     worker_custom_scripts_configured,
 )
 from app.core.worker_runtime_bundle import load_bound_runtime_bundle
+from app.core.worker_runtime_readiness import (
+    is_kit_mount_error,
+    recheck_runtime_on_container_error,
+)
 from app.core.worker_task_artifacts import (
     _stop_artifact_poller,
     finalize_task_raw_logs,
@@ -270,12 +287,23 @@ async def create_execute_container(
     )
 
     runtime_bundle = await load_bound_runtime_bundle(db, task)
-    claude_manifest = (runtime_bundle.manifest.get("adapters") or {}).get("claude") or {}
+    # The harness is a per-Task choice frozen into the snapshot at creation;
+    # never default to claude when the snapshot is loaded.
+    harness_key = "claude"
+    try:
+        inspection = sa_inspect(task)
+        if "worker_profile_snapshot" not in inspection.unloaded:
+            harness_key = (
+                getattr(task.worker_profile_snapshot, "harness_key", None) or "claude"
+            )
+    except Exception:  # noqa: BLE001
+        harness_key = "claude"
+    adapter_meta = (runtime_bundle.manifest.get("adapters") or {}).get(harness_key) or {}
     attempt = await create_task_attempt(
         db,
         task=task,
-        harness_key="claude",
-        adapter_version=str(claude_manifest.get("version") or "1.0.0"),
+        harness_key=harness_key,
+        adapter_version=str(adapter_meta.get("version") or "1.0.0"),
     )
 
     if worker_custom_scripts_configured(settings):
@@ -315,11 +343,38 @@ async def create_execute_container(
     )
 
     session_mode = getattr(task, "session_mode", "continue")
-    task.input_session_id = (
-        None
-        if session_mode == "fresh" or issue is None
-        else issue.claude_session_id
+    # Resolve the resume session through the Task's frozen projected lineage
+    # (spec §5.5 / §6.8). A continue only resumes the exact
+    # (issue, generation, harness, namespace) lineage row, or starts with no
+    # resume ID (fresh_no_match); it never falls back to Issue.claude_session_id,
+    # which may point at an older generation. A task without a complete
+    # projection fails closed before a container is created.
+    projection = projection_for_task(task)
+    if projection is None:
+        raise ValueError(
+            f"Task {task.id} has no complete projected lineage; refusing to "
+            "start without a fail-closed resume decision"
+        )
+    harness_key = projection["harness_key"]
+    resume_session, input_lineage_reason = await resolve_projected_resume_session(
+        db,
+        task=task,
+        harness_key=projection["harness_key"],
+        session_namespace=projection["session_namespace"],
+        generation=projection["generation"],
+        reset_task_id=projection["reset_task_id"],
+        session_mode=session_mode,
     )
+    task.input_session_id = (
+        resume_session if session_mode == "continue" and issue is not None else None
+    )
+    task.input_lineage_reason = input_lineage_reason
+    # Mirror the resolved session to the legacy Claude pointer so legacy readers
+    # (e.g. the issue API) keep working during the 068 compat window; the
+    # container env reads task.input_session_id, so this write is not a
+    # resume-decision source.
+    if issue is not None and harness_key == "claude" and resume_session:
+        issue.claude_session_id = resume_session
     task.output_session_id = None
     # Record the exact session decision at execution time. Scheduled tasks must not snapshot
     # this at creation because earlier queued tasks may advance the Issue session first. The
@@ -349,6 +404,25 @@ async def create_execute_container(
     )
     if worker_runtime.skills:
         environment["CODIFY_TASK_SKILLS_DIR"] = TASK_SKILLS_CONTAINER_PATH
+    sandbox_mode = None
+    cli_binary_digest = None
+    try:
+        inspection = sa_inspect(task)
+        if "worker_profile_snapshot" not in inspection.unloaded:
+            frozen_snapshot = task.worker_profile_snapshot
+            frozen_config = getattr(frozen_snapshot, "harness_config_snapshot", None)
+            if isinstance(frozen_config, dict):
+                sandbox_mode = frozen_config.get("sandbox_mode")
+            cli_binary_digest = getattr(frozen_snapshot, "cli_binary_digest", None)
+    except Exception:  # noqa: BLE001 - sandbox policy is advisory for old snapshots
+        sandbox_mode = None
+        cli_binary_digest = None
+    if sandbox_mode:
+        environment["CODIFY_HARNESS_SANDBOX_MODE"] = str(sandbox_mode)
+    if resume_session and harness_key == "codex":
+        environment["CODIFY_RESUME_SESSION"] = resume_session
+    if cli_binary_digest:
+        environment["CODIFY_CLI_BINARY_DIGEST"] = str(cli_binary_digest)
     # Persist the exact provider/session choices before the Docker side effect. If the
     # scheduler crashes after container creation, recovery can still report the runtime
     # configuration that was used to build the container environment.
@@ -365,37 +439,58 @@ async def create_execute_container(
     if await finalize_pre_container_cancellation(db, task, phase="container creation"):
         return None
     container_name = worker._get_container_name(task)
-    container = _create_stopped_container(
-        worker,
-        task,
-        container_name,
-        image=worker_runtime.image,
-        command="",
-        environment=environment,
-        volumes=volumes if volumes else None,
-        network=settings.worker_network,
-        entrypoint=container_overrides["entrypoint"],
-        user=container_overrides["user"],
-        labels={
-            "codify.task_id": str(task.id),
-            "codify.worker_runtime_mode": worker_runtime.runtime_mode,
-            "codify.worker_kit_version": worker_runtime.worker_kit_version or "",
-            "codify.attempt_id": attempt.attempt_id,
-            "codify.runtime_bundle_digest": runtime_bundle.digest,
-        },
-    )
-
-    await _persist_created_container_reference(worker, db, task, container)
-    if await finalize_pre_container_cancellation(db, task, phase="container start"):
-        await _remove_created_container(worker, db, task, container)
-        return None
     try:
-        worker.docker.put_archive(container, "/tmp", runtime_bundle.bundle_bytes)
-        worker.docker.put_archive(container, "/tmp", runtime_archive)
-    except Exception:
-        await _remove_created_container(worker, db, task, container)
+        container = _create_stopped_container(
+            worker,
+            task,
+            container_name,
+            image=worker_runtime.image,
+            command="",
+            environment=environment,
+            volumes=volumes if volumes else None,
+            network=settings.worker_network,
+            entrypoint=container_overrides["entrypoint"],
+            user=container_overrides["user"],
+            labels={
+                "codify.task_id": str(task.id),
+                "codify.worker_runtime_mode": worker_runtime.runtime_mode,
+                "codify.worker_kit_version": worker_runtime.worker_kit_version or "",
+                "codify.attempt_id": attempt.attempt_id,
+                "codify.runtime_bundle_digest": runtime_bundle.digest,
+            },
+        )
+
+        await _persist_created_container_reference(worker, db, task, container)
+        if await finalize_pre_container_cancellation(db, task, phase="container start"):
+            await _remove_created_container(worker, db, task, container)
+            return None
+        try:
+            worker.docker.put_archive(container, "/tmp", runtime_bundle.bundle_bytes)
+            worker.docker.put_archive(container, "/tmp", runtime_archive)
+        except Exception:
+            await _remove_created_container(worker, db, task, container)
+            raise
+        await _start_created_container(worker, db, task, container)
+    except (DockerConnectionsUnavailableError, TaskContainerLookupError):
+        # Ambiguous/inconclusive Docker view: deferred recovery owns the outcome.
         raise
-    await _start_created_container(worker, db, task, container)
+    except Exception as exc:
+        # §13.4: a Kit mount/entrypoint error must trigger the same strict probe
+        # used by the scheduler gate. A deterministically missing Kit becomes a
+        # structured unavailable error; any other outcome keeps the original
+        # error classified as a Profile/image runtime error.
+        if is_kit_mount_error(exc, worker_runtime.worker_kit_path):
+            raise await recheck_runtime_on_container_error(
+                db,
+                connection=worker_runtime.docker_connection(settings),
+                image=worker_runtime.image,
+                runtime_mode=worker_runtime.runtime_mode,
+                worker_kit_version=worker_runtime.worker_kit_version or "",
+                worker_kit_path=worker_runtime.worker_kit_path or "",
+                ttl_seconds=settings.worker_runtime_readiness_ttl_seconds,
+                original_error=exc,
+            )
+        raise
     return container
 
 
@@ -677,6 +772,28 @@ async def monitor_container_run(
         f"exit_code={exit_code}, timed_out={timed_out}, chunks={log_chunks_saved}"
     )
 
+    if timed_out:
+        # The log stream hit task_timeout while the harness was still running.
+        # Stop the container gracefully (TERM -> EXIT trap -> harness finalizer
+        # flushes its canonical events) with a bounded grace, then force-kill
+        # only if it does not exit in time. This leaves the workspace in a
+        # consistent state instead of force-removing a mid-write container.
+        try:
+            await asyncio.to_thread(container.stop, timeout=15)
+            logger.info(
+                f"[Task {task.id}] Gracefully stopped container after log timeout{resume_prefix}"
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                f"[Task {task.id}] Graceful stop after log timeout failed: {exc}"
+            )
+            try:
+                await asyncio.to_thread(container.kill)
+            except Exception as kill_exc:  # noqa: BLE001
+                logger.warning(
+                    f"[Task {task.id}] Force kill after log timeout failed: {kill_exc}"
+                )
+
     raw_logs_finalized = False
     for attempt in range(1, 4):
         try:
@@ -719,7 +836,19 @@ async def monitor_container_run(
         getattr(task, "cancel_requested_at", None),
         datetime,
     )
-    if task.status == TaskStatus.CANCELLED or cancellation_requested:
+    if issue:
+        await db.refresh(issue)
+
+    # The canonical terminal is authoritative. Parse it first so a persisted
+    # cancellation intent never downgrades a run that actually completed (the
+    # cancel request can land after the container already exited with success).
+    await worker._parse_task_result(task, logs, db, exit_code, issue=issue)
+    if exit_code == 0:
+        await _save_delivery_summary_from_container(worker, container, task, db)
+
+    if (
+        task.status == TaskStatus.CANCELLED or cancellation_requested
+    ) and task.status != TaskStatus.COMPLETED and not timed_out:
         if task.status != TaskStatus.CANCELLED:
             task.status = TaskStatus.CANCELLED
             task.completed_at = task.completed_at or utcnow()
@@ -757,18 +886,54 @@ async def monitor_container_run(
         await db.commit()
         return False
 
-    if issue:
-        await db.refresh(issue)
-
-    await worker._parse_task_result(task, logs, db, exit_code, issue=issue)
-    if exit_code == 0:
-        await _save_delivery_summary_from_container(worker, container, task, db)
+    if cancellation_requested:
+        logger.info(
+            "[Task %s] Cancellation intent arrived after the run had already completed; "
+            "keeping COMPLETED",
+            task.id,
+        )
 
     output_session_id = getattr(task, "output_session_id", None)
     if issue and isinstance(output_session_id, str) and output_session_id:
         # The session returned by the task is the only safe pointer for subsequent work. This
         # also covers fresh runs and the CLI wrapper's resume-not-found fallback.
-        issue.claude_session_id = output_session_id
+        # Record it into the Task's projected lineage row first (spec §6.8); rows without a
+        # projection (legacy 068 rows) are only mirrored to the IssueHarnessSession compat
+        # table. Bookkeeping must never break completion.
+        if projection_for_task(task) is not None:
+            try:
+                await record_projected_output_session(
+                    db,
+                    task=task,
+                    session_id=output_session_id,
+                )
+            except Exception as exc:  # noqa: BLE001 - never break completion on lineage bookkeeping
+                logger.warning(
+                    "[Task %s] Failed to record projected output session: %s",
+                    task.id,
+                    exc,
+                )
+        # Resolve the frozen harness key first so a codex task's session is never
+        # recorded under the claude lineage (which would break codex resume).
+        harness_key = "claude"
+        endpoint_fingerprint = None
+        try:
+            inspection = sa_inspect(task)
+            if "worker_profile_snapshot" in inspection.unloaded:
+                await db.refresh(task, attribute_names=["worker_profile_snapshot"])
+            snapshot = task.worker_profile_snapshot
+            harness_key = getattr(snapshot, "harness_key", None) or "claude"
+            if isinstance(getattr(snapshot, "model_endpoint_snapshot", None), dict):
+                endpoint_fingerprint = snapshot.model_endpoint_snapshot.get("fingerprint")
+        except Exception:  # noqa: BLE001 - session bookkeeping must never break completion
+            harness_key = "claude"
+        await record_task_output_session(
+            db,
+            issue=issue,
+            harness_key=harness_key,
+            session_namespace=session_namespace_for(harness_key, endpoint_fingerprint),
+            session_id=output_session_id,
+        )
         await db.commit()
 
     if issue:
@@ -813,6 +978,11 @@ async def monitor_container_run(
 
     scrubbed_logs = worker._scrub_sensitive_data(logs)
     if timed_out:
+        # Timeout is the authoritative outcome: the graceful stop we issued above
+        # may have let the harness emit a `cancelled` terminal, but a wall-clock
+        # timeout is a FAILED task, never a user cancellation.
+        task.status = TaskStatus.FAILED
+        task.completed_at = task.completed_at or utcnow()
         task.error_message = (
             f"Task timed out after {settings.task_timeout}s\n"
             + worker._sanitize_sensitive_data(logs)[-800:]

@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.skills import skill_snapshots_from_task_snapshot
 from app.core.task_helpers import _serialize_task as _serialize_task_base
-from app.models import Task, TaskWorkerProfileSnapshot
+from app.models import Task, TaskWorkerProfileSnapshot, User
 
 TASK_RESPONSE_REFRESH_ATTRIBUTES = ["id", "status", "created_at", "updated_at"]
 SNAPSHOT_RESPONSE_REFRESH_ATTRIBUTES = [
@@ -34,6 +34,50 @@ def loaded_task_relationship(task: Task, name: str) -> Any | None:
     if value.__class__.__module__.startswith("unittest.mock"):
         return None
     return value
+
+
+async def compute_task_queue_contexts(
+    db: AsyncSession,
+    tasks: list[Task],
+) -> dict[int, dict[str, Any]]:
+    """Batch queue context keyed by task_id for a set of Tasks (no per-task N+1).
+
+    Queue context is computed once per distinct Issue, then flattened by task_id.
+    Tasks whose Issue is not loaded are skipped; the caller can fall back to
+    per-issue computation when it already holds the rows.
+    """
+    from app.core.issue_task_order import compute_queue_context
+
+    contexts: dict[int, dict[str, Any]] = {}
+    issue_ids = sorted({t.issue_id for t in tasks if t.issue_id is not None})
+    for issue_id in issue_ids:
+        contexts.update(await compute_queue_context(db, issue_id=issue_id))
+    return contexts
+
+
+def apply_queue_context(
+    data: dict[str, Any],
+    task_id: int,
+    contexts: dict[int, dict[str, Any]],
+    current_user: User | None = None,
+) -> dict[str, Any]:
+    """Merge per-task queue context fields into a serialized Task dict."""
+    ctx = contexts.get(task_id) or {}
+    data["queue_position"] = ctx.get("queue_position")
+    data["blocked_by_task_id"] = ctx.get("blocked_by_task_id")
+    data["waiting_reason"] = ctx.get("waiting_reason")
+    data["lock_owner_task_id"] = ctx.get("lock_owner_task_id")
+    data["waiting_since"] = ctx.get("waiting_since")
+    data["runtime_failure_code"] = ctx.get("runtime_failure_code")
+    data["runtime_failure_message"] = ctx.get("runtime_failure_message")
+    data["runtime_checked_at"] = ctx.get("runtime_checked_at")
+    # §13.3/F4: the locator fingerprint exposes the daemon host/TLS identity of
+    # the frozen worker snapshot, so it is restricted to platform admins. A
+    # caller that does not resolve an admin user (anonymous, non-admin, or an
+    # unresolved dependency in direct-call contexts) fails closed to non-admin.
+    if getattr(current_user, "platform_role", None) == "platform_admin":
+        data["runtime_locator_fingerprint"] = ctx.get("runtime_locator_fingerprint")
+    return data
 
 
 def serialize_task(*args, **kwargs) -> dict:
@@ -78,6 +122,26 @@ def serialize_task(*args, **kwargs) -> dict:
                 getattr(snapshot, "skill_selection_source", "profile")
                 if snapshot is not None
                 else "profile"
+            ),
+            "harness_key": getattr(snapshot, "harness_key", None) if snapshot is not None else None,
+            "harness_snapshot": (
+                {
+                    "harness_adapter_version": snapshot.harness_adapter_version,
+                    "harness_adapter_digest": snapshot.harness_adapter_digest,
+                    "cli_source": snapshot.cli_source,
+                    "cli_executable_path": snapshot.cli_executable_path,
+                    "cli_version": snapshot.cli_version,
+                    "cli_binary_digest": snapshot.cli_binary_digest,
+                    "image_digest": snapshot.image_digest,
+                    "runtime_bundle_digest": snapshot.runtime_bundle_digest,
+                    "endpoint_protocol": (
+                        (snapshot.model_endpoint_snapshot or {}).get("wire_protocol")
+                        if snapshot.model_endpoint_snapshot
+                        else None
+                    ),
+                }
+                if snapshot is not None
+                else None
             ),
         }
     )

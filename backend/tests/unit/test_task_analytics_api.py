@@ -18,6 +18,20 @@ from app.dependencies.project_access import ProjectAccessScope
 from app.models import TaskStatus, TaskWorkerProfileSnapshot
 
 
+def _make_scalars_all_result(rows):
+    """Mock db.execute result whose ``.scalars().all()`` yields ``rows``."""
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = rows
+    return result
+
+
+def _make_rows_all_result(rows):
+    """Mock db.execute result whose ``.all()`` yields ``rows``."""
+    result = MagicMock()
+    result.all.return_value = rows
+    return result
+
+
 @pytest.mark.asyncio
 async def test_create_task_persists_manual_initiator_metadata():
     request = CreateTaskRequest(
@@ -53,6 +67,11 @@ async def test_create_task_persists_manual_initiator_metadata():
     db.add = MagicMock()
     db.commit = AsyncMock()
     db.flush = AsyncMock()
+    _no_lineage = MagicMock()
+    _no_lineage.scalar_one_or_none.return_value = None
+    _no_lineage.scalars.return_value.all.return_value = []
+    _no_lineage.all.return_value = []
+    db.execute = AsyncMock(return_value=_no_lineage)
     db.get = AsyncMock(return_value=mock_issue)
 
     async def refresh(task, **_kwargs):
@@ -143,8 +162,23 @@ async def test_retry_task_persists_manual_initiator_metadata():
     original_result.scalar_one_or_none.return_value = None
     issue_result = MagicMock()
     issue_result.scalar_one_or_none.return_value = MagicMock(id=1)
-    db.execute = AsyncMock(side_effect=[original_result, issue_result])
+    db.execute = AsyncMock(
+        side_effect=[
+            original_result,
+            issue_result,
+            _make_scalars_all_result([original_task]),
+            _make_rows_all_result([]),
+            _make_scalars_all_result([]),
+            MagicMock(),
+        ]
+    )
     async def refresh(task, **_kwargs):
+        # The retry flow re-reads the source task (terminal) before the ordering
+        # repair, then refreshes the freshly created retry (PENDING). Preserve the
+        # source's terminal status so the ordering repair does not treat it as an
+        # active task missing a snapshot.
+        if getattr(task, "status", None) in (TaskStatus.FAILED, TaskStatus.CANCELLED):
+            return
         task.id = 24
         task.status = TaskStatus.PENDING
         task.created_at = datetime(2026, 3, 14, 12, 0, 0)
@@ -284,6 +318,8 @@ class AnalyticsQueryStub:
             return MockResult([])
         if self._is_provider_query(sql):
             return MockResult(self.provider_rows)
+        if "task_worker_profile_snapshots.harness_key AS harness_key" in sql:
+            return MockResult([])
 
         raise AssertionError(f"unrecognized analytics query: {sql}")
 
@@ -752,6 +788,8 @@ async def test_get_analytics_provider_query_groups_by_joined_provider_model():
             assert "tasks.input_tokens" not in provider_metric_sql
             assert "EXTRACT(epoch FROM tasks.completed_at - tasks.started_at)" in provider_metric_sql
             return MockResult([])
+        if "task_worker_profile_snapshots.harness_key AS harness_key" in sql:
+            return MockResult([])
 
         raise AssertionError(f"unrecognized analytics query: {sql}")
 
@@ -771,6 +809,61 @@ async def test_get_analytics_provider_query_groups_by_joined_provider_model():
         )
 
     assert response["providers"] == []
+
+
+@pytest.mark.asyncio
+async def test_get_analytics_harness_query_uses_boolean_finished_predicate():
+    """It compares the finished-task CASE to 1 inside the AND condition."""
+    fixed_now = datetime(2026, 3, 14, 12, 0, 0)
+    db = MagicMock()
+
+    def execute_side_effect(query):
+        sql = " ".join(str(query).split())
+
+        if AnalyticsQueryStub._is_summary_query(sql):
+            return MockResult(AnalyticsSummaryRow().as_result_row())
+        if AnalyticsQueryStub._is_project_query(sql):
+            return MockResult([])
+        if AnalyticsQueryStub._is_available_initiators_query(sql):
+            return MockResult([])
+        if AnalyticsQueryStub._is_initiators_query(sql):
+            return MockResult([])
+        if AnalyticsQueryStub._is_trend_query(sql):
+            return MockResult([])
+        if AnalyticsQueryStub._is_priority_wait_query(sql):
+            return MockResult([])
+        if AnalyticsQueryStub._is_issue_status_query(sql):
+            return MockResult([])
+        if AnalyticsQueryStub._is_task_status_query(sql):
+            return MockResult([])
+        if AnalyticsQueryStub._is_error_query(sql):
+            return MockResult([])
+        if AnalyticsQueryStub._is_provider_query(sql):
+            return MockResult([])
+        if "task_worker_profile_snapshots.harness_key AS harness_key" in sql:
+            succeeded_sql = sql.split("AS succeeded_tasks", 1)[0]
+            assert " END = " in succeeded_sql
+            assert "AND CASE WHEN (tasks.started_at IS NOT NULL" in succeeded_sql
+            return MockResult([])
+
+        raise AssertionError(f"unrecognized analytics query: {sql}")
+
+    db.execute = AsyncMock(side_effect=execute_side_effect)
+    access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+    with patch("app.api.stats.utcnow", return_value=fixed_now), patch(
+        "app.api.stats.build_project_lookup", new=AsyncMock(return_value={})
+    ):
+        response = await get_analytics(
+            days=7,
+            project_id=None,
+            initiator_username=None,
+            db=db,
+            _current_user=None,
+            access_scope=access_scope,
+        )
+
+    assert response["harnesses"] == []
 
 
 @pytest.mark.asyncio
@@ -807,6 +900,8 @@ async def test_get_analytics_queue_wait_excludes_pre_schedule_delay():
         if AnalyticsQueryStub._is_error_query(sql):
             return MockResult([])
         if AnalyticsQueryStub._is_provider_query(sql):
+            return MockResult([])
+        if "task_worker_profile_snapshots.harness_key AS harness_key" in sql:
             return MockResult([])
 
         raise AssertionError(f"unrecognized analytics query: {sql}")

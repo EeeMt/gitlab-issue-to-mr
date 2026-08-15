@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from app.core.worker_kit import BAKED_IMAGE_MODE, MOUNTED_KIT_MODE
 from app.core.worker_profiles import (
     WorkerProfileValidationError,
     build_worker_profile_environment_map,
@@ -14,6 +15,12 @@ from app.core.worker_profiles import (
     snapshot_from_profile,
     validate_worker_profile_docker_target,
     validate_worker_profile_mounts,
+)
+from app.core.worker_shared_configuration import (
+    WORKER_KIT_SOURCE_SYSTEM,
+    WorkerSharedConfigurationContext,
+    compute_effective_configuration_digest,
+    snapshot_effective_configuration_digest,
 )
 
 
@@ -162,6 +169,7 @@ def test_serialize_secret_profile_environment_variable_hides_plaintext():
         "key": "SECRET_VALUE",
         "value": None,
         "is_secret": True,
+        "operation": "set",
         "value_configured": True,
         "created_at": None,
         "updated_at": None,
@@ -276,6 +284,50 @@ def test_system_docker_profile_snapshots_resolved_deployment_target():
     assert snapshot.docker_tls_key == "/system/key.pem"
 
 
+def test_worker_profile_snapshot_freezes_capability_and_sandbox_policy():
+    def make_profile(constraints):
+        return SimpleNamespace(
+            id=11,
+            name="Harness Worker",
+            description=None,
+            enabled=True,
+            is_default=False,
+            image="codify-worker/base:2026.08",
+            codegraph_enabled=False,
+            volume_mounts=[],
+            environment_variables=[],
+            pre_script="",
+            post_script="",
+            default_execute_run_instruction_template="execute {{user_prompt}}",
+            default_plan_run_instruction_template="plan {{user_prompt}}",
+            ci_auto_repair_run_instruction_template="repair {{issue_title}}",
+            default_harness_key="codex",
+            harness_constraints=constraints,
+            created_at=None,
+            updated_at=None,
+        )
+
+    default_snapshot = snapshot_from_profile(
+        SimpleNamespace(id=50),
+        make_profile({}),
+    )
+    assert default_snapshot.harness_key == "codex"
+    frozen = default_snapshot.harness_config_snapshot
+    assert frozen is not None
+    # container-boundary is the system default: the worker container is the
+    # isolation boundary, matching the Claude harness.
+    assert frozen["sandbox_mode"] == "container-boundary"
+    assert frozen["capabilities"]["sandbox_mode"] == "container-boundary"
+    assert frozen["constraints"] == {}
+
+    tightened = snapshot_from_profile(
+        SimpleNamespace(id=51),
+        make_profile({"sandbox_mode": "sandboxed"}),
+    )
+    assert tightened.harness_config_snapshot["sandbox_mode"] == "sandboxed"
+    assert tightened.harness_config_snapshot["capabilities"]["sandbox_mode"] == "sandboxed"
+
+
 def test_validate_worker_profile_docker_target_requires_complete_absolute_tls_paths():
     with pytest.raises(WorkerProfileValidationError, match="configured together"):
         validate_worker_profile_docker_target(
@@ -368,4 +420,90 @@ def test_select_snapshot_run_instruction_template_uses_ci_template_for_ci_repair
             trigger_source="ci_auto_repair",
         )
         == "repair {{issue_title}}"
+    )
+
+
+def test_snapshot_from_profile_freezes_shared_effective_configuration():
+    profile = SimpleNamespace(
+        id=9,
+        name="System Kit Worker",
+        description=None,
+        enabled=True,
+        is_default=False,
+        image="codify-worker/java21:2026.07",
+        worker_kit_source=WORKER_KIT_SOURCE_SYSTEM,
+        runtime_mode=BAKED_IMAGE_MODE,
+        worker_kit_version=None,
+        worker_kit_path=None,
+        docker_host=None,
+        docker_tls_ca=None,
+        docker_tls_cert=None,
+        docker_tls_key=None,
+        codegraph_enabled=False,
+        volume_mounts=[],
+        volume_mount_masks=[],
+        environment_variables=[],
+        pre_script=None,
+        post_script=None,
+        default_execute_run_instruction_template=None,
+        default_plan_run_instruction_template=None,
+        ci_auto_repair_run_instruction_template=None,
+        default_harness_key="claude",
+        harness_constraints={},
+        image_digest=None,
+        created_at=None,
+        updated_at=None,
+    )
+    shared = WorkerSharedConfigurationContext(
+        row=SimpleNamespace(
+            revision=4,
+            runtime_mode=MOUNTED_KIT_MODE,
+            worker_kit_version="0.4.0",
+            worker_kit_path="/opt/codify/worker-kits/0.4.0",
+            volume_mounts=[],
+            pre_script="shared-pre",
+            post_script="shared-post",
+            default_execute_run_instruction_template="shared execute {{user_prompt}}",
+            default_plan_run_instruction_template="shared plan {{user_prompt}}",
+            ci_auto_repair_run_instruction_template="shared repair {{issue_title}}",
+        ),
+        environment_variables=(),
+    )
+
+    snapshot = snapshot_from_profile(
+        SimpleNamespace(id=77),
+        profile,
+        shared_configuration=shared,
+    )
+
+    assert snapshot.runtime_mode == MOUNTED_KIT_MODE
+    assert snapshot.worker_kit_version == "0.4.0"
+    assert snapshot.worker_kit_path == "/opt/codify/worker-kits/0.4.0"
+    assert snapshot.pre_script == "shared-pre"
+    assert snapshot.default_execute_run_instruction_template == "shared execute {{user_prompt}}"
+    assert snapshot.shared_configuration_revision == 4
+    assert len(snapshot.effective_configuration_digest) == 64
+    assert snapshot.effective_configuration_digest == snapshot_effective_configuration_digest(
+        snapshot
+    )
+    # The digest folds in the frozen Docker target and harness decision (§10.1).
+    assert snapshot.effective_configuration_digest == compute_effective_configuration_digest(
+        image=snapshot.image,
+        runtime_mode=snapshot.runtime_mode,
+        worker_kit_version=snapshot.worker_kit_version,
+        worker_kit_path=snapshot.worker_kit_path,
+        volume_mounts=snapshot.volume_mounts,
+        environment_variables=snapshot.environment_variables,
+        pre_script=snapshot.pre_script,
+        post_script=snapshot.post_script,
+        default_execute_run_instruction_template=(
+            snapshot.default_execute_run_instruction_template
+        ),
+        default_plan_run_instruction_template=snapshot.default_plan_run_instruction_template,
+        ci_auto_repair_run_instruction_template=snapshot.ci_auto_repair_run_instruction_template,
+        docker_host=snapshot.docker_host,
+        codegraph_enabled=snapshot.codegraph_enabled,
+        harness_key=snapshot.harness_key,
+        harness_config=snapshot.harness_config_snapshot,
+        skills=[],
     )

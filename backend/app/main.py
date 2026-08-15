@@ -220,10 +220,12 @@ from app.api import (
     providers,
     skills,
     stats,
+    system_statistics,
     tasks,
     usage_limits,
     webhook_handler,
     worker_profiles,
+    worker_shared_configuration,
 )
 
 app.include_router(auth.router, prefix="/api", tags=["auth"])
@@ -312,6 +314,12 @@ app.include_router(
     dependencies=[Depends(require_admin_user)],
 )
 app.include_router(
+    system_statistics.router,
+    prefix="/api",
+    tags=["system-statistics"],
+    dependencies=[Depends(require_admin_user)],
+)
+app.include_router(
     providers.router,
     prefix="/api",
     tags=["providers"],
@@ -321,6 +329,12 @@ app.include_router(
     worker_profiles.router,
     prefix="/api",
     tags=["worker-profiles"],
+    dependencies=[Depends(require_authenticated_user)],
+)
+app.include_router(
+    worker_shared_configuration.router,
+    prefix="/api",
+    tags=["worker-shared-configuration"],
     dependencies=[Depends(require_authenticated_user)],
 )
 app.include_router(

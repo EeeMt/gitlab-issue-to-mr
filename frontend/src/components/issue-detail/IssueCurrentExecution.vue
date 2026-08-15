@@ -33,6 +33,7 @@
           {{ task.started_at ? t('issue.executionStartedAt') : t('issue.executionCreatedAt') }}
           · {{ formatCompactDateTime(task.started_at || task.created_at) }}
         </span>
+        <span v-if="queueContextLabel">{{ queueContextLabel }}</span>
       </div>
       <span class="execution-card__link">{{ t('issue.executionOpenTask', { id: task.id }) }} →</span>
     </button>
@@ -77,6 +78,28 @@ const duration = computed(() => {
   const ended = task.completed_at ? parseUtcDate(task.completed_at).getTime() : Date.now()
   if (!Number.isFinite(started) || !Number.isFinite(ended) || ended < started) return '—'
   return formatDurationMs(ended - started)
+})
+
+const queueContextLabel = computed(() => {
+  const task = props.task
+  if (!task) return null
+  const qp = task.queue_position
+  const blockedBy = task.blocked_by_task_id
+  if (task.waiting_reason === 'sequence_repair_required') {
+    return t('taskView.queueContextSequenceRepair')
+  }
+  if (task.waiting_reason === 'workspace_cleanup') {
+    return t('taskView.queueContextWaitingCleanup', {
+      blockedBy: task.lock_owner_task_id ?? '',
+    })
+  }
+  if (typeof qp === 'number' && qp > 1) {
+    return t('taskView.queueContextNonHead', { position: qp, blockedBy: blockedBy ?? '' })
+  }
+  if (qp === 1) {
+    return task.scheduled_at ? t('taskView.queueContextHeadScheduled') : t('taskView.queueContextHeadDue')
+  }
+  return null
 })
 
 function formatCompactDateTime(value?: string | null): string {

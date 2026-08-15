@@ -45,6 +45,7 @@ deploy/e2e-videos/*.webm
 # Local-only deployment files (not committed; place on Docker host manually)
 deploy/ca.crt
 deploy/.env.test
+deploy/dev-env-info.md
 
 # Playwright CLI snapshots
 .playwright-cli/
@@ -64,6 +65,8 @@ temporary/*.png
 # Local agent skills/config
 .agents/
 .codex/
+/.agent_context/
+/.multica/
 
 # Offline bundle archives (large binaries)
 deploy/codify-offline-bundle*.tar.gz

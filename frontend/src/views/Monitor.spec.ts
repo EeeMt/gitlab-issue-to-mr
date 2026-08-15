@@ -1393,6 +1393,33 @@ describe('Monitor', () => {
       expect(waitingCards).toHaveLength(1)
     })
 
+    it('routes queue_position > 1 tasks to the waiting-for-predecessors column, not ready', async () => {
+      const predecessorTask = createMockTask({
+        id: 6,
+        status: 'pending',
+        priority: 1,
+        scheduled_at: null,
+        queue_position: 2,
+        blocked_by_task_id: 3,
+        container_name: null,
+        created_at: '2026-06-15T09:30:00Z',
+        project_name: 'Project F',
+        project_path_with_namespace: 'group/project-f',
+      })
+      ;(mockApi.getTasks as Mock).mockResolvedValue([...mockActiveTasks, predecessorTask])
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const predecessorsCol = wrapper.find('.queue-kanban__column--predecessors')
+      expect(predecessorsCol.exists()).toBe(true)
+      const predecessorCards = predecessorsCol.findAll('.queue-kanban__card')
+      expect(predecessorCards).toHaveLength(1)
+
+      const readyCol = wrapper.find('.queue-kanban__column--ready')
+      const readyIds = readyCol.findAll('.queue-kanban__card').map((card) => card.text())
+      expect(readyIds.join()).not.toContain('#6')
+    })
+
     it('kanban cards display task id and priority', async () => {
       wrapper = mountComponent()
       await flushPromises()

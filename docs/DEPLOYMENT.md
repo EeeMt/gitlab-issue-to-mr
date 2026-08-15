@@ -14,8 +14,7 @@
 当前 compose 约定：
 
 - `backend` 与 `scheduler` 共用 `codify-backend:latest`
-- `backend` 使用 `AUTO_MIGRATE=false`
-- `scheduler` 使用 `AUTO_MIGRATE=true`
+- `backend` 与 `scheduler` 均使用 `AUTO_MIGRATE=true`（启动时自动执行迁移）
 - PostgreSQL 数据挂载在 Docker volume `postgres_data`
 
 ## 2. 部署前准备
@@ -26,7 +25,7 @@
 
 - 已安装 Docker 和 Docker Compose
 - 可访问目标 GitLab 实例
-- 可访问 Claude CLI 兼容模型服务
+- 可访问 Harness 兼容模型服务（Claude/Codex）
 - Docker Engine 允许当前部署方式所需的 Worker 容器启动能力
 
 ### 2.2 关键配置项
@@ -270,7 +269,7 @@ docker exec codify-postgres psql -U codify -d codify -c \
 - `backend` / `scheduler` 日志里是否有异常
 - Worker 容器是否被提前退出
 
-如果是 E2E 或真实 GitLab 集成问题，参见 [e2e-debugging.md](e2e-debugging.md)。
+如果是 E2E 或真实 GitLab 集成问题，参见 [E2E_TESTS.md](E2E_TESTS.md)。
 
 ## 9. 升级与回滚建议
 
@@ -307,4 +306,4 @@ docker exec codify-postgres psql -U codify -d codify -c \
 - [项目总览 README](../README.md)
 - [README.zh-CN.md](README.zh-CN.md)
 - [GITLAB_OIDC_SETUP.md](GITLAB_OIDC_SETUP.md)
-- [e2e-debugging.md](e2e-debugging.md)
+- [E2E_TESTS.md](E2E_TESTS.md)

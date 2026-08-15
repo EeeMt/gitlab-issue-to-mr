@@ -16,6 +16,7 @@ export interface TaskFormDraft {
   requireChanges: boolean
   taskMode: TaskMode
   sessionMode: 'continue' | 'fresh'
+  harnessKey: string | null
   selectedProviderId: number | null
   scheduleType: TaskScheduleType
   scheduledAt: number | null
@@ -47,6 +48,9 @@ export function buildCreateTaskRequest(
   }
   if (draft.selectedProviderId !== null) {
     request.provider_id = draft.selectedProviderId
+  }
+  if (draft.harnessKey) {
+    request.harness_key = draft.harnessKey
   }
   if (!draft.inheritProfileSkills) {
     request.skill_ids = [...draft.selectedSkillIds]

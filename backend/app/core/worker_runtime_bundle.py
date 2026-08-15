@@ -9,7 +9,7 @@ import os
 import tarfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Iterable
+from typing import Any, Iterable
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import undefer
 
 from app.core.harness_protocol import CANONICAL_EVENT_SCHEMA, HARNESS_CONTRACT_VERSION
+from app.core.harness_registry import validate_adapter_capabilities
 from app.models import Task, WorkerRuntimeBundle
 
 ORCHESTRATION_VERSION = "1.0.0"
@@ -72,14 +73,22 @@ def _sha256(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+_ADAPTER_DIGEST_FILES = (
+    "deploy/ci-claude.sh",
+    "deploy/worker-entrypoint/harness/version_range.py",
+    "deploy/worker-entrypoint/harness/adapters/claude.sh",
+    "deploy/worker-entrypoint/harness/adapters/claude_events.py",
+    "deploy/worker-entrypoint/harness/adapters/codex.sh",
+    "deploy/worker-entrypoint/harness/adapters/codex_events.py",
+    "deploy/worker-entrypoint/harness/adapters/sanitize.py",
+    "deploy/worker-entrypoint/legacy/codex-run.sh",
+)
+
+
 def _adapter_digest(files: Iterable[tuple[str, bytes]]) -> str:
     digest = hashlib.sha256()
     for name, payload in files:
-        if name in {
-            "deploy/ci-claude.sh",
-            "deploy/worker-entrypoint/harness/adapters/claude.sh",
-            "deploy/worker-entrypoint/harness/adapters/claude_events.py",
-        }:
+        if name in _ADAPTER_DIGEST_FILES:
             digest.update(name.encode())
             digest.update(b"\0")
             digest.update(payload)
@@ -129,18 +138,27 @@ def build_runtime_bundle(source_dir: Path | None = None) -> BuiltRuntimeBundle:
     for key, expected in expected_protocol.items():
         if harness_manifest.get(key) != expected:
             raise RuntimeError(f"Runtime source {key} does not match executable protocol")
-    claude_metadata = dict((harness_manifest.get("adapters") or {}).get("claude") or {})
-    if not claude_metadata.get("version"):
-        raise RuntimeError("Runtime source has no Claude Adapter version")
-    claude_metadata["digest"] = _adapter_digest(source_files)
+    source_adapters = harness_manifest.get("adapters") or {}
+    if not isinstance(source_adapters, dict) or not source_adapters:
+        raise RuntimeError("Runtime source has no Adapter declarations")
+    adapters: dict[str, dict[str, Any]] = {}
+    for adapter_key, metadata in source_adapters.items():
+        if not isinstance(metadata, dict) or not metadata.get("version"):
+            raise RuntimeError(
+                f"Runtime source Adapter {adapter_key!r} has no version"
+            )
+        capabilities = metadata.get("capabilities")
+        if capabilities is not None:
+            validate_adapter_capabilities(adapter_key, capabilities)
+        adapter_metadata = dict(metadata)
+        adapter_metadata["digest"] = _adapter_digest(source_files)
+        adapters[adapter_key] = adapter_metadata
     manifest = {
         "schema": "codify.worker.runtime-bundle/v1",
         "contract_version": HARNESS_CONTRACT_VERSION,
         "event_schema": CANONICAL_EVENT_SCHEMA,
         "orchestration_version": ORCHESTRATION_VERSION,
-        "adapters": {
-            "claude": claude_metadata,
-        },
+        "adapters": adapters,
         "files": [
             {
                 "path": _archive_name(name).removeprefix(f"{RUNTIME_ARCHIVE_ROOT}/"),

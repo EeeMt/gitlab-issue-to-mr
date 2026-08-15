@@ -1,6 +1,7 @@
 """Failure handling and notification helpers for worker task lifecycle."""
 
 import asyncio
+import json
 import logging
 from typing import Any
 
@@ -9,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.utcnow import utcnow
 from app.core.worker_docker_targets import TaskContainerLookupError
+from app.core.worker_runtime_readiness import WorkerRuntimeUnavailableError
 from app.models import Issue, Task, TaskStatus
 
 logger = logging.getLogger(__name__)
@@ -103,7 +105,20 @@ async def fail_execute_task(
     task.status = TaskStatus.FAILED
     if task.completed_at is None:
         task.completed_at = utcnow()
-    task.error_message = worker._sanitize_sensitive_data(str(error))[:1000]
+    if isinstance(error, WorkerRuntimeUnavailableError):
+        # §13.4: replace the vague container error with a structured Kit error so
+        # the frozen locator's unavailable state is visible to operators.
+        task.error_message = json.dumps(
+            {
+                "code": "worker_runtime_unavailable",
+                "message": "Worker runtime is unavailable; resolve the failure and retry",
+                "failure_code": error.failure_code,
+                "failure_message": error.failure_message,
+            },
+            ensure_ascii=False,
+        )[:1000]
+    else:
+        task.error_message = worker._sanitize_sensitive_data(str(error))[:1000]
     if container is None and getattr(task, "container_id", None) is None:
         task.raw_logs_finalized_at = getattr(task, "raw_logs_finalized_at", None) or utcnow()
     if had_completed_at:

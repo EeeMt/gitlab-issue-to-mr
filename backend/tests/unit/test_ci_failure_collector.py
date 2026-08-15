@@ -79,22 +79,40 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
             "ci_auto_repair_run_instruction_template": (
                 BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE
             ),
+            "docker_host": "unix:///var/run/docker.sock",
+            "docker_tls_ca": None,
+            "docker_tls_cert": None,
+            "docker_tls_key": None,
         }
         values.update(overrides)
         return SimpleNamespace(**values)
 
-    def _provider(self, provider_id: int) -> AIProvider:
+    def _provider(
+        self,
+        provider_id: int,
+        *,
+        wire_protocol: str = "anthropic_messages",
+        provider_kind: str = "anthropic_compatible",
+    ) -> AIProvider:
         return AIProvider(
             id=provider_id,
             name=f"Provider {provider_id}",
             base_url="https://ai.example.com",
             api_key="secret",
             model="test-model",
+            provider_kind=provider_kind,
+            wire_protocol=wire_protocol,
             is_default=provider_id == 3,
             is_disabled=False,
         )
 
-    def _worker_profile(self, worker_profile_id: int) -> WorkerProfile:
+    def _worker_profile(
+        self,
+        worker_profile_id: int,
+        *,
+        harness_key: str = "claude",
+        enabled_harnesses: list[str] | None = None,
+    ) -> WorkerProfile:
         from app.core.task_prompt import BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE
 
         return WorkerProfile(
@@ -111,6 +129,8 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
             ci_auto_repair_run_instruction_template=(
                 BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE
             ),
+            default_harness_key=harness_key,
+            enabled_harnesses=enabled_harnesses or ["claude"],
         )
 
     async def _seed_issue_and_run(
@@ -122,10 +142,29 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
         default_provider_id=3,
         worker_profile_id=2,
         latest_task_provider_id=3,
+        provider_wire_protocol: str | None = None,
+        provider_provider_kind: str | None = None,
+        harness_key: str = "claude",
+        enabled_harnesses: list[str] | None = None,
     ):
         provider_ids = {default_provider_id, latest_task_provider_id}
-        session.add_all([self._provider(provider_id) for provider_id in sorted(provider_ids)])
-        session.add(self._worker_profile(worker_profile_id))
+        session.add_all(
+            [
+                self._provider(
+                    provider_id,
+                    wire_protocol=provider_wire_protocol or "anthropic_messages",
+                    provider_kind=provider_provider_kind or "anthropic_compatible",
+                )
+                for provider_id in sorted(provider_ids)
+            ]
+        )
+        session.add(
+            self._worker_profile(
+                worker_profile_id,
+                harness_key=harness_key,
+                enabled_harnesses=enabled_harnesses,
+            )
+        )
         issue = Issue(
             id=1,
             title="Repair CI",
@@ -348,6 +387,48 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
             steps = [(log.step, log.status) for log in (await session.execute(select(CIFailureRunLog))).scalars().all()]
             self.assertIn(("repair_task_created", "succeeded"), steps)
 
+    async def test_code_failure_rejects_protocol_incompatible_default_harness(self):
+        from app.core.ci_failure_collector import process_ci_failure_run
+
+        jobs, traces = self._code_failure_jobs()
+        async with self.Session() as session:
+            _, run = await self._seed_issue_and_run(
+                session,
+                enabled=True,
+                default_provider_id=22,
+                worker_profile_id=11,
+                latest_task_provider_id=3,
+                provider_wire_protocol="anthropic_messages",
+                harness_key="codex",
+                enabled_harnesses=["codex"],
+            )
+
+            with patch(
+                "app.core.ci_failure_collector.get_project_metadata",
+                new_callable=AsyncMock,
+                return_value={
+                    "project_name": "test-project",
+                    "project_path_with_namespace": "group/test-project",
+                },
+            ):
+                with self.assertRaises(RuntimeError):
+                    await process_ci_failure_run(
+                        session,
+                        run.id,
+                        gitlab_client=FakeGitLabClient(jobs=jobs, traces=traces),
+                        settings=self._settings(),
+                        collector_id="test",
+                    )
+
+            # No repair task may be created when the profile's default harness
+            # cannot speak to the resolved provider: fail at creation, not runtime.
+            tasks = (
+                await session.execute(
+                    select(Task).where(Task.trigger_source == "ci_auto_repair")
+                )
+            ).scalars().all()
+            self.assertEqual(tasks, [])
+
     async def test_code_failure_uses_issue_default_worker_and_provider(self):
         from app.core.ci_failure_collector import process_ci_failure_run
 
@@ -386,6 +467,62 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(snapshot)
             self.assertEqual(snapshot.worker_profile_id, 11)
             self.assertEqual(snapshot.image, "codify-worker:test")
+
+    async def test_code_failure_skips_auto_repair_when_runtime_unavailable(self):
+        from app.core.ci_failure_collector import process_ci_failure_run
+        from app.core.worker_runtime_readiness import (
+            FAILURE_WORKER_KIT_NOT_FOUND,
+            READINESS_UNAVAILABLE,
+            RuntimeReadiness,
+        )
+
+        jobs, traces = self._code_failure_jobs()
+        async with self.Session() as session:
+            _, run = await self._seed_issue_and_run(
+                session,
+                enabled=True,
+                default_provider_id=22,
+                worker_profile_id=11,
+                latest_task_provider_id=3,
+            )
+
+            with (
+                patch(
+                    "app.core.ci_failure_collector.get_project_metadata",
+                    new_callable=AsyncMock,
+                    return_value={
+                        "project_name": "test-project",
+                        "project_path_with_namespace": "group/test-project",
+                    },
+                ),
+                patch(
+                    "app.core.ci_failure_collector.readiness_for_profile",
+                    new=AsyncMock(
+                        return_value=RuntimeReadiness(
+                            status=READINESS_UNAVAILABLE,
+                            failure_code=FAILURE_WORKER_KIT_NOT_FOUND,
+                        )
+                    ),
+                ),
+            ):
+                await process_ci_failure_run(
+                    session,
+                    run.id,
+                    gitlab_client=FakeGitLabClient(jobs=jobs, traces=traces),
+                    settings=self._settings(),
+                    collector_id="test",
+                )
+
+            # The run is ignored, not repaired, when the runtime is unavailable.
+            refreshed = await session.get(CIFailureRun, run.id)
+            self.assertEqual(refreshed.status, "ignored")
+            self.assertEqual(refreshed.ignored_reason, "worker_runtime_unavailable")
+            tasks = (
+                await session.execute(
+                    select(Task).where(Task.trigger_source == "ci_auto_repair")
+                )
+            ).scalars().all()
+            self.assertEqual(tasks, [])
 
     async def test_merged_results_pipeline_allows_sha_mismatch_when_pipeline_is_current(self):
         from app.core.ci_failure_collector import process_ci_failure_run

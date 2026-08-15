@@ -184,6 +184,15 @@ def _build_container_env_with_settings(
         "ANTHROPIC_MODEL": model,
         "CLAUDE_MAX_TURNS": max_turns,
         "TASK_ID": str(task.id),
+        **(
+            {
+                "OPENAI_BASE_URL": base_url,
+                "OPENAI_API_KEY": api_key,
+                "OPENAI_MODEL": model,
+            }
+            if (getattr(provider, "wire_protocol", "") or "").startswith("openai")
+            else {}
+        ),
         "TASK_TIMEOUT": str(settings.task_timeout),
         "ISSUE_ID": str(issue.id),
         "ISSUE_TITLE": issue.title or "",
@@ -203,8 +212,8 @@ def _build_container_env_with_settings(
     session_mode = getattr(task, "session_mode", "continue")
     if session_mode == "fresh":
         environment["START_FRESH_SESSION"] = "1"
-    elif issue.claude_session_id:
-        environment["RESUME_SESSION"] = issue.claude_session_id
+    elif getattr(task, "input_session_id", None):
+        environment["RESUME_SESSION"] = task.input_session_id
 
     if issue.base_branch:
         environment["BASE_BRANCH"] = issue.base_branch

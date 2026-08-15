@@ -27,6 +27,15 @@ from app.api.worker_profiles import (
     test_worker_profile_docker_connection as run_docker_connection_test,
 )
 from app.core.worker_profiles import parse_worker_profile_mounts
+from app.core.worker_runtime_readiness import (
+    RuntimeProbeOutcome,
+    RuntimeProbeTransientError,
+    RuntimeReadiness,
+)
+from app.core.worker_shared_configuration import (
+    EffectiveWorkerConfiguration,
+    WorkerSharedConfigurationContext,
+)
 from app.database import get_db
 from app.dependencies.auth import (
     require_admin_user,
@@ -96,10 +105,46 @@ def test_worker_profile_requests_reject_invalid_skill_ids(request_type, request_
         request_type(**request_kwargs)
 
 
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"enabled_harnesses": ["claude", "opencode"], "default_harness_key": "claude"},
+        {"enabled_harnesses": ["claude"], "default_harness_key": "codex"},
+        {"enabled_harnesses": [], "default_harness_key": "claude"},
+        {"harness_constraints": {"privileged": True}},
+        {"harness_runtimes": {"claude": {"source": "docker exec rm -rf"}}},
+        {"harness_runtimes": {"unknown": {"source": "image"}}},
+    ],
+)
+def test_worker_profile_requests_reject_invalid_harness_fields(kwargs):
+    with pytest.raises(ValidationError):
+        WorkerProfileCreateRequest(name="Worker", image="worker:latest", **kwargs)
+
+
+def test_worker_profile_request_accepts_valid_harness_fields():
+    request = WorkerProfileCreateRequest(
+        name="Worker",
+        image="worker:latest",
+        enabled_harnesses=["claude"],
+        default_harness_key="claude",
+        harness_constraints={"max_turns": 20},
+        harness_runtimes={
+            "claude": {
+                "source": "image",
+                "executable_path": "/usr/local/bin/claude",
+            }
+        },
+    )
+    assert request.enabled_harnesses == ["claude"]
+    assert request.default_harness_key == "claude"
+    assert request.harness_constraints == {"max_turns": 20}
+
+
 @pytest.mark.asyncio
 async def test_create_worker_profile_rejects_duplicate_env_keys():
     db = MagicMock()
     db.add = MagicMock()
+    db.get = AsyncMock(return_value=None)
     name_check_result = MagicMock()
     name_check_result.scalar_one_or_none.return_value = None
     db.execute = AsyncMock(return_value=name_check_result)
@@ -109,11 +154,14 @@ async def test_create_worker_profile_rejects_duplicate_env_keys():
     request = WorkerProfileCreateRequest(
         name="Java Worker",
         image="codify-worker-java:latest",
+        worker_kit_source="profile",
         volume_mounts=[],
         environment_variables=[
             WorkerProfileEnvironmentVariableRequest(key="MAVEN_OPTS", value="-Xmx1g"),
             WorkerProfileEnvironmentVariableRequest(key="MAVEN_OPTS", value="-Xmx2g"),
         ],
+        pre_script="",
+        post_script="",
         default_execute_run_instruction_template="Execute {{user_prompt}}",
         default_plan_run_instruction_template="Plan {{user_prompt}}",
         ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
@@ -158,6 +206,7 @@ async def test_create_worker_profile_returns_created_profile_after_commit_withou
         request = WorkerProfileCreateRequest(
             name="Java Worker",
             image="codify-worker-java:latest",
+            worker_kit_source="profile",
             runtime_mode="mounted_kit",
             worker_kit_version="0.3.5",
             worker_kit_path="/opt/codify/worker-kits/0.3.5-linux-amd64",
@@ -220,6 +269,10 @@ async def test_create_baked_worker_profile_rejects_default_skills():
                     WorkerProfileCreateRequest(
                         name="Legacy Worker",
                         image="legacy-worker:latest",
+                        worker_kit_source="profile",
+                        default_execute_run_instruction_template="execute {{user_prompt}}",
+                        default_plan_run_instruction_template="plan {{user_prompt}}",
+                        ci_auto_repair_run_instruction_template="repair {{issue_title}}",
                         default_skill_ids=[skill.id],
                     ),
                     db=db,
@@ -254,6 +307,7 @@ async def test_duplicate_worker_profile_locks_and_revalidates_default_skills():
     source.default_skills = [skill]
     db = MagicMock()
     db.add = MagicMock()
+    db.get = AsyncMock(return_value=None)
     db.flush = AsyncMock()
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
@@ -286,7 +340,14 @@ async def test_duplicate_worker_profile_locks_and_revalidates_default_skills():
         [9],
         retained_disabled_skill_ids=[9],
     )
-    validate_runtime.assert_called_once_with(source, [skill])
+    # Skills are re-validated against the copy's resolved effective configuration
+    # (not the raw source columns) so a system-Kit copy validates against the
+    # inherited runtime.
+    validate_runtime.assert_called_once()
+    effective_arg, skills_arg = validate_runtime.call_args.args
+    assert isinstance(effective_arg, EffectiveWorkerConfiguration)
+    assert effective_arg.image == "codify-worker/java21-maven:2026.07"
+    assert skills_arg == [skill]
     db.commit.assert_awaited_once()
 
 
@@ -312,6 +373,7 @@ async def test_duplicate_worker_profile_preserves_disabled_default_skill():
     source.default_skills = [disabled_skill]
     db = MagicMock()
     db.add = MagicMock()
+    db.get = AsyncMock(return_value=None)
     db.flush = AsyncMock()
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
@@ -513,6 +575,7 @@ async def test_create_mounted_worker_profile_persists_portable_kit_contract():
         request = WorkerProfileCreateRequest(
             name="External Java Runtime",
             image="team/java21-maven:2026.07",
+            worker_kit_source="profile",
             runtime_mode="mounted_kit",
             worker_kit_version="0.1.0",
             worker_kit_path="/opt/codify/worker-kits/0.1.0-linux-amd64",
@@ -535,6 +598,7 @@ async def test_create_mounted_worker_profile_persists_portable_kit_contract():
 @pytest.mark.asyncio
 async def test_create_mounted_worker_profile_rejects_kit_mount_collision():
     db = MagicMock()
+    db.get = AsyncMock(return_value=None)
     result = MagicMock()
     result.scalar_one_or_none.return_value = None
     db.execute = AsyncMock(return_value=result)
@@ -543,6 +607,7 @@ async def test_create_mounted_worker_profile_rejects_kit_mount_collision():
     request = WorkerProfileCreateRequest(
         name="Invalid Runtime",
         image="team/node22:2026.07",
+        worker_kit_source="profile",
         runtime_mode="mounted_kit",
         worker_kit_version="0.1.0",
         worker_kit_path="/opt/codify/worker-kits/0.1.0-linux-amd64",
@@ -550,6 +615,8 @@ async def test_create_mounted_worker_profile_rejects_kit_mount_collision():
             {"host_path": "/tmp/override", "container_path": "/nix", "mode": "rw"}
         ],
         environment_variables=[],
+        pre_script="",
+        post_script="",
         default_execute_run_instruction_template="Execute {{user_prompt}}",
         default_plan_run_instruction_template="Plan {{user_prompt}}",
         ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
@@ -574,6 +641,7 @@ async def test_create_mounted_worker_profile_rejects_kit_mount_collision():
 )
 async def test_create_worker_profile_rejects_system_mount_collision(container_path):
     db = MagicMock()
+    db.get = AsyncMock(return_value=None)
     result = MagicMock()
     result.scalar_one_or_none.return_value = None
     db.execute = AsyncMock(return_value=result)
@@ -582,6 +650,7 @@ async def test_create_worker_profile_rejects_system_mount_collision(container_pa
     request = WorkerProfileCreateRequest(
         name="Invalid Mount",
         image="codify-worker:latest",
+        worker_kit_source="profile",
         volume_mounts=[
             {
                 "host_path": "/srv/override",
@@ -638,7 +707,9 @@ async def test_set_default_rejects_disabled_profile():
 async def test_update_assigned_worker_allows_unchanged_docker_target_fields():
     profile = _make_profile(id=11)
     db = MagicMock()
-    db.get = AsyncMock(return_value=profile)
+    db.get = AsyncMock(
+        side_effect=lambda model, pk, **kwargs: profile if model is WorkerProfile else None
+    )
     db.execute = AsyncMock()
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
@@ -768,7 +839,9 @@ async def test_disable_worker_profile_still_rejects_active_issue():
 async def test_update_disabled_worker_profile_can_enable():
     profile = _make_profile(id=11, name="Disabled Worker", enabled=False)
     db = MagicMock()
-    db.get = AsyncMock(return_value=profile)
+    db.get = AsyncMock(
+        side_effect=lambda model, pk, **kwargs: profile if model is WorkerProfile else None
+    )
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
 
@@ -896,7 +969,9 @@ async def test_delete_worker_profile_removes_disabled_unassigned_profile():
 async def test_update_assigned_worker_allows_tls_credential_rotation_on_same_daemon():
     profile = _make_profile(id=11)
     db = MagicMock()
-    db.get = AsyncMock(return_value=profile)
+    db.get = AsyncMock(
+        side_effect=lambda model, pk, **kwargs: profile if model is WorkerProfile else None
+    )
     db.execute = AsyncMock()
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
@@ -946,14 +1021,39 @@ async def test_verify_mounted_worker_profile_runs_preflight_on_profile_target():
         }
     ]
     db = MagicMock()
-    db.get = AsyncMock(return_value=profile)
+    db.get = AsyncMock(
+        side_effect=lambda model, pk, **kwargs: profile if model is WorkerProfile else None
+    )
+    db.commit = AsyncMock()
 
     container = MagicMock()
     client = MagicMock()
     client.create_container.return_value = container
     client.wait_for_container.return_value = (0, "Worker kit verification passed")
+    client.resolve_image_repo_digest.return_value = (
+        "team/java21-maven@sha256:abc123def456"
+    )
 
-    with patch("app.api.worker_profiles.DockerClientWrapper", return_value=client):
+    with (
+        patch("app.api.worker_profiles.DockerClientWrapper", return_value=client),
+        patch(
+            "app.api.worker_profiles.run_deterministic_kit_probe",
+            new=AsyncMock(
+                return_value=RuntimeProbeOutcome(
+                    readiness=RuntimeReadiness(
+                        status="ready",
+                        docker_daemon_key="daemon-key-12",
+                        runtime_mode="mounted_kit",
+                        worker_kit_version="0.3.5",
+                        worker_kit_path="/opt/codify/worker-kits/0.3.5-linux-amd64",
+                        checked_at=datetime(2026, 1, 1),
+                        ready_until=datetime(2026, 1, 2),
+                    ),
+                    committed=True,
+                )
+            ),
+        ),
+    ):
         response = await verify_worker_profile_runtime(
             12,
             WorkerRuntimeVerificationRequest(smoke_command="java -version"),
@@ -962,7 +1062,12 @@ async def test_verify_mounted_worker_profile_runs_preflight_on_profile_target():
 
     assert response["ok"] is True
     assert response["image"] == "team/java21-maven:2026.07"
+    assert response["image_digest"] == "team/java21-maven@sha256:abc123def456"
+    assert profile.image_digest == "team/java21-maven@sha256:abc123def456"
+    assert profile.verified_at is not None
+    db.commit.assert_awaited_once()
     client.client.images.get.assert_called_once_with("team/java21-maven:2026.07")
+    client.resolve_image_repo_digest.assert_called_once_with("team/java21-maven:2026.07")
     create_kwargs = client.create_container.call_args.kwargs
     assert create_kwargs["command"] == [
         "--verify",
@@ -993,10 +1098,43 @@ async def test_verify_mounted_worker_profile_runs_preflight_on_profile_target():
 
 
 @pytest.mark.asyncio
+async def test_verify_mounted_worker_profile_transient_daemon_returns_503():
+    """§13.5: an unreachable daemon surfaces as 503 transient, never a raw 500."""
+    profile = _make_profile(id=14, name="Transient Runtime")
+    profile.image = "team/java21-maven:2026.07"
+    profile.runtime_mode = "mounted_kit"
+    profile.worker_kit_version = "0.3.5"
+    profile.worker_kit_path = "/opt/codify/worker-kits/0.3.5-linux-amd64"
+    db = MagicMock()
+    db.get = AsyncMock(
+        side_effect=lambda model, pk, **kwargs: profile if model is WorkerProfile else None
+    )
+    db.commit = AsyncMock()
+
+    with patch(
+        "app.api.worker_profiles.run_deterministic_kit_probe",
+        new=AsyncMock(side_effect=RuntimeProbeTransientError("daemon unreachable")),
+    ):
+        with pytest.raises(HTTPException) as exc_info:
+            await verify_worker_profile_runtime(
+                14,
+                WorkerRuntimeVerificationRequest(smoke_command="true"),
+                db=db,
+            )
+
+    assert exc_info.value.status_code == 503
+    assert (
+        exc_info.value.detail["code"] == "worker_runtime_verification_transient_failure"
+    )
+
+
+@pytest.mark.asyncio
 async def test_verify_baked_worker_profile_is_rejected_without_docker_access():
     profile = _make_profile(id=13)
     db = MagicMock()
-    db.get = AsyncMock(return_value=profile)
+    db.get = AsyncMock(
+        side_effect=lambda model, pk, **kwargs: profile if model is WorkerProfile else None
+    )
 
     with (
         patch("app.api.worker_profiles.DockerClientWrapper") as client_class,
@@ -1011,6 +1149,64 @@ async def test_verify_baked_worker_profile_is_rejected_without_docker_access():
     assert exc.value.status_code == 422
     assert "mounted_kit" in str(exc.value.detail)
     client_class.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_verify_task_worker_runtime_runs_probe_and_returns_readiness():
+    """POST /tasks/{id}/verify-worker-runtime probes the frozen snapshot (§15.2)."""
+    from app.api.tasks import verify_task_worker_runtime
+    from app.core.worker_runtime_readiness import (
+        READINESS_READY,
+        RuntimeProbeOutcome,
+        RuntimeReadiness,
+    )
+
+    snapshot = SimpleNamespace(
+        runtime_mode="mounted_kit",
+        image="worker:latest",
+        worker_kit_version="0.3.5",
+        worker_kit_path="/opt/kit",
+        docker_host="tcp://worker:2376",
+        docker_tls_ca=None,
+        docker_tls_cert=None,
+        docker_tls_key=None,
+    )
+    task = SimpleNamespace(worker_profile_snapshot=snapshot)
+    db = MagicMock()
+    db.get = AsyncMock(return_value=task)
+
+    with patch(
+        "app.api.tasks.run_deterministic_kit_probe",
+        new=AsyncMock(
+            return_value=RuntimeProbeOutcome(
+                readiness=RuntimeReadiness(status=READINESS_READY),
+                committed=True,
+            )
+        ),
+    ):
+        response = await verify_task_worker_runtime(12, db=db, _admin=None)
+
+    assert response["ok"] is True
+    assert response["task_id"] == 12
+    assert response["runtime_mode"] == "mounted_kit"
+    assert response["worker_kit_version"] == "0.3.5"
+    assert response["runtime_locator_fingerprint"] is not None
+    assert response["runtime_readiness"]["status"] == READINESS_READY
+
+
+@pytest.mark.asyncio
+async def test_verify_task_worker_runtime_rejects_baked_snapshot():
+    from app.api.tasks import verify_task_worker_runtime
+
+    task = SimpleNamespace(worker_profile_snapshot=SimpleNamespace(runtime_mode="baked_image"))
+    db = MagicMock()
+    db.get = AsyncMock(return_value=task)
+
+    with pytest.raises(HTTPException) as exc:
+        await verify_task_worker_runtime(12, db=db, _admin=None)
+
+    assert exc.value.status_code == 422
+    assert "mounted_kit" in str(exc.value.detail)
 
 
 def test_list_worker_profiles_exposes_secret_configured_not_plaintext():
@@ -1054,11 +1250,15 @@ def test_admin_worker_profile_list_includes_docker_target():
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[require_authenticated_user] = lambda: SimpleNamespace(id=1)
     app.dependency_overrides[require_admin_user] = lambda: SimpleNamespace(id=1)
-    client = TestClient(app, raise_server_exceptions=False)
-    try:
-        response = client.get("/api/worker-profiles/admin")
-    finally:
-        app.dependency_overrides.clear()
+    with patch(
+        "app.api.worker_profiles.load_shared_configuration",
+        new=AsyncMock(return_value=WorkerSharedConfigurationContext()),
+    ):
+        client = TestClient(app, raise_server_exceptions=False)
+        try:
+            response = client.get("/api/worker-profiles/admin")
+        finally:
+            app.dependency_overrides.clear()
 
     assert response.status_code == 200
     assert response.json()[0]["docker_host"] == "tcp://worker:2376"

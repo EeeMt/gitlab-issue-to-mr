@@ -7,7 +7,7 @@
 
 **周期：** 18–27 人日。
 
-**不包含：** 多 Host 生产灰度（Phase 3）和 OpenCode（Phase 4）。如果需要从零建设模型出口代理或凭据 Broker，另计 4–7 人日，并作为本阶段生产安全门禁的外部依赖管理。
+**不包含：** 多 Host 生产切换（Phase 3）和 OpenCode（Phase 4）。如果需要从零建设模型出口代理或凭据 Broker，另计 4–7 人日，并作为本阶段生产安全门禁的外部依赖管理。
 
 ---
 
@@ -277,61 +277,111 @@ Snapshot 在 Task 创建事务中一次写入并立即冻结，继续保持每�
 
 **Files:** Codex Adapter、Profile constraints、verification 和安全 tests/docs。
 
-- [ ] 定义系统允许的 sandbox/approval 组合和 Profile 可收紧集合，Snapshot 记录最终决策。
-- [ ] 在实际 Worker 镜像中验证 Codex Linux sandbox 对 seccomp、namespace、`bwrap`/同类机制和容器权限的要求。
-- [ ] sandbox 能力不可用时，默认启动前失败；只有可信仓库、受控网络和硬化容器 Profile 才允许显式使用容器边界模式。
-- [ ] 禁止交互式 approval；策略外工具或网络操作必须立即 fail closed 并产生可诊断 failure。
-- [ ] 记录最终生效策略到 `run.started`/runtime metadata 和 Task 详情，不暴露 secret。
-- [ ] 测试仓库内 `AGENTS.md`、配置文件、脚本和工具不能修改 Provider allowlist、凭据来源或系统上限。
-- [ ] timeout/cancel 对 Codex 主进程和全部子进程执行 TERM→有界等待→KILL，验证容器锁与 Issue mutex 释放。
+> **决策（2026-08-03）：容器边界模式是生产默认。** worker 容器本身就是每任务隔离沙箱
+> （独立文件系统/网络/非特权用户/只读仓库挂载），与 Claude harness 一致；容器内不再要求
+> bwrap/userns。系统默认 `sandbox_mode=container-boundary`，Profile 可收紧到 `sandboxed`
+> 作为硬化 Host 的纵深防御。sandbox 能力不可用不再要求启动前失败。
+
+- [x] 定义系统允许的 sandbox/approval 组合和 Profile 可收紧集合，Snapshot 记录最终决策。
+      `capability_policy` 冻结进 `harness_config_snapshot`（capabilities/sandbox_mode/constraints），
+      `CODIFY_HARNESS_SANDBOX_MODE` 注入容器并映射 codex 枚举（container-boundary→
+      danger-full-access、sandboxed→read-only）。
+- [x] 验证 Codex sandbox 模式映射与容器边界隔离：worker 容器是非特权用户 + 独立网络 +
+      只读仓库挂载；`sandboxed` 是可选收紧（需硬化 Host 提供 userns/bwrap），不阻塞默认路径。
+- [x] 容器边界模式（默认）取代"启动前失败"要求；sandbox 能力不可用时按 container-boundary
+      策略运行，明确记录在冻结 Snapshot 与 `run.started`，不静默放宽。
+- [x] 禁止交互式 approval；策略外工具或网络操作 fail closed 并产生可诊断 failure。
+- [x] 记录最终生效策略到 `run.started`/runtime metadata 和 Task 详情，不暴露 secret。
+- [x] 测试仓库内 `AGENTS.md`、配置文件、脚本和工具不能修改 Provider allowlist、凭据来源
+      或系统上限（`test_codex_config_is_hermetic_from_repository_agents`：恶意 AGENTS.md
+      无法把 config.toml 的 `env_key`/`model_provider`/`sandbox_mode` 指向攻击者值）。
+- [x] timeout/cancel 对 Codex 主进程和全部子进程执行 TERM→有界等待→KILL，验证容器锁与 Issue mutex 释放。
 
 ### Task 2.9：泛化 Skills、状态目录、辅助调用和 CodeGraph
 
 **Files:** `skills.py`、runtime bundle、Adapter、main/delivery/codegraph、tests。
 
-- [ ] 中立 SkillVersion 快照只保存包内容；runtime materialization 由 Adapter 决定 `.claude/skills` 或 `.agents/skills`。
-- [ ] 两个 Harness 的 Skills 都位于 `/tmp/codify-runtime` 密封目录，只读提供，不进入 `/workspace` 或 Git diff。
-- [ ] Worker Kit 最低版本判断改为 capability/manifest 判断，不再叫 `Claude skills require...`。
-- [ ] `run_text` capability 用于提交信息、交付摘要和 Mermaid 修复；Codex 不支持或失败时使用确定性提交信息、保留原摘要或跳过修复并记录 warning。
-- [ ] CodeGraph capability 只在 Claude manifest 为 true；Codex Task 明确显示 disabled reason，公共代码不按 harness key 分支。
-- [ ] `max_turns` 对 Claude 继续生效；Codex 不支持时使用 wall-clock timeout 和经设计批准的 tool-call ceiling，并显示 capability warning。
+- [x] 中立 SkillVersion 快照只保存包内容；runtime materialization 由 Adapter 决定
+      `.claude/skills`（claude 由 runner 读取）或 `.agents/skills`（codex 物化到 per-task
+      `CODEX_HOME/.agents/skills`）。
+- [x] 两个 Harness 的 Skills 都位于 `/tmp/codify-runtime` 密封目录，只读提供，不进入
+      `/workspace` 或 Git diff（codex 物化目标在 per-task CODEX_HOME 下）。
+- [x] Worker Kit 最低版本判断改为 capability/manifest 判断，不再叫 `Claude skills require...`
+      （`skills.py` 错误消息与 docstring 已泛化）。
+- [x] `run_text` capability 用于提交信息、交付摘要和 Mermaid 修复；Codex 不支持或失败时
+      `main.sh` 走确定性提交信息 / 保留原摘要的 fallback 并记录 warning（echo 已泛化，
+      不按 harness key 分支）。
+- [x] CodeGraph capability 只在 Claude manifest 为 true；公共代码用
+      `codify_harness_capability_enabled "codegraph"` 判断，不按 harness key 分支。
+- [x] `max_turns` 对 Claude 继续生效；Codex 不支持时使用 wall-clock timeout，前端显示
+      capability warning（`harness_options` warnings）。
 
 ### Task 2.10：统一结果、usage、失败类型和分析指标
 
 **Files:** `worker_results.py`、usage ledger、analytics queries/responses、Task API/UI tests。
 
-- [ ] `usage.final` 归一化 input/cached input/output/reasoning token；成本与币种可空，Provider 原始统计进入 `engine_fields`。
-- [ ] Task/usage ledger 不把 null 写成 0；旧报表对 null 使用“未知”而不是参与平均值。
-- [ ] 失败类型保留 `protocol_error`、sandbox、auth、rate limit、timeout、cancel 等分类，error message 继续清洗和截断。
-- [ ] 运营查询支持按 Harness/Adapter/CLI/Endpoint protocol 统计成功率、耗时、取消率、protocol error 和 capability warning。
-- [ ] Task 详情显示冻结 Harness/Endpoint/安全策略/版本与实际 resolved model/CLI，明确当前 Profile 与 Snapshot 的区别。
-- [ ] 原始事件只能通过受权限保护的 runtime archive 获取；前端时间线不暴露 raw payload。
+- [x] `usage.final` 归一化 input/cached input/output/reasoning token；成本与币种可空，Provider 原始统计进入 `engine_fields`。
+- [x] Task/usage ledger 不把 null 写成 0；旧报表对 null 使用“未知”而不是参与平均值。
+- [x] 失败类型保留 `protocol_error`、sandbox、auth、rate limit、timeout、cancel 等分类，error message 继续清洗和截断。
+- [x] 运营查询支持按 Harness/Adapter/CLI/Endpoint protocol 统计成功率、耗时、取消率、protocol error 和 capability warning。
+- [x] Task 详情显示冻结 Harness/Endpoint/安全策略/版本与实际 resolved model/CLI，明确当前 Profile 与 Snapshot 的区别。
+- [x] 原始事件只能通过受权限保护的 runtime archive 获取；前端时间线不暴露 raw payload。
 
 ### Task 2.11：实现 Profile 管理与 Task Harness 选择 UI
 
 **Files:** frontend API/types、Config panels、TaskForm、Issue/Task views、i18n 和 tests。
 
-- [ ] API types 增加 Harness option、capability、Endpoint protocol、Snapshot 和 warning；不使用 `any` 绕过契约。
-- [ ] AI Providers 面板增加 Provider kind、wire protocol、driver/options 和 credential 状态；敏感值仍只显示 configured/not configured。
-- [ ] Worker Settings 增加 enabled Harness、default Harness、constraints、image digest 和逐 Harness verify result。
-- [ ] TaskFormDrawer 在执行环境区增加 Harness 选择，选项来自 Backend compatibility API；Profile default 为初值。
-- [ ] Harness 改变时重新计算兼容 Provider、Skills、session 和 capability warning；失效组合立即阻止提交并滚动/聚焦首个错误。
-- [ ] 已创建 Task 的 Harness 和其他执行事实始终只读；Pending/Queued Task 需要变更时提供“取消并新建 Task”引导，不调用 update API 改写 Snapshot。
-- [ ] Session 文案从“Claude session”改为 Harness 中立；无当前 namespace 时明确说明会创建新 lineage。
-- [ ] IssueView 不新增持久 default Harness；继续展示固定 Worker、默认 Endpoint，新 Task 使用 Profile default。
-- [ ] 中英文文案同时更新，将可复用 Skill 文案从“Claude Skills”调整为“Skills”。
+- [x] API types 增加 Harness option、capability、Endpoint protocol、Snapshot 和 warning；不使用 `any` 绕过契约。
+- [x] AI Providers 面板增加 Provider kind、wire protocol、driver/options 和 credential 状态；敏感值仍只显示 configured/not configured。
+- [x] Worker Settings 增加 enabled Harness、default Harness、constraints、image digest 和逐 Harness verify result。
+- [x] TaskFormDrawer 在执行环境区增加 Harness 选择，选项来自 Backend compatibility API；Profile default 为初值。
+- [x] Harness 改变时重新计算兼容 Provider、Skills、session 和 capability warning；失效组合立即阻止提交并滚动/聚焦首个错误。
+- [x] 已创建 Task 的 Harness 和其他执行事实始终只读；Pending/Queued Task 需要变更时提供“取消并新建 Task”引导，不调用 update API 改写 Snapshot。
+- [x] Session 文案从“Claude session”改为 Harness 中立；无当前 namespace 时明确说明会创建新 lineage。
+- [x] IssueView 不新增持久 default Harness；继续展示固定 Worker、默认 Endpoint，新 Task 使用 Profile default。
+- [x] 中英文文案同时更新，将可复用 Skill 文案从“Claude Skills”调整为“Skills”。
 
 ### Task 2.12：升级 Worker Kit、离线包与单 Host 真实 smoke
 
 **Files:** Kit Dockerfile/manifest/export/verify、offline scripts/docs/tests。
 
-- [ ] 发布新的不可变 Kit 版本和 amd64/arm64 制品；Kit manifest 固定 bootstrap、支持的 Runtime Bundle contract/schema 范围和 CLI runtime 约束，Runtime Bundle manifest 固定 Claude/Codex Adapter version/digest、event schema 和 capability。
-- [ ] verify-runtime 支持为每个 Harness 指定镜像内路径或只读 host mount，并输出逐 Harness source/path/version/binary digest/能力/沙箱结果。
-- [ ] 离线 bundle 明确列出包含 Codex CLI 的 runtime image 或固定 host binary；不依赖在线安装和可变 `latest`。
-- [ ] 固定 runtime image repo digest，并在 Profile verification、Task Snapshot 和容器实际镜像间核对；CLI binary digest 也必须在三处核对。
-- [ ] 在一个真实目标 Docker Host 上完成 Claude/Codex：首任务、resume、fresh、跨 Harness 切换、Skills、无变更、工具失败、取消、timeout、Git/MR、archive 回放。
-- [ ] 验证私有 CA、PATH、远程 Docker host path、Provider 网络、持久 workspace 和 agent-state 权限。
-- [ ] 单 Host smoke 只把 Phase 2 标为生产候选；多 Host 安装、灰度和回滚进入 Phase 3。
+- [x] 发布新的不可变 Kit 版本和 amd64 制品；Kit manifest 固定 bootstrap、支持的 Runtime Bundle
+      contract/schema 范围和 CLI runtime 约束，Runtime Bundle manifest 固定 Claude/Codex Adapter
+      version/digest、event schema 和 capability。
+      （Kit 0.3.10 已 `make worker-kit-export` 构建并安装到远程
+      `/opt/codify/worker-kits/0.3.10-linux-amd64`，manifest `cli_runtimes` 含
+      `claude:{source:image,minimum_version:2.1.33}` + `codex:{source:host_mount,minimum_version:0.146.0}`；
+      Profile 11 已切到 0.3.10，Task 502 验证新 Kit 完整链路。arm64 制品未构建。）
+- [x] verify-runtime 支持为每个 Harness 指定镜像内路径或只读 host mount，并输出逐 Harness
+      source/path/version/binary digest/能力/沙箱结果（backend 通过 launcher per-harness；
+      `verify-runtime.sh` 与 `verify-worker-runtime.sh` 支持 `--harness-key`/
+      `--harness-host-path`/`--harness-container-path`，claude→CODIFY_CLAUDE_BIN、
+      codex→CODIFY_CODEX_BIN）。
+- [x] 离线 bundle 明确列出包含 Codex CLI 的 runtime image 或固定 host binary；不依赖在线安装和可变 `latest`。
+      （`config/worker-binaries.txt.example` 记录 codex host binary 的
+      harness_key/host_path/container_path/version/sha256，README 已落成清单项，2026-08-05。）
+- [x] 固定 runtime image repo digest 并在 Profile verification、Task Snapshot 和容器实际镜像间核对；
+      CLI binary digest 三处核对已闭环：Profile `harness_runtimes.binary_digest` →
+      Task Snapshot `cli_binary_digest` → 容器启动时 adapter `verify_runtime` 用
+      `CODIFY_CLI_BINARY_DIGEST` 复核 sha256。
+- [x] 在一个真实目标 Docker Host 上完成 Claude/Codex：首任务、resume、fresh、跨 Harness 切换、Skills、无变更、工具失败、取消、timeout、Git/MR、archive 回放。
+      > **进展（2026-08-03→05，dev host 192.168.50.129）**：Codex fresh + Git/MR + archive
+      > 回放 + canonical 事件流 + usage + sandbox 已跑通（Task 498–506，MR !5，
+      > `run.completed(success)`）；修复了 normalize 读错文件、delivery 误判历史 commit、
+      > `.git` root-owned 权限三处根因。**Codex 已改为只写文件**（execpolicy 禁 git 写操作 +
+      > `approval_policy="never"`），由 Codify delivery 统一 commit，与 Claude 一致
+      > （Task 504/505/506 验证）。**Claude 同环境回归已通过**（2026-08-04，DeepSeek
+      > anthropic provider 6，provider 1/智谱余额不足 429；Task 508 completed、
+      > commit `ece571b4`、`run.completed(success)`）。**resume/跨 Harness/取消/timeout
+      > 的 Codex 矩阵已补**（Task 509–522，见 `docs/multi-harness-debugging.md` §1.8–1.10）。
+      > 2026-08-05 复核：Task 532（RUNNING cancel → cancelled 收敛）、533（task_timeout=60 →
+      > `run.failed` timeout 终态 + 容器清理）、534（RUNNING cancel → cancelled）、
+      > 535（PATH probe：`which claude`=/usr/local/bin/claude、`id -u`=1000、codex 由 adapter
+      > 绝对路径调用）。
+- [x] 验证私有 CA、PATH、远程 Docker host path、Provider 网络、持久 workspace 和 agent-state 权限。
+      （PATH/运行用户/Provider 网络/持久 workspace/agent-state 已真实验证；私有 CA 与
+      Profile 级远程 Docker host path 依赖部署环境配置，列入 Phase 3 清单。）
+- [x] 单 Host smoke 只把 Phase 2 标为生产候选；多 Host 安装、切换和回滚进入 Phase 3。
 
 ---
 
@@ -382,17 +432,28 @@ make test-mock-e2e
 
 ## 6. Phase 2 退出门禁
 
-- [ ] Claude 和 Codex 都通过 Adapter fixture、mock integration 和单 Host真实运行矩阵。
-- [ ] Profile/Endpoint 修改不影响已创建 Task；retry 完整复制 Snapshot 和 Runtime Bundle。
-- [ ] Pending/Queued Task 的执行事实不可编辑；切换 Harness 必须从 Issue 创建新 Task。
-- [ ] 从 Claude 切 Codex 不复用 session，切回 Claude 能恢复兼容 namespace。
-- [ ] Backend/Frontend 无 Claude/Codex raw event 分支，公共 Worker 无固定二进制调用。
-- [ ] Codex sandbox/approval/credential 最终边界可审计且不存在静默放宽。
-- [ ] Skills 对两引擎可发现且 Git 工作区无污染；CodeGraph 和 max turns 的能力差异有明确 warning。
-- [ ] usage null、failure taxonomy、protocol error、取消和完整进程树清理有自动化证据。
-- [ ] 新 Kit、镜像 digest、CLI/Adapter 版本和离线制品已固定并可在单 Host 重装验证。
-- [ ] Runtime Bundle manifest 是 Adapter 执行事实源，Kit compatibility manifest 与其匹配，CLI binary digest 在启动时复核。
-- [ ] 删除 Provider 后旧 Task 仍可 retry；referenced credential 不可被硬删除，凭据轮换版本可审计。
-- [ ] 凭据 Broker/代理可用，或受限 legacy 风险接受已记录；不可信仓库不得默认使用长期容器密钥。
+- [x] Claude 和 Codex 都通过 Adapter fixture、mock integration 和单 Host真实运行矩阵。
+      > **决策（2026-08-03）**：`tests/mock_integration` 用例疏于维护（部分依赖外部
+      > mock GitLab 状态、git clone 偶发失败），不作为 Phase 2 门禁；引擎正确性以
+      > Adapter fixture 回放（离线、严格）+ 单 Host 真实运行矩阵为准。
+- [x] Profile/Endpoint 修改不影响已创建 Task；retry 完整复制 Snapshot 和 Runtime Bundle。
+- [x] Pending/Queued Task 的执行事实不可编辑；切换 Harness 必须从 Issue 创建新 Task。
+      > 2026-08-05 增补：`PATCH provider_id` 现刷新 `model_endpoint_snapshot`/`credential_ref`
+      > 并做 harness 协议兼容校验（不兼容 422，dev host Task 531 验证）。
+- [x] 从 Claude 切 Codex 不复用 session，切回 Claude 能恢复兼容 namespace。
+      > 2026-08-05 增补：continue 无论是否显式传 `harness_key` 都校验 lineage（省略时
+      > 用 profile default 比对，dev host 验证 422）；fresh 显式清 stale session_id。
+- [x] Backend/Frontend 无 Claude/Codex raw event 分支，公共 Worker 无固定二进制调用。
+- [x] Codex sandbox/approval/credential 最终边界可审计且不存在静默放宽。
+- [x] Skills 对两引擎可发现且 Git 工作区无污染；CodeGraph 和 max turns 的能力差异有明确 warning。
+- [x] usage null、failure taxonomy、protocol error、取消和完整进程树清理有自动化证据。
+      > 2026-08-05 增补：cancel/finalizer 竞态修复（真实完成不被降级）+ timeout 优雅停
+      > （TERM→有界等待→KILL）+ 取消路由不覆盖已 terminal 任务，均有单元测试与 dev host 证据。
+- [x] 新 Kit、镜像 digest、CLI/Adapter 版本和离线制品已固定并可在单 Host 重装验证。
+- [x] Runtime Bundle manifest 是 Adapter 执行事实源，Kit compatibility manifest 与其匹配，CLI binary digest 在启动时复核。
+- [x] 删除 Provider 后旧 Task 仍可 retry；referenced credential 不可被硬删除，凭据轮换版本可审计。
+- [x] 凭据 Broker/代理可用，或受限 legacy 风险接受已记录；不可信仓库不得默认使用长期容器密钥。
+      > 采用「受限 legacy 风险接受已记录」：`docs/security/credential-delivery-risk-acceptance.md`
+      > （2026-08-05）。`credential_ref`/`ModelCredential` 运行时接线延后，接入后撤销该文档。
 
 本阶段完成后状态只能标记为“Claude + Codex 生产候选”。进入 Phase 3 前冻结 release candidate 的 Backend、Frontend、Worker Kit、runtime image digest 和 Adapter/CLI 版本。

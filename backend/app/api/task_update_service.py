@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.api.task_responses import (
     attach_task_worker_snapshot,
@@ -16,6 +17,12 @@ from app.api.task_responses import (
     serialize_task,
 )
 from app.api.task_schemas import UpdateTaskRequest
+from app.config import get_effective_settings
+from app.core.harness_registry import HarnessRegistryError
+from app.core.model_endpoints import (
+    ensure_harness_protocol_compatibility,
+    normalize_endpoint,
+)
 from app.core.skills import (
     SkillValidationError,
     delete_unreferenced_skill_versions,
@@ -24,9 +31,26 @@ from app.core.skills import (
     validate_runtime_supports_skills,
 )
 from app.core.task_prompt import TaskPromptValidationError
-from app.core.worker_profiles import WorkerProfileValidationError
+from app.core.worker_profiles import (
+    WorkerProfileValidationError,
+    replace_task_worker_snapshot,
+)
+from app.core.worker_runtime_readiness import (
+    readiness_for_profile,
+    runtime_unavailable_http_detail,
+)
+from app.core.worker_shared_configuration import (
+    load_shared_configuration,
+    snapshot_effective_configuration_digest,
+)
 from app.dependencies.project_access import ProjectAccessScope
-from app.models import Issue, TaskStatus, TaskWorkerProfileSnapshot, User
+from app.models import (
+    Issue,
+    TaskStatus,
+    TaskWorkerProfileSnapshot,
+    User,
+    WorkerProfile,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +115,13 @@ async def update_task_record(
             raise HTTPException(status_code=404, detail="Issue not found")
 
     if "provider_id" in updated_fields:
+        if snapshot is None:
+            snapshot = await db.get(TaskWorkerProfileSnapshot, task.id)
+        if snapshot is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Task has no worker profile snapshot",
+            )
         try:
             provider = await services.resolve_provider_for_issue(
                 db,
@@ -101,6 +132,144 @@ async def update_task_record(
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         task.provider_id = provider.id
         task.provider_runtime_snapshot = None
+        # Keep the frozen snapshot consistent with the provider that will actually
+        # execute: re-freeze the secret-free endpoint and credential ref, and
+        # reject a provider whose wire protocol cannot talk to the task's frozen
+        # harness instead of failing at runtime.
+        endpoint = normalize_endpoint(provider)
+        harness_key = getattr(snapshot, "harness_key", None) or "claude"
+        try:
+            ensure_harness_protocol_compatibility(harness_key, endpoint)
+        except (HarnessRegistryError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+        snapshot.model_endpoint_snapshot = endpoint.as_snapshot()
+        snapshot.credential_ref = endpoint.credential_ref
+
+    if "worker_profile_id" in updated_fields:
+        # §12.3: an explicit worker switch on a not-yet-executed Task re-resolves
+        # the current shared configuration, re-checks runtime readiness, and
+        # replaces the frozen snapshot. Prompt-only edits never reach this path,
+        # so they never refresh the snapshot.
+        if issue is None:
+            issue = await db.get(Issue, task.issue_id)
+        if issue is None:
+            raise HTTPException(status_code=404, detail="Issue not found")
+        if snapshot is None:
+            snapshot = await db.get(TaskWorkerProfileSnapshot, task.id)
+        if snapshot is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Task has no worker profile snapshot",
+            )
+        new_profile = await db.get(
+            WorkerProfile,
+            request.worker_profile_id,
+            options=[
+                selectinload(WorkerProfile.environment_variables),
+                selectinload(WorkerProfile.default_skills),
+            ],
+        )
+        if new_profile is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Worker profile not found",
+            )
+        # get_task_with_access_check loads task.worker_profile without its
+        # environment_variables, so this profile may already sit in the session
+        # identity map with that collection unloaded — and db.get() with loader
+        # options does not re-apply them to an identity-mapped object. Force-load
+        # the collections the switch touches below so a later lazy access cannot
+        # raise MissingGreenlet (and silently bypass the readiness gate).
+        await db.refresh(
+            new_profile,
+            attribute_names=["environment_variables", "default_skills"],
+        )
+        if not new_profile.enabled:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"Worker profile '{new_profile.name}' is disabled",
+            )
+        # Load the shared baseline once under lock and hand the same context to
+        # both the readiness gate and the frozen snapshot so a concurrent shared
+        # PATCH cannot interleave between the two reads (§11.2).
+        shared = await load_shared_configuration(db, for_update=True)
+        readiness = await readiness_for_profile(
+            db,
+            new_profile,
+            get_effective_settings(),
+            shared=shared,
+        )
+        if readiness.is_unavailable:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=runtime_unavailable_http_detail(readiness),
+            )
+        old_skill_ids = [
+            reference.skill_id
+            for reference in (getattr(snapshot, "skill_references", None) or [])
+            if isinstance(getattr(reference, "skill_id", None), int)
+        ]
+        old_selection_source = getattr(snapshot, "skill_selection_source", None)
+        try:
+            provider = await services.resolve_provider_for_issue(
+                db, issue, task.provider_id
+            )
+        except WorkerProfileValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+        harness_key = getattr(new_profile, "default_harness_key", None) or "claude"
+        endpoint = normalize_endpoint(provider)
+        try:
+            ensure_harness_protocol_compatibility(harness_key, endpoint)
+        except (HarnessRegistryError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+        task.provider_id = provider.id
+        task.provider_runtime_snapshot = None
+        snapshot = await replace_task_worker_snapshot(
+            db,
+            task,
+            new_profile,
+            harness_key=harness_key,
+            endpoint=endpoint,
+            shared_configuration=shared,
+        )
+        # Preserve the task's skill selection across the switch: a task-sourced
+        # selection carries its skill ids over (re-validated against the new
+        # runtime), while a profile-sourced selection falls back to the new
+        # Profile defaults.
+        if old_selection_source == "task" and old_skill_ids:
+            requested_skill_ids = old_skill_ids
+            selection_source = "task"
+        else:
+            requested_skill_ids = [
+                skill.id
+                for skill in (getattr(new_profile, "default_skills", None) or [])
+                if bool(getattr(skill, "enabled", False))
+            ]
+            selection_source = "profile"
+        try:
+            selected_skills = await load_enabled_skill_snapshots(
+                db, requested_skill_ids
+            )
+            validate_runtime_supports_skills(snapshot, selected_skills)
+        except SkillValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+        replace_task_skill_references(snapshot, selected_skills)
+        snapshot.skill_selection_source = selection_source
+        snapshot.effective_configuration_digest = snapshot_effective_configuration_digest(
+            snapshot
+        )
 
     if "require_changes" in updated_fields:
         task.require_changes = request.require_changes
@@ -143,6 +312,9 @@ async def update_task_record(
             ) from exc
         replace_task_skill_references(snapshot, selected_skills)
         snapshot.skill_selection_source = selection_source
+        snapshot.effective_configuration_digest = snapshot_effective_configuration_digest(
+            snapshot
+        )
 
     if task.task_mode == "plan":
         task.require_changes = False
@@ -166,6 +338,7 @@ async def update_task_record(
             "task_mode",
             "require_changes",
             "provider_id",
+            "worker_profile_id",
         }
     )
     if render_context_changed:

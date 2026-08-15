@@ -553,8 +553,8 @@ describe('Analytics', () => {
 
     const options = wrapper.vm.initiatorOptions as any[]
     expect(options).toHaveLength(2)
-    expect(options[0]).toEqual({ label: 'alice (20)', value: 'alice' })
-    expect(options[1]).toEqual({ label: 'bob (22)', value: 'bob' })
+    expect(options[0]).toEqual({ label: 'alice', value: 'alice' })
+    expect(options[1]).toEqual({ label: 'bob', value: 'bob' })
   })
 
   it('refresh button triggers fetchAnalytics', async () => {

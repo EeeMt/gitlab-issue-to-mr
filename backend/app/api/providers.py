@@ -4,7 +4,7 @@ import logging
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +12,13 @@ from app.core.config_crypto import (
     ConfigEncryptionError,
     decrypt_config_secret,
     encrypt_config_secret,
+)
+from app.core.harness_registry import compatible_harness_keys
+from app.core.model_credentials import (
+    CredentialError,
+    create_model_credential,
+    get_credential,
+    soft_retire_credential,
 )
 from app.database import get_db
 from app.dependencies.auth import require_admin_user
@@ -21,6 +28,35 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,99}$")
+
+# Wire-protocol / provider-kind allowlist. Claude consumes anthropic_messages;
+# Codex consumes openai_responses. Chat Completions is not silently converted.
+VALID_PROVIDER_KINDS = frozenset({"anthropic_compatible", "openai_compatible"})
+VALID_WIRE_PROTOCOLS = frozenset(
+    {"anthropic_messages", "openai_responses", "openai_chat_completions"}
+)
+KIND_PROTOCOLS: dict[str, frozenset[str]] = {
+    "anthropic_compatible": frozenset({"anthropic_messages"}),
+    "openai_compatible": frozenset(
+        {"openai_responses", "openai_chat_completions"}
+    ),
+}
+
+
+def _validate_kind_protocol(
+    provider_kind: str, wire_protocol: str, provider_options: dict
+) -> None:
+    if provider_kind not in VALID_PROVIDER_KINDS:
+        raise ValueError(f"unknown provider_kind: {provider_kind!r}")
+    if wire_protocol not in VALID_WIRE_PROTOCOLS:
+        raise ValueError(f"unknown wire_protocol: {wire_protocol!r}")
+    if wire_protocol not in KIND_PROTOCOLS[provider_kind]:
+        raise ValueError(
+            f"provider_kind {provider_kind!r} cannot consume wire_protocol "
+            f"{wire_protocol!r}"
+        )
+    if not isinstance(provider_options, dict):
+        raise ValueError("provider_options must be an object")
 
 
 # ── Schemas ────────────────────────────────────────────────────────────────────
@@ -33,6 +69,12 @@ class ProviderResponse(BaseModel):
     model: str
     max_turns: int
     system_prompt: str | None
+    provider_kind: str
+    wire_protocol: str
+    provider_driver: str | None
+    provider_options: dict
+    credential_ref: str | None
+    credential_status: str | None
     is_default: bool
     is_disabled: bool
     created_at: str
@@ -46,7 +88,18 @@ class CreateProviderRequest(BaseModel):
     model: str
     max_turns: int = 20
     system_prompt: str | None = None
+    provider_kind: str = "anthropic_compatible"
+    wire_protocol: str = "anthropic_messages"
+    provider_driver: str | None = None
+    provider_options: dict = {}
     is_disabled: bool = False
+
+    @model_validator(mode="after")
+    def validate_kind_protocol(self) -> "CreateProviderRequest":
+        _validate_kind_protocol(
+            self.provider_kind, self.wire_protocol, self.provider_options
+        )
+        return self
 
     @field_validator("name")
     @classmethod
@@ -96,7 +149,23 @@ class UpdateProviderRequest(BaseModel):
     max_turns: int | None = None
     system_prompt: str | None = None
     clear_system_prompt: bool = False
+    provider_kind: str | None = None
+    wire_protocol: str | None = None
+    provider_driver: str | None = None
+    provider_options: dict | None = None
     is_disabled: bool | None = None
+
+    @model_validator(mode="after")
+    def validate_kind_protocol(self) -> "UpdateProviderRequest":
+        if self.provider_kind is not None and self.wire_protocol is not None:
+            _validate_kind_protocol(
+                self.provider_kind, self.wire_protocol, self.provider_options or {}
+            )
+        elif self.provider_kind is not None and self.provider_kind not in VALID_PROVIDER_KINDS:
+            raise ValueError(f"unknown provider_kind: {self.provider_kind!r}")
+        elif self.wire_protocol is not None and self.wire_protocol not in VALID_WIRE_PROTOCOLS:
+            raise ValueError(f"unknown wire_protocol: {self.wire_protocol!r}")
+        return self
 
     @field_validator("name")
     @classmethod
@@ -139,15 +208,38 @@ class UpdateProviderRequest(BaseModel):
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def _serialize_provider(provider: AIProvider) -> dict:
+async def _resolve_credential_status(
+    db: AsyncSession, credential_ref: str | None
+) -> str | None:
+    if not credential_ref:
+        return None
+    credential = await get_credential(db, credential_ref)
+    return credential.status if credential else None
+
+
+def _serialize_provider(
+    provider: AIProvider, credential_status: str | None = None
+) -> dict:
     return {
         "id": provider.id,
         "name": provider.name,
         "base_url": provider.base_url,
-        "api_key_configured": provider.api_key is not None and provider.api_key != "",
+        "api_key_configured": (
+            getattr(provider, "credential_ref", None) is not None
+            or (provider.api_key is not None and provider.api_key != "")
+        ),
         "model": provider.model,
         "max_turns": provider.max_turns,
         "system_prompt": provider.system_prompt,
+        "provider_kind": getattr(provider, "provider_kind", "anthropic_compatible"),
+        "wire_protocol": getattr(provider, "wire_protocol", "anthropic_messages"),
+        "compatible_harnesses": compatible_harness_keys(
+            getattr(provider, "wire_protocol", "anthropic_messages")
+        ),
+        "provider_driver": getattr(provider, "provider_driver", None),
+        "provider_options": getattr(provider, "provider_options", None) or {},
+        "credential_ref": getattr(provider, "credential_ref", None),
+        "credential_status": credential_status,
         "is_default": provider.is_default,
         "is_disabled": provider.is_disabled,
         "created_at": provider.created_at.isoformat(),
@@ -175,7 +267,13 @@ async def list_providers(db: AsyncSession = Depends(get_db)):
         select(AIProvider).order_by(AIProvider.is_default.desc(), AIProvider.id)
     )
     providers = result.scalars().all()
-    return [_serialize_provider(p) for p in providers]
+    serialized = []
+    for provider in providers:
+        credential_status = await _resolve_credential_status(
+            db, getattr(provider, "credential_ref", None)
+        )
+        serialized.append(_serialize_provider(provider, credential_status))
+    return serialized
 
 
 @router.get("/providers/{provider_id}")
@@ -184,7 +282,10 @@ async def get_provider(provider_id: int, db: AsyncSession = Depends(get_db)):
     provider = await db.get(AIProvider, provider_id)
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
-    return _serialize_provider(provider)
+    credential_status = await _resolve_credential_status(
+        db, getattr(provider, "credential_ref", None)
+    )
+    return _serialize_provider(provider, credential_status)
 
 
 @router.post("/providers", status_code=status.HTTP_201_CREATED)
@@ -213,11 +314,20 @@ async def create_provider(
             detail="Default provider cannot be disabled",
         )
 
-    # Encrypt API key if provided
+    # Create an independent ModelCredential for the key; provider.api_key stays
+    # as a legacy transition value until the worker resolves via credential_ref.
     encrypted_key = None
+    credential_ref = None
     if request.api_key:
         try:
             encrypted_key = encrypt_config_secret(request.api_key)
+            credential = await create_model_credential(
+                db,
+                name=f"{request.name} credential",
+                secret=request.api_key,
+                provider_kind=request.provider_kind,
+            )
+            credential_ref = credential.ref
         except ConfigEncryptionError as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -231,6 +341,11 @@ async def create_provider(
         model=request.model,
         max_turns=request.max_turns,
         system_prompt=request.system_prompt,
+        provider_kind=request.provider_kind,
+        wire_protocol=request.wire_protocol,
+        provider_driver=request.provider_driver,
+        provider_options=request.provider_options,
+        credential_ref=credential_ref,
         is_default=is_first,
         is_disabled=request.is_disabled,
     )
@@ -239,7 +354,8 @@ async def create_provider(
     await db.refresh(provider)
 
     logger.info(f"Created AI provider '{provider.name}' (id={provider.id}, default={provider.is_default})")
-    return _serialize_provider(provider)
+    credential_status = await _resolve_credential_status(db, credential_ref)
+    return _serialize_provider(provider, credential_status)
 
 
 @router.patch("/providers/{provider_id}")
@@ -284,12 +400,40 @@ async def update_provider(
     if request.is_disabled is not None:
         provider.is_disabled = request.is_disabled
 
-    # Handle API key update/clear
+    if request.provider_kind is not None:
+        provider.provider_kind = request.provider_kind
+    if request.wire_protocol is not None:
+        provider.wire_protocol = request.wire_protocol
+    if request.provider_driver is not None:
+        provider.provider_driver = request.provider_driver
+    if request.provider_options is not None:
+        provider.provider_options = request.provider_options
+
+    # Handle API key update/clear with independent credential rotation.
+    old_ref = getattr(provider, "credential_ref", None)
     if request.clear_api_key:
+        if old_ref:
+            try:
+                await soft_retire_credential(db, old_ref)
+            except CredentialError:
+                pass
         provider.api_key = None
+        provider.credential_ref = None
     elif request.api_key is not None:
         try:
             provider.api_key = encrypt_config_secret(request.api_key)
+            credential = await create_model_credential(
+                db,
+                name=f"{provider.name} credential",
+                secret=request.api_key,
+                provider_kind=request.provider_kind or provider.provider_kind,
+            )
+            provider.credential_ref = credential.ref
+            if old_ref and old_ref != credential.ref:
+                try:
+                    await soft_retire_credential(db, old_ref)
+                except CredentialError:
+                    pass
         except ConfigEncryptionError as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -306,7 +450,10 @@ async def update_provider(
     await db.refresh(provider)
 
     logger.info(f"Updated AI provider '{provider.name}' (id={provider.id})")
-    return _serialize_provider(provider)
+    credential_status = await _resolve_credential_status(
+        db, getattr(provider, "credential_ref", None)
+    )
+    return _serialize_provider(provider, credential_status)
 
 
 @router.delete("/providers/{provider_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -358,6 +505,16 @@ async def delete_provider(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Cannot delete default provider — no enabled provider remains",
             )
+
+    # Deleting a Provider removes only the Endpoint config. The independent
+    # credential is soft-retired (never hard-deleted) so existing retryable
+    # Task snapshots can still resolve it.
+    credential_ref = getattr(provider, "credential_ref", None)
+    if credential_ref:
+        try:
+            await soft_retire_credential(db, credential_ref)
+        except CredentialError:
+            pass
 
     await db.delete(provider)
 

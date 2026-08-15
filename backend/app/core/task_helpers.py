@@ -86,6 +86,25 @@ def _serialize_task(
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,
         "is_manually_overridden": task.is_manually_overridden,
         "override_reason": task.override_reason,
+        "issue_sequence": task.issue_sequence if isinstance(task.issue_sequence, int) else None,
+        "queue_position": None,
+        "blocked_by_task_id": None,
+        "waiting_reason": None,
+        "lock_owner_task_id": None,
+        "waiting_since": None,
+        "schedule_constraints": None,
+        "projected_lineage": (
+            {
+                "harness_key": task.projected_harness_key,
+                "session_namespace": task.projected_session_namespace,
+                "generation": task.projected_lineage_generation,
+                "reset_task_id": task.projected_reset_task_id,
+            }
+            if isinstance(task.projected_harness_key, str)
+            and isinstance(task.projected_session_namespace, str)
+            and isinstance(task.projected_lineage_generation, int)
+            else None
+        ),
     }
     if include_prompt_details:
         data.update(

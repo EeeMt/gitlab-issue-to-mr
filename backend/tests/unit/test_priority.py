@@ -97,6 +97,15 @@ def create_mock_db(task, issue=None):
         default_plan_run_instruction_template="Plan {{user_prompt}}",
         ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
     )
+    # Ordered-turn projected lineage defaults (the scheduler repairs these before
+    # claim; the worker fails closed on a missing projection).
+    if getattr(task, "projected_harness_key", None) is None:
+        task.projected_harness_key = "claude"
+        task.projected_session_namespace = "claude-0000000000000000"
+        task.projected_lineage_generation = 0
+        task.projected_reset_task_id = None
+        task.lineage_projection_reason = "initial"
+        task.input_lineage_reason = None
     if getattr(task, "provider_id", None) is None:
         task.provider_id = 1
     task.provider = AIProvider(
@@ -118,8 +127,12 @@ def create_mock_db(task, issue=None):
             provider = getattr(task, 'provider', None)
             mock_result.scalar_one_or_none.return_value = provider
             mock_result.scalars.return_value.all.return_value = [provider] if provider else []
+        elif 'FROM issue_session_lineages' in statement_str:
+            mock_result.scalar_one_or_none.return_value = None
+            mock_result.scalars.return_value.all.return_value = []
         else:
             mock_result.scalar_one_or_none.return_value = task
+            mock_result.scalars.return_value.all.return_value = [task] if task else []
         return mock_result
 
     mock_db.execute = AsyncMock(side_effect=_mock_execute)

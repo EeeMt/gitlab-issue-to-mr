@@ -1,0 +1,18 @@
+# Fixed host binaries required by Worker Profiles (e.g. the Codex CLI).
+#
+# Codex CLI is a fixed host binary, NOT part of the runtime image. Ship it with
+# the bundle (e.g. under `kits/` or `images/`) and mount it read-only at the
+# path declared by the Worker Profile `harness_runtimes.codex`. Do not rely on
+# online install or a mutable `latest` tag.
+#
+# Copy this file to `worker-binaries.txt` on the offline host and fill in real
+# values before running `verify-worker-runtime.sh`.
+#
+# Format (pipe-separated):
+#   harness_key | host_path | container_path | version | sha256
+#
+# `host_path` is the absolute path on the Docker host that will be mounted into
+# the worker container at `container_path` (read-only). `sha256` is the
+# SHA-256 of the binary file on the host, re-verified before each run by the
+# adapter (CODIFY_CLI_BINARY_DIGEST).
+codex | /opt/codify/codex/bin/codex | /usr/local/bin/codex | 0.146.0 | <sha256-of-codex-binary>

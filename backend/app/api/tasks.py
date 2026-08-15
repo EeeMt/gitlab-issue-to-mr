@@ -47,9 +47,14 @@ from app.api.task_operations import (
     get_task_with_access_check,
     notify_task_retried,
     validate_scheduled_datetime_in_future,
+    validate_task_status_for_reschedule,
     validate_task_status_for_retry,
 )
 from app.api.task_queries import TaskListFilters, build_task_list_query
+from app.api.task_responses import (
+    apply_queue_context,
+    compute_task_queue_contexts,
+)
 from app.api.task_responses import (
     serialize_task as _serialize_task,
 )
@@ -70,8 +75,10 @@ from app.api.task_stats_routes import (
 )
 from app.api.task_update_service import TaskUpdateServices, update_task_record
 from app.config import get_effective_settings
+from app.core.docker_client import resolve_docker_connection
 from app.core.projects import build_project_lookup, get_project_metadata
 from app.core.task_creation import prepare_task_runtime_snapshot
+from app.core.task_failure_summary import load_task_failure_summary
 from app.core.task_prompt import (
     NORMAL_PLACEHOLDER_NAMES,
     PLACEHOLDER_NAMES,
@@ -84,6 +91,7 @@ from app.core.usage_limits import (
     get_usage_quota_service,
 )
 from app.core.utcnow import utcnow
+from app.core.worker_kit import MOUNTED_KIT_MODE
 from app.core.worker_profiles import (
     clone_task_worker_snapshot,
     replace_task_worker_snapshot,
@@ -92,13 +100,23 @@ from app.core.worker_profiles import (
     select_snapshot_run_instruction_template,
 )
 from app.core.worker_runtime_bundle import bind_runtime_bundle
+from app.core.worker_runtime_readiness import (
+    RuntimeProbeTransientError,
+    fingerprint_from_snapshot,
+    run_deterministic_kit_probe,
+    serialize_runtime_readiness,
+)
 from app.core.worker_workspace import configured_workspace_root
 from app.core.worker_workspace_remote import (
     inspect_issue_workspace,
     remove_issue_workspace_remote,
 )
 from app.database import get_db
-from app.dependencies.auth import get_optional_current_user, require_page_access
+from app.dependencies.auth import (
+    get_optional_current_user,
+    require_admin_user,
+    require_page_access,
+)
 from app.dependencies.project_access import (
     ProjectAccessScope,
     require_project_access,
@@ -178,6 +196,7 @@ async def list_tasks(
     page_size: int = 20,
     db: AsyncSession = Depends(get_db),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+    _current_user: User | None = Depends(get_optional_current_user),
 ):
     """List tasks with optional filtering, sorting, and pagination.
 
@@ -228,11 +247,16 @@ async def list_tasks(
         result = await db.execute(query.limit(page_size).offset(offset))
         tasks = result.scalars().all()
 
+        items = [
+            _serialize_task(task, project_lookup.get(task.project_id), settings)
+            for task in tasks
+        ]
+        queue_contexts = await compute_task_queue_contexts(db, list(tasks))
+        for task, item in zip(tasks, items):
+            apply_queue_context(item, task.id, queue_contexts, current_user=_current_user)
+
         return {
-            "items": [
-                _serialize_task(task, project_lookup.get(task.project_id), settings)
-                for task in tasks
-            ],
+            "items": items,
             "total": total,
             "page": page,
             "page_size": page_size,
@@ -242,7 +266,12 @@ async def list_tasks(
     result = await db.execute(query.limit(100))
     tasks = result.scalars().all()
 
-    return [_serialize_task(task, project_lookup.get(task.project_id), settings) for task in tasks]
+    items = [_serialize_task(task, project_lookup.get(task.project_id), settings) for task in tasks]
+    queue_contexts = await compute_task_queue_contexts(db, list(tasks))
+    for task, item in zip(tasks, items):
+        apply_queue_context(item, task.id, queue_contexts, current_user=_current_user)
+
+    return items
 
 
 @router.get("/tasks/filter-options")
@@ -343,7 +372,17 @@ async def list_scheduled_tasks(
     project_lookup = await build_project_lookup(is_unrestricted=True)
     settings = get_effective_settings()
 
-    return [_serialize_task(task, project_lookup.get(task.project_id), settings) for task in tasks]
+    serialized = [
+        _serialize_task(task, project_lookup.get(task.project_id), settings)
+        for task in tasks
+    ]
+    if tasks:
+        # Attach batch per-Issue queue context so Schedule/Heatmap views can show
+        # non-head tasks that wait behind a predecessor (§7).
+        queue_contexts = await compute_task_queue_contexts(db, tasks)
+        for task, data in zip(tasks, serialized):
+            apply_queue_context(data, task.id, queue_contexts, current_user=_current_user)
+    return serialized
 
 
 @router.get("/tasks/slot-capacity")
@@ -432,11 +471,73 @@ async def preview_run_instruction_template(
     }
 
 
+@router.get("/tasks/schedule-constraints")
+async def get_schedule_constraints(
+    issue_id: int | None = Query(default=None),
+    task_id: int | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
+    """Return the valid ``scheduled_at`` window for an append or a reschedule.
+
+    ``issue_id`` returns the tail-create floor (no ceiling) for new Tasks on an
+    Issue; ``task_id`` returns the bidirectional window for rescheduling that
+    Task. Exactly one of the two is required. The window returned here is a
+    convenience projection — the submitting transaction re-validates under the
+    Issue row lock and remains the source of truth.
+
+    Registered before ``/tasks/{task_id}`` so the static path is never captured
+    as a Task ID.
+    """
+    from app.core.issue_task_order import IssueOrderIntegrityError, compute_schedule_window
+
+    if task_id is not None and issue_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide exactly one of issue_id or task_id, not both",
+        )
+    if task_id is not None:
+        task = await get_task_with_access_check(task_id, db, access_scope, current_user)
+        validate_task_status_for_reschedule(task)
+        try:
+            return await compute_schedule_window(
+                db,
+                issue_id=task.issue_id,
+                exclude_task_id=task.id,
+            )
+        except IssueOrderIntegrityError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=exc.detail,
+            ) from exc
+    if issue_id is not None:
+        issue = await db.get(Issue, issue_id)
+        if issue is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Issue not found",
+            )
+        require_project_access(issue.project_id, access_scope)
+        try:
+            return await compute_schedule_window(db, issue_id=issue.id)
+        except IssueOrderIntegrityError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=exc.detail,
+            ) from exc
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Either issue_id or task_id is required",
+    )
+
+
 @router.get("/tasks/{task_id}")
 async def get_task(
     task_id: int,
     db: AsyncSession = Depends(get_db),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+    _current_user: User | None = Depends(get_optional_current_user),
 ):
     """Get task by ID.
 
@@ -466,6 +567,20 @@ async def get_task(
                 TaskWorkerProfileSnapshot.worker_kit_version,
                 TaskWorkerProfileSnapshot.skill_selection_source,
                 TaskWorkerProfileSnapshot.created_at,
+                TaskWorkerProfileSnapshot.harness_key,
+                TaskWorkerProfileSnapshot.harness_adapter_version,
+                TaskWorkerProfileSnapshot.harness_adapter_digest,
+                TaskWorkerProfileSnapshot.harness_config_snapshot,
+                TaskWorkerProfileSnapshot.model_endpoint_snapshot,
+                TaskWorkerProfileSnapshot.credential_ref,
+                TaskWorkerProfileSnapshot.cli_source,
+                TaskWorkerProfileSnapshot.cli_executable_path,
+                TaskWorkerProfileSnapshot.cli_version,
+                TaskWorkerProfileSnapshot.cli_binary_digest,
+                TaskWorkerProfileSnapshot.image_digest,
+                TaskWorkerProfileSnapshot.runtime_contract_version,
+                TaskWorkerProfileSnapshot.orchestration_version,
+                TaskWorkerProfileSnapshot.runtime_bundle_digest,
             ),
             selectinload(Task.worker_profile_snapshot).selectinload(
                 TaskWorkerProfileSnapshot.skill_references
@@ -488,6 +603,18 @@ async def get_task(
     metadata = await get_project_metadata(task.project_id)
     t3 = time.time()
     result_data = _serialize_task(task, metadata, include_prompt_details=True)
+    queue_contexts = await compute_task_queue_contexts(db, [task])
+    apply_queue_context(result_data, task.id, queue_contexts, current_user=_current_user)
+    if task.status in (TaskStatus.PENDING, TaskStatus.QUEUED):
+        from app.core.issue_task_order import compute_schedule_window
+
+        result_data["schedule_constraints"] = await compute_schedule_window(
+            db,
+            issue_id=task.issue_id,
+            exclude_task_id=task.id,
+        )
+    failure_summary = await load_task_failure_summary(db, task.id)
+    result_data.update(failure_summary)
     t4 = time.time()
 
     total = t4 - t0
@@ -545,6 +672,73 @@ async def retry_task(
         access_scope=access_scope,
         services=_task_creation_services(),
     )
+
+
+@router.post("/tasks/{task_id}/verify-worker-runtime")
+async def verify_task_worker_runtime(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    _admin=Depends(require_admin_user),
+):
+    """Verify a frozen task snapshot's Worker Kit through the readiness service (§15.2).
+
+    Runs the strict, side-effect-free Kit probe against the snapshot's frozen
+    Docker target and returns the post-check readiness. Does not touch the
+    task's lifecycle state; a later retry/schedule re-reads the readiness
+    record.
+    """
+    task = await db.get(
+        Task,
+        task_id,
+        options=[selectinload(Task.worker_profile_snapshot)],
+    )
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found",
+        )
+    snapshot = task.worker_profile_snapshot
+    if snapshot is None or snapshot.runtime_mode != MOUNTED_KIT_MODE:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Task worker runtime verification requires mounted_kit mode",
+        )
+    settings = get_effective_settings()
+    connection = resolve_docker_connection(
+        settings,
+        docker_host=snapshot.docker_host,
+        docker_tls_ca=snapshot.docker_tls_ca,
+        docker_tls_cert=snapshot.docker_tls_cert,
+        docker_tls_key=snapshot.docker_tls_key,
+    )
+    fingerprint = fingerprint_from_snapshot(snapshot, settings)
+    try:
+        outcome = await run_deterministic_kit_probe(
+            db,
+            connection=connection,
+            image=snapshot.image,
+            runtime_mode=snapshot.runtime_mode,
+            worker_kit_version=snapshot.worker_kit_version or "",
+            worker_kit_path=snapshot.worker_kit_path or "",
+            ttl_seconds=settings.worker_runtime_readiness_ttl_seconds,
+        )
+    except RuntimeProbeTransientError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "worker_runtime_verification_transient_failure",
+                "message": f"Worker Kit probe could not reach a conclusion: {exc}",
+            },
+        ) from exc
+    return {
+        "ok": True,
+        "task_id": task_id,
+        "runtime_locator_fingerprint": fingerprint,
+        "runtime_mode": snapshot.runtime_mode,
+        "worker_kit_version": snapshot.worker_kit_version,
+        "docker_host": connection.host,
+        "runtime_readiness": serialize_runtime_readiness(outcome.readiness),
+    }
 
 
 @router.post("/tasks")

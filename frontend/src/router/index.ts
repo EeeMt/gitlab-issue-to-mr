@@ -108,11 +108,60 @@ const router = createRouter({
       meta: { requiresAuth: true, requiresAdmin: true }
     },
     {
+      path: '/system-statistics',
+      name: 'SystemStatistics',
+      component: () => import('../views/SystemStatistics.vue'),
+      meta: { requiresAuth: true, requiresAdmin: true }
+    },
+    {
       path: '/oidc-diagnostics',
       name: 'OidcDiagnostics',
       redirect: '/configuration?tab=auth'
     }
   ]
+})
+
+const CHUNK_RELOAD_KEY = 'codify:chunk-reload-at'
+const CHUNK_RELOAD_COOLDOWN_MS = 30_000
+let chunkReloadAttemptedInMemory = false
+
+export function isDynamicImportFailure(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  return (
+    error.message.includes('Failed to fetch dynamically imported module') ||
+    error.message.includes('Importing a module script failed') ||
+    error.message.includes('Loading chunk') ||
+    (error.name === 'TypeError' && /\/assets\/[^"']+\.(?:js|css)/.test(error.message))
+  )
+}
+
+// After a deploy the old hashed lazy chunks disappear, so a page that is still
+// open references a URL that no longer exists. Reload once to pick up the new
+// index.html instead of leaving the router stuck in a failed navigation.
+router.onError((error, to) => {
+  if (!isDynamicImportFailure(error)) {
+    console.error('Navigation failed:', error)
+    return
+  }
+
+  let canReload = false
+  try {
+    const lastReloadAt = Number(sessionStorage.getItem(CHUNK_RELOAD_KEY) ?? 0)
+    canReload = Date.now() - lastReloadAt >= CHUNK_RELOAD_COOLDOWN_MS
+    if (canReload) {
+      sessionStorage.setItem(CHUNK_RELOAD_KEY, String(Date.now()))
+    }
+  } catch {
+    canReload = !chunkReloadAttemptedInMemory
+    chunkReloadAttemptedInMemory = true
+  }
+
+  if (!canReload) {
+    console.error('Stale chunk load failed; skipping auto-reload within cooldown:', error)
+    return
+  }
+
+  window.location.assign(to.fullPath.startsWith('/') ? to.fullPath : '/')
 })
 
 router.beforeEach(async (to) => {

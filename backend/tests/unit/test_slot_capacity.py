@@ -66,6 +66,7 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
         worker_profile_id=1,
         skill_references=[],
         skill_selection_source="profile",
+        runtime_locator_fingerprint=None,
     )
     task.provider_runtime_snapshot = {}
     task.rendered_prompt = "Rendered prompt"
@@ -76,7 +77,29 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     task.updated_at = now
     task.started_at = None
     task.completed_at = None
+    # Issue input-stream ordering / projected lineage (nullable compat fields).
+    task.issue_sequence = None
+    task.projected_harness_key = None
+    task.projected_session_namespace = None
+    task.projected_lineage_generation = None
+    task.projected_reset_task_id = None
+    task.lineage_projection_reason = None
+    task.input_lineage_reason = None
     return task
+
+
+def _make_scalars_all_result(rows):
+    """Mock db.execute result whose ``.scalars().all()`` yields ``rows``."""
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = rows
+    return result
+
+
+def _make_rows_all_result(rows):
+    """Mock db.execute result whose ``.all()`` yields ``rows``."""
+    result = MagicMock()
+    result.all.return_value = rows
+    return result
 
 
 def _make_app_client_with_db(mock_db, extra_overrides=None):
@@ -156,6 +179,90 @@ def _mock_task_runtime_dependencies():
         ),
     ):
         yield
+
+
+# Fixed projected lineage used by retry tests: the M1 four-tuple check compares
+# the retry source's projection against the tail, so both must agree here.
+_RETRY_TAIL_PROJECTION = {
+    "harness_key": "claude",
+    "session_namespace": "claude-ns",
+    "generation": 0,
+    "reset_task_id": None,
+}
+
+
+@contextmanager
+def _mock_retry_order_dependencies():
+    """Isolate retry route tests from Issue-ordering domain DB calls.
+
+    The ordering/lineage domain service is covered by its own unit tests; these
+    route tests only verify slot-capacity wiring.
+    """
+    with (
+        patch(
+            "app.api.task_creation_service.ensure_issue_order_integrity_locked",
+            new=AsyncMock(
+                return_value={
+                    "max_sequence": 1,
+                    "tail_projection": _RETRY_TAIL_PROJECTION,
+                    "repaired_sequences": 0,
+                    "repaired_projections": 0,
+                    "blocked": False,
+                }
+            ),
+        ),
+        patch(
+            "app.api.task_creation_service.validate_schedule_time_locked",
+            new=AsyncMock(),
+        ),
+        patch(
+            "app.api.task_creation_service.compute_task_queue_contexts",
+            new=AsyncMock(return_value={}),
+        ),
+    ):
+        yield
+
+
+@contextmanager
+def _mock_reschedule_order_dependencies():
+    """Isolate reschedule route tests from Issue-ordering domain DB calls."""
+    with (
+        patch(
+            "app.core.issue_task_order.validate_schedule_time_locked",
+            new=AsyncMock(),
+        ),
+        patch(
+            "app.core.issue_task_order.compute_schedule_window",
+            new=AsyncMock(
+                return_value={
+                    "has_valid_window": True,
+                    "min_scheduled_at": None,
+                    "min_source_task_id": None,
+                    "max_scheduled_at": None,
+                    "max_source_task_id": None,
+                }
+            ),
+        ),
+        patch(
+            "app.core.issue_task_order.count_active_successors",
+            new=AsyncMock(return_value=0),
+        ),
+        patch(
+            "app.api.task_responses.compute_task_queue_contexts",
+            new=AsyncMock(return_value={}),
+        ),
+    ):
+        yield
+
+
+def _set_projected_lineage(task) -> None:
+    """Pin a retry source Task's projected lineage to the fixed tail tuple."""
+    task.projected_harness_key = "claude"
+    task.projected_session_namespace = "claude-ns"
+    task.projected_lineage_generation = 0
+    task.projected_reset_task_id = None
+    task.lineage_projection_reason = "initial"
+    task.input_lineage_reason = None
 
 
 # ===========================================================================
@@ -552,6 +659,11 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
         mock_db.commit = AsyncMock()
         mock_db.flush = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
+        _no_lineage = MagicMock()
+        _no_lineage.scalar_one_or_none.return_value = None
+        _no_lineage.scalars.return_value.all.return_value = []
+        _no_lineage.all.return_value = []
+        mock_db.execute = AsyncMock(return_value=_no_lineage)
         mock_db.get = AsyncMock(return_value=mock_issue)
 
         client, app = _make_app_client_with_db(mock_db)
@@ -591,6 +703,11 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
         mock_db.commit = AsyncMock()
         mock_db.flush = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
+        _no_lineage = MagicMock()
+        _no_lineage.scalar_one_or_none.return_value = None
+        _no_lineage.scalars.return_value.all.return_value = []
+        _no_lineage.all.return_value = []
+        mock_db.execute = AsyncMock(return_value=_no_lineage)
         mock_db.get = AsyncMock(return_value=mock_issue)
 
         client, app = _make_app_client_with_db(mock_db)
@@ -629,6 +746,11 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
         mock_db.commit = AsyncMock()
         mock_db.flush = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
+        _no_lineage = MagicMock()
+        _no_lineage.scalar_one_or_none.return_value = None
+        _no_lineage.scalars.return_value.all.return_value = []
+        _no_lineage.all.return_value = []
+        mock_db.execute = AsyncMock(return_value=_no_lineage)
         mock_db.get = AsyncMock(return_value=mock_issue)
 
         client, app = _make_app_client_with_db(mock_db)
@@ -663,6 +785,11 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
         mock_db.commit = AsyncMock()
         mock_db.flush = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
+        _no_lineage = MagicMock()
+        _no_lineage.scalar_one_or_none.return_value = None
+        _no_lineage.scalars.return_value.all.return_value = []
+        _no_lineage.all.return_value = []
+        mock_db.execute = AsyncMock(return_value=_no_lineage)
         mock_db.get = AsyncMock(return_value=mock_issue)
 
         client, app = _make_app_client_with_db(mock_db)
@@ -697,15 +824,23 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
 
         task = _make_serializable_task(task_status=TaskStatus.FAILED, task_id=80)
         task.project_id = 1
+        _set_projected_lineage(task)
 
-        # First execute returns the task; second returns None (no existing retry)
+        # First execute returns the task; second returns None (no existing retry);
+        # third returns the Issue under the row lock.
         mock_result_task = MagicMock()
         mock_result_task.scalar_one_or_none.return_value = task
         mock_result_no_retry = MagicMock()
         mock_result_no_retry.scalar_one_or_none.return_value = None
+        mock_issue = MagicMock()
+        mock_issue.id = 1
+        mock_issue.project_id = 1
+        mock_issue.status = "open"
+        mock_result_issue = MagicMock()
+        mock_result_issue.scalar_one_or_none.return_value = mock_issue
 
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry])
+        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue])
         mock_db.commit = AsyncMock()
         mock_db.flush = AsyncMock()
         mock_db.refresh = AsyncMock()
@@ -715,9 +850,10 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
         future_dt = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
 
         with patch("app.core.task_helpers._require_task_operator", return_value=None):
-            response = client.post("/api/tasks/80/retry", json={
-                "scheduled_datetime": future_dt
-            })
+            with _mock_retry_order_dependencies():
+                response = client.post("/api/tasks/80/retry", json={
+                    "scheduled_datetime": future_dt
+                })
 
         app.dependency_overrides.clear()
 
@@ -733,9 +869,10 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
 
         task = _make_serializable_task(task_status=TaskStatus.FAILED, task_id=81)
         task.project_id = 1
+        _set_projected_lineage(task)
 
         # First execute returns the task; second returns None (no existing retry);
-        # third fetches the Issue for serialization
+        # third fetches the Issue under the row lock.
         mock_result_task = MagicMock()
         mock_result_task.scalar_one_or_none.return_value = task
         mock_result_no_retry = MagicMock()
@@ -743,6 +880,7 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
         mock_issue = MagicMock()
         mock_issue.id = 1
         mock_issue.project_id = 1
+        mock_issue.status = "open"
         mock_issue.description = "Fix the login bug"
         mock_result_issue = MagicMock()
         mock_result_issue.scalar_one_or_none.return_value = mock_issue
@@ -757,7 +895,13 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
                 obj.updated_at = now
 
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue])
+        mock_db.execute = AsyncMock(
+            side_effect=[
+                mock_result_task,
+                mock_result_no_retry,
+                mock_result_issue,
+            ]
+        )
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.flush = AsyncMock()
@@ -771,9 +915,10 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
         with patch("app.api.tasks.notify_task_retried", new=AsyncMock()):
             with patch("app.core.task_helpers._require_task_operator", return_value=None):
                 with _mock_task_runtime_dependencies():
-                    response = client.post("/api/tasks/81/retry", json={
-                        "scheduled_datetime": future_dt
-                    })
+                    with _mock_retry_order_dependencies():
+                        response = client.post("/api/tasks/81/retry", json={
+                            "scheduled_datetime": future_dt
+                        })
 
         app.dependency_overrides.clear()
 
@@ -784,9 +929,10 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
         from app.models import Task as TaskModel
         task = _make_serializable_task(task_status=TaskStatus.FAILED, task_id=82)
         task.project_id = 1
+        _set_projected_lineage(task)
 
         # First execute returns the task; second returns None (no existing retry);
-        # third fetches the Issue for serialization
+        # third fetches the Issue under the row lock.
         mock_result_task = MagicMock()
         mock_result_task.scalar_one_or_none.return_value = task
         mock_result_no_retry = MagicMock()
@@ -794,6 +940,7 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
         mock_issue = MagicMock()
         mock_issue.id = 1
         mock_issue.project_id = 1
+        mock_issue.status = "open"
         mock_issue.description = "Fix the login bug"
         mock_result_issue = MagicMock()
         mock_result_issue.scalar_one_or_none.return_value = mock_issue
@@ -808,7 +955,13 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
                 obj.updated_at = now
 
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue])
+        mock_db.execute = AsyncMock(
+            side_effect=[
+                mock_result_task,
+                mock_result_no_retry,
+                mock_result_issue,
+            ]
+        )
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.flush = AsyncMock()
@@ -821,7 +974,8 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
             with patch("app.api.tasks.notify_task_retried", new=AsyncMock()):
                 with patch("app.core.task_helpers._require_task_operator", return_value=None):
                     with _mock_task_runtime_dependencies():
-                        response = client.post("/api/tasks/82/retry")
+                        with _mock_retry_order_dependencies():
+                            response = client.post("/api/tasks/82/retry")
             mock_check.assert_not_called()
 
         app.dependency_overrides.clear()
@@ -835,15 +989,23 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
 
         task = _make_serializable_task(task_status=TaskStatus.FAILED, task_id=83)
         task.project_id = 1
+        _set_projected_lineage(task)
 
-        # First execute returns the task; second returns None (no existing retry)
+        # First execute returns the task; second returns None (no existing retry);
+        # third returns the Issue under the row lock.
         mock_result_task = MagicMock()
         mock_result_task.scalar_one_or_none.return_value = task
         mock_result_no_retry = MagicMock()
         mock_result_no_retry.scalar_one_or_none.return_value = None
+        mock_issue = MagicMock()
+        mock_issue.id = 1
+        mock_issue.project_id = 1
+        mock_issue.status = "open"
+        mock_result_issue = MagicMock()
+        mock_result_issue.scalar_one_or_none.return_value = mock_issue
 
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry])
+        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue])
         mock_db.commit = AsyncMock()
         mock_db.flush = AsyncMock()
         mock_db.refresh = AsyncMock()
@@ -854,9 +1016,10 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
 
         with patch("app.api.tasks.notify_task_retried", new=AsyncMock()):
             with patch("app.core.task_helpers._require_task_operator", return_value=None):
-                client.post("/api/tasks/83/retry", json={
-                    "scheduled_datetime": future_dt
-                })
+                with _mock_retry_order_dependencies():
+                    client.post("/api/tasks/83/retry", json={
+                        "scheduled_datetime": future_dt
+                    })
 
         app.dependency_overrides.clear()
 
@@ -900,9 +1063,10 @@ class RescheduleTaskSlotCapacityTests(unittest.TestCase):
         future_dt = (datetime.now(UTC) + timedelta(hours=3)).isoformat()
 
         with patch("app.core.task_helpers._require_task_operator", return_value=None):
-            response = client.patch("/api/tasks/90/schedule", json={
-                "scheduled_datetime": future_dt
-            })
+            with _mock_reschedule_order_dependencies():
+                response = client.patch("/api/tasks/90/schedule", json={
+                    "scheduled_datetime": future_dt
+                })
 
         app.dependency_overrides.clear()
 
@@ -935,9 +1099,10 @@ class RescheduleTaskSlotCapacityTests(unittest.TestCase):
         with patch("app.api.task_action_routes.notify_task_rescheduled", new=AsyncMock()):
             with patch("app.core.task_helpers._require_task_operator", return_value=None):
                 with patch("app.api.tasks.get_project_metadata", new_callable=AsyncMock, return_value={}):
-                    response = client.patch("/api/tasks/91/schedule", json={
-                        "scheduled_datetime": future_dt
-                    })
+                    with _mock_reschedule_order_dependencies():
+                        response = client.patch("/api/tasks/91/schedule", json={
+                            "scheduled_datetime": future_dt
+                        })
 
         app.dependency_overrides.clear()
 
@@ -968,9 +1133,10 @@ class RescheduleTaskSlotCapacityTests(unittest.TestCase):
         with patch("app.api.task_action_routes.notify_task_rescheduled", new=AsyncMock()):
             with patch("app.core.task_helpers._require_task_operator", return_value=None):
                 with patch("app.api.tasks.get_project_metadata", new_callable=AsyncMock, return_value={}):
-                    client.patch("/api/tasks/92/schedule", json={
-                        "scheduled_datetime": future_dt
-                    })
+                    with _mock_reschedule_order_dependencies():
+                        client.patch("/api/tasks/92/schedule", json={
+                            "scheduled_datetime": future_dt
+                        })
 
         app.dependency_overrides.clear()
 
@@ -1004,9 +1170,10 @@ class RescheduleTaskSlotCapacityTests(unittest.TestCase):
         with patch("app.api.task_action_routes.notify_task_rescheduled", new=AsyncMock()):
             with patch("app.core.task_helpers._require_task_operator", return_value=None):
                 with patch("app.api.tasks.get_project_metadata", new_callable=AsyncMock, return_value={}):
-                    response = client.patch("/api/tasks/93/schedule", json={
-                        "scheduled_datetime": future_dt
-                    })
+                    with _mock_reschedule_order_dependencies():
+                        response = client.patch("/api/tasks/93/schedule", json={
+                            "scheduled_datetime": future_dt
+                        })
 
         app.dependency_overrides.clear()
 

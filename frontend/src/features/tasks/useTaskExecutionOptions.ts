@@ -43,6 +43,8 @@ export function useTaskExecutionOptions(options: TaskExecutionOptions) {
     skills.value.map(skill => ({
       label: skill.name,
       value: skill.id,
+      skillName: skill.name,
+      description: skill.description,
       disabled: false,
     }))
   )

@@ -1020,13 +1020,13 @@ describe('IssueList', () => {
       expect(options[1]).toEqual({ label: 'group/project-2', value: 2 })
     })
 
-    it('creator filter maps scoped options with stable user values and counts', async () => {
+    it('creator filter maps scoped options to truncated usernames without counts', async () => {
       await mountComponent()
       const creatorField = (wrapper.vm as any).filterConfig.filterFields.find((f: any) => f.key === 'initiator')
       const options = creatorField.options()
       expect(options).toHaveLength(3)
-      expect(options[0]).toEqual({ label: 'Alice (@alice)', value: 'user:1', count: 10 })
-      expect(options[2]).toEqual({ label: 'charlie', value: 'user:3', count: 2 })
+      expect(options[0]).toEqual({ label: 'alice', value: 'user:1', truncateLabel: true })
+      expect(options[2]).toEqual({ label: 'charlie', value: 'user:3', truncateLabel: true })
     })
 
     it('has_mr filter returns yes/no options', async () => {

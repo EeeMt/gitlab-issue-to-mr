@@ -296,7 +296,7 @@
               </div>
 
               <div class="execution-environment-panel">
-                <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+                <n-grid :cols="isMobile ? 1 : 3" :x-gap="16" :y-gap="8">
                   <n-gi>
                     <n-form-item
                       :label="t('createTask.workerProfile')"
@@ -311,6 +311,7 @@
                         data-testid="worker-profile-select"
                       />
                     </n-form-item>
+                    <div class="field-hint">{{ t('issue.workerDefaultHint') }}</div>
                   </n-gi>
                   <n-gi>
                     <n-form-item :label="t('createTask.defaultProvider')">
@@ -321,6 +322,20 @@
                         :placeholder="t('config.providers.systemDefault')"
                       />
                     </n-form-item>
+                    <div class="field-hint">{{ t('issue.defaultProviderHint') }}</div>
+                  </n-gi>
+                  <n-gi>
+                    <n-form-item :label="t('issue.defaultHarness')">
+                      <n-select
+                        v-model:value="harnessKey"
+                        :options="harnessOptions"
+                        clearable
+                        :disabled="!selectedWorkerProfile"
+                        :placeholder="t('issue.defaultHarnessPlaceholder')"
+                        data-testid="default-harness-select"
+                      />
+                    </n-form-item>
+                    <div class="field-hint">{{ t('issue.defaultHarnessHint') }}</div>
                   </n-gi>
                 </n-grid>
               </div>
@@ -705,6 +720,7 @@ const promptTemplates = ref<PromptTemplate[]>([])
 const workerProfiles = ref<WorkerProfile[]>([])
 const providers = ref<AIProvider[]>([])
 const defaultProviderId = ref<number | null>(null)
+const harnessKey = ref<string | null>(null)
 
 // Template picker state
 const promptVariableTips = ref<Record<string, string> | undefined>(undefined)
@@ -851,6 +867,29 @@ const cloneMode = ref<'full' | 'shallow'>('full')
 const selectedWorkerProfile = computed(() =>
   workerProfiles.value.find(profile => profile.id === workerProfileId.value) ?? null
 )
+
+const harnessOptions = computed(() => {
+  const profile = selectedWorkerProfile.value
+  const enabled = profile?.enabled_harnesses ?? []
+  return enabled.map(key => ({
+    label: key === 'codex'
+      ? t('createTask.harnessCodex')
+      : key === 'claude'
+        ? t('createTask.harnessClaude')
+        : key,
+    value: key,
+  }))
+})
+
+watch(workerProfileId, (id) => {
+  const profile = workerProfiles.value.find(p => p.id === id) ?? null
+  if (!profile) {
+    harnessKey.value = null
+    return
+  }
+  const enabled = profile.enabled_harnesses ?? []
+  harnessKey.value = profile.default_harness_key ?? enabled[0] ?? 'claude'
+})
 
 function supportsRepositoryCloneSettings(profile: WorkerProfile): boolean {
   if (profile.runtime_mode !== 'mounted_kit') return false
@@ -1304,6 +1343,7 @@ async function handleReset() {
   Object.assign(formValue.value, createInitialFormValue())
   cloneMode.value = 'full'
   workerProfileId.value = null
+  harnessKey.value = null
   defaultProviderId.value =
     providers.value.find(provider => provider.is_default)?.id ?? null
   if (advancedSettingsRef.value) {
@@ -1378,6 +1418,7 @@ async function handleSubmit() {
           : false,
       worker_profile_id: workerProfileId.value,
       default_provider_id: defaultProviderId.value,
+      default_harness_key: harnessKey.value,
       git_clone_depth: formValue.value.git_clone_depth,
       git_clone_filter: formValue.value.git_clone_filter,
     }

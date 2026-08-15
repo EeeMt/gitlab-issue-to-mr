@@ -44,7 +44,7 @@ Mermaid npm bundle, or ci-claude script.
 On a connected build machine:
 
 ```bash
-make worker-kit-export WORKER_KIT_VERSION=0.3.9 WORKER_KIT_PLATFORM=linux/amd64
+make worker-kit-export WORKER_KIT_VERSION=0.3.10 WORKER_KIT_PLATFORM=linux/amd64
 ```
 
 This creates an archive and checksum under `deploy/offline-bundle/kits/`. Kit versions are
@@ -82,22 +82,36 @@ preparation from the common task environment and keeps it behind the Claude Adap
 The actual Claude
 Adapter version and digest come only from each Task's immutable Runtime Bundle manifest; the Kit
 does not carry or declare a current Adapter. Existing mounted-kit profiles remain pinned to their
-configured path: install `0.3.9`
+configured path: install `0.3.10`
 on every eligible Docker host, verify it,
 and then update the profile version and path. Merely deploying the Backend does not replace an
 already installed kit.
 
-## Phase 1 release boundary
+Version `0.3.10` is the Claude + Codex production candidate. Its manifest declares both harness
+CLI runtimes explicitly: `claude` comes from the runtime image (minimum `2.1.33`) and `codex`
+comes from a fixed read-only host mount (minimum `0.146.0`). The Kit manifest also declares the
+supported Runtime Bundle contract/event schema and the bootstrap version; the actual Adapter
+version/digest still comes only from each Task's immutable Runtime Bundle manifest. Runtime
+verification runs once per enabled harness (`--harness-key claude|codex`) and checks the effective
+CLI binary, version, and binary digest on the target Host.
 
-The Phase 1 release is a coordinated hard cutover:
+## Phase 3 production baseline
+
+The Phase 3 release is a coordinated hard cutover on every target Host:
 
 1. Stop scheduling and close every Issue created before the release. Its existing Tasks remain
    readable but cannot execute or retry because they have no immutable Runtime Bundle.
-2. Install and verify Worker Kit `0.3.9` on every Docker Engine host eligible for scheduling.
-3. Update every enabled Worker Profile to the immutable `0.3.9` version and absolute path. A host
+2. Install and verify Worker Kit `0.3.10` on every Docker Engine host eligible for scheduling.
+3. Update every enabled Worker Profile to the immutable `0.3.10` version and absolute path, pin
+   the runtime image to its immutable repo digest, and re-run verify-runtime per enabled harness.
+   A host
    or profile left on an older Kit must remain disabled.
 4. Deploy Backend/Scheduler and run the migration before accepting new Issues or Tasks, then
    resume scheduling.
+
+The previous `0.3.9-linux-amd64` installation remains in place on every Host as a rollback
+coordinate until the production sign-off window closes. See
+`docs/runbooks/multi-harness-rollout.md` for the full switch and rollback procedure.
 
 Task execution without a Runtime Bundle manifest fails before orchestration starts. Neither the
 Backend nor the Kit launcher backfills historical Tasks or falls back to Kit-local task scripts.
@@ -158,13 +172,13 @@ can execute mounted-kit profiles:
 
 ```bash
 sudo ./scripts/install-worker-kit.sh \
-  kits/codify-worker-kit-0.3.9-linux-amd64.tar.gz
+  kits/codify-worker-kit-0.3.10-linux-amd64.tar.gz
 ```
 
 The default installation path is:
 
 ```text
-/opt/codify/worker-kits/0.3.9-linux-amd64
+/opt/codify/worker-kits/0.3.10-linux-amd64
 ```
 
 For remote Docker targets, this is a path on the Docker Engine host, not on the Backend or
@@ -182,18 +196,37 @@ Verify the kit and one project runtime image before creating a profile:
 
 ```bash
 ./scripts/verify-worker-runtime.sh \
-  --kit /opt/codify/worker-kits/0.3.9-linux-amd64 \
-  --claude-host-path /opt/codify/overrides/claude-2.1.200 \
-  --image team/java21-maven:2026.07 \
+  --kit /opt/codify/worker-kits/0.3.10-linux-amd64 \
+  --image codify-worker/java21-maven:2026.07 \
+  --harness-key claude \
+  --harness-host-path /usr/bin/claude \
+  --harness-container-path /usr/local/bin/claude \
   --smoke 'java -version && mvn -version'
+
+./scripts/verify-worker-runtime.sh \
+  --kit /opt/codify/worker-kits/0.3.10-linux-amd64 \
+  --image codify-worker/java21-maven:2026.07 \
+  --harness-key codex \
+  --harness-host-path /opt/codify/codex/bin/codex \
+  --harness-container-path /opt/codify-codex/bin/codex \
+  --smoke 'test -x /opt/codify-codex/bin/codex && /opt/codify-codex/bin/codex --version'
 ```
 
-The verifier checks the manifest, kit mounts, the effective Claude executable, Codify tools,
-Mermaid, CodeGraph, numeric UID/GID downgrade, workspace writes, and the optional project
-command. If the runtime image already includes Claude at `/usr/local/bin/claude`, omit
-`--claude-host-path`.
+The verifier checks the manifest, kit mounts, the effective harness executable (Claude or Codex),
+Codify tools, Mermaid, CodeGraph, numeric UID/GID downgrade, workspace writes, and the optional
+project command. The legacy `--claude-host-path` form is still accepted and is equivalent to
+`--harness-key claude --harness-host-path <path>`. On a production profile, use the same container
+paths declared in `harness_runtimes`.
 
-Administrators can run the same check through Codify after saving a profile:
+Note: the Kit does not ship the executable Adapters (they live only in each Task's immutable Runtime
+Bundle), so a Kit-only `--verify` checks the Kit bootstrap, the default CLI, and the requested
+harness smoke. The Adapter-level binary digest/version/config verification is enforced at task
+container start by the frozen Runtime Bundle (`CODIFY_CLI_BINARY_DIGEST`), which the offline verify
+plus one real smoke task together cover.
+
+Administrators can run the Codify-path check through the API after saving a profile. This resolves
+the immutable image repo digest on the profile's Docker daemon and persists `image_digest` plus
+`verified_at`:
 
 ```http
 POST /api/worker-profiles/42/verify-runtime
@@ -205,6 +238,7 @@ Content-Type: application/json
 The API preflight applies the profile's non-secret environment variables and custom mounts.
 Secret environment variables are deliberately omitted because the optional smoke command can
 write arbitrary output; the response lists the omitted keys without exposing their values.
+Per-harness offline verification covers the Harness executable paths declared by the profile.
 
 ## Profile API
 
@@ -213,15 +247,30 @@ No UI is required. Create or update a Worker Profile through the existing admin 
 ```json
 {
   "name": "Java 21 and Maven",
-  "image": "codify-worker/java21-maven:2026.07",
+  "image": "<registry>/codify-worker/java21-maven@sha256:<repo-digest>",
   "runtime_mode": "mounted_kit",
-  "worker_kit_version": "0.3.9",
-  "worker_kit_path": "/opt/codify/worker-kits/0.3.9-linux-amd64",
+  "worker_kit_version": "0.3.10",
+  "worker_kit_path": "/opt/codify/worker-kits/0.3.10-linux-amd64",
+  "enabled_harnesses": ["claude", "codex"],
+  "default_harness_key": "claude",
+  "harness_runtimes": {
+    "codex": {
+      "source": "host_mount",
+      "executable_path": "/opt/codify-codex/bin/codex",
+      "version": "0.146.0",
+      "binary_digest": "<sha256>"
+    }
+  },
   "codegraph_enabled": true,
   "volume_mounts": [
     {
-      "host_path": "/opt/codify/overrides/claude-2.1.200",
+      "host_path": "/usr/bin/claude",
       "container_path": "/usr/local/bin/claude",
+      "mode": "ro"
+    },
+    {
+      "host_path": "/opt/codify/codex",
+      "container_path": "/opt/codify-codex",
       "mode": "ro"
     }
   ],
@@ -230,8 +279,11 @@ No UI is required. Create or update a Worker Profile through the existing admin 
 ```
 
 Profiles remain editable configuration. Each task stores `runtime_mode`, image, kit version,
-kit path, Docker target, mounts, and environment in its immutable worker snapshot. Retries use
-that snapshot and are not silently moved to a newer kit.
+kit path, Docker target, mounts, environment, harness key, Adapter version/digest, CLI
+source/path/version/binary digest, image digest, and Runtime Bundle digest in its immutable worker
+snapshot. Retries use that snapshot and are not silently moved to a newer kit or image. The image
+reference in a verified profile should be `repo@sha256:...` (or an equivalent immutable ID), and
+the API verify-runtime must succeed before the profile can accept new tasks in the rollout window.
 
 ## Constraints and security
 

@@ -252,8 +252,9 @@ class CancelTaskEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(task.status, TaskStatus.CANCELLED)
 
-    def test_cancel_task_releases_issue_execution_lock(self) -> None:
-        """POST /cancel should release the DB issue execution lock."""
+    def test_cancel_running_task_keeps_lock_until_converged(self) -> None:
+        """A RUNNING cancel records intent and keeps the Issue lock; the worker
+        finalizer converges the terminal and releases it (spec §6.7)."""
         from app.core.worker_docker_targets import TaskContainerNotFoundError
 
         task = MagicMock()
@@ -264,6 +265,7 @@ class CancelTaskEndpointTests(unittest.TestCase):
         task.scheduled_at = None
         task.container_id = "gone-container-2"
         task.cancel_requested_at = None
+        task.raw_logs_finalized_at = None
 
         client, app, _mock_db = self._get_client(task)
 
@@ -283,8 +285,48 @@ class CancelTaskEndpointTests(unittest.TestCase):
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 200)
-        mock_release.assert_awaited_once()
-        self.assertEqual(mock_release.await_args.kwargs["issue_id"], 33)
+        self.assertEqual(task.status, TaskStatus.RUNNING)
+        self.assertIsNotNone(task.cancel_requested_at)
+        mock_release.assert_not_awaited()
+
+    def test_cancel_running_task_does_not_downgrade_completed(self) -> None:
+        """Cancel of a RUNNING task must not downgrade a run the finalizer
+        already converged to COMPLETED while the cancel was in flight."""
+        from app.core.worker_docker_targets import TaskContainerNotFoundError
+
+        task = MagicMock()
+        task.id = 3
+        task.project_id = 1
+        task.issue_id = 33
+        task.status = TaskStatus.RUNNING
+        task.scheduled_at = None
+        task.container_id = "ctr-3"
+        task.cancel_requested_at = None
+
+        client, app, mock_db = self._get_client(task)
+
+        async def converge_to_completed(*_args, **_kwargs):
+            # Simulate the scheduler finalizer converging the run to COMPLETED
+            # while this cancel was stopping the container / draining logs.
+            task.status = TaskStatus.COMPLETED
+
+        mock_db.refresh = AsyncMock(side_effect=converge_to_completed)
+
+        with (
+            patch("app.api.task_action_routes.notify_task_cancelled", new=AsyncMock()),
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch(
+                "app.api.task_action_routes.find_task_container",
+                new=AsyncMock(side_effect=TaskContainerNotFoundError("missing")),
+            ),
+            patch("app.api.task_action_routes.release_issue_execution_lock", new=AsyncMock()),
+        ):
+            response = client.post("/api/tasks/3/cancel")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(task.status, TaskStatus.COMPLETED)
 
     def test_cancel_task_404_when_not_found(self) -> None:
         """POST /api/tasks/{id}/cancel should return 404 when task not found."""
@@ -498,6 +540,7 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     task.additions = 0
     task.deletions = 0
     task.total_changes = 0
+    task.change_stats_recorded_at = None
     task.input_tokens = 0
     task.output_tokens = 0
     task.model_name = None
@@ -522,6 +565,14 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     task.updated_at = now
     task.started_at = None
     task.completed_at = None
+    # Issue input-stream ordering / projected lineage (nullable compat fields).
+    task.issue_sequence = None
+    task.projected_harness_key = None
+    task.projected_session_namespace = None
+    task.projected_lineage_generation = None
+    task.projected_reset_task_id = None
+    task.lineage_projection_reason = None
+    task.input_lineage_reason = None
     return task
 
 
@@ -586,6 +637,20 @@ def _make_app_client_with_db(mock_db, extra_overrides=None):
         app.dependency_overrides.update(extra_overrides)
 
     return TestClient(app, raise_server_exceptions=False), app
+
+
+def _make_scalars_all_result(rows):
+    """Mock db.execute result whose ``.scalars().all()`` yields ``rows``."""
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = rows
+    return result
+
+
+def _make_rows_all_result(rows):
+    """Mock db.execute result whose ``.all()`` yields ``rows``."""
+    result = MagicMock()
+    result.all.return_value = rows
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -901,7 +966,7 @@ class RetryTaskAPITests(unittest.TestCase):
 
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(
-            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue]
+            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue, _make_scalars_all_result([task]), _make_rows_all_result([]), _make_scalars_all_result([]), MagicMock()]
         )
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
@@ -956,7 +1021,7 @@ class RetryTaskAPITests(unittest.TestCase):
         )
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(
-            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue]
+            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue, _make_scalars_all_result([task]), _make_rows_all_result([]), _make_scalars_all_result([]), MagicMock()]
         )
         mock_db.add = MagicMock()
 
@@ -980,15 +1045,15 @@ class RetryTaskAPITests(unittest.TestCase):
         task.output_session_id = "session-created-by-source"
 
         # First execute returns the task; second returns None (no existing retry);
-        # third resolves default provider; fourth fetches the Issue for serialization
+        # third is the Issue row lock (returns a provider-shaped mock whose id is
+        # used as the issue id); fourth is the new ordering query; fifth is the
+        # lineage snapshot query.
         mock_result_task = MagicMock()
         mock_result_task.scalar_one_or_none.return_value = task
         mock_result_no_retry = MagicMock()
         mock_result_no_retry.scalar_one_or_none.return_value = None
         mock_result_default_provider = MagicMock()
         mock_result_default_provider.scalar_one_or_none.return_value = _make_mock_provider(id=1)
-        mock_result_issue = MagicMock()
-        mock_result_issue.scalar_one_or_none.return_value = None
 
         now = datetime(2024, 1, 1, 12, 0, 0)
 
@@ -1005,7 +1070,10 @@ class RetryTaskAPITests(unittest.TestCase):
                 mock_result_task,
                 mock_result_no_retry,
                 mock_result_default_provider,
-                mock_result_issue,
+                _make_scalars_all_result([task]),
+                _make_rows_all_result([]),
+                _make_scalars_all_result([]),
+                MagicMock(),
             ]
         )
         mock_db.add = MagicMock()
@@ -1070,7 +1138,7 @@ class RetryTaskAPITests(unittest.TestCase):
 
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(
-            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue]
+            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue, _make_scalars_all_result([task]), _make_rows_all_result([]), _make_scalars_all_result([]), MagicMock()]
         )
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
@@ -1141,7 +1209,7 @@ class RetryTaskAPITests(unittest.TestCase):
 
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(
-            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue]
+            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue, _make_scalars_all_result([task]), _make_rows_all_result([]), _make_scalars_all_result([]), MagicMock()]
         )
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
@@ -1191,7 +1259,7 @@ class RetryTaskAPITests(unittest.TestCase):
 
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(
-            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue]
+            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue, _make_scalars_all_result([task]), _make_rows_all_result([]), _make_scalars_all_result([]), MagicMock()]
         )
         mock_db.add = MagicMock()
         mock_db.flush = AsyncMock()
@@ -1245,7 +1313,7 @@ class RetryTaskAPITests(unittest.TestCase):
 
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(
-            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue]
+            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue, _make_scalars_all_result([task]), _make_rows_all_result([]), _make_scalars_all_result([]), MagicMock()]
         )
         mock_db.add = MagicMock()
         mock_db.flush = AsyncMock()
@@ -1301,7 +1369,7 @@ class RetryTaskAPITests(unittest.TestCase):
 
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(
-            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue]
+            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue, _make_scalars_all_result([task]), _make_rows_all_result([]), _make_scalars_all_result([]), MagicMock()]
         )
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
@@ -1384,6 +1452,81 @@ class RetryTaskAPITests(unittest.TestCase):
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 400)
+
+    def test_retry_task_rejects_stale_generation_lineage(self):
+        """POST /api/tasks/{id}/retry rejects a stale-generation source with 409."""
+        task = _make_serializable_task(task_status=TaskStatus.FAILED)
+        task.id = 71
+        task.project_id = 1
+        task.issue_id = 1
+        task.session_mode = "continue"
+        task.output_session_id = "session-old"
+        task.worker_profile_snapshot = _make_worker_snapshot(task_id=71)
+        # The source belongs to generation 0 of the issue lineage.
+        task.issue_sequence = 1
+        task.projected_harness_key = "claude"
+        task.projected_session_namespace = "claude-0000000000000000"
+        task.projected_lineage_generation = 0
+        task.projected_reset_task_id = None
+        task.lineage_projection_reason = "initial"
+        task.input_lineage_reason = "resumed"
+
+        mock_result_task = MagicMock()
+        mock_result_task.scalar_one_or_none.return_value = task
+        mock_result_no_retry = MagicMock()
+        mock_result_no_retry.scalar_one_or_none.return_value = None
+        mock_result_issue = MagicMock()
+        mock_result_issue.scalar_one_or_none.return_value = MagicMock(
+            id=1,
+            project_id=1,
+            status="open",
+        )
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(
+            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue]
+        )
+        mock_db.refresh = AsyncMock()
+        mock_db.add = MagicMock()
+        mock_db.flush = AsyncMock()
+        mock_db.commit = AsyncMock()
+
+        client, app = _make_app_client_with_db(mock_db)
+
+        # The queue tail has advanced to generation 1, so a default continue
+        # retry of the generation-0 source is an old-generation retry.
+        tail_projection = {
+            "harness_key": "claude",
+            "session_namespace": "claude-0000000000000000",
+            "generation": 1,
+            "reset_task_id": 70,
+            "reason": "fresh",
+        }
+        integrity_report = {
+            "repaired_sequences": 0,
+            "repaired_projections": 0,
+            "blocked": False,
+            "max_sequence": 2,
+            "tail_projection": tail_projection,
+        }
+        with (
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch(
+                "app.api.task_creation_service.ensure_issue_order_integrity_locked",
+                new=AsyncMock(return_value=integrity_report),
+            ),
+        ):
+            response = client.post("/api/tasks/71/retry")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 409)
+        detail = response.json()["detail"]
+        self.assertEqual(detail["code"], "retry_lineage_conflict")
+        self.assertEqual(detail["allowed_actions"], ["fresh_retry"])
+        self.assertEqual(detail["source_lineage"]["generation"], 0)
+        self.assertEqual(detail["tail_lineage"]["generation"], 1)
+        mock_db.add.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -1577,6 +1720,7 @@ class CreateTaskAPITests(unittest.TestCase):
         mock_db.commit = AsyncMock()
         mock_db.flush = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
+        mock_db.execute = AsyncMock(return_value=_make_scalars_all_result([]))
 
         async def override_db():
             yield mock_db
@@ -1646,6 +1790,10 @@ class CreateTaskAPITests(unittest.TestCase):
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock()
+        no_lineage = MagicMock()
+        no_lineage.scalar_one_or_none.return_value = None
+        no_lineage.scalars.return_value.all.return_value = []
+        mock_db.execute = AsyncMock(return_value=no_lineage)
 
         current_user = MagicMock()
         current_user.id = 7
@@ -1919,16 +2067,20 @@ class RetryTaskWithScheduleTests(unittest.TestCase):
         task = _make_serializable_task(task_status=TaskStatus.FAILED)
         task.id = 80
         task.project_id = 1
+        # A continue retry must match the tail lineage tuple (§4.6); pin the
+        # source projection to the tail projection used below.
+        task.projected_harness_key = "claude"
+        task.projected_session_namespace = "claude-ns"
+        task.projected_lineage_generation = 0
+        task.projected_reset_task_id = None
+        task.lineage_projection_reason = "initial"
 
         # First execute returns the task; second returns None (no existing retry);
-        # third is for slot capacity count query; fourth fetches Issue.
+        # third fetches the Issue under its row lock.
         mock_result_task = MagicMock()
         mock_result_task.scalar_one_or_none.return_value = task
         mock_result_no_retry = MagicMock()
         mock_result_no_retry.scalar_one_or_none.return_value = None
-        mock_result_default = MagicMock()
-        mock_result_default.scalar_one_or_none.return_value = None
-        mock_result_default.scalar.return_value = 0
         mock_result_issue = MagicMock()
         mock_result_issue.scalar_one_or_none.return_value = MagicMock(id=1, project_id=1)
 
@@ -1946,8 +2098,12 @@ class RetryTaskWithScheduleTests(unittest.TestCase):
             side_effect=[
                 mock_result_task,
                 mock_result_no_retry,
-                mock_result_default,
                 mock_result_issue,
+                _make_scalars_all_result([task]),
+                _make_rows_all_result([]),
+                _make_scalars_all_result([]),
+                _make_scalars_all_result([]),
+                MagicMock(),
             ]
         )
         mock_db.add = MagicMock()
@@ -1958,6 +2114,12 @@ class RetryTaskWithScheduleTests(unittest.TestCase):
         client, app = _make_app_client_with_db(mock_db)
 
         future_dt = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
+        tail_projection = {
+            "harness_key": "claude",
+            "session_namespace": "claude-ns",
+            "generation": 0,
+            "reset_task_id": None,
+        }
 
         with (
             patch("app.api.tasks.notify_task_retried", new=AsyncMock()),
@@ -1974,6 +2136,30 @@ class RetryTaskWithScheduleTests(unittest.TestCase):
             patch(
                 "app.api.tasks.replace_task_worker_snapshot",
                 new=AsyncMock(return_value=_make_worker_snapshot(task_id=102)),
+            ),
+            patch(
+                "app.api.task_creation_service.ensure_issue_order_integrity_locked",
+                new=AsyncMock(
+                    return_value={
+                        "max_sequence": 1,
+                        "tail_projection": tail_projection,
+                        "repaired_sequences": 0,
+                        "repaired_projections": 0,
+                        "blocked": False,
+                    }
+                ),
+            ),
+            patch(
+                "app.api.task_creation_service.validate_schedule_time_locked",
+                new=AsyncMock(),
+            ),
+            patch(
+                "app.api.task_creation_service.compute_task_queue_contexts",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.core.slot_capacity.check_slot_capacity",
+                new=AsyncMock(return_value=MagicMock(is_full=False, enforce=True)),
             ),
         ):
             response = client.post("/api/tasks/80/retry", json={"scheduled_datetime": future_dt})
@@ -2020,7 +2206,7 @@ class ListTasksProviderTests(unittest.TestCase):
         self.assertEqual(data[0]["provider_id"], 9)
         self.assertEqual(data[0]["provider_name"], "OpenAI Prod")
 
-        executed_query = mock_db.execute.await_args.args[0]
+        executed_query = mock_db.execute.await_args_list[0].args[0]
         self.assertIn("provider", str(executed_query))
 
 
@@ -2136,10 +2322,19 @@ class PaginationTests(unittest.TestCase):
         mock_db = MagicMock()
 
         if total_count is not None:
-            # Paginated mode: first execute → count, second execute → data
+            # Paginated mode: count, data, then per-Issue queue context (tasks +
+            # lock). Empty task sets do not reach the queue-context queries, so the
+            # extra entries are simply left unconsumed.
             mock_count_result = MagicMock()
             mock_count_result.scalar.return_value = total_count
-            mock_db.execute = AsyncMock(side_effect=[mock_count_result, mock_data_result])
+            mock_db.execute = AsyncMock(
+                side_effect=[
+                    mock_count_result,
+                    mock_data_result,
+                    _make_scalars_all_result(tasks_list),
+                    MagicMock(),
+                ]
+            )
         else:
             # Legacy mode: single execute → data
             mock_db.execute = AsyncMock(return_value=mock_data_result)
