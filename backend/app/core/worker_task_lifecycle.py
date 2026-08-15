@@ -171,6 +171,10 @@ def resolve_had_existing_mr(issue: Issue | None) -> bool:
     return (issue.merge_request_iid is not None) if issue else False
 
 
+def is_freeform_task(task: Task) -> bool:
+    return (getattr(task, "task_mode", "execute") or "execute") == "freeform"
+
+
 def resolve_sudo_gitlab(
     task: Task,
     gitlab_client,
@@ -259,22 +263,28 @@ async def create_execute_container(
         except Exception as e:
             logger.warning(f"Failed to pull image: {e}, using existing local image if available")
 
-    mr_iid = issue.merge_request_iid if issue else None
-    mr_web_url = issue.merge_request_url if issue else None
+    # Freeform tasks defer MR create/reuse to post-push delivery (monitor_container_run):
+    # they never get a pre-start MR_IID injected, and the Issue MR fields are left
+    # untouched here. execute/plan keep the existing pre-run MR lifecycle.
+    is_freeform = is_freeform_task(task)
+    mr_iid = None
+    mr_web_url = None
+    if not is_freeform and issue:
+        mr_iid = issue.merge_request_iid
+        mr_web_url = issue.merge_request_url
+        if issue.target_branch:
+            try:
+                worker.gitlab.ensure_project_label(task.project_id, "Codify", "#6699cc")
+            except Exception as e:
+                logger.warning(f"[Task {task_id}] Failed to ensure Codify label: {e}")
 
-    if issue and issue.target_branch:
-        try:
-            worker.gitlab.ensure_project_label(task.project_id, "Codify", "#6699cc")
-        except Exception as e:
-            logger.warning(f"[Task {task_id}] Failed to ensure Codify label: {e}")
-
-        mr_iid, mr_web_url = worker._create_mr_if_needed(
-            task,
-            issue,
-            mr_iid,
-            mr_web_url,
-            sudo_gl=sudo_gl,
-        )
+            mr_iid, mr_web_url = worker._create_mr_if_needed(
+                task,
+                issue,
+                mr_iid,
+                mr_web_url,
+                sudo_gl=sudo_gl,
+            )
 
     await persist_issue_mr_if_changed(db, issue, mr_iid, mr_web_url)
 
@@ -846,6 +856,16 @@ async def monitor_container_run(
     if exit_code == 0:
         await _save_delivery_summary_from_container(worker, container, task, db)
 
+    # A freeform task only constitutes code delivery when it completed and the
+    # canonical finalization persisted a commit_sha. MR delivery is therefore
+    # deferred to post-push, never driven by the process exit code alone.
+    is_freeform = is_freeform_task(task)
+    freeform_delivered = (
+        is_freeform
+        and task.status == TaskStatus.COMPLETED
+        and bool(getattr(task, "commit_sha", None))
+    )
+
     if (
         task.status == TaskStatus.CANCELLED or cancellation_requested
     ) and task.status != TaskStatus.COMPLETED and not timed_out:
@@ -936,7 +956,32 @@ async def monitor_container_run(
         )
         await db.commit()
 
-    if issue:
+    if issue and freeform_delivered and issue.target_branch:
+        # Freeform MR delivery happens only after a canonical commit_sha was
+        # persisted: create/reuse the MR now and persist the real Issue MR
+        # association before draft removal / description updates run below.
+        try:
+            worker.gitlab.ensure_project_label(task.project_id, "Codify", "#6699cc")
+        except Exception as e:
+            logger.warning(f"[Task {task.id}] Failed to ensure Codify label: {e}")
+        try:
+            mr_iid, mr_web_url = worker._create_mr_if_needed(
+                task,
+                issue,
+                None,
+                None,
+                sudo_gl=sudo_gl,
+            )
+        except Exception as e:
+            logger.warning(
+                f"[Task {task.id}] Freeform MR create/reuse failed after commit "
+                f"{task.commit_sha!r}; keeping commit_sha and not fabricating an MR "
+                f"association: {e}"
+            )
+            mr_iid, mr_web_url = None, None
+        await persist_issue_mr_if_changed(db, issue, mr_iid, mr_web_url)
+
+    if issue and not is_freeform:
         parsed_mr_iid = getattr(task, "_parsed_mr_iid", None)
         parsed_mr_url = getattr(task, "_parsed_mr_url", None)
         if parsed_mr_iid and not issue.merge_request_iid:
@@ -948,7 +993,11 @@ async def monitor_container_run(
             await db.commit()
 
     if exit_code == 0:
-        if issue and issue.merge_request_iid:
+        # Freeform delivery actions (Undraft/Ready, delivery notification) only
+        # run when the task actually produced a commit; a no-commit freeform task
+        # skips them even when a pre-existing MR is already linked to the Issue.
+        delivery_ready = not is_freeform or freeform_delivered
+        if issue and issue.merge_request_iid and delivery_ready:
             t_mr_draft = time.monotonic()
             logger.info(f"[Task {task.id}] Removing MR draft status for !{issue.merge_request_iid}")
             try:
@@ -961,13 +1010,14 @@ async def monitor_container_run(
                     f"[Task {task.id}] Failed to update MR draft status after "
                     f"{time.monotonic() - t_mr_draft:.1f}s{resume_prefix}: {e}"
                 )
-        await worker._send_notifications(
-            task,
-            success=True,
-            had_existing_mr=had_existing_mr,
-            logs=logs,
-            issue=issue,
-        )
+        if delivery_ready:
+            await worker._send_notifications(
+                task,
+                success=True,
+                had_existing_mr=had_existing_mr,
+                logs=logs,
+                issue=issue,
+            )
     else:
         await worker._send_failure_notifications(
             task,
@@ -1036,7 +1086,7 @@ async def monitor_container_run(
         _save_task_metadata_from_container(worker, container, task, issue)
         await db.commit()
 
-    if issue and issue.merge_request_iid:
+    if issue and issue.merge_request_iid and (not is_freeform or freeform_delivered):
         await worker._update_mr_description_for_issue(task, issue, db, sudo_gl=sudo_gl)
     elif issue:
         logger.debug(

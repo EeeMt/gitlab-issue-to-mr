@@ -271,6 +271,52 @@ class WorkerEnvironmentVariableHelperTests(unittest.TestCase):
         self.assertEqual(env["RESUME_SESSION"], "session-123")
 
     @patch("app.core.worker.get_settings")
+    def test_freeform_mode_env_omits_mr_iid_and_keeps_prompt_file(self, mock_get_settings) -> None:
+        """Freeform containers get TASK_MODE/REQUIRE_CHANGES/prompt path but never MR_IID,
+        even when the Issue already carries a merge request (delivery is deferred)."""
+        mock_get_settings.return_value = SimpleNamespace(
+            gitlab_url="http://gitlab.example.com",
+            gitlab_bot_token="test-token",
+            anthropic_base_url="http://localhost:11434/v1",
+            anthropic_api_key="test-key",
+            anthropic_model="claude-sonnet-4-20250514",
+            claude_max_turns=20,
+            task_timeout=1800,
+            custom_ca_bundle="",
+        )
+        worker = WorkerExecutor(docker_client=MagicMock(), gitlab_client=MagicMock())
+        task = SimpleNamespace(
+            project_id=123,
+            user_prompt="Explore without an MR",
+            id=456,
+            initiator_display_name=None,
+            initiator_email=None,
+            initiator_username="alice",
+            task_mode="freeform",
+            require_changes=False,
+        )
+        issue = SimpleNamespace(
+            branch_name="codify/issue-789",
+            id=789,
+            title="Freeform issue",
+            claude_session_id=None,
+            base_branch="main",
+            merge_request_iid=7,
+        )
+
+        env = worker._build_container_env(
+            task,
+            issue,
+            mr_iid=None,
+            target_branch="main",
+        )
+
+        self.assertEqual(env["TASK_MODE"], "freeform")
+        self.assertEqual(env["REQUIRE_CHANGES"], "false")
+        self.assertIn("CODIFY_TASK_PROMPT_FILE", env)
+        self.assertNotIn("MR_IID", env)
+
+    @patch("app.core.worker.get_settings")
     def test_fresh_session_mode_disables_issue_session_resume(self, mock_get_settings) -> None:
         mock_get_settings.return_value = SimpleNamespace(
             gitlab_url="http://gitlab.example.com",

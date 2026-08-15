@@ -2917,6 +2917,64 @@ class TestExecuteTask(unittest.TestCase):
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
+    def test_freeform_task_defers_mr_creation_to_post_push(self, mock_notify, mock_get_settings):
+        """Freeform tasks skip pre-start MR creation and only create/reuse an MR
+        post-push when a commit was persisted."""
+        mock_get_settings.return_value = _make_settings()
+        mock_gitlab = MagicMock()
+        mock_gitlab.normalize_web_url.side_effect = lambda x: x
+        mock_gitlab.create_note = MagicMock()
+        mock_gitlab.create_mr_note = MagicMock()
+
+        mock_docker = MagicMock()
+        mock_docker.create_container.return_value = MagicMock(id="ctr-freeform")
+
+        worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+        task = _make_task(
+            target_branch="main",
+            merge_request_iid=7,
+            merge_request_url="http://mr/7",
+            task_mode="freeform",
+            require_changes=False,
+        )
+        db = _make_db(task)
+
+        fake_logs = "CODIFY_DIFF:+1-0\n"
+
+        async def parse_delivered(current_task, *_args, **_kwargs):
+            current_task.status = TaskStatus.COMPLETED
+            current_task.completed_at = datetime.now(UTC)
+            current_task.commit_sha = "abc123"
+
+        with (
+            patch.object(
+                worker,
+                '_create_mr_if_needed',
+                return_value=(55, "http://mr/55"),
+            ) as mock_create_mr,
+            patch.object(
+                worker,
+                '_stream_logs_to_db',
+                new=AsyncMock(return_value=(0, fake_logs, 1, False)),
+            ),
+            patch.object(
+                worker,
+                '_parse_task_result',
+                new=AsyncMock(side_effect=parse_delivered),
+            ),
+        ):
+            result = asyncio.run(worker.execute_task(db, task.id))
+
+        self.assertTrue(result)
+        self.assertEqual(task.commit_sha, "abc123")
+        # Exactly one MR create/reuse, post-push, with empty pre-run MR context.
+        mock_create_mr.assert_called_once()
+        self.assertIsNone(mock_create_mr.call_args.args[2])
+        self.assertIsNone(mock_create_mr.call_args.args[3])
+        self.assertEqual(task.issue.merge_request_iid, 55)
+
+    @patch('app.core.worker.get_settings')
+    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
     def test_fast_task_with_no_log_chunks(self, mock_notify, mock_get_settings):
         """Very fast task with 0 log chunks gets a fallback log entry — lines 964-971."""
         mock_get_settings.return_value = _make_settings()

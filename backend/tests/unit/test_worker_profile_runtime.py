@@ -252,6 +252,119 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
     ] == {"bind": "/nix/store", "mode": "ro"}
 
 
+@pytest.mark.asyncio
+async def test_create_execute_container_freeform_defers_mr_and_omits_mr_iid(tmp_path):
+    """Freeform containers start without a pre-start MR and without MR_IID env,
+    even when the Issue already carries a merge request."""
+    task = MagicMock()
+    task.id = 12
+    task.project_id = 100
+    task.ci_failure_run_id = None
+    task.trigger_source = "manual"
+    task.rendered_prompt = "Prompt"
+    task.status = TaskStatus.RUNNING
+    task.cancel_requested_at = None
+    task.task_mode = "freeform"
+    task.require_changes = False
+
+    issue = MagicMock()
+    issue.id = 1
+    issue.merge_request_iid = 7
+    issue.merge_request_url = "http://mr/7"
+    issue.target_branch = "main"
+
+    worker = MagicMock()
+    worker.gitlab.ensure_project_label = MagicMock()
+    worker._create_mr_if_needed = MagicMock(return_value=(None, None))
+    worker._build_previous_task_summaries = AsyncMock(return_value="Previous summary")
+    worker._prepare_container_inputs = AsyncMock(return_value=({"TASK_ID": "12"}, "main"))
+    worker._build_container_volumes = MagicMock(
+        return_value={"/cache": {"bind": "/cache", "mode": "rw"}}
+    )
+    worker._get_container_name = MagicMock(return_value="codify-12-issue1")
+    worker.docker.pull_image = MagicMock()
+    worker.docker.create_container = MagicMock(return_value=SimpleNamespace(id="container-1"))
+
+    runtime = TaskWorkerRuntime(
+        image="custom-worker:latest",
+        runtime_mode="mounted_kit",
+        worker_kit_version="0.1.0",
+        worker_kit_path="/opt/codify/worker-kits/0.1.0-linux-amd64",
+        codegraph_enabled=True,
+        volume_mounts=[],
+        environment={},
+        pre_script="",
+        post_script="",
+    )
+    settings = SimpleNamespace(
+        worker_image="old-worker:latest",
+        worker_skip_image_pull=False,
+        worker_network="bridge",
+    )
+    db = MagicMock()
+    db.commit = AsyncMock()
+    db.flush = AsyncMock()
+    db.get = AsyncMock(return_value=None)
+    db.refresh = AsyncMock()
+
+    async def _mock_execute(statement, *args, **kwargs):
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_result.scalars.return_value.all.return_value = []
+        return mock_result
+
+    db.execute = AsyncMock(side_effect=_mock_execute)
+    bundle = SimpleNamespace(
+        digest="d" * 64,
+        contract_version="codify.worker.harness/v1",
+        manifest={
+            "archive_manifest_digest": "m" * 64,
+            "adapters": {"claude": {"version": "1.0.0", "digest": "a" * 64}},
+        },
+        bundle_bytes=b"runtime-bundle",
+    )
+    attempt = SimpleNamespace(
+        attempt_id="task-12-attempt-1",
+        harness_key="claude",
+        adapter_version="1.0.0",
+    )
+
+    with (
+        patch(
+            "app.core.worker_task_lifecycle.load_task_worker_runtime",
+            new=AsyncMock(return_value=runtime),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.build_issue_workspace_paths",
+            return_value=SimpleNamespace(issue_root=str(tmp_path)),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.load_bound_runtime_bundle",
+            new=AsyncMock(return_value=bundle),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.create_task_attempt",
+            new=AsyncMock(return_value=attempt),
+        ),
+    ):
+        container = await create_execute_container(
+            worker,
+            db,
+            settings=settings,
+            task=task,
+            issue=issue,
+            sudo_gl=None,
+        )
+
+    assert container.id == "container-1"
+    worker._create_mr_if_needed.assert_not_called()
+    args, _ = worker._prepare_container_inputs.await_args
+    assert args[3] is None
+    # The Issue MR association is a pre-run fact for freeform; leave it untouched.
+    assert issue.merge_request_iid == 7
+    assert "MR_IID" not in worker.docker.create_container.call_args.kwargs["environment"]
+
+
 def _kit_runtime_and_settings():
     runtime = TaskWorkerRuntime(
         image="custom-worker:latest",
