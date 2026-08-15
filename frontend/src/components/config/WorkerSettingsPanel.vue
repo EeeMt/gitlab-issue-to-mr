@@ -844,7 +844,7 @@
               </div>
               <div
                 v-for="(environmentVariable, index) in workerFormValue.environment_variables"
-                :key="environmentVariable.id ?? `env-${index}`"
+                :key="environmentVariableRowKey(environmentVariable, index)"
                 class="config-compact-row config-compact-row--environment"
                 :class="`config-compact-row--${environmentVariable.source}`"
               >
@@ -1532,6 +1532,13 @@ function compareEnvironmentVariableKeys(
   right: Pick<EnvironmentVariableFormItem, 'key'>
 ): number {
   return left.key.localeCompare(right.key)
+}
+
+function environmentVariableRowKey(
+  environmentVariable: EnvironmentVariableFormItem,
+  index: number
+): string {
+  return `${environmentVariable.source}-${environmentVariable.id ?? `new-${index}`}`
 }
 
 function mapProfileToWorkerFormValue(

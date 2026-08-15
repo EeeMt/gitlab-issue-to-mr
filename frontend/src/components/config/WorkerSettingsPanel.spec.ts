@@ -548,6 +548,101 @@ describe('WorkerSettingsPanel', () => {
     )
   })
 
+  it('keeps overlapping shared and profile environment variable ids on distinct rows', async () => {
+    mockGetWorkerSharedConfiguration.mockResolvedValueOnce(
+      createSharedConfiguration({
+        environment_variables: [
+          {
+            id: 7,
+            key: 'SHARED_FLAG',
+            value: 'shared',
+            is_secret: false,
+            value_configured: true
+          }
+        ]
+      })
+    )
+    mockGetAdminWorkerProfiles.mockResolvedValueOnce([
+      createWorkerProfile({
+        worker_kit_source: 'system',
+        environment_variables: [],
+        overrides: {
+          worker_kit: null,
+          pre_script: null,
+          post_script: null,
+          volume_mounts: [],
+          masked_volume_mount_paths: [],
+          environment_variables: [
+            {
+              id: 7,
+              key: 'PROFILE_ONLY',
+              value: 'profile',
+              is_secret: false,
+              value_configured: true,
+              operation: 'set'
+            }
+          ]
+        }
+      })
+    ])
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+
+    try {
+      const wrapper = mount(WorkerSettingsPanel, {
+        props: { isMobile: false, reloadKey: 0 }
+      })
+      await flushPromises()
+      const vm = wrapper.vm as any
+      const rowKeys = vm.workerFormValue.environment_variables.map(
+        (environmentVariable: any, index: number) =>
+          vm.environmentVariableRowKey(environmentVariable, index)
+      )
+
+      expect(new Set(rowKeys).size).toBe(rowKeys.length)
+
+      const findRow = (key: string) =>
+        wrapper.findAll('.config-compact-row--environment').find(
+          (row) => (row.find('input').element as HTMLInputElement).value === key
+        )!
+
+      await findRow('SHARED_FLAG')
+        .findAll('button')
+        .find((button) => button.text() === 'config.overrideHere')!
+        .trigger('click')
+      await flushPromises()
+      expect(vm.workerFormValue.environment_variables).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ key: 'SHARED_FLAG', source: 'profile_override' }),
+          expect.objectContaining({ key: 'PROFILE_ONLY', source: 'profile_new' })
+        ])
+      )
+
+      await findRow('SHARED_FLAG')
+        .findAll('button')
+        .find((button) => button.text() === 'config.restoreSystemValue')!
+        .trigger('click')
+      await flushPromises()
+      expect(vm.workerFormValue.environment_variables).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ key: 'SHARED_FLAG', source: 'system' }),
+          expect.objectContaining({ key: 'PROFILE_ONLY', source: 'profile_new' })
+        ])
+      )
+
+      await findRow('PROFILE_ONLY')
+        .findAll('button')
+        .find((button) => button.text() === 'config.remove')!
+        .trigger('click')
+      await flushPromises()
+      expect(vm.workerFormValue.environment_variables).toEqual([
+        expect.objectContaining({ key: 'SHARED_FLAG', source: 'system' })
+      ])
+      expect(warnSpy.mock.calls.flat().join(' ')).not.toMatch(/duplicate keys/i)
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
   it('keeps Kit and scripts inheritance distinct from explicit profile values', async () => {
     mockGetAdminWorkerProfiles.mockResolvedValueOnce([
       createWorkerProfile({
