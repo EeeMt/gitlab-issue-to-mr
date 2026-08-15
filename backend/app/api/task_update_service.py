@@ -30,7 +30,7 @@ from app.core.skills import (
     replace_task_skill_references,
     validate_runtime_supports_skills,
 )
-from app.core.task_prompt import TaskPromptValidationError
+from app.core.task_prompt import TaskPromptValidationError, resolve_task_mode_template
 from app.core.worker_profiles import (
     WorkerProfileValidationError,
     replace_task_worker_snapshot,
@@ -91,6 +91,7 @@ async def update_task_record(
         )
 
     updated_fields = request.model_fields_set
+    original_task_mode = task.task_mode or "execute"
     if "user_prompt" in updated_fields:
         if not request.user_prompt or not request.user_prompt.strip():
             raise HTTPException(
@@ -316,7 +317,7 @@ async def update_task_record(
             snapshot
         )
 
-    if task.task_mode == "plan":
+    if task.task_mode in ("plan", "freeform"):
         task.require_changes = False
 
     await db.refresh(task, attribute_names=["status"])
@@ -348,19 +349,62 @@ async def update_task_record(
             raise HTTPException(status_code=404, detail="Issue not found")
         if snapshot is None:
             snapshot = await db.get(TaskWorkerProfileSnapshot, task.id)
-        template = task.run_instruction_template
-        if template is None:
-            if snapshot is None:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    detail="Task has no worker profile snapshot",
-                )
-            template = services.select_snapshot_run_instruction_template(
-                snapshot,
-                task_mode=task.task_mode or "execute",
-                trigger_source=task.trigger_source or "manual",
-            )
+        target_mode = task.task_mode or "execute"
+        submitted_template = (
+            request.run_instruction_template
+            if "run_instruction_template" in updated_fields
+            else None
+        )
+        mode_changed = original_task_mode != target_mode
         try:
+            if target_mode == "freeform":
+                # freeform always resolves to the canonical template and rejects
+                # any other explicit template; require_changes was forced false above.
+                template = resolve_task_mode_template(
+                    task_mode="freeform",
+                    submitted_template=submitted_template,
+                    default_template=None,
+                )
+            elif submitted_template is not None:
+                template = resolve_task_mode_template(
+                    task_mode=target_mode,
+                    submitted_template=submitted_template,
+                    default_template=None,
+                )
+            elif mode_changed:
+                # Switching to execute/plan without an explicit template uses the
+                # frozen snapshot's target-mode default — never the previous
+                # freeform {{user_prompt}} template.
+                if snapshot is None:
+                    raise TaskPromptValidationError("Task has no worker profile snapshot")
+                default_template = services.select_snapshot_run_instruction_template(
+                    snapshot,
+                    task_mode=target_mode,
+                    trigger_source=task.trigger_source or "manual",
+                )
+                template = resolve_task_mode_template(
+                    task_mode=target_mode,
+                    submitted_template=None,
+                    default_template=default_template,
+                )
+            else:
+                # Mode unchanged without an explicit template: keep the existing
+                # task snapshot template, backfilled from the frozen snapshot when
+                # the task predates prompt persistence.
+                default_template = task.run_instruction_template
+                if default_template is None:
+                    if snapshot is None:
+                        raise TaskPromptValidationError("Task has no worker profile snapshot")
+                    default_template = services.select_snapshot_run_instruction_template(
+                        snapshot,
+                        task_mode=target_mode,
+                        trigger_source=task.trigger_source or "manual",
+                    )
+                template = resolve_task_mode_template(
+                    task_mode=target_mode,
+                    submitted_template=None,
+                    default_template=default_template,
+                )
             services.render_and_store_task_prompt(
                 task,
                 issue,

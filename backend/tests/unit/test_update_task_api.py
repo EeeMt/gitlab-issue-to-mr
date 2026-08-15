@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from fastapi.testclient import TestClient
 
+from app.core.task_prompt import FREEFORM_RUN_INSTRUCTION_TEMPLATE
 from app.core.worker_profiles import WorkerProfileValidationError
 from app.models import Issue, TaskStatus, TaskWorkerProfileSnapshot
 
@@ -532,6 +533,148 @@ class UpdateTaskPlanModeTests(unittest.TestCase):
         """PATCH task_mode with an unknown value returns 422."""
         resp, _ = self._patch({"task_mode": "review"})
         self.assertEqual(resp.status_code, 422)
+
+
+# ---------------------------------------------------------------------------
+# Freeform mode: update-time three-value invariants
+# ---------------------------------------------------------------------------
+
+class UpdateTaskFreeformModeTests(unittest.TestCase):
+    """PATCH /tasks/{id} freeform canonical invariants on update."""
+
+    def tearDown(self):
+        from app.main import app
+        app.dependency_overrides.clear()
+
+    def _patch(self, payload, task=None):
+        t = task or _make_task()
+        mock_db = _mock_db_for_task(t)
+        client, app = _make_client(mock_db)
+        with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+            resp = client.patch("/api/tasks/1", json=payload)
+        app.dependency_overrides.clear()
+        return resp, t
+
+    def _make_freeform_task(self):
+        task = _make_task()
+        task.task_mode = "freeform"
+        task.require_changes = False
+        task.run_instruction_template = FREEFORM_RUN_INSTRUCTION_TEMPLATE
+        task.rendered_prompt = "Original prompt"
+        return task
+
+    def test_execute_to_freeform_forces_canonical_and_rerenders(self):
+        """Switching execute -> freeform overrides template + require_changes and re-renders."""
+        task = _make_task()
+        task.task_mode = "execute"
+        task.require_changes = True
+        task.run_instruction_template = "Do {{user_prompt}}"
+        task.rendered_prompt = "Do Original prompt"
+        resp, t = self._patch({"task_mode": "freeform"}, task=task)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(t.task_mode, "freeform")
+        self.assertFalse(t.require_changes)
+        self.assertEqual(t.run_instruction_template, FREEFORM_RUN_INSTRUCTION_TEMPLATE)
+        self.assertEqual(t.rendered_prompt, "Original prompt")
+
+    def test_execute_to_freeform_with_explicit_canonical_template(self):
+        """An explicit canonical template is accepted when switching to freeform."""
+        task = _make_task()
+        task.task_mode = "execute"
+        task.require_changes = True
+        task.run_instruction_template = "Do {{user_prompt}}"
+        task.rendered_prompt = "Do Original prompt"
+        resp, t = self._patch(
+            {"task_mode": "freeform", "run_instruction_template": "{{user_prompt}}"},
+            task=task,
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(t.task_mode, "freeform")
+        self.assertFalse(t.require_changes)
+        self.assertEqual(t.run_instruction_template, FREEFORM_RUN_INSTRUCTION_TEMPLATE)
+        self.assertEqual(t.rendered_prompt, "Original prompt")
+
+    def test_freeform_prompt_only_update_atomically_rerenders(self):
+        """A freeform task edited to only change user_prompt re-renders rendered_prompt."""
+        task = self._make_freeform_task()
+        resp, t = self._patch({"user_prompt": "New prompt"}, task=task)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(t.task_mode, "freeform")
+        self.assertFalse(t.require_changes)
+        self.assertEqual(t.run_instruction_template, FREEFORM_RUN_INSTRUCTION_TEMPLATE)
+        self.assertEqual(t.rendered_prompt, "New prompt")
+
+    def test_freeform_explicit_non_canonical_template_returns_422_no_partial_save(self):
+        """A freeform task explicitly submitting a non-canonical template is rejected."""
+        task = self._make_freeform_task()
+        mock_db = _mock_db_for_task(task)
+        client, app = _make_client(mock_db)
+        with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+            resp = client.patch(
+                "/api/tasks/1",
+                json={"run_instruction_template": "Must change: {{user_prompt}}"},
+            )
+        app.dependency_overrides.clear()
+        self.assertEqual(resp.status_code, 422)
+        self.assertEqual(
+            resp.json()["detail"],
+            "freeform mode only accepts the canonical user-prompt template",
+        )
+        mock_db.rollback.assert_awaited_once()
+        mock_db.commit.assert_not_awaited()
+
+    def test_freeform_to_execute_without_template_uses_snapshot_default(self):
+        """freeform -> execute without a template uses the frozen snapshot's execute
+        template, never the freeform {{user_prompt}}."""
+        task = self._make_freeform_task()
+        resp, t = self._patch({"task_mode": "execute"}, task=task)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(t.task_mode, "execute")
+        self.assertEqual(t.run_instruction_template, "Do {{user_prompt}}")
+        self.assertEqual(t.rendered_prompt, "Do Original prompt")
+
+    def test_freeform_to_plan_without_template_uses_snapshot_plan_default(self):
+        """freeform -> plan without a template uses the frozen snapshot's plan template."""
+        task = self._make_freeform_task()
+        resp, t = self._patch({"task_mode": "plan"}, task=task)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(t.task_mode, "plan")
+        self.assertFalse(t.require_changes)
+        self.assertEqual(t.run_instruction_template, "Plan {{user_prompt}}")
+        self.assertEqual(t.rendered_prompt, "Plan Original prompt")
+
+    def test_explicit_valid_template_prioritized_over_mode_default(self):
+        """An explicit valid template wins over the target-mode default."""
+        task = self._make_freeform_task()
+        resp, t = self._patch(
+            {"task_mode": "execute", "run_instruction_template": "Custom {{user_prompt}}"},
+            task=task,
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(t.task_mode, "execute")
+        self.assertEqual(t.run_instruction_template, "Custom {{user_prompt}}")
+        self.assertEqual(t.rendered_prompt, "Custom Original prompt")
+
+    def test_scheduler_claim_during_update_returns_409_and_rolls_back(self):
+        """If the scheduler claims the task (status leaves pending/queued) mid-request,
+        return 409 and do not persist partial changes."""
+        task = _make_task()
+        task.user_prompt = "Original prompt"
+        mock_db = _mock_db_for_task(task)
+
+        async def claim_task(obj, attribute_names=None):
+            task.status = TaskStatus.RUNNING
+
+        mock_db.refresh = AsyncMock(side_effect=claim_task)
+
+        client, app = _make_client(mock_db)
+        with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+            resp = client.patch("/api/tasks/1", json={"user_prompt": "Changed"})
+        app.dependency_overrides.clear()
+
+        self.assertEqual(resp.status_code, 409)
+        mock_db.rollback.assert_awaited_once()
+        mock_db.commit.assert_not_awaited()
 
 
 if __name__ == "__main__":

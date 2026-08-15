@@ -2596,3 +2596,181 @@ class PaginationTests(unittest.TestCase):
         self.assertEqual(data["total"], 1)
         self.assertEqual(len(data["items"]), 1)
         self.assertEqual(data["page"], 1)
+
+
+# ---------------------------------------------------------------------------
+# POST /tasks/{task_id}/retry — freeform three-value preservation
+# ---------------------------------------------------------------------------
+
+
+class RetryTaskFreeformTests(unittest.TestCase):
+    """POST /api/tasks/{id}/retry preserves freeform mode, template, and prompt snapshot."""
+
+    def tearDown(self):
+        from app.main import app
+
+        app.dependency_overrides.clear()
+
+    def _post_retry(self, task, body=None, extra_patches=None):
+        import contextlib
+
+        mock_result_task = MagicMock()
+        mock_result_task.scalar_one_or_none.return_value = task
+        mock_result_no_retry = MagicMock()
+        mock_result_no_retry.scalar_one_or_none.return_value = None
+        mock_result_issue = MagicMock()
+        mock_result_issue.scalar_one_or_none.return_value = MagicMock(
+            id=task.issue_id, project_id=task.project_id
+        )
+
+        now = datetime(2024, 1, 1, 12, 0, 0)
+
+        async def fake_refresh(obj, attribute_names=None):
+            if isinstance(obj, Task):
+                obj.id = 200
+                obj.status = TaskStatus.PENDING
+                obj.created_at = now
+                obj.updated_at = now
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(
+            side_effect=[
+                mock_result_task,
+                mock_result_no_retry,
+                mock_result_issue,
+                _make_scalars_all_result([task]),
+                _make_rows_all_result([]),
+                _make_scalars_all_result([]),
+                MagicMock(),
+            ]
+        )
+        mock_db.add = MagicMock()
+        mock_db.commit = AsyncMock()
+        mock_db.flush = AsyncMock()
+        mock_db.refresh = AsyncMock(side_effect=fake_refresh)
+
+        client, app = _make_app_client_with_db(mock_db)
+        patches = [
+            patch("app.api.tasks.notify_task_retried", new=AsyncMock()),
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
+            patch(
+                "app.api.tasks.resolve_worker_profile_for_issue",
+                new=AsyncMock(return_value=_make_mock_worker_profile()),
+            ),
+            patch(
+                "app.api.tasks.resolve_provider_for_issue",
+                new=AsyncMock(return_value=_make_mock_provider(id=1)),
+            ),
+            patch(
+                "app.api.tasks.replace_task_worker_snapshot",
+                new=AsyncMock(return_value=_make_worker_snapshot(task_id=200)),
+            ),
+        ]
+        if extra_patches:
+            patches.extend(extra_patches)
+        with contextlib.ExitStack() as stack:
+            for patch_obj in patches:
+                stack.enter_context(patch_obj)
+            response = client.post(f"/api/tasks/{task.id}/retry", json=body or {})
+        app.dependency_overrides.clear()
+        return response, mock_db
+
+    def test_retry_freeform_preserves_three_values_and_prompt_snapshot(self):
+        """A freeform retry keeps task_mode=freeform, require_changes=False, the
+        canonical template, and the persisted prompt snapshot."""
+        from app.core.task_prompt import FREEFORM_RUN_INSTRUCTION_TEMPLATE
+
+        task = _make_serializable_task(task_status=TaskStatus.FAILED)
+        task.id = 90
+        task.project_id = 1
+        task.task_mode = "freeform"
+        task.require_changes = False
+        task.run_instruction_template = FREEFORM_RUN_INSTRUCTION_TEMPLATE
+        task.rendered_prompt = "Freeform prompt snapshot"
+
+        response, mock_db = self._post_retry(task)
+        self.assertEqual(response.status_code, 200)
+        created_task = _added_task(mock_db)
+        self.assertEqual(created_task.task_mode, "freeform")
+        self.assertIs(created_task.require_changes, False)
+        self.assertEqual(
+            created_task.run_instruction_template, FREEFORM_RUN_INSTRUCTION_TEMPLATE
+        )
+        self.assertEqual(created_task.rendered_prompt, "Freeform prompt snapshot")
+
+    def test_retry_freeform_does_not_reread_current_profile_execute_template(self):
+        """Retry copies the frozen prompt/template and never consults the current
+        Worker Profile's execute template."""
+        from app.core.task_prompt import FREEFORM_RUN_INSTRUCTION_TEMPLATE
+
+        task = _make_serializable_task(task_status=TaskStatus.FAILED)
+        task.id = 91
+        task.project_id = 1
+        task.task_mode = "freeform"
+        task.require_changes = False
+        task.run_instruction_template = FREEFORM_RUN_INSTRUCTION_TEMPLATE
+        task.rendered_prompt = "Freeform prompt snapshot"
+        task.worker_profile_snapshot.default_execute_run_instruction_template = (
+            "Execute {{user_prompt}}"
+        )
+
+        def _fail_if_called(*args, **kwargs):
+            raise AssertionError(
+                "Retry must not re-read the current Profile execute template"
+            )
+
+        response, mock_db = self._post_retry(
+            task,
+            extra_patches=[
+                patch(
+                    "app.api.tasks.select_snapshot_run_instruction_template",
+                    new=AsyncMock(side_effect=_fail_if_called),
+                ),
+            ],
+        )
+        self.assertEqual(response.status_code, 200)
+        created_task = _added_task(mock_db)
+        self.assertEqual(created_task.task_mode, "freeform")
+        self.assertEqual(
+            created_task.run_instruction_template, FREEFORM_RUN_INSTRUCTION_TEMPLATE
+        )
+        self.assertEqual(created_task.rendered_prompt, "Freeform prompt snapshot")
+
+    def test_retry_execute_preserves_mode_and_template(self):
+        """execute/plan retry behavior is unchanged: mode, require_changes, and
+        template are inherited from the source."""
+        task = _make_serializable_task(task_status=TaskStatus.FAILED)
+        task.id = 93
+        task.project_id = 1
+        task.task_mode = "execute"
+        task.require_changes = True
+        task.run_instruction_template = "Execute {{user_prompt}}"
+        task.rendered_prompt = "Execute Test prompt"
+
+        response, mock_db = self._post_retry(task)
+        self.assertEqual(response.status_code, 200)
+        created_task = _added_task(mock_db)
+        self.assertEqual(created_task.task_mode, "execute")
+        self.assertIs(created_task.require_changes, True)
+        self.assertEqual(created_task.run_instruction_template, "Execute {{user_prompt}}")
+        self.assertEqual(created_task.rendered_prompt, "Execute Test prompt")
+
+    def test_retry_api_does_not_switch_mode(self):
+        """The retry API offers no mode switch: passing task_mode in the body is
+        ignored and the retried task keeps the source mode."""
+        from app.core.task_prompt import FREEFORM_RUN_INSTRUCTION_TEMPLATE
+
+        task = _make_serializable_task(task_status=TaskStatus.FAILED)
+        task.id = 94
+        task.project_id = 1
+        task.task_mode = "freeform"
+        task.require_changes = False
+        task.run_instruction_template = FREEFORM_RUN_INSTRUCTION_TEMPLATE
+        task.rendered_prompt = "Freeform prompt snapshot"
+
+        response, mock_db = self._post_retry(task, body={"task_mode": "execute"})
+        self.assertEqual(response.status_code, 200)
+        created_task = _added_task(mock_db)
+        self.assertEqual(created_task.task_mode, "freeform")
+        self.assertIs(created_task.require_changes, False)
