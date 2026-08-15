@@ -3,6 +3,17 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 describe('IssueCurrentExecution styles', () => {
+  it('uses the shared task-mode presentation instead of a plan-or-execute fallback', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'src/components/issue-detail/IssueCurrentExecution.vue'),
+      'utf8',
+    )
+
+    expect(source).toContain('getTaskModePresentation')
+    expect(source).toContain('taskModeLabel')
+    expect(source).not.toContain("task.task_mode === 'plan' ?")
+  })
+
   it('keeps the activity line animated when motion preference media queries are unsupported', () => {
     const source = readFileSync(
       resolve(process.cwd(), 'src/components/issue-detail/IssueCurrentExecution.vue'),

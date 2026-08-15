@@ -235,6 +235,22 @@
               />
             </div>
           </n-gi>
+          <n-gi :span="1">
+            <div class="system-statistics-breakdown" data-testid="breakdown-card">
+              <div
+                class="system-statistics-breakdown__title"
+                data-testid="task-mode-breakdown"
+              >{{ t('systemStatistics.breakdowns.taskModes') }}</div>
+              <n-data-table
+                data-testid="task-mode-breakdown-table"
+                :columns="taskModeColumns"
+                :data="taskModeBreakdownRows"
+                size="small"
+                :bordered="false"
+                :max-height="440"
+              />
+            </div>
+          </n-gi>
         </n-grid>
       </n-card>
 
@@ -296,6 +312,10 @@ import PageHeader from '../components/PageHeader.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDurationSec } from '../utils/format'
 import { formatLargeNumber } from '../utils/usageLimits'
+import {
+  TASK_MODE_BREAKDOWN_ORDER,
+  getTaskModePresentation,
+} from '../features/tasks/taskModePresentation'
 
 use([LineChart, GridComponent, TooltipComponent, CanvasRenderer])
 
@@ -631,6 +651,22 @@ const providerColumns = computed(() =>
 const harnessColumns = computed(() =>
   breakdownColumns({ title: t('systemStatistics.breakdowns.harnesses') })
 )
+const taskModeColumns = computed(() =>
+  breakdownColumns({ title: t('systemStatistics.breakdowns.taskModes') })
+)
+const taskModeBreakdownRows = computed(() =>
+  [...(breakdowns.value?.task_modes ?? [])]
+    .sort((left, right) => {
+      const leftMode = getTaskModePresentation(left.key).mode
+      const rightMode = getTaskModePresentation(right.key).mode
+      return TASK_MODE_BREAKDOWN_ORDER.indexOf(leftMode)
+        - TASK_MODE_BREAKDOWN_ORDER.indexOf(rightMode)
+    })
+    .map(row => ({
+      ...row,
+      label: t(getTaskModePresentation(row.key).i18nKey),
+    }))
+)
 
 async function loadOverview(quiet = false) {
   if (!quiet) loading.value = true
@@ -873,12 +909,22 @@ watch(range, () => {
 }
 
 .system-statistics-breakdown {
+  min-width: 0;
+  max-width: 100%;
   padding: 12px;
   border-radius: 14px;
   background: rgba(248, 250, 252, 0.8);
   border: 1px solid rgba(15, 23, 42, 0.1);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   overflow: hidden;
+}
+
+.system-statistics-breakdown-grid {
+  min-width: 0;
+}
+
+.system-statistics-breakdown-grid :deep(.n-grid-item) {
+  min-width: 0;
 }
 
 .system-statistics-breakdown__title {

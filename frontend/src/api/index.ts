@@ -1765,6 +1765,7 @@ export interface SystemStatisticsBreakdowns {
   projects: SystemStatisticsBreakdownRow[]
   providers: SystemStatisticsBreakdownRow[]
   harnesses: SystemStatisticsBreakdownRow[]
+  task_modes?: SystemStatisticsBreakdownRow[]
 }
 
 export async function getSystemStatisticsOverview(params?: {

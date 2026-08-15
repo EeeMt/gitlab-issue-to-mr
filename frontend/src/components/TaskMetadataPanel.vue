@@ -248,6 +248,7 @@ import {
   ChatbubbleEllipsesOutline,
   CodeSlashOutline,
   BulbOutline,
+  InformationCircleOutline,
   CubeOutline
 } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
@@ -255,6 +256,7 @@ import type { Task } from '../api'
 import TaskRuntimeSummaryRows from './TaskRuntimeSummaryRows.vue'
 import { formatPriority } from '../utils/format'
 import { formatDateTimeUtc8 } from '../utils/datetime'
+import { getTaskModePresentation } from '../features/tasks/taskModePresentation'
 
 const props = defineProps<{
   task: Task
@@ -278,12 +280,18 @@ function formatDate(dateStr: string): string {
 }
 
 const taskModeMeta = computed(() => {
-  const isPlan = props.task.task_mode === 'plan'
+  const presentation = getTaskModePresentation(props.task.task_mode)
+  const iconMap = {
+    implementation: CodeSlashOutline,
+    freeform: ChatbubbleEllipsesOutline,
+    analysis: BulbOutline,
+    unknown: InformationCircleOutline,
+  }
 
   return {
-    icon: isPlan ? BulbOutline : CodeSlashOutline,
-    label: isPlan ? t('taskView.taskModePlan') : t('taskView.taskModeExecute'),
-    modifierClass: isPlan ? 'task-mode-chip--plan' : 'task-mode-chip--execute'
+    icon: iconMap[presentation.icon],
+    label: t(presentation.i18nKey),
+    modifierClass: `task-mode-chip--${presentation.modifier}`,
   }
 })
 
@@ -447,8 +455,16 @@ function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean 
   --task-mode-chip-accent: #64748b;
 }
 
+.task-mode-chip--freeform {
+  --task-mode-chip-accent: var(--n-primary-color, #18a058);
+}
+
 .task-mode-chip--plan {
   --task-mode-chip-accent: #78716c;
+}
+
+.task-mode-chip--unknown {
+  --task-mode-chip-accent: var(--n-text-color-3, #8a8f98);
 }
 
 .task-mode-chip--codex {

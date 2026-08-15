@@ -653,6 +653,7 @@ import {
   useTaskViewActions,
   type TaskArchiveMetadata,
 } from '../features/tasks/useTaskViewActions'
+import { getTaskModePresentation } from '../features/tasks/taskModePresentation'
 
 const ansiConverter = new AnsiToHtml({ escapeXML: true })
 
@@ -826,9 +827,7 @@ const taskProjectName = computed(() => {
 })
 
 const taskModeLabel = computed(() =>
-  task.value?.task_mode === 'plan'
-    ? t('taskView.taskModePlan')
-    : t('taskView.taskModeExecute')
+  t(getTaskModePresentation(task.value?.task_mode).i18nKey)
 )
 
 const executionStateTitle = computed(() => {

@@ -26,7 +26,7 @@
       <div class="execution-card__meta">
         <span>
           {{ t('issue.executionMode') }} ·
-          {{ task.task_mode === 'plan' ? t('issue.taskModePlan') : t('issue.taskModeExecute') }}
+          {{ taskModeLabel }}
         </span>
         <span>{{ t('dashboard.duration') }} · {{ duration }}</span>
         <span>
@@ -50,6 +50,7 @@ import { useI18n } from 'vue-i18n'
 import type { Task } from '../../api'
 import { formatDateTimeUtc8Compact, parseUtcDate } from '../../utils/datetime'
 import { formatDurationMs } from '../../utils/format'
+import { getTaskModePresentation } from '../../features/tasks/taskModePresentation'
 
 const props = defineProps<{
   task: Task | null
@@ -78,6 +79,11 @@ const duration = computed(() => {
   const ended = task.completed_at ? parseUtcDate(task.completed_at).getTime() : Date.now()
   if (!Number.isFinite(started) || !Number.isFinite(ended) || ended < started) return '—'
   return formatDurationMs(ended - started)
+})
+
+const taskModeLabel = computed(() => {
+  if (!props.task) return ''
+  return t(getTaskModePresentation(props.task.task_mode).i18nKey)
 })
 
 const queueContextLabel = computed(() => {

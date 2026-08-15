@@ -78,14 +78,19 @@ describe('TaskMetadataPanel', () => {
     expect(taskRuntimeSummaryRowsSource).toContain('.metadata-label-icon {\n  flex: 0 0 auto;\n  opacity: 0.65;')
   })
 
-  it('renders task mode as a chip with the same mode icons used by task creation', () => {
+  it('renders every task mode through the shared exhaustive presentation map', () => {
     expect(taskMetadataPanelSource).toContain('CodeSlashOutline')
     expect(taskMetadataPanelSource).toContain('BulbOutline')
+    expect(taskMetadataPanelSource).toContain('ChatbubbleEllipsesOutline')
+    expect(taskMetadataPanelSource).toContain('InformationCircleOutline')
+    expect(taskMetadataPanelSource).toContain('getTaskModePresentation')
     expect(taskMetadataPanelSource).toContain('<span class="task-mode-chip" :class="taskModeMeta.modifierClass">')
     expect(taskMetadataPanelSource).toContain('taskModeMeta.icon')
-    expect(taskMetadataPanelSource).toContain("modifierClass: isPlan ? 'task-mode-chip--plan' : 'task-mode-chip--execute'")
+    expect(taskMetadataPanelSource).not.toContain("const isPlan = props.task.task_mode === 'plan'")
     expect(taskMetadataPanelSource).toContain('.task-mode-chip--execute {')
+    expect(taskMetadataPanelSource).toContain('.task-mode-chip--freeform {')
     expect(taskMetadataPanelSource).toContain('.task-mode-chip--plan {')
+    expect(taskMetadataPanelSource).toContain('.task-mode-chip--unknown {')
   })
 
   it('renders branch configuration as a labeled vertical flow', () => {

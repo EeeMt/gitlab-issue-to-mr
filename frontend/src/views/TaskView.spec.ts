@@ -846,6 +846,18 @@ describe('TaskView', () => {
       expect(wrapper.find('[data-testid="task-actions-card"]').exists()).toBe(false)
     })
 
+    it.each([
+      ['freeform', 'taskView.taskModeFreeform'],
+      [null, 'taskView.taskModeUnknown'],
+      ['legacy-mode', 'taskView.taskModeUnknown'],
+    ])('shows %s with its explicit task mode presentation', async (taskMode, expectedKey) => {
+      await mountComponent({ task_mode: taskMode })
+
+      expect(wrapper.find('.task-view__context').text()).toContain(expectedKey)
+      expect(wrapper.find('.task-metadata-panel').text()).toContain(expectedKey)
+      expect(wrapper.find('.task-view__context').text()).not.toContain('taskView.taskModeExecute')
+    })
+
     it('shows the harness engine used by the task in the overview', async () => {
       await mountComponent({ harness_key: 'codex' })
 

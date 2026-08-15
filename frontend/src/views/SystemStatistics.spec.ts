@@ -558,9 +558,75 @@ describe('SystemStatistics', () => {
     await flushPromises()
 
     const cards = wrapper.findAll('[data-testid="breakdown-card"]')
-    expect(cards.length).toBe(3)
+    expect(cards.length).toBe(4)
     cards.forEach((card) => {
       expect(card.classes()).toContain('system-statistics-breakdown')
     })
   })
+
+  it('renders task modes in fixed localized order without exposing backend labels', async () => {
+    const row = (key: string | null, label: string, taskCount: number) => ({
+      key,
+      label,
+      task_count: taskCount,
+      completed: 0,
+      failed: 0,
+      cancelled: 0,
+      success_rate: null,
+      deleted_count: 0,
+      known_total_tokens: null,
+      known_total_changes: null,
+    })
+    mockApi.getSystemStatisticsBreakdowns.mockResolvedValue({
+      as_of: '2026-08-09T00:00:00Z',
+      reporting_timezone: 'Asia/Shanghai',
+      projects: [],
+      providers: [],
+      harnesses: [],
+      task_modes: [
+        row('plan', 'backend plan', 99),
+        row(null, 'backend unknown', 80),
+        row('execute', 'backend execute', 1),
+        row('freeform', 'backend freeform', 5),
+      ],
+    })
+
+    wrapper = mount(SystemStatistics)
+    await flushPromises()
+
+    const taskModeTable = wrapper.getComponent('[data-testid="task-mode-breakdown-table"]')
+    const rows = taskModeTable.props('data') as Array<{ key: string | null; label: string }>
+    expect(rows.map(item => item.key)).toEqual(['freeform', 'execute', 'plan', null])
+    expect(rows.map(item => item.label)).toEqual([
+      'taskView.taskModeFreeform',
+      'taskView.taskModeExecute',
+      'taskView.taskModePlan',
+      'taskView.taskModeUnknown',
+    ])
+    expect(wrapper.get('[data-testid="task-mode-breakdown"]').text()).toContain(
+      'systemStatistics.breakdowns.taskModes',
+    )
+    expect(wrapper.text()).not.toContain('backend freeform')
+    expect(taskModeTable.props('columns')).toHaveLength(6)
+  })
+
+  it('renders an empty task-mode card for older responses without task_modes', async () => {
+    wrapper = mount(SystemStatistics)
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-testid="breakdown-card"]')).toHaveLength(4)
+    expect(wrapper.getComponent('[data-testid="task-mode-breakdown-table"]').props('data')).toEqual([])
+  })
+
+  it.each([390, 768, 1440])(
+    'keeps all four breakdown cards stacked without horizontal pressure at %ipx',
+    async (viewportWidth) => {
+      breakpoints.width = viewportWidth
+      wrapper = mount(SystemStatistics)
+      await flushPromises()
+
+      expect(wrapper.get('[data-testid="breakdown-grid"]').attributes('cols')).toBe('1')
+      expect(wrapper.findAll('[data-testid="breakdown-card"]')).toHaveLength(4)
+    },
+  )
 })
