@@ -1755,8 +1755,8 @@ export interface SystemStatisticsBreakdownRow {
   cancelled: number
   success_rate: number | null
   deleted_count: number
-  known_total_tokens: number
-  known_total_changes: number
+  known_total_tokens: number | null
+  known_total_changes: number | null
 }
 
 export interface SystemStatisticsBreakdowns {

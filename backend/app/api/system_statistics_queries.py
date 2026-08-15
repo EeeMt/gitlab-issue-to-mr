@@ -691,15 +691,19 @@ def _breakdown_select(t: CTE, key_expr) -> Any:
         func.count(case((t.c.data_state == "deleted", t.c.task_id))).label(
             "deleted_count"
         ),
-        func.coalesce(
-            func.sum(case((_token_complete(t), t.c.input_tokens), else_=None)), 0
-        ).label("known_input_tokens"),
-        func.coalesce(
-            func.sum(case((_token_complete(t), t.c.output_tokens), else_=None)), 0
-        ).label("known_output_tokens"),
-        func.coalesce(
-            func.sum(case((_change_available(t), t.c.total_changes), else_=None)), 0
-        ).label("known_total_changes"),
+        # A group with no known sample stays NULL, never an exact 0, so an
+        # unknown aggregate is not presented as a precise zero (§5.7 / §9.5).
+        # A group whose tasks carry real known zeros still aggregates to 0,
+        # keeping a true zero distinguishable from Unknown (§15.1).
+        func.sum(case((_token_complete(t), t.c.input_tokens), else_=None)).label(
+            "known_input_tokens"
+        ),
+        func.sum(case((_token_complete(t), t.c.output_tokens), else_=None)).label(
+            "known_output_tokens"
+        ),
+        func.sum(case((_change_available(t), t.c.total_changes), else_=None)).label(
+            "known_total_changes"
+        ),
     )
 
 
@@ -733,15 +737,15 @@ def build_provider_breakdown(dialect: str, all_tasks: CTE) -> Any:
             func.count(case((t.c.data_state == "deleted", t.c.task_id))).label(
                 "deleted_count"
             ),
-            func.coalesce(
-                func.sum(case((_token_complete(t), t.c.input_tokens), else_=None)), 0
-            ).label("known_input_tokens"),
-            func.coalesce(
-                func.sum(case((_token_complete(t), t.c.output_tokens), else_=None)), 0
-            ).label("known_output_tokens"),
-            func.coalesce(
-                func.sum(case((_change_available(t), t.c.total_changes), else_=None)), 0
-            ).label("known_total_changes"),
+            func.sum(case((_token_complete(t), t.c.input_tokens), else_=None)).label(
+                "known_input_tokens"
+            ),
+            func.sum(case((_token_complete(t), t.c.output_tokens), else_=None)).label(
+                "known_output_tokens"
+            ),
+            func.sum(case((_change_available(t), t.c.total_changes), else_=None)).label(
+                "known_total_changes"
+            ),
         )
         .group_by(t.c.provider_id, t.c.provider_name, t.c.provider_model)
         .order_by(func.count(t.c.task_id).desc(), t.c.provider_id.asc())

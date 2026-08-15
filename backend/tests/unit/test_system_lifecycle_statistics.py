@@ -1706,6 +1706,268 @@ class LifecycleStatsNullableTrendAPITests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# §5.7 / §15.1 breakdown unknown-vs-zero semantics (P2-3)
+# ---------------------------------------------------------------------------
+
+
+class BreakdownNullableSemanticsTests(unittest.IsolatedAsyncioTestCase):
+    """A breakdown group with no known sample returns NULL, never an exact 0;
+    a group with real known zeros still aggregates to 0."""
+
+    async def asyncSetUp(self):
+        self.engine = _make_engine()
+        await _create_schema(self.engine)
+        self.Session = async_sessionmaker(self.engine, expire_on_commit=False)
+        self.dialect = "sqlite"
+        self.now = utcnow()
+
+    async def asyncTearDown(self):
+        await self.engine.dispose()
+
+    async def _breakdowns(self):
+        from app.api import system_statistics_queries as q
+
+        async with self.Session() as db:
+            all_tasks = q.build_all_task_statistics_cte(
+                dialect=self.dialect,
+                project_id=None,
+                provider_id=None,
+                harness_key=None,
+                data_state="all",
+            )
+            projects = list(
+                (await db.execute(q.build_project_breakdown(self.dialect, all_tasks))).all()
+            )
+            providers = list(
+                (await db.execute(q.build_provider_breakdown(self.dialect, all_tasks))).all()
+            )
+            harnesses = list(
+                (await db.execute(q.build_harness_breakdown(self.dialect, all_tasks))).all()
+            )
+        return projects, providers, harnesses
+
+    async def test_unknown_only_groups_stay_null(self):
+        # A COMPLETED task with no tokens, no code-change record and an inverted
+        # execution has no known sample for any dimension.
+        async with self.Session() as db:
+            await _seed_base(db)
+            _seed_issue(db, 1, created_at=self.now - timedelta(days=5))
+            _seed_task(
+                db,
+                1,
+                1,
+                status=TaskStatus.COMPLETED,
+                created_at=self.now - timedelta(days=5),
+                started_at=self.now - timedelta(hours=1),
+                completed_at=self.now - timedelta(hours=2),  # end < start
+                input_tokens=None,
+                output_tokens=None,
+            )
+            await db.commit()
+
+        projects, providers, harnesses = await self._breakdowns()
+        for group in (*projects, *providers, *harnesses):
+            self.assertIsNone(group.known_input_tokens)
+            self.assertIsNone(group.known_output_tokens)
+            self.assertIsNone(group.known_total_changes)
+
+    async def test_known_zero_groups_return_zero(self):
+        # A COMPLETED task with real zero tokens and a recorded zero change
+        # triple: every dimension has a known 0 sample.
+        async with self.Session() as db:
+            await _seed_base(db)
+            _seed_issue(db, 1, created_at=self.now - timedelta(days=5))
+            _seed_task(
+                db,
+                1,
+                1,
+                status=TaskStatus.COMPLETED,
+                created_at=self.now - timedelta(days=5),
+                started_at=self.now,
+                completed_at=self.now,
+                change_stats_recorded_at=self.now,
+                additions=0,
+                deletions=0,
+                total_changes=0,
+                input_tokens=0,
+                output_tokens=0,
+            )
+            await db.commit()
+
+        projects, providers, harnesses = await self._breakdowns()
+        for group in (*projects, *providers, *harnesses):
+            self.assertEqual(group.known_input_tokens, 0)
+            self.assertEqual(group.known_output_tokens, 0)
+            self.assertEqual(group.known_total_changes, 0)
+
+    async def test_mixed_response_distinguishes_unknown_from_zero(self):
+        # Unknown rows never corrupt a group that holds a real known zero, and
+        # an Unknown-only group stays NULL in the same response (§15.1 :639).
+        async with self.Session() as db:
+            await _seed_base(db)
+            # Harness "claude" -> real zeros; harness "codex" -> Unknown-only.
+            _seed_issue(db, 1, created_at=self.now - timedelta(days=5))
+            _seed_task(
+                db,
+                1,
+                1,
+                status=TaskStatus.COMPLETED,
+                created_at=self.now - timedelta(days=5),
+                started_at=self.now,
+                completed_at=self.now,
+                change_stats_recorded_at=self.now,
+                additions=0,
+                deletions=0,
+                total_changes=0,
+                input_tokens=0,
+                output_tokens=0,
+                harness_key="claude",
+            )
+            _seed_task(
+                db,
+                2,
+                1,
+                status=TaskStatus.COMPLETED,
+                created_at=self.now - timedelta(days=5),
+                started_at=self.now - timedelta(hours=1),
+                completed_at=self.now - timedelta(hours=2),  # end < start
+                input_tokens=None,
+                output_tokens=None,
+                harness_key="codex",
+            )
+            await db.commit()
+
+        projects, providers, harnesses = await self._breakdowns()
+        # The single project/provider group has one known 0 sample, so the
+        # Unknown task cannot drag the aggregate back to NULL.
+        self.assertEqual(len(projects), 1)
+        self.assertEqual(projects[0].known_total_changes, 0)
+        self.assertEqual(len(providers), 1)
+        self.assertEqual(providers[0].known_total_changes, 0)
+        # Harness groups separate the two cases within one response.
+        harness_map = {row.key: row for row in harnesses}
+        self.assertEqual(harness_map["claude"].known_total_changes, 0)
+        self.assertIsNone(harness_map["codex"].known_total_changes)
+
+
+class LifecycleStatsNullableBreakdownAPITests(unittest.TestCase):
+    """Breakdowns API keeps unknown aggregates NULL (§5.7) and known zeros as 0."""
+
+    def _client(self, *, user):
+        from app.database import get_db
+        from app.dependencies.auth import AuthContext, get_optional_auth_context
+        from app.main import app
+
+        async def override_db():
+            session = self.Session()
+            try:
+                yield session
+            finally:
+                await session.close()
+
+        if user is None:
+            async def override_auth():
+                return None
+        else:
+            async def override_auth():
+                return AuthContext(
+                    user=user,
+                    session=MagicMock(),
+                    gitlab_access_token=None,
+                    gitlab_refresh_token=None,
+                )
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[get_optional_auth_context] = override_auth
+        return TestClient(app, raise_server_exceptions=False), app
+
+    def tearDown(self):
+        from app.main import app
+
+        app.dependency_overrides.clear()
+        if getattr(self, "_engine", None) is not None:
+            asyncio.run(self._engine.dispose())
+            self._engine = None
+
+    @staticmethod
+    def _user(role: str):
+        user = MagicMock()
+        user.platform_role = role
+        return user
+
+    def _seed(self, *, known_zero: bool) -> None:
+        engine = _make_engine()
+        asyncio.run(_create_schema(engine))
+        Session = async_sessionmaker(engine, expire_on_commit=False)
+        now = utcnow()
+
+        async def seed():
+            async with Session() as db:
+                await _seed_base(db)
+                _seed_issue(db, 1, created_at=now - timedelta(days=5))
+                if known_zero:
+                    _seed_task(
+                        db,
+                        1,
+                        1,
+                        status=TaskStatus.COMPLETED,
+                        created_at=now - timedelta(days=5),
+                        started_at=now,
+                        completed_at=now,
+                        change_stats_recorded_at=now,
+                        additions=0,
+                        deletions=0,
+                        total_changes=0,
+                        input_tokens=0,
+                        output_tokens=0,
+                    )
+                else:
+                    _seed_task(
+                        db,
+                        1,
+                        1,
+                        status=TaskStatus.COMPLETED,
+                        created_at=now - timedelta(days=5),
+                        started_at=now - timedelta(hours=1),
+                        completed_at=now - timedelta(hours=2),  # inverted
+                        input_tokens=None,
+                        output_tokens=None,
+                    )
+                await db.commit()
+
+        asyncio.run(seed())
+        self.Session = Session
+        self._engine = engine
+
+    def _project_row(self, client):
+        from unittest.mock import AsyncMock, patch
+
+        with patch(
+            "app.api.system_statistics.build_project_lookup",
+            new=AsyncMock(return_value={}),
+        ):
+            r = client.get("/api/admin/system-statistics/breakdowns")
+        self.assertEqual(r.status_code, 200)
+        data = r.json()
+        self.assertEqual(len(data["projects"]), 1)
+        return data["projects"][0]
+
+    def test_breakdown_unknown_aggregates_are_null(self):
+        self._seed(known_zero=False)
+        client, _ = self._client(user=self._user("platform_admin"))
+        row = self._project_row(client)
+        self.assertIsNone(row["known_total_tokens"])
+        self.assertIsNone(row["known_total_changes"])
+
+    def test_breakdown_known_zero_aggregates_are_not_null(self):
+        self._seed(known_zero=True)
+        client, _ = self._client(user=self._user("platform_admin"))
+        row = self._project_row(client)
+        self.assertEqual(row["known_total_tokens"], 0)
+        self.assertEqual(row["known_total_changes"], 0)
+
+
+# ---------------------------------------------------------------------------
 # §6.4 worker stats writer + task stats routes
 # ---------------------------------------------------------------------------
 

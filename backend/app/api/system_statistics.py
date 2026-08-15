@@ -349,10 +349,17 @@ def _serialize_breakdown_row(row, *, key: str | None, label: str | None) -> dict
         "cancelled": _int(row.cancelled),
         "success_rate": _ratio(completed, finished),
         "deleted_count": _int(row.deleted_count),
-        "known_total_tokens": _int(row.known_input_tokens) + _int(
-            row.known_output_tokens
+        # NULL when no complete-token / no code-change sample exists in the
+        # group; unknown must stay Unknown (§5.7), not read as an exact 0.
+        # Mirrors the lifetime/trend known_total_tokens serialization so a real
+        # zero stays distinguishable from Unknown across all three endpoints.
+        "known_total_tokens": (
+            _int(row.known_input_tokens) + _int(row.known_output_tokens)
+            if row.known_input_tokens is not None
+            or row.known_output_tokens is not None
+            else None
         ),
-        "known_total_changes": _int(row.known_total_changes),
+        "known_total_changes": _optional_int(row.known_total_changes),
     }
 
 
