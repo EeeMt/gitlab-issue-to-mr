@@ -2,154 +2,109 @@
 
 [中文说明](docs/README.zh-CN.md)
 
-Codify turns your requirements into code. Describe what you need, and Codify handles the rest — generating code in isolated containers, pushing commits, and opening Merge Requests. 
+Codify is a self-hosted platform that turns requirements into code. It puts interactive coding agents — **Claude Code**, with **Codex** wired in and rolling out — behind a web control plane: describe what you need, and Codify runs the agent in an isolated Docker container, commits the changes, pushes a branch, and opens a Merge Request. Schedule tasks for off-peak hours and your compute works around the clock.
 
-Schedule tasks ahead so AI works around the clock, making the most of your time and compute resources. Track everything from a single dashboard.
+At its core, Codify takes an agent CLI (like `claude -p "..."`) and adds everything a one-shot shell process lacks: persistence, scheduling, concurrency control, isolation, observability, and Git delivery.
 
-## Three steps, from idea to MR
+## What problem it solves
 
-1. **Create an issue** — describe the problem and expected outcome
-2. **Launch a task** — run it now, or schedule it for off-peak hours to keep resources busy
-3. **Review the results** — follow status, read logs, inspect the delivery
+| Problem | Codify's answer |
+|---|---|
+| Agents run on your machine with full access | Execution in isolated Docker containers with timeouts, cancellation, and scrubbed secrets |
+| Model keys handed to code-running processes | Credentials encrypted at rest, injected by reference, rotatable without touching running tasks |
+| No memory between runs | Issue-level persistent workspaces and session lineage — resume a conversation, not a cold start |
+| Parallel runs clobber the same code | Tasks on one issue execute in strict order, like commands fed to one long-lived CLI session |
+| Nobody reviews the output | Every task ends in a branch + MR authored as the requester; CI feedback closes the loop |
+| Opaque failures | Canonical events ingested exactly-once, structured logs, downloadable run archives |
+| One worker image for every project | Worker Profiles with shared-config inheritance, frozen into immutable per-task snapshots |
+| No governance | Roles, per-user daily/weekly quotas, admin-monitored system statistics |
 
-## What happens behind the scenes
+## Core concepts
 
-Once a task is launched, Codify will:
+- **Issue** — a persistent requirement container. It owns the workspace, the conversation session, and one branch + MR lifecycle. Tasks execute in strict per-issue sequence, like typing into an interactive terminal session that persists.
+- **Task** — one round of execution (a "turn") in an issue's ordered stream. Priority (P0/P1/P2) and scheduled time arbitrate *between* issues only — never reorder a single issue's turns.
+- **Harness** — the coding agent CLI. Each harness has an adapter, a wire protocol (anthropic-messages / openai-responses), and a capability policy. Claude Code is active today; the Codex adapter is first-class in the runtime manifest and rolling out.
+- **Worker Profile → Task Snapshot → Runtime Bundle** — admin-maintained profiles (image, mounts, env, skills, harness constraints, run-instruction templates) resolve at task creation into an immutable snapshot, bound to a content-addressed (sha256) runtime bundle. Retries reuse the frozen bundle — nothing changes under a running task.
 
-1. Queue it by priority and scheduled time, respecting concurrency limits
-2. Spin up a dedicated Docker container
-3. Clone the repo and run Claude CLI to generate code
-4. Commit, push to a new branch, and create or update a Merge Request
-5. Log every step so you can trace what happened
+## Features
 
-## Application feature overview
+**Run & schedule**
 
+- Priority queue (P0/P1/P2), scheduled runs, global concurrency limit, per-issue mutex
+- Slot-capacity heatmap when picking a schedule window
+- Execute and plan task modes; run-instruction templates with live preview
+- Run now, cancel, retry (reuses frozen snapshot and session lineage), scheduled retry, reschedule, force-complete/force-fail with reason, download run archive
 
-https://github.com/user-attachments/assets/08dd2ed5-12aa-4e82-97c0-695baeb527c9
+**Observe & trace**
 
+- Live structured process log and raw container log (ANSI, emoji), auto-refreshing
+- Token usage, code change stats, MR link on every task
+- Delivery summary rendered as Markdown + Mermaid diagrams
+- Monitor page: queue kanban, execution timeline, health checks (backlog, orphan containers, failures)
 
-## Key components
+**Deliver & close the loop**
 
-- `backend/app/api/tasks.py` — task APIs and queue views
-- `backend/app/api/issues.py` — issue management APIs
-- `backend/app/core/worker.py` — task execution and MR updates
-- `backend/app/scheduler.py` — priority scheduling and crash recovery
-- `backend/app/api/config.py` — runtime and auth configuration
-- `frontend/src/views/` — dashboard pages
-- `deploy/` — Dockerfiles, compose deployment, worker entrypoint
+- Commit → push → MR per issue, authored as the requester (GitLab sudo), tagged with Codify labels
+- MR merged → issue auto-closed; issue closed → branch auto-deleted
+- CI pipeline failure → auto-created repair task (opt-in per issue)
 
-## Dashboard at a glance
+**Admin platform**
 
-| Page | Purpose |
-|------|---------|
-| **Workspace** | |
-| Dashboard | Overview, heatmap, trends |
-| Issues | Issue list and detail |
-| &ensp;↳ Create issue | Describe goals with prompt templates |
-| Tasks | Task list and detail with live logs |
-| &ensp;↳ Create task | Manually configure and launch a task |
-| Sessions | View and manage login sessions |
-| **Insights** | |
-| Analytics | Execution trends and success rates |
-| Schedule overview | Queue and scheduling status |
-| Monitor | Runtime status and health checks |
-| **Administration** | |
-| Access management | Users and permissions |
-| Configuration | Runtime parameters and integrations |
-| &ensp;↳ OIDC diagnostics | Debug SSO login issues |
+- Worker Profiles with shared-config inheritance (overlays, masks, per-key merge) and a runtime readiness gate
+- AI Providers per protocol with credential rotation and retirement
+- Prompt templates, global Skills catalog (zip upload), Mattermost notifications, announcement banner, webhook event log
+- Usage quotas (daily/weekly token + task limits), role management (platform_admin / platform_user), GitLab OIDC with diagnostics
+- System lifecycle statistics that survive data cleanup (delete-time archives), maintenance data cleanup
+- Local accounts + GitLab OIDC, session management, break-glass login
+
+## Architecture
+
+Four services under docker-compose: **backend** (FastAPI + async SQLAlchemy), **scheduler** (same image; DB-backed queue state machine `PENDING → QUEUED → RUNNING`), **nginx** (frontend + `/api` proxy), **postgres**. Each task runs in its own container named `codify-{task_id}-p{project_id}-i{issue_iid}` on a configurable Docker host.
+
+A task's life:
+
+1. **Create** — quota check, issue sequence allocated, session lineage projected, worker snapshot frozen, immutable runtime bundle bound
+2. **Queue** — the scheduler promotes only each unlocked issue's due head to `QUEUED`
+3. **Claim** — atomic transaction: issue lock + sequence check + CAS `QUEUED → RUNNING`, then a container starts
+4. **Run** — the container loads the frozen bundle and snapshot, launches the harness; canonical events stream back and are ingested exactly-once
+5. **Deliver** — commit/push to the issue branch; MR created/updated with the run summary
+6. **Terminate** — `COMPLETED` / `FAILED` / `CANCELLED`; the issue lock is released; scheduler crash recovery reconciles any state after a restart
 
 ## Quick start
 
-### What you need
+**Prerequisites:** Docker + Docker Compose, a reachable GitLab instance, and a Claude API-compatible model endpoint.
 
-- Docker and Docker Compose
-- A reachable GitLab instance
-- A Claude CLI-compatible model endpoint
-
-### 1. Configure
-
-`deploy/docker-compose.yml` reads from `deploy/.env.test`. At minimum, set:
-
-- `GITLAB_URL`
-- `GITLAB_BOT_TOKEN`
-- `ANTHROPIC_API_KEY`
-
-Good to know:
-
-- Runtime overrides are persisted in PostgreSQL `system_config`
-- Secrets entered in the dashboard are stored encrypted at rest
-- If the PostgreSQL volume is removed, runtime config, users, sessions, and auth state are lost
-
-### 2. Start the stack
+`deploy/docker-compose.yml` reads from `deploy/.env.test`. At minimum, set `GITLAB_URL`, `GITLAB_BOT_TOKEN`, and `ANTHROPIC_API_KEY`. Runtime overrides are persisted in PostgreSQL `system_config`; secrets entered in the dashboard are encrypted at rest.
 
 ```bash
 cd deploy
 docker-compose up -d --build
 ```
 
-Default ports:
-
 - Frontend: `http://localhost:8880`
 - Backend API: `http://localhost:8000`
 
-### 3. Set up login (recommended)
-
-Start with OIDC disabled, make sure everything works, then enable it. See [docs/GITLAB_OIDC_SETUP.md](docs/GITLAB_OIDC_SETUP.md).
-
-Recommended rollout:
-
-1. Deploy with OIDC disabled
-2. Ensure `CONFIG_ENCRYPTION_KEY` is set
-3. Open the dashboard Configuration page
-4. Enter OIDC settings and validate them
-5. Enable OIDC after the checks succeed
+**Login (recommended):** start with OIDC disabled, make sure everything works, then enable it via the dashboard Configuration page. See [docs/GITLAB_OIDC_SETUP.md](docs/GITLAB_OIDC_SETUP.md).
 
 ## Common commands
 
-Run `make help` to see all available commands. Key commands:
+Run `make help` for the full list. Key targets:
 
 ```bash
-# Development
-make up                     # Start development environment
-make build                  # Build all images
-make logs                   # View logs
-make ps                     # Show running containers
-
-# Testing
-make test-unit              # Run unit tests (with coverage)
-make test-all               # Run all tests (unit + E2E)
-make test-e2e              # Run all E2E tests (Playwright + GitLab)
-
-# Rebuild specific service
-make rebuild-backend        # Rebuild backend image
-make rebuild-nginx          # Rebuild frontend image
-make rebuild-worker         # Rebuild worker image
+make up / down / logs / ps      # development environment
+make rebuild-backend            # rebuild backend image (required after worker-script changes)
+make test-unit                  # backend + frontend + mock-e2e unit suites
+make test-mock-integration      # full lifecycle in Docker (mock GitLab + fake harness)
+make test-e2e                   # all E2E: Playwright + GitLab
+make lint                       # backend ruff
 ```
-
-## Usage
-
-The workflow lives entirely in the dashboard:
-
-1. **Create an issue** — explain the problem, expected outcome, and constraints
-2. **Launch a task** — run immediately or schedule for later
-3. **Review the results** — track status, read logs, and check the MR
-
-## Operational notes
-
-- `backend` and `scheduler` share the same image in `deploy/docker-compose.yml`
-- `backend` and `scheduler` both run with `AUTO_MIGRATE=true`
-- Dashboard configuration route: `/configuration`
-- Project/task visibility is filtered by GitLab access rules for authenticated users
 
 ## Related docs
 
-- [docs/README.md](docs/README.md)
-- [docs/README.zh-CN.md](docs/README.zh-CN.md)
-- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
-- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
-- [docs/GITLAB_OIDC_SETUP.md](docs/GITLAB_OIDC_SETUP.md)
-- [docs/E2E_TESTS.md](docs/E2E_TESTS.md)
-- [deploy/offline-bundle/README.md](deploy/offline-bundle/README.md)
+- [docs/README.md](docs/README.md) — full doc index
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) · [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) · [docs/E2E_TESTS.md](docs/E2E_TESTS.md)
+- [docs/README.zh-CN.md](docs/README.zh-CN.md) — 中文入门与使用指南
+- [deploy/offline-bundle/README.md](deploy/offline-bundle/README.md) — offline deployment kit
 
 ## License
 
