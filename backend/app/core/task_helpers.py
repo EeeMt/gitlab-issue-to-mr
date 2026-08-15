@@ -4,7 +4,7 @@ import logging
 from typing import Any
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -239,7 +239,13 @@ async def maybe_update_issue_status(db: AsyncSession, issue_id: int) -> None:
             select(func.count(Task.id)).where(
                 Task.issue_id == issue_id,
                 Task.status == TaskStatus.COMPLETED,
-                Task.task_mode != "plan",  # plan tasks do not constitute code delivery
+                or_(
+                    Task.task_mode == "execute",
+                    and_(
+                        Task.task_mode == "freeform",
+                        Task.commit_sha.is_not(None),
+                    ),
+                ),  # freeform tasks only count as code delivery when a commit was pushed
             )
         )
         if completed_count_result.scalar() > 0:

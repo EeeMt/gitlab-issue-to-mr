@@ -2774,3 +2774,165 @@ class RetryTaskFreeformTests(unittest.TestCase):
         created_task = _added_task(mock_db)
         self.assertEqual(created_task.task_mode, "freeform")
         self.assertIs(created_task.require_changes, False)
+
+
+# ---------------------------------------------------------------------------
+# maybe_update_issue_status — freeform delivery eligibility
+# ---------------------------------------------------------------------------
+
+
+class IssueStatusAutoTransitionTests(unittest.IsolatedAsyncioTestCase):
+    """Auto-transition must treat a freeform task as code delivery only when it
+    produced a commit (commit_sha IS NOT NULL); execute is always eligible."""
+
+    async def asyncSetUp(self):
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+        from sqlalchemy.pool import StaticPool
+
+        from app.models import Base
+
+        self.engine = create_async_engine(
+            "sqlite+aiosqlite:///:memory:",
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+        )
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        self.Session = async_sessionmaker(self.engine, expire_on_commit=False)
+
+    async def asyncTearDown(self):
+        await self.engine.dispose()
+
+    async def _seed_issue(self, session, *, status: str = "in_progress"):
+        from app.models import Issue, WorkerProfile
+
+        session.add(
+            WorkerProfile(
+                id=1,
+                name="Default",
+                enabled=True,
+                is_default=False,
+                image="codify-worker:test",
+                volume_mounts=[],
+                volume_mount_masks=[],
+                enabled_harnesses=["claude"],
+            )
+        )
+        issue = Issue(
+            id=1,
+            title="Auto-transition test",
+            project_id=42,
+            status=status,
+            worker_profile_id=1,
+            initiator_user_id=9,
+            initiator_username="alice",
+        )
+        session.add(issue)
+        return issue
+
+    def _task(
+        self,
+        task_id: int,
+        *,
+        mode: str,
+        status: TaskStatus = TaskStatus.COMPLETED,
+        commit_sha: str | None = None,
+    ) -> Task:
+        return Task(
+            id=task_id,
+            issue_id=1,
+            project_id=42,
+            user_prompt=f"Task {task_id}",
+            status=status,
+            priority=1,
+            task_mode=mode,
+            commit_sha=commit_sha,
+        )
+
+    async def _issue_status(self, session, issue_id: int = 1) -> str | None:
+        from app.models import Issue
+
+        issue = await session.get(Issue, issue_id)
+        return issue.status if issue else None
+
+    async def test_only_no_commit_freeform_goes_open(self):
+        from app.core.task_helpers import maybe_update_issue_status
+
+        async with self.Session() as session:
+            await self._seed_issue(session)
+            session.add(self._task(10, mode="freeform", commit_sha=None))
+            await session.commit()
+
+            await maybe_update_issue_status(session, 1)
+
+            self.assertEqual(await self._issue_status(session), "open")
+
+    async def test_committed_freeform_goes_in_review(self):
+        from app.core.task_helpers import maybe_update_issue_status
+
+        async with self.Session() as session:
+            await self._seed_issue(session)
+            session.add(self._task(10, mode="freeform", commit_sha="abc123"))
+            await session.commit()
+
+            await maybe_update_issue_status(session, 1)
+
+            self.assertEqual(await self._issue_status(session), "in_review")
+
+    async def test_prior_execute_keeps_in_review_despite_no_commit_freeform(self):
+        from app.core.task_helpers import maybe_update_issue_status
+
+        async with self.Session() as session:
+            await self._seed_issue(session)
+            session.add_all(
+                [
+                    self._task(10, mode="execute", commit_sha="sha1"),
+                    self._task(11, mode="freeform", commit_sha=None),
+                ]
+            )
+            await session.commit()
+
+            await maybe_update_issue_status(session, 1)
+
+            self.assertEqual(await self._issue_status(session), "in_review")
+
+    async def test_execute_without_commit_still_goes_in_review(self):
+        from app.core.task_helpers import maybe_update_issue_status
+
+        async with self.Session() as session:
+            await self._seed_issue(session)
+            session.add(self._task(10, mode="execute", commit_sha=None))
+            await session.commit()
+
+            await maybe_update_issue_status(session, 1)
+
+            self.assertEqual(await self._issue_status(session), "in_review")
+
+    async def test_only_plan_or_all_failed_goes_open(self):
+        from app.core.task_helpers import maybe_update_issue_status
+
+        async with self.Session() as session:
+            await self._seed_issue(session)
+            session.add_all(
+                [
+                    self._task(10, mode="plan"),
+                    self._task(11, mode="execute", status=TaskStatus.FAILED),
+                ]
+            )
+            await session.commit()
+
+            await maybe_update_issue_status(session, 1)
+
+            self.assertEqual(await self._issue_status(session), "open")
+
+    async def test_active_task_prevents_premature_transition(self):
+        from app.core.task_helpers import maybe_update_issue_status
+
+        async with self.Session() as session:
+            await self._seed_issue(session)
+            session.add(self._task(10, mode="execute", status=TaskStatus.RUNNING))
+            await session.commit()
+
+            await maybe_update_issue_status(session, 1)
+
+            self.assertEqual(await self._issue_status(session), "in_progress")

@@ -11,7 +11,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_effective_settings
@@ -251,7 +251,13 @@ async def _count_ci_auto_repair_attempts(db: AsyncSession, issue_id: int) -> tup
             .where(
                 Task.issue_id == issue_id,
                 Task.trigger_source == "manual",
-                Task.task_mode == "execute",
+                or_(
+                    Task.task_mode == "execute",
+                    and_(
+                        Task.task_mode == "freeform",
+                        Task.commit_sha.is_not(None),
+                    ),
+                ),
                 Task.status == TaskStatus.COMPLETED,
                 Task.completed_at.is_not(None),
             )
@@ -379,7 +385,7 @@ async def process_ci_failure_run(
             await db.execute(
                 select(Task).where(
                     Task.issue_id == issue.id,
-                    Task.task_mode == "execute",
+                    Task.task_mode.in_(["execute", "freeform"]),
                     Task.status.in_([TaskStatus.PENDING, TaskStatus.QUEUED, TaskStatus.RUNNING]),
                 )
             )
@@ -617,7 +623,13 @@ async def process_ci_failure_run(
                 select(Task)
                 .where(
                     Task.issue_id == issue.id,
-                    Task.task_mode == "execute",
+                    or_(
+                        Task.task_mode == "execute",
+                        and_(
+                            Task.task_mode == "freeform",
+                            Task.commit_sha.is_not(None),
+                        ),
+                    ),
                     Task.status == TaskStatus.COMPLETED,
                 )
                 .order_by(Task.completed_at.desc().nullslast(), Task.created_at.desc())

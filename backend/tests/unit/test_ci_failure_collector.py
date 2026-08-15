@@ -839,3 +839,293 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(refreshed.ignored_reason, "infra_failure_detected")
             tasks = (await session.execute(select(Task).where(Task.trigger_source == "ci_auto_repair"))).scalars().all()
             self.assertEqual(tasks, [])
+
+    async def test_successful_manual_freeform_with_commit_resets_ci_auto_repair_attempt_budget(self):
+        from app.core.ci_failure_collector import process_ci_failure_run
+
+        jobs, traces = self._code_failure_jobs()
+        async with self.Session() as session:
+            _, run = await self._seed_issue_and_run(session, enabled=True)
+            session.add_all(
+                [
+                    self._prior_ci_repair_task(11, datetime(2026, 6, 17, 10, 0, 0)),
+                    self._prior_ci_repair_task(12, datetime(2026, 6, 17, 10, 1, 0)),
+                    Task(
+                        id=13,
+                        issue_id=1,
+                        project_id=42,
+                        user_prompt="Manual freeform with commit",
+                        status=TaskStatus.COMPLETED,
+                        priority=1,
+                        task_mode="freeform",
+                        commit_sha="abc123def",
+                        trigger_source="manual",
+                        created_at=datetime(2026, 6, 17, 10, 2, 0),
+                        completed_at=datetime(2026, 6, 17, 10, 5, 0),
+                    ),
+                ]
+            )
+            await session.commit()
+
+            with patch(
+                "app.core.ci_failure_collector.get_project_metadata",
+                new_callable=AsyncMock,
+                return_value={"project_name": "test-project", "project_path_with_namespace": "group/test-project"},
+            ):
+                await process_ci_failure_run(
+                    session,
+                    run.id,
+                    gitlab_client=FakeGitLabClient(jobs=jobs, traces=traces),
+                    settings=self._settings(ci_auto_repair_max_attempts=2),
+                    collector_id="test",
+                )
+
+            refreshed = await session.get(CIFailureRun, run.id)
+            self.assertEqual(refreshed.status, "task_created")
+            self.assertIsNotNone(refreshed.repair_task_id)
+
+            logs = (
+                await session.execute(
+                    select(CIFailureRunLog).where(CIFailureRunLog.step == "auto_repair_gate_checked")
+                )
+            ).scalars().all()
+            self.assertEqual(logs[-1].status, "succeeded")
+            self.assertEqual(logs[-1].details["attempts"], 0)
+            self.assertEqual(logs[-1].details["reset_after_task_id"], 13)
+
+    async def test_successful_manual_freeform_without_commit_does_not_reset_ci_auto_repair_attempt_budget(self):
+        from app.core.ci_failure_collector import process_ci_failure_run
+
+        async with self.Session() as session:
+            _, run = await self._seed_issue_and_run(session, enabled=True)
+            session.add_all(
+                [
+                    self._prior_ci_repair_task(11, datetime(2026, 6, 17, 10, 0, 0)),
+                    self._prior_ci_repair_task(12, datetime(2026, 6, 17, 10, 1, 0)),
+                    Task(
+                        id=13,
+                        issue_id=1,
+                        project_id=42,
+                        user_prompt="Manual freeform without commit",
+                        status=TaskStatus.COMPLETED,
+                        priority=1,
+                        task_mode="freeform",
+                        commit_sha=None,
+                        trigger_source="manual",
+                        created_at=datetime(2026, 6, 17, 10, 2, 0),
+                        completed_at=datetime(2026, 6, 17, 10, 5, 0),
+                    ),
+                ]
+            )
+            await session.commit()
+
+            await process_ci_failure_run(
+                session,
+                run.id,
+                gitlab_client=FakeGitLabClient(),
+                settings=self._settings(ci_auto_repair_max_attempts=2),
+                collector_id="test",
+            )
+
+            refreshed = await session.get(CIFailureRun, run.id)
+            self.assertEqual(refreshed.status, "ignored")
+            self.assertEqual(refreshed.ignored_reason, "max_attempts_exceeded")
+
+            logs = (
+                await session.execute(
+                    select(CIFailureRunLog).where(CIFailureRunLog.step == "auto_repair_gate_checked")
+                )
+            ).scalars().all()
+            self.assertEqual(logs[-1].details["attempts"], 2)
+            self.assertNotIn("reset_after_task_id", logs[-1].details)
+
+    async def test_active_freeform_task_blocks_ci_auto_repair(self):
+        from app.core.ci_failure_collector import process_ci_failure_run
+
+        async with self.Session() as session:
+            _, run = await self._seed_issue_and_run(session, enabled=True)
+            session.add(
+                Task(
+                    id=13,
+                    issue_id=1,
+                    project_id=42,
+                    user_prompt="Freeform running",
+                    status=TaskStatus.RUNNING,
+                    priority=1,
+                    task_mode="freeform",
+                    trigger_source="manual",
+                )
+            )
+            await session.commit()
+
+            await process_ci_failure_run(
+                session,
+                run.id,
+                gitlab_client=FakeGitLabClient(),
+                settings=self._settings(),
+                collector_id="test",
+            )
+
+            refreshed = await session.get(CIFailureRun, run.id)
+            self.assertEqual(refreshed.status, "ignored")
+            self.assertEqual(refreshed.ignored_reason, "active_execute_task_exists")
+            tasks = (await session.execute(select(Task).where(Task.trigger_source == "ci_auto_repair"))).scalars().all()
+            self.assertEqual(tasks, [])
+
+    async def test_active_plan_task_does_not_block_ci_auto_repair(self):
+        from app.core.ci_failure_collector import process_ci_failure_run
+        from app.core.model_endpoints import normalize_endpoint
+        from app.models import TaskWorkerProfileSnapshot
+
+        jobs, traces = self._code_failure_jobs()
+        async with self.Session() as session:
+            session.add_all([self._provider(3), self._worker_profile(2)])
+            issue = Issue(
+                id=1,
+                title="Repair CI",
+                project_id=42,
+                status="in_review",
+                branch_name="codify/issue-1",
+                target_branch="main",
+                merge_request_iid=7,
+                ci_auto_repair_enabled=True,
+                worker_profile_id=2,
+                default_provider_id=3,
+                initiator_user_id=9,
+                initiator_username="alice",
+            )
+            session.add(issue)
+            plan_task = Task(
+                id=13,
+                issue_id=1,
+                project_id=42,
+                user_prompt="Plan running",
+                status=TaskStatus.RUNNING,
+                priority=1,
+                task_mode="plan",
+                trigger_source="manual",
+            )
+            session.add(plan_task)
+            session.add(
+                TaskWorkerProfileSnapshot(
+                    task_id=13,
+                    worker_profile_id=2,
+                    profile_name="Worker 2",
+                    image="codify-worker:test",
+                    default_execute_run_instruction_template="Execute {{user_prompt}}",
+                    default_plan_run_instruction_template="Plan {{user_prompt}}",
+                    ci_auto_repair_run_instruction_template="Repair {{user_prompt}}",
+                    harness_key="claude",
+                    model_endpoint_snapshot=normalize_endpoint(self._provider(3)).as_snapshot(),
+                )
+            )
+            run = CIFailureRun(
+                id=91,
+                project_id=42,
+                merge_request_iid=7,
+                pipeline_id=678,
+                pipeline_sha="abc123",
+                pipeline_ref="codify/issue-1",
+                pipeline_status="failed",
+                pipeline_url="https://gitlab.example.com/group/project/-/pipelines/678",
+                status="collecting",
+            )
+            session.add(run)
+            await session.commit()
+
+            with patch(
+                "app.core.ci_failure_collector.get_project_metadata",
+                new_callable=AsyncMock,
+                return_value={"project_name": "test-project", "project_path_with_namespace": "group/test-project"},
+            ):
+                await process_ci_failure_run(
+                    session,
+                    run.id,
+                    gitlab_client=FakeGitLabClient(jobs=jobs, traces=traces),
+                    settings=self._settings(),
+                    collector_id="test",
+                )
+
+            refreshed = await session.get(CIFailureRun, run.id)
+            self.assertEqual(refreshed.status, "task_created")
+            self.assertIsNotNone(refreshed.repair_task_id)
+
+    async def test_no_commit_freeform_does_not_shadow_previous_eligible_priority(self):
+        from app.core.ci_failure_collector import process_ci_failure_run
+
+        jobs, traces = self._code_failure_jobs()
+        async with self.Session() as session:
+            _, run = await self._seed_issue_and_run(session, enabled=True)
+            session.add(
+                Task(
+                    id=11,
+                    issue_id=1,
+                    project_id=42,
+                    user_prompt="Freeform without commit",
+                    status=TaskStatus.COMPLETED,
+                    priority=99,
+                    task_mode="freeform",
+                    commit_sha=None,
+                    trigger_source="manual",
+                    created_at=datetime(2026, 6, 17, 10, 2, 0),
+                    completed_at=datetime(2026, 6, 17, 10, 5, 0),
+                )
+            )
+            await session.commit()
+
+            with patch(
+                "app.core.ci_failure_collector.get_project_metadata",
+                new_callable=AsyncMock,
+                return_value={"project_name": "test-project", "project_path_with_namespace": "group/test-project"},
+            ):
+                await process_ci_failure_run(
+                    session,
+                    run.id,
+                    gitlab_client=FakeGitLabClient(jobs=jobs, traces=traces),
+                    settings=self._settings(),
+                    collector_id="test",
+                )
+
+            refreshed = await session.get(CIFailureRun, run.id)
+            repair_task = await session.get(Task, refreshed.repair_task_id)
+            self.assertEqual(repair_task.priority, 1)
+
+    async def test_committed_freeform_qualifies_for_latest_task_priority(self):
+        from app.core.ci_failure_collector import process_ci_failure_run
+
+        jobs, traces = self._code_failure_jobs()
+        async with self.Session() as session:
+            _, run = await self._seed_issue_and_run(session, enabled=True)
+            session.add(
+                Task(
+                    id=11,
+                    issue_id=1,
+                    project_id=42,
+                    user_prompt="Committed freeform",
+                    status=TaskStatus.COMPLETED,
+                    priority=50,
+                    task_mode="freeform",
+                    commit_sha="abc123def",
+                    trigger_source="manual",
+                    created_at=datetime(2026, 6, 17, 10, 2, 0),
+                    completed_at=datetime(2026, 6, 17, 10, 5, 0),
+                )
+            )
+            await session.commit()
+
+            with patch(
+                "app.core.ci_failure_collector.get_project_metadata",
+                new_callable=AsyncMock,
+                return_value={"project_name": "test-project", "project_path_with_namespace": "group/test-project"},
+            ):
+                await process_ci_failure_run(
+                    session,
+                    run.id,
+                    gitlab_client=FakeGitLabClient(jobs=jobs, traces=traces),
+                    settings=self._settings(),
+                    collector_id="test",
+                )
+
+            refreshed = await session.get(CIFailureRun, run.id)
+            repair_task = await session.get(Task, refreshed.repair_task_id)
+            self.assertEqual(repair_task.priority, 50)
