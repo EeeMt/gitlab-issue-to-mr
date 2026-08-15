@@ -11,7 +11,7 @@ from app.core.skills import (
     resolve_task_skill_snapshots,
     validate_runtime_supports_skills,
 )
-from app.core.task_prompt import render_and_store_task_prompt
+from app.core.task_prompt import render_and_store_task_prompt, resolve_task_mode_template
 from app.core.worker_profiles import (
     replace_task_worker_snapshot,
     select_snapshot_run_instruction_template,
@@ -85,12 +85,18 @@ async def prepare_task_runtime_snapshot(
         snapshot
     )
     task.worker_profile_snapshot = snapshot
-    template = run_instruction_template
-    if template is None:
-        template = select_template(
-            snapshot,
-            task_mode=task.task_mode or "execute",
-            trigger_source=template_trigger_source or task.trigger_source or "manual",
-        )
+    template = resolve_task_mode_template(
+        task_mode=task.task_mode or "execute",
+        submitted_template=run_instruction_template,
+        default_template=(
+            select_template(
+                snapshot,
+                task_mode=task.task_mode or "execute",
+                trigger_source=template_trigger_source or task.trigger_source or "manual",
+            )
+            if run_instruction_template is None
+            else None
+        ),
+    )
     render_prompt(task, issue, project_metadata, template)
     return snapshot

@@ -80,12 +80,14 @@ from app.core.projects import build_project_lookup, get_project_metadata
 from app.core.task_creation import prepare_task_runtime_snapshot
 from app.core.task_failure_summary import load_task_failure_summary
 from app.core.task_prompt import (
+    FREEFORM_RUN_INSTRUCTION_TEMPLATE,
     NORMAL_PLACEHOLDER_NAMES,
     PLACEHOLDER_NAMES,
     TaskPromptValidationError,
     build_task_prompt_context,
     render_and_store_task_prompt,
     render_run_instruction_template,
+    resolve_task_mode_template,
 )
 from app.core.usage_limits import (
     get_usage_quota_service,
@@ -423,6 +425,11 @@ async def get_run_instruction_template_defaults(
             "available_placeholders": placeholders,
             "known_placeholders": list(PLACEHOLDER_NAMES),
         },
+        "freeform": {
+            "content": FREEFORM_RUN_INSTRUCTION_TEMPLATE,
+            "available_placeholders": ["user_prompt"],
+            "known_placeholders": list(PLACEHOLDER_NAMES),
+        },
     }
 
 
@@ -446,12 +453,19 @@ async def preview_run_instruction_template(
         project_id=issue.project_id,
         user_prompt=request.user_prompt,
         task_mode=request.task_mode,
-        require_changes=False if request.task_mode == "plan" else request.require_changes,
+        require_changes=(
+            False if request.task_mode in ("plan", "freeform") else request.require_changes
+        ),
         trigger_source="manual",
     )
     try:
+        template = resolve_task_mode_template(
+            task_mode=request.task_mode,
+            submitted_template=request.run_instruction_template,
+            default_template=None,
+        )
         result = render_run_instruction_template(
-            request.run_instruction_template,
+            template,
             build_task_prompt_context(
                 prospective_task,
                 issue,

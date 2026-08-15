@@ -338,6 +338,53 @@ def test_task_response_preserves_required_frontend_fields() -> None:
     ]
 
 
+def test_task_response_serializes_real_freeform_mode() -> None:
+    now = datetime(2026, 7, 4, 10, 0, 0)
+    task = Task(
+        id=13,
+        issue_id=7,
+        project_id=3,
+        user_prompt="Just answer",
+        status=TaskStatus.PENDING,
+        priority=1,
+        is_retry=False,
+        retry_source_task_id=None,
+        trigger_source="manual",
+        ci_failure_run_id=None,
+        scheduled_at=None,
+        container_id=None,
+        commit_sha=None,
+        error_message=None,
+        additions=0,
+        deletions=0,
+        total_changes=0,
+        input_tokens=None,
+        output_tokens=None,
+        model_name=None,
+        commit_message=None,
+        require_changes=False,
+        task_mode="freeform",
+        session_mode="continue",
+        input_session_id=None,
+        output_session_id=None,
+        provider_id=None,
+        worker_profile_id=None,
+        created_at=now,
+        updated_at=now,
+        started_at=None,
+        completed_at=None,
+        is_manually_overridden=False,
+        override_reason=None,
+    )
+    response = _serialize_task(
+        task,
+        {},
+        SimpleNamespace(gitlab_url="https://gitlab.example.com"),
+    )
+    assert response["task_mode"] == "freeform"
+    assert response["require_changes"] is False
+
+
 def test_model_service_summary_exposes_runtime_config_without_api_key() -> None:
     task = SimpleNamespace(
         provider_id=7,

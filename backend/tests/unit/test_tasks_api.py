@@ -1773,6 +1773,156 @@ class CreateTaskAPITests(unittest.TestCase):
         created_task = mock_db.add.call_args_list[0].args[0]
         self.assertEqual(created_task.session_mode, "fresh")
 
+    def test_create_freeform_task_success(self):
+        """POST /api/tasks with task_mode=freeform enforces canonical invariants."""
+        from app.database import get_db
+        from app.dependencies.auth import get_optional_current_user, require_authenticated_user
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
+
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        async def fake_refresh(task, attribute_names=None):
+            if isinstance(task, TaskWorkerProfileSnapshot):
+                return
+            task.id = 99
+            if task.status is None:
+                task.status = TaskStatus.PENDING
+            if task.created_at is None:
+                task.created_at = datetime(2024, 1, 1, 12, 0, 0)
+            if task.updated_at is None:
+                task.updated_at = datetime(2024, 1, 1, 12, 0, 0)
+
+        mock_db = MagicMock()
+        mock_db.add = MagicMock()
+        mock_db.commit = AsyncMock()
+        mock_db.flush = AsyncMock()
+        mock_db.refresh = AsyncMock(side_effect=fake_refresh)
+        mock_db.execute = AsyncMock(return_value=_make_scalars_all_result([]))
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[get_optional_current_user] = lambda: None
+        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
+
+        mock_issue = MagicMock()
+        mock_issue.id = 1
+        mock_issue.project_id = 1
+        mock_issue.description = "Fix the login bug"
+        mock_db.get = AsyncMock(return_value=mock_issue)
+
+        client = TestClient(app, raise_server_exceptions=False)
+        with (
+            patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
+            patch(
+                "app.api.tasks.resolve_worker_profile_for_issue",
+                new=AsyncMock(return_value=_make_mock_worker_profile()),
+            ),
+            patch(
+                "app.api.tasks.resolve_provider_for_issue",
+                new=AsyncMock(return_value=_make_mock_provider(id=1)),
+            ),
+            patch(
+                "app.api.tasks.replace_task_worker_snapshot",
+                new=AsyncMock(return_value=_make_worker_snapshot(task_id=99)),
+            ),
+        ):
+            response = client.post(
+                "/api/tasks",
+                json={
+                    "issue_id": 1,
+                    "user_prompt": "Just tell me the answer",
+                    "priority": 0,
+                    "provider_id": 1,
+                    "session_mode": "fresh",
+                    "task_mode": "freeform",
+                    "require_changes": True,
+                },
+            )
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["task_mode"], "freeform")
+        self.assertIs(data["require_changes"], False)
+        self.assertEqual(data["run_instruction_template"], "{{user_prompt}}")
+        self.assertEqual(data["rendered_prompt"], "Just tell me the answer")
+        created_task = mock_db.add.call_args_list[0].args[0]
+        self.assertEqual(created_task.task_mode, "freeform")
+        self.assertIs(created_task.require_changes, False)
+        self.assertEqual(created_task.run_instruction_template, "{{user_prompt}}")
+
+    def test_create_freeform_rejects_non_canonical_template(self):
+        """POST /api/tasks with a non-canonical freeform template returns a stable 422."""
+        from app.database import get_db
+        from app.dependencies.auth import get_optional_current_user, require_authenticated_user
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
+
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        async def override_db():
+            yield mock_db
+
+        mock_db = MagicMock()
+        mock_db.add = MagicMock()
+        mock_db.commit = AsyncMock()
+        mock_db.flush = AsyncMock()
+        mock_db.refresh = AsyncMock()
+        mock_db.rollback = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=_make_scalars_all_result([]))
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[get_optional_current_user] = lambda: None
+        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
+
+        mock_issue = MagicMock()
+        mock_issue.id = 1
+        mock_issue.project_id = 1
+        mock_issue.description = "Fix the login bug"
+        mock_db.get = AsyncMock(return_value=mock_issue)
+
+        client = TestClient(app, raise_server_exceptions=False)
+        with (
+            patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
+            patch(
+                "app.api.tasks.resolve_worker_profile_for_issue",
+                new=AsyncMock(return_value=_make_mock_worker_profile()),
+            ),
+            patch(
+                "app.api.tasks.resolve_provider_for_issue",
+                new=AsyncMock(return_value=_make_mock_provider(id=1)),
+            ),
+            patch(
+                "app.api.tasks.replace_task_worker_snapshot",
+                new=AsyncMock(return_value=_make_worker_snapshot(task_id=99)),
+            ),
+        ):
+            response = client.post(
+                "/api/tasks",
+                json={
+                    "issue_id": 1,
+                    "user_prompt": "Just tell me the answer",
+                    "priority": 0,
+                    "provider_id": 1,
+                    "session_mode": "fresh",
+                    "task_mode": "freeform",
+                    "run_instruction_template": "Must change: {{user_prompt}}",
+                },
+            )
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.json()["detail"],
+            "freeform mode only accepts the canonical user-prompt template",
+        )
+        mock_db.commit.assert_not_awaited()
+
     def test_create_task_returns_409_when_usage_limit_exceeded(self):
         """POST /api/tasks returns structured 409 when quota is already exceeded."""
         from app.core.usage_limits import UsageLimitExceeded

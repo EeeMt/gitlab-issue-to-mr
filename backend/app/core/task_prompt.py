@@ -84,6 +84,12 @@ BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE = """请直接修复「{{issue_
 # persisted template is always exactly the raw user prompt.
 FREEFORM_RUN_INSTRUCTION_TEMPLATE = "{{user_prompt}}"
 
+# Stable HTTP detail used when a freeform request submits any template other
+# than the canonical user-prompt template.
+FREEFORM_TEMPLATE_VALIDATION_DETAIL = (
+    "freeform mode only accepts the canonical user-prompt template"
+)
+
 PLACEHOLDER_NAMES = (
     "user_prompt",
     "issue_title",
@@ -145,6 +151,38 @@ def validate_run_instruction_template(template: str) -> str:
     if unknown:
         raise TaskPromptValidationError(f"unknown placeholder(s): {', '.join(unknown)}")
     return normalized
+
+
+def resolve_task_mode_template(
+    *,
+    task_mode: str,
+    submitted_template: str | None,
+    default_template: str | None,
+) -> str:
+    """Resolve the effective run-instruction template for one task mode.
+
+    freeform always resolves to the canonical user-prompt template and rejects
+    any other explicit template with a stable error, so a "freeform + custom
+    wrapper" payload can never be persisted. execute/plan use the submitted
+    template when provided, otherwise ``default_template``. When the mode needs
+    a template and none is available, raises TaskPromptValidationError.
+
+    Create, Update, and Preview all route their template decisions through this
+    helper so the freeform error semantics stay identical across the API.
+    """
+    if task_mode == "freeform":
+        if submitted_template is not None:
+            normalized = validate_run_instruction_template(submitted_template)
+            if normalized != FREEFORM_RUN_INSTRUCTION_TEMPLATE:
+                raise TaskPromptValidationError(FREEFORM_TEMPLATE_VALIDATION_DETAIL)
+        return FREEFORM_RUN_INSTRUCTION_TEMPLATE
+    if submitted_template is not None:
+        return validate_run_instruction_template(submitted_template)
+    if default_template is None:
+        raise TaskPromptValidationError(
+            "a run instruction template is required for this task mode"
+        )
+    return validate_run_instruction_template(default_template)
 
 
 def render_run_instruction_template(
