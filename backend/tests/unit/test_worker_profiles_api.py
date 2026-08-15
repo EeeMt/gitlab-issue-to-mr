@@ -32,6 +32,7 @@ from app.core.worker_runtime_readiness import (
     RuntimeProbeTransientError,
     RuntimeReadiness,
 )
+from app.core.worker_shared_configuration import WorkerSharedConfigurationContext
 from app.database import get_db
 from app.dependencies.auth import (
     require_admin_user,
@@ -1236,11 +1237,15 @@ def test_admin_worker_profile_list_includes_docker_target():
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[require_authenticated_user] = lambda: SimpleNamespace(id=1)
     app.dependency_overrides[require_admin_user] = lambda: SimpleNamespace(id=1)
-    client = TestClient(app, raise_server_exceptions=False)
-    try:
-        response = client.get("/api/worker-profiles/admin")
-    finally:
-        app.dependency_overrides.clear()
+    with patch(
+        "app.api.worker_profiles.load_shared_configuration",
+        new=AsyncMock(return_value=WorkerSharedConfigurationContext()),
+    ):
+        client = TestClient(app, raise_server_exceptions=False)
+        try:
+            response = client.get("/api/worker-profiles/admin")
+        finally:
+            app.dependency_overrides.clear()
 
     assert response.status_code == 200
     assert response.json()[0]["docker_host"] == "tcp://worker:2376"

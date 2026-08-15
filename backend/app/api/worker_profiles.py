@@ -51,6 +51,7 @@ from app.core.worker_profiles import (
     build_worker_profile_volume_map,
     parse_worker_profile_mounts,
     replace_profile_environment_variables,
+    serialize_profile_environment_variable_for_api,
     serialize_worker_profile_for_api,
     set_default_worker_profile,
     validate_profile_templates,
@@ -64,8 +65,11 @@ from app.core.worker_profiles import (
     list_worker_profiles as list_worker_profiles_domain,
 )
 from app.core.worker_runtime_readiness import (
+    READINESS_UNKNOWN,
     RuntimeProbeTransientError,
     RuntimeReadiness,
+    fingerprint_from_docker_target,
+    read_runtime_readiness,
     run_deterministic_kit_probe,
     runtime_verification_input_digest,
     serialize_runtime_readiness,
@@ -339,10 +343,13 @@ async def list_worker_profiles_for_admin(
     db: AsyncSession = Depends(get_db),
     _admin=Depends(require_admin_user),
 ):
-    """List worker profiles including administrator-only Docker target fields."""
+    """List worker profiles with admin-only Docker target fields and the §16.2
+    overrides/effective/sources/shared_revision/runtime sections."""
     profiles = await list_worker_profiles_domain(db)
+    settings = get_effective_settings()
+    shared = await load_shared_configuration(db)
     return [
-        serialize_worker_profile_for_api(profile, include_docker_target=True)
+        await _admin_profile_payload(db, profile, settings=settings, shared=shared)
         for profile in profiles
     ]
 
@@ -450,6 +457,142 @@ def _verification_digest(
         harness_runtimes=dict(getattr(profile, "harness_runtimes", None) or {}),
         require_skill_support=runtime_uses_skill_capable_worker_kit(runtime),
     )
+
+
+def _profile_scalar_source(profile: Any, field: str) -> str:
+    """Source vocabulary (§7.6) for one Profile scalar.
+
+    ``None`` inherits the shared baseline (``system``); any explicit value,
+    including an explicit empty disable, is a ``profile_override``.
+    """
+    if getattr(profile, field, None) is None:
+        return "system"
+    return "profile_override"
+
+
+async def _profile_api_sections(
+    db: AsyncSession,
+    profile: WorkerProfile,
+    *,
+    settings: Any,
+    shared: Any | None = None,
+) -> dict[str, Any]:
+    """Build the §16.2 overrides/effective/sources/shared_revision/runtime sections.
+
+    ``matches_current_input`` recomputes the §10.2 verification input digest from
+    the current shared baseline + Profile overrides + resolved Docker target and
+    compares it to the stored digest, so a Profile whose verification inputs have
+    changed since the last successful verification reports ``False`` without the
+    client having to diff anything. ``runtime_readiness.status`` is the
+    read-time derived status: an expired ``ready`` row reads as ``unknown``.
+    """
+    shared = shared if shared is not None else await load_shared_configuration(db)
+    try:
+        effective = resolve_effective_configuration(profile, shared)
+        validate_effective_configuration(effective)
+    except WorkerProfileValidationError:
+        effective = None
+
+    kit_source = (
+        str(getattr(profile, "worker_kit_source", WORKER_KIT_SOURCE_PROFILE) or "")
+        .strip()
+        or WORKER_KIT_SOURCE_PROFILE
+    )
+    overrides = {
+        "worker_kit": (
+            None
+            if kit_source == WORKER_KIT_SOURCE_SYSTEM
+            else {
+                "runtime_mode": getattr(profile, "runtime_mode", None),
+                "worker_kit_version": getattr(profile, "worker_kit_version", None),
+                "worker_kit_path": getattr(profile, "worker_kit_path", None),
+            }
+        ),
+        "pre_script": getattr(profile, "pre_script", None),
+        "post_script": getattr(profile, "post_script", None),
+        "volume_mounts": list(getattr(profile, "volume_mounts", None) or []),
+        "masked_volume_mount_paths": list(
+            getattr(profile, "volume_mount_masks", None) or []
+        ),
+        "environment_variables": [
+            serialize_profile_environment_variable_for_api(row)
+            for row in (getattr(profile, "environment_variables", None) or [])
+        ],
+    }
+    effective_section = (
+        {
+            "worker_kit_version": effective.worker_kit_version,
+            "worker_kit_path": effective.worker_kit_path,
+        }
+        if effective is not None
+        else {"worker_kit_version": None, "worker_kit_path": None}
+    )
+    sources = {
+        "worker_kit": (
+            "system" if kit_source == WORKER_KIT_SOURCE_SYSTEM else "profile_override"
+        ),
+        "pre_script": _profile_scalar_source(profile, "pre_script"),
+        "post_script": _profile_scalar_source(profile, "post_script"),
+    }
+
+    stored_digest = getattr(profile, "verified_runtime_configuration_digest", None)
+    matches_current_input = False
+    if effective is not None and stored_digest:
+        try:
+            runtime = _build_verification_runtime(profile, effective, settings)
+            current_digest = _verification_digest(profile, effective, runtime, settings)
+            matches_current_input = current_digest == stored_digest
+        except Exception:  # noqa: BLE001 - unresolvable inputs never match
+            matches_current_input = False
+
+    readiness = RuntimeReadiness(status=READINESS_UNKNOWN)
+    if effective is not None:
+        try:
+            fingerprint = fingerprint_from_docker_target(
+                settings,
+                docker_host=getattr(profile, "docker_host", None),
+                docker_tls_ca=getattr(profile, "docker_tls_ca", None),
+                docker_tls_cert=getattr(profile, "docker_tls_cert", None),
+                docker_tls_key=getattr(profile, "docker_tls_key", None),
+                runtime_mode=effective.runtime_mode,
+                worker_kit_version=effective.worker_kit_version,
+                worker_kit_path=effective.worker_kit_path,
+            )
+            readiness = await read_runtime_readiness(db, fingerprint)
+        except Exception:  # noqa: BLE001 - unresolvable locator is never a known state
+            readiness = RuntimeReadiness(status=READINESS_UNKNOWN)
+
+    return {
+        "overrides": overrides,
+        "effective": effective_section,
+        "sources": sources,
+        "shared_revision": shared.revision,
+        "runtime_verification": {
+            "verified_at": getattr(profile, "verified_at", None),
+            "verified_runtime_configuration_digest": stored_digest,
+            "matches_current_input": matches_current_input,
+        },
+        "runtime_readiness": {
+            "status": readiness.status,
+            "checked_at": readiness.checked_at.isoformat() if readiness.checked_at else None,
+            "ready_until": readiness.ready_until.isoformat() if readiness.ready_until else None,
+        },
+    }
+
+
+async def _admin_profile_payload(
+    db: AsyncSession,
+    profile: WorkerProfile,
+    *,
+    settings: Any,
+    shared: Any | None = None,
+) -> dict[str, Any]:
+    """Admin Profile response: the flat fields plus the §16.2 sections."""
+    payload = serialize_worker_profile_for_api(profile, include_docker_target=True)
+    payload.update(
+        await _profile_api_sections(db, profile, settings=settings, shared=shared)
+    )
+    return payload
 
 
 def _runtime_unavailable_detail(
@@ -776,7 +919,9 @@ async def create_worker_profile(
             profile,
             attribute_names=["environment_variables", "default_skills"],
         )
-        return serialize_worker_profile_for_api(profile, include_docker_target=True)
+        return await _admin_profile_payload(
+            db, profile, settings=get_effective_settings()
+        )
     except HTTPException:
         await _rollback(db)
         raise
@@ -1043,7 +1188,9 @@ async def update_worker_profile(
             profile,
             attribute_names=["environment_variables", "default_skills"],
         )
-        return serialize_worker_profile_for_api(profile, include_docker_target=True)
+        return await _admin_profile_payload(
+            db, profile, settings=get_effective_settings()
+        )
     except HTTPException:
         await _rollback(db)
         raise
@@ -1067,7 +1214,9 @@ async def set_default_worker_profile_endpoint(
             profile,
             attribute_names=["environment_variables", "default_skills"],
         )
-        return serialize_worker_profile_for_api(profile, include_docker_target=True)
+        return await _admin_profile_payload(
+            db, profile, settings=get_effective_settings()
+        )
     except WorkerProfileValidationError as exc:
         await _rollback(db)
         raise _http_profile_error(exc) from exc
@@ -1091,7 +1240,9 @@ async def disable_worker_profile(
             profile,
             attribute_names=["environment_variables", "default_skills"],
         )
-        return serialize_worker_profile_for_api(profile, include_docker_target=True)
+        return await _admin_profile_payload(
+            db, profile, settings=get_effective_settings()
+        )
     except WorkerProfileValidationError as exc:
         await _rollback(db)
         raise _http_profile_error(exc) from exc
@@ -1193,7 +1344,9 @@ async def duplicate_worker_profile(
         db.add(copy)
         await db.commit()
         await db.refresh(copy, attribute_names=["environment_variables", "default_skills"])
-        return serialize_worker_profile_for_api(copy, include_docker_target=True)
+        return await _admin_profile_payload(
+            db, copy, settings=get_effective_settings(), shared=shared
+        )
     except (WorkerProfileValidationError, SkillValidationError) as exc:
         await _rollback(db)
         raise _http_profile_error(exc) from exc

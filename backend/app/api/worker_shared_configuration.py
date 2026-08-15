@@ -18,6 +18,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config import get_effective_settings
+from app.core.docker_client import resolve_docker_connection
 from app.core.harness_registry import capability_policy
 from app.core.skills import SkillValidationError, validate_runtime_supports_skills
 from app.core.worker_environment_variables import (
@@ -288,6 +290,7 @@ async def update_shared_configuration(
                 selectinload(WorkerProfile.environment_variables),
             )
         )
+        settings = get_effective_settings()
         errors: list[str] = []
         profiles: list[dict[str, Any]] = []
         for profile in result.scalars().all():
@@ -320,13 +323,28 @@ async def update_shared_configuration(
                 for skill in profile.default_skills
                 if bool(getattr(skill, "enabled", False))
             ]
+            # F3 (§12.3/§16.2): the preview digest must use the *resolved* Docker
+            # target (what a Task snapshot freezes), not the raw profile field,
+            # so the preview is recomputable byte-for-byte against the snapshot.
+            connection = resolve_docker_connection(
+                settings,
+                docker_host=getattr(profile, "docker_host", None),
+                docker_tls_ca=getattr(profile, "docker_tls_ca", None),
+                docker_tls_cert=getattr(profile, "docker_tls_cert", None),
+                docker_tls_key=getattr(profile, "docker_tls_key", None),
+            )
+            resolved_docker_host = (
+                connection.host
+                if connection
+                else getattr(profile, "docker_host", None)
+            )
             profiles.append(
                 {
                     "id": profile.id,
                     "name": profile.name,
                     "effective_configuration_digest": effective_configuration_digest(
                         effective,
-                        docker_host=getattr(profile, "docker_host", None),
+                        docker_host=resolved_docker_host,
                         codegraph_enabled=bool(
                             getattr(profile, "codegraph_enabled", False)
                         ),

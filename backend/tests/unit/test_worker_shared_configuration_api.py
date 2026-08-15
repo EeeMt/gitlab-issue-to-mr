@@ -21,6 +21,8 @@ from app.api.worker_shared_configuration import (
     get_shared_configuration,
     update_shared_configuration,
 )
+from app.config import get_effective_settings
+from app.core.docker_client import resolve_docker_connection
 from app.core.harness_registry import capability_policy
 from app.core.worker_shared_configuration import (
     WorkerSharedConfigurationContext,
@@ -34,9 +36,19 @@ from app.models import (
     WorkerSharedEnvironmentVariable,
 )
 
+_RESOLVE = object()
 
-def _profile_digest(profile: WorkerProfile, effective=None) -> str:
-    """Digest the API uses for one Profile in the shared-PATCH response."""
+
+def _profile_digest(
+    profile: WorkerProfile, effective=None, *, docker_host=_RESOLVE
+) -> str:
+    """Digest the API uses for one Profile in the shared-PATCH response.
+
+    F3: the API digests the *resolved* Docker target (the Task Snapshot
+    semantics), so the default mirrors ``resolve_docker_connection``. Passing an
+    explicit ``docker_host`` (including ``None`` for the raw profile field)
+    bypasses resolution so tests can prove the raw field is not used.
+    """
     effective = effective or resolve_effective_configuration(profile)
     constraints = dict(profile.harness_constraints or {})
     harness_key = profile.default_harness_key or "claude"
@@ -49,9 +61,18 @@ def _profile_digest(profile: WorkerProfile, effective=None) -> str:
         for skill in (getattr(profile, "default_skills", None) or [])
         if bool(getattr(skill, "enabled", False))
     ]
+    if docker_host is _RESOLVE:
+        connection = resolve_docker_connection(
+            get_effective_settings(),
+            docker_host=getattr(profile, "docker_host", None),
+            docker_tls_ca=getattr(profile, "docker_tls_ca", None),
+            docker_tls_cert=getattr(profile, "docker_tls_cert", None),
+            docker_tls_key=getattr(profile, "docker_tls_key", None),
+        )
+        docker_host = connection.host if connection else getattr(profile, "docker_host", None)
     return effective_configuration_digest(
         effective,
-        docker_host=profile.docker_host,
+        docker_host=docker_host,
         codegraph_enabled=bool(profile.codegraph_enabled),
         harness_key=harness_key,
         harness_config={
@@ -398,3 +419,65 @@ async def test_patch_shared_configuration_merges_for_explicit_profile(db_factory
     # proving the PATCH folded the shared env/mounts in.
     standalone_digest = _profile_digest(profile)
     assert returned_digest != standalone_digest
+
+
+@pytest.mark.asyncio
+async def test_patch_shared_configuration_digest_uses_resolved_docker_host(db_factory):
+    """F3: the preview digest uses the resolved Docker target (Task Snapshot
+    semantics), so a profile with no explicit host digests the deployment
+    default instead of the empty raw field (§12.3/§16.2)."""
+    session_factory = await db_factory()
+    async with session_factory() as db:
+        await _seed_shared_configuration(db)
+        await _seed_enabled_profile(db)
+        await db.commit()
+
+        response = await update_shared_configuration(
+            WorkerSharedConfigurationPatchRequest(
+                expected_revision=1,
+                pre_script="shared-pre-v2",
+            ),
+            db=db,
+        )
+        profile = await db.get(
+            WorkerProfile,
+            1,
+            options=[
+                selectinload(WorkerProfile.environment_variables),
+                selectinload(WorkerProfile.default_skills),
+            ],
+        )
+        shared_row = await db.get(WorkerSharedConfiguration, 1)
+        shared_env = tuple(
+            (
+                await db.execute(
+                    select(WorkerSharedEnvironmentVariable).order_by(
+                        WorkerSharedEnvironmentVariable.key
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        shared = WorkerSharedConfigurationContext(
+            row=shared_row, environment_variables=shared_env
+        )
+
+    returned_digest = response["profiles"][0]["effective_configuration_digest"]
+    effective = resolve_effective_configuration(profile, shared)
+    connection = resolve_docker_connection(
+        get_effective_settings(),
+        docker_host=getattr(profile, "docker_host", None),
+        docker_tls_ca=getattr(profile, "docker_tls_ca", None),
+        docker_tls_cert=getattr(profile, "docker_tls_cert", None),
+        docker_tls_key=getattr(profile, "docker_tls_key", None),
+    )
+    assert returned_digest == _profile_digest(
+        profile, effective, docker_host=connection.host
+    )
+    # The raw profile.docker_host is None, so a digest built from it (empty
+    # docker target) must differ from the resolved one — proving the PATCH no
+    # longer feeds the raw field into the digest.
+    assert returned_digest != _profile_digest(
+        profile, effective, docker_host=getattr(profile, "docker_host", None)
+    )

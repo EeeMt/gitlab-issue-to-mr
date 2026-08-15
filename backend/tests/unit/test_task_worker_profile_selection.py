@@ -553,9 +553,15 @@ async def test_create_task_rejects_disabled_issue_worker():
 
 
 def test_task_request_schemas_do_not_expose_worker_switching():
+    """Worker switching is pinned by the parent issue on create/retry.
+
+    §12.3 (F6) intentionally adds ``worker_profile_id`` to the UPDATE schema so
+    a PENDING/QUEUED task can be re-pointed at a different Profile, but create
+    and retry keep rejecting it.
+    """
     assert "worker_profile_id" not in CreateTaskRequest.model_fields
     assert "worker_profile_id" not in RetryTaskRequest.model_fields
-    assert "worker_profile_id" not in UpdateTaskRequest.model_fields
+    assert "worker_profile_id" in UpdateTaskRequest.model_fields
     with pytest.raises(ValidationError, match="fixed by the parent issue"):
         CreateTaskRequest.model_validate({
             "issue_id": 1,
@@ -563,9 +569,9 @@ def test_task_request_schemas_do_not_expose_worker_switching():
             "worker_profile_id": 7,
         })
     with pytest.raises(ValidationError, match="fixed by the parent issue"):
-        UpdateTaskRequest.model_validate({"worker_profile_id": 7})
-    with pytest.raises(ValidationError, match="fixed by the parent issue"):
         RetryTaskRequest.model_validate({"worker_profile_id": 7})
+    # F6: an explicit worker switch on an editable task is now valid.
+    assert UpdateTaskRequest.model_validate({"worker_profile_id": 7}).worker_profile_id == 7
 
 
 @pytest.mark.parametrize("skill_ids", [[True], ["1"], [0], [1, 1]])

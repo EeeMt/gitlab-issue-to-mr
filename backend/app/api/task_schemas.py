@@ -77,6 +77,10 @@ class UpdateTaskRequest(BaseModel):
         task_mode: Execution mode — 'execute' (default) or 'plan'.
             Cannot be null — omit the key to leave unchanged.
             Setting task_mode='plan' automatically forces require_changes=False.
+        worker_profile_id: Explicitly switch the worker Profile on a
+            PENDING/QUEUED task (§12.3). This re-resolves the current shared
+            configuration, re-checks runtime readiness, and replaces the frozen
+            snapshot. Cannot be null — omit the key to leave the worker unchanged.
     """
 
     user_prompt: str | None = None
@@ -88,18 +92,21 @@ class UpdateTaskRequest(BaseModel):
         default=None, max_length=MAX_RUN_INSTRUCTION_TEMPLATE_LENGTH
     )
     skill_ids: list[StrictInt] | None = None
+    worker_profile_id: int | None = None
 
     @field_validator("skill_ids")
     @classmethod
     def validate_skill_ids(cls, value: list[int] | None) -> list[int] | None:
         return _validate_skill_ids(value)
 
-    @model_validator(mode="before")
+    @field_validator("worker_profile_id", mode="before")
     @classmethod
-    def reject_worker_switch(cls, data: Any) -> Any:
-        if isinstance(data, dict) and "worker_profile_id" in data:
-            raise ValueError("worker_profile_id is fixed by the parent issue")
-        return data
+    def worker_profile_id_not_null(cls, v: Any) -> Any:
+        if v is None:
+            raise ValueError(
+                "worker_profile_id cannot be null; omit the key to leave it unchanged"
+            )
+        return v
 
     @field_validator("user_prompt", mode="before")
     @classmethod
