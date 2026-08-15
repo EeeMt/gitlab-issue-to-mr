@@ -11,7 +11,6 @@ export DOCKER_BUILDKIT := 1
 export COMPOSE_DOCKER_CLI_BUILD := 1
 WORKER_KIT_VERSION ?= 0.3.10
 WORKER_KIT_PLATFORM ?= linux/amd64
-JAVA21_MAVEN_WORKER_DOCKERFILE := $(PROJECT_ROOT)/deploy/Dockerfile.worker-java21-maven
 
 # ============================================
 # Development Environment
@@ -22,12 +21,7 @@ build-app-images: ## Build Codify application images (backend and nginx)
 	cd $(PROJECT_ROOT)/deploy && docker-compose --env-file .env.test build
 
 .PHONY: build
-build: build-app-images ## Build all images (backend, nginx, worker)
-	docker build -f $(JAVA21_MAVEN_WORKER_DOCKERFILE) -t codify-worker/java21-maven:2026.07 $(PROJECT_ROOT)
-	@printf "\nBuild summary:\n"
-	@printf "  - codify-backend:latest\n"
-	@printf "  - codify-nginx:latest\n"
-	@printf "  - codify-worker/java21-maven:2026.07\n"
+build: build-app-images ## Build application images (backend and nginx)
 
 .PHONY: offline-bundle-export
 offline-bundle-export: build-app-images ## Build app images, export kits/images, and package deploy/offline-bundle
@@ -35,6 +29,9 @@ offline-bundle-export: build-app-images ## Build app images, export kits/images,
 	WORKER_KIT_VERSION=$(WORKER_KIT_VERSION) WORKER_KIT_PLATFORM=linux/arm64 $(PROJECT_ROOT)/deploy/worker-kit/export.sh
 	cd $(PROJECT_ROOT)/deploy/offline-bundle && ./scripts/export-images.sh
 	cd $(PROJECT_ROOT)/deploy/offline-bundle && ./scripts/package-bundle.sh
+
+.PHONY: export
+export: offline-bundle-export ## Alias for offline-bundle-export: app images, kits, offline bundle
 
 .PHONY: worker-kit-export
 worker-kit-export: ## Build and export the portable mounted worker kit
@@ -45,8 +42,7 @@ worker-kit-verify: ## Verify KIT_PATH against RUNTIME_IMAGE (optional CLAUDE_HOS
 	$(PROJECT_ROOT)/deploy/worker-kit/verify-runtime.sh --kit "$(KIT_PATH)" --image "$(RUNTIME_IMAGE)" $(if $(CLAUDE_HOST_PATH),--claude-host-path "$(CLAUDE_HOST_PATH)") $(if $(CLAUDE_CONTAINER_PATH),--claude-container-path "$(CLAUDE_CONTAINER_PATH)") $(if $(SMOKE),--smoke "$(SMOKE)")
 
 .PHONY: up
-up: ## Start development environment (rebuilds backend, nginx, and worker images)
-	docker build -f $(JAVA21_MAVEN_WORKER_DOCKERFILE) -t codify-worker/java21-maven:2026.07 $(PROJECT_ROOT)
+up: ## Start development environment (rebuilds backend and nginx images)
 	cd $(PROJECT_ROOT)/deploy && docker-compose --env-file .env.test up -d --build
 
 .PHONY: down
@@ -86,10 +82,6 @@ rebuild-scheduler: ## Rebuild scheduler image and restart container
 rebuild-nginx: ## Rebuild nginx image and restart container
 	cd $(PROJECT_ROOT)/deploy && docker-compose --env-file .env.test build --pull=false nginx
 	cd $(PROJECT_ROOT)/deploy && docker-compose --env-file .env.test up -d nginx
-
-.PHONY: rebuild-worker
-rebuild-worker: ## Rebuild worker image
-	docker build -f $(JAVA21_MAVEN_WORKER_DOCKERFILE) -t codify-worker/java21-maven:2026.07 $(PROJECT_ROOT)
 
 # ============================================
 # Testing
@@ -536,9 +528,12 @@ help:
 	@echo "  make setup-npm         Install frontend npm dependencies"
 	@echo ""
 	@echo "Development Environment:"
-	@echo "  make build              Build all images (backend, nginx, worker)"
+	@echo "  make build              Build application images (backend and nginx)"
 	@echo "  make build-app-images   Build backend and nginx images"
+	@echo "  make export             Build app images, export kits/images, and package offline bundle"
 	@echo "  make offline-bundle-export  Build app images, export kits/images, and package them"
+	@echo "  make worker-kit-export  Build and export the portable mounted worker kit"
+	@echo "  make worker-kit-verify  Verify KIT_PATH against RUNTIME_IMAGE (optional CLAUDE_HOST_PATH and SMOKE)"
 	@echo "  make up                Start development environment"
 	@echo "  make down              Stop development environment"
 	@echo "  make restart           Restart development environment"
@@ -550,7 +545,6 @@ help:
 	@echo "  make rebuild-backend   Rebuild backend image and restart"
 	@echo "  make rebuild-scheduler Rebuild scheduler image and restart"
 	@echo "  make rebuild-nginx    Rebuild nginx image and restart"
-	@echo "  make rebuild-worker   Rebuild worker image"
 	@echo ""
 	@echo "Unit Tests:"
 	@echo "  make test-unit         Run all unit tests (backend + frontend + mock-e2e) with coverage"
