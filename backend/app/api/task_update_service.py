@@ -174,6 +174,16 @@ async def update_task_record(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Worker profile not found",
             )
+        # get_task_with_access_check loads task.worker_profile without its
+        # environment_variables, so this profile may already sit in the session
+        # identity map with that collection unloaded — and db.get() with loader
+        # options does not re-apply them to an identity-mapped object. Force-load
+        # the collections the switch touches below so a later lazy access cannot
+        # raise MissingGreenlet (and silently bypass the readiness gate).
+        await db.refresh(
+            new_profile,
+            attribute_names=["environment_variables", "default_skills"],
+        )
         if not new_profile.enabled:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,

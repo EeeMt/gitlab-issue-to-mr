@@ -366,6 +366,7 @@ async def readiness_for_profile(
     ever blocks on a *known* unavailable runtime, and profile validation stays
     with snapshot creation.
     """
+    from app.core.worker_profiles import WorkerProfileValidationError
     from app.core.worker_shared_configuration import (
         load_shared_configuration,
         resolve_effective_configuration,
@@ -384,7 +385,13 @@ async def readiness_for_profile(
             worker_kit_version=effective.worker_kit_version,
             worker_kit_path=effective.worker_kit_path,
         )
-    except Exception:  # noqa: BLE001 - an unresolvable locator is never a *known* unavailable
+    except WorkerProfileValidationError:
+        # An unresolvable configuration has no known locator, so it returns
+        # unknown and never blocks: the gate only ever blocks on a *known*
+        # unavailable runtime, and profile validation stays with snapshot
+        # creation. Programming errors (e.g. MissingGreenlet from an unloaded
+        # lazy relationship) are NOT swallowed here — they must surface so a
+        # caller bug cannot silently bypass the 409 gate.
         return RuntimeReadiness(status=READINESS_UNKNOWN)
     return await read_runtime_readiness(db, fingerprint)
 

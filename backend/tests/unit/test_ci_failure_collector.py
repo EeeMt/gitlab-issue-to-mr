@@ -79,6 +79,10 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
             "ci_auto_repair_run_instruction_template": (
                 BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE
             ),
+            "docker_host": "unix:///var/run/docker.sock",
+            "docker_tls_ca": None,
+            "docker_tls_cert": None,
+            "docker_tls_key": None,
         }
         values.update(overrides)
         return SimpleNamespace(**values)

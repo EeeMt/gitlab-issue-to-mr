@@ -154,6 +154,10 @@ async def test_create_persists_snapshot_and_rendered_prompt_before_commit() -> N
         ),
         patch("app.api.tasks.resolve_provider_for_issue", new=AsyncMock(return_value=provider)),
         patch("app.api.tasks.replace_task_worker_snapshot", new=AsyncMock(return_value=snapshot)),
+        patch(
+            "app.api.task_creation_service.readiness_for_profile",
+            new=AsyncMock(return_value=SimpleNamespace(is_unavailable=False)),
+        ),
         patch("app.api.tasks.bind_runtime_bundle", new=AsyncMock(return_value=MagicMock(id=1))),
         patch(
             "app.core.task_helpers.get_effective_settings",
@@ -227,6 +231,10 @@ async def test_create_rejects_explicitly_blank_run_instruction_template() -> Non
         ),
         patch("app.api.tasks.resolve_provider_for_issue", new=AsyncMock(return_value=provider)),
         patch("app.api.tasks.replace_task_worker_snapshot", new=AsyncMock(return_value=snapshot)),
+        patch(
+            "app.api.task_creation_service.readiness_for_profile",
+            new=AsyncMock(return_value=SimpleNamespace(is_unavailable=False)),
+        ),
         pytest.raises(HTTPException) as exc_info,
     ):
         await create_task(request, db, None, _scope())

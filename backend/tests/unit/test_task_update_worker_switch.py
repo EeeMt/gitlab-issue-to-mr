@@ -411,6 +411,110 @@ async def test_worker_switch_rejects_known_unavailable_runtime_409(db_factory):
 
 
 @pytest.mark.asyncio
+async def test_worker_switch_to_current_profile_in_identity_map_200(db_factory):
+    """§12.3 regression: switching to the Task's *current* profile must not 500.
+
+    ``get_task_with_access_check`` loads ``task.worker_profile`` without its
+    ``environment_variables``, so the profile already sits in the session
+    identity map partially loaded; ``db.get`` with loader options does not
+    re-apply them to an identity-mapped object. The switch must force-load the
+    collections it touches so a later lazy access cannot raise MissingGreenlet.
+    """
+    session_factory = await db_factory()
+    async with session_factory() as db:
+        await _seed_shared(db)
+        provider = await _seed_provider(db)
+        source = await _seed_profile(db, name="Source Worker", image="img/source:1")
+        issue = await _seed_issue(db, worker_profile_id=source.id)
+        task = await _seed_task(
+            db,
+            provider_id=provider.id,
+            worker_profile_id=source.id,
+            issue_id=issue.id,
+        )
+        await _seed_old_snapshot(db, task, source)
+        await db.commit()
+        # Reproduce the identity-map state left by get_task_with_access_check:
+        # the profile is already in the session but its environment_variables
+        # collection is not loaded.
+        db.expire(source, ["environment_variables"])
+
+        await update_task_record(
+            task_id=task.id,
+            request=UpdateTaskRequest(worker_profile_id=source.id),
+            db=db,
+            current_user=None,
+            access_scope=_access_scope(),
+            services=_services(),
+        )
+        refreshed_task = await db.get(Task, task.id)
+        new_snapshot = await db.get(TaskWorkerProfileSnapshot, task.id)
+
+    assert refreshed_task.worker_profile_id == source.id
+    assert new_snapshot.worker_profile_id == source.id
+    assert new_snapshot.image == "img/source:1"
+
+
+@pytest.mark.asyncio
+async def test_worker_switch_to_current_profile_in_identity_map_409(db_factory):
+    """§12.3 regression: with the current profile in the identity map, an
+    unavailable runtime must still 409 — the readiness gate must not be silently
+    bypassed by a swallowed lazy-load error.
+    """
+    session_factory = await db_factory()
+    async with session_factory() as db:
+        await _seed_shared(db)
+        provider = await _seed_provider(db)
+        source = await _seed_profile(
+            db,
+            name="System Target",
+            image="img/system:1",
+            worker_kit_source="system",
+            runtime_mode="mounted_kit",
+            worker_kit_version="0.4.0",
+            worker_kit_path="/opt/codify/worker-kits/0.4.0",
+        )
+        issue = await _seed_issue(db, worker_profile_id=source.id)
+        task = await _seed_task(
+            db,
+            provider_id=provider.id,
+            worker_profile_id=source.id,
+            issue_id=issue.id,
+        )
+        await _seed_old_snapshot(db, task, source)
+        fingerprint = await _target_fingerprint(db, source)
+        db.add(
+            WorkerRuntimeReadiness(
+                runtime_locator_fingerprint=fingerprint,
+                docker_daemon_key="tcp://localhost:2376",
+                runtime_mode="mounted_kit",
+                worker_kit_version="0.4.0",
+                worker_kit_path="/opt/codify/worker-kits/0.4.0",
+                status="unavailable",
+                failure_code="worker_kit_missing",
+                failure_message="worker kit missing",
+                checked_at=utcnow(),
+            )
+        )
+        await db.commit()
+        db.expire(source, ["environment_variables"])
+
+        with pytest.raises(HTTPException) as exc_info:
+            await update_task_record(
+                task_id=task.id,
+                request=UpdateTaskRequest(worker_profile_id=source.id),
+                db=db,
+                current_user=None,
+                access_scope=_access_scope(),
+                services=_services(),
+            )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "worker_runtime_unavailable"
+    assert exc_info.value.detail["failure_code"] == "worker_kit_missing"
+
+
+@pytest.mark.asyncio
 async def test_prompt_only_edit_does_not_refresh_snapshot(db_factory):
     session_factory = await db_factory()
     async with session_factory() as db:
