@@ -430,3 +430,134 @@ async def test_update_profile_mounts_only_rejects_set_mask_conflict(db_factory):
 
     assert exc.value.status_code == 422
     assert "cannot be both set and masked" in str(exc.value.detail)
+
+
+def _overridden_profile(*, name="Override Worker"):
+    return WorkerProfile(
+        name=name,
+        enabled=True,
+        is_default=False,
+        image="codify-worker/java21:2026.07",
+        worker_kit_source="profile",
+        runtime_mode="baked_image",
+        volume_mounts=[],
+        pre_script="",
+        post_script="",
+        default_execute_run_instruction_template="execute {{user_prompt}}",
+        default_plan_run_instruction_template="plan {{user_prompt}}",
+        ci_auto_repair_run_instruction_template="repair {{issue_title}}",
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_null_template_restores_inheritance_and_keeps_other_overrides(
+    db_factory,
+):
+    """PATCHing one of three overridden run-instruction templates to null restores
+    inheritance for that template while the other two keep their overrides."""
+    session_factory = await db_factory()
+    async with session_factory() as db:
+        await _seed_shared(db)
+        profile = _overridden_profile()
+        db.add(profile)
+        await db.commit()
+        profile_id = profile.id
+
+        response = await update_worker_profile(
+            profile_id,
+            WorkerProfileUpdateRequest(
+                default_execute_run_instruction_template=None,
+            ),
+            db=db,
+        )
+        effective = await _effective(db, profile_id)
+
+    assert response["default_execute_run_instruction_template"] is None
+    assert response["default_plan_run_instruction_template"] == "plan {{user_prompt}}"
+    assert response["ci_auto_repair_run_instruction_template"] == "repair {{issue_title}}"
+    assert effective.default_execute_run_instruction_template == (
+        "shared execute {{user_prompt}}"
+    )
+    assert effective.default_plan_run_instruction_template == "plan {{user_prompt}}"
+    assert effective.ci_auto_repair_run_instruction_template == "repair {{issue_title}}"
+
+
+@pytest.mark.asyncio
+async def test_update_explicit_blank_template_remains_rejected(db_factory):
+    """An explicit empty-string template is still a blank (not inheritance) and
+    keeps being rejected with 422; the profile's prior override survives."""
+    session_factory = await db_factory()
+    async with session_factory() as db:
+        await _seed_shared(db)
+        profile = _overridden_profile()
+        db.add(profile)
+        await db.commit()
+        profile_id = profile.id
+
+        with pytest.raises(HTTPException) as exc:
+            await update_worker_profile(
+                profile_id,
+                WorkerProfileUpdateRequest(
+                    default_execute_run_instruction_template="",
+                ),
+                db=db,
+            )
+        # The failed PATCH rolled back and expired the session's copy; reload the
+        # collection explicitly so the effective resolution does not lazy-load.
+        profile = await db.get(WorkerProfile, profile_id)
+        await db.refresh(profile, attribute_names=["environment_variables"])
+        effective = await _effective(db, profile_id)
+
+    assert exc.value.status_code == 422
+    assert "cannot be blank" in str(exc.value.detail)
+    assert effective.default_execute_run_instruction_template == "execute {{user_prompt}}"
+    assert effective.default_plan_run_instruction_template == "plan {{user_prompt}}"
+    assert effective.ci_auto_repair_run_instruction_template == "repair {{issue_title}}"
+
+
+@pytest.mark.asyncio
+async def test_update_single_field_non_empty_template_override(db_factory):
+    """A single-field non-empty override still applies while the other two
+    templates keep their current values."""
+    session_factory = await db_factory()
+    async with session_factory() as db:
+        await _seed_shared(db)
+        profile = _overridden_profile()
+        db.add(profile)
+        await db.commit()
+        profile_id = profile.id
+
+        response = await update_worker_profile(
+            profile_id,
+            WorkerProfileUpdateRequest(
+                default_plan_run_instruction_template="plan-v2 {{user_prompt}}",
+            ),
+            db=db,
+        )
+
+    assert response["default_plan_run_instruction_template"] == "plan-v2 {{user_prompt}}"
+    assert response["default_execute_run_instruction_template"] == "execute {{user_prompt}}"
+    assert response["ci_auto_repair_run_instruction_template"] == "repair {{issue_title}}"
+
+
+@pytest.mark.asyncio
+async def test_update_unrelated_field_preserves_all_templates(db_factory):
+    """A PATCH that does not touch the templates leaves all three untouched."""
+    session_factory = await db_factory()
+    async with session_factory() as db:
+        await _seed_shared(db)
+        profile = _overridden_profile()
+        db.add(profile)
+        await db.commit()
+        profile_id = profile.id
+
+        response = await update_worker_profile(
+            profile_id,
+            WorkerProfileUpdateRequest(description="Unrelated edit"),
+            db=db,
+        )
+
+    assert response["description"] == "Unrelated edit"
+    assert response["default_execute_run_instruction_template"] == "execute {{user_prompt}}"
+    assert response["default_plan_run_instruction_template"] == "plan {{user_prompt}}"
+    assert response["ci_auto_repair_run_instruction_template"] == "repair {{issue_title}}"

@@ -1111,9 +1111,11 @@ async def update_worker_profile(
         if template_fields & fields:
             merged_templates: dict[str, str | None] = {}
             for field in template_fields:
-                request_value = getattr(request, field)
-                if field in fields and request_value is not None:
-                    merged_templates[field] = request_value
+                if field in fields:
+                    # A request value of None restores inheritance from the
+                    # shared configuration; distinguish it from "not provided"
+                    # (keep the profile's current value).
+                    merged_templates[field] = getattr(request, field)
                 else:
                     merged_templates[field] = getattr(profile, field)
             if all(merged_templates.values()):
