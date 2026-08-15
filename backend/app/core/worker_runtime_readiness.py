@@ -368,16 +368,11 @@ async def readiness_for_profile(
     """
     from app.core.worker_shared_configuration import (
         load_shared_configuration,
-        profile_inherits_shared,
         resolve_effective_configuration,
     )
 
     try:
-        shared = (
-            await load_shared_configuration(db)
-            if profile_inherits_shared(profile)
-            else None
-        )
+        shared = await load_shared_configuration(db)
         effective = resolve_effective_configuration(profile, shared)
         fingerprint = fingerprint_from_docker_target(
             settings,

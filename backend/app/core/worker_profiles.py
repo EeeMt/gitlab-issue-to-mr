@@ -596,10 +596,12 @@ def snapshot_from_profile(
     snapshot and credential ref are frozen so later Profile/Provider edits never
     change a created Task's execution truth.
 
-    ``shared_configuration`` is a ``WorkerSharedConfigurationContext``. When it
-    is ``None`` the profile is resolved as fully explicit (pre-shared behavior).
-    The snapshot stores the fully expanded effective configuration plus the
-    shared revision and effective-configuration digest.
+    ``shared_configuration`` is a ``WorkerSharedConfigurationContext``; callers
+    that create Task snapshots always pass the loaded shared baseline so the
+    per-item merge is applied. When it is ``None`` (direct calls in tests) the
+    profile is resolved against an empty baseline. The snapshot stores the fully
+    expanded effective configuration plus the shared revision and
+    effective-configuration digest.
     """
     effective = resolve_effective_configuration(profile, shared_configuration)
     validate_effective_configuration(effective)
@@ -698,11 +700,7 @@ async def replace_task_worker_snapshot(
     endpoint: Any | None = None,
 ) -> TaskWorkerProfileSnapshot:
     """Replace one task's worker profile snapshot."""
-    from app.core.worker_shared_configuration import profile_inherits_shared
-
-    shared = None
-    if profile_inherits_shared(profile):
-        shared = await load_shared_configuration(db)
+    shared = await load_shared_configuration(db)
     existing = await db.get(TaskWorkerProfileSnapshot, task.id)
     if existing is not None:
         await db.delete(existing)

@@ -136,6 +136,38 @@ async def test_create_system_kit_profile_inherits_shared_runtime(db_factory):
 
 
 @pytest.mark.asyncio
+async def test_create_profile_defaults_to_system_kit_and_inherits_shared(db_factory):
+    """F1: a new Profile defaults to ``worker_kit_source=system`` and inherits the
+    shared Kit (§18.6)."""
+    session_factory = await db_factory()
+    async with session_factory() as db:
+        await _seed_shared(db)
+        response = await create_worker_profile(
+            _create_request(runtime_mode="baked_image"),
+            db=db,
+        )
+        effective = await _effective(db, response["id"])
+
+    assert response["worker_kit_source"] == "system"
+    assert effective.runtime_mode == "mounted_kit"
+    assert effective.worker_kit_version == "0.4.0"
+    assert effective.worker_kit_path == "/opt/codify/worker-kits/0.4.0"
+
+
+@pytest.mark.asyncio
+async def test_create_profile_default_system_kit_requires_shared_baseline(db_factory):
+    """F1: the default ``worker_kit_source=system`` requires a shared baseline, so
+    a bare create without one fails closed (§18.6)."""
+    session_factory = await db_factory()
+    async with session_factory() as db:
+        with pytest.raises(HTTPException) as exc:
+            await create_worker_profile(_create_request(), db=db)
+
+    assert exc.value.status_code == 422
+    assert "requires a configured shared" in str(exc.value.detail)
+
+
+@pytest.mark.asyncio
 async def test_create_system_kit_profile_requires_shared_baseline(db_factory):
     session_factory = await db_factory()
     async with session_factory() as db:

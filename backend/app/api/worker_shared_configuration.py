@@ -38,7 +38,6 @@ from app.core.worker_profiles import (
 from app.core.worker_shared_configuration import (
     WorkerSharedConfigurationContext,
     effective_configuration_digest,
-    profile_inherits_shared,
     resolve_effective_configuration,
     validate_effective_configuration,
 )
@@ -292,10 +291,12 @@ async def update_shared_configuration(
         errors: list[str] = []
         profiles: list[dict[str, Any]] = []
         for profile in result.scalars().all():
-            # §7.2/§7.3: a fully explicit Profile does not resolve against the
-            # shared baseline, so a shared change cannot make it invalid. Match
-            # task creation's gate: only inheriting Profiles merge shared.
-            profile_shared = shared_context if profile_inherits_shared(profile) else None
+            # §7.2/§7.3 (F1): shared environment variables and volume mounts
+            # merge per-item into every enabled Profile; a Profile's own
+            # set/override/mask rows hide specific shared items. A shared change
+            # is therefore validated against every Profile's merged effective
+            # configuration, not just profiles that declared inheritance.
+            profile_shared = shared_context
             effective = resolve_effective_configuration(profile, profile_shared)
             try:
                 validate_effective_configuration(effective)

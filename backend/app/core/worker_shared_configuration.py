@@ -84,36 +84,6 @@ class EffectiveWorkerConfiguration:
     shared_configuration_revision: int | None = None
 
 
-def profile_inherits_shared(profile: Any) -> bool:
-    """Return whether a profile inherits anything from the shared baseline.
-
-    A profile that is fully explicit (kit source ``profile``, every scalar set,
-    no masks, no ``mask`` environment rows) resolves identically without the
-    shared configuration, so callers can skip the shared read entirely.
-    """
-    if (
-        getattr(profile, "worker_kit_source", WORKER_KIT_SOURCE_PROFILE)
-        == WORKER_KIT_SOURCE_SYSTEM
-    ):
-        return True
-    for field in (
-        "pre_script",
-        "post_script",
-        "default_execute_run_instruction_template",
-        "default_plan_run_instruction_template",
-        "ci_auto_repair_run_instruction_template",
-    ):
-        if getattr(profile, field, None) is None:
-            return True
-    if getattr(profile, "volume_mount_masks", None):
-        return True
-    for row in getattr(profile, "environment_variables", None) or []:
-        operation = str(_profile_value(row, "operation", ENV_OPERATION_SET) or "").strip()
-        if operation == ENV_OPERATION_MASK:
-            return True
-    return False
-
-
 async def load_shared_configuration(
     db: AsyncSession,
 ) -> WorkerSharedConfigurationContext:
@@ -212,9 +182,15 @@ def resolve_effective_configuration(
 ) -> EffectiveWorkerConfiguration:
     """Resolve the profile's full effective configuration.
 
-    A missing shared context (``None``) is treated as an empty baseline: the
-    profile's own explicit values are used as-is, which is exactly the behavior
-    before shared configuration existed.
+    The shared baseline is always merged per-item: environment variables and
+    volume mounts inherit from the shared baseline unless the profile overrides
+    (``set`` / own mount) or masks (``mask`` row / ``volume_mount_masks``) that
+    specific item. Kit, scripts, and run-instruction templates keep their
+    three-state semantics (``worker_kit_source=system`` inherits the shared Kit;
+    a NULL script/template inherits the shared value; ``""`` is an explicit
+    disable). A missing shared context (``None``) is treated as an empty
+    baseline: the profile's own explicit values are used as-is, which is exactly
+    the behavior before shared configuration existed.
     """
     from app.core.worker_profiles import WorkerProfileValidationError
 

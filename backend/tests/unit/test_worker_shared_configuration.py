@@ -16,7 +16,6 @@ from app.core.worker_shared_configuration import (
     WorkerSharedConfigurationContext,
     compute_effective_configuration_digest,
     effective_configuration_digest,
-    profile_inherits_shared,
     resolve_effective_configuration,
     validate_effective_configuration,
 )
@@ -101,13 +100,66 @@ def test_resolve_fully_explicit_profile_without_shared_baseline():
     validate_effective_configuration(effective)
 
 
-def test_resolve_explicit_profile_ignores_shared_baseline():
+def test_explicit_profile_keeps_own_kit_and_scalars_with_shared_baseline():
+    """F1: an explicit profile keeps its own Kit and scalar overrides."""
     effective = resolve_effective_configuration(_profile(), _shared())
 
     assert effective.runtime_mode == BAKED_IMAGE_MODE
     assert effective.worker_kit_version is None
     assert effective.pre_script == ""
     assert effective.default_execute_run_instruction_template == "execute {{user_prompt}}"
+
+
+def test_fully_explicit_profile_inherits_shared_env_and_mounts_per_item():
+    """F1: full-explicit scalars with empty env/mounts still inherit shared
+    env/mounts per-item; only the profile's own set/mask rows hide them."""
+    effective = resolve_effective_configuration(
+        _profile(),
+        _shared(
+            env=[
+                ("SHARED_A", "a", False),
+                ("SHARED_SECRET", "ciphertext", True),
+            ]
+        ),
+    )
+    by_path = {mount["container_path"]: mount for mount in effective.volume_mounts}
+    by_key = {item["key"]: item for item in effective.environment_variables}
+
+    assert set(by_path) == {"/shared"}
+    assert by_path["/shared"]["host_path"] == "/srv/shared"
+    assert by_key["SHARED_A"]["value"] == "a"
+    assert by_key["SHARED_SECRET"]["is_secret"] is True
+    assert effective.pre_script == ""
+    assert effective.default_execute_run_instruction_template == "execute {{user_prompt}}"
+
+
+def test_profile_override_and_mask_hide_shared_items_per_item():
+    """F1: a profile's set/override or mask hides only that specific shared item."""
+    effective = resolve_effective_configuration(
+        _profile(
+            volume_mounts=[
+                {"host_path": "/srv/own", "container_path": "/shared", "mode": "rw"}
+            ],
+            volume_mount_masks=["/masked"],
+            environment_variables=_profile_env(
+                ("SHARED_A", "override", False, ENV_OPERATION_SET),
+                ("SHARED_SECRET", None, False, ENV_OPERATION_MASK),
+            ),
+        ),
+        _shared(
+            env=[
+                ("SHARED_A", "a", False),
+                ("SHARED_SECRET", "ciphertext", True),
+            ]
+        ),
+    )
+    by_path = {mount["container_path"]: mount for mount in effective.volume_mounts}
+    by_key = {item["key"]: item for item in effective.environment_variables}
+
+    assert by_path["/shared"]["host_path"] == "/srv/own"
+    assert by_path["/shared"]["mode"] == "rw"
+    assert by_key["SHARED_A"]["value"] == "override"
+    assert "SHARED_SECRET" not in by_key
 
 
 def test_scalar_inheritance_null_inherits_shared_value():
@@ -219,34 +271,6 @@ def test_environment_overlay_and_mask():
     assert by_key["SHARED_A"]["value"] == "override"
     assert "SHARED_B" not in by_key
     assert by_key["SHARED_SECRET"]["is_secret"] is True
-
-
-def test_profile_inherits_shared_detects_each_inheritance_toggle():
-    assert profile_inherits_shared(_profile()) is False
-    assert profile_inherits_shared(_profile(pre_script=None)) is True
-    assert (
-        profile_inherits_shared(
-            _profile(default_execute_run_instruction_template=None)
-        )
-        is True
-    )
-    assert (
-        profile_inherits_shared(
-            _profile(worker_kit_source=WORKER_KIT_SOURCE_SYSTEM)
-        )
-        is True
-    )
-    assert profile_inherits_shared(_profile(volume_mount_masks=["/x"])) is True
-    assert (
-        profile_inherits_shared(
-            _profile(
-                environment_variables=_profile_env(
-                    ("K", None, False, ENV_OPERATION_MASK)
-                )
-            )
-        )
-        is True
-    )
 
 
 def test_effective_digest_is_stable_and_order_independent():

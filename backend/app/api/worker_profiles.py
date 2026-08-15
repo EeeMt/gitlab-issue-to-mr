@@ -76,7 +76,6 @@ from app.core.worker_shared_configuration import (
     WORKER_KIT_SOURCES,
     EffectiveWorkerConfiguration,
     load_shared_configuration,
-    profile_inherits_shared,
     resolve_effective_configuration,
     validate_effective_configuration,
 )
@@ -174,7 +173,7 @@ class WorkerProfileRequestBase(BaseModel):
 class WorkerProfileCreateRequest(WorkerProfileRequestBase):
     name: str = Field(max_length=100)
     image: str = Field(max_length=255)
-    worker_kit_source: str = WORKER_KIT_SOURCE_PROFILE
+    worker_kit_source: str = WORKER_KIT_SOURCE_SYSTEM
     runtime_mode: str = BAKED_IMAGE_MODE
     volume_mounts: list[dict[str, Any]] = Field(default_factory=list)
     volume_mount_masks: list[str] = Field(default_factory=list)
@@ -207,34 +206,6 @@ class WorkerRuntimeVerificationRequest(BaseModel):
 
 def _http_profile_error(exc: WorkerProfileValidationError) -> HTTPException:
     return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc))
-
-
-def _create_needs_shared(request: WorkerProfileCreateRequest) -> bool:
-    """Return whether a create request inherits anything from the shared baseline.
-
-    Mirrors ``profile_inherits_shared``: a NULL scalar (script or template),
-    ``worker_kit_source=system``, a mount mask, or a ``mask`` environment row
-    all mean the profile resolves against the shared configuration, so creation
-    must validate the combined effective configuration (§11.2).
-    """
-    if request.worker_kit_source == WORKER_KIT_SOURCE_SYSTEM:
-        return True
-    if (
-        request.pre_script is None
-        or request.post_script is None
-        or request.default_execute_run_instruction_template is None
-        or request.default_plan_run_instruction_template is None
-        or request.ci_auto_repair_run_instruction_template is None
-    ):
-        return True
-    if request.volume_mount_masks:
-        return True
-    if any(
-        getattr(item, "operation", "set") == "mask"
-        for item in request.environment_variables
-    ):
-        return True
-    return False
 
 
 async def _load_shared_for_validation(
@@ -522,9 +493,7 @@ async def verify_worker_profile_runtime(
     Re-verification is always explicit and always re-probes the Kit.
     """
     profile = await _load_profile_or_404(db, profile_id)
-    shared = (
-        await load_shared_configuration(db) if profile_inherits_shared(profile) else None
-    )
+    shared = await load_shared_configuration(db)
     try:
         effective = resolve_effective_configuration(profile, shared)
         validate_effective_configuration(effective)
@@ -643,11 +612,7 @@ async def verify_worker_profile_runtime(
     # Reload profile+shared and recompute the digest: if the verification
     # inputs changed while verifying, the result is superseded (§15.1).
     fresh_profile = await _load_profile_or_404(db, profile_id, populate_existing=True)
-    fresh_shared = (
-        await load_shared_configuration(db)
-        if profile_inherits_shared(fresh_profile)
-        else None
-    )
+    fresh_shared = await load_shared_configuration(db)
     try:
         fresh_effective = resolve_effective_configuration(fresh_profile, fresh_shared)
         validate_effective_configuration(fresh_effective)
@@ -707,7 +672,7 @@ async def create_worker_profile(
             raise WorkerProfileValidationError("Worker profile image cannot be blank")
 
         await _ensure_profile_name_available(db, name)
-        kit_source = request.worker_kit_source or WORKER_KIT_SOURCE_PROFILE
+        kit_source = request.worker_kit_source or WORKER_KIT_SOURCE_SYSTEM
         if kit_source not in WORKER_KIT_SOURCES:
             raise WorkerProfileValidationError(
                 f"worker_kit_source must be one of: {', '.join(sorted(WORKER_KIT_SOURCES))}"
@@ -780,12 +745,10 @@ async def create_worker_profile(
             harness_runtimes=request.harness_runtimes or {},
             default_skills=[],
         )
-        shared = None
-        if _create_needs_shared(request) or request.expected_shared_revision is not None:
-            shared = await _load_shared_for_validation(
-                db,
-                expected_shared_revision=request.expected_shared_revision,
-            )
+        shared = await _load_shared_for_validation(
+            db,
+            expected_shared_revision=request.expected_shared_revision,
+        )
         effective = _validate_combined_configuration(profile, shared, default_skills=[])
         db.add(profile)
         await db.flush()
@@ -968,7 +931,7 @@ async def update_worker_profile(
         if "codegraph_enabled" in fields and request.codegraph_enabled is not None:
             profile.codegraph_enabled = request.codegraph_enabled
         if "worker_kit_source" in fields:
-            kit_source = request.worker_kit_source or WORKER_KIT_SOURCE_PROFILE
+            kit_source = request.worker_kit_source or WORKER_KIT_SOURCE_SYSTEM
             if kit_source not in WORKER_KIT_SOURCES:
                 raise WorkerProfileValidationError(
                     "worker_kit_source must be one of: "
@@ -1046,12 +1009,10 @@ async def update_worker_profile(
                 request.default_skill_ids,
                 retained_disabled_skill_ids=existing_skill_ids,
             )
-        shared = None
-        if profile_inherits_shared(profile) or request.expected_shared_revision is not None:
-            shared = await _load_shared_for_validation(
-                db,
-                expected_shared_revision=request.expected_shared_revision,
-            )
+        shared = await _load_shared_for_validation(
+            db,
+            expected_shared_revision=request.expected_shared_revision,
+        )
         _validate_combined_configuration(
             profile,
             shared,
@@ -1226,9 +1187,7 @@ async def duplicate_worker_profile(
         # §11.3: the copy carries the source's inheritance/override/mask intent.
         # Re-validate its resolved effective configuration so a copy that relies
         # on the current shared baseline is still statically valid.
-        shared = None
-        if profile_inherits_shared(copy):
-            shared = await load_shared_configuration(db)
+        shared = await load_shared_configuration(db)
         effective = resolve_effective_configuration(copy, shared)
         validate_effective_configuration(effective)
         db.add(copy)

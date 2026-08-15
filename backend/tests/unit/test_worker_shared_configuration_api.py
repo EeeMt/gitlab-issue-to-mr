@@ -25,7 +25,6 @@ from app.core.harness_registry import capability_policy
 from app.core.worker_shared_configuration import (
     WorkerSharedConfigurationContext,
     effective_configuration_digest,
-    profile_inherits_shared,
     resolve_effective_configuration,
 )
 from app.models import (
@@ -186,9 +185,9 @@ async def test_patch_shared_configuration_increments_revision_and_validates_prof
             ),
             db=db,
         )
-        # The profile is fully explicit (worker_kit_source=profile, every scalar
-        # set, no masks), so the shared PATCH resolves it WITHOUT the shared
-        # baseline (§7.2/§7.3 gate) and the digest reflects only its own config.
+        # F1: even a fully explicit Profile (worker_kit_source=profile, every
+        # scalar set, no masks) merges the shared baseline per-item, so the
+        # shared PATCH validates and digests it against the merged config.
         profile = await db.get(
             WorkerProfile,
             1,
@@ -197,8 +196,24 @@ async def test_patch_shared_configuration_increments_revision_and_validates_prof
                 selectinload(WorkerProfile.default_skills),
             ],
         )
-        assert profile_inherits_shared(profile) is False
-        expected_digest = _profile_digest(profile)
+        shared_row = await db.get(WorkerSharedConfiguration, 1)
+        shared_env = tuple(
+            (
+                await db.execute(
+                    select(WorkerSharedEnvironmentVariable).order_by(
+                        WorkerSharedEnvironmentVariable.key
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        shared = WorkerSharedConfigurationContext(
+            row=shared_row, environment_variables=shared_env
+        )
+        expected_digest = _profile_digest(
+            profile, resolve_effective_configuration(profile, shared)
+        )
 
     assert response["revision"] == 2
     assert response["pre_script"] == "shared-pre-v2"
@@ -334,10 +349,8 @@ async def test_patch_shared_configuration_rejects_statically_invalid_profile(
 
 
 @pytest.mark.asyncio
-async def test_patch_shared_configuration_does_not_merge_for_explicit_profile(
-    db_factory,
-):
-    """A fully explicit Profile is validated and digested without the shared merge."""
+async def test_patch_shared_configuration_merges_for_explicit_profile(db_factory):
+    """F1: a fully explicit Profile is validated and digested WITH the shared merge."""
     session_factory = await db_factory()
     async with session_factory() as db:
         await _seed_shared_configuration(db)
@@ -375,15 +388,13 @@ async def test_patch_shared_configuration_does_not_merge_for_explicit_profile(
             row=shared_row, environment_variables=shared_env
         )
 
-    assert profile_inherits_shared(profile) is False
     returned_digest = response["profiles"][0]["effective_configuration_digest"]
-    # The response resolves the non-inheriting Profile without the shared
-    # baseline, so its digest reflects the Profile's own explicit config only.
-    assert returned_digest == _profile_digest(profile)
-    # Merging the shared baseline (which would add SHARED_A/SHARED_SECRET) must
-    # produce a different digest, proving the PATCH did not fold shared in.
-    merged_digest = _profile_digest(
-        profile,
-        resolve_effective_configuration(profile, shared),
+    # F1: the response resolves every Profile against the shared baseline, so
+    # its digest reflects the merged config (shared SHARED_A/SHARED_SECRET).
+    assert returned_digest == _profile_digest(
+        profile, resolve_effective_configuration(profile, shared)
     )
-    assert returned_digest != merged_digest
+    # Resolving without the shared baseline must produce a different digest,
+    # proving the PATCH folded the shared env/mounts in.
+    standalone_digest = _profile_digest(profile)
+    assert returned_digest != standalone_digest

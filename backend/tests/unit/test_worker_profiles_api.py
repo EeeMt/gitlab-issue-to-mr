@@ -140,6 +140,7 @@ def test_worker_profile_request_accepts_valid_harness_fields():
 async def test_create_worker_profile_rejects_duplicate_env_keys():
     db = MagicMock()
     db.add = MagicMock()
+    db.get = AsyncMock(return_value=None)
     name_check_result = MagicMock()
     name_check_result.scalar_one_or_none.return_value = None
     db.execute = AsyncMock(return_value=name_check_result)
@@ -149,6 +150,7 @@ async def test_create_worker_profile_rejects_duplicate_env_keys():
     request = WorkerProfileCreateRequest(
         name="Java Worker",
         image="codify-worker-java:latest",
+        worker_kit_source="profile",
         volume_mounts=[],
         environment_variables=[
             WorkerProfileEnvironmentVariableRequest(key="MAVEN_OPTS", value="-Xmx1g"),
@@ -200,6 +202,7 @@ async def test_create_worker_profile_returns_created_profile_after_commit_withou
         request = WorkerProfileCreateRequest(
             name="Java Worker",
             image="codify-worker-java:latest",
+            worker_kit_source="profile",
             runtime_mode="mounted_kit",
             worker_kit_version="0.3.5",
             worker_kit_path="/opt/codify/worker-kits/0.3.5-linux-amd64",
@@ -262,6 +265,7 @@ async def test_create_baked_worker_profile_rejects_default_skills():
                     WorkerProfileCreateRequest(
                         name="Legacy Worker",
                         image="legacy-worker:latest",
+                        worker_kit_source="profile",
                         default_skill_ids=[skill.id],
                     ),
                     db=db,
@@ -296,6 +300,7 @@ async def test_duplicate_worker_profile_locks_and_revalidates_default_skills():
     source.default_skills = [skill]
     db = MagicMock()
     db.add = MagicMock()
+    db.get = AsyncMock(return_value=None)
     db.flush = AsyncMock()
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
@@ -354,6 +359,7 @@ async def test_duplicate_worker_profile_preserves_disabled_default_skill():
     source.default_skills = [disabled_skill]
     db = MagicMock()
     db.add = MagicMock()
+    db.get = AsyncMock(return_value=None)
     db.flush = AsyncMock()
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
@@ -555,6 +561,7 @@ async def test_create_mounted_worker_profile_persists_portable_kit_contract():
         request = WorkerProfileCreateRequest(
             name="External Java Runtime",
             image="team/java21-maven:2026.07",
+            worker_kit_source="profile",
             runtime_mode="mounted_kit",
             worker_kit_version="0.1.0",
             worker_kit_path="/opt/codify/worker-kits/0.1.0-linux-amd64",
@@ -577,6 +584,7 @@ async def test_create_mounted_worker_profile_persists_portable_kit_contract():
 @pytest.mark.asyncio
 async def test_create_mounted_worker_profile_rejects_kit_mount_collision():
     db = MagicMock()
+    db.get = AsyncMock(return_value=None)
     result = MagicMock()
     result.scalar_one_or_none.return_value = None
     db.execute = AsyncMock(return_value=result)
@@ -585,6 +593,7 @@ async def test_create_mounted_worker_profile_rejects_kit_mount_collision():
     request = WorkerProfileCreateRequest(
         name="Invalid Runtime",
         image="team/node22:2026.07",
+        worker_kit_source="profile",
         runtime_mode="mounted_kit",
         worker_kit_version="0.1.0",
         worker_kit_path="/opt/codify/worker-kits/0.1.0-linux-amd64",
@@ -618,6 +627,7 @@ async def test_create_mounted_worker_profile_rejects_kit_mount_collision():
 )
 async def test_create_worker_profile_rejects_system_mount_collision(container_path):
     db = MagicMock()
+    db.get = AsyncMock(return_value=None)
     result = MagicMock()
     result.scalar_one_or_none.return_value = None
     db.execute = AsyncMock(return_value=result)
@@ -626,6 +636,7 @@ async def test_create_worker_profile_rejects_system_mount_collision(container_pa
     request = WorkerProfileCreateRequest(
         name="Invalid Mount",
         image="codify-worker:latest",
+        worker_kit_source="profile",
         volume_mounts=[
             {
                 "host_path": "/srv/override",
@@ -682,7 +693,9 @@ async def test_set_default_rejects_disabled_profile():
 async def test_update_assigned_worker_allows_unchanged_docker_target_fields():
     profile = _make_profile(id=11)
     db = MagicMock()
-    db.get = AsyncMock(return_value=profile)
+    db.get = AsyncMock(
+        side_effect=lambda model, pk, **kwargs: profile if model is WorkerProfile else None
+    )
     db.execute = AsyncMock()
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
@@ -812,7 +825,9 @@ async def test_disable_worker_profile_still_rejects_active_issue():
 async def test_update_disabled_worker_profile_can_enable():
     profile = _make_profile(id=11, name="Disabled Worker", enabled=False)
     db = MagicMock()
-    db.get = AsyncMock(return_value=profile)
+    db.get = AsyncMock(
+        side_effect=lambda model, pk, **kwargs: profile if model is WorkerProfile else None
+    )
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
 
@@ -940,7 +955,9 @@ async def test_delete_worker_profile_removes_disabled_unassigned_profile():
 async def test_update_assigned_worker_allows_tls_credential_rotation_on_same_daemon():
     profile = _make_profile(id=11)
     db = MagicMock()
-    db.get = AsyncMock(return_value=profile)
+    db.get = AsyncMock(
+        side_effect=lambda model, pk, **kwargs: profile if model is WorkerProfile else None
+    )
     db.execute = AsyncMock()
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
@@ -990,7 +1007,9 @@ async def test_verify_mounted_worker_profile_runs_preflight_on_profile_target():
         }
     ]
     db = MagicMock()
-    db.get = AsyncMock(return_value=profile)
+    db.get = AsyncMock(
+        side_effect=lambda model, pk, **kwargs: profile if model is WorkerProfile else None
+    )
     db.commit = AsyncMock()
 
     container = MagicMock()
@@ -1073,7 +1092,9 @@ async def test_verify_mounted_worker_profile_transient_daemon_returns_503():
     profile.worker_kit_version = "0.3.5"
     profile.worker_kit_path = "/opt/codify/worker-kits/0.3.5-linux-amd64"
     db = MagicMock()
-    db.get = AsyncMock(return_value=profile)
+    db.get = AsyncMock(
+        side_effect=lambda model, pk, **kwargs: profile if model is WorkerProfile else None
+    )
     db.commit = AsyncMock()
 
     with patch(
@@ -1097,7 +1118,9 @@ async def test_verify_mounted_worker_profile_transient_daemon_returns_503():
 async def test_verify_baked_worker_profile_is_rejected_without_docker_access():
     profile = _make_profile(id=13)
     db = MagicMock()
-    db.get = AsyncMock(return_value=profile)
+    db.get = AsyncMock(
+        side_effect=lambda model, pk, **kwargs: profile if model is WorkerProfile else None
+    )
 
     with (
         patch("app.api.worker_profiles.DockerClientWrapper") as client_class,
