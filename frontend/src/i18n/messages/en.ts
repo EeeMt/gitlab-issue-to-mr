@@ -72,6 +72,7 @@ const en = {
     referenceNote: 'Reference statistics',
     coverageNotEnabled: 'Deletion coverage guarantee is not enabled yet',
     coverageStatement: 'Coverage statement',
+    coverageStatementBody: 'Reference statistics cover currently retained data, plus deletion data retained from {capture} through the standard deletion entry points.',
     currentState: {
       title: 'Current Running State',
       subtitle: 'Live snapshot computed from the current business tables',
@@ -98,6 +99,8 @@ const en = {
       knownTokens: 'Known Tokens',
       knownChanges: 'Known Code Changes',
       knownExecutionSeconds: 'Known Execution Time',
+      avgExecutionSeconds: 'Avg Execution Time',
+      executionValidSamples: 'Execution Samples',
       deletedTaskCount: 'Deleted Tasks',
       deletedIssueCount: 'Deleted Issues',
       deletedBeforeTerminal: 'Deleted Before Terminal',

@@ -1686,6 +1686,8 @@ export interface SystemStatisticsLifetime {
   known_total_tokens: number | null
   known_total_changes: number | null
   known_total_execution_seconds: number | null
+  avg_execution_seconds: number | null
+  execution_valid_samples: number
 }
 
 export interface SystemStatisticsDeletion {
@@ -1712,7 +1714,6 @@ export interface SystemStatisticsOverview {
   coverage: {
     capture_started_at: string | null
     capture_enabled: boolean
-    statement: string
     token: SystemStatisticsCoverageMetric
     code: SystemStatisticsCoverageMetric
   }

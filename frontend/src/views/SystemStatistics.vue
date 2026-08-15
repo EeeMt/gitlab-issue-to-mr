@@ -344,7 +344,9 @@ const lastRefreshAt = computed(() => {
 const coverageStatement = computed(() => {
   if (!overview.value) return ''
   if (overview.value.coverage.capture_enabled) {
-    return overview.value.coverage.statement
+    return t('systemStatistics.coverageStatementBody', {
+      capture: overview.value.coverage.capture_started_at ?? '',
+    })
   }
   return t('systemStatistics.coverageNotEnabled')
 })
@@ -408,6 +410,8 @@ const lifetimeItems = computed<MetricItem[]>(() => {
     { labelKey: 'knownTokens', label: t('systemStatistics.lifetime.knownTokens'), value: fmtNum(lt.known_total_tokens) },
     { labelKey: 'knownChanges', label: t('systemStatistics.lifetime.knownChanges'), value: fmtNum(lt.known_total_changes) },
     { labelKey: 'knownExecutionSeconds', label: t('systemStatistics.lifetime.knownExecutionSeconds'), value: fmtDuration(lt.known_total_execution_seconds) },
+    { labelKey: 'avgExecutionSeconds', label: t('systemStatistics.lifetime.avgExecutionSeconds'), value: fmtDuration(lt.avg_execution_seconds) },
+    { labelKey: 'executionValidSamples', label: t('systemStatistics.lifetime.executionValidSamples'), value: fmtNum(lt.execution_valid_samples) },
     { labelKey: 'deletedTask', label: t('systemStatistics.lifetime.deletedTaskCount'), value: fmtNum(overview.value?.deletion.deleted_task_count) },
     { labelKey: 'deletedIssue', label: t('systemStatistics.lifetime.deletedIssueCount'), value: fmtNum(overview.value?.deletion.deleted_issue_count) },
     { labelKey: 'deletedBeforeTerminal', label: t('systemStatistics.lifetime.deletedBeforeTerminal'), value: fmtNum(overview.value?.deletion.deleted_before_terminal) },

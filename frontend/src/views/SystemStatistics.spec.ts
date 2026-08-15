@@ -29,6 +29,8 @@ const { mockApi, resetMockApi } = vi.hoisted(() => {
       known_total_tokens: 100,
       known_total_changes: 20,
       known_total_execution_seconds: 300,
+      avg_execution_seconds: 150,
+      execution_valid_samples: 2,
     },
     deletion: {
       deleted_task_count: 1,
@@ -38,7 +40,6 @@ const { mockApi, resetMockApi } = vi.hoisted(() => {
     coverage: {
       capture_started_at: '2026-08-01T00:00:00Z',
       capture_enabled: true,
-      statement: 'Coverage statement under test',
       token: {
         eligible_samples: 3,
         complete_samples: 2,
@@ -210,6 +211,8 @@ beforeEach(() => {
       known_total_tokens: 100,
       known_total_changes: 20,
       known_total_execution_seconds: 300,
+      avg_execution_seconds: 150,
+      execution_valid_samples: 2,
     },
     deletion: {
       deleted_task_count: 1,
@@ -219,7 +222,6 @@ beforeEach(() => {
     coverage: {
       capture_started_at: '2026-08-01T00:00:00Z',
       capture_enabled: true,
-      statement: 'Coverage statement under test',
       token: {
         eligible_samples: 3,
         complete_samples: 2,
@@ -256,7 +258,7 @@ afterEach(() => {
 })
 
 describe('SystemStatistics', () => {
-  it('renders the reference-statistics coverage statement from the overview API', async () => {
+  it('renders the reference-statistics coverage statement from i18n', async () => {
     wrapper = mount(SystemStatistics)
     await flushPromises()
 
@@ -265,7 +267,7 @@ describe('SystemStatistics', () => {
     })
     const statement = wrapper.find('[data-testid="coverage-statement"]')
     expect(statement.exists()).toBe(true)
-    expect(statement.text()).toContain('Coverage statement under test')
+    expect(statement.text()).toContain('systemStatistics.coverageStatementBody')
   })
 
   it('shows the coverage note when the deletion guarantee is not enabled', async () => {
@@ -303,7 +305,6 @@ describe('SystemStatistics', () => {
       coverage: {
         capture_started_at: null,
         capture_enabled: false,
-        statement: '',
         token: {
           eligible_samples: 0,
           complete_samples: 0,
@@ -351,9 +352,12 @@ describe('SystemStatistics', () => {
 
     const text = wrapper.text()
     expect(text).toContain('systemStatistics.lifetime.knownExecutionSeconds')
+    expect(text).toContain('systemStatistics.lifetime.avgExecutionSeconds')
+    expect(text).toContain('systemStatistics.lifetime.executionValidSamples')
     expect(text).toContain('systemStatistics.lifetime.failureRate')
     expect(text).toContain('systemStatistics.lifetime.issuesWithMr')
     expect(text).toContain('5m') // 300s known_total_execution_seconds
+    expect(text).toContain('2m 30s') // 150s avg_execution_seconds
     expect(text).toContain('33.3%') // 1/3 failure_rate
   })
 
@@ -392,7 +396,6 @@ describe('SystemStatistics', () => {
       coverage: {
         capture_started_at: null,
         capture_enabled: false,
-        statement: '',
         token: {
           eligible_samples: 0,
           complete_samples: 0,

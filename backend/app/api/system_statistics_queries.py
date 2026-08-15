@@ -336,11 +336,13 @@ def _code_eligible(t: CTE) -> Any:
 
 
 def task_execution_seconds(dialect: str, t: CTE) -> Any:
+    # Equal start/terminal timestamps are a valid 0-second sample (§9.4); only
+    # a missing boundary or an end before the start is Unknown.
     return case(
         (
             t.c.started_at.is_not(None)
             & t.c.terminal_at.is_not(None)
-            & (t.c.terminal_at > t.c.started_at),
+            & (t.c.terminal_at >= t.c.started_at),
             duration_seconds(dialect, t.c.started_at, t.c.terminal_at),
         ),
         else_=None,
@@ -359,7 +361,7 @@ def task_queue_wait_seconds(dialect: str, t: CTE) -> Any:
         (
             t.c.started_at.is_not(None)
             & queue_base.is_not(None)
-            & (t.c.started_at > queue_base),
+            & (t.c.started_at >= queue_base),
             duration_seconds(dialect, queue_base, t.c.started_at),
         ),
         else_=None,
@@ -447,8 +449,9 @@ def build_current_state_task_query(
     waiting = task.status.in_(ACTIVE_TASK_STATUSES[:-1])
     # Only measure queue wait once the task is past its queue base; a
     # future-scheduled task (queue_base > now) would otherwise yield negative
-    # seconds, which §9.4 requires to be NULL.
-    wait_eligible = waiting & queue_base.is_not(None) & (queue_base < now)
+    # seconds, which §9.4 requires to be NULL. A task exactly at its base is a
+    # valid 0-second wait sample.
+    wait_eligible = waiting & queue_base.is_not(None) & (queue_base <= now)
     queue_wait = case(
         (wait_eligible, task_queue_wait_now(dialect, queue_base, now)),
         else_=None,
@@ -537,8 +540,11 @@ def build_lifetime_task_query(dialect: str, all_tasks: CTE) -> Any:
             func.sum(case((t.c.deleted_before_terminal, 1), else_=0)), 0
         ).label("deleted_before_terminal"),
         # No valid sample -> NULL, not 0, so an unknown aggregate is not
-        # presented as an exact zero (§5.7 / §9.5).
+        # presented as an exact zero (§5.7 / §9.5). Average and sample count
+        # share the same valid-sample condition (§9.4).
         func.sum(task_execution_seconds(dialect, t)).label("known_execution_seconds"),
+        func.avg(task_execution_seconds(dialect, t)).label("avg_execution_seconds"),
+        func.count(task_execution_seconds(dialect, t)).label("execution_valid_samples"),
         func.sum(case((_token_complete(t), t.c.input_tokens), else_=None)).label(
             "known_input_tokens"
         ),
@@ -548,20 +554,23 @@ def build_lifetime_task_query(dialect: str, all_tasks: CTE) -> Any:
         func.sum(case((_change_available(t), t.c.total_changes), else_=None)).label(
             "known_total_changes"
         ),
+        # Numerator samples are intersected with the eligible set so a
+        # coverage rate can never exceed 1.0: a sample only counts toward
+        # complete/partial/missing once it is eligible (§9.5).
         func.coalesce(
-            func.sum(case((_token_complete(t), 1), else_=0)), 0
+            func.sum(case((_token_eligible(t) & _token_complete(t), 1), else_=0)), 0
         ).label("token_complete_samples"),
         func.coalesce(
-            func.sum(case((_token_partial(t), 1), else_=0)), 0
+            func.sum(case((_token_eligible(t) & _token_partial(t), 1), else_=0)), 0
         ).label("token_partial_samples"),
         func.coalesce(
-            func.sum(case((_token_missing(t), 1), else_=0)), 0
+            func.sum(case((_token_eligible(t) & _token_missing(t), 1), else_=0)), 0
         ).label("token_missing_samples"),
         func.coalesce(
             func.sum(case((_token_eligible(t), 1), else_=0)), 0
         ).label("token_eligible_samples"),
         func.coalesce(
-            func.sum(case((_change_available(t), 1), else_=0)), 0
+            func.sum(case((_code_eligible(t) & _change_available(t), 1), else_=0)), 0
         ).label("change_available_samples"),
         func.coalesce(
             func.sum(case((_code_eligible(t), 1), else_=0)), 0

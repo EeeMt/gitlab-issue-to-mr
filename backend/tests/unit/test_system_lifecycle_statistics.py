@@ -504,6 +504,41 @@ class CleanupArchivesLifecycleTests(unittest.IsolatedAsyncioTestCase):
             # force=True here, but there were no active Tasks at lock time (§6.2).
             self.assertFalse(issue_archive.forced_with_active_tasks)
 
+    async def test_cleanup_archives_operator_user_id(self):
+        from app.core.system_data_cleanup import cleanup_system_data
+
+        now = utcnow()
+        async with self.Session() as db:
+            await _seed_base(db)
+            _seed_issue(db, 1, created_at=now - timedelta(days=40))
+            _seed_task(
+                db,
+                1,
+                1,
+                status=TaskStatus.COMPLETED,
+                created_at=now - timedelta(days=40),
+                change_stats_recorded_at=now,
+            )
+            await db.commit()
+
+            result = await cleanup_system_data(
+                db,
+                older_than_days=30,
+                force=False,
+                workspace_root="",
+                deleted_by_user_id=77,
+            )
+
+            self.assertEqual(result.deleted_issues, 1)
+            task_archive = (
+                await db.execute(select(DeletedTaskStatistics))
+            ).scalar_one()
+            issue_archive = (
+                await db.execute(select(DeletedIssueStatistics))
+            ).scalar_one()
+            self.assertEqual(task_archive.deleted_by_user_id, 77)
+            self.assertEqual(issue_archive.deleted_by_user_id, 77)
+
 
 # ---------------------------------------------------------------------------
 # §8–9 query builders
@@ -595,6 +630,10 @@ class QueryBuilderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(lt.token_eligible_samples, 1)
         self.assertEqual(lt.code_eligible_samples, 1)
         self.assertEqual(lt.change_available_samples, 1)
+        # §9.4: the archived task 1 ran 2h (started now-2h, terminal now).
+        self.assertEqual(lt.execution_valid_samples, 1)
+        self.assertAlmostEqual(lt.known_execution_seconds, 7200.0, delta=0.01)
+        self.assertAlmostEqual(lt.avg_execution_seconds, 7200.0, delta=0.01)
         self.assertEqual(li.issue_count, 2)
         self.assertEqual(li.issues_with_mr, 1)  # archived issue 1 had an MR
 
@@ -806,6 +845,233 @@ class ConservativeBackfillTests(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 
 
+class CoverageEligibilityTests(unittest.IsolatedAsyncioTestCase):
+    """F1: coverage numerators are restricted to the eligible sample set.
+
+    A sample must be eligible before it can count toward complete/partial/missing
+    (token) or available (code); otherwise a non-terminal task with recorded
+    stats would push the coverage rate above 1.0 (§9.5).
+    """
+
+    async def asyncSetUp(self):
+        self.engine = _make_engine()
+        await _create_schema(self.engine)
+        self.Session = async_sessionmaker(self.engine, expire_on_commit=False)
+        self.dialect = "sqlite"
+        self.now = utcnow()
+
+    async def asyncTearDown(self):
+        await self.engine.dispose()
+
+    async def _lifetime(self, data_state="all"):
+        from app.api import system_statistics_queries as q
+
+        all_tasks = q.build_all_task_statistics_cte(
+            dialect=self.dialect,
+            project_id=None,
+            provider_id=None,
+            harness_key=None,
+            data_state=data_state,
+        )
+        async with self.Session() as db:
+            return (
+                await db.execute(q.build_lifetime_task_query(self.dialect, all_tasks))
+            ).one()
+
+    async def test_active_pending_task_does_not_inflate_coverage(self):
+        # Regression for the reported token_rate=2.0 / code_rate=2.0 bug: a
+        # PENDING task carrying complete tokens and change stats must count
+        # toward neither numerator because it is not an eligible sample.
+        async with self.Session() as db:
+            await _seed_base(db)
+            _seed_issue(db, 1, created_at=self.now - timedelta(days=5))
+            _seed_task(
+                db,
+                1,
+                1,
+                status=TaskStatus.COMPLETED,
+                created_at=self.now - timedelta(days=5),
+                started_at=self.now - timedelta(hours=2),
+                completed_at=self.now,
+                change_stats_recorded_at=self.now,
+                additions=5,
+                deletions=2,
+                total_changes=7,
+                input_tokens=100,
+                output_tokens=50,
+            )
+            _seed_task(
+                db,
+                2,
+                1,
+                status=TaskStatus.PENDING,
+                created_at=self.now - timedelta(minutes=10),
+                change_stats_recorded_at=self.now,
+                additions=1,
+                deletions=0,
+                total_changes=1,
+                input_tokens=200,
+                output_tokens=100,
+            )
+            await db.commit()
+
+        lt = await self._lifetime()
+        self.assertEqual(lt.token_eligible_samples, 1)
+        self.assertEqual(lt.token_complete_samples, 1)
+        self.assertEqual(lt.token_partial_samples, 0)
+        self.assertEqual(lt.token_missing_samples, 0)
+        self.assertEqual(
+            lt.token_complete_samples + lt.token_partial_samples + lt.token_missing_samples,
+            lt.token_eligible_samples,
+        )
+        self.assertEqual(lt.code_eligible_samples, 1)
+        self.assertEqual(lt.change_available_samples, 1)
+        # Coverage rates stay within [0, 1].
+        self.assertEqual(lt.token_complete_samples / lt.token_eligible_samples, 1.0)
+        self.assertEqual(lt.change_available_samples / lt.code_eligible_samples, 1.0)
+
+    async def test_partial_and_missing_tokens_partition_eligible_set(self):
+        async with self.Session() as db:
+            await _seed_base(db)
+            _seed_issue(db, 1, created_at=self.now - timedelta(days=5))
+            # Complete tokens.
+            _seed_task(
+                db,
+                1,
+                1,
+                status=TaskStatus.COMPLETED,
+                created_at=self.now - timedelta(days=5),
+                started_at=self.now - timedelta(hours=2),
+                completed_at=self.now,
+                change_stats_recorded_at=self.now,
+                input_tokens=100,
+                output_tokens=50,
+            )
+            # Partial tokens (input only).
+            _seed_task(
+                db,
+                2,
+                1,
+                status=TaskStatus.COMPLETED,
+                created_at=self.now - timedelta(days=4),
+                started_at=self.now - timedelta(hours=1),
+                completed_at=self.now,
+                input_tokens=10,
+                output_tokens=None,
+            )
+            # Missing tokens entirely.
+            _seed_task(
+                db,
+                3,
+                1,
+                status=TaskStatus.COMPLETED,
+                created_at=self.now - timedelta(days=3),
+                started_at=self.now - timedelta(minutes=30),
+                completed_at=self.now,
+                input_tokens=None,
+                output_tokens=None,
+            )
+            await db.commit()
+
+        lt = await self._lifetime()
+        self.assertEqual(lt.token_eligible_samples, 3)
+        self.assertEqual(lt.token_complete_samples, 1)
+        self.assertEqual(lt.token_partial_samples, 1)
+        self.assertEqual(lt.token_missing_samples, 1)
+        self.assertEqual(
+            lt.token_complete_samples + lt.token_partial_samples + lt.token_missing_samples,
+            lt.token_eligible_samples,
+        )
+        # Only task 1 records code-change data.
+        self.assertEqual(lt.code_eligible_samples, 3)
+        self.assertEqual(lt.change_available_samples, 1)
+        self.assertAlmostEqual(lt.change_available_samples / lt.code_eligible_samples, 1 / 3)
+
+    async def test_plan_and_failed_tasks_are_code_ineligible(self):
+        async with self.Session() as db:
+            await _seed_base(db)
+            _seed_issue(db, 1, created_at=self.now - timedelta(days=5))
+            # Plan-mode completed task: terminal + started -> token eligible,
+            # but task_mode != "execute" -> not code eligible.
+            _seed_task(
+                db,
+                1,
+                1,
+                status=TaskStatus.COMPLETED,
+                created_at=self.now - timedelta(days=5),
+                started_at=self.now - timedelta(hours=1),
+                completed_at=self.now,
+                change_stats_recorded_at=self.now,
+                additions=1,
+                deletions=0,
+                total_changes=1,
+                input_tokens=10,
+                output_tokens=5,
+                task_mode="plan",
+            )
+            # Failed execute-mode task: terminal + started -> token eligible,
+            # but status != "completed" -> not code eligible.
+            _seed_task(
+                db,
+                2,
+                1,
+                status=TaskStatus.FAILED,
+                created_at=self.now - timedelta(days=4),
+                started_at=self.now - timedelta(hours=3),
+                completed_at=self.now - timedelta(hours=2),
+                change_stats_recorded_at=self.now,
+                additions=2,
+                deletions=1,
+                total_changes=3,
+                input_tokens=20,
+                output_tokens=10,
+            )
+            await db.commit()
+
+        lt = await self._lifetime()
+        self.assertEqual(lt.token_eligible_samples, 2)
+        self.assertEqual(lt.token_complete_samples, 2)
+        self.assertEqual(lt.code_eligible_samples, 0)
+        self.assertEqual(lt.change_available_samples, 0)
+
+    async def test_deleted_before_terminal_task_is_not_eligible(self):
+        async with self.Session() as db:
+            await _seed_base(db)
+            _seed_issue(db, 1, created_at=self.now - timedelta(days=5))
+            _seed_task(
+                db,
+                1,
+                1,
+                status=TaskStatus.RUNNING,
+                created_at=self.now - timedelta(days=5),
+                started_at=self.now - timedelta(hours=1),
+                change_stats_recorded_at=self.now,
+                additions=1,
+                deletions=0,
+                total_changes=1,
+                input_tokens=30,
+                output_tokens=15,
+            )
+            await db.commit()
+            from app.core.system_statistics_deletion import (
+                archive_issue_statistics_before_delete,
+            )
+
+            await archive_issue_statistics_before_delete(
+                db, issue_id=1, deletion_reason="cleanup", now=self.now
+            )
+            await db.execute(delete(Task).where(Task.id == 1))
+            await db.execute(delete(Issue).where(Issue.id == 1))
+            await db.commit()
+
+        lt = await self._lifetime()
+        self.assertEqual(lt.deleted_before_terminal, 1)
+        self.assertEqual(lt.token_eligible_samples, 0)
+        self.assertEqual(lt.token_complete_samples, 0)
+        self.assertEqual(lt.code_eligible_samples, 0)
+        self.assertEqual(lt.change_available_samples, 0)
+
+
 class DurationEdgeCaseTests(unittest.IsolatedAsyncioTestCase):
     """Durations where the end precedes the start are NULL, never negative."""
 
@@ -853,6 +1119,8 @@ class DurationEdgeCaseTests(unittest.IsolatedAsyncioTestCase):
             # The only task's execution is inverted (invalid) -> no valid sample,
             # so the lifetime aggregate is NULL, never a negative (nor a bogus 0).
             self.assertIsNone(lt.known_execution_seconds)
+            self.assertIsNone(lt.avg_execution_seconds)
+            self.assertEqual(lt.execution_valid_samples, 0)
             finished = list(
                 (
                     await db.execute(
@@ -862,6 +1130,52 @@ class DurationEdgeCaseTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(len(finished), 1)
             self.assertEqual(finished[0].known_execution_seconds, 0)
+
+    async def test_equal_timestamps_are_valid_zero_second_samples(self):
+        from app.api import system_statistics_queries as q
+
+        async with self.Session() as db:
+            await _seed_base(db)
+            _seed_issue(db, 1, created_at=self.now)
+            # created_at == started_at == completed_at: execution and queue wait
+            # are both known, 0-second samples (§9.4), not Unknown.
+            _seed_task(
+                db,
+                1,
+                1,
+                status=TaskStatus.COMPLETED,
+                created_at=self.now,
+                started_at=self.now,
+                completed_at=self.now,
+            )
+            await db.commit()
+
+            all_tasks = q.build_all_task_statistics_cte(
+                dialect=self.dialect,
+                project_id=None,
+                provider_id=None,
+                harness_key=None,
+                data_state="all",
+            )
+            lt = (
+                await db.execute(q.build_lifetime_task_query(self.dialect, all_tasks))
+            ).one()
+            self.assertEqual(lt.execution_valid_samples, 1)
+            self.assertEqual(lt.known_execution_seconds, 0)
+            self.assertEqual(lt.avg_execution_seconds, 0)
+
+            # started_at == queue_base (created_at, no scheduled_at) -> 0s wait.
+            rows = list(
+                (
+                    await db.execute(
+                        select(q.task_queue_wait_seconds(self.dialect, all_tasks)).select_from(
+                            all_tasks
+                        )
+                    )
+                ).all()
+            )
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0][0], 0)
 
     async def test_queue_wait_guard_against_inverted_start(self):
         from app.api import system_statistics_queries as q
@@ -1117,6 +1431,8 @@ class LifecycleStatsAPITests(unittest.TestCase):
         self.assertEqual(data["lifetime"]["completed"], 1)
         self.assertEqual(data["lifetime"]["known_total_tokens"], 150)
         self.assertEqual(data["lifetime"]["known_total_changes"], 7)
+        self.assertEqual(data["lifetime"]["execution_valid_samples"], 1)
+        self.assertAlmostEqual(data["lifetime"]["avg_execution_seconds"], 7200.0, delta=0.01)
         self.assertEqual(data["current_state"]["queued"], 1)
         self.assertEqual(data["current_state"]["active_issues"], 1)
         self.assertEqual(data["deletion"]["deleted_task_count"], 0)

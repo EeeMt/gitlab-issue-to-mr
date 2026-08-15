@@ -39,10 +39,6 @@ from app.models import SystemStatisticsMetadata
 
 router = APIRouter()
 
-_REFERENCE_STATEMENT = (
-    "参考统计：仅覆盖当前仍保留的数据，以及从 {capture_started_at} 起通过标准删除入口保留的删除数据。"
-)
-
 
 def _int(value) -> int:
     return int(value or 0)
@@ -79,16 +75,14 @@ def _resolve_range(range_value: str, now: datetime) -> tuple[datetime | None, st
 async def _coverage_from_metadata(db: AsyncSession, now: datetime) -> dict[str, Any]:
     meta = await db.get(SystemStatisticsMetadata, 1)
     capture_started_at = meta.capture_started_at if meta else None
+    # The human-readable reference-statistics statement is rendered by the
+    # frontend from i18n so the language always matches the page (§11); the API
+    # only reports the coverage window facts.
     return {
         "capture_started_at": (
             capture_started_at.isoformat() if capture_started_at else None
         ),
         "capture_enabled": capture_started_at is not None,
-        "statement": _REFERENCE_STATEMENT.format(
-            capture_started_at=(
-                capture_started_at.isoformat() if capture_started_at else "（尚未启用）"
-            )
-        ),
     }
 
 
@@ -185,6 +179,10 @@ async def get_system_statistics_overview(
             "known_total_execution_seconds": _optional_float(
                 lifetime_task_row.known_execution_seconds
             ),
+            "avg_execution_seconds": _optional_float(
+                lifetime_task_row.avg_execution_seconds
+            ),
+            "execution_valid_samples": _int(lifetime_task_row.execution_valid_samples),
         },
         "deletion": {
             "deleted_task_count": _int(lifetime_task_row.deleted_task_count),

@@ -162,6 +162,7 @@ async def cleanup_system_data(
     workspace_root: str,
     settings: Any | None = None,
     now: datetime | None = None,
+    deleted_by_user_id: int | None = None,
 ) -> SystemDataCleanupResult:
     settings = settings or get_effective_settings()
     result = SystemDataCleanupResult()
@@ -247,6 +248,7 @@ async def cleanup_system_data(
             db,
             issue_id=issue.id,
             deletion_reason="cleanup",
+            deleted_by_user_id=deleted_by_user_id,
         )
 
         task_ids = [task.id for task in issue_tasks]

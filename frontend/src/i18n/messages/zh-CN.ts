@@ -72,6 +72,7 @@ const zhCN = {
     referenceNote: '参考统计',
     coverageNotEnabled: '删除数据覆盖保证尚未启用',
     coverageStatement: '覆盖说明',
+    coverageStatementBody: '参考统计：仅覆盖当前仍保留的数据，以及从 {capture} 起通过标准删除入口保留的删除数据。',
     currentState: {
       title: '当前运行态',
       subtitle: '基于当前业务表实时聚合',
@@ -98,6 +99,8 @@ const zhCN = {
       knownTokens: '已知 Token 数',
       knownChanges: '已知代码变更',
       knownExecutionSeconds: '已知执行时长',
+      avgExecutionSeconds: '平均执行时长',
+      executionValidSamples: '执行时长样本数',
       deletedTaskCount: '已删除 Task',
       deletedIssueCount: '已删除需求',
       deletedBeforeTerminal: '未终态删除',

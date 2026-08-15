@@ -234,6 +234,72 @@ async def test_archive_row_lock_and_same_transaction_delete(session_factory):
         await contender_task
 
 
+async def test_create_path_waits_for_archive_holder_commit(session_factory):
+    """The real create/retry path blocks on the archive's Issue lock (§15.1).
+
+    The previous contender only ran another archive; this drives the actual
+    create path (select Issue FOR UPDATE, then insert a Task) and verifies it
+    cannot interleave with a concurrent archive of the same issue.
+    """
+    issue_id = await _seed_issue_with_tasks(session_factory)
+    async with session_factory() as holder:
+        await holder.execute(select(Issue).where(Issue.id == issue_id).with_for_update())
+        entered = asyncio.Event()
+        completed = asyncio.Event()
+        errors: list[BaseException] = []
+
+        async def create_path():
+            try:
+                async with session_factory() as create_db:
+                    # Create/retry acquires the Issue row lock first, then inserts
+                    # the new Task under the same transaction. entered.set() runs
+                    # before the SELECT so the test can observe the blocked state.
+                    entered.set()
+                    issue = (
+                        await create_db.execute(
+                            select(Issue).where(Issue.id == issue_id).with_for_update()
+                        )
+                    ).scalar_one()
+                    create_db.add(
+                        Task(
+                            issue_id=issue.id,
+                            project_id=1,
+                            user_prompt="create-after-archive",
+                            status=TaskStatus.PENDING,
+                        )
+                    )
+                    await create_db.commit()
+                    completed.set()
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+                raise
+
+        contender = asyncio.create_task(create_path())
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        await asyncio.sleep(0.3)
+        assert not completed.is_set(), "create path should be blocked on the Issue row lock"
+
+        await holder.commit()  # archive holder releases the lock
+
+        try:
+            await asyncio.wait_for(completed.wait(), timeout=10)
+        except Exception:  # noqa: BLE001
+            raise AssertionError(f"create path did not finish after unlock: {errors!r}") from None
+        await contender
+        assert not errors
+
+    async with session_factory() as db:
+        created = await db.scalar(
+            select(func.count())
+            .select_from(Task)
+            .where(
+                Task.issue_id == issue_id,
+                Task.user_prompt == "create-after-archive",
+            )
+        )
+        assert int(created or 0) == 1
+
+
 async def test_pg_day_bucket_uses_shanghai_timezone(session_factory):
     """Day-bucket trends convert to Asia/Shanghai before date_trunc.
 

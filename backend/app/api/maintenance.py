@@ -39,7 +39,7 @@ class CleanupSystemDataResponse(BaseModel):
 async def cleanup_system_data_endpoint(
     body: CleanupSystemDataRequest,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_admin_user),
+    current_user: User = Depends(require_admin_user),
 ) -> CleanupSystemDataResponse:
     settings = get_effective_settings()
     result = await cleanup_system_data(
@@ -48,5 +48,6 @@ async def cleanup_system_data_endpoint(
         force=body.force,
         workspace_root=settings.worker_workspace_host_path,
         settings=settings,
+        deleted_by_user_id=current_user.id if current_user else None,
     )
     return CleanupSystemDataResponse(**result.to_dict())
