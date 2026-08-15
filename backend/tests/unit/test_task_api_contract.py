@@ -7,13 +7,18 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 from fastapi.routing import APIRoute
+from pydantic import ValidationError
 
 import app.api.tasks as tasks_module
 from app.api.task_runtime_summary_routes import (
     serialize_model_service_summary,
     serialize_worker_runtime_summary,
 )
-from app.api.task_schemas import CreateTaskRequest
+from app.api.task_schemas import (
+    CreateTaskRequest,
+    RunInstructionTemplatePreviewRequest,
+    UpdateTaskRequest,
+)
 from app.api.tasks import (
     _serialize_task,
     download_task_archive,
@@ -156,6 +161,61 @@ def test_create_request_preserves_execute_and_plan_invariants() -> None:
     assert execute.effective_require_changes is False
     assert plan.effective_require_changes is False
     assert fresh.session_mode == "fresh"
+
+
+def test_create_request_accepts_three_task_modes_and_rejects_others() -> None:
+    execute = CreateTaskRequest(issue_id=1)
+    freeform = CreateTaskRequest(issue_id=1, task_mode="freeform")
+    plan = CreateTaskRequest(issue_id=1, task_mode="plan")
+
+    assert execute.task_mode == "execute"
+    assert freeform.task_mode == "freeform"
+    assert plan.task_mode == "plan"
+    with pytest.raises(ValidationError):
+        CreateTaskRequest(issue_id=1, task_mode="bogus")
+
+
+def test_create_effective_require_changes_false_for_freeform_and_plan() -> None:
+    freeform = CreateTaskRequest(issue_id=1, task_mode="freeform", require_changes=True)
+    plan = CreateTaskRequest(issue_id=1, task_mode="plan", require_changes=True)
+    execute = CreateTaskRequest(issue_id=1, task_mode="execute", require_changes=True)
+
+    assert freeform.effective_require_changes is False
+    assert plan.effective_require_changes is False
+    assert execute.effective_require_changes is True
+    assert (
+        CreateTaskRequest(issue_id=1, task_mode="freeform").effective_require_changes
+        is False
+    )
+
+
+def test_update_request_accepts_three_task_modes_and_rejects_others() -> None:
+    assert UpdateTaskRequest(task_mode="freeform").task_mode == "freeform"
+    assert UpdateTaskRequest(task_mode="plan").task_mode == "plan"
+    assert UpdateTaskRequest(task_mode="execute").task_mode == "execute"
+    with pytest.raises(ValidationError):
+        UpdateTaskRequest(task_mode="bogus")
+
+
+def test_preview_request_accepts_three_modes_and_omitted_template() -> None:
+    request = RunInstructionTemplatePreviewRequest(
+        issue_id=1, task_mode="freeform", user_prompt="need"
+    )
+    assert request.task_mode == "freeform"
+    assert request.run_instruction_template is None
+    assert (
+        RunInstructionTemplatePreviewRequest(
+            issue_id=1,
+            task_mode="plan",
+            user_prompt="need",
+            run_instruction_template="{{user_prompt}}",
+        ).task_mode
+        == "plan"
+    )
+    with pytest.raises(ValidationError):
+        RunInstructionTemplatePreviewRequest(
+            issue_id=1, task_mode="bogus", user_prompt="need"
+        )
 
 
 def test_task_response_preserves_required_frontend_fields() -> None:

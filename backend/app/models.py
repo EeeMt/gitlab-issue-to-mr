@@ -443,7 +443,9 @@ class Task(Base):
     # Require code changes for success (relevant when issue has target_branch)
     require_changes: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
-    # Execution mode: 'execute' (default) makes code changes; 'plan' only analyses and outputs a proposal
+    # Execution mode: 'execute' (default) makes code changes; 'plan' only
+    # analyses and outputs a proposal; 'freeform' uses only the user prompt and
+    # never requires code changes.
     task_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="execute")
 
     # AI model used for this task (populated from structured system_init events)

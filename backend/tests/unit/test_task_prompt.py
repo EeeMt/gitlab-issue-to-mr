@@ -11,6 +11,7 @@ from app.core.task_prompt import (
     BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE,
     BUILT_IN_EXECUTE_RUN_INSTRUCTION_TEMPLATE,
     BUILT_IN_PLAN_RUN_INSTRUCTION_TEMPLATE,
+    FREEFORM_RUN_INSTRUCTION_TEMPLATE,
     MAX_RENDERED_PROMPT_LENGTH,
     MAX_RUN_INSTRUCTION_TEMPLATE_LENGTH,
     TaskPromptValidationError,
@@ -20,6 +21,7 @@ from app.core.task_prompt import (
     select_run_instruction_template,
     validate_run_instruction_template,
 )
+from app.core.worker_profiles import select_snapshot_run_instruction_template
 from app.core.worker_runtime import materialize_task_prompt
 from app.models import Base, Issue, Task, TaskStatus
 
@@ -95,6 +97,76 @@ def test_template_selection_precedence() -> None:
             retry_snapshot="snapshot",
         )
         == "snapshot"
+    )
+
+
+def test_freeform_run_instruction_template_is_canonical() -> None:
+    assert FREEFORM_RUN_INSTRUCTION_TEMPLATE == "{{user_prompt}}"
+
+
+def test_template_selection_precedence_includes_freeform() -> None:
+    settings = SimpleNamespace(
+        default_execute_run_instruction_template="execute",
+        default_plan_run_instruction_template="plan",
+        ci_auto_repair_run_instruction_template="ci",
+    )
+    # retry snapshot beats everything.
+    assert (
+        select_run_instruction_template(
+            settings,
+            task_mode="freeform",
+            trigger_source="ci_auto_repair",
+            retry_snapshot="snapshot",
+        )
+        == "snapshot"
+    )
+    # CI auto-repair beats freeform.
+    assert (
+        select_run_instruction_template(
+            settings, task_mode="freeform", trigger_source="ci_auto_repair"
+        )
+        == "ci"
+    )
+    # freeform resolves to the canonical constant, not the profile templates.
+    assert (
+        select_run_instruction_template(settings, task_mode="freeform")
+        == FREEFORM_RUN_INSTRUCTION_TEMPLATE
+    )
+    # plan and execute keep their existing templates.
+    assert select_run_instruction_template(settings, task_mode="plan") == "plan"
+    assert select_run_instruction_template(settings, task_mode="execute") == "execute"
+
+
+def test_snapshot_template_selection_uses_canonical_for_freeform() -> None:
+    snapshot = type(
+        "Snapshot",
+        (),
+        {
+            "default_execute_run_instruction_template": "execute {{user_prompt}}",
+            "default_plan_run_instruction_template": "plan {{user_prompt}}",
+            "ci_auto_repair_run_instruction_template": "repair {{issue_title}}",
+        },
+    )()
+    # freeform returns the canonical constant and never reads the implementation
+    # template frozen in the snapshot.
+    assert (
+        select_snapshot_run_instruction_template(snapshot, task_mode="freeform")
+        == FREEFORM_RUN_INSTRUCTION_TEMPLATE
+    )
+    # CI auto-repair keeps precedence over freeform in the snapshot path too.
+    assert (
+        select_snapshot_run_instruction_template(
+            snapshot, task_mode="freeform", trigger_source="ci_auto_repair"
+        )
+        == "repair {{issue_title}}"
+    )
+    assert (
+        select_snapshot_run_instruction_template(snapshot, task_mode="plan")
+        == "plan {{user_prompt}}"
+    )
+    assert (
+        select_snapshot_run_instruction_template(snapshot, task_mode="execute")
+        == "execute {{user_prompt}}"
     )
 
 

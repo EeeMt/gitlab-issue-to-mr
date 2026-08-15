@@ -10,7 +10,7 @@ from app.core.skills import MAX_SKILLS_PER_TASK
 from app.core.task_prompt import MAX_RUN_INSTRUCTION_TEMPLATE_LENGTH
 from app.core.utcnow import utcnow
 
-_VALID_TASK_MODES = ("execute", "plan")
+_VALID_TASK_MODES = ("execute", "freeform", "plan")
 
 
 def _validate_skill_ids(value: list[int] | None) -> list[int] | None:
@@ -74,9 +74,10 @@ class UpdateTaskRequest(BaseModel):
             key entirely to leave the current value unchanged.
         require_changes: Whether the task must produce file changes.
             Cannot be null — omit the key to leave unchanged.
-        task_mode: Execution mode — 'execute' (default) or 'plan'.
+        task_mode: Execution mode — 'execute' (default), 'freeform', or 'plan'.
             Cannot be null — omit the key to leave unchanged.
-            Setting task_mode='plan' automatically forces require_changes=False.
+            Setting task_mode='plan' or task_mode='freeform' automatically
+            forces require_changes=False.
         worker_profile_id: Explicitly switch the worker Profile on a
             PENDING/QUEUED task (§12.3). This re-resolves the current shared
             configuration, re-checks runtime readiness, and replaces the frozen
@@ -87,7 +88,7 @@ class UpdateTaskRequest(BaseModel):
     priority: int | None = None
     provider_id: int | None = None
     require_changes: bool | None = None
-    task_mode: Literal["execute", "plan"] | None = None
+    task_mode: Literal["execute", "freeform", "plan"] | None = None
     run_instruction_template: str | None = Field(
         default=None, max_length=MAX_RUN_INSTRUCTION_TEMPLATE_LENGTH
     )
@@ -150,7 +151,7 @@ class CreateTaskRequest(BaseModel):
     provider_id: int | None = None
     harness_key: str | None = None  # Omitted -> Profile default
     require_changes: bool | None = False
-    task_mode: Literal["execute", "plan"] = "execute"
+    task_mode: Literal["execute", "freeform", "plan"] = "execute"
     session_mode: Literal["continue", "fresh"] = "continue"
     run_instruction_template: str | None = Field(
         default=None, max_length=MAX_RUN_INSTRUCTION_TEMPLATE_LENGTH
@@ -186,17 +187,24 @@ class CreateTaskRequest(BaseModel):
 
     @property
     def effective_require_changes(self) -> bool:
-        """Plan mode never requires code changes."""
-        if self.task_mode == "plan":
+        """Plan and freeform modes never require code changes."""
+        if self.task_mode in ("plan", "freeform"):
             return False
         return self.require_changes if self.require_changes is not None else False
 
 
 class RunInstructionTemplatePreviewRequest(BaseModel):
-    """Prospective task context used to preview a run-instruction template."""
+    """Prospective task context used to preview a run-instruction template.
+
+    ``run_instruction_template`` is optional so freeform previews can omit it;
+    the server resolves the canonical freeform template. Other modes must still
+    supply an explicit template (enforced by the preview service, not here).
+    """
 
     issue_id: int
-    task_mode: Literal["execute", "plan"] = "execute"
+    task_mode: Literal["execute", "freeform", "plan"] = "execute"
     user_prompt: str
-    run_instruction_template: str = Field(max_length=MAX_RUN_INSTRUCTION_TEMPLATE_LENGTH)
+    run_instruction_template: str | None = Field(
+        default=None, max_length=MAX_RUN_INSTRUCTION_TEMPLATE_LENGTH
+    )
     require_changes: bool = False

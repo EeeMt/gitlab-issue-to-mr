@@ -30,6 +30,7 @@ from app.core.skills import (
     validate_runtime_supports_skills,
 )
 from app.core.task_prompt import (
+    FREEFORM_RUN_INSTRUCTION_TEMPLATE,
     TaskPromptValidationError,
     validate_run_instruction_template,
 )
@@ -817,6 +818,8 @@ def select_snapshot_run_instruction_template(
     """Select the validated run-instruction template from a task snapshot."""
     if trigger_source == "ci_auto_repair":
         return validate_run_instruction_template(snapshot.ci_auto_repair_run_instruction_template)
+    if task_mode == "freeform":
+        return validate_run_instruction_template(FREEFORM_RUN_INSTRUCTION_TEMPLATE)
     if task_mode == "plan":
         return validate_run_instruction_template(snapshot.default_plan_run_instruction_template)
     return validate_run_instruction_template(snapshot.default_execute_run_instruction_template)

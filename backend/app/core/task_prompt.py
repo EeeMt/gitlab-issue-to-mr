@@ -80,6 +80,10 @@ BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE = """请直接修复「{{issue_
 9. 不要要求人工确认，除非你真的被阻塞。
 """
 
+# Canonical freeform run instruction. Server-enforced for freeform tasks: the
+# persisted template is always exactly the raw user prompt.
+FREEFORM_RUN_INSTRUCTION_TEMPLATE = "{{user_prompt}}"
+
 PLACEHOLDER_NAMES = (
     "user_prompt",
     "issue_title",
@@ -188,6 +192,8 @@ def select_run_instruction_template(
         return validate_run_instruction_template(retry_snapshot)
     if trigger_source == "ci_auto_repair":
         return validate_run_instruction_template(settings.ci_auto_repair_run_instruction_template)
+    if task_mode == "freeform":
+        return validate_run_instruction_template(FREEFORM_RUN_INSTRUCTION_TEMPLATE)
     if task_mode == "plan":
         return validate_run_instruction_template(settings.default_plan_run_instruction_template)
     return validate_run_instruction_template(settings.default_execute_run_instruction_template)
