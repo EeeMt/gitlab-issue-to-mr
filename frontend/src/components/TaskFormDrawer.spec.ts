@@ -3,7 +3,7 @@ import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { h, ref, nextTick } from 'vue'
 import TaskFormDrawer from './TaskFormDrawer.vue'
 
-const { mockApi, resetMockApi, mockMessage, clipboardWrite, mockOptionNodeClick } = vi.hoisted(() => {
+const { mockApi, resetMockApi, mockMessage, clipboardWrite, mockOptionNodeClick, mockPendingOptionValue } = vi.hoisted(() => {
   const mock = {
     createTask: vi.fn<() => Promise<any>>(),
     updateTask: vi.fn<() => Promise<any>>(),
@@ -24,7 +24,8 @@ const { mockApi, resetMockApi, mockMessage, clipboardWrite, mockOptionNodeClick 
   const mockMsg = { error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn() }
   const clipboardWrite = vi.fn<() => Promise<void>>()
   const mockOptionNodeClick = vi.fn()
-  return { mockApi: mock, resetMockApi, mockMessage: mockMsg, clipboardWrite, mockOptionNodeClick }
+  const mockPendingOptionValue = { value: null as number | null }
+  return { mockApi: mock, resetMockApi, mockMessage: mockMsg, clipboardWrite, mockOptionNodeClick, mockPendingOptionValue }
 })
 
 vi.mock('../i18n', () => ({ currentLocale: ref('en') }))
@@ -267,7 +268,17 @@ vi.mock('naive-ui', () => ({
               'data-value': String(option.value),
               'data-disabled': option.disabled ? 'true' : 'false',
             }, props.renderOption
-              ? props.renderOption({ node: h('span', { onClick: mockOptionNodeClick }, option.label), option, selected: selectedValues.includes(option.value) })
+              ? props.renderOption({
+                node: h('span', {
+                  class: [
+                    'n-base-select-option',
+                    { 'n-base-select-option--pending': mockPendingOptionValue.value === option.value },
+                  ],
+                  onClick: mockOptionNodeClick,
+                }, option.label),
+                option,
+                selected: selectedValues.includes(option.value),
+              })
               : option.label)
           )
         )
@@ -428,6 +439,7 @@ describe('TaskFormDrawer', () => {
     clipboardWrite.mockReset()
     clipboardWrite.mockResolvedValue(undefined)
     mockOptionNodeClick.mockReset()
+    mockPendingOptionValue.value = null
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
       value: { writeText: clipboardWrite },
@@ -621,6 +633,19 @@ describe('TaskFormDrawer', () => {
       expect(nameEl!.contains(copyEl)).toBe(false)
       // The description still renders below the name row.
       expect(optionEl.querySelector('.skill-option__desc')).not.toBeNull()
+    })
+
+    it('maps the Naive UI keyboard-pending option state onto the full row', async () => {
+      mockPendingOptionValue.value = 11
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const option = wrapper.findAll('[data-testid="skill-select-option"]')
+        .find(item => item.attributes('data-value') === '11')
+      expect(option!.find('.n-base-select-option--pending').exists()).toBe(true)
+      expect(option!.find('.skill-option').classes()).toContain('skill-option--pending')
     })
 
     it('selects the option when clicking anywhere on the row', async () => {

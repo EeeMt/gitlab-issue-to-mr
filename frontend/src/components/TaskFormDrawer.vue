@@ -897,6 +897,9 @@ function renderSkillOption({ node, option, selected }: { node: VNode; option: Se
   const name = skillOptionName(option)
   const description = skillOptionDescription(option)
   const copied = copiedSkillValue.value === option.value
+  const nodeClass = node.props?.class
+  const pending = typeof nodeClass === 'string'
+    && nodeClass.split(/\s+/).includes('n-base-select-option--pending')
   const tooltipProps = {
     trigger: 'hover' as const,
     placement: 'right' as const,
@@ -933,7 +936,10 @@ function renderSkillOption({ node, option, selected }: { node: VNode; option: Se
   }, [
     h(NIcon, { size: 14 }, { default: () => copied ? h(CheckmarkCircleOutline) : h(CopyOutline) }),
   ])
-  return h('div', { class: 'skill-option', onClick: forwardOptionClick }, [
+  return h('div', {
+    class: ['skill-option', { 'skill-option--pending': pending }],
+    onClick: forwardOptionClick,
+  }, [
     h('div', { class: 'skill-option__name-row' }, [
       h(NTooltip, tooltipProps, {
         trigger: () => h('div', { class: 'skill-option__name' }, [node]),
@@ -2893,7 +2899,8 @@ onBeforeUnmount(() => {
 /* Full-row hover highlight — the naive-ui node is shrink-wrapped to the name, so
    the hover state must live on the wrapper to keep the whole row hittable. */
 .skill-option:hover,
-.skill-option:focus-within {
+.skill-option:focus-within,
+.skill-option--pending {
   background-color: var(--n-option-color-pending, rgba(0, 0, 0, 0.05));
 }
 
