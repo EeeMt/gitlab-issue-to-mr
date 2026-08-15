@@ -1496,9 +1496,10 @@ function getDefaultRunInstructionTemplate(mode: 'execute' | 'plan' | null): stri
   if (!mode) return ''
   const profile = effectiveWorkerProfile.value
   if (profile) {
-    return mode === 'plan'
+    const profileTemplate = mode === 'plan'
       ? profile.default_plan_run_instruction_template
       : profile.default_execute_run_instruction_template
+    if (profileTemplate) return profileTemplate
   }
   return runInstructionDefaults.value?.[mode].content ?? ''
 }

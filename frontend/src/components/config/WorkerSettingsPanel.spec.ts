@@ -22,6 +22,7 @@ function createWorkerProfile(overrides: Record<string, any> = {}) {
     enabled: true,
     is_default: true,
     image: 'codify-worker/java21-maven:2026.07',
+    worker_kit_source: 'profile',
     runtime_mode: 'baked_image',
     worker_kit_version: null,
     worker_kit_path: null,
@@ -37,6 +38,7 @@ function createWorkerProfile(overrides: Record<string, any> = {}) {
         mode: 'rw'
       }
     ],
+    volume_mount_masks: [],
     environment_variables: [
       {
         id: 7,
@@ -59,8 +61,39 @@ function createWorkerProfile(overrides: Record<string, any> = {}) {
     default_execute_run_instruction_template: 'Execute {{user_prompt}}',
     default_plan_run_instruction_template: 'Plan {{user_prompt}}',
     ci_auto_repair_run_instruction_template: 'Repair {{issue_title}}',
+    shared_revision: 3,
+    runtime_verification: {
+      verified_at: null,
+      verified_runtime_configuration_digest: null,
+      matches_current_input: false
+    },
+    runtime_readiness: {
+      status: 'unknown',
+      checked_at: null,
+      ready_until: null
+    },
     created_at: '2026-06-25T00:00:00',
     updated_at: '2026-06-25T00:00:00',
+    ...overrides
+  }
+}
+
+function createSharedConfiguration(overrides: Record<string, any> = {}) {
+  return {
+    id: 1,
+    revision: 3,
+    runtime_mode: 'mounted_kit',
+    worker_kit_version: '0.4.0',
+    worker_kit_path: '/opt/codify/worker-kits/0.4.0',
+    volume_mounts: [],
+    environment_variables: [],
+    pre_script: 'echo shared pre',
+    post_script: 'echo shared post',
+    default_execute_run_instruction_template: 'Shared execute {{user_prompt}}',
+    default_plan_run_instruction_template: 'Shared plan {{user_prompt}}',
+    ci_auto_repair_run_instruction_template: 'Shared repair {{issue_title}}',
+    created_at: '2026-08-14T00:00:00Z',
+    updated_at: '2026-08-15T00:00:00Z',
     ...overrides
   }
 }
@@ -69,10 +102,13 @@ const {
   mockGetConfig,
   mockGetBuiltIns,
   mockGetAdminWorkerProfiles,
+  mockGetWorkerSharedConfiguration,
   mockGetAdminSkills,
   mockTestWorkerDockerConnection,
   mockUpdateConfig,
   mockUpdateWorkerProfile,
+  mockUpdateWorkerSharedConfiguration,
+  mockVerifyWorkerProfileRuntime,
   mockCreateWorkerProfile,
   mockDeleteWorkerProfile,
   mockDuplicateWorkerProfile,
@@ -84,10 +120,13 @@ const {
   mockGetConfig: vi.fn(),
   mockGetBuiltIns: vi.fn(),
   mockGetAdminWorkerProfiles: vi.fn(),
+  mockGetWorkerSharedConfiguration: vi.fn(),
   mockGetAdminSkills: vi.fn(),
   mockTestWorkerDockerConnection: vi.fn(),
   mockUpdateConfig: vi.fn(),
   mockUpdateWorkerProfile: vi.fn(),
+  mockUpdateWorkerSharedConfiguration: vi.fn(),
+  mockVerifyWorkerProfileRuntime: vi.fn(),
   mockCreateWorkerProfile: vi.fn(),
   mockDeleteWorkerProfile: vi.fn(),
   mockDuplicateWorkerProfile: vi.fn(),
@@ -193,7 +232,7 @@ vi.mock('naive-ui', () => ({
   },
   NInput: {
     name: 'NInput',
-    props: ['value', 'type', 'placeholder', 'showPasswordOn', 'size'],
+    props: ['value', 'type', 'placeholder', 'showPasswordOn', 'size', 'disabled'],
     emits: ['update:value'],
     setup(props: any, { emit }: any) {
       return () =>
@@ -202,6 +241,7 @@ vi.mock('naive-ui', () => ({
           type: props.type || 'text',
           value: props.value,
           placeholder: props.placeholder,
+          disabled: props.disabled,
           onInput: (event: Event) => emit('update:value', (event.target as HTMLInputElement).value)
         })
     }
@@ -240,7 +280,7 @@ vi.mock('naive-ui', () => ({
   },
   NSelect: {
     name: 'NSelect',
-    props: ['value', 'options', 'size'],
+    props: ['value', 'options', 'size', 'disabled'],
     emits: ['update:value'],
     setup(props: any, { emit }: any) {
       return () =>
@@ -249,6 +289,7 @@ vi.mock('naive-ui', () => ({
           {
             class: 'n-select',
             value: props.value,
+            disabled: props.disabled,
             onChange: (event: Event) => emit('update:value', (event.target as HTMLSelectElement).value)
           },
           (props.options || []).map((option: any) =>
@@ -330,10 +371,13 @@ vi.mock('../../api', () => ({
   getConfig: mockGetConfig,
   getRunInstructionTemplateBuiltIns: mockGetBuiltIns,
   getAdminWorkerProfiles: mockGetAdminWorkerProfiles,
+  getWorkerSharedConfiguration: mockGetWorkerSharedConfiguration,
   getAdminSkills: mockGetAdminSkills,
   testWorkerDockerConnection: mockTestWorkerDockerConnection,
   updateConfig: mockUpdateConfig,
   updateWorkerProfile: mockUpdateWorkerProfile,
+  updateWorkerSharedConfiguration: mockUpdateWorkerSharedConfiguration,
+  verifyWorkerProfileRuntime: mockVerifyWorkerProfileRuntime,
   createWorkerProfile: mockCreateWorkerProfile,
   deleteWorkerProfile: mockDeleteWorkerProfile,
   duplicateWorkerProfile: mockDuplicateWorkerProfile,
@@ -349,6 +393,7 @@ describe('WorkerSettingsPanel', () => {
       runtime: createRuntimeConfig()
     })
     mockGetAdminWorkerProfiles.mockResolvedValue([createWorkerProfile()])
+    mockGetWorkerSharedConfiguration.mockResolvedValue(createSharedConfiguration())
     mockGetAdminSkills.mockResolvedValue([])
     mockTestWorkerDockerConnection.mockResolvedValue({
       docker_host: 'tcp://arm-worker:2376',
@@ -366,6 +411,13 @@ describe('WorkerSettingsPanel', () => {
       runtime: createRuntimeConfig()
     })
     mockUpdateWorkerProfile.mockResolvedValue(createWorkerProfile())
+    mockUpdateWorkerSharedConfiguration.mockResolvedValue(
+      createSharedConfiguration({ revision: 4, updated_at: '2026-08-15T01:00:00Z' })
+    )
+    mockVerifyWorkerProfileRuntime.mockResolvedValue({
+      ok: true,
+      runtime_readiness: { status: 'ready', checked_at: '2026-08-15T01:00:00Z', ready_until: null }
+    })
     mockCreateWorkerProfile.mockResolvedValue(createWorkerProfile({ id: 2, name: 'Worker Profile 2' }))
     mockDeleteWorkerProfile.mockResolvedValue(undefined)
     mockDuplicateWorkerProfile.mockResolvedValue(createWorkerProfile({ id: 2, name: 'Default Worker Copy' }))
@@ -390,6 +442,188 @@ describe('WorkerSettingsPanel', () => {
     expect((wrapper.vm as any).workerFormValue.image).toBe('codify-worker/java21-maven:2026.07')
     expect(wrapper.text()).not.toContain('config.aiProvider')
     expect(wrapper.text()).not.toContain('config.providers.movedNotice')
+  })
+
+  it('opens and saves the shared configuration as a separate revisioned editor', async () => {
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: { isMobile: false, reloadKey: 0 }
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="worker-profile-editor"]').exists()).toBe(true)
+    await wrapper.find('[data-testid="worker-shared-configuration-entry"]').trigger('click')
+    expect(wrapper.find('[data-testid="worker-shared-configuration-editor"]').exists()).toBe(true)
+
+    const vm = wrapper.vm as any
+    vm.sharedFormValue.pre_script = 'npm ci'
+    vm.sharedFormValue.mounts = [
+      { host_path: '/srv/cache', container_path: '/cache', mode: 'rw' }
+    ]
+    await vm.handleSaveSharedConfiguration()
+
+    expect(mockUpdateWorkerSharedConfiguration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expected_revision: 3,
+        pre_script: 'npm ci',
+        volume_mounts: [
+          { host_path: '/srv/cache', container_path: '/cache', mode: 'rw' }
+        ]
+      })
+    )
+    expect(mockGetAdminWorkerProfiles).toHaveBeenCalledTimes(2)
+    expect(mockMessage.success).toHaveBeenCalledWith('config.sharedConfigurationSaved')
+  })
+
+  it('composes system collection rows and serializes per-item masks without leaking secrets', async () => {
+    mockGetWorkerSharedConfiguration.mockResolvedValueOnce(
+      createSharedConfiguration({
+        volume_mounts: [
+          { host_path: '/srv/cache', container_path: '/cache', mode: 'ro' }
+        ],
+        environment_variables: [
+          {
+            id: 41,
+            key: 'SHARED_TOKEN',
+            value: null,
+            is_secret: true,
+            value_configured: true
+          }
+        ]
+      })
+    )
+    mockGetAdminWorkerProfiles.mockResolvedValueOnce([
+      createWorkerProfile({
+        worker_kit_source: 'system',
+        volume_mounts: [],
+        volume_mount_masks: [],
+        environment_variables: [],
+        overrides: {
+          worker_kit: null,
+          pre_script: null,
+          post_script: null,
+          volume_mounts: [],
+          masked_volume_mount_paths: [],
+          environment_variables: []
+        }
+      })
+    ])
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: { isMobile: false, reloadKey: 0 }
+    })
+    await flushPromises()
+    const vm = wrapper.vm as any
+
+    expect(vm.workerFormValue.mounts[0]).toEqual(
+      expect.objectContaining({ container_path: '/cache', source: 'system' })
+    )
+    expect(vm.workerFormValue.environment_variables[0]).toEqual(
+      expect.objectContaining({
+        key: 'SHARED_TOKEN',
+        value: '',
+        value_configured: true,
+        source: 'system'
+      })
+    )
+    expect(wrapper.text()).not.toContain('shared-secret-value')
+
+    vm.maskMount(0)
+    vm.maskEnvironmentVariable(0)
+    await vm.handleSaveWorker()
+
+    expect(mockUpdateWorkerProfile).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        volume_mounts: [],
+        volume_mount_masks: ['/cache'],
+        environment_variables: [
+          {
+            id: undefined,
+            key: 'SHARED_TOKEN',
+            value: null,
+            is_secret: false,
+            operation: 'mask'
+          }
+        ]
+      })
+    )
+  })
+
+  it('keeps Kit and scripts inheritance distinct from explicit profile values', async () => {
+    mockGetAdminWorkerProfiles.mockResolvedValueOnce([
+      createWorkerProfile({
+        worker_kit_source: 'system',
+        pre_script: null,
+        post_script: null,
+        default_execute_run_instruction_template: null,
+        default_plan_run_instruction_template: null,
+        ci_auto_repair_run_instruction_template: null
+      })
+    ])
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: { isMobile: false, reloadKey: 0 }
+    })
+    await flushPromises()
+    const vm = wrapper.vm as any
+
+    expect(vm.workerFormValue.worker_kit_source).toBe('system')
+    expect(vm.workerFormValue.worker_pre_script).toBe(null)
+    vm.setWorkerKitFollowsSystem(false)
+    expect(vm.workerFormValue.worker_kit_source).toBe('profile')
+    expect(vm.workerFormValue.worker_kit_version).toBe('0.4.0')
+
+    vm.setScriptFollowsSystem('pre', false)
+    expect(vm.workerFormValue.worker_pre_script).toBe('echo shared pre')
+    vm.workerFormValue.worker_pre_script = ''
+    await vm.handleSaveWorker()
+    expect(mockUpdateWorkerProfile).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ pre_script: '' })
+    )
+
+    vm.setScriptFollowsSystem('pre', true)
+    expect(vm.workerFormValue.worker_pre_script).toBe(null)
+  })
+
+  it('shows unavailable readiness details and re-verifies the selected profile', async () => {
+    mockGetAdminWorkerProfiles.mockResolvedValue([
+      createWorkerProfile({
+        worker_kit_source: 'system',
+        runtime_readiness: {
+          status: 'unavailable',
+          checked_at: '2026-08-15T00:30:00Z',
+          ready_until: null
+        }
+      })
+    ])
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: { isMobile: false, reloadKey: 0 }
+    })
+    await flushPromises()
+
+    const status = wrapper.find('[data-testid="worker-profile-runtime-status"]')
+    expect(status.text()).toContain('config.runtimeUnavailable')
+    expect(status.text()).toContain('config.runtimeFailureDetailsUnavailable')
+
+    await (wrapper.vm as any).handleVerifyProfileRuntime()
+    expect(mockVerifyWorkerProfileRuntime).toHaveBeenCalledWith(1)
+    expect(mockGetAdminWorkerProfiles).toHaveBeenCalledTimes(2)
+    expect(mockMessage.success).toHaveBeenCalledWith('config.runtimeVerificationSucceeded')
+  })
+
+  it('reports a stale shared revision without claiming the save succeeded', async () => {
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: { isMobile: false, reloadKey: 0 }
+    })
+    await flushPromises()
+    mockUpdateWorkerSharedConfiguration.mockRejectedValueOnce({
+      response: { status: 409, data: { detail: 'shared_configuration_changed' } }
+    })
+
+    ;(wrapper.vm as any).sharedFormValue.post_script = 'changed elsewhere'
+    await (wrapper.vm as any).handleSaveSharedConfiguration()
+
+    expect(mockMessage.error).toHaveBeenCalledWith('config.sharedConfigurationChanged')
+    expect(mockMessage.success).not.toHaveBeenCalledWith('config.sharedConfigurationSaved')
   })
 
   it('renders mounts and environment variables as compact table rows', async () => {
@@ -489,14 +723,16 @@ describe('WorkerSettingsPanel', () => {
     expect(vm.workerFormValue.mounts[0]).toEqual({
       host_path: '',
       container_path: '',
-      mode: 'ro'
+      mode: 'ro',
+      source: 'profile_new'
     })
     expect(vm.workerFormValue.mounts[1].host_path).toBe('/host/cache')
     expect(vm.workerFormValue.environment_variables[0]).toEqual({
       key: '',
       value: '',
       is_secret: false,
-      value_configured: false
+      value_configured: false,
+      source: 'profile_new'
     })
     expect(vm.workerFormValue.environment_variables[1].key).toBe('JAVA_OPTS')
   })
@@ -861,12 +1097,10 @@ describe('WorkerSettingsPanel', () => {
     expect(vm.workerFormValue.image).toBe('codify-worker/java21-maven:2026.07')
     expect(vm.workerFormValue.mounts).toEqual([])
     expect(vm.workerFormValue.environment_variables).toEqual([])
-    expect(vm.workerFormValue.default_execute_run_instruction_template).toBe(
-      'Execute {{user_prompt}}'
-    )
+    expect(vm.workerFormValue.default_execute_run_instruction_template).toBe(null)
   })
 
-  it('posts a new worker profile only when saving a filled draft', async () => {
+  it('creates inherited templates through a disabled bootstrap profile before enabling it', async () => {
     const wrapper = mount(WorkerSettingsPanel, {
       props: {
         isMobile: false,
@@ -886,8 +1120,25 @@ describe('WorkerSettingsPanel', () => {
         id: 3,
         name: 'Java Worker',
         image: 'codify-worker-java:latest',
+        enabled: false,
         volume_mounts: [],
-        environment_variables: []
+        environment_variables: [],
+        default_execute_run_instruction_template: 'Shared execute {{user_prompt}}',
+        default_plan_run_instruction_template: 'Shared plan {{user_prompt}}',
+        ci_auto_repair_run_instruction_template: 'Shared repair {{issue_title}}'
+      })
+    )
+    mockUpdateWorkerProfile.mockResolvedValueOnce(
+      createWorkerProfile({
+        id: 3,
+        name: 'Java Worker',
+        image: 'codify-worker-java:latest',
+        worker_kit_source: 'system',
+        volume_mounts: [],
+        environment_variables: [],
+        default_execute_run_instruction_template: null,
+        default_plan_run_instruction_template: null,
+        ci_auto_repair_run_instruction_template: null
       })
     )
 
@@ -897,13 +1148,50 @@ describe('WorkerSettingsPanel', () => {
       expect.objectContaining({
         name: 'Java Worker',
         image: 'codify-worker-java:latest',
+        enabled: false,
         codegraph_enabled: false,
         volume_mounts: [],
-        environment_variables: []
+        environment_variables: [],
+        default_execute_run_instruction_template: 'Shared execute {{user_prompt}}',
+        default_plan_run_instruction_template: 'Shared plan {{user_prompt}}',
+        ci_auto_repair_run_instruction_template: 'Shared repair {{issue_title}}'
       })
     )
-    expect(mockUpdateWorkerProfile).not.toHaveBeenCalled()
+    expect(mockUpdateWorkerProfile).toHaveBeenCalledWith(
+      3,
+      expect.objectContaining({
+        enabled: true,
+        default_execute_run_instruction_template: null,
+        default_plan_run_instruction_template: null,
+        ci_auto_repair_run_instruction_template: null,
+        expected_shared_revision: 3
+      })
+    )
+    expect(mockDeleteWorkerProfile).not.toHaveBeenCalled()
     expect(vm.selectedProfileId).toBe(3)
+  })
+
+  it('removes a disabled bootstrap profile when inherited-template normalization fails', async () => {
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: { isMobile: false, reloadKey: 0 }
+    })
+    await flushPromises()
+    const vm = wrapper.vm as any
+    await vm.handleCreateProfile()
+    vm.workerFormValue.name = 'Stale Worker'
+    vm.workerFormValue.image = 'codify-worker:latest'
+    mockCreateWorkerProfile.mockResolvedValueOnce(
+      createWorkerProfile({ id: 9, name: 'Stale Worker', enabled: false })
+    )
+    mockUpdateWorkerProfile.mockRejectedValueOnce({
+      response: { status: 409, data: { detail: 'shared_configuration_changed' } }
+    })
+
+    await vm.handleSaveWorker()
+
+    expect(mockDeleteWorkerProfile).toHaveBeenCalledWith(9)
+    expect(mockMessage.error).toHaveBeenCalledWith('config.sharedConfigurationChanged')
+    expect(vm.selectedProfileId).toBe(null)
   })
 
   it('enables a disabled worker profile from the profile actions', async () => {
@@ -1007,14 +1295,18 @@ describe('WorkerSettingsPanel', () => {
         key: 'JAVA_OPTS',
         value: '-Xmx512m',
         is_secret: false,
-        value_configured: true
+        value_configured: true,
+        source: 'profile_new',
+        system_value: undefined
       },
       {
         id: 7,
         key: 'SECRET_TOKEN',
         value: '',
         is_secret: true,
-        value_configured: true
+        value_configured: true,
+        source: 'profile_new',
+        system_value: undefined
       }
     ])
     expect((wrapper.find('input[type="password"]').element as HTMLInputElement).value).toBe('')
@@ -1043,13 +1335,15 @@ describe('WorkerSettingsPanel', () => {
             id: 8,
             key: 'JAVA_OPTS',
             value: '-Xmx512m',
-            is_secret: false
+            is_secret: false,
+            operation: 'set'
           },
           {
             id: 7,
             key: 'SECRET_TOKEN',
             value: '',
-            is_secret: true
+            is_secret: true,
+            operation: 'set'
           }
         ]
       })
@@ -1060,14 +1354,18 @@ describe('WorkerSettingsPanel', () => {
         key: 'JAVA_OPTS',
         value: '-Xmx512m',
         is_secret: false,
-        value_configured: true
+        value_configured: true,
+        source: 'profile_new',
+        system_value: undefined
       },
       {
         id: 7,
         key: 'SECRET_TOKEN',
         value: '',
         is_secret: true,
-        value_configured: true
+        value_configured: true,
+        source: 'profile_new',
+        system_value: undefined
       }
     ])
     expect(vm.lastLoadedWorker.environment_variables).toEqual([
@@ -1076,14 +1374,18 @@ describe('WorkerSettingsPanel', () => {
         key: 'JAVA_OPTS',
         value: '-Xmx512m',
         is_secret: false,
-        value_configured: true
+        value_configured: true,
+        source: 'profile_new',
+        system_value: undefined
       },
       {
         id: 7,
         key: 'SECRET_TOKEN',
         value: '',
         is_secret: true,
-        value_configured: true
+        value_configured: true,
+        source: 'profile_new',
+        system_value: undefined
       }
     ])
   })
@@ -1146,21 +1448,27 @@ describe('WorkerSettingsPanel', () => {
         key: 'JAVA_OPTS',
         value: '-Xmx512m',
         is_secret: false,
-        value_configured: true
+        value_configured: true,
+        source: 'profile_new',
+        system_value: undefined
       },
       {
         id: 19,
         key: 'NEW_SECRET',
         value: '',
         is_secret: true,
-        value_configured: true
+        value_configured: true,
+        source: 'profile_new',
+        system_value: undefined
       },
       {
         id: 7,
         key: 'SECRET_TOKEN',
         value: '',
         is_secret: true,
-        value_configured: true
+        value_configured: true,
+        source: 'profile_new',
+        system_value: undefined
       }
     ])
     expect(vm.lastLoadedWorker.environment_variables).toEqual([
@@ -1169,21 +1477,27 @@ describe('WorkerSettingsPanel', () => {
         key: 'JAVA_OPTS',
         value: '-Xmx512m',
         is_secret: false,
-        value_configured: true
+        value_configured: true,
+        source: 'profile_new',
+        system_value: undefined
       },
       {
         id: 19,
         key: 'NEW_SECRET',
         value: '',
         is_secret: true,
-        value_configured: true
+        value_configured: true,
+        source: 'profile_new',
+        system_value: undefined
       },
       {
         id: 7,
         key: 'SECRET_TOKEN',
         value: '',
         is_secret: true,
-        value_configured: true
+        value_configured: true,
+        source: 'profile_new',
+        system_value: undefined
       }
     ])
     expect(wrapper.text()).toContain('config.configured')
@@ -1195,19 +1509,22 @@ describe('WorkerSettingsPanel', () => {
             id: 8,
             key: 'JAVA_OPTS',
             value: '-Xmx512m',
-            is_secret: false
+            is_secret: false,
+            operation: 'set'
           },
           {
             id: undefined,
             key: 'NEW_SECRET',
             value: 'brand-new-secret',
-            is_secret: true
+            is_secret: true,
+            operation: 'set'
           },
           {
             id: 7,
             key: 'SECRET_TOKEN',
             value: 'new-secret-value',
-            is_secret: true
+            is_secret: true,
+            operation: 'set'
           }
         ]
       })

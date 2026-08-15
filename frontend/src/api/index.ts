@@ -235,14 +235,16 @@ export interface WorkerProfileEnvironmentVariable {
   key: string
   value: string | null
   is_secret: boolean
+  operation?: 'set' | 'mask'
   value_configured: boolean
 }
 
 export interface WorkerProfileEnvironmentVariableUpdate {
   id?: number
   key: string
-  value: string
+  value: string | null
   is_secret: boolean
+  operation?: 'set' | 'mask'
 }
 
 export interface WorkerProfileMount {
@@ -258,6 +260,7 @@ export interface WorkerProfile {
   enabled: boolean
   is_default: boolean
   image: string
+  worker_kit_source?: 'system' | 'profile'
   runtime_mode: 'baked_image' | 'mounted_kit'
   worker_kit_version: string | null
   worker_kit_path: string | null
@@ -267,19 +270,106 @@ export interface WorkerProfile {
   docker_tls_key?: string | null
   codegraph_enabled: boolean
   volume_mounts: WorkerProfileMount[]
+  volume_mount_masks?: string[]
   environment_variables: WorkerProfileEnvironmentVariable[]
   default_skill_ids: number[]
+  pre_script: string | null
+  post_script: string | null
+  default_execute_run_instruction_template: string | null
+  default_plan_run_instruction_template: string | null
+  ci_auto_repair_run_instruction_template: string | null
+  enabled_harnesses?: string[]
+  default_harness_key?: string
+  harness_constraints?: Record<string, unknown>
+  image_digest?: string | null
+  overrides?: WorkerProfileOverrides
+  effective?: WorkerProfileEffectiveConfiguration
+  sources?: WorkerProfileSources
+  shared_revision?: number
+  runtime_verification?: WorkerProfileRuntimeVerification
+  runtime_readiness?: WorkerRuntimeReadiness
+  created_at: string
+  updated_at: string
+}
+
+export type WorkerConfigurationSource = 'system' | 'profile_override' | 'profile_mask'
+
+export interface WorkerProfileOverrides {
+  worker_kit: {
+    runtime_mode: 'baked_image' | 'mounted_kit'
+    worker_kit_version: string | null
+    worker_kit_path: string | null
+  } | null
+  pre_script: string | null
+  post_script: string | null
+  volume_mounts: WorkerProfileMount[]
+  masked_volume_mount_paths: string[]
+  environment_variables: WorkerProfileEnvironmentVariable[]
+}
+
+export interface WorkerProfileEffectiveConfiguration {
+  worker_kit_version: string | null
+  worker_kit_path: string | null
+}
+
+export interface WorkerProfileSources {
+  worker_kit: Exclude<WorkerConfigurationSource, 'profile_mask'>
+  pre_script: Exclude<WorkerConfigurationSource, 'profile_mask'>
+  post_script: Exclude<WorkerConfigurationSource, 'profile_mask'>
+}
+
+export interface WorkerProfileRuntimeVerification {
+  verified_at: string | null
+  verified_runtime_configuration_digest: string | null
+  matches_current_input: boolean
+}
+
+export interface WorkerRuntimeReadiness {
+  status: 'ready' | 'unknown' | 'unavailable'
+  failure_code?: string | null
+  failure_message?: string | null
+  checked_at: string | null
+  ready_until: string | null
+}
+
+export interface WorkerSharedConfiguration {
+  id: number
+  revision: number
+  runtime_mode: 'baked_image' | 'mounted_kit'
+  worker_kit_version: string | null
+  worker_kit_path: string | null
+  volume_mounts: WorkerProfileMount[]
   pre_script: string
   post_script: string
   default_execute_run_instruction_template: string
   default_plan_run_instruction_template: string
   ci_auto_repair_run_instruction_template: string
-  enabled_harnesses?: string[]
-  default_harness_key?: string
-  harness_constraints?: Record<string, unknown>
-  image_digest?: string | null
+  environment_variables: WorkerProfileEnvironmentVariable[]
   created_at: string
   updated_at: string
+}
+
+export interface WorkerSharedConfigurationPayload {
+  expected_revision: number
+  runtime_mode: 'baked_image' | 'mounted_kit'
+  worker_kit_version: string | null
+  worker_kit_path: string | null
+  volume_mounts: WorkerProfileMount[]
+  pre_script: string
+  post_script: string
+  default_execute_run_instruction_template: string
+  default_plan_run_instruction_template: string
+  ci_auto_repair_run_instruction_template: string
+  environment_variables: Array<
+    Pick<WorkerProfileEnvironmentVariableUpdate, 'key' | 'value' | 'is_secret'>
+  >
+}
+
+export interface WorkerRuntimeVerificationResult {
+  ok: boolean
+  worker_kit_version?: string | null
+  verified_at?: string | null
+  runtime_readiness: WorkerRuntimeReadiness
 }
 
 export interface WorkerProfilePayload {
@@ -287,6 +377,7 @@ export interface WorkerProfilePayload {
   description?: string | null
   enabled?: boolean
   image?: string
+  worker_kit_source?: 'system' | 'profile'
   runtime_mode?: 'baked_image' | 'mounted_kit'
   worker_kit_version?: string | null
   worker_kit_path?: string | null
@@ -296,16 +387,18 @@ export interface WorkerProfilePayload {
   docker_tls_key?: string | null
   codegraph_enabled?: boolean
   volume_mounts?: WorkerProfileMount[]
+  volume_mount_masks?: string[]
   environment_variables?: WorkerProfileEnvironmentVariableUpdate[]
   default_skill_ids?: number[]
-  pre_script?: string
-  post_script?: string
+  pre_script?: string | null
+  post_script?: string | null
   enabled_harnesses?: string[]
   default_harness_key?: string
   harness_constraints?: Record<string, unknown>
-  default_execute_run_instruction_template?: string
-  default_plan_run_instruction_template?: string
-  ci_auto_repair_run_instruction_template?: string
+  default_execute_run_instruction_template?: string | null
+  default_plan_run_instruction_template?: string | null
+  ci_auto_repair_run_instruction_template?: string | null
+  expected_shared_revision?: number
 }
 
 export interface DockerConnectionTestResult {
@@ -1434,6 +1527,18 @@ export async function getAdminWorkerProfiles(): Promise<WorkerProfile[]> {
   return data
 }
 
+export async function getWorkerSharedConfiguration(): Promise<WorkerSharedConfiguration> {
+  const { data } = await api.get('/worker-shared-configuration')
+  return data
+}
+
+export async function updateWorkerSharedConfiguration(
+  payload: WorkerSharedConfigurationPayload
+): Promise<WorkerSharedConfiguration> {
+  const { data } = await api.patch('/worker-shared-configuration', payload)
+  return data
+}
+
 export async function testWorkerDockerConnection(
   payload: Pick<
     WorkerProfilePayload,
@@ -1478,6 +1583,13 @@ export async function deleteWorkerProfile(profileId: number): Promise<void> {
 
 export async function duplicateWorkerProfile(profileId: number): Promise<WorkerProfile> {
   const { data } = await api.post(`/worker-profiles/${profileId}/duplicate`)
+  return data
+}
+
+export async function verifyWorkerProfileRuntime(
+  profileId: number
+): Promise<WorkerRuntimeVerificationResult> {
+  const { data } = await api.post(`/worker-profiles/${profileId}/verify-runtime`, {})
   return data
 }
 

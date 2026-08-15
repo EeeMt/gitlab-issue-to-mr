@@ -124,6 +124,10 @@ export interface Task {
   waiting_reason?: TaskWaitingReason | null
   lock_owner_task_id?: number | null
   waiting_since?: string | null
+  runtime_failure_code?: string | null
+  runtime_failure_message?: string | null
+  runtime_checked_at?: string | null
+  runtime_locator_fingerprint?: string | null
   schedule_constraints?: TaskScheduleWindow | null
   projected_lineage?: TaskProjectedLineage | null
   issue?: {
@@ -142,6 +146,7 @@ export type TaskWaitingReason =
   | 'scheduled'
   | 'global_capacity'
   | 'workspace_cleanup'
+  | 'worker_runtime_unavailable'
   | 'sequence_repair_required'
   | string
 
@@ -187,6 +192,20 @@ export interface TaskConflictDetail {
   max_source_task_id?: number | null
   tail_lineage?: TaskProjectedLineage
   source_lineage?: TaskProjectedLineage
+}
+
+export interface TaskWorkerRuntimeVerificationResult {
+  ok: boolean
+  task_id: number
+  runtime_mode: string
+  worker_kit_version: string | null
+  runtime_readiness: {
+    status: 'ready' | 'unknown' | 'unavailable'
+    failure_code: string | null
+    failure_message: string | null
+    checked_at: string | null
+    ready_until: string | null
+  }
 }
 
 export interface CreateTaskRequest {
@@ -410,6 +429,13 @@ export async function getTaskModelServiceSummary(id: number): Promise<TaskModelS
 
 export async function getTaskWorkerRuntimeSummary(id: number): Promise<TaskWorkerRuntimeSummary> {
   const response = await api.get(`/tasks/${id}/worker-runtime-summary`)
+  return response.data
+}
+
+export async function verifyTaskWorkerRuntime(
+  id: number
+): Promise<TaskWorkerRuntimeVerificationResult> {
+  const response = await api.post(`/tasks/${id}/verify-worker-runtime`)
   return response.data
 }
 

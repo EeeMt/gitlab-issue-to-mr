@@ -123,7 +123,7 @@
                 @click="handleExecute"
                 :title="executeButtonTitle"
                 :loading="actionLoading"
-                :disabled="!canManageTask"
+                :disabled="!canManageTask || isWorkerRuntimeBlocked"
               >
                 <template #icon><n-icon :component="PlayOutline" /></template>
                 {{ t('common.execute') }}
@@ -207,6 +207,59 @@
         <div class="task-view__content">
           <div class="task-workbench">
             <main class="task-workbench__main">
+              <n-card
+                v-if="task && isWorkerRuntimeBlocked"
+                class="task-card worker-runtime-blocker"
+                :bordered="false"
+                data-testid="worker-runtime-blocker"
+              >
+                <div class="worker-runtime-blocker__heading">
+                  <span class="worker-runtime-blocker__icon" aria-hidden="true">
+                    <n-icon :component="CloseCircleOutline" size="20" />
+                  </span>
+                  <div>
+                    <div class="worker-runtime-blocker__eyebrow">{{ t('taskView.schedulingBlocked') }}</div>
+                    <h3>{{ t('taskView.workerRuntimeUnavailableTitle') }}</h3>
+                  </div>
+                </div>
+                <p>{{ t('taskView.workerRuntimeUnavailableDescription', { version: blockedWorkerKitVersion || '—' }) }}</p>
+                <dl class="worker-runtime-blocker__details">
+                  <div>
+                    <dt>{{ t('taskView.workerKitVersion') }}</dt>
+                    <dd><code>{{ blockedWorkerKitVersion || '—' }}</code></dd>
+                  </div>
+                  <div v-if="blockedWorkerSummary?.worker_kit_path">
+                    <dt>{{ t('taskView.workerKitPath') }}</dt>
+                    <dd><code>{{ blockedWorkerSummary.worker_kit_path }}</code></dd>
+                  </div>
+                  <div v-if="task.runtime_checked_at">
+                    <dt>{{ t('taskView.runtimeLastChecked') }}</dt>
+                    <dd>{{ formatDateTimeUtc8(task.runtime_checked_at) }}</dd>
+                  </div>
+                  <div v-if="task.runtime_failure_message" class="worker-runtime-blocker__error">
+                    <dt>{{ t('taskView.runtimeLastError') }}</dt>
+                    <dd>{{ task.runtime_failure_message }}</dd>
+                  </div>
+                </dl>
+                <div v-if="isAdmin" class="worker-runtime-blocker__actions">
+                  <n-button
+                    type="primary"
+                    secondary
+                    :loading="runtimeRechecking"
+                    @click="handleVerifyTaskRuntime"
+                  >
+                    <template #icon><n-icon :component="RefreshOutline" /></template>
+                    {{ t('taskView.recheckTaskRuntime') }}
+                  </n-button>
+                  <n-button type="error" secondary :loading="actionLoading" @click="handleCancel">
+                    <template #icon><n-icon :component="CloseCircleOutline" /></template>
+                    {{ t('taskView.cancelBlockedTask') }}
+                  </n-button>
+                </div>
+                <p v-else class="worker-runtime-blocker__recovery-hint">
+                  {{ t('taskView.workerRuntimeUnavailableUserHint') }}
+                </p>
+              </n-card>
               <n-card
                 v-if="task && !isTerminal"
                 class="task-card task-execution-overview"
@@ -550,7 +603,18 @@ import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NSpace, NCard, NTag, NSpin, NDatePicker, NDrawer, NDrawerContent, NIcon, NInput, NModal, NScrollbar, NTooltip, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { getTask, getTaskLogs, getIssue, getTaskArchive, type Issue, type Task, type TaskLog } from '../api'
+import {
+  getTask,
+  getTaskLogs,
+  getIssue,
+  getTaskArchive,
+  getTaskWorkerRuntimeSummary,
+  verifyTaskWorkerRuntime,
+  type Issue,
+  type Task,
+  type TaskLog,
+  type TaskWorkerRuntimeSummary
+} from '../api'
 import { authState, isAdmin, initializeAuth } from '../auth'
 import { renderMarkdown, summarizeSkillUsage } from '../components/task-process/taskProcessUtils'
 import PageHeader from '../components/PageHeader.vue'
@@ -640,6 +704,8 @@ const issueDefaultProviderId = ref<number | null>(null)
 const issueCurrentHarness = ref<string | null>(null)
 const issueDefaultHarness = ref<string | null>(null)
 const archiveMetadata = ref<TaskArchiveMetadata | null>(null)
+const blockedWorkerSummary = ref<TaskWorkerRuntimeSummary | null>(null)
+const runtimeRechecking = ref(false)
 let pollTimer: number | null = null
 let taskRequestGeneration = 0
 let logRequestGeneration = 0
@@ -772,6 +838,9 @@ const executionStateTitle = computed(() => {
 
 const executionStateDescription = computed(() => {
   if (!task.value) return ''
+  if (task.value.waiting_reason === 'worker_runtime_unavailable') {
+    return t('taskView.workerRuntimeUnavailablePendingDescription')
+  }
   return t(`taskView.executionState.${task.value.status}Description`)
 })
 
@@ -821,6 +890,12 @@ const canReschedule = computed(() => {
   if (s === 'queued') return true
   return s === 'pending' && !!task.value?.scheduled_at
 })
+const isWorkerRuntimeBlocked = computed(
+  () => task.value?.waiting_reason === 'worker_runtime_unavailable'
+)
+const blockedWorkerKitVersion = computed(
+  () => blockedWorkerSummary.value?.worker_kit_version ?? task.value?.worker_kit_version ?? null
+)
 const canManageTask = computed(() => {
   if (!task.value) return false
   if (!authState.oidcEnabled) return true
@@ -857,6 +932,9 @@ const canAppendFollowupTask = computed(() =>
 )
 
 const executeButtonTitle = computed(() => {
+  if (isWorkerRuntimeBlocked.value) {
+    return t('taskView.executeBlockedByWorkerRuntime')
+  }
   const qp = task.value?.queue_position
   if (typeof qp === 'number' && qp > 1) {
     return t('taskView.executeNowQueuedDescription', {
@@ -879,6 +957,9 @@ const queueContextLabel = computed(() => {
     return t('taskView.queueContextWaitingCleanup', {
       blockedBy: taskValue.lock_owner_task_id ?? '',
     })
+  }
+  if (taskValue.waiting_reason === 'worker_runtime_unavailable') {
+    return t('taskView.queueContextWorkerRuntimeUnavailable')
   }
   if (typeof qp === 'number' && qp > 1) {
     return t('taskView.queueContextNonHead', {
@@ -982,6 +1063,11 @@ async function fetchTask(): Promise<boolean> {
       return false
     }
     task.value = fetchedTask
+    if (task.value.waiting_reason === 'worker_runtime_unavailable') {
+      await fetchBlockedWorkerSummary(requestedTaskId, requestGeneration)
+    } else {
+      blockedWorkerSummary.value = null
+    }
 
     if (isActiveTaskStatus(previousStatus) && !isActiveTaskStatus(task.value.status)) {
       await fetchLogs()
@@ -1021,6 +1107,53 @@ async function fetchTask(): Promise<boolean> {
   }
 }
 
+async function fetchBlockedWorkerSummary(requestedTaskId: number, requestGeneration: number) {
+  try {
+    const summary = await getTaskWorkerRuntimeSummary(requestedTaskId)
+    if (
+      requestGeneration === taskRequestGeneration &&
+      requestedTaskId === taskId.value &&
+      task.value?.waiting_reason === 'worker_runtime_unavailable'
+    ) {
+      blockedWorkerSummary.value = summary
+    }
+  } catch {
+    if (requestGeneration === taskRequestGeneration && requestedTaskId === taskId.value) {
+      blockedWorkerSummary.value = null
+    }
+  }
+}
+
+async function handleVerifyTaskRuntime() {
+  if (!task.value || !isAdmin.value) return
+  runtimeRechecking.value = true
+  try {
+    const result = await verifyTaskWorkerRuntime(task.value.id)
+    if (result.runtime_readiness.status === 'ready') {
+      message.success(t('taskView.taskRuntimeReady'))
+    } else if (result.runtime_readiness.status === 'unavailable') {
+      task.value.runtime_failure_code = result.runtime_readiness.failure_code
+      task.value.runtime_failure_message = result.runtime_readiness.failure_message
+      task.value.runtime_checked_at = result.runtime_readiness.checked_at
+      message.error(
+        result.runtime_readiness.failure_message || t('taskView.workerRuntimeUnavailableTitle')
+      )
+    } else {
+      message.info(t('taskView.taskRuntimeStillUnknown'))
+    }
+    await refreshTask()
+  } catch (error: any) {
+    const detail = error?.response?.data?.detail
+    message.error(
+      typeof detail === 'string'
+        ? detail
+        : detail?.message || t('taskView.taskRuntimeRecheckFailed')
+    )
+  } finally {
+    runtimeRechecking.value = false
+  }
+}
+
 async function fetchArchiveMetadata(requestedTaskId = taskId.value) {
   if (!task.value || task.value.id !== requestedTaskId || !isTerminal.value) {
     if (requestedTaskId === taskId.value) archiveMetadata.value = null
@@ -1034,6 +1167,7 @@ async function fetchArchiveMetadata(requestedTaskId = taskId.value) {
   } catch {
     if (requestedTaskId === taskId.value && task.value?.id === requestedTaskId) {
       archiveMetadata.value = null
+      blockedWorkerSummary.value = null
     }
   }
 }
@@ -1210,6 +1344,106 @@ onBeforeUnmount(() => {
 
 .task-card {
   border-radius: var(--app-card-radius);
+}
+
+.worker-runtime-blocker {
+  overflow: hidden;
+  border: 1px solid rgba(220, 38, 38, 0.18);
+  box-shadow: inset 3px 0 0 #dc2626;
+}
+
+.worker-runtime-blocker__heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.worker-runtime-blocker__icon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  color: #b91c1c;
+  background: rgba(220, 38, 38, 0.09);
+  border-radius: 9px;
+  place-items: center;
+}
+
+.worker-runtime-blocker__eyebrow {
+  margin-bottom: 3px;
+  color: #b91c1c;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.worker-runtime-blocker h3 {
+  margin: 0;
+  color: var(--n-text-color-1);
+  font-size: 18px;
+  line-height: 1.35;
+}
+
+.worker-runtime-blocker > p {
+  margin: 12px 0 0;
+  color: var(--n-text-color-2);
+  line-height: 1.55;
+}
+
+.worker-runtime-blocker__details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+  padding: 12px;
+  margin: 14px 0 0;
+  background: rgba(15, 23, 42, 0.025);
+  border-radius: 9px;
+}
+
+.worker-runtime-blocker__details > div {
+  min-width: 0;
+}
+
+.worker-runtime-blocker__details dt {
+  margin-bottom: 3px;
+  color: var(--n-text-color-3, #64748b);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.worker-runtime-blocker__details dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--n-text-color-1);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.worker-runtime-blocker__details code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.worker-runtime-blocker__error {
+  grid-column: 1 / -1;
+}
+
+.worker-runtime-blocker__error dd {
+  color: #b42318;
+}
+
+.worker-runtime-blocker__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.worker-runtime-blocker__recovery-hint {
+  color: var(--n-text-color-3, #64748b) !important;
+  font-size: 12px;
 }
 
 .task-workbench {
@@ -1754,6 +1988,20 @@ onBeforeUnmount(() => {
 
   .task-schedule-drawer__actions :deep(.n-button) {
     flex: 1 1 140px;
+  }
+
+  .worker-runtime-blocker__details {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .worker-runtime-blocker__error {
+    grid-column: auto;
+  }
+
+  .worker-runtime-blocker__actions :deep(.n-button) {
+    flex: 1 1 180px;
+    min-height: 44px;
+    white-space: normal;
   }
 }
 
