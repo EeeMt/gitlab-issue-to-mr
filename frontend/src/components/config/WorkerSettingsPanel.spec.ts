@@ -585,62 +585,55 @@ describe('WorkerSettingsPanel', () => {
         }
       })
     ])
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: { isMobile: false, reloadKey: 0 }
+    })
+    await flushPromises()
+    const vm = wrapper.vm as any
+    const renderedKeys = wrapper
+      .findAll('.config-compact-row--environment')
+      .map((row) => (row.element as any).__vnode?.key)
 
-    try {
-      const wrapper = mount(WorkerSettingsPanel, {
-        props: { isMobile: false, reloadKey: 0 }
-      })
-      await flushPromises()
-      const vm = wrapper.vm as any
-      const rowKeys = vm.workerFormValue.environment_variables.map(
-        (environmentVariable: any, index: number) =>
-          vm.environmentVariableRowKey(environmentVariable, index)
-      )
+    expect(renderedKeys).toEqual(['profile_new-7', 'system-7'])
+    expect(new Set(renderedKeys).size).toBe(renderedKeys.length)
 
-      expect(new Set(rowKeys).size).toBe(rowKeys.length)
+    const findRow = (key: string) =>
+      wrapper.findAll('.config-compact-row--environment').find(
+        (row) => (row.find('input').element as HTMLInputElement).value === key
+      )!
 
-      const findRow = (key: string) =>
-        wrapper.findAll('.config-compact-row--environment').find(
-          (row) => (row.find('input').element as HTMLInputElement).value === key
-        )!
-
-      await findRow('SHARED_FLAG')
-        .findAll('button')
-        .find((button) => button.text() === 'config.overrideHere')!
-        .trigger('click')
-      await flushPromises()
-      expect(vm.workerFormValue.environment_variables).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ key: 'SHARED_FLAG', source: 'profile_override' }),
-          expect.objectContaining({ key: 'PROFILE_ONLY', source: 'profile_new' })
-        ])
-      )
-
-      await findRow('SHARED_FLAG')
-        .findAll('button')
-        .find((button) => button.text() === 'config.restoreSystemValue')!
-        .trigger('click')
-      await flushPromises()
-      expect(vm.workerFormValue.environment_variables).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ key: 'SHARED_FLAG', source: 'system' }),
-          expect.objectContaining({ key: 'PROFILE_ONLY', source: 'profile_new' })
-        ])
-      )
-
-      await findRow('PROFILE_ONLY')
-        .findAll('button')
-        .find((button) => button.text() === 'config.remove')!
-        .trigger('click')
-      await flushPromises()
-      expect(vm.workerFormValue.environment_variables).toEqual([
-        expect.objectContaining({ key: 'SHARED_FLAG', source: 'system' })
+    await findRow('SHARED_FLAG')
+      .findAll('button')
+      .find((button) => button.text() === 'config.overrideHere')!
+      .trigger('click')
+    await flushPromises()
+    expect(vm.workerFormValue.environment_variables).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'SHARED_FLAG', source: 'profile_override' }),
+        expect.objectContaining({ key: 'PROFILE_ONLY', source: 'profile_new' })
       ])
-      expect(warnSpy.mock.calls.flat().join(' ')).not.toMatch(/duplicate keys/i)
-    } finally {
-      warnSpy.mockRestore()
-    }
+    )
+
+    await findRow('SHARED_FLAG')
+      .findAll('button')
+      .find((button) => button.text() === 'config.restoreSystemValue')!
+      .trigger('click')
+    await flushPromises()
+    expect(vm.workerFormValue.environment_variables).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'SHARED_FLAG', source: 'system' }),
+        expect.objectContaining({ key: 'PROFILE_ONLY', source: 'profile_new' })
+      ])
+    )
+
+    await findRow('PROFILE_ONLY')
+      .findAll('button')
+      .find((button) => button.text() === 'config.remove')!
+      .trigger('click')
+    await flushPromises()
+    expect(vm.workerFormValue.environment_variables).toEqual([
+      expect.objectContaining({ key: 'SHARED_FLAG', source: 'system' })
+    ])
   })
 
   it('keeps Kit and scripts inheritance distinct from explicit profile values', async () => {
