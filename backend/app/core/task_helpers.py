@@ -211,6 +211,21 @@ def _require_issue_operator(issue: Issue, current_user: User | None) -> None:
     )
 
 
+def task_delivery_eligible_clause():
+    """SQLAlchemy clause matching completed tasks that constitute code delivery.
+
+    ``execute`` tasks always count as delivery; ``freeform`` tasks only count
+    when they actually pushed a commit. Shared with ``ci_failure_collector``.
+    """
+    return or_(
+        Task.task_mode == "execute",
+        and_(
+            Task.task_mode == "freeform",
+            Task.commit_sha.is_not(None),
+        ),
+    )
+
+
 async def maybe_update_issue_status(db: AsyncSession, issue_id: int) -> None:
     """Auto-transition issue status when no active tasks remain.
 
@@ -239,13 +254,7 @@ async def maybe_update_issue_status(db: AsyncSession, issue_id: int) -> None:
             select(func.count(Task.id)).where(
                 Task.issue_id == issue_id,
                 Task.status == TaskStatus.COMPLETED,
-                or_(
-                    Task.task_mode == "execute",
-                    and_(
-                        Task.task_mode == "freeform",
-                        Task.commit_sha.is_not(None),
-                    ),
-                ),  # freeform tasks only count as code delivery when a commit was pushed
+                task_delivery_eligible_clause(),
             )
         )
         if completed_count_result.scalar() > 0:

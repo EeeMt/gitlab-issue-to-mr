@@ -993,9 +993,11 @@ async def monitor_container_run(
             await db.commit()
 
     if exit_code == 0:
-        # Freeform delivery actions (Undraft/Ready, delivery notification) only
-        # run when the task actually produced a commit; a no-commit freeform task
+        # Freeform delivery actions (Undraft/Ready, description update) only run
+        # when the task actually produced a commit; a no-commit freeform task
         # skips them even when a pre-existing MR is already linked to the Issue.
+        # The generic completion notification is sent for every successful run so
+        # a no-commit freeform task still signals completion to the user.
         delivery_ready = not is_freeform or freeform_delivered
         if issue and issue.merge_request_iid and delivery_ready:
             t_mr_draft = time.monotonic()
@@ -1010,14 +1012,13 @@ async def monitor_container_run(
                     f"[Task {task.id}] Failed to update MR draft status after "
                     f"{time.monotonic() - t_mr_draft:.1f}s{resume_prefix}: {e}"
                 )
-        if delivery_ready:
-            await worker._send_notifications(
-                task,
-                success=True,
-                had_existing_mr=had_existing_mr,
-                logs=logs,
-                issue=issue,
-            )
+        await worker._send_notifications(
+            task,
+            success=True,
+            had_existing_mr=had_existing_mr,
+            logs=logs,
+            issue=issue,
+        )
     else:
         await worker._send_failure_notifications(
             task,

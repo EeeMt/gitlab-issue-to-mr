@@ -301,7 +301,9 @@ async def test_freeform_completed_no_commit_no_mr_no_delivery():
     assert issue.merge_request_iid is None
     worker._remove_mr_draft_status_for_issue.assert_not_called()
     worker._update_mr_description_for_issue.assert_not_called()
-    worker._send_notifications.assert_not_called()
+    # The generic completion notification is preserved for successful runs even
+    # when no commit was produced; only MR-delivery actions are skipped.
+    worker._send_notifications.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -316,7 +318,7 @@ async def test_freeform_completed_no_commit_with_existing_mr_leaves_it_untouched
     assert issue.merge_request_iid == 7
     worker._remove_mr_draft_status_for_issue.assert_not_called()
     worker._update_mr_description_for_issue.assert_not_called()
-    worker._send_notifications.assert_not_called()
+    worker._send_notifications.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -365,6 +367,39 @@ async def test_freeform_failed_does_not_trigger_mr_delivery():
     worker._remove_mr_draft_status_for_issue.assert_not_called()
     worker._update_mr_description_for_issue.assert_not_called()
     worker._send_failure_notifications.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_freeform_timeout_does_not_trigger_mr_delivery():
+    worker, db, task, issue, container = _monitor_fixtures(task_mode="freeform", issue_mr_iid=7)
+    worker._stream_logs_to_db = AsyncMock(return_value=(-1, "logs", 1, True))
+    worker._parse_task_result = AsyncMock(side_effect=_parse_cb(TaskStatus.FAILED, None))
+
+    result = await _run_monitor(worker, db, task, issue, container, had_existing_mr=True)
+
+    assert result is False
+    worker._create_mr_if_needed.assert_not_called()
+    assert issue.merge_request_iid == 7
+    worker._remove_mr_draft_status_for_issue.assert_not_called()
+    worker._update_mr_description_for_issue.assert_not_called()
+    worker._send_notifications.assert_not_called()
+    worker._send_failure_notifications.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_freeform_cancelled_does_not_trigger_mr_delivery():
+    worker, db, task, issue, container = _monitor_fixtures(task_mode="freeform", issue_mr_iid=7)
+    worker._parse_task_result = AsyncMock(side_effect=_parse_cb(TaskStatus.CANCELLED, None))
+
+    result = await _run_monitor(worker, db, task, issue, container, had_existing_mr=True)
+
+    assert result is False
+    worker._create_mr_if_needed.assert_not_called()
+    assert issue.merge_request_iid == 7
+    worker._remove_mr_draft_status_for_issue.assert_not_called()
+    worker._update_mr_description_for_issue.assert_not_called()
+    worker._send_notifications.assert_not_called()
+    worker._send_failure_notifications.assert_not_called()
 
 
 @pytest.mark.asyncio
