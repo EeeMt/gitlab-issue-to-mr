@@ -34,6 +34,8 @@ This directory aggregates the main project documentation. Start from the root [R
 - [Worker Harness Adapter 契约 v1](architecture/worker-harness-contract-v1.md)
 - [Worker Canonical Event v1](architecture/worker-canonical-event-v1.md)
 - [Issue Task 有序回合设计与实施方案](superpowers/specs/2026-08-08-issue-task-ordered-turns-design.md) — 将同一 Issue 建模为严格有序的交互式 CLI 输入流
+- [Task Freeform 模式设计](superpowers/specs/2026-08-14-task-freeform-mode-design.md) — 第三种正式任务模式：自由使用 Harness 原生能力
+- [Worker Profile 共享配置设计](superpowers/specs/2026-08-14-worker-profile-shared-configuration-design.md) — 共享基线 + Profile 差量继承，冻结为不可变任务快照
 - [Multi-Harness 接入调试与通用经验](multi-harness-debugging.md) — 通用接入断层清单（含 codex 专项）与验证命令
 
 ## 安全

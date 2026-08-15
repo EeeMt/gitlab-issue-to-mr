@@ -52,7 +52,7 @@ Key modules:
 | `backend/app/core/harness_sessions.py` / `harness_attempts.py` | session lineage, idempotent canonical-event ingest |
 | `backend/app/core/model_credentials.py` | per-provider credentials (active/retired lifecycle) |
 | `deploy/worker-entrypoint/harness/` | worker-side adapters + event translators + runner (claude/codex) |
-| `backend/app/migrations.py` + `alembic/versions/NNN_*.py` | migrations (head: `067`) |
+| `backend/app/migrations.py` + `alembic/versions/NNN_*.py` | migrations (head: `072`) |
 
 Worker containers: `codify-{task_id}-p{project_id}-i{issue_iid}` — scheduler crash recovery matches this pattern.
 

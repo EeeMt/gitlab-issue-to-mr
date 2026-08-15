@@ -22,12 +22,6 @@ Codify 帮你把需求变成代码。写清楚目标和约束，剩下的交给 
 4. 把改动提交、推送到新分支，创建或更新 MR
 5. 全程在 Dashboard 记录日志和状态变化
 
-## 系统功能概览
-
-
-https://github.com/user-attachments/assets/19d0dd54-25d0-4449-9df1-aec66a04652d
-
-
 ## 关键组件
 
 - `backend/app/api/tasks.py` — 任务 API 与队列视图
@@ -50,11 +44,13 @@ https://github.com/user-attachments/assets/19d0dd54-25d0-4449-9df1-aec66a04652d
 | &ensp;↳ 创建任务 | 手动配置并发起任务 |
 | 会话管理 | 查看和管理登录会话 |
 | **洞察** | |
-| 统计分析 | 执行趋势与成功率 |
-| 调度总览 | 查看队列和调度状态 |
-| 监控 | 运行时状态与健康检查 |
+| 统计分析 | 执行趋势与成功率、AI Provider 维度对比 |
+| 调度总览 | 未来 24h 排程密度分布 |
+| 监控 | 队列看板、执行时间线、健康检查 |
 | **管理** | |
-| 访问管理 | 用户与权限 |
+| 访问管理 | 用户、角色与状态管理 |
+| 用量管理 | 用户 Token / 任务数配额 |
+| 系统统计 | 系统生命周期统计（管理员） |
 | 系统配置 | 运行时参数和集成配置 |
 | &ensp;↳ OIDC 诊断 | 调试 SSO 登录问题 |
 
@@ -132,25 +128,20 @@ docker-compose up -d --build
 
 ### 任务列表
 
-主页（`/`）展示任务队列，按优先级分为三个标签页：
+任务列表页（`/tasks`）以表格展示任务队列，顶部为统计卡；首页（`/dashboard`）为工作台总览。
 
-| 标签 | 优先级值 | 说明 |
-|------|---------|------|
-| P0   | 0       | 最高优先级，最先被调度 |
-| P1   | 1       | 普通优先级 |
-| P2   | 2       | 低优先级 |
+**筛选与排序：**
+- 按项目、发起人、任务状态、优先级、Harness 筛选
+- 服务端排序、列显隐、关键字搜索、快速过滤"我的"
+- 远程分页
 
-**筛选功能：**
-- 按项目筛选
-- 按发起人筛选
-- 按任务状态筛选
-- 按 Harness 筛选
-
-**任务卡片信息：**
+**任务行信息：**
 - 任务 ID、项目名、Issue 链接
 - 执行状态（颜色标签）与 Harness 引擎
 - 代码变更量（`+添加 -删除`）
 - 创建时间 / 计划时间
+
+优先级仍为 P0 / P1 / P2 三级（见下方说明），从固定标签页改成了可筛选、可排序的表格列。
 
 ### 任务详情
 
@@ -182,46 +173,50 @@ docker-compose up -d --build
 | 取消 | PENDING / QUEUED / RUNNING | 取消任务，状态变为 CANCELLED |
 | 重试 | FAILED / CANCELLED | 复制原任务冻结的 Harness/端点/凭据重新入队 |
 | 重新调度 | PENDING（有计划时间） | 修改计划执行时间 |
+| 编辑 | — | 修改任务配置 |
+| 下载运行归档 | — | 下载任务运行时归档（事件、日志、制品） |
+| 强制标记 | — | 强制标记为完成/失败，需填写原因 |
 
 **日志面板：**
 - 展示容器执行日志，支持 **ANSI 颜色**渲染
 - 完整显示 emoji（如 ✅ ❌ 🔧 等）
 - 任务执行中每约 10 秒自动刷新一次
 
-### 手动创建任务
+### 创建任务
 
-页面路由：`/create-task`，或点击侧边栏"创建任务"。
+页面路由：`/issues/create`（旧路径 `/create-task` 已重定向到此）。
 
-直接输入参数创建任务（无需关联需求）：
+任务统一从 Issue 发起：在 Issue 详情页点击「创建任务/追加任务」打开创建抽屉，也可以在创建 Issue 时直接填写。抽屉字段：
 
 | 字段 | 说明 |
 |------|------|
-| 项目 | 从下拉列表选择目标 GitLab 项目 |
-| 需求描述 | 发给 Harness 的完整提示词 |
-| Harness | Claude / Codex（受 Issue 现有会话 lineage 约束） |
-| 基础分支 | 在哪个分支上开发（可选，默认 main） |
-| 目标分支 | MR 合并到哪个分支（可选，默认 main） |
-| 优先级 | P0 / P1 / P2 |
-| 计划时间 | 延迟到指定时间再执行（可选） |
+| 提示词 | 发给 Harness 的完整提示词，可从模板库选择（支持标签过滤） |
+| 模式 | execute（实施）/ plan（分析），可勾选"仅当有变更才提交" |
+| 会话续接 | fresh（新会话）/ continue（续接 Issue 既有会话） |
+| AI Provider | 选择模型提供方（默认使用 Issue 级设置） |
+| Harness | Claude（Codex 适配器已接入，灰度中；受 Issue 现有会话 lineage 约束） |
+| 调度方式 | 立即执行，或定时执行（带 slot 容量热力图与容量校验） |
+| 运行指令模板 | 可选择模板并实时预览渲染结果 |
+| 技能 | 按需启用已上传的技能 |
 
-> 手动任务不会关联需求，适合快速验证或临时任务。
+> 任务创建时冻结不可变 Worker/Provider 快照，后续修改配置不会影响已创建的任务。
 
 ### 调度总览
 
-页面路由：`/schedule`
+页面路由：`/schedule-overview`
 
-展示未来调度队列的可视化视图：
-- 待执行任务的计划时间分布
-- 当前正在运行的任务
+展示未来 24 小时按小时分桶的排程密度柱状图：
+- 可点击时间窗口查看详情
+- 支持"仅看我的任务"
 
 ### 监控页面
 
-页面路由：`/monitor`
+页面路由：`/monitor`（需 monitor 页面权限）
 
-展示系统运行状态：
-- 当前活跃的 Worker 容器列表
-- 每个容器的任务 ID、运行时长、项目信息
-- 实时容器日志查看（仅管理员）
+三个页签：
+- **runtime** — 队列看板（运行中 / 就绪 / 等待 / 被前序任务阻塞）与执行时间线
+- **debug** — 活跃 Worker 容器列表与容器日志
+- **health** — 健康检查：队列积压、运行中缺容器、孤儿容器、24h 失败数、Docker 目标可达性
 
 ### 统计分析
 
@@ -237,7 +232,7 @@ docker-compose up -d --build
 
 页面路由：`/configuration`（仅管理员）
 
-分为以下几个标签页：
+分为 11 个标签页：运行时配置、认证（Auth/OIDC）、GitLab 连接、AI Providers、Prompt 模板、Worker、Skills、Mattermost 通知、公告横幅、维护、Webhook 事件。
 
 #### 运行时配置（Runtime）
 
@@ -291,16 +286,40 @@ docker-compose up -d --build
 | GitLab URL | GitLab 实例地址 |
 | GitLab Bot Token | Bot 账号的 Personal Access Token |
 
+#### Prompt 模板
+
+维护提示词模板库，创建任务时从模板抽屉中选择（支持标签过滤与覆盖确认）。
+
+#### Skills（技能目录）
+
+管理员上传/管理全局技能包（zip 导入），任务按需启用；技能随 Worker Profile 解析，并在任务快照中冻结版本。
+
+#### Mattermost 通知
+
+配置 Mattermost 集成，任务完成/失败事件推送通知；支持通知 Profile 与渠道目标配置。
+
+#### 公告横幅
+
+设置系统级公告横幅，展示在 Dashboard 顶部。
+
+#### 维护
+
+系统数据清理（已删除 Issue/Task 的归档、workspace、容器，支持 force）与运行时配置重置。
+
+#### Webhook 事件
+
+查看 GitLab webhook 接收的事件日志（可审计）。
+
 ### 访问管理
 
-页面路由：`/access`（仅管理员）
+页面路由：`/access-management`（仅管理员）
 
 管理已登录用户的权限：
 
 | 角色 | 权限说明 |
 |------|---------|
-| admin | 完全访问，包括配置、日志、容器监控 |
-| platform_user | 查看任务、创建手动任务，不可访问配置页面 |
+| platform_admin | 完全访问，包括配置、日志、容器监控 |
+| platform_user | 查看/创建任务，不可访问管理配置页；Monitor、Analytics、调度总览为按角色分配的页面权限 |
 
 ---
 
@@ -339,7 +358,7 @@ docker-compose up -d --build
 | `GITLAB_BOT_TOKEN` | Bot 账号 PAT（`api` 权限） | `glpat-xxxx` |
 | `ANTHROPIC_BASE_URL` | 默认 AI Provider（Claude）端点 | `https://api.anthropic.com` |
 | `ANTHROPIC_API_KEY` | 默认 AI Provider（Claude）密钥 | `sk-ant-xxxx` |
-| `ANTHROPIC_MODEL` | 默认模型（多 Provider 场景以 Dashboard 配置为准） | `claude-opus-4-5` |
+| `ANTHROPIC_MODEL` | 默认模型（多 Provider 场景以 Dashboard 配置为准） | `claude-sonnet-4-20250514` |
 | `DATABASE_URL` | PostgreSQL 连接串 | `postgresql+asyncpg://...` |
 | `DOCKER_HOST` | Docker 引擎地址 | `tcp://localhost:2376` |
 | `WORKER_IMAGE` | Worker 容器镜像 | `codify-worker/java21-maven:2026.07` |
