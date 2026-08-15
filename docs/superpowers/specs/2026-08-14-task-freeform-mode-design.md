@@ -46,7 +46,7 @@ freeform / 自由模式 / Freeform
 本设计已经确认以下决策，不再作为实施阶段开放项：
 
 1. 高频场景是用户希望直接使用 Harness，让 Harness 自主判断是否需要修改代码。
-2. 自由模式有代码变更时，Codify 自动 commit、push 并更新 MR。
+2. 自由模式有代码变更时，Codify 自动 commit、push，并在 push 后创建或更新 MR。
 3. 自由模式没有代码变更时，Task 正常完成，不因无提交而失败。
 4. “仅使用提示词”只移除 Codify 的 Task 级实施/分析运行指令；以下能力继续沿用现有 Harness Adapter 和运行配置：
    - 当前 Harness 会话上下文，或用户显式选择的新会话；
@@ -60,6 +60,8 @@ freeform / 自由模式 / Freeform
 8. 选择模式后直接进入完整表单，不增加“下一步”按钮或步骤条。
 9. 模式入口只用于新建 Task；编辑已有 Task 时直接打开完整表单。
 10. 自由模式不允许自定义运行指令模板，现有“仅用提示词”快捷按钮移除。
+11. 自由模式没有实际提交时，不新建 MR，也不把现有 MR 标记为 Ready 或改写其交付描述；只有出现实际提交后才进入 MR 交付流程。
+12. 管理员系统统计新增独立 Task Mode Breakdown，明确区分 `freeform`、`execute`、`plan` 和历史 Unknown。
 
 ## 3. 背景与问题
 
@@ -310,6 +312,16 @@ plan
 3. 保持 server default 为 `execute`，兼容省略 `task_mode` 的既有 API 调用方。
 
 迁移 revision 必须在实施时基于仓库当前 Alembic head 分配，不在本设计中硬编码编号。
+
+创建迁移前必须从 `backend/` 执行：
+
+```bash
+.venv/bin/alembic heads
+```
+
+结果必须且只能包含一个 head。若出现多个 head，先独立修复迁移拓扑并验证已部署数据库的 revision 状态；不得把不相关的历史分支修复塞进自由模式约束迁移，也不得在多 head 状态下猜测 `down_revision`。
+
+截至 2026-08-16 本设计复核时，仓库已通过 `a5ebec09` 删除重复的 orphan migration，当前单一 head 为 `072_shared_per_item_inheritance`。实施时仍需重新检查，不能把该值作为永久约束。
 
 Downgrade 时，在恢复旧约束前把已有 `freeform` 行映射为：
 
@@ -569,7 +581,7 @@ Worker 只有 `plan` 进入“丢弃修改并直接完成”的专用分支。`f
 flowchart TD
     P["运行自由模式 Task"] --> H["Harness 执行用户提示词"]
     H --> C{"工作区是否存在可交付修改或提交"}
-    C -->|是| D["Codify commit / push / 更新 MR"]
+    C -->|是| D["Codify commit / push / 创建或更新 MR"]
     D --> S["Task Completed"]
     C -->|否| N["REQUIRE_CHANGES=false"]
     N --> S
@@ -577,13 +589,42 @@ flowchart TD
 
 自由模式不得新增“保留未提交修改”的结束状态。Task 容器退出前仍完成现有交付或明确确认无变更。
 
-### 11.4 无变更完成
+### 11.4 MR 生命周期
+
+当前实施路径可能在容器启动前创建 Draft MR，并在进程成功退出后直接移除 Draft、更新 MR 描述。该时序不能直接复用于自由模式，因为“进程成功”不等于“产生代码交付”。
+
+自由模式使用延迟 MR 交付：
+
+```mermaid
+flowchart TD
+    S["启动自由模式 Task"] --> R["运行 Harness，不预先创建或更新 MR"]
+    R --> F["解析 canonical terminal 与 finalization metadata"]
+    F --> C{"commit_sha 是否存在"}
+    C -->|否| N["保持现有 MR 完全不变；不创建新 MR"]
+    C -->|是| M["在分支已 push 后创建或复用 MR"]
+    M --> P["持久化 Issue MR 关联"]
+    P --> U["更新描述并按现有规则移除 Draft"]
+```
+
+具体不变量：
+
+- 自由模式运行前不得为了展示“AI 正在执行”而创建 MR；
+- Issue 已有关联 MR 时，运行自由 Task 可以继续使用同一工作分支，但在确认本 Task 有实际提交前，不向 Worker 暴露会触发 MR 状态或描述写入的交付上下文；
+- canonical 结果解析并取得非空 `task.commit_sha` 后，才创建或复用 MR、持久化 `Issue.merge_request_iid/url`、更新描述并执行 Ready 转换；
+- 自由 Task 无提交时，已有 MR 的 Draft/Ready 状态、标题和描述必须保持运行前值；
+- `execute` 和 `plan` 的既有 MR 时序不在本设计中改变；
+- 提交已 push 但 MR API 暂时失败时，沿用现有可诊断、可重试的 MR 交付失败处理，不伪造 MR 关联，也不清除已保存的 `commit_sha`。
+
+实现上应把“Harness 进程退出成功”和“存在本次代码交付”拆成两个条件，不能继续只用 `exit_code == 0` 决定自由模式的 Undraft、MR 描述更新或交付通知。
+
+### 11.5 无变更完成
 
 当 Harness 只回答问题且工作区无变化时：
 
 - Task 状态为 `COMPLETED`；
 - `commit_sha` 保持 `NULL`；
 - 不创建虚假 commit；
+- 不创建新 MR，也不修改已有 MR 的 Draft/Ready 状态、标题或描述；
 - 不因 `require_changes` 失败；
 - 最终摘要、Token 和事件按当前可用能力保存；
 - Issue 状态按第 12 节判断。
@@ -660,7 +701,32 @@ status IN (pending, queued, running)
 
 ### 14.1 模式维度
 
-系统统计的 `task_mode` 分组增加：
+既有生命周期统计只实现 Project、Provider、Harness 三类 Breakdown；它虽然保存了 `task_mode` 维度，但没有 Task Mode Breakdown。本设计明确增加第四类 Breakdown，而不是假设已有分组。
+
+`GET /api/admin/system-statistics/breakdowns` 响应新增：
+
+```json
+{
+  "task_modes": [
+    { "key": "freeform", "label": "freeform", "task_count": 12 },
+    { "key": "execute", "label": "execute", "task_count": 40 },
+    { "key": "plan", "label": "plan", "task_count": 8 }
+  ]
+}
+```
+
+示例省略与现有 BreakdownRow 相同的完成数、失败数、成功率、删除数、Token 和代码变更字段。
+
+Task Mode Breakdown 契约：
+
+- 使用当前 Task 与 `deleted_task_statistics` 的统一 `all_tasks` CTE，继续受 `project_id`、`provider_id`、`harness_key` 和 `data_state` 筛选影响；
+- 复用现有 BreakdownRow 指标口径，不新增第二套成功率或已知性算法；
+- `key` 返回数据库真实值 `freeform`、`execute`、`plan`；历史空值返回 `null`，不得回退为 `execute`；
+- `label` 的本地化由前端基于 `key` 完成，后端不固化中文或英文产品文案；
+- 前端固定按 `freeform -> execute -> plan -> Unknown` 排序，不对这个有界枚举使用 Top N 截断；
+- API 新增 `task_modes` key 属于向后兼容的响应扩展，既有三个 Breakdown 不变。
+
+新增正式模式值：
 
 ```text
 freeform
@@ -688,7 +754,7 @@ AND not deleted_before_terminal
 
 ### 14.3 成功率与时长
 
-自由模式与其他模式一样计入 Task 总数、状态、执行时长和 Token 统计。管理员可以通过 `task_mode` 维度单独查看它，不把自由模式成功率混写为实施模式。
+自由模式与其他模式一样计入 Task 总数、状态、执行时长和 Token 统计。管理员通过新增的 Task Mode Breakdown 单独查看它，不把自由模式成功率混写为实施模式。
 
 ### 14.4 删除归档
 
@@ -759,6 +825,15 @@ Send only the task prompt to the Harness. It decides whether to answer, analyze,
 ```
 
 正常新建流程不会在未选择模式时展示提交按钮，因此不再依赖“提交后提示请选择模式”。若保留防御性校验及其文案，必须更新为三种模式，不得只解释实施与分析。
+
+### 15.5 系统统计
+
+`SystemStatistics.vue` 的基础 Breakdown 增加 Task Mode 卡片：
+
+- 复用现有 Breakdown 表格列和 Unknown 展示，不新建图表库；
+- 模式名称通过 `taskMode` i18n 映射显示为自由模式、实施模式、分析模式，Unknown 使用现有未知文案；
+- 四张 Breakdown 在窄视口单列堆叠，在足够宽的桌面视口保持现有两列网格；Project 继续占整行，Task Mode 与 Provider/Harness 按实际空间排列；
+- 新卡片必须覆盖 `390px`、`768px`、`1440px` 和宽桌面布局，不能因增加第四张表恢复横向裁切。
 
 ## 16. API 与响应示例
 
@@ -851,6 +926,7 @@ Content-Type: application/json
 - 现有客户端显式发送 `execute` / `plan` 不受影响。
 - 默认模板响应新增 `freeform` key，不删除或修改既有 `execute` / `plan` key。
 - Prompt 预览只在 `task_mode=freeform` 时允许省略模板；既有实施/分析预览请求和校验语义保持不变。
+- 系统统计 Breakdown 响应新增 `task_modes` key，既有 `projects`、`providers`、`harnesses` key 和行结构保持不变。
 - 新后端和新前端应在同一发布窗口部署；旧前端可能把未知模式错误显示为实施模式。
 - 后端序列化始终返回真实 `freeform`，不得为了旧前端回退为 `execute`。
 
@@ -861,18 +937,20 @@ Content-Type: application/json
 - Adapter 不校验二值 Task mode；
 - `TASK_MODE=freeform` 能完整进入 Harness 和 finalization；
 - 无变更且 `REQUIRE_CHANGES=false` 返回成功；
-- 有变更时 commit、push、MR 和 metadata 正常；
+- 无变更时不创建、Undraft 或改写 MR；
+- 有变更时先 commit / push，再创建或复用 MR，metadata 和 Issue MR 关联正常；
 - Claude 与 Codex 两种已支持 Harness 都通过。
 
 不因源代码看起来兼容就省略真实容器验证。
 
 ### 17.4 发布顺序
 
-1. 部署扩展检查约束的数据库迁移。
-2. 部署接受并正确处理 `freeform` 的后端与 Scheduler。
-3. 部署显示和创建自由模式的前端。
-4. 使用新建 Issue / Task 和新冻结 Runtime Bundle 做 canary。
-5. 验证 Issue 状态、CI 门禁和系统统计后再开放给所有用户。
+1. 在待发布 revision 上确认 `alembic heads` 只有一个结果，并完成迁移 upgrade / downgrade 测试。
+2. 部署扩展检查约束的数据库迁移。
+3. 部署接受并正确处理 `freeform` 的后端与 Scheduler。
+4. 部署显示和创建自由模式、Task Mode Breakdown 的前端。
+5. 使用新建 Issue / Task 和新冻结 Runtime Bundle 做 canary。
+6. 分别验证自由模式有提交、无提交时的 MR、Issue、CI 门禁和系统统计，再开放给所有用户。
 
 ## 18. 安全与审计
 
@@ -898,8 +976,11 @@ Content-Type: application/json
 - `backend/app/core/task_prompt.py`
 - `backend/app/core/worker_profiles.py`
 - `backend/app/core/worker_runtime.py`
+- `backend/app/core/worker_task_lifecycle.py`
+- `backend/app/core/worker_gitlab.py`
 - `backend/app/core/task_helpers.py`
 - `backend/app/core/ci_failure_collector.py`
+- `backend/app/api/system_statistics.py`
 - `backend/app/api/system_statistics_queries.py`
 - `backend/app/core/system_statistics_deletion.py`
 - `backend/app/models.py`
@@ -916,9 +997,11 @@ Content-Type: application/json
 - `frontend/src/features/tasks/useTaskFormSubmission.ts`
 - `frontend/src/features/tasks/useRunInstructionPreview.ts`
 - `frontend/src/api/tasks.ts`
+- `frontend/src/api/index.ts`
 - `frontend/src/components/TaskMetadataPanel.vue`
 - `frontend/src/components/issue-detail/IssueCurrentExecution.vue`
 - `frontend/src/views/TaskView.vue`
+- `frontend/src/views/SystemStatistics.vue`
 - `frontend/src/i18n/messages/en.ts`
 - `frontend/src/i18n/messages/zh-CN.ts`
 - 相关 mocks、unit tests 和 E2E tests
@@ -927,6 +1010,7 @@ Content-Type: application/json
 
 ### 20.1 数据库与模型
 
+- 创建自由模式迁移前 `alembic heads` 只有一个结果，新增迁移以该 head 为 `down_revision`。
 - 新约束接受 `execute`、`freeform`、`plan`。
 - 新约束拒绝其他值。
 - downgrade 映射自由模式后能恢复旧约束。
@@ -951,6 +1035,9 @@ Content-Type: application/json
 
 - 自由模式无文件变化且 `require_changes=false` 成功。
 - 自由模式产生文件变化时自动 commit 和 push。
+- 自由模式运行前不会创建 MR，也不会把已有 MR 上下文用于运行中状态写入。
+- 自由模式无提交时不创建 MR，不改变已有 MR 的 Draft/Ready、标题和描述。
+- 自由模式有提交时，在 push 后创建或复用 MR，持久化 Issue MR 关联，再更新描述和 Ready 状态。
 - 已存在 Harness commit 时沿用现有发布规则。
 - 自由模式不会抑制支持该能力的 Harness Adapter 注入 Provider system prompt。
 - 默认 Skills 和 Task Skills 仍物化。
@@ -966,7 +1053,8 @@ Content-Type: application/json
 - 无提交自由 Task 不重置 CI 自动修复尝试窗口。
 - 已完成实施 Task 即使没有 `commit_sha`，仍可重置 CI 自动修复尝试窗口并提供最近任务优先级。
 - 活动自由 Task 会阻止并发 CI 修复创建。
-- 自由模式在 task mode breakdown 中独立显示。
+- Breakdown API 返回 `task_modes`，分别聚合 `freeform`、`execute`、`plan` 和历史 Unknown。
+- Task Mode Breakdown 沿用 `data_state` 和其他维度筛选，并保持代码指标覆盖率分子不超过 eligible 分母。
 - 有可靠变更数据的自由 Task 进入代码统计样本。
 - 删除后的自由 Task 继续出现在生命周期统计中。
 
@@ -984,6 +1072,8 @@ Content-Type: application/json
 - 创建请求发送 `task_mode=freeform`，不依赖前端显式发送 canonical 模板。
 - 选择自由模式不会从默认模板响应或 Worker Profile 误取实施模板。
 - 任务详情和当前执行正确显示自由模式。
+- 系统统计显示 Task Mode Breakdown，并按自由、实施、分析、Unknown 的固定顺序和本地化文案展示。
+- 增加第四张 Breakdown 后，窄屏单列和宽屏两列布局不发生横向裁切。
 - 不再存在“仅用提示词”按钮和对应 handler。
 - radiogroup、键盘选择、焦点返回和 reduced-motion 行为可测试。
 
@@ -1001,8 +1091,9 @@ Content-Type: application/json
 - 触摸目标和底部安全区；
 - 选择模式进入完整表单；
 - 返回模式入口后字段和滚动位置保留；
-- 自由模式创建无变更 Task；
-- 自由模式创建有变更 Task 并完成交付。
+- 自由模式创建无变更 Task 后确认没有 MR 副作用；
+- 自由模式创建有变更 Task 并在 push 后完成 MR 交付；
+- 系统统计 Task Mode Breakdown 在移动端、平板和桌面视口均可读。
 
 ## 21. 验收标准
 
@@ -1013,10 +1104,10 @@ Content-Type: application/json
 3. 自由模式 Task 在数据库、API 和所有展示面都保留 `task_mode=freeform`。
 4. 服务端保证 canonical 模板和 `require_changes=false`，不存在依赖前端组合的旁路。
 5. 自由模式继续使用现有会话、Skills、Harness Adapter 已支持的 Provider system prompt、沙箱和交付能力。
-6. 有代码变化自动 commit / push / 更新 MR；无变化正常完成。
+6. 有代码变化先 commit / push，再创建或更新 MR；无变化正常完成且不创建、Undraft 或改写 MR。
 7. Issue 对 `execute` 保持既有完成语义；`freeform` 只有存在实际 `commit_sha` 才进入 `in_review`。
 8. CI 自动修复保留已完成 `execute` 的既有资格，并识别自由模式的潜在写入和实际交付。
-9. 系统统计独立显示自由模式，并正确处理代码指标和删除归档。
+9. 系统统计通过新增 Task Mode Breakdown 独立显示 `freeform`、`execute`、`plan` 和 Unknown，并正确处理筛选、代码指标和删除归档。
 10. 现有 execute / plan、Retry、CI 自动修复和旧 API 默认行为无回归。
 11. 移动端真实视口下模式列表、完整表单和返回交互可用。
 12. Claude 与 Codex 的真实 Worker smoke 均通过。
@@ -1028,7 +1119,8 @@ Content-Type: application/json
 - `Task Run Instruction Template Design` 中 `task_mode` 从二值扩展为三值；自由模式模板由应用内 canonical 常量提供，不由 System Config 或 Worker Profile 提供。
 - 既有“显式 run_instruction_template 总是优先”规则对自由模式增加例外：自由模式只允许 canonical 模板。
 - `Worker Profiles Design` 不新增自由模板字段，实施和分析默认模板规则保持不变。
-- `System Lifecycle Statistics Design` 中代码样本从仅 `execute` 扩展为 `execute/freeform`，仍受数据已知性约束。
+- `System Lifecycle Statistics Design` 在既有 Project、Provider、Harness 基础上增加第四类 Task Mode Breakdown；代码样本从仅 `execute` 扩展为 `execute/freeform`，仍受数据已知性约束。
 - `CI Pipeline Auto-Repair Design` 中最近任务查询保留已完成 `execute` 的既有资格，并把有实际 `commit_sha` 的 `freeform` 纳入；活动潜在写入者包含 `freeform`。
+- 既有 Worker MR 时序对自由模式增加例外：只有解析到实际 `commit_sha` 后才允许创建、Undraft 或改写 MR。
 
 若既有文档与本设计在自由模式相关语义上冲突，以本设计为准。
