@@ -2775,6 +2775,30 @@ class RetryTaskFreeformTests(unittest.TestCase):
         self.assertEqual(created_task.task_mode, "freeform")
         self.assertIs(created_task.require_changes, False)
 
+    def test_retry_freeform_normalizes_drifted_source(self):
+        """A retry of a drifted freeform source (require_changes=True or a
+        non-canonical template) is defensively normalized to the three-value
+        invariant while preserving the source prompt snapshot."""
+        from app.core.task_prompt import FREEFORM_RUN_INSTRUCTION_TEMPLATE
+
+        task = _make_serializable_task(task_status=TaskStatus.FAILED)
+        task.id = 95
+        task.project_id = 1
+        task.task_mode = "freeform"
+        task.require_changes = True
+        task.run_instruction_template = "Must change {{user_prompt}}"
+        task.rendered_prompt = "Must change Test prompt"
+
+        response, mock_db = self._post_retry(task)
+        self.assertEqual(response.status_code, 200)
+        created_task = _added_task(mock_db)
+        self.assertEqual(created_task.task_mode, "freeform")
+        self.assertIs(created_task.require_changes, False)
+        self.assertEqual(
+            created_task.run_instruction_template, FREEFORM_RUN_INSTRUCTION_TEMPLATE
+        )
+        self.assertEqual(created_task.rendered_prompt, "Must change Test prompt")
+
 
 # ---------------------------------------------------------------------------
 # maybe_update_issue_status — freeform delivery eligibility

@@ -677,5 +677,123 @@ class UpdateTaskFreeformModeTests(unittest.TestCase):
         mock_db.commit.assert_not_awaited()
 
 
+# ---------------------------------------------------------------------------
+# Freeform mode: execute<->plan / freeform mode-switch round-trip semantics
+# ---------------------------------------------------------------------------
+
+class UpdateTaskModeSwitchRoundTripTests(unittest.TestCase):
+    """PATCH mode switches never silently reuse the previous custom or freeform
+    template; a switch without an explicit template uses the frozen snapshot's
+    target-mode default."""
+
+    def tearDown(self):
+        from app.main import app
+        app.dependency_overrides.clear()
+
+    def _patch(self, payload, task=None):
+        t = task or _make_task()
+        mock_db = _mock_db_for_task(t)
+        client, app = _make_client(mock_db)
+        with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+            resp = client.patch("/api/tasks/1", json=payload)
+        app.dependency_overrides.clear()
+        return resp, t
+
+    def test_execute_to_plan_without_template_uses_snapshot_plan_default(self):
+        """Switching execute -> plan without a template uses the frozen snapshot's
+        plan default, not the previous execute custom template."""
+        task = _make_task()
+        task.task_mode = "execute"
+        task.require_changes = True
+        task.run_instruction_template = "Custom execute {{user_prompt}}"
+        task.rendered_prompt = "Custom execute Original prompt"
+        resp, t = self._patch({"task_mode": "plan"}, task=task)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(t.task_mode, "plan")
+        self.assertFalse(t.require_changes)
+        self.assertEqual(t.run_instruction_template, "Plan {{user_prompt}}")
+        self.assertEqual(t.rendered_prompt, "Plan Original prompt")
+
+    def test_plan_to_execute_without_template_uses_snapshot_execute_default(self):
+        """Switching plan -> execute without a template uses the frozen snapshot's
+        execute default, not the previous plan custom template."""
+        task = _make_task()
+        task.task_mode = "plan"
+        task.require_changes = False
+        task.run_instruction_template = "Custom plan {{user_prompt}}"
+        task.rendered_prompt = "Custom plan Original prompt"
+        resp, t = self._patch({"task_mode": "execute"}, task=task)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(t.task_mode, "execute")
+        self.assertEqual(t.run_instruction_template, "Do {{user_prompt}}")
+        self.assertEqual(t.rendered_prompt, "Do Original prompt")
+
+    def test_execute_freeform_execute_roundtrip_does_not_restore_user_prompt(self):
+        """A round-trip execute -> freeform -> execute lands on the snapshot execute
+        default, never the freeform {{user_prompt}} template or the original
+        custom execute template."""
+        task = _make_task()
+        task.task_mode = "execute"
+        task.require_changes = True
+        task.run_instruction_template = "Custom execute {{user_prompt}}"
+        task.rendered_prompt = "Custom execute Original prompt"
+        mock_db = _mock_db_for_task(task)
+        client, app = _make_client(mock_db)
+        with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+            resp = client.patch("/api/tasks/1", json={"task_mode": "freeform"})
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(task.task_mode, "freeform")
+            self.assertFalse(task.require_changes)
+            self.assertEqual(task.run_instruction_template, FREEFORM_RUN_INSTRUCTION_TEMPLATE)
+            self.assertEqual(task.rendered_prompt, "Original prompt")
+            resp = client.patch("/api/tasks/1", json={"task_mode": "execute"})
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(task.task_mode, "execute")
+            self.assertEqual(task.run_instruction_template, "Do {{user_prompt}}")
+            self.assertEqual(task.rendered_prompt, "Do Original prompt")
+        app.dependency_overrides.clear()
+
+    def test_switch_to_freeform_with_explicit_non_canonical_template_returns_422_no_partial_save(self):
+        """Switching execute -> freeform with an explicit non-canonical template is
+        a stable 422 and rolls back without committing partial changes."""
+        task = _make_task()
+        task.task_mode = "execute"
+        task.require_changes = True
+        task.run_instruction_template = "Do {{user_prompt}}"
+        task.rendered_prompt = "Do Original prompt"
+        mock_db = _mock_db_for_task(task)
+        client, app = _make_client(mock_db)
+        with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+            resp = client.patch(
+                "/api/tasks/1",
+                json={
+                    "task_mode": "freeform",
+                    "run_instruction_template": "Must change {{user_prompt}}",
+                },
+            )
+        app.dependency_overrides.clear()
+        self.assertEqual(resp.status_code, 422)
+        self.assertEqual(
+            resp.json()["detail"],
+            "freeform mode only accepts the canonical user-prompt template",
+        )
+        mock_db.rollback.assert_awaited_once()
+        mock_db.commit.assert_not_awaited()
+
+    def test_patching_require_changes_true_on_freeform_task_is_forced_false(self):
+        """PATCH require_changes=True on an already-freeform task stays False
+        (freeform three-value invariant guard, mirroring the plan-mode guard)."""
+        task = _make_task()
+        task.task_mode = "freeform"
+        task.require_changes = False
+        task.run_instruction_template = FREEFORM_RUN_INSTRUCTION_TEMPLATE
+        task.rendered_prompt = "Original prompt"
+        resp, t = self._patch({"require_changes": True}, task=task)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(t.task_mode, "freeform")
+        self.assertFalse(t.require_changes)
+        self.assertEqual(t.run_instruction_template, FREEFORM_RUN_INSTRUCTION_TEMPLATE)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -40,7 +40,7 @@ from app.core.model_endpoints import (
 )
 from app.core.scheduling import resolve_scheduled_at
 from app.core.skills import SkillValidationError
-from app.core.task_prompt import TaskPromptValidationError
+from app.core.task_prompt import FREEFORM_RUN_INSTRUCTION_TEMPLATE, TaskPromptValidationError
 from app.core.usage_limits import UsageLimitExceeded, usage_limit_exceeded_detail
 from app.core.utcnow import utcnow
 from app.core.worker_profiles import WorkerProfileValidationError
@@ -294,6 +294,17 @@ async def retry_task_record(
                 detail=slot_full_detail_dict(slot_info),
             )
 
+    # Defensive re-assertion of the freeform three-value invariant: a retry of a
+    # freeform source must never propagate require_changes=True or a non-canonical
+    # template, even if the source row drifted. execute/plan retry semantics are
+    # unchanged.
+    retry_task_mode = original_task.task_mode if original_task.task_mode else "execute"
+    retry_require_changes = original_task.require_changes
+    retry_run_instruction_template = original_task.run_instruction_template
+    if retry_task_mode == "freeform":
+        retry_require_changes = False
+        retry_run_instruction_template = FREEFORM_RUN_INSTRUCTION_TEMPLATE
+
     new_task = Task(
         issue_id=original_task.issue_id,
         project_id=original_task.project_id,
@@ -314,12 +325,12 @@ async def retry_task_record(
         initiator_username=current_user.username if current_user is not None else None,
         initiator_display_name=(current_user.display_name if current_user is not None else None),
         initiator_email=current_user.email if current_user is not None else None,
-        task_mode=original_task.task_mode if original_task.task_mode else "execute",
-        require_changes=original_task.require_changes,
+        task_mode=retry_task_mode,
+        require_changes=retry_require_changes,
         # Continue a session established by the source run. If a fresh run failed before it
         # produced a session, preserve fresh mode so the retry cannot fall back to the old one.
         session_mode=retry_session_mode,
-        run_instruction_template=original_task.run_instruction_template,
+        run_instruction_template=retry_run_instruction_template,
         rendered_prompt=original_task.rendered_prompt,
         rendered_prompt_at=original_task.rendered_prompt_at,
         issue_sequence=integrity_report["max_sequence"] + 1,
