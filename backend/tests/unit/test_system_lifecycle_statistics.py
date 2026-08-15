@@ -726,6 +726,83 @@ class QueryBuilderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(harness_map["claude"], 1)
         self.assertEqual(harness_map["codex"], 1)
 
+    async def test_task_mode_breakdown_groups_by_real_mode(self):
+        """build_task_mode_breakdown groups by the real task_mode value and keeps
+        a historical NULL (deleted archive) as an Unknown group — no Top N cut.
+
+        asyncSetUp leaves an archived execute task and a retained queued execute
+        task in the CTE; this test adds freeform/plan/None groups on top.
+        """
+        q, all_tasks, _ = self._ctes()
+        async with self.Session() as db:
+            _seed_task(
+                db,
+                3,
+                2,
+                status=TaskStatus.COMPLETED,
+                created_at=self.now - timedelta(days=5),
+                task_mode="execute",
+                change_stats_recorded_at=self.now,
+                additions=1,
+                deletions=0,
+                total_changes=1,
+            )
+            _seed_task(
+                db,
+                4,
+                2,
+                status=TaskStatus.COMPLETED,
+                created_at=self.now - timedelta(days=4),
+                task_mode="freeform",
+                change_stats_recorded_at=self.now,
+                additions=2,
+                deletions=1,
+                total_changes=3,
+            )
+            _seed_task(
+                db,
+                5,
+                2,
+                status=TaskStatus.COMPLETED,
+                created_at=self.now - timedelta(days=3),
+                task_mode="plan",
+            )
+            # A deleted archive row with a NULL task_mode (pre-mode history) must
+            # surface as the Unknown group rather than being dropped.
+            db.add(
+                DeletedTaskStatistics(
+                    source_task_id=99,
+                    source_issue_id=2,
+                    project_id=1,
+                    task_mode=None,
+                    last_status="completed",
+                    created_at=self.now - timedelta(days=1),
+                    started_at=self.now - timedelta(hours=1),
+                    terminal_at=self.now,
+                    deleted_before_terminal=False,
+                )
+            )
+            await db.commit()
+
+            rows = list(
+                (await db.execute(q.build_task_mode_breakdown(self.dialect, all_tasks))).all()
+            )
+        by_key = {r.key: r for r in rows}
+        # execute: archived task 1 + queued task 2 + completed task 3.
+        self.assertEqual(by_key["execute"].task_count, 3)
+        self.assertEqual(by_key["freeform"].task_count, 1)
+        self.assertEqual(by_key["plan"].task_count, 1)
+        self.assertEqual(by_key[None].task_count, 1)
+        # Task-mode rows reuse the existing metric set.
+        self.assertEqual(by_key["execute"].completed, 2)
+        self.assertEqual(by_key["freeform"].completed, 1)
+        self.assertEqual(by_key["freeform"].known_total_changes, 3)
+        # The plan task has no recorded change data -> Unknown, never a fake 0.
+        self.assertIsNone(by_key["plan"].known_total_changes)
+        self.assertIsNone(by_key[None].known_total_changes)
+        # The bounded enum returns every group without Top N truncation.
+        self.assertEqual(len(rows), 4)
+
 
 # ---------------------------------------------------------------------------
 # §6.4 conservative backfill (F1)
@@ -1033,6 +1110,60 @@ class CoverageEligibilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(lt.token_complete_samples, 2)
         self.assertEqual(lt.code_eligible_samples, 0)
         self.assertEqual(lt.change_available_samples, 0)
+
+    async def test_freeform_completed_task_is_code_eligible_with_known_changes(self):
+        """A completed freeform task with recorded change data is a code sample."""
+        async with self.Session() as db:
+            await _seed_base(db)
+            _seed_issue(db, 1, created_at=self.now - timedelta(days=5))
+            _seed_task(
+                db,
+                1,
+                1,
+                status=TaskStatus.COMPLETED,
+                created_at=self.now - timedelta(days=5),
+                started_at=self.now - timedelta(hours=1),
+                completed_at=self.now,
+                change_stats_recorded_at=self.now,
+                additions=5,
+                deletions=2,
+                total_changes=7,
+                input_tokens=100,
+                output_tokens=50,
+                task_mode="freeform",
+            )
+            await db.commit()
+
+        lt = await self._lifetime()
+        self.assertEqual(lt.code_eligible_samples, 1)
+        self.assertEqual(lt.change_available_samples, 1)
+        self.assertAlmostEqual(lt.change_available_samples / lt.code_eligible_samples, 1.0)
+
+    async def test_freeform_without_change_data_adds_eligible_denominator_only(self):
+        """A completed freeform task with no recorded change data is an eligible
+        denominator but never fabricates a known 0."""
+        async with self.Session() as db:
+            await _seed_base(db)
+            _seed_issue(db, 1, created_at=self.now - timedelta(days=5))
+            _seed_task(
+                db,
+                1,
+                1,
+                status=TaskStatus.COMPLETED,
+                created_at=self.now - timedelta(days=5),
+                started_at=self.now - timedelta(hours=1),
+                completed_at=self.now,
+                input_tokens=100,
+                output_tokens=50,
+                task_mode="freeform",
+            )
+            await db.commit()
+
+        lt = await self._lifetime()
+        self.assertEqual(lt.code_eligible_samples, 1)
+        self.assertEqual(lt.change_available_samples, 0)
+        # Numerator stays within the denominator.
+        self.assertLessEqual(lt.change_available_samples, lt.code_eligible_samples)
 
     async def test_deleted_before_terminal_task_is_not_eligible(self):
         async with self.Session() as db:
@@ -1563,6 +1694,12 @@ class LifecycleStatsAPITests(unittest.TestCase):
         provider_map = {p["provider_id"]: p for p in data["providers"]}
         self.assertEqual(provider_map[10]["label"], "Snap")
         self.assertEqual(provider_map[10]["known_total_changes"], 7)
+        # The new task_modes breakdown returns the bounded enum; label is the
+        # backend-neutral raw value, never a hard-coded localization.
+        task_mode_map = {m["key"]: m for m in data["task_modes"]}
+        self.assertEqual(task_mode_map["execute"]["task_count"], 2)
+        self.assertEqual(task_mode_map["execute"]["label"], "execute")
+        self.assertEqual(task_mode_map["execute"]["completed"], 1)
 
     def test_breakdown_project_label_falls_back_when_lookup_missing(self):
         client, _ = self._client(user=self._user("platform_admin"))
@@ -1965,6 +2102,54 @@ class LifecycleStatsNullableBreakdownAPITests(unittest.TestCase):
         row = self._project_row(client)
         self.assertEqual(row["known_total_tokens"], 0)
         self.assertEqual(row["known_total_changes"], 0)
+
+    def test_breakdown_unknown_task_mode_group_keeps_null_aggregates(self):
+        """A historical NULL task_mode surfaces as the Unknown task_modes group
+        with Unknown (NULL) aggregates, not a fabricated exact 0."""
+        engine = _make_engine()
+        asyncio.run(_create_schema(engine))
+        Session = async_sessionmaker(engine, expire_on_commit=False)
+        now = utcnow()
+
+        async def seed():
+            async with Session() as db:
+                await _seed_base(db)
+                _seed_issue(db, 1, created_at=now - timedelta(days=5))
+                db.add(
+                    DeletedTaskStatistics(
+                        source_task_id=99,
+                        source_issue_id=1,
+                        project_id=1,
+                        task_mode=None,
+                        last_status="completed",
+                        created_at=now - timedelta(days=5),
+                        started_at=now - timedelta(hours=1),
+                        terminal_at=now - timedelta(hours=2),  # inverted
+                        input_tokens=None,
+                        output_tokens=None,
+                        deleted_before_terminal=False,
+                    )
+                )
+                await db.commit()
+
+        asyncio.run(seed())
+        self.Session = Session
+        self._engine = engine
+
+        client, _ = self._client(user=self._user("platform_admin"))
+        with patch(
+            "app.api.system_statistics.build_project_lookup",
+            new=AsyncMock(return_value={}),
+        ):
+            r = client.get("/api/admin/system-statistics/breakdowns")
+        self.assertEqual(r.status_code, 200)
+        data = r.json()
+        unknown_rows = [m for m in data["task_modes"] if m["key"] is None]
+        self.assertEqual(len(unknown_rows), 1)
+        self.assertEqual(unknown_rows[0]["label"], "Unknown")
+        self.assertEqual(unknown_rows[0]["task_count"], 1)
+        self.assertIsNone(unknown_rows[0]["known_total_tokens"])
+        self.assertIsNone(unknown_rows[0]["known_total_changes"])
 
 
 # ---------------------------------------------------------------------------

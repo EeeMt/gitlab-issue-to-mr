@@ -66,6 +66,17 @@ async def test_engine():
                     "change_stats_recorded_at TIMESTAMP"
                 )
             )
+            # Bring tasks.task_mode CHECK forward to include freeform (migration
+            # 073) so archive tests can seed a freeform task on older test DBs.
+            await conn.execute(
+                sa.text("ALTER TABLE tasks DROP CONSTRAINT IF EXISTS ck_tasks_task_mode")
+            )
+            await conn.execute(
+                sa.text(
+                    "ALTER TABLE tasks ADD CONSTRAINT ck_tasks_task_mode "
+                    "CHECK (task_mode IN ('execute', 'freeform', 'plan'))"
+                )
+            )
     except Exception as exc:  # noqa: BLE001
         await engine.dispose()
         pytest.skip(f"lifecycle test DB unreachable: {exc!r}")
@@ -234,6 +245,98 @@ async def test_archive_row_lock_and_same_transaction_delete(session_factory):
 
         await asyncio.wait_for(completed.wait(), timeout=10)
         await contender_task
+
+
+async def test_archive_preserves_freeform_task_mode(session_factory):
+    """Deletion archive stores task_mode='freeform' verbatim so statistics can
+    break a deleted task down by its real mode."""
+    async with session_factory() as db:
+        profile = WorkerProfile(
+            name=f"wp-{uuid.uuid4().hex[:8]}",
+            image="test-image",
+            default_execute_run_instruction_template="",
+            default_plan_run_instruction_template="",
+            ci_auto_repair_run_instruction_template="",
+        )
+        db.add(profile)
+        provider = AIProvider(
+            name=f"prov-{uuid.uuid4().hex[:8]}",
+            model="test-model",
+            base_url="https://example.test",
+            is_default=False,
+            is_disabled=False,
+        )
+        db.add(provider)
+        await db.flush()
+        issue = Issue(
+            title="lifecycle-pg-freeform",
+            project_id=1,
+            worker_profile_id=profile.id,
+        )
+        db.add(issue)
+        await db.flush()
+        now = utcnow()
+        task = Task(
+            issue_id=issue.id,
+            project_id=1,
+            user_prompt="pg-freeform",
+            status=TaskStatus.COMPLETED,
+            provider_id=provider.id,
+            provider_runtime_snapshot={
+                "provider_id": provider.id,
+                "provider_name": provider.name,
+                "configured_model": "test-model",
+            },
+            task_mode="freeform",
+            started_at=now - timedelta(hours=1),
+            completed_at=now,
+            input_tokens=10,
+            output_tokens=5,
+            additions=1,
+            deletions=1,
+            total_changes=2,
+            change_stats_recorded_at=now,
+        )
+        db.add(task)
+        await db.flush()
+        db.add(
+            TaskWorkerProfileSnapshot(
+                task_id=task.id,
+                worker_profile_id=profile.id,
+                profile_name=profile.name,
+                image="test-image",
+                volume_mounts=[],
+                environment_variables=[],
+                pre_script="",
+                post_script="",
+                default_execute_run_instruction_template="",
+                default_plan_run_instruction_template="",
+                ci_auto_repair_run_instruction_template="",
+                harness_key="claude",
+                harness_adapter_version="1.2",
+                cli_version="2.0",
+            )
+        )
+        await db.commit()
+        issue_id = issue.id
+
+    async with session_factory() as db:
+        archived = await archive_issue_statistics_before_delete(
+            db, issue_id=issue_id, deletion_reason="manual", now=utcnow()
+        )
+        assert archived == 1
+        await db.execute(delete(Task).where(Task.id == task.id))
+        await db.execute(delete(Issue).where(Issue.id == issue_id))
+        await db.commit()
+
+    async with session_factory() as db:
+        archived_row = await db.scalar(
+            select(DeletedTaskStatistics).where(
+                DeletedTaskStatistics.source_issue_id == issue_id
+            )
+        )
+        assert archived_row is not None
+        assert archived_row.task_mode == "freeform"
 
 
 async def _seed_empty_issue(maker) -> tuple[int, WorkerProfile, AIProvider]:

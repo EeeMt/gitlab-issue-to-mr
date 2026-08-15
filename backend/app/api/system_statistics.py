@@ -30,6 +30,7 @@ from app.api.system_statistics_queries import (
     build_task_created_trend,
     build_task_deleted_trend,
     build_task_finished_trend,
+    build_task_mode_breakdown,
     pick_bucket_for_all,
 )
 from app.core.projects import build_project_lookup
@@ -385,6 +386,7 @@ async def get_system_statistics_breakdowns(
     project_rows = list((await db.execute(build_project_breakdown(dialect, all_tasks))).all())
     provider_rows = list((await db.execute(build_provider_breakdown(dialect, all_tasks))).all())
     harness_rows = list((await db.execute(build_harness_breakdown(dialect, all_tasks))).all())
+    task_mode_rows = list((await db.execute(build_task_mode_breakdown(dialect, all_tasks))).all())
 
     # Resolve real project names from the cached GitLab project list; fall back
     # to "Project {id}" when the name is unavailable (§10), so deleted projects
@@ -427,6 +429,14 @@ async def get_system_statistics_breakdowns(
         )
         for row in harness_rows
     ]
+    # The task_mode enum is bounded, so all rows are returned without Top N
+    # truncation; a historical NULL mode becomes the Unknown group.
+    task_modes = [
+        _serialize_breakdown_row(
+            row, key=str(row.key) if row.key is not None else None, label=row.key
+        )
+        for row in task_mode_rows
+    ]
 
     return {
         "as_of": now.isoformat(),
@@ -434,4 +444,5 @@ async def get_system_statistics_breakdowns(
         "projects": _top_n_with_unknown(projects, limit=DEFAULT_BREAKDOWN_LIMIT),
         "providers": _top_n_with_unknown(providers, limit=DEFAULT_BREAKDOWN_LIMIT),
         "harnesses": _top_n_with_unknown(harnesses, limit=DEFAULT_BREAKDOWN_LIMIT),
+        "task_modes": task_modes,
     }

@@ -329,7 +329,7 @@ def _token_eligible(t: CTE) -> Any:
 
 def _code_eligible(t: CTE) -> Any:
     return (
-        (t.c.task_mode == "execute")
+        t.c.task_mode.in_(["execute", "freeform"])
         & (t.c.status == "completed")
         & (~t.c.deleted_before_terminal)
     )
@@ -759,4 +759,21 @@ def build_harness_breakdown(dialect: str, all_tasks: CTE) -> Any:
         _breakdown_select(t, key)
         .group_by(t.c.harness_key)
         .order_by(func.count(t.c.task_id).desc(), t.c.harness_key.asc())
+    )
+
+
+def build_task_mode_breakdown(dialect: str, all_tasks: CTE) -> Any:
+    """Group tasks by their bounded ``task_mode`` enum (execute/freeform/plan).
+
+    Uses the same ``all_tasks`` CTE as the other breakdowns, so retained/deleted
+    and project/provider/harness/data_state filters apply identically. The enum
+    is bounded, so no Top N truncation is applied here; historical NULL modes
+    surface as an Unknown group at the API layer.
+    """
+    t = all_tasks
+    key = t.c.task_mode.label("key")
+    return (
+        _breakdown_select(t, key)
+        .group_by(t.c.task_mode)
+        .order_by(func.count(t.c.task_id).desc(), t.c.task_mode.asc())
     )
