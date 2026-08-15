@@ -561,3 +561,74 @@ async def test_update_unrelated_field_preserves_all_templates(db_factory):
     assert response["default_execute_run_instruction_template"] == "execute {{user_prompt}}"
     assert response["default_plan_run_instruction_template"] == "plan {{user_prompt}}"
     assert response["ci_auto_repair_run_instruction_template"] == "repair {{issue_title}}"
+
+
+@pytest.mark.asyncio
+async def test_create_null_templates_inherit_shared_baseline(db_factory):
+    """The create contract accepts NULL templates (= inherit the shared
+    baseline) in one atomic request, matching the update contract (§11.2)."""
+    session_factory = await db_factory()
+    async with session_factory() as db:
+        await _seed_shared(db)
+        response = await create_worker_profile(
+            _create_request(
+                default_execute_run_instruction_template=None,
+                default_plan_run_instruction_template=None,
+                ci_auto_repair_run_instruction_template=None,
+            ),
+            db=db,
+        )
+        effective = await _effective(db, response["id"])
+
+    assert response["default_execute_run_instruction_template"] is None
+    assert response["default_plan_run_instruction_template"] is None
+    assert response["ci_auto_repair_run_instruction_template"] is None
+    assert effective.default_execute_run_instruction_template == "shared execute {{user_prompt}}"
+    assert effective.default_plan_run_instruction_template == "shared plan {{user_prompt}}"
+    assert effective.ci_auto_repair_run_instruction_template == "shared repair {{issue_title}}"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_preserves_harness_intent(db_factory):
+    """Duplicating a non-default-Harness Profile carries its Harness intent
+    verbatim and re-validates skills against the resolved effective config."""
+    session_factory = await db_factory()
+    async with session_factory() as db:
+        await _seed_shared(db)
+        source = WorkerProfile(
+            name="Codex Source",
+            enabled=True,
+            is_default=False,
+            image="codify-worker/java21:2026.07",
+            worker_kit_source="system",
+            runtime_mode="baked_image",
+            volume_mounts=[],
+            volume_mount_masks=[],
+            pre_script="",
+            post_script="",
+            default_execute_run_instruction_template="execute {{user_prompt}}",
+            default_plan_run_instruction_template="plan {{user_prompt}}",
+            ci_auto_repair_run_instruction_template="repair {{issue_title}}",
+            enabled_harnesses=["codex"],
+            default_harness_key="codex",
+            harness_constraints={"max_turns": 50},
+            harness_runtimes={
+                "codex": {
+                    "source": "image",
+                    "executable_path": "/usr/bin/codex",
+                    "version": "0.1",
+                    "binary_digest": "sha256:abc",
+                }
+            },
+        )
+        db.add(source)
+        await db.commit()
+        source_id = source.id
+
+        response = await duplicate_worker_profile(source_id, db=db)
+        copy = await db.get(WorkerProfile, response["id"])
+
+    assert copy.enabled_harnesses == ["codex"]
+    assert copy.default_harness_key == "codex"
+    assert copy.harness_constraints == {"max_turns": 50}
+    assert copy.harness_runtimes["codex"]["source"] == "image"

@@ -698,9 +698,20 @@ async def replace_task_worker_snapshot(
     *,
     harness_key: str | None = None,
     endpoint: Any | None = None,
+    shared_configuration: Any | None = None,
 ) -> TaskWorkerProfileSnapshot:
-    """Replace one task's worker profile snapshot."""
-    shared = await load_shared_configuration(db)
+    """Replace one task's worker profile snapshot.
+
+    ``shared_configuration`` is the caller's already-locked shared context (see
+    ``load_shared_configuration(..., for_update=True)``). Task create / F6 switch
+    / CI repair pass the same context they used for the readiness gate so the
+    snapshot freezes the identical baseline. When omitted the baseline is loaded
+    unlocked (retry/clone paths that reuse a frozen snapshot).
+    """
+    if shared_configuration is None:
+        shared = await load_shared_configuration(db)
+    else:
+        shared = shared_configuration
     existing = await db.get(TaskWorkerProfileSnapshot, task.id)
     if existing is not None:
         await db.delete(existing)

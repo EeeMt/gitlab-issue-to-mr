@@ -49,6 +49,7 @@ from app.core.worker_runtime_readiness import (
     readiness_for_profile,
     runtime_unavailable_http_detail,
 )
+from app.core.worker_shared_configuration import load_shared_configuration
 from app.dependencies.project_access import ProjectAccessScope, require_project_access
 from app.models import Issue, Task, User
 
@@ -456,8 +457,17 @@ async def create_task_record(
         ) from exc
 
     # Runtime readiness gate (§12): refuse to create a Task for a Kit locator
-    # that is known unavailable. Unknown/expired readiness never blocks.
-    readiness = await readiness_for_profile(db, worker_profile, get_effective_settings())
+    # that is known unavailable. Unknown/expired readiness never blocks. The
+    # shared baseline is loaded once under lock and handed to both the gate and
+    # the frozen snapshot below so a concurrent shared PATCH cannot interleave
+    # between the two reads (§11.2).
+    shared = await load_shared_configuration(db, for_update=True)
+    readiness = await readiness_for_profile(
+        db,
+        worker_profile,
+        get_effective_settings(),
+        shared=shared,
+    )
     if readiness.is_unavailable:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -566,6 +576,7 @@ async def create_task_record(
             ),
             harness_key=harness_key,
             endpoint=endpoint,
+            shared_configuration=shared,
         )
         bundle = await services.bind_runtime_bundle(db, task)
         # Freeze the immutable Adapter + Bundle facts into the snapshot so the

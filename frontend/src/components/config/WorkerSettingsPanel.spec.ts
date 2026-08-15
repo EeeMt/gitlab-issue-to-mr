@@ -1188,7 +1188,7 @@ describe('WorkerSettingsPanel', () => {
     expect(vm.workerFormValue.default_execute_run_instruction_template).toBe(null)
   })
 
-  it('creates inherited templates through a disabled bootstrap profile before enabling it', async () => {
+  it('creates a profile with inherited (null) templates in a single create', async () => {
     const wrapper = mount(WorkerSettingsPanel, {
       props: {
         isMobile: false,
@@ -1208,19 +1208,6 @@ describe('WorkerSettingsPanel', () => {
         id: 3,
         name: 'Java Worker',
         image: 'codify-worker-java:latest',
-        enabled: false,
-        volume_mounts: [],
-        environment_variables: [],
-        default_execute_run_instruction_template: 'Shared execute {{user_prompt}}',
-        default_plan_run_instruction_template: 'Shared plan {{user_prompt}}',
-        ci_auto_repair_run_instruction_template: 'Shared repair {{issue_title}}'
-      })
-    )
-    mockUpdateWorkerProfile.mockResolvedValueOnce(
-      createWorkerProfile({
-        id: 3,
-        name: 'Java Worker',
-        image: 'codify-worker-java:latest',
         worker_kit_source: 'system',
         volume_mounts: [],
         environment_variables: [],
@@ -1232,34 +1219,29 @@ describe('WorkerSettingsPanel', () => {
 
     await vm.handleSaveWorker()
 
+    // The create contract accepts NULL templates (= inherit the shared
+    // baseline), so inherited templates are persisted in one atomic create
+    // instead of a disabled-bootstrap + PATCH dance.
     expect(mockCreateWorkerProfile).toHaveBeenCalledWith(
       expect.objectContaining({
         name: 'Java Worker',
         image: 'codify-worker-java:latest',
-        enabled: false,
+        enabled: true,
         codegraph_enabled: false,
         volume_mounts: [],
         environment_variables: [],
-        default_execute_run_instruction_template: 'Shared execute {{user_prompt}}',
-        default_plan_run_instruction_template: 'Shared plan {{user_prompt}}',
-        ci_auto_repair_run_instruction_template: 'Shared repair {{issue_title}}'
-      })
-    )
-    expect(mockUpdateWorkerProfile).toHaveBeenCalledWith(
-      3,
-      expect.objectContaining({
-        enabled: true,
         default_execute_run_instruction_template: null,
         default_plan_run_instruction_template: null,
         ci_auto_repair_run_instruction_template: null,
         expected_shared_revision: 3
       })
     )
+    expect(mockUpdateWorkerProfile).not.toHaveBeenCalled()
     expect(mockDeleteWorkerProfile).not.toHaveBeenCalled()
     expect(vm.selectedProfileId).toBe(3)
   })
 
-  it('removes a disabled bootstrap profile when inherited-template normalization fails', async () => {
+  it('shows a shared-revision conflict when the single create is rejected', async () => {
     const wrapper = mount(WorkerSettingsPanel, {
       props: { isMobile: false, reloadKey: 0 }
     })
@@ -1268,16 +1250,17 @@ describe('WorkerSettingsPanel', () => {
     await vm.handleCreateProfile()
     vm.workerFormValue.name = 'Stale Worker'
     vm.workerFormValue.image = 'codify-worker:latest'
-    mockCreateWorkerProfile.mockResolvedValueOnce(
-      createWorkerProfile({ id: 9, name: 'Stale Worker', enabled: false })
-    )
-    mockUpdateWorkerProfile.mockRejectedValueOnce({
+    mockCreateWorkerProfile.mockRejectedValueOnce({
       response: { status: 409, data: { detail: 'shared_configuration_changed' } }
     })
 
     await vm.handleSaveWorker()
 
-    expect(mockDeleteWorkerProfile).toHaveBeenCalledWith(9)
+    // A rejected single create leaves no bootstrap row to clean up and never
+    // falls through to a PATCH.
+    expect(mockCreateWorkerProfile).toHaveBeenCalledTimes(1)
+    expect(mockUpdateWorkerProfile).not.toHaveBeenCalled()
+    expect(mockDeleteWorkerProfile).not.toHaveBeenCalled()
     expect(mockMessage.error).toHaveBeenCalledWith('config.sharedConfigurationChanged')
     expect(vm.selectedProfileId).toBe(null)
   })

@@ -376,3 +376,96 @@ async def test_072_fully_explicit_profile_is_zero_drift_after_upgrade(
         assert post_f1.pre_script == pre_f1.pre_script == ""
         assert post_f1.shared_configuration_revision == 1
         assert effective_configuration_digest(post_f1) == effective_configuration_digest(pre_f1)
+
+
+async def test_head_to_069_downgrade_in_one_pass(seeded_071, migration_db):
+    """A single-pass head → 069 downgrade must not be blocked by mask rows.
+
+    072's compensation masks are stored with a NULL ``value`` and no ``operation``
+    column exists below 070, so 072's downgrade must delete them before 070's
+    downgrade restores ``value NOT NULL``. Otherwise the downgrade fails on the
+    NULL mask values and cannot reach 069. The seeded profiles keep every scalar
+    field non-NULL (a 069-valid state) so the only possible blocker is the mask
+    rows this defect path is about.
+    """
+    async with seeded_071() as db:
+        await _insert_shared_configuration(
+            db,
+            volume_mounts=[],
+            env_rows=[("SHARED_A", "a", False), ("SHARED_SECRET", "ciphertext", True)],
+        )
+        fully_explicit = await _insert_worker_profile(db, name="Fully Explicit")
+        partial_override = await _insert_worker_profile(
+            db,
+            name="Partial Override",
+            volume_mounts=[
+                {"host_path": "/srv/own", "container_path": "/shared", "mode": "rw"}
+            ],
+        )
+        await _insert_profile_env(
+            db,
+            worker_profile_id=partial_override,
+            key="SHARED_A",
+            operation="set",
+            value="override",
+        )
+        await db.commit()
+        ids = {"fully_explicit": fully_explicit, "partial_override": partial_override}
+
+    await asyncio.to_thread(
+        command.upgrade, migration_db["cfg"], "072_shared_per_item_inheritance"
+    )
+    async with seeded_071() as db:
+        # The upgrade created NULL-valued mask rows for the fully explicit Profile
+        # and the shared secret the partial override does not own.
+        assert await _profile_env_ops(db, worker_profile_id=ids["fully_explicit"]) == [
+            ("SHARED_A", "mask"),
+            ("SHARED_SECRET", "mask"),
+        ]
+        assert await _profile_env_ops(db, worker_profile_id=ids["partial_override"]) == [
+            ("SHARED_A", "set"),
+            ("SHARED_SECRET", "mask"),
+        ]
+
+    # One-pass downgrade all the way back to 069 (runs 072→071→070→069).
+    await asyncio.to_thread(
+        command.downgrade, migration_db["cfg"], "069_system_lifecycle_statistics"
+    )
+
+    async with seeded_071() as db:
+        # The mask rows are gone; only the partial override's own 'set' row with
+        # a real value survives. The 069 schema has no operation column, so the
+        # remaining rows expose just (key, value).
+        remaining = [
+            (key, value)
+            for key, value in (
+                await db.execute(
+                    sa.text(
+                        "SELECT key, value "
+                        "FROM worker_profile_environment_variables ORDER BY key"
+                    )
+                )
+            ).all()
+        ]
+        assert remaining == [("SHARED_A", "override")]
+        # The 069 schema has no operation column and a NOT NULL value.
+        columns = {
+            row[0]
+            for row in await db.execute(
+                sa.text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'worker_profile_environment_variables'"
+                )
+            )
+        }
+        assert "operation" not in columns
+        value_nullable = (
+            await db.execute(
+                sa.text(
+                    "SELECT is_nullable FROM information_schema.columns "
+                    "WHERE table_name = 'worker_profile_environment_variables' "
+                    "AND column_name = 'value'"
+                )
+            )
+        ).scalar_one()
+        assert value_nullable == "NO"

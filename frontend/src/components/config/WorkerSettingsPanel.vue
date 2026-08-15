@@ -2186,50 +2186,6 @@ async function handleVerifyProfileRuntime() {
   }
 }
 
-function hasInheritedCreateTemplates(payload: WorkerProfilePayload): boolean {
-  return payload.default_execute_run_instruction_template === null ||
-    payload.default_plan_run_instruction_template === null ||
-    payload.ci_auto_repair_run_instruction_template === null
-}
-
-async function createProfileWithInheritedTemplates(
-  payload: WorkerProfilePayload
-): Promise<WorkerProfile> {
-  if (!hasInheritedCreateTemplates(payload)) {
-    return createWorkerProfile(payload)
-  }
-
-  // The create contract currently requires concrete template strings. Create a
-  // disabled, unassigned Profile with the visible shared values, then normalize
-  // inherited fields through the nullable PATCH contract before it can be used.
-  const bootstrapProfile = await createWorkerProfile({
-    ...payload,
-    enabled: false,
-    default_execute_run_instruction_template:
-      payload.default_execute_run_instruction_template ??
-      sharedFormValue.value.default_execute_run_instruction_template,
-    default_plan_run_instruction_template:
-      payload.default_plan_run_instruction_template ??
-      sharedFormValue.value.default_plan_run_instruction_template,
-    ci_auto_repair_run_instruction_template:
-      payload.ci_auto_repair_run_instruction_template ??
-      sharedFormValue.value.ci_auto_repair_run_instruction_template
-  })
-
-  try {
-    return await updateWorkerProfile(bootstrapProfile.id, payload)
-  } catch (error) {
-    // The bootstrap row is disabled and has no assignments. Best-effort cleanup
-    // keeps a failed revision check from leaving a misleading partial Profile.
-    try {
-      await deleteWorkerProfile(bootstrapProfile.id)
-    } catch {
-      await refreshAdminProfiles().catch(() => undefined)
-    }
-    throw error
-  }
-}
-
 function replaceLoadedProfile(profile: WorkerProfile) {
   const index = workerProfiles.value.findIndex((item) => item.id === profile.id)
   if (index >= 0) {
@@ -2248,7 +2204,7 @@ async function handleSaveWorker() {
   try {
     const payload = buildWorkerProfilePayload()
     const savedProfile = creatingWorkerProfile.value
-      ? await createProfileWithInheritedTemplates(payload)
+      ? await createWorkerProfile(payload)
       : await updateWorkerProfile(
           selectedProfileId.value as number,
           payload

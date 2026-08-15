@@ -39,7 +39,10 @@ from app.core.worker_runtime_readiness import (
     readiness_for_profile,
     runtime_unavailable_http_detail,
 )
-from app.core.worker_shared_configuration import snapshot_effective_configuration_digest
+from app.core.worker_shared_configuration import (
+    load_shared_configuration,
+    snapshot_effective_configuration_digest,
+)
 from app.dependencies.project_access import ProjectAccessScope
 from app.models import (
     Issue,
@@ -189,7 +192,16 @@ async def update_task_record(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"Worker profile '{new_profile.name}' is disabled",
             )
-        readiness = await readiness_for_profile(db, new_profile, get_effective_settings())
+        # Load the shared baseline once under lock and hand the same context to
+        # both the readiness gate and the frozen snapshot so a concurrent shared
+        # PATCH cannot interleave between the two reads (§11.2).
+        shared = await load_shared_configuration(db, for_update=True)
+        readiness = await readiness_for_profile(
+            db,
+            new_profile,
+            get_effective_settings(),
+            shared=shared,
+        )
         if readiness.is_unavailable:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -227,6 +239,7 @@ async def update_task_record(
             new_profile,
             harness_key=harness_key,
             endpoint=endpoint,
+            shared_configuration=shared,
         )
         # Preserve the task's skill selection across the switch: a task-sourced
         # selection carries its skill ids over (re-validated against the new

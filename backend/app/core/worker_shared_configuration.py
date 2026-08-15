@@ -86,9 +86,20 @@ class EffectiveWorkerConfiguration:
 
 async def load_shared_configuration(
     db: AsyncSession,
+    *,
+    for_update: bool = False,
 ) -> WorkerSharedConfigurationContext:
-    """Load the shared configuration singleton and its environment variables."""
-    row = await db.get(WorkerSharedConfiguration, 1)
+    """Load the shared configuration singleton and its environment variables.
+
+    With ``for_update=True`` the singleton row is locked with ``SELECT ... FOR
+    UPDATE`` so the row and its environment set are read atomically against a
+    concurrent shared-configuration PATCH. Write-path callers (Profile
+    create/update/duplicate, Task create/F6 switch, CI repair) must use this so
+    their revision check, readiness fingerprint, and frozen snapshot all observe
+    one consistent baseline. The lock is released at commit; callers must never
+    hold it across remote Docker I/O.
+    """
+    row = await db.get(WorkerSharedConfiguration, 1, with_for_update=for_update)
     if row is None:
         return WorkerSharedConfigurationContext()
     result = await db.execute(

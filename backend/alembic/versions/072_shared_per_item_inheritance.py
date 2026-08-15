@@ -195,12 +195,21 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Downgrade is a no-op: the compensation masks are inert pre-F1.
+    """Remove the per-item inheritance compensation masks.
 
-    A migration downgrade is paired with reverting the F1 code, which restores
-    the whole-Profile gate: fully explicit Profiles resolve without the shared
-    baseline, so the masks this migration added are ignored and effective
-    configuration is unchanged. Removing them would require distinguishing
-    compensation masks from intentionally user-added ones, which is not
-    reversible from the persisted state.
+    The pre-F1 (069) schema has no ``operation`` column and a ``NOT NULL``
+    ``value``, so an ``operation='mask'`` row (always stored with a NULL value)
+    cannot be represented below 070 at all — and the whole-Profile gate the
+    downgraded code restores ignores masks. Deleting every mask row is the only
+    representation-preserving choice: it keeps 070's downgrade (which restores
+    ``value NOT NULL``) from failing on the NULL mask values, so a single-pass
+    head→069 downgrade succeeds. Mask intent is inherently unrecoverable when
+    downgrading past the revision that introduced it, which is the expected cost
+    of reverting a data-model change.
     """
+    conn = op.get_bind()
+    conn.execute(
+        sa.text(
+            "DELETE FROM worker_profile_environment_variables WHERE operation = 'mask'"
+        )
+    )

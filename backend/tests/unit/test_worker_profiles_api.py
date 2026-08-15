@@ -32,7 +32,10 @@ from app.core.worker_runtime_readiness import (
     RuntimeProbeTransientError,
     RuntimeReadiness,
 )
-from app.core.worker_shared_configuration import WorkerSharedConfigurationContext
+from app.core.worker_shared_configuration import (
+    EffectiveWorkerConfiguration,
+    WorkerSharedConfigurationContext,
+)
 from app.database import get_db
 from app.dependencies.auth import (
     require_admin_user,
@@ -267,6 +270,9 @@ async def test_create_baked_worker_profile_rejects_default_skills():
                         name="Legacy Worker",
                         image="legacy-worker:latest",
                         worker_kit_source="profile",
+                        default_execute_run_instruction_template="execute {{user_prompt}}",
+                        default_plan_run_instruction_template="plan {{user_prompt}}",
+                        ci_auto_repair_run_instruction_template="repair {{issue_title}}",
                         default_skill_ids=[skill.id],
                     ),
                     db=db,
@@ -334,7 +340,14 @@ async def test_duplicate_worker_profile_locks_and_revalidates_default_skills():
         [9],
         retained_disabled_skill_ids=[9],
     )
-    validate_runtime.assert_called_once_with(source, [skill])
+    # Skills are re-validated against the copy's resolved effective configuration
+    # (not the raw source columns) so a system-Kit copy validates against the
+    # inherited runtime.
+    validate_runtime.assert_called_once()
+    effective_arg, skills_arg = validate_runtime.call_args.args
+    assert isinstance(effective_arg, EffectiveWorkerConfiguration)
+    assert effective_arg.image == "codify-worker/java21-maven:2026.07"
+    assert skills_arg == [skill]
     db.commit.assert_awaited_once()
 
 

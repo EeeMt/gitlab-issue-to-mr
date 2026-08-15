@@ -35,6 +35,7 @@ from app.core.worker_profiles import (
 )
 from app.core.worker_runtime_bundle import bind_runtime_bundle
 from app.core.worker_runtime_readiness import readiness_for_profile
+from app.core.worker_shared_configuration import load_shared_configuration
 from app.core.worker_workspace import configured_workspace_root
 from app.database import AsyncSessionLocal
 from app.models import (
@@ -653,7 +654,10 @@ async def process_ci_failure_run(
 
         # Runtime readiness gate (§12): a CI repair task must not be created for
         # a Kit locator that is known unavailable; skip (ignore) the run instead.
-        readiness = await readiness_for_profile(db, worker_profile, settings)
+        # The shared baseline is loaded once under lock and handed to both the
+        # gate and the frozen snapshot below (§11.2).
+        shared = await load_shared_configuration(db, for_update=True)
+        readiness = await readiness_for_profile(db, worker_profile, settings, shared=shared)
         if readiness.is_unavailable:
             await _ignore_run(
                 db,
@@ -772,6 +776,7 @@ async def process_ci_failure_run(
             render_prompt=render_and_store_task_prompt,
             harness_key=profile_default_key,
             endpoint=endpoint,
+            shared_configuration=shared,
         )
         await bind_runtime_bundle(db, repair_task)
         run.repair_task_id = repair_task.id

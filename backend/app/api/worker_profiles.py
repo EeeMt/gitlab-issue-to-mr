@@ -32,11 +32,6 @@ from app.core.skills import (
     runtime_uses_skill_capable_worker_kit,
     validate_runtime_supports_skills,
 )
-from app.core.task_prompt import (
-    BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE,
-    BUILT_IN_EXECUTE_RUN_INSTRUCTION_TEMPLATE,
-    BUILT_IN_PLAN_RUN_INSTRUCTION_TEMPLATE,
-)
 from app.core.utcnow import utcnow
 from app.core.worker_docker_targets import docker_daemon_key
 from app.core.worker_kit import (
@@ -184,13 +179,9 @@ class WorkerProfileCreateRequest(WorkerProfileRequestBase):
     environment_variables: list[WorkerProfileEnvironmentVariableRequest] = Field(
         default_factory=list
     )
-    default_execute_run_instruction_template: str = (
-        BUILT_IN_EXECUTE_RUN_INSTRUCTION_TEMPLATE
-    )
-    default_plan_run_instruction_template: str = BUILT_IN_PLAN_RUN_INSTRUCTION_TEMPLATE
-    ci_auto_repair_run_instruction_template: str = (
-        BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE
-    )
+    # The three run-instruction templates stay nullable (inherited from
+    # WorkerProfileRequestBase): NULL = inherit the shared baseline, matching the
+    # update contract. Validation happens on the resolved effective configuration.
 
 
 class WorkerProfileUpdateRequest(WorkerProfileRequestBase):
@@ -217,8 +208,15 @@ async def _load_shared_for_validation(
     *,
     expected_shared_revision: int | None,
 ):
-    """Load the shared baseline and enforce the optimistic-revision check (§11.2)."""
-    shared = await load_shared_configuration(db)
+    """Load the shared baseline under lock and enforce the optimistic check (§11.2).
+
+    The singleton row is locked with ``SELECT ... FOR UPDATE`` so the baseline
+    read, the expected-revision check, and the static combination validation are
+    one transactional unit: a concurrent shared-configuration PATCH cannot commit
+    between the read and the check, and a Profile save cannot mix a row revision
+    with environment variables from a different revision.
+    """
+    shared = await load_shared_configuration(db, for_update=True)
     if expected_shared_revision is not None and (
         shared.row is None or shared.revision != expected_shared_revision
     ):
@@ -1296,10 +1294,6 @@ async def duplicate_worker_profile(
             source_skill_ids,
             retained_disabled_skill_ids=source_skill_ids,
         )
-        validate_runtime_supports_skills(
-            source,
-            [skill for skill in default_skills if skill.enabled],
-        )
         copy = WorkerProfile(
             name=await _unique_copy_name(db, source.name),
             description=source.description,
@@ -1335,14 +1329,26 @@ async def duplicate_worker_profile(
                 )
                 for row in source.environment_variables
             ],
+            # §11.3: the copy carries the source's Harness intent verbatim so a
+            # duplicate of a non-default-Harness profile still executes with the
+            # same adapter allowlist, default harness, constraints, and runtimes.
+            enabled_harnesses=list(getattr(source, "enabled_harnesses", None) or ["claude"]),
+            default_harness_key=getattr(source, "default_harness_key", None) or "claude",
+            harness_constraints=dict(getattr(source, "harness_constraints", None) or {}),
+            harness_runtimes=dict(getattr(source, "harness_runtimes", None) or {}),
             default_skills=default_skills,
         )
         # §11.3: the copy carries the source's inheritance/override/mask intent.
-        # Re-validate its resolved effective configuration so a copy that relies
-        # on the current shared baseline is still statically valid.
-        shared = await load_shared_configuration(db)
+        # Re-validate its resolved effective configuration and its skills against
+        # that resolved config (not the raw source columns), under the shared
+        # lock so the baseline cannot change between validation and save.
+        shared = await load_shared_configuration(db, for_update=True)
         effective = resolve_effective_configuration(copy, shared)
         validate_effective_configuration(effective)
+        validate_runtime_supports_skills(
+            effective,
+            [skill for skill in default_skills if bool(getattr(skill, "enabled", False))],
+        )
         db.add(copy)
         await db.commit()
         await db.refresh(copy, attribute_names=["environment_variables", "default_skills"])

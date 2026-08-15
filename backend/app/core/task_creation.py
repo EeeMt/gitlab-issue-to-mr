@@ -45,13 +45,25 @@ async def prepare_task_runtime_snapshot(
     skill_selection_source: str | None = None,
     harness_key: str | None = None,
     endpoint: Any | None = None,
+    shared_configuration: Any | None = None,
 ) -> TaskWorkerProfileSnapshot:
-    """Snapshot the worker profile and persist the task's rendered prompt."""
+    """Snapshot the worker profile and persist the task's rendered prompt.
+
+    ``shared_configuration`` is the caller's already-locked shared context (see
+    ``load_shared_configuration(..., for_update=True)``); it is forwarded to the
+    snapshot builder so the snapshot freezes the same baseline the readiness
+    gate resolved.
+    """
     # Build the snapshot first so skill validation runs against the resolved
     # effective worker configuration (shared-config inheritance) rather than the
     # raw Profile columns.
     snapshot = await replace_snapshot(
-        db, task, worker_profile, harness_key=harness_key, endpoint=endpoint
+        db,
+        task,
+        worker_profile,
+        harness_key=harness_key,
+        endpoint=endpoint,
+        shared_configuration=shared_configuration,
     )
     if skill_snapshots is None:
         resolved_skills = await resolve_task_skill_snapshots(

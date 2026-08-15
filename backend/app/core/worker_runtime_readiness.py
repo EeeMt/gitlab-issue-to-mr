@@ -356,6 +356,8 @@ async def readiness_for_profile(
     db: AsyncSession,
     profile: Any,
     settings: Any,
+    *,
+    shared: Any | None = None,
 ) -> RuntimeReadiness:
     """Return the effective readiness for a profile's resolved Kit locator.
 
@@ -365,6 +367,14 @@ async def readiness_for_profile(
     known locator, so it returns ``unknown`` and never blocks: the gate only
     ever blocks on a *known* unavailable runtime, and profile validation stays
     with snapshot creation.
+
+    ``shared`` is the caller's already-locked ``WorkerSharedConfigurationContext``
+    (see ``load_shared_configuration(..., for_update=True)``). Passing it lets a
+    task-create/F6-switch/CI-repair flow resolve the readiness gate and the
+    frozen snapshot from the *same* locked baseline, so a concurrent shared PATCH
+    cannot interleave between the two reads. When omitted the shared baseline is
+    loaded unlocked (read-only callers such as verify-runtime, which must never
+    hold the DB lock across Docker I/O).
     """
     from app.core.worker_profiles import WorkerProfileValidationError
     from app.core.worker_shared_configuration import (
@@ -373,7 +383,8 @@ async def readiness_for_profile(
     )
 
     try:
-        shared = await load_shared_configuration(db)
+        if shared is None:
+            shared = await load_shared_configuration(db)
         effective = resolve_effective_configuration(profile, shared)
         fingerprint = fingerprint_from_docker_target(
             settings,
