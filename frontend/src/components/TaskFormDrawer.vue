@@ -1573,12 +1573,14 @@ function resetTaskModeDrafts() {
 function refreshPristineTaskModeDrafts() {
   const executeDraft = taskModeDrafts.value.execute
   const planDraft = taskModeDrafts.value.plan
-  if (!executeDraft.runInstructionDirty) {
+  const activeEditMode = props.mode === 'edit' && props.show ? taskMode.value : null
+  if (!executeDraft.runInstructionDirty && activeEditMode !== 'execute') {
     executeDraft.runInstructionTemplate = getDefaultRunInstructionTemplate('execute')
   }
-  if (!planDraft.runInstructionDirty) {
+  if (!planDraft.runInstructionDirty && activeEditMode !== 'plan') {
     planDraft.runInstructionTemplate = getDefaultRunInstructionTemplate('plan')
   }
+  if (activeEditMode) return
   if (taskMode.value === 'execute' && !runInstructionDirty.value) {
     runInstructionTemplate.value = executeDraft.runInstructionTemplate
   } else if (taskMode.value === 'plan' && !runInstructionDirty.value) {

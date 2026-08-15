@@ -2256,6 +2256,40 @@ describe('TaskFormDrawer', () => {
       )
     })
 
+    it('preserves the stored edit snapshot when defaults finish loading later', async () => {
+      let resolveDefaults!: (value: any) => void
+      mockApi.getRunInstructionTemplateDefaults.mockImplementation(() => new Promise((resolve) => {
+        resolveDefaults = resolve
+      }))
+      await mountDrawer({
+        mode: 'edit',
+        issueId: undefined,
+        issueDescription: undefined,
+        task: {
+          id: 42,
+          issue_id: 1,
+          user_prompt: 'Original prompt',
+          priority: 1,
+          require_changes: true,
+          provider_id: 7,
+          task_mode: 'execute',
+          run_instruction_template: 'Stored snapshot'
+        }
+      })
+      await openDrawer()
+
+      resolveDefaults({
+        execute: { content: 'Late execute default', available_placeholders: [] },
+        freeform: { content: '', available_placeholders: [] },
+        plan: { content: 'Late plan default', available_placeholders: [] }
+      })
+      await flushPromises()
+
+      expect(wrapper.vm.runInstructionTemplate).toBe('Stored snapshot')
+      expect(wrapper.vm.taskModeDrafts.execute.runInstructionTemplate).toBe('Stored snapshot')
+      expect(wrapper.vm.taskModeDrafts.plan.runInstructionTemplate).toBe('Worker plan {{user_prompt}}')
+    })
+
     it('ignores a preview response after the template changes', async () => {
       let resolvePreview!: (value: any) => void
       mockApi.previewRunInstructionTemplate.mockImplementation(() => new Promise((resolve) => {
