@@ -289,9 +289,17 @@ async def get_system_statistics_trends(
                         "completed": _int(row.completed),
                         "failed": _int(row.failed),
                         "cancelled": _int(row.cancelled),
-                        "known_total_tokens": _int(row.known_input_tokens)
-                        + _int(row.known_output_tokens),
-                        "known_total_changes": _int(row.known_total_changes),
+                        # NULL when no complete-token sample exists in the bucket;
+                        # unknown must stay Unknown (§5.7), not read as an exact 0.
+                        # Mirrors the lifetime known_total_tokens serialization.
+                        "known_total_tokens": (
+                            _int(row.known_input_tokens)
+                            + _int(row.known_output_tokens)
+                            if row.known_input_tokens is not None
+                            or row.known_output_tokens is not None
+                            else None
+                        ),
+                        "known_total_changes": _optional_int(row.known_total_changes),
                         "known_execution_seconds": _optional_float(
                             row.known_execution_seconds
                         ),

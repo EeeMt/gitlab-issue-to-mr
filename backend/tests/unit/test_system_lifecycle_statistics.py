@@ -1129,7 +1129,9 @@ class DurationEdgeCaseTests(unittest.IsolatedAsyncioTestCase):
                 ).all()
             )
             self.assertEqual(len(finished), 1)
-            self.assertEqual(finished[0].known_execution_seconds, 0)
+            # The only task's execution is inverted (invalid) -> the bucket has
+            # no known execution sample, so the trend aggregate is NULL, not 0.
+            self.assertIsNone(finished[0].known_execution_seconds)
 
     async def test_equal_timestamps_are_valid_zero_second_samples(self):
         from app.api import system_statistics_queries as q
@@ -1244,6 +1246,103 @@ class DurationEdgeCaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(cs.queued, 1)
             self.assertIsNone(cs.avg_queue_wait_seconds)
             self.assertEqual(cs.queue_wait_samples, 0)
+
+
+# ---------------------------------------------------------------------------
+# §5.7 / §9.5 trend unknown-vs-zero semantics (P2-1)
+# ---------------------------------------------------------------------------
+
+
+class TrendNullableSemanticsTests(unittest.IsolatedAsyncioTestCase):
+    """A trend bucket with no known sample returns NULL, never an exact 0;
+    a bucket with real known zeros still aggregates to 0."""
+
+    async def asyncSetUp(self):
+        self.engine = _make_engine()
+        await _create_schema(self.engine)
+        self.Session = async_sessionmaker(self.engine, expire_on_commit=False)
+        self.dialect = "sqlite"
+        self.now = utcnow()
+
+    async def asyncTearDown(self):
+        await self.engine.dispose()
+
+    async def _finished_trend(self):
+        from app.api import system_statistics_queries as q
+
+        async with self.Session() as db:
+            all_tasks = q.build_all_task_statistics_cte(
+                dialect=self.dialect,
+                project_id=None,
+                provider_id=None,
+                harness_key=None,
+                data_state="all",
+            )
+            return list(
+                (
+                    await db.execute(
+                        q.build_task_finished_trend(all_tasks, self.dialect, "day", None)
+                    )
+                ).all()
+            )
+
+    async def test_unknown_samples_stay_null_in_trend(self):
+        async with self.Session() as db:
+            await _seed_base(db)
+            _seed_issue(db, 1, created_at=self.now - timedelta(days=5))
+            # Completed task with no tokens, no code-change record and an
+            # inverted execution: no known sample for any of the three metrics.
+            _seed_task(
+                db,
+                1,
+                1,
+                status=TaskStatus.COMPLETED,
+                created_at=self.now - timedelta(days=5),
+                started_at=self.now - timedelta(hours=1),
+                completed_at=self.now - timedelta(hours=2),  # end < start
+                input_tokens=None,
+                output_tokens=None,
+            )
+            await db.commit()
+
+        rows = await self._finished_trend()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].task_count, 1)
+        self.assertIsNone(rows[0].known_input_tokens)
+        self.assertIsNone(rows[0].known_output_tokens)
+        self.assertIsNone(rows[0].known_total_changes)
+        self.assertIsNone(rows[0].known_execution_seconds)
+
+    async def test_known_zero_samples_return_zero_in_trend(self):
+        async with self.Session() as db:
+            await _seed_base(db)
+            _seed_issue(db, 1, created_at=self.now - timedelta(days=5))
+            # Completed task with real zero tokens, a recorded zero code-change
+            # triple and equal start/terminal timestamps: all known 0 samples.
+            _seed_task(
+                db,
+                1,
+                1,
+                status=TaskStatus.COMPLETED,
+                created_at=self.now - timedelta(days=5),
+                started_at=self.now,
+                completed_at=self.now,
+                change_stats_recorded_at=self.now,
+                additions=0,
+                deletions=0,
+                total_changes=0,
+                input_tokens=0,
+                output_tokens=0,
+            )
+            await db.commit()
+
+        rows = await self._finished_trend()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].task_count, 1)
+        self.assertEqual(rows[0].known_input_tokens, 0)
+        self.assertEqual(rows[0].known_output_tokens, 0)
+        self.assertEqual(rows[0].known_total_changes, 0)
+        self.assertEqual(rows[0].known_execution_seconds, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -1490,6 +1589,120 @@ class LifecycleStatsAPITests(unittest.TestCase):
         client, _ = self._client(user=self._user("platform_admin"))
         r = client.get("/api/admin/system-statistics/overview?data_state=bogus")
         self.assertEqual(r.status_code, 422)
+
+
+class LifecycleStatsNullableTrendAPITests(unittest.TestCase):
+    """Trends API keeps unknown aggregates NULL (§5.7) and known zeros as 0."""
+
+    def _client(self, *, user):
+        from app.database import get_db
+        from app.dependencies.auth import AuthContext, get_optional_auth_context
+        from app.main import app
+
+        async def override_db():
+            session = self.Session()
+            try:
+                yield session
+            finally:
+                await session.close()
+
+        if user is None:
+            async def override_auth():
+                return None
+        else:
+            async def override_auth():
+                return AuthContext(
+                    user=user,
+                    session=MagicMock(),
+                    gitlab_access_token=None,
+                    gitlab_refresh_token=None,
+                )
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[get_optional_auth_context] = override_auth
+        return TestClient(app, raise_server_exceptions=False), app
+
+    def tearDown(self):
+        from app.main import app
+
+        app.dependency_overrides.clear()
+        if getattr(self, "_engine", None) is not None:
+            asyncio.run(self._engine.dispose())
+            self._engine = None
+
+    @staticmethod
+    def _user(role: str):
+        user = MagicMock()
+        user.platform_role = role
+        return user
+
+    def _seed(self, *, known_zero: bool) -> None:
+        engine = _make_engine()
+        asyncio.run(_create_schema(engine))
+        Session = async_sessionmaker(engine, expire_on_commit=False)
+        now = utcnow()
+
+        async def seed():
+            async with Session() as db:
+                await _seed_base(db)
+                _seed_issue(db, 1, created_at=now - timedelta(days=5))
+                if known_zero:
+                    _seed_task(
+                        db,
+                        1,
+                        1,
+                        status=TaskStatus.COMPLETED,
+                        created_at=now - timedelta(days=5),
+                        started_at=now,
+                        completed_at=now,
+                        change_stats_recorded_at=now,
+                        additions=0,
+                        deletions=0,
+                        total_changes=0,
+                        input_tokens=0,
+                        output_tokens=0,
+                    )
+                else:
+                    _seed_task(
+                        db,
+                        1,
+                        1,
+                        status=TaskStatus.COMPLETED,
+                        created_at=now - timedelta(days=5),
+                        started_at=now - timedelta(hours=1),
+                        completed_at=now - timedelta(hours=2),  # inverted
+                        input_tokens=None,
+                        output_tokens=None,
+                    )
+                await db.commit()
+
+        asyncio.run(seed())
+        self.Session = Session
+        self._engine = engine
+
+    def _terminal_values(self, client):
+        r = client.get("/api/admin/system-statistics/trends?range=all")
+        self.assertEqual(r.status_code, 200)
+        data = r.json()
+        terminal = next(s for s in data["series"] if s["time_basis"] == "terminal_at")
+        self.assertEqual(len(terminal["values"]), 1)
+        return terminal["values"][0]
+
+    def test_trend_unknown_aggregates_are_null(self):
+        self._seed(known_zero=False)
+        client, _ = self._client(user=self._user("platform_admin"))
+        value = self._terminal_values(client)
+        self.assertIsNone(value["known_total_tokens"])
+        self.assertIsNone(value["known_total_changes"])
+        self.assertIsNone(value["known_execution_seconds"])
+
+    def test_trend_known_zero_aggregates_are_not_null(self):
+        self._seed(known_zero=True)
+        client, _ = self._client(user=self._user("platform_admin"))
+        value = self._terminal_values(client)
+        self.assertEqual(value["known_total_tokens"], 0)
+        self.assertEqual(value["known_total_changes"], 0)
+        self.assertEqual(value["known_execution_seconds"], 0)
 
 
 # ---------------------------------------------------------------------------

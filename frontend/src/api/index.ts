@@ -1726,8 +1726,8 @@ export interface SystemStatisticsTrendValue {
   completed?: number
   failed?: number
   cancelled?: number
-  known_total_tokens?: number
-  known_total_changes?: number
+  known_total_tokens?: number | null
+  known_total_changes?: number | null
   known_execution_seconds?: number | null
 }
 

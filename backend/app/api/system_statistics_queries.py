@@ -625,18 +625,19 @@ def build_task_finished_trend(
         func.coalesce(
             func.sum(case((t.c.status == "cancelled", 1), else_=0)), 0
         ).label("cancelled"),
-        func.coalesce(
-            func.sum(case((_token_complete(t), t.c.input_tokens), else_=None)), 0
-        ).label("known_input_tokens"),
-        func.coalesce(
-            func.sum(case((_token_complete(t), t.c.output_tokens), else_=None)), 0
-        ).label("known_output_tokens"),
-        func.coalesce(
-            func.sum(case((_change_available(t), t.c.total_changes), else_=None)), 0
-        ).label("known_total_changes"),
-        func.coalesce(
-            func.sum(task_execution_seconds(dialect, t)), 0
-        ).label("known_execution_seconds"),
+        # A bucket with no known sample stays NULL, never an exact 0, so an
+        # unknown aggregate is not presented as a precise zero (§5.7 / §9.5).
+        # A bucket whose tasks carry real known zeros still aggregates to 0.
+        func.sum(case((_token_complete(t), t.c.input_tokens), else_=None)).label(
+            "known_input_tokens"
+        ),
+        func.sum(case((_token_complete(t), t.c.output_tokens), else_=None)).label(
+            "known_output_tokens"
+        ),
+        func.sum(case((_change_available(t), t.c.total_changes), else_=None)).label(
+            "known_total_changes"
+        ),
+        func.sum(task_execution_seconds(dialect, t)).label("known_execution_seconds"),
     ).where(t.c.terminal_at.is_not(None))
     if since is not None:
         stmt = stmt.where(t.c.terminal_at >= since)
