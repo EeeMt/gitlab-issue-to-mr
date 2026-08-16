@@ -27,7 +27,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import event
+from sqlalchemy import event, func, select
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -275,6 +275,17 @@ async def _seed_task(db_session: AsyncSession, issue: Issue = None, **overrides)
         issue = await _seed_issue(db_session)
     runtime_bundle = await get_or_create_runtime_bundle(db_session)
 
+    # Allocate the next monotonic issue_sequence, mirroring the production
+    # append path: the 068 integrity model fails closed on any active Task with
+    # a NULL sequence (active_null_sequence), so direct DB seeding must maintain
+    # the same invariant the API allocates.
+    max_sequence = (
+        await db_session.execute(
+            select(func.max(Task.issue_sequence)).where(Task.issue_id == issue.id)
+        )
+    ).scalar()
+    issue_sequence = (max_sequence or 0) + 1
+
     defaults = dict(
         project_id=issue.project_id,
         issue_id=issue.id,
@@ -285,6 +296,7 @@ async def _seed_task(db_session: AsyncSession, issue: Issue = None, **overrides)
         status=TaskStatus.PENDING,
         priority=1,
         initiator_username="testuser",
+        issue_sequence=issue_sequence,
         runtime_bundle_id=runtime_bundle.id,
     )
     defaults.update(overrides)
@@ -306,6 +318,7 @@ async def _seed_task(db_session: AsyncSession, issue: Issue = None, **overrides)
         default_execute_run_instruction_template="{{user_prompt}}",
         default_plan_run_instruction_template="{{user_prompt}}",
         ci_auto_repair_run_instruction_template="{{user_prompt}}",
+        harness_key="claude",
     )
     await db_session.commit()
     await db_session.refresh(task)

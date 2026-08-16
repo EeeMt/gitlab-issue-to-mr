@@ -191,7 +191,7 @@ create_runtime_archive() {
 
     rm -f "${archive_part_path}" 2>/dev/null || true
     local -a archive_pipeline_status=()
-    if tar -czf - -C "${CODIFY_RUNTIME_DIR}" "${archive_files[@]}" 2>/dev/null \
+    if COPYFILE_DISABLE=1 tar -czf - -C "${CODIFY_RUNTIME_DIR}" "${archive_files[@]}" 2>/dev/null \
         | head -c "$((archive_max_bytes + 1))" > "${archive_part_path}"; then
         archive_pipeline_status=("${PIPESTATUS[@]}")
     else
