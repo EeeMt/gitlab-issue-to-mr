@@ -592,6 +592,120 @@ class TestCreateTask:
         assert r2.json()["id"] > r1.json()["id"]
 
 
+class TestCreateFreeformTask:
+    """POST /api/tasks — freeform task mode canonical invariants."""
+
+    async def _seed_issue(self, client) -> int:
+        issue_resp = await client.post("/api/issues", json={
+            "project_id": 1,
+            "title": "Freeform test issue",
+            "target_branch": "main",
+            "worker_profile_id": 1,
+        })
+        assert issue_resp.status_code == 200
+        return issue_resp.json()["id"]
+
+    async def test_create_freeform_defaults_canonical_template(self, client):
+        """Freeform with omitted template persists the canonical user-prompt template."""
+        issue_id = await self._seed_issue(client)
+        resp = await client.post("/api/tasks", json={
+            "issue_id": issue_id,
+            "provider_id": 1,
+            "task_mode": "freeform",
+            "user_prompt": "Just tell me the answer",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["task_mode"] == "freeform"
+        assert data["require_changes"] is False
+        assert data["rendered_prompt"] == "Just tell me the answer"
+
+    async def test_create_freeform_forces_require_changes_false(self, client):
+        """Freeform with require_changes=true still persists false."""
+        issue_id = await self._seed_issue(client)
+        resp = await client.post("/api/tasks", json={
+            "issue_id": issue_id,
+            "provider_id": 1,
+            "task_mode": "freeform",
+            "require_changes": True,
+            "user_prompt": "No changes expected",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["task_mode"] == "freeform"
+        assert data["require_changes"] is False
+
+    async def test_create_freeform_accepts_explicit_canonical_template(self, client):
+        """Freeform with the explicit canonical template is accepted."""
+        issue_id = await self._seed_issue(client)
+        resp = await client.post("/api/tasks", json={
+            "issue_id": issue_id,
+            "provider_id": 1,
+            "task_mode": "freeform",
+            "run_instruction_template": "{{user_prompt}}",
+            "user_prompt": "Explicit canonical",
+        })
+        assert resp.status_code == 200
+        assert resp.json()["task_mode"] == "freeform"
+
+    async def test_create_freeform_rejects_non_canonical_template(self, client):
+        """Freeform with any other template returns a stable 422."""
+        issue_id = await self._seed_issue(client)
+        resp = await client.post("/api/tasks", json={
+            "issue_id": issue_id,
+            "provider_id": 1,
+            "task_mode": "freeform",
+            "run_instruction_template": "execute {{user_prompt}}",
+            "user_prompt": "Wrapped prompt",
+        })
+        assert resp.status_code == 422
+        assert (
+            resp.json()["detail"]
+            == "freeform mode only accepts the canonical user-prompt template"
+        )
+
+    async def test_create_execute_and_plan_old_flows_still_work(self, client):
+        """execute (default) and plan modes are unaffected by the freeform branch."""
+        issue_id = await self._seed_issue(client)
+        default_resp = await client.post("/api/tasks", json={
+            "issue_id": issue_id,
+            "provider_id": 1,
+            "user_prompt": "Default mode",
+        })
+        assert default_resp.status_code == 200
+        assert default_resp.json()["task_mode"] == "execute"
+        assert default_resp.json()["require_changes"] is False
+
+        plan_resp = await client.post("/api/tasks", json={
+            "issue_id": issue_id,
+            "provider_id": 1,
+            "task_mode": "plan",
+            "user_prompt": "Plan only",
+        })
+        assert plan_resp.status_code == 200
+        assert plan_resp.json()["task_mode"] == "plan"
+        assert plan_resp.json()["require_changes"] is False
+
+    async def test_get_freeform_task_returns_mode(self, client):
+        """GET /api/tasks/{id} reports task_mode=freeform for a created task."""
+        issue_id = await self._seed_issue(client)
+        create_resp = await client.post("/api/tasks", json={
+            "issue_id": issue_id,
+            "provider_id": 1,
+            "task_mode": "freeform",
+            "user_prompt": "Fetch me",
+        })
+        assert create_resp.status_code == 200
+        task_id = create_resp.json()["id"]
+
+        get_resp = await client.get(f"/api/tasks/{task_id}")
+        assert get_resp.status_code == 200
+        data = get_resp.json()
+        assert data["task_mode"] == "freeform"
+        assert data["require_changes"] is False
+        assert data["rendered_prompt"] == "Fetch me"
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Tests: GET /api/tasks — list tasks
 # ═══════════════════════════════════════════════════════════════════════════
