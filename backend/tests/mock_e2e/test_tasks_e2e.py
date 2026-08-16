@@ -894,6 +894,24 @@ class TestGetTask:
                          "merge_request_iid", "merge_request_url"}
             assert issue_keys.issubset(data["issue"].keys())
 
+    async def test_get_active_null_sequence_task_returns_409(self, client, db_session):
+        """An active Task with a NULL issue_sequence fails closed with 409, not 500.
+
+        Mirrors the scheduler crash-recovery window (a legacy-NULL active Task
+        before repair): the Issue queue cannot be trusted, so the endpoint must
+        surface the same structured 409 as the schedule-window and reschedule
+        endpoints instead of crashing with a 500.
+        """
+        task = await _seed_task(db_session, issue_sequence=None)
+
+        resp = await client.get(f"/api/tasks/{task.id}")
+
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert detail["code"] == "issue_sequence_repair_required"
+        assert detail["reason"] == "active_null_sequence"
+        assert detail["issue_id"] == task.issue_id
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Tests: GET /api/tasks/{id}/logs — get task logs

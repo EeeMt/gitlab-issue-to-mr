@@ -620,13 +620,25 @@ async def get_task(
     queue_contexts = await compute_task_queue_contexts(db, [task])
     apply_queue_context(result_data, task.id, queue_contexts, current_user=_current_user)
     if task.status in (TaskStatus.PENDING, TaskStatus.QUEUED):
-        from app.core.issue_task_order import compute_schedule_window
-
-        result_data["schedule_constraints"] = await compute_schedule_window(
-            db,
-            issue_id=task.issue_id,
-            exclude_task_id=task.id,
+        from app.core.issue_task_order import (
+            IssueOrderIntegrityError,
+            compute_schedule_window,
         )
+
+        try:
+            result_data["schedule_constraints"] = await compute_schedule_window(
+                db,
+                issue_id=task.issue_id,
+                exclude_task_id=task.id,
+            )
+        except IssueOrderIntegrityError as exc:
+            # An active Task with a NULL issue_sequence (e.g. the scheduler
+            # crash-recovery window) fails the Issue closed; surface the same
+            # structured 409 as the schedule-window and reschedule endpoints.
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=exc.detail,
+            ) from exc
     failure_summary = await load_task_failure_summary(db, task.id)
     result_data.update(failure_summary)
     t4 = time.time()
