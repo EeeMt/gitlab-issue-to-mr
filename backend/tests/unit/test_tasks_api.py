@@ -64,13 +64,13 @@ class ValidateCancelTests(unittest.TestCase):
     def test_cancel_valid_statuses(self) -> None:
         """PENDING, QUEUED and RUNNING tasks can be cancelled without error."""
         for status in [TaskStatus.PENDING, TaskStatus.QUEUED, TaskStatus.RUNNING]:
-            with self.subTest(status=status):
+            with self.subTest(status=status.value):
                 validate_task_status_for_cancel(_make_task(status))  # should not raise
 
     def test_cancel_invalid_statuses(self) -> None:
         """FAILED, CANCELLED and COMPLETED tasks cannot be cancelled."""
         for status in [TaskStatus.FAILED, TaskStatus.CANCELLED, TaskStatus.COMPLETED]:
-            with self.subTest(status=status):
+            with self.subTest(status=status.value):
                 with self.assertRaises(HTTPException) as ctx:
                     validate_task_status_for_cancel(_make_task(status))
                 self.assertEqual(ctx.exception.status_code, 400)
@@ -87,7 +87,7 @@ class ValidateRetryTests(unittest.TestCase):
     def test_retry_valid_statuses(self) -> None:
         """FAILED and CANCELLED tasks can be retried."""
         for status in [TaskStatus.FAILED, TaskStatus.CANCELLED]:
-            with self.subTest(status=status):
+            with self.subTest(status=status.value):
                 validate_task_status_for_retry(_make_task(status))  # should not raise
 
     def test_retry_invalid_statuses(self) -> None:
@@ -98,7 +98,7 @@ class ValidateRetryTests(unittest.TestCase):
             TaskStatus.QUEUED,
             TaskStatus.COMPLETED,
         ]:
-            with self.subTest(status=status):
+            with self.subTest(status=status.value):
                 with self.assertRaises(HTTPException) as ctx:
                     validate_task_status_for_retry(_make_task(status))
                 self.assertEqual(ctx.exception.status_code, 400)
@@ -125,7 +125,7 @@ class ValidateExecuteTests(unittest.TestCase):
             TaskStatus.CANCELLED,
             TaskStatus.COMPLETED,
         ]:
-            with self.subTest(status=status):
+            with self.subTest(status=status.value):
                 with self.assertRaises(HTTPException) as ctx:
                     validate_task_status_for_execute(_make_task(status))
                 self.assertEqual(ctx.exception.status_code, 400)
@@ -152,7 +152,7 @@ class ValidateRescheduleTests(unittest.TestCase):
         """Non-PENDING/QUEUED tasks cannot be rescheduled."""
         future = datetime.now(UTC) + timedelta(hours=1)
         for status in [TaskStatus.RUNNING, TaskStatus.FAILED, TaskStatus.COMPLETED]:
-            with self.subTest(status=status):
+            with self.subTest(status=status.value):
                 with self.assertRaises(HTTPException) as ctx:
                     validate_task_status_for_reschedule(_make_task(status, scheduled_at=future))
                 self.assertEqual(ctx.exception.status_code, 400)

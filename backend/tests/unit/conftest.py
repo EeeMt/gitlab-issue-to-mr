@@ -1,5 +1,6 @@
 import warnings
 
+import pytest
 import sqlalchemy as sa
 
 
@@ -44,3 +45,18 @@ def pytest_configure(config):
             object.__setattr__(self, k, v)
 
     Task.__init__ = _compat_init
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(config, items):
+    """Group unit tests by file for xdist, sharing a worker for the two
+    real-postgres files that both mutate the shared codify_test database."""
+    if not config.getoption("loadgroup", default=False):
+        return
+    for item in items:
+        nodeid = item.nodeid
+        if "test_issue_execution_lock_concurrency" in nodeid or "test_system_lifecycle_statistics_pg" in nodeid:
+            group = "shared_pg"
+        else:
+            group = nodeid.split("::")[0]
+        item.add_marker(pytest.mark.xdist_group(group))

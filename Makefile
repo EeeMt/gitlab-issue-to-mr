@@ -142,6 +142,7 @@ test-unit: $(VENV)/.installed $(NODE_MODULES)/.installed ## Run all unit tests w
 	printf "\n\033[1m━━━ Backend unit tests ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n"; \
 	_t0=$$(date +%s); \
 	(cd $(PROJECT_ROOT)/backend && $(VENV_PYTHON) -m pytest tests/unit/ -v --color=yes \
+	  -n auto --dist=loadgroup \
 	  --cov=app --cov-report=term-missing:skip-covered; \
 	  echo $$? > "$$_d/be.rc") 2>&1 | tee "$$_d/be.log"; \
 	echo $$(( $$(date +%s) - $$_t0 )) > "$$_d/be.time"; \
@@ -157,7 +158,8 @@ test-unit: $(VENV)/.installed $(NODE_MODULES)/.installed ## Run all unit tests w
 	echo $$(( $$(date +%s) - $$_t0 )) > "$$_d/fe.time"; \
 	printf "\n\033[1m━━━ Mock E2E tests ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n"; \
 	_t0=$$(date +%s); \
-	(cd $(PROJECT_ROOT)/backend && $(VENV_PYTHON) -m pytest tests/mock_e2e/ -v --color=yes; \
+	(cd $(PROJECT_ROOT)/backend && $(VENV_PYTHON) -m pytest tests/mock_e2e/ -v --color=yes \
+	  -n auto --dist=loadfile; \
 	  echo $$? > "$$_d/me.rc") 2>&1 | tee "$$_d/me.log"; \
 	echo $$(( $$(date +%s) - $$_t0 )) > "$$_d/me.time"; \
 	r_be=$$(cat "$$_d/be.rc"); r_fe=$$(cat "$$_d/fe.rc"); r_me=$$(cat "$$_d/me.rc"); \
@@ -217,16 +219,16 @@ test-unit: $(VENV)/.installed $(NODE_MODULES)/.installed ## Run all unit tests w
 	[ $$_ok -eq 3 ]
 
 .PHONY: test-backend
-test-backend: $(VENV)/.installed ## Run backend unit tests
-	cd $(PROJECT_ROOT)/backend && $(VENV_PYTHON) -m pytest tests/unit/ -v
+test-backend: $(VENV)/.installed ## Run backend unit tests (parallel across files)
+	cd $(PROJECT_ROOT)/backend && $(VENV_PYTHON) -m pytest tests/unit/ -v -n auto --dist=loadgroup
 
 .PHONY: test-frontend
 test-frontend: $(NODE_MODULES)/.installed ## Run frontend unit tests
 	cd $(PROJECT_ROOT)/frontend && npx vitest run
 
 .PHONY: test-mock-e2e
-test-mock-e2e: $(VENV)/.installed ## Run mock E2E tests
-	cd $(PROJECT_ROOT)/backend && $(VENV_PYTHON) -m pytest tests/mock_e2e/ -v
+test-mock-e2e: $(VENV)/.installed ## Run mock E2E tests (parallel across files)
+	cd $(PROJECT_ROOT)/backend && $(VENV_PYTHON) -m pytest tests/mock_e2e/ -v -n auto --dist=loadfile
 
 # ---------------------------------------------------------------------------
 # Mock Integration Tests (full lifecycle with mock GitLab + fake Claude)
