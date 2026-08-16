@@ -421,7 +421,9 @@ vi.mock('@vicons/ionicons5', () => {
     ArrowRedoOutline: icon('ArrowRedoOutline'),
     BulbOutline: icon('BulbOutline'),
     CalendarOutline: icon('CalendarOutline'),
+    ChatbubbleEllipsesOutline: icon('ChatbubbleEllipsesOutline'),
     ChevronDownOutline: icon('ChevronDownOutline'),
+    Checkmark: icon('Checkmark'),
     CheckmarkCircleOutline: icon('CheckmarkCircleOutline'),
     CloseCircleOutline: icon('CloseCircleOutline'),
     CloseOutline: icon('CloseOutline'),
@@ -1486,12 +1488,14 @@ describe('IssueView', () => {
       await wrapper.find('[data-testid="issue-toggle-create-task"]').trigger('click')
       await nextTick()
 
-      // Set task mode (required before creation)
+      // Follow the mode-first flow so selecting a mode reveals the full form.
       const drawer = wrapper.findComponent({ name: 'TaskFormDrawer' })
-      drawer.vm.taskMode = 'execute'
+      await drawer.get('[data-testid="task-mode-option-execute"]').trigger('click')
+      await nextTick()
 
       // Click create task button
-      const createBtn = wrapper.find('[data-testid="issue-create-task-button"]')
+      const createBtn = wrapper.get('[data-testid="issue-create-task-button"]')
+      expect(createBtn.attributes('disabled')).toBeUndefined()
       await createBtn.trigger('click')
       await flushPromises()
 
@@ -1528,9 +1532,11 @@ describe('IssueView', () => {
       await nextTick()
 
       const drawer = wrapper.findComponent({ name: 'TaskFormDrawer' })
-      drawer.vm.taskMode = 'execute'
+      await drawer.get('[data-testid="task-mode-option-execute"]').trigger('click')
+      await nextTick()
 
-      const createBtn = wrapper.find('[data-testid="issue-create-task-button"]')
+      const createBtn = wrapper.get('[data-testid="issue-create-task-button"]')
+      expect(createBtn.attributes('disabled')).toBeUndefined()
       await createBtn.trigger('click')
       await flushPromises()
 
@@ -1565,9 +1571,11 @@ describe('IssueView', () => {
       await nextTick()
 
       const drawer = wrapper.findComponent({ name: 'TaskFormDrawer' })
-      drawer.vm.taskMode = 'execute'
+      await drawer.get('[data-testid="task-mode-option-execute"]').trigger('click')
+      await nextTick()
 
-      const createBtn = wrapper.find('[data-testid="issue-create-task-button"]')
+      const createBtn = wrapper.get('[data-testid="issue-create-task-button"]')
+      expect(createBtn.attributes('disabled')).toBeUndefined()
       await createBtn.trigger('click')
       await flushPromises()
 
@@ -1591,9 +1599,12 @@ describe('IssueView', () => {
       await nextTick()
 
       const drawer = wrapper.findComponent({ name: 'TaskFormDrawer' })
-      drawer.vm.taskMode = 'execute'
+      await drawer.get('[data-testid="task-mode-option-execute"]').trigger('click')
+      await nextTick()
 
-      await wrapper.find('[data-testid="issue-create-task-button"]').trigger('click')
+      const createBtn = wrapper.get('[data-testid="issue-create-task-button"]')
+      expect(createBtn.attributes('disabled')).toBeUndefined()
+      await createBtn.trigger('click')
       await flushPromises()
 
       // Second call from re-fetch after task creation

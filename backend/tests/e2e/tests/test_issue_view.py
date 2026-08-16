@@ -48,6 +48,17 @@ def test_issue_with_task(logged_in_page: Page, backend_url):
     return issue["id"], task["id"]
 
 
+def _select_task_mode(page: Page, mode: str = "freeform"):
+    """Select a create-task mode and wait for the full form to become visible."""
+    drawer = page.get_by_test_id("issue-create-task-drawer")
+    option = drawer.get_by_test_id(f"task-mode-option-{mode}")
+    expect(option).to_be_visible()
+    option.click()
+    expect(option).to_have_attribute("aria-checked", "true")
+    expect(drawer.get_by_test_id("task-full-form")).to_be_visible()
+    return drawer
+
+
 # ---------------------------------------------------------------------------
 # 1. Page layout
 # ---------------------------------------------------------------------------
@@ -96,14 +107,29 @@ class TestIssueViewPage:
 class TestIssueViewCreateTaskForm:
     """Tests for the create task form on issue view."""
 
+    def test_create_task_starts_with_mode_choice(self, logged_in_page: Page, test_issue_id):
+        logged_in_page.goto(f"/issues/{test_issue_id}")
+        logged_in_page.wait_for_load_state("networkidle")
+        logged_in_page.get_by_test_id("issue-toggle-create-task").click()
+
+        drawer = logged_in_page.get_by_test_id("issue-create-task-drawer")
+        expect(drawer.get_by_test_id("task-mode-choice")).to_be_visible()
+        mode_options = drawer.locator('[data-testid^="task-mode-option-"]')
+        expect(mode_options).to_have_count(3)
+        for mode in ("freeform", "execute", "plan"):
+            option = drawer.get_by_test_id(f"task-mode-option-{mode}")
+            expect(option).to_be_visible()
+            expect(option).to_have_attribute("aria-checked", "false")
+        expect(drawer.get_by_test_id("task-full-form")).not_to_be_visible()
+        expect(drawer.get_by_test_id("issue-create-task-button")).not_to_be_visible()
+
     def test_task_prompt_input_visible(self, logged_in_page: Page, test_issue_id):
         logged_in_page.goto(f"/issues/{test_issue_id}")
         logged_in_page.wait_for_load_state("networkidle")
         # Open the create task drawer first
         logged_in_page.get_by_test_id("issue-toggle-create-task").click()
-        logged_in_page.wait_for_timeout(500)
+        drawer = _select_task_mode(logged_in_page)
         # VariableEditor uses CodeMirror; look for .cm-editor inside the drawer
-        drawer = logged_in_page.get_by_test_id("issue-create-task-drawer")
         editor = drawer.locator(".cm-editor")
         expect(editor).to_be_visible(timeout=5000)
 
@@ -112,7 +138,7 @@ class TestIssueViewCreateTaskForm:
         logged_in_page.wait_for_load_state("domcontentloaded")
         # Open the drawer first to see the button inside
         logged_in_page.get_by_test_id("issue-toggle-create-task").click()
-        logged_in_page.wait_for_timeout(500)
+        _select_task_mode(logged_in_page)
         expect(logged_in_page.get_by_test_id("issue-create-task-button")).to_be_visible()
 
     def test_edit_button_visible(self, logged_in_page: Page, test_issue_id):
@@ -141,10 +167,9 @@ class TestIssueViewCreateTask:
 
         # Open the create task drawer
         logged_in_page.get_by_test_id("issue-toggle-create-task").click()
-        logged_in_page.wait_for_timeout(500)
+        drawer = _select_task_mode(logged_in_page)
 
         # Fill prompt via CodeMirror editor (VariableEditor) inside the drawer
-        drawer = logged_in_page.get_by_test_id("issue-create-task-drawer")
         editor = drawer.locator(".cm-content")
         editor.click()
         editor.fill("E2E form-created task prompt")
@@ -311,9 +336,8 @@ class TestIssueViewCreateTaskDrawer:
         logged_in_page.wait_for_load_state("networkidle")
 
         logged_in_page.get_by_test_id("issue-toggle-create-task").click()
-        logged_in_page.wait_for_timeout(500)
+        drawer = _select_task_mode(logged_in_page)
 
-        drawer = logged_in_page.get_by_test_id("issue-create-task-drawer")
         editor = drawer.locator(".cm-editor")
         expect(editor).to_be_visible()
 
@@ -323,9 +347,8 @@ class TestIssueViewCreateTaskDrawer:
         logged_in_page.wait_for_load_state("networkidle")
 
         logged_in_page.get_by_test_id("issue-toggle-create-task").click()
-        logged_in_page.wait_for_timeout(500)
+        drawer = _select_task_mode(logged_in_page)
 
-        drawer = logged_in_page.get_by_test_id("issue-create-task-drawer")
         # Priority select should be an n-select or similar
         priority_select = drawer.locator(".n-base-selection, .n-select")
         if priority_select.count() > 0:
@@ -337,10 +360,30 @@ class TestIssueViewCreateTaskDrawer:
         logged_in_page.wait_for_load_state("networkidle")
 
         logged_in_page.get_by_test_id("issue-toggle-create-task").click()
-        logged_in_page.wait_for_timeout(500)
+        _select_task_mode(logged_in_page)
 
         submit_btn = logged_in_page.get_by_test_id("issue-create-task-button")
         expect(submit_btn).to_be_visible()
+
+    def test_changing_mode_preserves_prompt(self, logged_in_page: Page, test_issue_id):
+        """Common form fields should survive returning to mode choice and switching modes."""
+        logged_in_page.goto(f"/issues/{test_issue_id}")
+        logged_in_page.wait_for_load_state("networkidle")
+
+        logged_in_page.get_by_test_id("issue-toggle-create-task").click()
+        drawer = _select_task_mode(logged_in_page)
+        editor = drawer.locator(".cm-content")
+        editor.fill("Prompt shared across task modes")
+
+        drawer.get_by_test_id("task-mode-change").click()
+        expect(drawer.get_by_test_id("task-mode-choice")).to_be_visible()
+        expect(drawer.get_by_test_id("task-mode-option-freeform")).to_have_attribute(
+            "aria-checked", "true"
+        )
+        drawer.get_by_test_id("task-mode-option-execute").click()
+
+        expect(drawer.get_by_test_id("task-full-form")).to_be_visible()
+        expect(drawer.locator(".cm-content")).to_have_text("Prompt shared across task modes")
 
     def test_created_task_appears_in_table(self, logged_in_page: Page, test_issue_id):
         """Task created via drawer should appear in the tasks table."""
@@ -349,10 +392,9 @@ class TestIssueViewCreateTaskDrawer:
 
         # Open drawer
         logged_in_page.get_by_test_id("issue-toggle-create-task").click()
-        logged_in_page.wait_for_timeout(500)
+        drawer = _select_task_mode(logged_in_page)
 
         # Fill prompt
-        drawer = logged_in_page.get_by_test_id("issue-create-task-drawer")
         editor = drawer.locator(".cm-content")
         editor.click()
         editor.fill("E2E drawer task test")
