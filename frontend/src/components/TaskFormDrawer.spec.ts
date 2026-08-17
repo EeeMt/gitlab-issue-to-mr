@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vite
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { h, ref, nextTick } from 'vue'
 import TaskFormDrawer from './TaskFormDrawer.vue'
+import taskFormDrawerSource from './TaskFormDrawer.vue?raw'
 
 const { mockApi, resetMockApi, mockMessage, clipboardWrite, mockOptionNodeClick, mockPendingOptionValue } = vi.hoisted(() => {
   const mock = {
@@ -552,6 +553,44 @@ describe('TaskFormDrawer', () => {
       expect(wrapper.get('[data-testid="task-full-form"]').attributes('aria-hidden')).toBe('false')
       expect(wrapper.find('[data-testid="issue-create-task-button"]').exists()).toBe(true)
       expect(document.activeElement).toBe(wrapper.get('.variable-editor-mock').element)
+    })
+
+    it('uses one non-layout view animation and disables it for reduced motion', async () => {
+      await mountDrawer()
+      await openDrawer()
+
+      const modeChoice = wrapper.get('[data-testid="task-mode-choice"]')
+      const fullForm = wrapper.get('[data-testid="task-full-form"]')
+      expect(modeChoice.classes()).toContain('task-form-view--active')
+      expect(fullForm.classes()).not.toContain('task-form-view--active')
+
+      await wrapper.get('[data-testid="task-mode-option-execute"]').trigger('click')
+      await nextTick()
+
+      expect(modeChoice.classes()).not.toContain('task-form-view--active')
+      expect(fullForm.classes()).toContain('task-form-view--active')
+      expect(taskFormDrawerSource).not.toContain('<Transition name="task-form-view">')
+      expect(taskFormDrawerSource).toContain(
+        '<Transition name="task-mode-detail" :css="taskModeDetailTransitionEnabled">'
+      )
+      expect(taskFormDrawerSource).toContain(
+        '<Transition name="advanced-option" :css="taskModeDetailTransitionEnabled">'
+      )
+      expect(taskFormDrawerSource).toMatch(
+        /@keyframes task-form-view-enter\s*{[\s\S]*?from\s*{\s*opacity:\s*0;\s*}[\s\S]*?to\s*{\s*opacity:\s*1;\s*}/
+      )
+      expect(taskFormDrawerSource).toMatch(
+        /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.task-form-view--active[\s\S]*?animation:\s*none;/
+      )
+    })
+
+    it('balances the require-changes row spacing with adjacent fields', () => {
+      expect(taskFormDrawerSource).toMatch(
+        /\.prompt-form-section\s*{[\s\S]*?margin-bottom:\s*16px;[\s\S]*?}/
+      )
+      expect(taskFormDrawerSource).toMatch(
+        /\.task-mode-detail-reveal\s*{[\s\S]*?margin-top:\s*0;[\s\S]*?margin-bottom:\s*16px;[\s\S]*?}/
+      )
     })
 
     it('returns to the current option, preserves common state and scroll, then restores mode drafts', async () => {

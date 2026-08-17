@@ -86,15 +86,15 @@
       :native-scrollbar="false"
       closable
     >
-      <Transition name="task-form-view">
-        <section
-          v-show="isModeChoiceVisible"
-          ref="modeChoicePanelRef"
-          class="task-mode-choice"
-          data-testid="task-mode-choice"
-          :aria-hidden="!isModeChoiceVisible"
-          :inert="!isModeChoiceVisible"
-        >
+      <section
+        v-show="isModeChoiceVisible"
+        ref="modeChoicePanelRef"
+        class="task-mode-choice"
+        :class="{ 'task-form-view--active': isModeChoiceVisible }"
+        data-testid="task-mode-choice"
+        :aria-hidden="!isModeChoiceVisible"
+        :inert="!isModeChoiceVisible"
+      >
           <header class="task-mode-choice__header">
             <h2 class="task-mode-choice__title">{{ t('issue.taskModeChoiceTitle') }}</h2>
             <p class="task-mode-choice__hint">{{ t('issue.taskModeChoiceHint') }}</p>
@@ -129,18 +129,17 @@
               />
             </button>
           </div>
-        </section>
-      </Transition>
+      </section>
 
-      <Transition name="task-form-view">
-        <div
-          v-show="isFullFormVisible"
-          ref="fullFormPanelRef"
-          class="task-full-form"
-          data-testid="task-full-form"
-          :aria-hidden="!isFullFormVisible"
-          :inert="!isFullFormVisible"
-        >
+      <div
+        v-show="isFullFormVisible"
+        ref="fullFormPanelRef"
+        class="task-full-form"
+        :class="{ 'task-form-view--active': isFullFormVisible }"
+        data-testid="task-full-form"
+        :aria-hidden="!isFullFormVisible"
+        :inert="!isFullFormVisible"
+      >
       <n-form label-placement="top" class="task-form-drawer__form">
         <div v-if="currentTaskModeOption" class="task-mode-summary" data-testid="task-mode-summary">
           <span class="task-mode-summary__icon" aria-hidden="true">
@@ -201,7 +200,7 @@
           </div>
         </div>
 
-        <Transition name="task-mode-detail">
+        <Transition name="task-mode-detail" :css="taskModeDetailTransitionEnabled">
           <div
             v-if="taskMode === 'execute'"
             class="task-mode-detail-reveal"
@@ -227,7 +226,7 @@
           </div>
         </Transition>
 
-        <Transition name="advanced-option">
+        <Transition name="advanced-option" :css="taskModeDetailTransitionEnabled">
           <div v-if="taskMode !== null && taskMode !== 'freeform'" class="run-instruction-advanced-reveal">
             <div class="run-instruction-advanced-reveal__inner">
               <div
@@ -708,8 +707,7 @@
           </div>
         </div>
       </n-alert>
-        </div>
-      </Transition>
+      </div>
 
       <template #footer>
         <div v-if="isFullFormVisible" class="task-form-drawer__footer">
@@ -1028,6 +1026,7 @@ const priority = ref(DEFAULT_TASK_PRIORITY)
 const requireChanges = ref(DEFAULT_REQUIRE_CHANGES)
 const taskMode = ref<TaskMode | null>(null)
 const drawerView = ref<DrawerView>(props.mode === 'edit' ? 'full-form' : 'mode-choice')
+const taskModeDetailTransitionEnabled = ref(true)
 const modeChoicePanelRef = ref<HTMLElement | null>(null)
 const fullFormPanelRef = ref<HTMLElement | null>(null)
 const taskModeDrafts = ref<TaskModeDrafts>(createTaskModeDrafts())
@@ -1650,11 +1649,14 @@ async function focusFullForm() {
 }
 
 async function selectTaskMode(mode: TaskMode) {
+  taskModeDetailTransitionEnabled.value = false
   saveCurrentTaskModeDraft()
   taskMode.value = mode
   restoreTaskModeDraft(mode)
   runInstructionExpanded.value = false
   drawerView.value = 'full-form'
+  await nextTick()
+  taskModeDetailTransitionEnabled.value = true
   await focusFullForm()
 }
 
@@ -2040,15 +2042,18 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
-.task-form-view-enter-active,
-.task-form-view-leave-active {
-  transition: opacity 0.15s ease, transform 0.15s ease;
+.task-form-view--active {
+  animation: task-form-view-enter 0.15s ease-out both;
 }
 
-.task-form-view-enter-from,
-.task-form-view-leave-to {
-  opacity: 0;
-  transform: translateY(4px);
+@keyframes task-form-view-enter {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 .task-form-drawer__footer {
@@ -2107,7 +2112,7 @@ onBeforeUnmount(() => {
 
 /* Prompt section */
 .prompt-form-section {
-  margin-bottom: 18px;
+  margin-bottom: 16px;
 }
 
 .prompt-section-header {
@@ -2277,8 +2282,6 @@ onBeforeUnmount(() => {
   .run-instruction-advanced,
   .run-instruction-advanced__chevron,
   .task-mode-choice__option,
-  .task-form-view-enter-active,
-  .task-form-view-leave-active,
   .selection-check-enter-active,
   .selection-check-leave-active,
   .task-mode-detail-enter-active,
@@ -2288,6 +2291,10 @@ onBeforeUnmount(() => {
   .advanced-content-enter-active,
   .advanced-content-leave-active {
     transition: none;
+  }
+
+  .task-form-view--active {
+    animation: none;
   }
 }
 
@@ -2317,7 +2324,8 @@ onBeforeUnmount(() => {
 .task-mode-detail-reveal {
   display: grid;
   grid-template-rows: 1fr;
-  margin-top: 8px;
+  margin-top: 0;
+  margin-bottom: 16px;
   opacity: 1;
   transform: translateY(0);
 }
@@ -2331,7 +2339,7 @@ onBeforeUnmount(() => {
 .task-mode-detail-leave-active {
   transition:
     grid-template-rows 0.18s cubic-bezier(0.4, 0, 0.2, 1),
-    margin-top 0.18s cubic-bezier(0.4, 0, 0.2, 1),
+    margin-bottom 0.18s cubic-bezier(0.4, 0, 0.2, 1),
     opacity 0.14s ease,
     transform 0.18s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -2339,7 +2347,7 @@ onBeforeUnmount(() => {
 .task-mode-detail-enter-from,
 .task-mode-detail-leave-to {
   grid-template-rows: 0fr;
-  margin-top: 0;
+  margin-bottom: 0;
   opacity: 0;
   transform: translateY(-4px);
 }
