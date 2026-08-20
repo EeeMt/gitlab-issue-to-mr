@@ -15,6 +15,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ci_failure_logs import append_ci_failure_log
 from app.core.harness_attempts import create_task_attempt
+from app.core.harness_execution_policy import (
+    is_v2_only,
+    require_executable_contract_v2,
+)
 from app.core.harness_sessions import (
     record_task_output_session,
     session_namespace_for,
@@ -315,6 +319,13 @@ async def create_execute_container(
         harness_key=harness_key,
         adapter_version=str(adapter_meta.get("version") or "1.0.0"),
     )
+
+    # Execution contract gate (phase1-design §2.3): under ``v2_only`` the worker
+    # refuses to start a legacy V1 container and fails the task closed with the
+    # unified ``legacy_contract_not_executable`` code. The caller (run_execute_task)
+    # catches this ValueError and terminalizes the task.
+    if is_v2_only(settings.harness_execution_mode):
+        require_executable_contract_v2(attempt, runtime_bundle)
 
     if worker_custom_scripts_configured(settings):
         logger.debug(

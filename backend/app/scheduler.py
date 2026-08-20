@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from docker.errors import NotFound
 from sqlalchemy import case, delete, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
+from sqlalchemy.orm import aliased, selectinload
 
 from app.config import get_effective_settings as get_settings
 from app.core.docker_client import (
@@ -24,6 +24,8 @@ from app.core.docker_client import (
     DockerConnectionConfig,
     get_docker_client,
 )
+from app.core.harness_execution_policy import legacy_rejection_detail
+from app.core.harness_protocol import HARNESS_CONTRACT_VERSION_V2
 from app.core.issue_execution_locks import (
     acquire_issue_execution_lock,
     cleanup_inactive_issue_execution_locks,
@@ -258,6 +260,62 @@ class Scheduler:
                 issue_id=issue_id,
                 task_id=owner_task_id,
             )
+
+    async def _remediate_legacy_contracts(self, db: AsyncSession) -> set[int]:
+        """Under ``HARNESS_EXECUTION_MODE=v2_only``, terminalize legacy V1 contracts.
+
+        Idempotent remediation (phase1-design §2.3): a task whose frozen bundle
+        contract is not canonical V2 is not executable. RUNNING tasks are failed
+        closed (legacy container is not resumed; the retained-container cleanup
+        stops the physical container by name) and PENDING/QUEUED tasks are
+        cancelled without ever dispatching. Each task is processed at most once
+        because it becomes terminal. Returns the set of terminalized task ids.
+        """
+        row = await db.execute(
+            select(Task)
+            .where(
+                Task.status.in_(
+                    (TaskStatus.PENDING, TaskStatus.QUEUED, TaskStatus.RUNNING)
+                )
+            )
+            .options(selectinload(Task.runtime_bundle))
+        )
+        terminalized: set[int] = set()
+        terminalized_issues: set[int] = set()
+        for task in row.scalars().all():
+            bundle = task.runtime_bundle
+            contract_version = getattr(bundle, "contract_version", None)
+            if contract_version == HARNESS_CONTRACT_VERSION_V2:
+                continue
+            is_running = getattr(task.status, "value", task.status) == TaskStatus.RUNNING.value
+            cancelled = is_running and isinstance(
+                getattr(task, "cancel_requested_at", None), datetime
+            )
+            task.status = TaskStatus.CANCELLED if (cancelled or not is_running) else TaskStatus.FAILED
+            task.error_message = legacy_rejection_detail(task.id)["message"]
+            task.completed_at = utcnow()
+            task.container_id = None
+            if task.issue_id is not None:
+                await self._release_issue_lock(
+                    db,
+                    issue_id=task.issue_id,
+                    owner_task_id=task.id,
+                )
+                terminalized_issues.add(task.issue_id)
+            await db.flush()
+            terminalized.add(task.id)
+            logger.warning(
+                "v2_only remediation: terminalized legacy task %s as %s "
+                "(contract_version=%r)",
+                task.id,
+                task.status.value,
+                contract_version,
+            )
+        if terminalized:
+            await db.commit()
+            for issue_id in terminalized_issues:
+                self._running_issues.discard(issue_id)
+        return terminalized
 
     async def _startup_sequence_audit(self, db: AsyncSession) -> None:
         """Re-emit abnormal/waiting ordering states once per boot (spec §9).
@@ -1829,6 +1887,18 @@ class Scheduler:
                 logger.warning(f"Found {len(stuck_tasks)} tasks in RUNNING status")
 
             settings = get_settings()
+
+            # HARNESS_EXECUTION_MODE=v2_only: idempotently terminalize any
+            # residual legacy V1 contract before resuming/counting anything
+            # (open-harness-v2-phase1-design §2.3). Removes the affected tasks
+            # from the recovery sets so they are never resumed.
+            if settings.harness_execution_mode == "v2_only":
+                legacy_ids = await self._remediate_legacy_contracts(db)
+                if legacy_ids:
+                    owned_tasks = [t for t in owned_tasks if t.id not in legacy_ids]
+                    stuck_tasks = [t for t in stuck_tasks if t.id not in legacy_ids]
+                    running_task_ids.difference_update(legacy_ids)
+
             targets = await list_known_docker_targets(db, settings, include_retained=True)
             task_connections = {
                 task.id: await connection_for_task(db, task, settings) for task in owned_tasks

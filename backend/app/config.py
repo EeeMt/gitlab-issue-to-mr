@@ -209,6 +209,22 @@ class Settings(BaseSettings):
     # how long a `ready` observation is trusted; it never auto-clears `unavailable`.
     worker_runtime_readiness_ttl_seconds: int = Field(default=900, ge=30, le=86_400)
 
+    # Harness execution mode (open-harness-v2-phase1-design §2.3). Backend and
+    # scheduler each validate this at startup; `v2_only` fails closed on any
+    # residual legacy V1 contract.
+    harness_execution_mode: str = Field(default="dual_canary")
+
+    @field_validator("harness_execution_mode", mode="before")
+    @classmethod
+    def _validate_harness_execution_mode(cls, value: object) -> object:
+        if isinstance(value, bool):
+            raise ValueError("harness_execution_mode must be a string")
+        if value not in {"dual_canary", "v2_only"}:
+            raise ValueError(
+                "harness_execution_mode must be one of {dual_canary, v2_only}"
+            )
+        return value
+
     @field_validator(
         "worker_artifacts_max_total_bytes",
         "worker_artifacts_max_file_bytes",

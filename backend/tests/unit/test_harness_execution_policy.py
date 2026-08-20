@@ -1,0 +1,130 @@
+"""Unit tests for the execution contract policy (phase1-design §2.3).
+
+Covers mode validation (``dual_canary`` / ``v2_only``), the generic contract
+eligibility and the exact-V2 requirement, legacy-snapshot detection, and the
+unified ``legacy_contract_not_executable`` code used by scheduler remediation
+and the worker-side fail-closed gate.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from app.core.harness_execution_policy import (
+    LEGACY_CONTRACT_NOT_EXECUTABLE,
+    ExecutionPolicyError,
+    is_legacy_snapshot,
+    is_v2_only,
+    legacy_rejection_detail,
+    require_executable_contract,
+    require_executable_contract_v2,
+    validate_harness_execution_mode,
+)
+from app.core.harness_protocol import (
+    CANONICAL_EVENT_SCHEMA,
+    CANONICAL_EVENT_SCHEMA_V2,
+    HARNESS_CONTRACT_VERSION,
+    HARNESS_CONTRACT_VERSION_V2,
+)
+
+
+class Bundle:
+    def __init__(self, contract_version: str | None):
+        self.contract_version = contract_version
+
+
+class Attempt:
+    def __init__(self, event_schema: str):
+        self.event_schema = event_schema
+        self.attempt_id = "attempt-1"
+
+
+# ── mode validation ─────────────────────────────────────────────────────────
+
+
+def test_accepts_both_modes():
+    validate_harness_execution_mode("dual_canary")
+    validate_harness_execution_mode("v2_only")
+
+
+def test_rejects_unknown_mode():
+    with pytest.raises(ExecutionPolicyError) as exc:
+        validate_harness_execution_mode("canary_only")
+    assert exc.value.code == "invalid_harness_execution_mode"
+
+
+def test_is_v2_only_flag():
+    assert is_v2_only("v2_only")
+    assert not is_v2_only("dual_canary")
+
+
+# ── generic contract eligibility ────────────────────────────────────────────
+
+
+def test_contract_accepts_v1_and_v2_bundles():
+    require_executable_contract(Bundle(HARNESS_CONTRACT_VERSION))
+    require_executable_contract(Bundle(HARNESS_CONTRACT_VERSION_V2))
+
+
+def test_contract_rejects_missing_or_unknown_version():
+    with pytest.raises(ExecutionPolicyError) as exc:
+        require_executable_contract(Bundle(None))
+    assert exc.value.code == "missing_executable_contract"
+    with pytest.raises(ExecutionPolicyError) as exc:
+        require_executable_contract(Bundle("codify.worker.harness/v0"))
+    assert exc.value.code == "missing_executable_contract"
+
+
+# ── exact V2 requirement ────────────────────────────────────────────────────
+
+
+def test_v2_contract_requires_exact_v2_attempt_and_bundle():
+    require_executable_contract_v2(
+        Attempt(CANONICAL_EVENT_SCHEMA_V2), Bundle(HARNESS_CONTRACT_VERSION_V2)
+    )
+
+
+def test_v2_contract_rejects_v1_attempt():
+    with pytest.raises(ExecutionPolicyError) as exc:
+        require_executable_contract_v2(
+            Attempt(CANONICAL_EVENT_SCHEMA), Bundle(HARNESS_CONTRACT_VERSION_V2)
+        )
+    assert exc.value.code == LEGACY_CONTRACT_NOT_EXECUTABLE
+
+
+def test_v2_contract_rejects_v1_bundle():
+    with pytest.raises(ExecutionPolicyError) as exc:
+        require_executable_contract_v2(
+            Attempt(CANONICAL_EVENT_SCHEMA_V2), Bundle(HARNESS_CONTRACT_VERSION)
+        )
+    assert exc.value.code == LEGACY_CONTRACT_NOT_EXECUTABLE
+
+
+# ── legacy snapshot detection + rejection detail ────────────────────────────
+
+
+def test_legacy_snapshot_detection():
+    assert is_legacy_snapshot(type("S", (), {"runtime_contract_version": None})())
+    assert is_legacy_snapshot(
+        type("S", (), {"runtime_contract_version": HARNESS_CONTRACT_VERSION})()
+    )
+    assert not is_legacy_snapshot(
+        type("S", (), {"runtime_contract_version": HARNESS_CONTRACT_VERSION_V2})()
+    )
+
+
+def test_legacy_rejection_detail_code():
+    detail = legacy_rejection_detail(7)
+    assert detail["code"] == LEGACY_CONTRACT_NOT_EXECUTABLE
+    assert "v2_only" in detail["message"]
+
+
+def test_config_settings_validates_harness_execution_mode():
+    from pydantic import ValidationError
+
+    from app.config import Settings
+
+    assert Settings(harness_execution_mode="dual_canary").harness_execution_mode == "dual_canary"
+    assert Settings(harness_execution_mode="v2_only").harness_execution_mode == "v2_only"
+    with pytest.raises(ValidationError):
+        Settings(harness_execution_mode="bogus")
