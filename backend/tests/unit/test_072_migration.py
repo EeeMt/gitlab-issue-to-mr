@@ -312,7 +312,7 @@ async def test_072_adds_compensation_masks_to_fully_explicit_profiles(
         ids = await _seed_default_scenario(db)
 
     await asyncio.to_thread(
-        command.upgrade, migration_db["cfg"], "072_shared_per_item_inheritance"
+        command.upgrade, migration_db["cfg"], "074_open_harness_v2"
     )
 
     async with seeded_071() as db:
@@ -351,7 +351,7 @@ async def test_072_fully_explicit_profile_is_zero_drift_after_upgrade(
         ids = await _seed_default_scenario(db)
 
     await asyncio.to_thread(
-        command.upgrade, migration_db["cfg"], "072_shared_per_item_inheritance"
+        command.upgrade, migration_db["cfg"], "074_open_harness_v2"
     )
 
     async with seeded_071() as db:
@@ -413,7 +413,7 @@ async def test_head_to_069_downgrade_in_one_pass(seeded_071, migration_db):
         ids = {"fully_explicit": fully_explicit, "partial_override": partial_override}
 
     await asyncio.to_thread(
-        command.upgrade, migration_db["cfg"], "072_shared_per_item_inheritance"
+        command.upgrade, migration_db["cfg"], "074_open_harness_v2"
     )
     async with seeded_071() as db:
         # The upgrade created NULL-valued mask rows for the fully explicit Profile
