@@ -14,7 +14,7 @@ from app.core.harness_protocol import (
     CanonicalEventReplay,
     HarnessProtocolError,
     content_digest,
-    validate_event,
+    validate_event_by_schema,
 )
 from app.core.utcnow import utcnow
 from app.models import Task, TaskHarnessAttempt, TaskHarnessEventReceipt
@@ -39,6 +39,9 @@ async def create_task_attempt(
     adapter_version: str,
     cli_version: str | None = None,
     attempt_id: str | None = None,
+    event_schema: str = CANONICAL_EVENT_SCHEMA,
+    control_state: str = "disabled",
+    control_supported: bool = False,
 ) -> TaskHarnessAttempt:
     """Create the task-owned attempt or reuse it after scheduler recovery."""
     existing = (
@@ -61,11 +64,12 @@ async def create_task_attempt(
         attempt_id=attempt_id or new_attempt_id(task.id, 1),
         task_id=task.id,
         attempt_no=1,
-        event_schema=CANONICAL_EVENT_SCHEMA,
+        event_schema=event_schema,
         harness_key=harness_key,
         adapter_version=adapter_version,
         cli_version=cli_version,
         last_seq=0,
+        control_state=control_state if control_supported else "disabled",
     )
     db.add(created)
     await db.flush()
@@ -93,7 +97,7 @@ async def ingest_canonical_event(
     event: dict,
 ) -> EventIngestResult:
     """Accept one event exactly once, rejecting gaps and divergent duplicates."""
-    normalized = validate_event(event)
+    normalized = validate_event_by_schema(event)
     attempt = (
         await db.execute(
             select(TaskHarnessAttempt)

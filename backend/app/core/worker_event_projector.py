@@ -14,7 +14,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.harness_attempts import ingest_canonical_event
-from app.core.harness_protocol import HarnessProtocolError, validate_event
+from app.core.harness_protocol import (
+    CONTROL_EVENT_TYPES,
+    HarnessProtocolError,
+    validate_event_by_schema,
+)
 from app.core.task_event_archive import (
     archive_bundle_name,
     decode_event_line,
@@ -212,7 +216,7 @@ class WorkerEventProjector:
         db: AsyncSession,
     ) -> bool:
         """Ingest one canonical record; return false for an exact duplicate."""
-        normalized = validate_event(record)
+        normalized = validate_event_by_schema(record)
         if normalized["task_id"] != task_id:
             raise HarnessProtocolError("canonical event task_id does not match projector task")
         ingest = await ingest_canonical_event(db, normalized)
@@ -311,6 +315,19 @@ class WorkerEventProjector:
                     log_metadata=_dumps({"type": event_type, **payload}),
                 )
             )
+        elif event_type in CONTROL_EVENT_TYPES:
+            # V2 control-plane audit events. Projector only records them as a
+            # product-visible diagnostic; it never writes back to
+            # task_harness_commands rows (schemas.md §3.4 / §4.1).
+            db.add(
+                TaskLog(
+                    task_id=task_id,
+                    log_level="INFO",
+                    message="",
+                    log_type="control_event",
+                    log_metadata=_dumps({"type": event_type, **payload}),
+                )
+            )
         elif event_type == "diagnostic":
             db.add(
                 TaskLog(
@@ -335,7 +352,7 @@ class WorkerEventProjector:
         processed = 0
         for raw in records:
             record = decode_event_line(raw)
-            normalized = validate_event(record)
+            normalized = validate_event_by_schema(record)
             if cursor.attempt_id is None and cursor.last_offset == 0:
                 cursor.attempt_id = normalized["attempt_id"]
             elif cursor.attempt_id != normalized["attempt_id"]:

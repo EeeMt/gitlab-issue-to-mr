@@ -6,15 +6,24 @@ import pytest
 
 from app.core.harness_protocol import (
     CANONICAL_EVENT_SCHEMA,
+    CANONICAL_EVENT_SCHEMA_V2,
     CANONICAL_RESULT_SCHEMA,
+    COMMAND_SCHEMA_V2,
+    RUNTIME_MANIFEST_SCHEMA_V2,
     CanonicalEventReplay,
     HarnessProtocolError,
     build_event,
+    command_payload_digest,
     deterministic_event_id,
     normalize_usage,
     replay_events,
+    validate_command,
     validate_event,
+    validate_event_by_schema,
+    validate_event_v2,
+    validate_manifest,
     validate_result,
+    validate_result_v2,
 )
 
 
@@ -276,3 +285,252 @@ def test_successful_result_cannot_carry_failure():
                 "capability_warnings": [],
             }
         )
+
+
+# ── V2 superset (open-harness-v2-schemas.md) ─────────────────────────────────
+
+
+def _v2_event(seq: int, event_type: str, payload: dict | None = None) -> dict:
+    normalized_payload = payload or {}
+    if event_type == "run.completed" and payload is None:
+        normalized_payload = {"status": "completed", "success": True}
+    return {
+        "schema": CANONICAL_EVENT_SCHEMA_V2,
+        "event_id": deterministic_event_id("v2-attempt-1", seq),
+        "attempt_id": "v2-attempt-1",
+        "seq": seq,
+        "occurred_at": f"2026-08-01T00:00:{seq:02d}Z",
+        "type": event_type,
+        "task_id": 7,
+        "harness": {
+            "key": "pi",
+            "adapter_version": "2.0.0",
+            "cli_version": "0.84.2",
+            "control_transport": {"kind": "rpc_stdio", "protocol": "pi-rpc"},
+            "model_protocols": ["anthropic_messages"],
+        },
+        "payload": normalized_payload,
+    }
+
+
+def _v2_complete() -> list[dict]:
+    return [
+        _v2_event(1, "run.started"),
+        _v2_event(2, "harness.completed", {"session_id": "s1"}),
+        _v2_event(3, "worker.finalization", {"exit_code": 0}),
+        _v2_event(4, "run.completed", {"status": "completed", "success": True}),
+    ]
+
+
+def test_v2_event_requires_v2_schema():
+    event = _v2_event(1, "run.started")
+    assert validate_event_v2(event)["schema"] == CANONICAL_EVENT_SCHEMA_V2
+    event["schema"] = CANONICAL_EVENT_SCHEMA
+    with pytest.raises(HarnessProtocolError, match="unsupported event schema"):
+        validate_event_v2(event)
+
+
+def test_v2_event_requires_control_transport_and_model_protocols():
+    event = _v2_event(1, "run.started")
+    del event["harness"]["control_transport"]
+    with pytest.raises(HarnessProtocolError, match="control_transport"):
+        validate_event_v2(event)
+    event = _v2_event(1, "run.started")
+    del event["harness"]["model_protocols"]
+    with pytest.raises(HarnessProtocolError, match="model_protocols"):
+        validate_event_v2(event)
+
+
+def test_v2_rejects_unsupported_model_protocol():
+    event = _v2_event(1, "run.started")
+    event["harness"]["model_protocols"] = ["vendor_proprietary"]
+    with pytest.raises(HarnessProtocolError, match="fail closed"):
+        validate_event_v2(event)
+
+
+def test_v1_validator_still_rejects_v2_fields_expectation():
+    # V1 events must not silently accept a V2 schema.
+    with pytest.raises(HarnessProtocolError, match="unsupported event schema"):
+        validate_event(_v2_event(1, "run.started"))
+
+
+def test_event_schema_dispatch_selects_v2_validator():
+    event = _v2_event(1, "run.started")
+    assert validate_event_by_schema(event)["schema"] == CANONICAL_EVENT_SCHEMA_V2
+    v1 = build_event(
+        attempt_id="x",
+        seq=1,
+        task_id=1,
+        harness_key="claude",
+        adapter_version="1",
+        cli_version="1",
+        event_type="run.started",
+    )
+    assert validate_event_by_schema(v1)["schema"] == CANONICAL_EVENT_SCHEMA
+
+
+def test_control_command_delivered_requires_command_keys():
+    event = _v2_event(2, "control.command.delivered")
+    event["payload"] = {"command_id": "cmd-1"}
+    with pytest.raises(HarnessProtocolError, match="requires"):
+        validate_event_v2(event)
+
+
+def test_control_command_rejected_requires_known_code():
+    event = _v2_event(2, "control.command.rejected")
+    event["payload"] = {
+        "command_id": "cmd-1",
+        "payload_digest": "d",
+        "sequence_no": 1,
+        "rejection_code": "mystery_code",
+        "rejection_message": "no",
+    }
+    with pytest.raises(HarnessProtocolError, match="known rejection_code"):
+        validate_event_v2(event)
+
+    event["payload"]["rejection_code"] = "delivery_outcome_unknown"
+    assert validate_event_v2(event)["type"] == "control.command.rejected"
+
+
+def test_v2_replay_tracks_control_transport_identity():
+    replay = CanonicalEventReplay()
+    replay.ingest(_v2_event(1, "run.started"))
+    changed = _v2_event(2, "harness.completed", {"session_id": "s"})
+    changed["harness"]["control_transport"] = {"kind": "server_http", "protocol": "x"}
+    with pytest.raises(HarnessProtocolError, match="control transport changed"):
+        replay.ingest(changed)
+
+
+def test_v2_complete_attempt_replays_to_single_terminal():
+    replay = replay_events(_v2_complete())
+    assert replay.terminal_type == "run.completed"
+
+
+def test_v2_result_requires_harness_block_and_validates_usage():
+    result = validate_result_v2(
+        {
+            "schema": "codify.worker.result/v2",
+            "status": "completed",
+            "success": True,
+            "result": {"text": "ok"},
+            "harness": {
+                "key": "pi",
+                "adapter_version": "2.0.0",
+                "cli_version": "0.84.2",
+                "control_transport": {"kind": "rpc_stdio", "protocol": "pi-rpc"},
+                "model_protocols": ["anthropic_messages"],
+            },
+            "session_id": "s",
+            "model": "m",
+            "usage": {},
+            "failure": None,
+            "capability_warnings": [],
+        }
+    )
+    assert result["usage"]["cost"] is None
+
+
+def test_v2_result_rejects_missing_harness_block():
+    with pytest.raises(HarnessProtocolError, match="harness"):
+        validate_result_v2(
+            {
+                "schema": "codify.worker.result/v2",
+                "status": "completed",
+                "success": True,
+                "result": {"text": "ok"},
+                "harness_key": "pi",
+                "session_id": "s",
+                "model": "m",
+                "usage": {},
+                "failure": None,
+                "capability_warnings": [],
+            }
+        )
+
+
+def test_command_payload_digest_is_canonical_and_stable():
+    d1 = command_payload_digest(7, "v2-attempt-1", "steer", {"text": "go"})
+    d2 = command_payload_digest(7, "v2-attempt-1", "steer", {"text": "go"})
+    assert d1 == d2
+    assert len(d1) == 64
+    assert d1 != command_payload_digest(7, "v2-attempt-1", "steer", {"text": "go2"})
+
+
+def _valid_command() -> dict:
+    return {
+        "schema": COMMAND_SCHEMA_V2,
+        "command_id": "01Kxyz",
+        "task_id": 123,
+        "attempt_id": "task-123-attempt-1",
+        "sequence_no": 7,
+        "type": "steer",
+        "payload": {"text": "先修复并发问题"},
+        "created_at": "2026-08-21T10:00:00Z",
+    }
+
+
+def test_validate_command_accepts_steer_followup():
+    assert validate_command(_valid_command())["type"] == "steer"
+    cmd = _valid_command()
+    cmd["type"] = "follow_up"
+    assert validate_command(cmd)["type"] == "follow_up"
+
+
+def test_validate_command_rejects_invalid_type_and_oversized_text():
+    cmd = _valid_command()
+    cmd["type"] = "explode"
+    with pytest.raises(HarnessProtocolError, match="steer or follow_up"):
+        validate_command(cmd)
+    cmd = _valid_command()
+    cmd["payload"] = {"text": "x" * 4001}
+    with pytest.raises(HarnessProtocolError, match="payload_too_large"):
+        validate_command(cmd)
+
+
+def _valid_manifest() -> dict:
+    return {
+        "schema": RUNTIME_MANIFEST_SCHEMA_V2,
+        "maturity": "internal_preview",
+        "contract_version": "codify.worker.harness/v2",
+        "event_schema": CANONICAL_EVENT_SCHEMA_V2,
+        "command_schema": COMMAND_SCHEMA_V2,
+        "result_schema": "codify.worker.result/v2",
+        "adapters": {
+            "pi": {
+                "support_tier": "default",
+                "source": {
+                    "repository": "https://github.com/earendil-works/pi",
+                    "license": "MIT",
+                    "artifact_version": "0.84.2",
+                    "artifact_sha256": "906fbe78",
+                },
+                "adapter": {"version": "2.0.0", "digest": "abc"},
+                "control_transport": {"kind": "rpc_stdio", "protocol": "pi-rpc"},
+                "model_protocols": ["anthropic_messages"],
+                "capabilities": {
+                    "resume": True,
+                    "task_skills": True,
+                    "usage_tokens": True,
+                    "steering": True,
+                    "follow_up": True,
+                },
+                "options_schema": "pi/v1",
+            }
+        },
+        "files": [{"path": "runner.py", "size": 123, "sha256": "deadbeef"}],
+    }
+
+
+def test_validate_manifest_accepts_approved_adapter():
+    assert "pi" in validate_manifest(_valid_manifest())["adapters"]
+
+
+def test_validate_manifest_fails_closed_on_unknown_adapter():
+    manifest = _valid_manifest()
+    manifest["adapters"]["custom"] = {
+        "control_transport": {"kind": "rpc_stdio"},
+        "model_protocols": ["anthropic_messages"],
+        "capabilities": {"resume": True},
+    }
+    with pytest.raises(HarnessProtocolError, match="non-approved"):
+        validate_manifest(manifest)

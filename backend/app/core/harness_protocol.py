@@ -21,6 +21,34 @@ HARNESS_CONTRACT_VERSION = "codify.worker.harness/v1"
 CANONICAL_RESULT_SCHEMA = "codify.worker.result/v1"
 FIRST_SEQUENCE = 1
 
+# V2 superset contract identifiers.
+CANONICAL_EVENT_SCHEMA_V2 = "codify.worker.event/v2"
+HARNESS_CONTRACT_VERSION_V2 = "codify.worker.harness/v2"
+CANONICAL_RESULT_SCHEMA_V2 = "codify.worker.result/v2"
+COMMAND_SCHEMA_V2 = "codify.worker.command/v2"
+RUNTIME_MANIFEST_SCHEMA_V2 = "codify.worker.runtime-manifest/v2"
+MODEL_PROTOCOLS = frozenset(
+    {"anthropic_messages", "openai_responses", "openai_chat_completions"}
+)
+# V2 control-plane audit event types. Projector only audits/logs these; it never
+# writes back to task_harness_commands rows.
+CONTROL_EVENT_TYPES = frozenset(
+    {"control.command.delivered", "control.command.rejected", "control.queue.updated"}
+)
+# Deterministic command rejection codes (open-harness-v2-schemas.md §4.2).
+REJECTION_CODES = frozenset(
+    {
+        "task_not_running",
+        "attempt_mismatch",
+        "unsupported_harness",
+        "control_gate_closed",
+        "not_authorized",
+        "payload_too_large",
+        "invalid_command_type",
+        "delivery_outcome_unknown",
+    }
+)
+
 
 class FailureKind(StrEnum):
     CONFIGURATION_ERROR = "configuration_error"
@@ -31,6 +59,9 @@ class FailureKind(StrEnum):
     TIMEOUT = "timeout"
     CANCELLED = "cancelled"
     ENGINE_ERROR = "engine_error"
+    # V2 categories.
+    CRASH = "crash"
+    SETTLED_RACE = "settled_race"
 
 
 KNOWN_EVENT_TYPES = frozenset(
@@ -155,13 +186,15 @@ def normalize_event_type(
     payload: Mapping[str, Any],
     *,
     raw_ref: Mapping[str, Any] | None,
+    extra_known_types: frozenset[str] = frozenset(),
 ) -> tuple[str, dict[str, Any]]:
     """Downgrade an unknown non-terminal type to an auditable diagnostic.
 
     Unknown types beginning with ``run.`` are rejected because their terminal
-    meaning cannot be inferred safely.
+    meaning cannot be inferred safely. V2 control event types are recognized via
+    ``extra_known_types`` so they are not downgraded.
     """
-    if event_type in KNOWN_EVENT_TYPES:
+    if event_type in KNOWN_EVENT_TYPES or event_type in extra_known_types:
         return event_type, dict(payload)
     if event_type.startswith("run."):
         raise HarnessProtocolError(
@@ -195,8 +228,9 @@ def _validate_event_payload(event_type: str, payload: Mapping[str, Any]) -> None
             raise HarnessProtocolError("harness.failed requires a known failure.kind")
 
 
-def validate_event(event: Mapping[str, Any]) -> dict[str, Any]:
-    """Validate and normalize one canonical event envelope."""
+def _validate_event_core(
+    event: Mapping[str, Any], *, schema: str, require_v2_harness: bool
+) -> dict[str, Any]:
     required = {
         "schema",
         "event_id",
@@ -211,7 +245,7 @@ def validate_event(event: Mapping[str, Any]) -> dict[str, Any]:
     missing = sorted(required - set(event))
     if missing:
         raise HarnessProtocolError(f"missing canonical event fields: {', '.join(missing)}")
-    if event.get("schema") != CANONICAL_EVENT_SCHEMA:
+    if event.get("schema") != schema:
         raise HarnessProtocolError(f"unsupported event schema: {event.get('schema')!r}")
     event_id = event.get("event_id")
     if not isinstance(event_id, str) or not event_id.strip():
@@ -232,6 +266,8 @@ def validate_event(event: Mapping[str, Any]) -> dict[str, Any]:
     for key in ("key", "adapter_version", "cli_version"):
         if not isinstance(harness.get(key), str) or not harness[key].strip():
             raise HarnessProtocolError(f"harness.{key} must be a non-empty string")
+    if require_v2_harness:
+        _validate_v2_harness(harness)
     payload = event.get("payload")
     if not isinstance(payload, Mapping):
         raise HarnessProtocolError("payload must be an object")
@@ -239,15 +275,85 @@ def validate_event(event: Mapping[str, Any]) -> dict[str, Any]:
         raise HarnessProtocolError("payload contains a forbidden hidden-reasoning field")
     _validate_raw_ref(event.get("raw_ref"))
     event_type, normalized_payload = normalize_event_type(
-        str(event.get("type") or ""), payload, raw_ref=event.get("raw_ref")
+        str(event.get("type") or ""),
+        payload,
+        raw_ref=event.get("raw_ref"),
+        extra_known_types=CONTROL_EVENT_TYPES if require_v2_harness else frozenset(),
     )
     if event_type in {"usage.updated", "usage.final"}:
         normalized_payload["usage"] = normalize_usage(normalized_payload.get("usage"))
+    if require_v2_harness and event_type in CONTROL_EVENT_TYPES:
+        _validate_control_event(event_type, normalized_payload)
     _validate_event_payload(event_type, normalized_payload)
     normalized = dict(event)
     normalized["type"] = event_type
     normalized["payload"] = normalized_payload
     return normalized
+
+
+def _validate_v2_harness(harness: Mapping[str, Any]) -> None:
+    control_transport = harness.get("control_transport")
+    if not isinstance(control_transport, Mapping):
+        raise HarnessProtocolError("harness.control_transport must be an object")
+    kind = control_transport.get("kind")
+    protocol = control_transport.get("protocol")
+    if not isinstance(kind, str) or not kind.strip():
+        raise HarnessProtocolError("harness.control_transport.kind must be a string")
+    if protocol is not None and (not isinstance(protocol, str) or not protocol.strip()):
+        raise HarnessProtocolError("harness.control_transport.protocol must be a string")
+    model_protocols = harness.get("model_protocols")
+    if not isinstance(model_protocols, list) or not model_protocols:
+        raise HarnessProtocolError("harness.model_protocols must be a non-empty array")
+    if not all(isinstance(mp, str) and mp in MODEL_PROTOCOLS for mp in model_protocols):
+        raise HarnessProtocolError(
+            "harness.model_protocols contains an unsupported protocol; fail closed"
+        )
+
+
+def _validate_control_event(event_type: str, payload: Mapping[str, Any]) -> None:
+    """Per-command control events must reference a command and its digest."""
+    if event_type == "control.command.delivered":
+        for key in ("command_id", "payload_digest", "sequence_no", "delivered_at"):
+            if payload.get(key) is None:
+                raise HarnessProtocolError(f"control.command.delivered requires {key}")
+    elif event_type == "control.command.rejected":
+        for key in ("command_id", "payload_digest", "sequence_no", "rejection_code"):
+            if payload.get(key) is None:
+                raise HarnessProtocolError(f"control.command.rejected requires {key}")
+        if not isinstance(payload.get("rejection_message"), str):
+            raise HarnessProtocolError("control.command.rejected requires rejection_message")
+        code = payload.get("rejection_code")
+        if code not in REJECTION_CODES:
+            raise HarnessProtocolError("control.command.rejected requires a known rejection_code")
+    # control.queue.updated carries only an optional audit payload; no command key.
+    if event_type == "control.queue.updated":
+        queue = payload.get("queue")
+        if not isinstance(queue, list):
+            raise HarnessProtocolError("control.queue.updated requires queue array")
+
+
+def validate_event(event: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate and normalize one canonical event envelope (V1)."""
+    return _validate_event_core(
+        event, schema=CANONICAL_EVENT_SCHEMA, require_v2_harness=False
+    )
+
+
+def validate_event_v2(event: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate and normalize one canonical event envelope (V2 superset)."""
+    return _validate_event_core(
+        event, schema=CANONICAL_EVENT_SCHEMA_V2, require_v2_harness=True
+    )
+
+
+def validate_event_by_schema(event: Mapping[str, Any]) -> dict[str, Any]:
+    """Select the V1 or V2 validator from the event envelope's schema field."""
+    schema = event.get("schema")
+    if schema == CANONICAL_EVENT_SCHEMA:
+        return validate_event(event)
+    if schema == CANONICAL_EVENT_SCHEMA_V2:
+        return validate_event_v2(event)
+    raise HarnessProtocolError(f"unsupported event schema: {schema!r}")
 
 
 def build_event(
@@ -293,6 +399,8 @@ class CanonicalEventReplay:
     harness_key: str | None = None
     adapter_version: str | None = None
     cli_version: str | None = None
+    control_transport: Any = None
+    model_protocols: Any = None
     last_seq: int = 0
     seen_event_ids: set[str] = field(default_factory=set)
     started: bool = False
@@ -301,7 +409,7 @@ class CanonicalEventReplay:
     terminal_type: str | None = None
 
     def ingest(self, raw_event: Mapping[str, Any]) -> dict[str, Any]:
-        event = validate_event(raw_event)
+        event = validate_event_by_schema(raw_event)
         event_id = event["event_id"]
         if event_id in self.seen_event_ids:
             raise HarnessProtocolError(f"duplicate event_id: {event_id}", code="duplicate_event")
@@ -313,6 +421,8 @@ class CanonicalEventReplay:
             self.harness_key = event["harness"]["key"]
             self.adapter_version = event["harness"]["adapter_version"]
             self.cli_version = event["harness"]["cli_version"]
+            self.control_transport = event["harness"].get("control_transport")
+            self.model_protocols = event["harness"].get("model_protocols")
         elif event["attempt_id"] != self.attempt_id:
             raise HarnessProtocolError("attempt_id changed inside one replay")
         elif event["task_id"] != self.task_id:
@@ -323,6 +433,10 @@ class CanonicalEventReplay:
             raise HarnessProtocolError("Adapter version changed inside one replay")
         elif event["harness"]["cli_version"] != self.cli_version:
             raise HarnessProtocolError("CLI version changed inside one replay")
+        elif event["harness"].get("control_transport") != self.control_transport:
+            raise HarnessProtocolError("control transport changed inside one replay")
+        elif event["harness"].get("model_protocols") != self.model_protocols:
+            raise HarnessProtocolError("model_protocols changed inside one replay")
         expected_seq = self.last_seq + 1
         if event["seq"] != expected_seq:
             raise HarnessProtocolError(
@@ -427,6 +541,52 @@ def validate_result(result: Mapping[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def validate_result_v2(result: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate a ``codify.worker.result/v2`` envelope (V2 harness block)."""
+    required = {
+        "schema",
+        "status",
+        "success",
+        "result",
+        "harness",
+        "session_id",
+        "model",
+        "usage",
+        "failure",
+        "capability_warnings",
+    }
+    missing = sorted(required - set(result))
+    if missing:
+        raise HarnessProtocolError(f"missing canonical result fields: {', '.join(missing)}")
+    if result.get("schema") != CANONICAL_RESULT_SCHEMA_V2:
+        raise HarnessProtocolError("unsupported canonical result schema (expected result/v2)")
+    if result.get("status") not in {"completed", "failed", "cancelled", "protocol_error"}:
+        raise HarnessProtocolError("invalid canonical result status")
+    if not isinstance(result.get("success"), bool):
+        raise HarnessProtocolError("canonical result success must be boolean")
+    if result["success"] != (result["status"] == "completed"):
+        raise HarnessProtocolError("canonical result success and status disagree")
+    harness = result.get("harness")
+    if not isinstance(harness, Mapping):
+        raise HarnessProtocolError("canonical result requires a harness object")
+    for key in ("key", "adapter_version", "cli_version"):
+        if not isinstance(harness.get(key), str) or not harness[key].strip():
+            raise HarnessProtocolError(f"result.harness.{key} must be a non-empty string")
+    _validate_v2_harness(harness)
+    failure = result.get("failure")
+    if result["success"] and failure is not None:
+        raise HarnessProtocolError("successful canonical result cannot include failure")
+    if not result["success"]:
+        if not isinstance(failure, Mapping) or failure.get("kind") not in set(FailureKind):
+            raise HarnessProtocolError("failed canonical result requires a known failure.kind")
+    normalized = dict(result)
+    normalized["usage"] = normalize_usage(result.get("usage"))
+    warnings = result.get("capability_warnings")
+    if not isinstance(warnings, list) or not all(isinstance(item, str) for item in warnings):
+        raise HarnessProtocolError("capability_warnings must be an array of strings")
+    return normalized
+
+
 def canonical_json_bytes(value: Mapping[str, Any]) -> bytes:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
 
@@ -439,3 +599,155 @@ def deterministic_event_id(attempt_id: str, seq: int) -> str:
     """Stable UUID-shaped ID for fixture replay and retry-safe projection."""
     digest = hashlib.sha256(f"{attempt_id}:{seq}".encode()).digest()[:16]
     return str(UUID(bytes=digest))
+
+
+APPROVED_MANIFEST_ADAPTER_KEYS = frozenset({"pi", "opencode", "claude", "codex"})
+CONTROL_TRANSPORT_KINDS = frozenset(
+    {"rpc_stdio", "server_http", "cli_stream_json", "cli_jsonl"}
+)
+HARNESS_CAPABILITY_KEYS = frozenset(
+    {"resume", "task_skills", "usage_tokens", "steering", "follow_up"}
+)
+# Maximum payload.text length in UTF-16 code units (schemas.md §4.3).
+MAX_COMMAND_TEXT_LENGTH = 4000
+VALID_COMMAND_TYPES = frozenset({"steer", "follow_up"})
+
+
+def command_payload_digest(
+    task_id: int, attempt_id: str, command_type: str, payload: Mapping[str, Any]
+) -> str:
+    """SHA-256 of the canonical ``{task_id, attempt_id, type, payload}`` object."""
+    canonical = {
+        "task_id": task_id,
+        "attempt_id": attempt_id,
+        "type": command_type,
+        "payload": dict(payload),
+    }
+    return hashlib.sha256(canonical_json_bytes(canonical)).hexdigest()
+
+
+def validate_command(command: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate and normalize one ``codify.worker.command/v2`` envelope."""
+    required = {
+        "schema",
+        "command_id",
+        "task_id",
+        "attempt_id",
+        "sequence_no",
+        "type",
+        "payload",
+        "created_at",
+    }
+    missing = sorted(required - set(command))
+    if missing:
+        raise HarnessProtocolError(f"missing command fields: {', '.join(missing)}")
+    if command.get("schema") != COMMAND_SCHEMA_V2:
+        raise HarnessProtocolError(f"unsupported command schema: {command.get('schema')!r}")
+    command_id = command.get("command_id")
+    if not isinstance(command_id, str) or not command_id.strip():
+        raise HarnessProtocolError("command_id must be a non-empty string")
+    task_id = command.get("task_id")
+    if not isinstance(task_id, int) or isinstance(task_id, bool) or task_id < 1:
+        raise HarnessProtocolError("task_id must be a positive integer")
+    attempt_id = command.get("attempt_id")
+    if not isinstance(attempt_id, str) or not attempt_id.strip():
+        raise HarnessProtocolError("attempt_id must be a non-empty string")
+    sequence_no = command.get("sequence_no")
+    if not isinstance(sequence_no, int) or isinstance(sequence_no, bool) or sequence_no < 1:
+        raise HarnessProtocolError("sequence_no must be an integer >= 1")
+    command_type = command.get("type")
+    if command_type not in VALID_COMMAND_TYPES:
+        raise HarnessProtocolError("command.type must be steer or follow_up")
+    payload = command.get("payload")
+    if not isinstance(payload, Mapping):
+        raise HarnessProtocolError("command.payload must be an object")
+    text = payload.get("text")
+    if not isinstance(text, str):
+        raise HarnessProtocolError("command.payload.text must be a string")
+    if len(text) > MAX_COMMAND_TEXT_LENGTH:
+        raise HarnessProtocolError(
+            f"command.payload.text exceeds {MAX_COMMAND_TEXT_LENGTH} chars, "
+            "code=payload_too_large"
+        )
+    _parse_timestamp(command.get("created_at"))
+    return dict(command)
+
+
+def validate_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate and normalize a ``codify.worker.runtime-manifest/v2`` envelope.
+
+    Only compile-time approved adapter keys are accepted; unknown harnesses fail
+    closed. System capability upper bounds stay in code; the manifest can only
+    tighten them.
+    """
+    required = {
+        "schema",
+        "maturity",
+        "contract_version",
+        "event_schema",
+        "command_schema",
+        "result_schema",
+        "adapters",
+        "files",
+    }
+    missing = sorted(required - set(manifest))
+    if missing:
+        raise HarnessProtocolError(f"missing manifest fields: {', '.join(missing)}")
+    if manifest.get("schema") != RUNTIME_MANIFEST_SCHEMA_V2:
+        raise HarnessProtocolError(
+            f"unsupported manifest schema: {manifest.get('schema')!r}"
+        )
+    if manifest.get("contract_version") != HARNESS_CONTRACT_VERSION_V2:
+        raise HarnessProtocolError("manifest.contract_version must be harness/v2")
+    if manifest.get("event_schema") != CANONICAL_EVENT_SCHEMA_V2:
+        raise HarnessProtocolError("manifest.event_schema must be event/v2")
+    if manifest.get("command_schema") != COMMAND_SCHEMA_V2:
+        raise HarnessProtocolError("manifest.command_schema must be command/v2")
+    if manifest.get("result_schema") != CANONICAL_RESULT_SCHEMA_V2:
+        raise HarnessProtocolError("manifest.result_schema must be result/v2")
+    adapters = manifest.get("adapters")
+    if not isinstance(adapters, Mapping) or not adapters:
+        raise HarnessProtocolError("manifest.adapters must be a non-empty object")
+    unknown = sorted(set(adapters) - APPROVED_MANIFEST_ADAPTER_KEYS)
+    if unknown:
+        raise HarnessProtocolError(
+            f"manifest lists non-approved adapters: {', '.join(unknown)}; fail closed"
+        )
+    for key, adapter in adapters.items():
+        if not isinstance(adapter, Mapping):
+            raise HarnessProtocolError(f"manifest.adapters.{key} must be an object")
+        _validate_manifest_adapter(key, adapter)
+    files = manifest.get("files")
+    if not isinstance(files, list):
+        raise HarnessProtocolError("manifest.files must be an array")
+    for item in files:
+        if not isinstance(item, Mapping):
+            raise HarnessProtocolError("manifest.files entries must be objects")
+        if not isinstance(item.get("path"), str) or not isinstance(item.get("sha256"), str):
+            raise HarnessProtocolError("manifest.files entries require path and sha256")
+    return dict(manifest)
+
+
+def _validate_manifest_adapter(key: str, adapter: Mapping[str, Any]) -> None:
+    control_transport = adapter.get("control_transport")
+    if not isinstance(control_transport, Mapping):
+        raise HarnessProtocolError(f"manifest.adapters.{key}.control_transport required")
+    if control_transport.get("kind") not in CONTROL_TRANSPORT_KINDS:
+        raise HarnessProtocolError(
+            f"manifest.adapters.{key}.control_transport.kind unsupported"
+        )
+    model_protocols = adapter.get("model_protocols")
+    if not isinstance(model_protocols, list) or not model_protocols:
+        raise HarnessProtocolError(f"manifest.adapters.{key}.model_protocols required")
+    if not all(isinstance(mp, str) and mp in MODEL_PROTOCOLS for mp in model_protocols):
+        raise HarnessProtocolError(
+            f"manifest.adapters.{key}.model_protocols unsupported; fail closed"
+        )
+    capabilities = adapter.get("capabilities")
+    if not isinstance(capabilities, Mapping):
+        raise HarnessProtocolError(f"manifest.adapters.{key}.capabilities required")
+    for cap in capabilities:
+        if cap not in HARNESS_CAPABILITY_KEYS:
+            raise HarnessProtocolError(
+                f"manifest.adapters.{key}.capabilities contains unknown key {cap!r}"
+            )
