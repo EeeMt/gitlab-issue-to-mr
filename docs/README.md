@@ -37,6 +37,8 @@ This directory aggregates the main project documentation. Start from the root [R
 - [Task Freeform 模式设计](superpowers/specs/2026-08-14-task-freeform-mode-design.md) — 第三种正式任务模式：自由使用 Harness 原生能力
 - [Worker Profile 共享配置设计](superpowers/specs/2026-08-14-worker-profile-shared-configuration-design.md) — 共享基线 + Profile 差量继承，冻结为不可变任务快照
 - [Multi-Harness 接入调试与通用经验](multi-harness-debugging.md) — 通用接入断层清单（含 codex 专项）与验证命令
+- [Open-Harness V2 冻结 Schema 与合同](architecture/open-harness-v2-schemas.md) — 五个 V2 schema / §3.5 冻结清单 / 五风险评审
+- [Open-Harness V2 — 074 Migration 设计与 Phase 1 接口骨架](architecture/open-harness-v2-phase1-design.md) — 数据模型 / command plane / 执行策略接口契约
 
 ## 安全
 
