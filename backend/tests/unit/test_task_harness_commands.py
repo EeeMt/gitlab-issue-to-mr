@@ -1,0 +1,418 @@
+"""Behavioral tests for the V2 command plane (open-harness-v2-phase1-design §2.2).
+
+Runs against a real PostgreSQL (throwaway 074-migrated DB) and exercises:
+
+- ``create_command`` idempotency: same command_id+payload -> existing,
+  different payload -> 409-style conflict, no duplicate sequence allocated.
+- Eligibility gates: task must be RUNNING, the attempt must be exact V2 and
+  harness-capable, and the control gate must be ``accepting``.
+- Attempt-scoped strict sequence allocation under the row lock.
+- ``queued -> delivered|rejected`` CAS written by the pump; terminals immutable.
+
+Fixtures build a fresh 074-head database (like test_074_migration) and seed a
+RUNNING task + accepting V2 Pi attempt.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import uuid
+
+import pytest
+import sqlalchemy as sa
+from alembic.config import Config
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
+
+from alembic import command
+from app.core.harness_protocol import CANONICAL_EVENT_SCHEMA_V2
+from app.core.task_harness_commands import (
+    CommandError,
+    create_command,
+    write_command_delivery,
+    write_command_rejection,
+)
+from app.core.utcnow import utcnow
+
+ADMIN_URL = os.environ.get(
+    "CODIFY_TEST_DATABASE_URL",
+    "postgresql+asyncpg://codify:codify_password@192.168.50.129:5432/codify_test",
+)
+HOST_BASE = ADMIN_URL.rsplit("/", 1)[0] + "/"
+BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+ALEMBIC_INI = os.path.join(BACKEND_DIR, "alembic.ini")
+ALEMBIC_DIR = os.path.join(BACKEND_DIR, "alembic")
+
+
+def _alembic_config(url: str) -> Config:
+    cfg = Config(ALEMBIC_INI)
+    cfg.config_file_name = None
+    cfg.set_main_option("script_location", ALEMBIC_DIR)
+    cfg.set_main_option("sqlalchemy.url", url)
+    cfg.print_stdout = lambda *args, **kwargs: None  # type: ignore[method-assign]
+    return cfg
+
+
+async def _create_database(dbname: str) -> None:
+    engine = create_async_engine(ADMIN_URL, poolclass=NullPool)
+    try:
+        async with engine.connect() as conn:
+            await conn.execution_options(isolation_level="AUTOCOMMIT")
+            await conn.execute(sa.text(f'CREATE DATABASE "{dbname}"'))
+    finally:
+        await engine.dispose()
+
+
+async def _drop_database(dbname: str) -> None:
+    engine = create_async_engine(ADMIN_URL, poolclass=NullPool)
+    try:
+        async with engine.connect() as conn:
+            await conn.execution_options(isolation_level="AUTOCOMMIT")
+            await conn.execute(sa.text(f'DROP DATABASE IF EXISTS "{dbname}"'))
+    finally:
+        await engine.dispose()
+
+
+@pytest.fixture(scope="module")
+def commands_db():
+    dbname = f"codify_commands_{uuid.uuid4().hex[:8]}"
+    url = HOST_BASE + dbname
+    cfg = _alembic_config(url)
+    try:
+        asyncio.run(_create_database(dbname))
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"command-plane DB unreachable: {exc!r}")
+    original_url = os.environ.get("DATABASE_URL")
+    os.environ["DATABASE_URL"] = url
+    try:
+        command.upgrade(cfg, "074_open_harness_v2")
+        yield {"url": url, "cfg": cfg, "dbname": dbname}
+    finally:
+        asyncio.run(_drop_database(dbname))
+        if original_url is None:
+            os.environ.pop("DATABASE_URL", None)
+        else:
+            os.environ["DATABASE_URL"] = original_url
+
+
+@pytest.fixture
+async def maker(commands_db):
+    engine = create_async_engine(commands_db["url"], poolclass=NullPool)
+    try:
+        yield async_sessionmaker(engine, expire_on_commit=False)
+    finally:
+        await engine.dispose()
+
+
+async def _insert_profile(db, name=None):
+    if name is None:
+        name = f"seed_{uuid.uuid4().hex[:8]}"
+    return (
+        await db.execute(
+            sa.text(
+                "INSERT INTO worker_profiles (name, image) VALUES (:n, 'codify-worker:latest') "
+                "RETURNING id"
+            ),
+            {"n": name},
+        )
+    ).scalar_one()
+
+
+async def _insert_issue(db, *, project_id=1):
+    wp = await _insert_profile(db)
+    return (
+        await db.execute(
+            sa.text(
+                "INSERT INTO issues (title, description, project_id, status, "
+                "worker_profile_id, ci_auto_repair_enabled, created_at, updated_at) "
+                "VALUES ('t', 'd', :p, 'open', :wp, true, now(), now()) RETURNING id"
+            ),
+            {"p": project_id, "wp": wp},
+        )
+    ).scalar_one()
+
+
+async def _insert_task(db, *, issue_id, status="pending"):
+    return (
+        await db.execute(
+            sa.text(
+                "INSERT INTO tasks (issue_id, project_id, user_prompt, status, priority, "
+                "additions, deletions, total_changes, require_changes, task_mode, "
+                "trigger_source, session_mode, issue_sequence, created_at, updated_at) "
+                "VALUES (:i, 1, 'do', :s, 0, 0, 0, 0, true, 'execute', "
+                "'manual', 'continue', 1, now(), now()) RETURNING id"
+            ),
+            {"i": issue_id, "s": status},
+        )
+    ).scalar_one()
+
+
+async def _insert_v2_attempt(
+    db,
+    *,
+    task_id,
+    control_state="accepting",
+    harness_key="pi",
+):
+    aid = f"task-{task_id}-attempt-{uuid.uuid4().hex[:4]}"
+    return (
+        await db.execute(
+            sa.text(
+                "INSERT INTO task_harness_attempts (attempt_id, task_id, attempt_no, "
+                "event_schema, harness_key, adapter_version, cli_version, last_seq, "
+                "control_state, next_command_sequence, created_at, updated_at) "
+                "VALUES (:a, :t, 1, :es, :hk, '2.0.0', '0.84.2', 0, :cs, 1, now(), now()) "
+                "RETURNING attempt_id"
+            ),
+            {
+                "a": aid,
+                "t": task_id,
+                "es": CANONICAL_EVENT_SCHEMA_V2,
+                "hk": harness_key,
+                "cs": control_state,
+            },
+        )
+    ).scalar_one()
+
+
+async def _seed_running_pi(maker):
+    """Create a RUNNING task with an accepting V2 Pi attempt; return ids."""
+    async with maker() as db:
+        issue_id = await _insert_issue(db)
+        task_id = await _insert_task(db, issue_id=issue_id, status="running")
+        attempt_id = await _insert_v2_attempt(db, task_id=task_id)
+        await db.commit()
+        return task_id, attempt_id
+
+
+async def _command_count(db, task_id):
+    return (
+        await db.execute(
+            sa.text(
+                "SELECT count(*) FROM task_harness_commands WHERE task_id = :t"
+            ),
+            {"t": task_id},
+        )
+    ).scalar_one()
+
+
+def _cid(label: str) -> str:
+    # command_id is globally unique; the module-scoped DB is shared across
+    # tests, so each call must yield a distinct id.
+    return f"{label}-{uuid.uuid4().hex[:16]}"
+
+
+# ── create_command ──────────────────────────────────────────────────────────
+
+
+async def test_create_command_allocates_strict_sequence(maker):
+    task_id, _ = await _seed_running_pi(maker)
+    async with maker() as db:
+        r1 = await create_command(
+            db, task_id=task_id, command_id=_cid("cmd"), command_type="steer",
+            payload={"text": "first"}, created_by="alice",
+        )
+        r2 = await create_command(
+            db, task_id=task_id, command_id=_cid("cmd"), command_type="follow_up",
+            payload={"text": "second"}, created_by="alice",
+        )
+        await db.commit()
+        assert r1.created and r1.outcome == "created" and r1.sequence_no == 1
+        assert r2.created and r2.sequence_no == 2
+        assert await _command_count(db, task_id) == 2
+
+
+async def test_create_command_idempotent_same_payload(maker):
+    task_id, _ = await _seed_running_pi(maker)
+    cid = _cid("cmd")
+    async with maker() as db:
+        await create_command(
+            db, task_id=task_id, command_id=cid, command_type="steer",
+            payload={"text": "go"}, created_by="alice",
+        )
+        await db.commit()
+        r2 = await create_command(
+            db, task_id=task_id, command_id=cid, command_type="steer",
+            payload={"text": "go"}, created_by="alice",
+        )
+        await db.commit()
+        assert not r2.created
+        assert r2.outcome == "existing_same"
+        assert r2.sequence_no == 1
+        assert await _command_count(db, task_id) == 1
+
+
+async def test_create_command_conflict_on_different_payload(maker):
+    task_id, _ = await _seed_running_pi(maker)
+    cid = _cid("cmd")
+    async with maker() as db:
+        await create_command(
+            db, task_id=task_id, command_id=cid, command_type="steer",
+            payload={"text": "go"}, created_by="alice",
+        )
+        await db.commit()
+        r2 = await create_command(
+            db, task_id=task_id, command_id=cid, command_type="steer",
+            payload={"text": "different"}, created_by="alice",
+        )
+        await db.commit()
+        assert not r2.created
+        assert r2.outcome == "existing_conflict"
+        assert r2.rejection_code == "existing_conflict"
+        assert await _command_count(db, task_id) == 1
+
+
+async def test_create_command_rejects_when_task_not_running(maker):
+    async with maker() as db:
+        issue_id = await _insert_issue(db)
+        task_id = await _insert_task(db, issue_id=issue_id, status="pending")
+        await _insert_v2_attempt(db, task_id=task_id)
+        await db.commit()
+        r = await create_command(
+            db, task_id=task_id, command_id=_cid("cmd"), command_type="steer",
+            payload={"text": "x"}, created_by="alice",
+        )
+        await db.commit()
+        assert not r.created
+        assert r.rejection_code == "task_not_running"
+
+
+async def test_create_command_rejects_unsupported_harness(maker):
+    async with maker() as db:
+        issue_id = await _insert_issue(db)
+        task_id = await _insert_task(db, issue_id=issue_id, status="running")
+        await _insert_v2_attempt(db, task_id=task_id, harness_key="claude")
+        await db.commit()
+        r = await create_command(
+            db, task_id=task_id, command_id=_cid("cmd"), command_type="steer",
+            payload={"text": "x"}, created_by="alice",
+        )
+        assert r.rejection_code == "unsupported_harness"
+
+
+async def test_create_command_rejects_closed_control_gate(maker):
+    async with maker() as db:
+        issue_id = await _insert_issue(db)
+        task_id = await _insert_task(db, issue_id=issue_id, status="running")
+        await _insert_v2_attempt(db, task_id=task_id, control_state="closed")
+        await db.commit()
+        r = await create_command(
+            db, task_id=task_id, command_id=_cid("cmd"), command_type="steer",
+            payload={"text": "x"}, created_by="alice",
+        )
+        assert r.rejection_code == "control_gate_closed"
+
+
+async def test_create_command_rejects_invalid_type_and_oversize(maker):
+    task_id, _ = await _seed_running_pi(maker)
+    async with maker() as db:
+        r = await create_command(
+            db, task_id=task_id, command_id=_cid("cmd"), command_type="explode",
+            payload={"text": "x"}, created_by="alice",
+        )
+        assert r.rejection_code == "invalid_command_type"
+        r = await create_command(
+            db, task_id=task_id, command_id=_cid("cmd"), command_type="steer",
+            payload={"text": "x" * 4001}, created_by="alice",
+        )
+        assert r.rejection_code == "payload_too_large"
+
+
+async def test_create_command_unknown_task_raises(maker):
+    with pytest.raises(CommandError) as exc:
+        async with maker() as db:
+            await create_command(
+                db, task_id=999999, command_id=_cid("cmd"), command_type="steer",
+                payload={"text": "x"}, created_by="alice",
+            )
+    assert exc.value.code == "task_not_found"
+
+
+# ── CAS delivery / rejection (pump only) ────────────────────────────────────
+
+
+async def test_write_delivery_transitions_queued_to_delivered(maker):
+    task_id, _ = await _seed_running_pi(maker)
+    cid = _cid("cmd")
+    async with maker() as db:
+        await create_command(
+            db, task_id=task_id, command_id=cid, command_type="steer",
+            payload={"text": "go"}, created_by="alice",
+        )
+        await db.commit()
+        ok = await write_command_delivery(
+            db, command_id=cid, delivered_at=utcnow()
+        )
+        await db.commit()
+        assert ok
+        row = (
+            await db.execute(
+                sa.text(
+                    "SELECT status, delivered_at, delivery_attempts FROM "
+                    "task_harness_commands WHERE command_id = :c"
+                ),
+                {"c": cid},
+            )
+        ).one()
+        assert row.status == "delivered"
+        assert row.delivered_at is not None
+        assert row.delivery_attempts == 1
+
+
+async def test_write_rejection_transitions_to_rejected(maker):
+    task_id, _ = await _seed_running_pi(maker)
+    cid = _cid("cmd")
+    async with maker() as db:
+        await create_command(
+            db, task_id=task_id, command_id=cid, command_type="steer",
+            payload={"text": "go"}, created_by="alice",
+        )
+        await db.commit()
+        ok = await write_command_rejection(
+            db, command_id=cid, rejection_code="delivery_outcome_unknown",
+            rejection_message="boom", rejected_at=utcnow(),
+        )
+        await db.commit()
+        assert ok
+        row = (
+            await db.execute(
+                sa.text(
+                    "SELECT status, rejection_code, rejected_at FROM "
+                    "task_harness_commands WHERE command_id = :c"
+                ),
+                {"c": cid},
+            )
+        ).one()
+        assert row.status == "rejected"
+        assert row.rejection_code == "delivery_outcome_unknown"
+        assert row.rejected_at is not None
+
+
+async def test_terminal_states_are_immutable(maker):
+    task_id, _ = await _seed_running_pi(maker)
+    cid = _cid("cmd")
+    async with maker() as db:
+        await create_command(
+            db, task_id=task_id, command_id=cid, command_type="steer",
+            payload={"text": "go"}, created_by="alice",
+        )
+        await db.commit()
+        await write_command_delivery(db, command_id=cid, delivered_at=utcnow())
+        await db.commit()
+        # A second CAS on a delivered (non-queued) row is a no-op.
+        ok = await write_command_rejection(
+            db, command_id=cid, rejection_code="delivery_outcome_unknown",
+            rejection_message="late", rejected_at=utcnow(),
+        )
+        await db.commit()
+        assert not ok
+        row = (
+            await db.execute(
+                sa.text(
+                    "SELECT status FROM task_harness_commands WHERE command_id = :c"
+                ),
+                {"c": cid},
+            )
+        ).one()
+        assert row.status == "delivered"

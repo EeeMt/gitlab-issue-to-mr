@@ -221,6 +221,7 @@ from app.api import (
     skills,
     stats,
     system_statistics,
+    task_command_routes,
     tasks,
     usage_limits,
     webhook_handler,
@@ -239,6 +240,12 @@ app.include_router(
     tasks.router,
     prefix="/api",
     tags=["tasks"],
+    dependencies=[Depends(require_authenticated_user)],
+)
+app.include_router(
+    task_command_routes.router,
+    prefix="/api",
+    tags=["task-commands"],
     dependencies=[Depends(require_authenticated_user)],
 )
 app.include_router(
