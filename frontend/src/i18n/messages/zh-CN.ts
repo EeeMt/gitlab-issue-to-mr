@@ -227,6 +227,7 @@ const zhCN = {
     enabled: '已启用',
     disabled: '已禁用',
     notAvailable: '暂无',
+    unavailable: '不可用',
     source: '来源',
     timeline: '时间轴',
     scheduledAt: '预约时间',

@@ -227,6 +227,7 @@ const en = {
     enabled: 'Enabled',
     disabled: 'Disabled',
     notAvailable: 'N/A',
+    unavailable: 'Unavailable',
     source: 'Source',
     timeline: 'Timeline',
     scheduledAt: 'Scheduled At',
