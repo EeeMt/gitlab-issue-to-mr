@@ -1,5 +1,11 @@
 # Codify 多 Harness 引擎分阶段实施总计划
 
+> [!IMPORTANT]
+> 本路线图的 V1 历史与已完成工作继续保留，但 2026-08-21 之后的演进方向已由
+> [Open-Harness V2 架构方案](../../architecture/open-harness-v2.md) 和
+> [Open-Harness V2 分阶段实施计划](2026-08-21-open-harness-v2-implementation-plan.md) 取代。
+> 后续不再按本文件的“Claude/Codex 双引擎 + 条件性 OpenCode”范围继续实施。
+
 > 依据：[2026-07-31-multi-harness-engine-design.md](../specs/2026-07-31-multi-harness-engine-design.md)
 
 **目标：** 在不破坏现有 Claude Code 生产行为的前提下，先建立 Codify 自有的 Harness 合同和 Canonical Event 协议，再交付 Claude Code + Codex 双引擎生产基线；OpenCode 仅在满足准入条件后启动。
