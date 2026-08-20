@@ -294,7 +294,12 @@ class Scheduler:
             task.status = TaskStatus.CANCELLED if (cancelled or not is_running) else TaskStatus.FAILED
             task.error_message = legacy_rejection_detail(task.id)["message"]
             task.completed_at = utcnow()
-            task.container_id = None
+            if not is_running:
+                # A never-dispatched legacy task has no live container to reap.
+                task.container_id = None
+            # A RUNNING legacy task keeps its container_id so the retained-container
+            # cleanup (matched on container_id IS NOT NULL) finds and physically
+            # stops the still-alive container instead of leaving an orphan behind.
             if task.issue_id is not None:
                 await self._release_issue_lock(
                     db,

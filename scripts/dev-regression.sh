@@ -158,12 +158,12 @@ preflight() {
   else
     ok "issue #$ISSUE_ID"
   fi
-  # Auto-detect providers by wire protocol unless explicitly given.
+  # Auto-detect providers by model protocol unless explicitly given.
   if [ -z "$P_CLAUDE" ] || [ -z "$P_CODEX" ]; then
     api GET /api/providers
     [ "$HTTP_CODE" = "200" ] || die "providers list failed (HTTP $HTTP_CODE)"
-    [ -z "$P_CLAUDE" ] && P_CLAUDE="$(echo "$BODY" | jq -r '.[] | select(.wire_protocol=="anthropic_messages") | .id' | head -1)"
-    [ -z "$P_CODEX" ] && P_CODEX="$(echo "$BODY" | jq -r '.[] | select(.wire_protocol=="openai_responses") | .id' | head -1)"
+    [ -z "$P_CLAUDE" ] && P_CLAUDE="$(echo "$BODY" | jq -r '.[] | select(.model_protocol=="anthropic_messages") | .id' | head -1)"
+    [ -z "$P_CODEX" ] && P_CODEX="$(echo "$BODY" | jq -r '.[] | select(.model_protocol=="openai_responses") | .id' | head -1)"
   fi
   [ -n "$P_CLAUDE" ] || die "no anthropic_messages (Claude) provider found — set PROVIDER_CLAUDE_ID"
   [ -n "$P_CODEX" ] || die "no openai_responses (Codex) provider found — set PROVIDER_CODEX_ID"

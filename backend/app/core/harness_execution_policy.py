@@ -106,6 +106,24 @@ def require_executable_contract_v2(attempt, bundle) -> None:
         )
 
 
+def require_creatable_bundle_v2(bundle, mode: str, subject=None) -> None:
+    """Under ``v2_only``, refuse to create a Task that pins a non-V2 contract.
+
+    Runs at the task-creation entry so a legacy V1 contract is rejected up
+    front (``legacy_contract_not_executable``) instead of accepted and then
+    terminalized by recovery. No-op in any non-``v2_only`` mode.
+    """
+    if not is_v2_only(mode):
+        return
+    if getattr(bundle, "contract_version", None) != HARNESS_CONTRACT_VERSION_V2:
+        raise ExecutionPolicyError(
+            f"task {('for ' + str(subject)) if subject else ''}pins a non-V2 "
+            f"Runtime Bundle and is not creatable under HARNESS_EXECUTION_MODE="
+            f"v2_only (contract_version={getattr(bundle, 'contract_version', None)!r})",
+            code=LEGACY_CONTRACT_NOT_EXECUTABLE,
+        )
+
+
 def is_legacy_snapshot(snapshot) -> bool:
     """True if a frozen Task snapshot pins a legacy V1 (or V1-carried) contract.
 

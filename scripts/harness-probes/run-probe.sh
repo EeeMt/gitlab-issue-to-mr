@@ -150,7 +150,7 @@ with open(path, "w", encoding="utf-8") as handle:
         "fixture_schema": "codify.harness.fixture/v1",
         "harness": harness, "scenario": scenario, "cli_version": version.strip(),
         "adapter_candidate_version": "1.0.0", "image_digest": None,
-        "provider_kind": "probe", "wire_protocol": "probe",
+        "provider_kind": "probe", "model_protocol": "probe",
         "platform": {"system": platform.system(), "machine": platform.machine()},
         "command_file": "command.txt", "environment_keys": env_keys.split(",") if env_keys else [],
         "environment_sources": {key: "operator_environment" for key in env_keys.split(",") if key},

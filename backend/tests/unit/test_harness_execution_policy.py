@@ -16,6 +16,7 @@ from app.core.harness_execution_policy import (
     is_legacy_snapshot,
     is_v2_only,
     legacy_rejection_detail,
+    require_creatable_bundle_v2,
     require_executable_contract,
     require_executable_contract_v2,
     validate_harness_execution_mode,
@@ -97,6 +98,30 @@ def test_v2_contract_rejects_v1_bundle():
         require_executable_contract_v2(
             Attempt(CANONICAL_EVENT_SCHEMA_V2), Bundle(HARNESS_CONTRACT_VERSION)
         )
+    assert exc.value.code == LEGACY_CONTRACT_NOT_EXECUTABLE
+
+
+# ── v2_only creation gate (F5) ──────────────────────────────────────────────
+
+
+def test_creatable_bundle_v2_noop_outside_v2_only():
+    # In dual_canary a legacy V1 bundle is still creatable.
+    require_creatable_bundle_v2(Bundle(HARNESS_CONTRACT_VERSION), "dual_canary")
+
+
+def test_creatable_bundle_v2_allows_canonical_v2_under_v2_only():
+    require_creatable_bundle_v2(Bundle(HARNESS_CONTRACT_VERSION_V2), "v2_only")
+
+
+def test_creatable_bundle_v2_rejects_v1_under_v2_only():
+    with pytest.raises(ExecutionPolicyError) as exc:
+        require_creatable_bundle_v2(Bundle(HARNESS_CONTRACT_VERSION), "v2_only")
+    assert exc.value.code == LEGACY_CONTRACT_NOT_EXECUTABLE
+
+
+def test_creatable_bundle_v2_rejects_missing_contract_under_v2_only():
+    with pytest.raises(ExecutionPolicyError) as exc:
+        require_creatable_bundle_v2(Bundle(None), "v2_only")
     assert exc.value.code == LEGACY_CONTRACT_NOT_EXECUTABLE
 
 

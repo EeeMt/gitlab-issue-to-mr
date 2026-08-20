@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.harness_protocol import (
@@ -217,7 +218,30 @@ async def create_command(
         )
     )
     attempt.next_command_sequence = sequence_no + 1
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError:
+        # A concurrent caller committed the same command_id between our
+        # existence check and this flush (schemas.md §4 requires handling the
+        # unique-key race by re-reading and re-judging). Roll back and resolve
+        # against the committed row instead of surfacing a 500.
+        await db.rollback()
+        raced = await db.get(TaskHarnessCommand, command_id)
+        if raced is not None and raced.payload_digest == digest:
+            return CommandCreateResult(
+                command_id=command_id,
+                sequence_no=raced.sequence_no,
+                created=False,
+                outcome="existing_same",
+            )
+        return CommandCreateResult(
+            command_id=command_id,
+            sequence_no=0,
+            created=False,
+            outcome="existing_conflict",
+            rejection_code="existing_conflict",
+            rejection_message="command_id already exists with a different payload",
+        )
     return CommandCreateResult(
         command_id=command_id,
         sequence_no=sequence_no,

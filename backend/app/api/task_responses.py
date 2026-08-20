@@ -136,6 +136,9 @@ def serialize_task(*args, **kwargs) -> dict:
                     "runtime_bundle_digest": snapshot.runtime_bundle_digest,
                     "endpoint_protocol": (
                         (snapshot.model_endpoint_snapshot or {}).get("model_protocol")
+                        # Pre-074 snapshots stored the pre-rename key; fall back
+                        # so historical V1 reads keep returning the original value.
+                        or (snapshot.model_endpoint_snapshot or {}).get("wire_protocol")
                         if snapshot.model_endpoint_snapshot
                         else None
                     ),

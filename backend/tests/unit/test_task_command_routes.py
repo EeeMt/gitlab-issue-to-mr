@@ -80,7 +80,7 @@ class TaskCommandRoutesTest(unittest.TestCase):
                 "/api/tasks/7/commands/01Kxyz",
                 json={"type": "steer", "text": "先修复并发问题"},
             )
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 201)
         body = resp.json()
         self.assertTrue(body["created"])
         self.assertEqual(body["command"]["command_id"], "01Kxyz")
@@ -89,6 +89,33 @@ class TaskCommandRoutesTest(unittest.TestCase):
         _, kwargs = create_mock.call_args
         self.assertEqual(kwargs["payload"], {"text": "先修复并发问题"})
         self.assertEqual(kwargs["command_type"], "steer")
+
+    def test_put_command_replay_returns_200(self):
+        result = CommandCreateResult(
+            command_id="01Kxyz", sequence_no=1, created=False, outcome="existing_same"
+        )
+        with (
+            patch(
+                "app.api.task_command_routes.get_task_with_access_check",
+                new=AsyncMock(return_value=MagicMock()),
+            ),
+            patch(
+                "app.api.task_command_routes.create_command",
+                new=AsyncMock(return_value=result),
+            ),
+            patch(
+                "app.api.task_command_routes._load_command",
+                new=AsyncMock(return_value=_command()),
+            ),
+        ):
+            resp = self.client.put(
+                "/api/tasks/7/commands/01Kxyz",
+                json={"type": "steer", "text": "先修复并发问题"},
+            )
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertFalse(body["created"])
+        self.assertEqual(body["outcome"], "existing_same")
 
     def test_put_command_conflict_returns_409(self):
         result = CommandCreateResult(

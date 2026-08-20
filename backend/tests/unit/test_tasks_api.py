@@ -505,6 +505,43 @@ class TestRequireChangesSerialization(unittest.TestCase):
         self.assertTrue(data["require_changes"])
 
 
+class TestEndpointProtocolLegacyFallback(unittest.TestCase):
+    def test_serialize_pre_074_snapshot_falls_back_to_wire_protocol_key(self):
+        """A pre-074 snapshot (only ``wire_protocol``) still yields
+        ``endpoint_protocol`` instead of null (F2 / historical V1 read)."""
+        from app.api import task_responses as tr
+
+        snapshot = _make_worker_snapshot()
+        snapshot.model_endpoint_snapshot = {"wire_protocol": "anthropic_messages"}
+        with (
+            patch.object(tr, "_serialize_task_base", return_value={}),
+            patch.object(tr, "loaded_task_relationship", return_value=snapshot),
+            patch.object(tr, "skill_snapshots_from_task_snapshot", return_value=[]),
+        ):
+            body = tr.serialize_task(MagicMock())
+        self.assertEqual(
+            body["harness_snapshot"]["endpoint_protocol"], "anthropic_messages"
+        )
+
+    def test_serialize_new_snapshot_uses_model_protocol_key(self):
+        from app.api import task_responses as tr
+
+        snapshot = _make_worker_snapshot()
+        snapshot.model_endpoint_snapshot = {
+            "model_protocol": "openai_responses",
+            "wire_protocol": "stale",
+        }
+        with (
+            patch.object(tr, "_serialize_task_base", return_value={}),
+            patch.object(tr, "loaded_task_relationship", return_value=snapshot),
+            patch.object(tr, "skill_snapshots_from_task_snapshot", return_value=[]),
+        ):
+            body = tr.serialize_task(MagicMock())
+        self.assertEqual(
+            body["harness_snapshot"]["endpoint_protocol"], "openai_responses"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
 

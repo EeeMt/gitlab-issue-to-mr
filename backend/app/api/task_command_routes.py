@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -109,6 +109,7 @@ async def put_command(
     task_id: int,
     command_id: str,
     request: CreateCommandRequest,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
@@ -142,6 +143,8 @@ async def put_command(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="command row missing after creation",
         )
+    # Frozen contract: first creation is 201, an idempotent replay is 200.
+    response.status_code = status.HTTP_201_CREATED if result.created else status.HTTP_200_OK
     return {
         "command": _command_dict(cmd),
         "created": result.created,

@@ -21,6 +21,10 @@ from app.api.task_responses import (
 )
 from app.api.task_schemas import CreateTaskRequest, RetryTaskRequest
 from app.config import get_effective_settings
+from app.core.harness_execution_policy import (
+    ExecutionPolicyError,
+    require_creatable_bundle_v2,
+)
 from app.core.harness_registry import (
     HarnessRegistryError,
     validate_enabled_harnesses,
@@ -595,6 +599,14 @@ async def create_task_record(
             shared_configuration=shared,
         )
         bundle = await services.bind_runtime_bundle(db, task)
+        # Execution policy: under v2_only, refuse to create a Task whose bound
+        # bundle pins a legacy V1 contract (reject up front instead of letting
+        # recovery terminalize it later).
+        require_creatable_bundle_v2(
+            bundle,
+            get_effective_settings().harness_execution_mode,
+            subject=f"task for issue {issue.id}",
+        )
         # Freeze the immutable Adapter + Bundle facts into the snapshot so the
         # execution truth is self-contained and immune to later edits. Guards
         # keep mocked/partial bundles or snapshots from breaking creation.
@@ -629,6 +641,15 @@ async def create_task_record(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
+        ) from exc
+    except ExecutionPolicyError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": exc.code,
+                "message": str(exc),
+            },
         ) from exc
 
     await db.commit()

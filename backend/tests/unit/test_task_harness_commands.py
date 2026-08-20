@@ -18,10 +18,12 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import sqlalchemy as sa
 from alembic.config import Config
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -34,6 +36,7 @@ from app.core.task_harness_commands import (
     write_command_rejection,
 )
 from app.core.utcnow import utcnow
+from app.models import TaskStatus
 
 ADMIN_URL = os.environ.get(
     "CODIFY_TEST_DATABASE_URL",
@@ -416,3 +419,65 @@ async def test_terminal_states_are_immutable(maker):
             )
         ).one()
         assert row.status == "delivered"
+
+
+# ── unique-key race recovery (schemas.md §4) ────────────────────────────────
+
+
+def _mock_db_for_flush_race(*, existing_digest: str, flush_raises: bool):
+    """Drive ``create_command`` past its existence check and force the flush
+    path, then re-read a committed row on the unique-key race."""
+    db = MagicMock()
+    # Existence check returns None first, then the re-read returns the row a
+    # concurrent caller committed between our check and flush.
+    existing = MagicMock()
+    existing.command_id = "race-cmd"
+    existing.sequence_no = 1
+    existing.payload_digest = existing_digest
+    db.get = AsyncMock(side_effect=[None, existing])
+
+    task = MagicMock()
+    task.status = TaskStatus.RUNNING
+    attempt = MagicMock()
+    attempt.harness_key = "pi"
+    attempt.event_schema = CANONICAL_EVENT_SCHEMA_V2
+    attempt.control_state = "accepting"
+    attempt.next_command_sequence = 1
+    dstmt = MagicMock()
+    dstmt.scalar_one_or_none = MagicMock(side_effect=[task, attempt])
+    db.execute = AsyncMock(return_value=dstmt)
+    if flush_raises:
+        db.flush = AsyncMock(
+            side_effect=IntegrityError("INSERT ...", {}, Exception("duplicate key"))
+        )
+    else:
+        db.flush = AsyncMock()
+    db.rollback = AsyncMock()
+    db.add = MagicMock()
+    return db
+
+
+@patch("app.core.task_harness_commands.canonical_digest", return_value="dd" * 32)
+async def test_create_command_recovers_unique_key_race_to_existing_same(_digest):
+    db = _mock_db_for_flush_race(existing_digest="dd" * 32, flush_raises=True)
+    result = await create_command(
+        db, task_id=1, command_id="race-cmd", command_type="steer",
+        payload={"text": "go"}, created_by="alice",
+    )
+    assert db.rollback.called
+    assert not result.created
+    assert result.outcome == "existing_same"
+    assert result.sequence_no == 1
+
+
+@patch("app.core.task_harness_commands.canonical_digest", return_value="ee" * 32)
+async def test_create_command_recovers_unique_key_race_to_conflict(_digest):
+    db = _mock_db_for_flush_race(existing_digest="ff" * 32, flush_raises=True)
+    result = await create_command(
+        db, task_id=1, command_id="race-cmd", command_type="steer",
+        payload={"text": "different"}, created_by="alice",
+    )
+    assert db.rollback.called
+    assert not result.created
+    assert result.outcome == "existing_conflict"
+    assert result.rejection_code == "existing_conflict"
