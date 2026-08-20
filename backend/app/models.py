@@ -265,9 +265,14 @@ class AIProvider(Base):
     provider_kind: Mapped[str] = mapped_column(
         String(32), nullable=False, default="anthropic_compatible"
     )
-    wire_protocol: Mapped[str] = mapped_column(
+    # ``model_protocol`` is the V2 wire-protocol name. Only three values are
+    # allowed: anthropic_messages / openai_responses / openai_chat_completions.
+    model_protocol: Mapped[str] = mapped_column(
         String(32), nullable=False, default="anthropic_messages"
     )
+    # Describes known differences of an OpenAI-compatible service; backend
+    # allowlist, unknown values rejected at Task creation.
+    compat_profile: Mapped[str | None] = mapped_column(String(64), nullable=True)
     provider_driver: Mapped[str | None] = mapped_column(String(64), nullable=True)
     provider_options: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     credential_ref: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -499,6 +504,12 @@ class Task(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+    harness_commands: Mapped[list["TaskHarnessCommand"]] = relationship(
+        "TaskHarnessCommand",
+        back_populates="task",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
     ci_failure_run: Mapped[Optional["CIFailureRun"]] = relationship(
         "CIFailureRun",
         foreign_keys=[ci_failure_run_id],
@@ -602,6 +613,17 @@ class TaskHarnessAttempt(Base):
     harness_key: Mapped[str] = mapped_column(String(64), nullable=False)
     adapter_version: Mapped[str] = mapped_column(String(64), nullable=False)
     cli_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # V2 command control gate (disabled/starting/accepting/closing/closed).
+    control_state: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="disabled"
+    )
+    # Next attempt-scoped command sequence to allocate (>= 1).
+    next_command_sequence: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # Command dispatch lease (worker/container id + expiry) — single dispatcher.
+    command_dispatch_owner: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    command_dispatch_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
     last_seq: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     terminal_event_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     terminal_event_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
@@ -635,6 +657,14 @@ class TaskHarnessAttempt(Base):
             "terminal_event_type IS NULL OR terminal_event_type IN ('run.completed', 'run.failed')",
             name="ck_task_harness_attempt_terminal_type",
         ),
+        CheckConstraint(
+            "control_state IN ('disabled','starting','accepting','closing','closed')",
+            name="ck_task_harness_attempt_control_state",
+        ),
+        CheckConstraint(
+            "next_command_sequence >= 1",
+            name="ck_task_harness_attempt_next_command_sequence",
+        ),
     )
 
 
@@ -662,6 +692,81 @@ class TaskHarnessEventReceipt(Base):
 
     __table_args__ = (
         CheckConstraint("seq >= 1", name="ck_task_harness_event_receipt_seq"),
+    )
+
+
+class TaskHarnessCommand(Base):
+    """V2 control command queued for an in-flight Harness attempt.
+
+    ``queued -> delivered|rejected`` transitions are written only by the command
+    pump via CAS; ``delivered``/``rejected`` are immutable terminal states.
+    Command lifecycle stats never feed Issue lifecycle statistics.
+    """
+
+    __tablename__ = "task_harness_commands"
+
+    command_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    task_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    attempt_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("task_harness_attempts.attempt_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    sequence_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    command_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")
+    created_by: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    delivery_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    rejection_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    rejection_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    task: Mapped[Task] = relationship("Task", back_populates="harness_commands")
+    attempt: Mapped["TaskHarnessAttempt"] = relationship("TaskHarnessAttempt")
+
+    __table_args__ = (
+        CheckConstraint(
+            "sequence_no >= 1", name="ck_task_harness_command_sequence_no"
+        ),
+        CheckConstraint(
+            "command_type IN ('steer','follow_up')",
+            name="ck_task_harness_command_type",
+        ),
+        CheckConstraint(
+            "status IN ('queued','delivered','rejected')",
+            name="ck_task_harness_command_status",
+        ),
+        CheckConstraint(
+            "(status = 'queued') = (delivered_at IS NULL AND rejected_at IS NULL)",
+            name="ck_task_harness_command_queued_consistency",
+        ),
+        CheckConstraint(
+            "(status = 'delivered') = (delivered_at IS NOT NULL)",
+            name="ck_task_harness_command_delivered_consistency",
+        ),
+        CheckConstraint(
+            "(status = 'rejected') = (rejected_at IS NOT NULL)",
+            name="ck_task_harness_command_rejected_consistency",
+        ),
+        UniqueConstraint(
+            "attempt_id", "sequence_no", name="uq_task_harness_command_attempt_seq"
+        ),
+        Index(
+            "ix_task_harness_commands_attempt_status",
+            "attempt_id",
+            "status",
+        ),
     )
 
 
@@ -922,6 +1027,8 @@ class WorkerProfile(Base):
         String(32), nullable=False, default="claude", server_default=text("'claude'")
     )
     harness_constraints: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    # V2 namespaced per-harness options, e.g. {"pi":{...},"opencode":{...}}.
+    harness_options: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     image_digest: Mapped[str | None] = mapped_column(String(128), nullable=True)
     harness_runtimes: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
