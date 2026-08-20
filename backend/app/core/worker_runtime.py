@@ -182,6 +182,14 @@ def _build_container_env_with_settings(
         "ANTHROPIC_BASE_URL": base_url,
         "ANTHROPIC_API_KEY": api_key,
         "ANTHROPIC_MODEL": model,
+        # Sub-agents and background/side-queries in the Claude harness would
+        # otherwise fall back to the official Anthropic default models; pin them
+        # to the configured provider model so every sub-agent uses the same one.
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": model,
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": model,
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": model,
+        "ANTHROPIC_SMALL_FAST_MODEL": model,
+        "CLAUDE_CODE_SUBAGENT_MODEL": model,
         "CLAUDE_MAX_TURNS": max_turns,
         "TASK_ID": str(task.id),
         **(

@@ -162,6 +162,16 @@ class WorkerEnvironmentVariableHelperTests(unittest.TestCase):
         self.assertEqual(env["BASE_BRANCH"], "develop")
         self.assertEqual(env["MR_IID"], "5")
         self.assertEqual(env["CUSTOM_CA_BUNDLE"], "/etc/ssl/custom-ca.crt")
+        self.assertEqual(env["ANTHROPIC_MODEL"], "provider-model")
+        for key in (
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL",
+            "ANTHROPIC_SMALL_FAST_MODEL",
+            "CLAUDE_CODE_SUBAGENT_MODEL",
+        ):
+            self.assertEqual(env[key], "provider-model")
+            self.assertIn(key, RESERVED_WORKER_ENVIRONMENT_KEYS)
         self.assertTrue(set(env).issubset(RESERVED_WORKER_ENVIRONMENT_KEYS))
 
     def test_codegraph_toggle_env_key_is_reserved(self) -> None:

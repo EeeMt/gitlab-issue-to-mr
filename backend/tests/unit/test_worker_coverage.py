@@ -540,6 +540,15 @@ class TestBuildContainerEnv(unittest.TestCase):
         self.assertEqual(env["ISSUE_ID"], "1")
         self.assertEqual(env["MR_IID"], "5")
         self.assertEqual(env["CLAUDE_MAX_TURNS"], "20")
+        self.assertEqual(env["ANTHROPIC_MODEL"], "claude-sonnet-4-20250514")
+        for key in (
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL",
+            "ANTHROPIC_SMALL_FAST_MODEL",
+            "CLAUDE_CODE_SUBAGENT_MODEL",
+        ):
+            self.assertEqual(env[key], "claude-sonnet-4-20250514")
 
     @patch('app.core.worker.get_settings')
     def test_env_without_mr_iid(self, mock_get_settings):
