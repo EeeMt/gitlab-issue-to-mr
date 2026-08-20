@@ -10,6 +10,7 @@ from app.core.harness_registry import (
     capability_policy,
     compatible_harness_keys,
     harness_options,
+    registry_catalog_from_manifest,
     validate_adapter_capabilities,
     validate_enabled_harnesses,
     validate_harness_constraints,
@@ -17,19 +18,21 @@ from app.core.harness_registry import (
     validate_harness_runtimes,
     validate_protocol_compatibility,
     validate_runtime_bundle_manifest,
+    validate_v2_manifest_adapter_capabilities,
 )
 
 
-def test_registry_knows_claude_and_codex():
-    assert {"claude", "codex"} == HARNESS_KEYS
+def test_registry_knows_all_four_builtin_harnesses():
+    assert {"pi", "opencode", "claude", "codex"} == HARNESS_KEYS
 
 
 def test_compatible_harness_keys_reverse_lookup():
-    assert compatible_harness_keys("anthropic_messages") == ["claude"]
-    assert compatible_harness_keys("openai_responses") == ["codex"]
-    assert compatible_harness_keys(None) == ["claude"]
-    assert compatible_harness_keys("openai_chat_completions") == []
-    assert compatible_harness_keys("") == ["claude"]
+    # pi/opencode consume all three model protocols per the frozen V2 matrix.
+    assert compatible_harness_keys("anthropic_messages") == ["claude", "opencode", "pi"]
+    assert compatible_harness_keys("openai_responses") == ["codex", "opencode", "pi"]
+    assert compatible_harness_keys(None) == ["claude", "opencode", "pi"]
+    assert compatible_harness_keys("openai_chat_completions") == ["opencode", "pi"]
+    assert compatible_harness_keys("") == ["claude", "opencode", "pi"]
 
 
 def test_validate_adapter_capabilities_rejects_above_system_bound():
@@ -50,10 +53,10 @@ def test_validate_adapter_capabilities_allows_tightening_and_unknown():
 
 
 def test_validate_harness_key_accepts_known_and_rejects_unknown():
-    validate_harness_key("claude")
-    validate_harness_key("codex")
+    for key in ("claude", "codex", "pi", "opencode"):
+        validate_harness_key(key)
     with pytest.raises(HarnessRegistryError):
-        validate_harness_key("opencode")
+        validate_harness_key("omp")
 
 
 @pytest.mark.parametrize(
@@ -63,7 +66,7 @@ def test_validate_harness_key_accepts_known_and_rejects_unknown():
         (["claude", "codex"], "claude", True),
         (["claude"], "codex", False),  # default outside enabled
         ([], "claude", False),  # empty
-        (["claude", "codex"], "opencode", False),  # unknown default
+        (["claude", "codex"], "opencode", False),  # default outside enabled
     ],
 )
 def test_validate_enabled_harnesses(enabled, default, ok):
@@ -152,7 +155,7 @@ def test_validate_runtime_bundle_manifest_rejects_mismatches():
         validate_runtime_bundle_manifest(manifest)
 
     manifest = _valid_manifest()
-    manifest["adapters"]["opencode"] = {
+    manifest["adapters"]["omp"] = {
         "version": "1.0.0",
         "digest": "d" * 64,
         "provider_protocols": ["anthropic_messages"],
@@ -194,3 +197,167 @@ def test_harness_runtimes_schema_is_restricted():
         validate_harness_runtimes({"claude": {"source": "docker exec rm -rf"}})
     with pytest.raises(HarnessRegistryError):
         validate_harness_runtimes({"unknown": {"source": "image"}})
+
+
+# ── V2 manifest catalog ──────────────────────────────────────────────────────
+
+
+def _v2_adapter(
+    *,
+    support_tier="default",
+    artifact_version="0.84.2",
+    control_kind="rpc_stdio",
+    protocols=("anthropic_messages", "openai_responses", "openai_chat_completions"),
+    capabilities=None,
+    options_schema="pi/v1",
+):
+    return {
+        "support_tier": support_tier,
+        "source": {
+            "repository": "https://github.com/earendil-works/pi",
+            "license": "MIT",
+            "artifact_version": artifact_version,
+            "artifact_sha256": "aa" * 32,
+        },
+        "adapter": {"version": "2.0.0", "digest": "dd" * 32},
+        "control_transport": {"kind": control_kind, "protocol": "pi-rpc"},
+        "model_protocols": list(protocols),
+        "capabilities": dict(capabilities)
+        if capabilities is not None
+        else {
+            "resume": True,
+            "task_skills": True,
+            "usage_tokens": True,
+            "steering": True,
+            "follow_up": True,
+        },
+        "options_schema": options_schema,
+    }
+
+
+def _v2_manifest(**adapter_overrides):
+    adapters = {
+        "pi": _v2_adapter(),
+        "opencode": _v2_adapter(
+            control_kind="server_http",
+            capabilities={
+                "resume": True,
+                "task_skills": True,
+                "usage_tokens": True,
+                "steering": False,
+                "follow_up": False,
+            },
+            options_schema="opencode/v1",
+        ),
+        "claude": _v2_adapter(
+            control_kind="cli_stream_json",
+            protocols=("anthropic_messages",),
+            capabilities={
+                "resume": True,
+                "task_skills": True,
+                "usage_tokens": True,
+                "steering": False,
+                "follow_up": False,
+            },
+            options_schema=None,
+        ),
+        "codex": _v2_adapter(
+            control_kind="cli_jsonl",
+            protocols=("openai_responses",),
+            capabilities={
+                "resume": True,
+                "task_skills": True,
+                "usage_tokens": True,
+                "steering": False,
+                "follow_up": False,
+            },
+            options_schema=None,
+        ),
+    }
+    for key, overrides in adapter_overrides.items():
+        adapters[key] = {**adapters[key], **overrides}
+    return {
+        "schema": "codify.worker.runtime-manifest/v2",
+        "maturity": "internal_preview",
+        "contract_version": "codify.worker.harness/v2",
+        "event_schema": "codify.worker.event/v2",
+        "command_schema": "codify.worker.command/v2",
+        "result_schema": "codify.worker.result/v2",
+        "adapters": adapters,
+        "files": [
+            {"path": "harness/pi/bridge.py", "size": 10, "sha256": "aa" * 32},
+            {"path": "harness/shared/schema.py", "size": 5, "sha256": "bb" * 32},
+        ],
+    }
+
+
+def test_v2_capability_upper_bound_rejects_opencode_steering():
+    # opencode cannot steer/follow_up per the frozen schema; a manifest claiming
+    # steering=true above the code-held bound must fail closed.
+    validate_v2_manifest_adapter_capabilities("opencode", {"steering": False})
+    validate_v2_manifest_adapter_capabilities("pi", {"steering": True})
+    with pytest.raises(HarnessRegistryError, match="above the system upper bound"):
+        validate_v2_manifest_adapter_capabilities("opencode", {"steering": True})
+    with pytest.raises(HarnessRegistryError, match="above the system upper bound"):
+        validate_v2_manifest_adapter_capabilities("claude", {"follow_up": True})
+    with pytest.raises(HarnessRegistryError, match="above the system upper bound"):
+        validate_v2_manifest_adapter_capabilities("codex", {"follow_up": True})
+
+
+def test_v2_capability_upper_bound_allows_tightening_and_unknown():
+    # Under-declaring is a legitimate tightening; unknown keys are forward-compatible.
+    validate_v2_manifest_adapter_capabilities("opencode", {"resume": False})
+    validate_v2_manifest_adapter_capabilities("pi", {"future_capability": True})
+    with pytest.raises(HarnessRegistryError):
+        validate_v2_manifest_adapter_capabilities("unknown", {"steering": True})
+
+
+def test_registry_catalog_is_displayable_and_never_leaks_source():
+    catalog = {
+        entry["key"]: entry for entry in registry_catalog_from_manifest(_v2_manifest())
+    }
+    assert set(catalog) == {"claude", "codex", "opencode", "pi"}
+    pi = catalog["pi"]
+    assert pi["display_name"] == "Pi"
+    assert pi["support_tier"] == "default"
+    assert pi["control_transport"]["kind"] == "rpc_stdio"
+    assert "anthropic_messages" in pi["model_protocols"]
+    assert pi["capabilities"]["steering"] is True
+    assert pi["options_schema"] == "pi/v1"
+    assert catalog["opencode"]["capabilities"]["steering"] is False
+    assert catalog["claude"]["control_transport"]["kind"] == "cli_stream_json"
+    assert catalog["codex"]["model_protocols"] == ["openai_responses"]
+
+    # The catalog must never expose raw source commands / repository / artifacts.
+    for entry in catalog.values():
+        assert "repository" not in entry
+        assert "source" not in entry
+        assert "artifact_sha256" not in entry
+        assert "executable" not in entry
+
+
+def test_registry_catalog_rejects_capability_above_bound():
+    manifest = _v2_manifest(
+        opencode={
+            "capabilities": {
+                "resume": True,
+                "task_skills": True,
+                "usage_tokens": True,
+                "steering": True,
+                "follow_up": False,
+            }
+        }
+    )
+    with pytest.raises(HarnessRegistryError, match="above the system upper bound"):
+        registry_catalog_from_manifest(manifest)
+
+
+def test_registry_catalog_surfaces_options_schema_without_validator():
+    # A schema name for which no typed validator exists yet (Task 6) is still
+    # declared; Phase 1 exposes the catalog, it does not validate options.
+    catalog = {
+        entry["key"]: entry for entry in registry_catalog_from_manifest(_v2_manifest())
+    }
+    assert catalog["pi"]["options_schema"] == "pi/v1"
+    assert catalog["opencode"]["options_schema"] == "opencode/v1"
+    assert catalog["claude"]["options_schema"] is None

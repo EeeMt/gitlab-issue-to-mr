@@ -10,16 +10,23 @@ never accepts arbitrary commands or Adapter paths from the database.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from app.core.harness_protocol import (
     CANONICAL_EVENT_SCHEMA,
+    HARNESS_CAPABILITY_KEYS,
     HARNESS_CONTRACT_VERSION,
+    MODEL_PROTOCOLS,
+    validate_manifest,
 )
 
-# Known harness keys. codex is a first-class key even though its adapter is not
-# yet bundled; profiles cannot select a harness whose adapter is unavailable.
-HARNESS_KEYS = frozenset({"claude", "codex"})
+# Known harness keys (compile-time allowlist). The V2 manifest catalog is
+# restricted to this set; pi/opencode are first-class keys whose adapters are
+# Phase 2-4 work, so profiles cannot yet select them (no bundled adapter).
+HARNESS_KEYS = frozenset({"pi", "opencode", "claude", "codex"})
+
+# Re-export the V2 model-protocol allowlist for registry/API use.
+MODEL_PROTOCOLS_ALLOWLIST = MODEL_PROTOCOLS
 
 # Constraints a profile may tighten (never relax) per harness.
 TIGHTENABLE_CONSTRAINTS = frozenset(
@@ -27,6 +34,8 @@ TIGHTENABLE_CONSTRAINTS = frozenset(
 )
 
 # System upper-bound capabilities per harness. Profiles may only tighten these.
+# This is the V1 capability matrix (run_text/codegraph/max_turns/...); it stays
+# intact for the V1 path, with pi/opencode added to match the new allowlist.
 SYSTEM_CAPABILITIES: dict[str, dict[str, Any]] = {
     "claude": {
         "resume": True,
@@ -48,15 +57,79 @@ SYSTEM_CAPABILITIES: dict[str, dict[str, Any]] = {
         "codegraph": False,
         "sandbox_mode": "container-boundary",
     },
+    "pi": {
+        "resume": True,
+        "task_skills": True,
+        "max_turns": True,
+        "usage_tokens": True,
+        "usage_cost": True,
+        "run_text": True,
+        "codegraph": True,
+        "sandbox_mode": "container-boundary",
+    },
+    "opencode": {
+        "resume": True,
+        "task_skills": True,
+        "max_turns": False,
+        "usage_tokens": True,
+        "usage_cost": True,
+        "run_text": False,
+        "codegraph": False,
+        "sandbox_mode": "container-boundary",
+    },
+}
+
+# V2 capability upper bound, keyed by HARNESS_CAPABILITY_KEYS
+# (resume/task_skills/usage_tokens/steering/follow_up). The system upper bound
+# stays in code; a manifest may only tighten it. Per the frozen schema: pi
+# declares all four; opencode/claude/codex declare steering/follow_up=false.
+V2_SYSTEM_CAPABILITY_UPPER_BOUND: dict[str, dict[str, bool]] = {
+    "pi": {
+        "resume": True,
+        "task_skills": True,
+        "usage_tokens": True,
+        "steering": True,
+        "follow_up": True,
+    },
+    "opencode": {
+        "resume": True,
+        "task_skills": True,
+        "usage_tokens": True,
+        "steering": False,
+        "follow_up": False,
+    },
+    "claude": {
+        "resume": True,
+        "task_skills": True,
+        "usage_tokens": True,
+        "steering": False,
+        "follow_up": False,
+    },
+    "codex": {
+        "resume": True,
+        "task_skills": True,
+        "usage_tokens": True,
+        "steering": False,
+        "follow_up": False,
+    },
 }
 
 # provider wire protocols each harness may consume.
 HARNESS_PROVIDER_PROTOCOLS: dict[str, frozenset[str]] = {
     "claude": frozenset({"anthropic_messages"}),
     "codex": frozenset({"openai_responses"}),
+    "pi": frozenset({"anthropic_messages", "openai_responses", "openai_chat_completions"}),
+    "opencode": frozenset(
+        {"anthropic_messages", "openai_responses", "openai_chat_completions"}
+    ),
 }
 
-DISPLAY_NAMES: dict[str, str] = {"claude": "Claude", "codex": "Codex"}
+DISPLAY_NAMES: dict[str, str] = {
+    "claude": "Claude",
+    "codex": "Codex",
+    "pi": "Pi",
+    "opencode": "OpenCode",
+}
 
 
 class HarnessRegistryError(ValueError):
@@ -265,6 +338,69 @@ def validate_runtime_bundle_manifest(manifest: dict[str, Any]) -> None:
                 raise HarnessRegistryError(
                     f"adapter {key!r} declares unsupported protocol {protocol!r}"
                 )
+
+
+def validate_v2_manifest_adapter_capabilities(
+    harness_key: str, capabilities: Mapping[str, Any]
+) -> None:
+    """Reject a V2 manifest capability the system upper bound forbids.
+
+    ``V2_SYSTEM_CAPABILITY_UPPER_BOUND`` is the code-held ceiling keyed by
+    ``HARNESS_CAPABILITY_KEYS``; a manifest may only tighten it, never raise it.
+    Under-declaring a supported capability or declaring an unknown
+    (forward-compatible) key is legitimate and stays valid.
+    """
+    validate_harness_key(harness_key)
+    if not isinstance(capabilities, Mapping):
+        raise HarnessRegistryError(
+            f"adapter {harness_key!r} V2 capabilities must be an object"
+        )
+    upper = V2_SYSTEM_CAPABILITY_UPPER_BOUND[harness_key]
+    for name, value in capabilities.items():
+        if name not in HARNESS_CAPABILITY_KEYS:
+            # Unknown capabilities are forward-compatible (readers ignore them).
+            continue
+        if value is True and upper.get(name) is False:
+            raise HarnessRegistryError(
+                f"adapter {harness_key!r} declares V2 capability {name!r} "
+                "above the system upper bound"
+            )
+
+
+def registry_catalog_from_manifest(
+    manifest: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Project a validated V2 runtime-manifest into a *displayable* catalog.
+
+    Returns one displayable entry per approved adapter: key, display name,
+    support tier, control transport, model protocols, capabilities and options
+    schema. It never leaks ``source.repository`` commands, artifact paths or
+    host paths — only supporting metadata is exposed. ``options_schema`` names
+    the schema even when no typed validator exists yet (Phase 1 declares the
+    catalog; typed validators for pi/v1 and opencode/v1 are a later responsibility).
+
+    System capability upper bounds stay in code; every adapter's declared V2
+    capabilities are checked against the bound before being returned.
+    """
+    validated = validate_manifest(manifest)
+    adapters = validated["adapters"]
+    entries: list[dict[str, Any]] = []
+    for key in sorted(adapters):
+        adapter = adapters[key]
+        capabilities = adapter.get("capabilities") or {}
+        validate_v2_manifest_adapter_capabilities(key, capabilities)
+        entries.append(
+            {
+                "key": key,
+                "display_name": DISPLAY_NAMES.get(key, key),
+                "support_tier": adapter.get("support_tier"),
+                "control_transport": dict(adapter.get("control_transport") or {}),
+                "model_protocols": list(adapter.get("model_protocols") or []),
+                "capabilities": dict(capabilities),
+                "options_schema": adapter.get("options_schema"),
+            }
+        )
+    return entries
 
 
 def harness_options(

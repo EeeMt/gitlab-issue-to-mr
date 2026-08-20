@@ -323,8 +323,10 @@ async def create_execute_container(
     # Execution contract gate (phase1-design §2.3): under ``v2_only`` the worker
     # refuses to start a legacy V1 container and fails the task closed with the
     # unified ``legacy_contract_not_executable`` code. The caller (run_execute_task)
-    # catches this ValueError and terminalizes the task.
-    if is_v2_only(settings.harness_execution_mode):
+    # catches this ValueError and terminalizes the task. Settings objects that
+    # predate the field (or are lightweight test doubles) default to dual_canary.
+    execution_mode = getattr(settings, "harness_execution_mode", "dual_canary")
+    if is_v2_only(execution_mode):
         require_executable_contract_v2(attempt, runtime_bundle)
 
     if worker_custom_scripts_configured(settings):

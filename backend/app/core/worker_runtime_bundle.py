@@ -9,15 +9,24 @@ import os
 import tarfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import undefer
 
-from app.core.harness_protocol import CANONICAL_EVENT_SCHEMA, HARNESS_CONTRACT_VERSION
-from app.core.harness_registry import validate_adapter_capabilities
+from app.core.harness_protocol import (
+    CANONICAL_EVENT_SCHEMA,
+    CANONICAL_EVENT_SCHEMA_V2,
+    HARNESS_CONTRACT_VERSION,
+    HARNESS_CONTRACT_VERSION_V2,
+    validate_manifest,
+)
+from app.core.harness_registry import (
+    validate_adapter_capabilities,
+    validate_v2_manifest_adapter_capabilities,
+)
 from app.models import Task, WorkerRuntimeBundle
 
 ORCHESTRATION_VERSION = "1.0.0"
@@ -39,6 +48,193 @@ class BuiltRuntimeBundle:
     digest: str
     archive_bytes: bytes
     manifest: dict
+
+
+@dataclass(frozen=True, slots=True)
+class BuiltRuntimeBundleV2:
+    """A content-addressed Runtime Bundle built from a V2 runtime-manifest.
+
+    Unlike the V1 archive bundle, a V2 bundle is manifest-only (no code archive
+    in this phase): the top-level ``digest`` is the recursive bundle digest over
+    the manifest ``files``, and each adapter carries an independent digest
+    derived from the file subset it references.
+    """
+
+    digest: str
+    schema: str
+    contract_version: str
+    event_schema: str
+    adapter_digests: dict[str, str]
+    manifest: dict
+
+
+_V2_ADAPTER_DIR_KEYS = ("directory", "dir")
+
+
+def bundle_manifest_digest_from_files(
+    manifest_files: Iterable[Mapping[str, Any]],
+) -> str:
+    """Recursive bundle digest over a V2 manifest's ``files`` list.
+
+    The digest is SHA-256 of the canonical JSON (sorted keys, sorted by ``path``)
+    of the file entries ``{path, size, sha256}``. Any change to any file's
+    content (sha256), size or set of files changes this digest.
+    """
+    entries = sorted(
+        (str(item.get("path")), item) for item in manifest_files
+    )
+    canonical = [
+        {
+            "path": item.get("path"),
+            "size": item.get("size"),
+            "sha256": item.get("sha256"),
+        }
+        for _, item in entries
+    ]
+    payload = json.dumps(
+        canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode()
+    return _sha256(payload)
+
+
+def adapter_digest_from_manifest_files(
+    manifest_files: Iterable[Mapping[str, Any]],
+    adapter_key: str,
+    *,
+    adapter_dir: str | None = None,
+    shared_files: Iterable[Mapping[str, Any]] | None = None,
+) -> str:
+    """Independent per-adapter digest over a V2 manifest's file subset.
+
+    Deterministic rule:
+      * Files whose ``path`` is under ``adapter_dir`` belong only to this
+        adapter (its own source/bridge/events files).
+      * ``shared_files`` — files not under ANY declared adapter directory (shared
+        libraries, schema, common runtime) — are referenced by every adapter and
+        therefore contribute to every adapter's digest.
+      * The adapter's digest is SHA-256 of the canonical JSON of the union
+        ``own ∪ shared``, ordered by ``path``.
+    Because shared files are digested by every adapter, a shared-library change
+    alters every adapter digest, while changing an adapter's own file alters only
+    that adapter's digest (and the recursive bundle digest).
+
+    If neither ``adapter_dir`` nor ``shared_files`` is given (the frozen V2
+    schema declares no per-adapter directory and no partition), the rule falls
+    back to hashing ALL manifest files for the adapter — a shared change then
+    still alters every adapter digest.
+    """
+    items = list(manifest_files)
+    if adapter_dir and shared_files is not None:
+        own = [
+            item
+            for item in items
+            if str(item.get("path") or "").startswith(f"{adapter_dir}/")
+        ]
+        shared = sorted(shared_files, key=lambda item: str(item.get("path")))
+        subset = sorted(
+            set(_file_entry_key(item) for item in own + shared),
+            key=lambda path: path,
+        )
+    else:
+        # Fallback: digest every file (no per-adapter partition declared).
+        subset = sorted(
+            set(_file_entry_key(item) for item in items), key=lambda path: path
+        )
+    found = {_file_entry_key(item): item for item in items}
+    canonical = [
+        {
+            "path": item.get("path"),
+            "size": item.get("size"),
+            "sha256": item.get("sha256"),
+        }
+        for item in (found[path] for path in subset)
+    ]
+    payload = json.dumps(
+        canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode()
+    return _sha256(payload)
+
+
+def _file_entry_key(item: Mapping[str, Any]) -> str:
+    return str(item.get("path"))
+
+
+def build_runtime_bundle_v2(manifest: Mapping[str, Any]) -> BuiltRuntimeBundleV2:
+    """Build a V2 Runtime Bundle from a validated V2 runtime-manifest.
+
+    Validates the manifest via ``harness_protocol.validate_manifest`` (approved
+    adapter keys, control_transport kinds, model protocols, capability keys),
+    enforces the code-held V2 capability upper bound per adapter, and stamps an
+    independent ``adapter.digest`` per adapter plus a recursive top-level
+    ``bundle_digest`` over ``files``.
+
+    This is Phase-1 machinery and is deliberately NOT wired into the V1
+    ``get_or_create_runtime_bundle``/``bind_runtime_bundle`` path — V1 tasks keep
+    receiving V1 bundles; the V2 bundle is selected later for explicit V2
+    profiles.
+    """
+    validated = validate_manifest(manifest)
+    adapters = validated["adapters"]
+    files = validated["files"]
+
+    bundle_digest = bundle_manifest_digest_from_files(files)
+
+    # Resolve each adapter's declared source directory so shared files (those
+    # not under ANY adapter directory) can be attributed to every adapter.
+    adapter_dirs: dict[str, str | None] = {}
+    for key in adapters:
+        source = adapters[key].get("source") or {}
+        adapter_dir = None
+        if isinstance(source, Mapping):
+            for dir_key in _V2_ADAPTER_DIR_KEYS:
+                candidate = source.get(dir_key)
+                if isinstance(candidate, str) and candidate:
+                    adapter_dir = candidate
+                    break
+        adapter_dirs[key] = adapter_dir
+
+    declared_dirs = [d for d in adapter_dirs.values() if d]
+    if declared_dirs:
+        shared_files = [
+            item
+            for item in files
+            if not any(
+                str(item.get("path") or "").startswith(f"{d}/") for d in declared_dirs
+            )
+        ]
+    else:
+        shared_files = None
+
+    adapter_digests: dict[str, str] = {}
+    stamped_adapters: dict[str, dict[str, Any]] = {}
+    for key in sorted(adapters):
+        adapter = dict(adapters[key])
+        validate_v2_manifest_adapter_capabilities(key, adapter.get("capabilities") or {})
+        digest = adapter_digest_from_manifest_files(
+            files, key, adapter_dir=adapter_dirs[key], shared_files=shared_files
+        )
+        adapter_digests[key] = digest
+        adapter_meta = dict(adapter.get("adapter") or {})
+        adapter_meta["digest"] = digest
+        adapter["adapter"] = adapter_meta
+        stamped_adapters[key] = adapter
+
+    v2_manifest = {
+        "schema": "codify.worker.runtime-bundle/v2",
+        "contract_version": HARNESS_CONTRACT_VERSION_V2,
+        "event_schema": CANONICAL_EVENT_SCHEMA_V2,
+        "adapters": stamped_adapters,
+        "files": list(files),
+        "bundle_digest": bundle_digest,
+    }
+    return BuiltRuntimeBundleV2(
+        digest=bundle_digest,
+        schema="codify.worker.runtime-bundle/v2",
+        contract_version=HARNESS_CONTRACT_VERSION_V2,
+        event_schema=CANONICAL_EVENT_SCHEMA_V2,
+        adapter_digests=adapter_digests,
+        manifest=v2_manifest,
+    )
 
 
 def default_runtime_source_dir() -> Path:

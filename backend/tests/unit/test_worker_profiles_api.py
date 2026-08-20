@@ -108,7 +108,7 @@ def test_worker_profile_requests_reject_invalid_skill_ids(request_type, request_
 @pytest.mark.parametrize(
     "kwargs",
     [
-        {"enabled_harnesses": ["claude", "opencode"], "default_harness_key": "claude"},
+        {"enabled_harnesses": ["claude", "omp"], "default_harness_key": "claude"},
         {"enabled_harnesses": ["claude"], "default_harness_key": "codex"},
         {"enabled_harnesses": [], "default_harness_key": "claude"},
         {"harness_constraints": {"privileged": True}},
