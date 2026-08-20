@@ -1,0 +1,18 @@
+// OpenCode Server SSE event protocol — observed sample (sanitized), OpenCode 1.18.19.
+// Fields that carry session/message/part IDs are redacted to <ID>. Text content redacted to <R>.
+// Endpoint: GET /event (SSE, text/event-stream), Basic auth. Event order as emitted during one
+// asynchronous prompt (session.create -> busy -> ... -> message.part.delta -> session.idle).
+{"id": "<ID>", "type": "server.connected", "properties": {}}
+{"id": "<ID>", "type": "server.heartbeat", "properties": {}}
+{"id": "<ID>", "type": "session.created", "properties": {"sessionID": "<ID>", "info": {"id": "<ID>", "slug": "probe", "version": "1.18.19"}, "messageID": null}}
+{"id": "<ID>", "type": "session.status", "properties": {"sessionID": "<ID>", "status": {"type": "busy"}}}
+{"id": "<ID>", "type": "session.updated", "properties": {"sessionID": "<ID>", "info": {"id": "<ID>", "slug": "probe", "version": "1.18.19"}}}
+{"id": "<ID>", "type": "message.updated", "properties": {"sessionID": "<ID>", "info": {"id": "<ID>", "role": "user", "sessionID": "<ID>"}}}
+{"id": "<ID>", "type": "message.part.updated", "properties": {"sessionID": "<ID>", "part": {"type": "text", "text": "<R>", "messageID": "<ID>", "sessionID": "<ID>"}}}
+{"id": "<ID>", "type": "message.part.delta", "properties": {"sessionID": "<ID>", "messageID": "<ID>", "partID": "<ID>", "delta": "<R>"}}
+{"id": "<ID>", "type": "session.diff", "properties": {"sessionID": "<ID>", "diff": []}}
+{"id": "<ID>", "type": "session.idle", "properties": {"sessionID": "<ID>"}}
+
+// Settled judgment: session.idle (SSE) OR GET /session/status -> session not in {type:busy}.
+// Abort: POST /session/{id}/abort -> 200 {"result": true}; subsequent assistant message carries
+// error:true with a completed timestamp (interrupted -> settled in error state).
