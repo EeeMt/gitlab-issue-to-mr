@@ -505,37 +505,37 @@ class ProviderEndpointFieldSchemaTests(unittest.TestCase):
     def test_accepts_valid_kind_protocol_pairs(self):
         CreateProviderRequest(
             **_valid_create_kwargs(
-                provider_kind="openai_compatible", wire_protocol="openai_responses"
+                provider_kind="openai_compatible", model_protocol="openai_responses"
             )
         )
         CreateProviderRequest(
             **_valid_create_kwargs(
                 provider_kind="openai_compatible",
-                wire_protocol="openai_chat_completions",
+                model_protocol="openai_chat_completions",
             )
         )
         CreateProviderRequest(
             **_valid_create_kwargs(
                 provider_kind="anthropic_compatible",
-                wire_protocol="anthropic_messages",
+                model_protocol="anthropic_messages",
             )
         )
 
     def test_rejects_invalid_kind_protocol_pairs(self):
         for kwargs in (
-            {"provider_kind": "openai_compatible", "wire_protocol": "anthropic_messages"},
-            {"provider_kind": "anthropic_compatible", "wire_protocol": "openai_responses"},
-            {"provider_kind": "unknown_kind", "wire_protocol": "anthropic_messages"},
-            {"provider_kind": "anthropic_compatible", "wire_protocol": "unknown_protocol"},
+            {"provider_kind": "openai_compatible", "model_protocol": "anthropic_messages"},
+            {"provider_kind": "anthropic_compatible", "model_protocol": "openai_responses"},
+            {"provider_kind": "unknown_kind", "model_protocol": "anthropic_messages"},
+            {"provider_kind": "anthropic_compatible", "model_protocol": "unknown_protocol"},
         ):
             with pytest.raises(ValidationError):
                 CreateProviderRequest(**_valid_create_kwargs(**kwargs))
 
     def test_update_validates_kind_protocol(self):
-        UpdateProviderRequest(wire_protocol="openai_responses")
+        UpdateProviderRequest(model_protocol="openai_responses")
         with pytest.raises(ValidationError):
             UpdateProviderRequest(
-                provider_kind="anthropic_compatible", wire_protocol="openai_responses"
+                provider_kind="anthropic_compatible", model_protocol="openai_responses"
             )
 
 
@@ -577,7 +577,7 @@ class ProviderCredentialLifecycleTests(unittest.TestCase):
                 "model": "deepseek-v4-flash",
                 "api_key": "sk-test-secret",
                 "provider_kind": "anthropic_compatible",
-                "wire_protocol": "anthropic_messages",
+                "model_protocol": "anthropic_messages",
             },
         )
         self.assertEqual(resp.status_code, 201, resp.text)

@@ -111,9 +111,9 @@
               </template>
             </n-form-item>
 
-            <n-form-item :label="t('config.providers.wireProtocol')" path="wire_protocol">
+            <n-form-item :label="t('config.providers.wireProtocol')" path="model_protocol">
               <n-select
-                v-model:value="formValue.wire_protocol"
+                v-model:value="formValue.model_protocol"
                 :options="wireProtocolOptions"
                 class="config-form__input"
               />
@@ -249,7 +249,7 @@ const formValue = ref({
   api_key: '',
   system_prompt: '',
   provider_kind: 'anthropic_compatible',
-  wire_protocol: 'anthropic_messages',
+  model_protocol: 'anthropic_messages',
   is_disabled: false
 })
 
@@ -262,7 +262,7 @@ const wireProtocolOptions = computed(() => {
   const protocols = (PROVIDER_KIND_PROTOCOLS[formValue.value.provider_kind] ?? [])
     .filter(protocol => protocol !== 'openai_chat_completions')
   if (
-    formValue.value.wire_protocol === 'openai_chat_completions'
+    formValue.value.model_protocol === 'openai_chat_completions'
     && !protocols.includes('openai_chat_completions')
   ) {
     protocols.push('openai_chat_completions')
@@ -457,7 +457,7 @@ function resetForm() {
     api_key: '',
     system_prompt: '',
     provider_kind: 'anthropic_compatible',
-    wire_protocol: 'anthropic_messages',
+    model_protocol: 'anthropic_messages',
     is_disabled: false
   }
 }
@@ -498,7 +498,7 @@ function openEdit(provider: AIProvider) {
     api_key: '',
     system_prompt: provider.system_prompt || '',
     provider_kind: provider.provider_kind || 'anthropic_compatible',
-    wire_protocol: provider.wire_protocol || 'anthropic_messages',
+    model_protocol: provider.model_protocol || 'anthropic_messages',
     is_disabled: provider.is_disabled
   }
   modalVisible.value = true
@@ -512,8 +512,8 @@ function handleStatusSwitchChange(isEnabled: boolean) {
 function handleProviderKindChange(kind: string) {
   formValue.value.provider_kind = kind
   const protocols = PROVIDER_KIND_PROTOCOLS[kind] ?? []
-  if (!protocols.includes(formValue.value.wire_protocol)) {
-    formValue.value.wire_protocol =
+  if (!protocols.includes(formValue.value.model_protocol)) {
+    formValue.value.model_protocol =
       PROVIDER_KIND_DEFAULT_PROTOCOL[kind] ?? protocols[0] ?? 'anthropic_messages'
   }
 }
@@ -536,7 +536,7 @@ async function handleSave() {
         model: formValue.value.model.trim(),
         max_turns: formValue.value.max_turns,
         provider_kind: formValue.value.provider_kind,
-        wire_protocol: formValue.value.wire_protocol,
+        model_protocol: formValue.value.model_protocol,
         is_disabled: formValue.value.is_disabled
       }
       if (formValue.value.api_key.trim()) {
@@ -557,7 +557,7 @@ async function handleSave() {
         model: formValue.value.model.trim(),
         max_turns: formValue.value.max_turns,
         provider_kind: formValue.value.provider_kind,
-        wire_protocol: formValue.value.wire_protocol,
+        model_protocol: formValue.value.model_protocol,
         is_disabled: formValue.value.is_disabled
       }
       if (formValue.value.api_key.trim()) {

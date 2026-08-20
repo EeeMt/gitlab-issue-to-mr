@@ -169,7 +169,7 @@ def test_harness_options_reports_unavailable_codex():
         enabled_harnesses=["claude", "codex"],
         default_harness_key="claude",
         available_harnesses=["claude"],
-        wire_protocol="anthropic_messages",
+        model_protocol="anthropic_messages",
     )
     by_key = {opt["key"]: opt for opt in options}
     assert by_key["claude"]["selectable"] is True

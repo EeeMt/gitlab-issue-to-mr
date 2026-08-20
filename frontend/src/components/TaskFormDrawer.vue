@@ -780,7 +780,7 @@ import { useTaskSlotCapacity } from '../features/tasks/useTaskSlotCapacity'
 import { useTaskFormSubmission } from '../features/tasks/useTaskFormSubmission'
 
 function providerProtocol(provider: AIProvider): string | null {
-  const protocol = provider.wire_protocol
+  const protocol = provider.model_protocol
   return typeof protocol === 'string' && protocol.trim() ? protocol.trim() : 'anthropic_messages'
 }
 

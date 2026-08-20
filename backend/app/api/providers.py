@@ -20,6 +20,7 @@ from app.core.model_credentials import (
     get_credential,
     soft_retire_credential,
 )
+from app.core.model_endpoints import COMPAT_PROFILES
 from app.database import get_db
 from app.dependencies.auth import require_admin_user
 from app.models import AIProvider, Task, TaskStatus, User
@@ -29,10 +30,10 @@ router = APIRouter()
 
 _NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,99}$")
 
-# Wire-protocol / provider-kind allowlist. Claude consumes anthropic_messages;
+# Model-protocol / provider-kind allowlist. Claude consumes anthropic_messages;
 # Codex consumes openai_responses. Chat Completions is not silently converted.
 VALID_PROVIDER_KINDS = frozenset({"anthropic_compatible", "openai_compatible"})
-VALID_WIRE_PROTOCOLS = frozenset(
+VALID_MODEL_PROTOCOLS = frozenset(
     {"anthropic_messages", "openai_responses", "openai_chat_completions"}
 )
 KIND_PROTOCOLS: dict[str, frozenset[str]] = {
@@ -44,16 +45,16 @@ KIND_PROTOCOLS: dict[str, frozenset[str]] = {
 
 
 def _validate_kind_protocol(
-    provider_kind: str, wire_protocol: str, provider_options: dict
+    provider_kind: str, model_protocol: str, provider_options: dict
 ) -> None:
     if provider_kind not in VALID_PROVIDER_KINDS:
         raise ValueError(f"unknown provider_kind: {provider_kind!r}")
-    if wire_protocol not in VALID_WIRE_PROTOCOLS:
-        raise ValueError(f"unknown wire_protocol: {wire_protocol!r}")
-    if wire_protocol not in KIND_PROTOCOLS[provider_kind]:
+    if model_protocol not in VALID_MODEL_PROTOCOLS:
+        raise ValueError(f"unknown model_protocol: {model_protocol!r}")
+    if model_protocol not in KIND_PROTOCOLS[provider_kind]:
         raise ValueError(
-            f"provider_kind {provider_kind!r} cannot consume wire_protocol "
-            f"{wire_protocol!r}"
+            f"provider_kind {provider_kind!r} cannot consume model_protocol "
+            f"{model_protocol!r}"
         )
     if not isinstance(provider_options, dict):
         raise ValueError("provider_options must be an object")
@@ -70,7 +71,8 @@ class ProviderResponse(BaseModel):
     max_turns: int
     system_prompt: str | None
     provider_kind: str
-    wire_protocol: str
+    model_protocol: str
+    compat_profile: str | None
     provider_driver: str | None
     provider_options: dict
     credential_ref: str | None
@@ -89,7 +91,8 @@ class CreateProviderRequest(BaseModel):
     max_turns: int = 20
     system_prompt: str | None = None
     provider_kind: str = "anthropic_compatible"
-    wire_protocol: str = "anthropic_messages"
+    model_protocol: str = "anthropic_messages"
+    compat_profile: str | None = None
     provider_driver: str | None = None
     provider_options: dict = {}
     is_disabled: bool = False
@@ -97,9 +100,16 @@ class CreateProviderRequest(BaseModel):
     @model_validator(mode="after")
     def validate_kind_protocol(self) -> "CreateProviderRequest":
         _validate_kind_protocol(
-            self.provider_kind, self.wire_protocol, self.provider_options
+            self.provider_kind, self.model_protocol, self.provider_options
         )
         return self
+
+    @field_validator("compat_profile")
+    @classmethod
+    def validate_compat_profile(cls, v: str | None) -> str | None:
+        if v is not None and v not in COMPAT_PROFILES:
+            raise ValueError(f"unknown compat_profile: {v!r}")
+        return v
 
     @field_validator("name")
     @classmethod
@@ -150,22 +160,31 @@ class UpdateProviderRequest(BaseModel):
     system_prompt: str | None = None
     clear_system_prompt: bool = False
     provider_kind: str | None = None
-    wire_protocol: str | None = None
+    model_protocol: str | None = None
+    compat_profile: str | None = None
+    clear_compat_profile: bool = False
     provider_driver: str | None = None
     provider_options: dict | None = None
     is_disabled: bool | None = None
 
     @model_validator(mode="after")
     def validate_kind_protocol(self) -> "UpdateProviderRequest":
-        if self.provider_kind is not None and self.wire_protocol is not None:
+        if self.provider_kind is not None and self.model_protocol is not None:
             _validate_kind_protocol(
-                self.provider_kind, self.wire_protocol, self.provider_options or {}
+                self.provider_kind, self.model_protocol, self.provider_options or {}
             )
         elif self.provider_kind is not None and self.provider_kind not in VALID_PROVIDER_KINDS:
             raise ValueError(f"unknown provider_kind: {self.provider_kind!r}")
-        elif self.wire_protocol is not None and self.wire_protocol not in VALID_WIRE_PROTOCOLS:
-            raise ValueError(f"unknown wire_protocol: {self.wire_protocol!r}")
+        elif self.model_protocol is not None and self.model_protocol not in VALID_MODEL_PROTOCOLS:
+            raise ValueError(f"unknown model_protocol: {self.model_protocol!r}")
         return self
+
+    @field_validator("compat_profile")
+    @classmethod
+    def validate_compat_profile(cls, v: str | None) -> str | None:
+        if v is not None and v not in COMPAT_PROFILES:
+            raise ValueError(f"unknown compat_profile: {v!r}")
+        return v
 
     @field_validator("name")
     @classmethod
@@ -232,9 +251,10 @@ def _serialize_provider(
         "max_turns": provider.max_turns,
         "system_prompt": provider.system_prompt,
         "provider_kind": getattr(provider, "provider_kind", "anthropic_compatible"),
-        "wire_protocol": getattr(provider, "wire_protocol", "anthropic_messages"),
+        "model_protocol": getattr(provider, "model_protocol", "anthropic_messages"),
+        "compat_profile": getattr(provider, "compat_profile", None),
         "compatible_harnesses": compatible_harness_keys(
-            getattr(provider, "wire_protocol", "anthropic_messages")
+            getattr(provider, "model_protocol", "anthropic_messages")
         ),
         "provider_driver": getattr(provider, "provider_driver", None),
         "provider_options": getattr(provider, "provider_options", None) or {},
@@ -342,7 +362,8 @@ async def create_provider(
         max_turns=request.max_turns,
         system_prompt=request.system_prompt,
         provider_kind=request.provider_kind,
-        wire_protocol=request.wire_protocol,
+        model_protocol=request.model_protocol,
+        compat_profile=request.compat_profile,
         provider_driver=request.provider_driver,
         provider_options=request.provider_options,
         credential_ref=credential_ref,
@@ -402,8 +423,12 @@ async def update_provider(
 
     if request.provider_kind is not None:
         provider.provider_kind = request.provider_kind
-    if request.wire_protocol is not None:
-        provider.wire_protocol = request.wire_protocol
+    if request.model_protocol is not None:
+        provider.model_protocol = request.model_protocol
+    if request.compat_profile is not None:
+        provider.compat_profile = request.compat_profile
+    elif request.clear_compat_profile:
+        provider.compat_profile = None
     if request.provider_driver is not None:
         provider.provider_driver = request.provider_driver
     if request.provider_options is not None:

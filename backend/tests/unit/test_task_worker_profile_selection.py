@@ -319,7 +319,7 @@ async def test_create_task_uses_issue_default_harness_when_request_omits_key():
     worker_profile.default_harness_key = "claude"
     worker_profile.enabled_harnesses = ["claude", "codex"]
 
-    provider = _provider_mock(44, wire_protocol="openai_responses")
+    provider = _provider_mock(44, model_protocol="openai_responses")
 
     db = MagicMock()
     db.add = MagicMock()
@@ -642,16 +642,17 @@ async def test_update_task_preserves_worker_metadata_after_refresh_without_snaps
     assert response["worker_image"] == "codify-worker/java21-maven:2026.07"
 
 
-def _provider_mock(id_, wire_protocol, base_url="https://api.example", model="test-model"):
+def _provider_mock(id_, model_protocol, base_url="https://api.example", model="test-model"):
     provider = MagicMock()
     provider.id = id_
     provider.name = f"provider-{id_}"
     provider.base_url = base_url
     provider.model = model
     provider.provider_kind = (
-        "openai_compatible" if wire_protocol.startswith("openai") else "anthropic_compatible"
+        "openai_compatible" if model_protocol.startswith("openai") else "anthropic_compatible"
     )
-    provider.wire_protocol = wire_protocol
+    provider.model_protocol = model_protocol
+    provider.compat_profile = None
     provider.provider_driver = None
     provider.provider_options = {}
     provider.credential_ref = None
@@ -689,7 +690,7 @@ async def test_update_task_rejects_provider_incompatible_with_frozen_harness():
         ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
         harness_key="codex",
         model_endpoint_snapshot={
-            "wire_protocol": "openai_responses",
+            "model_protocol": "openai_responses",
             "base_url": "https://api.deepseek.com",
             "model": "deepseek-v4-flash",
         },
@@ -697,7 +698,7 @@ async def test_update_task_rejects_provider_incompatible_with_frozen_harness():
     )
     task.worker_profile_snapshot = snapshot
 
-    new_provider = _provider_mock(55, wire_protocol="anthropic_messages")
+    new_provider = _provider_mock(55, model_protocol="anthropic_messages")
     issue = MagicMock()
     issue.id = 1
     issue.project_id = 101
@@ -765,7 +766,7 @@ async def test_update_task_provider_change_refreshes_snapshot_endpoint():
         ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
         harness_key="codex",
         model_endpoint_snapshot={
-            "wire_protocol": "openai_responses",
+            "model_protocol": "openai_responses",
             "base_url": "https://api-old.example",
             "model": "old-model",
         },
@@ -775,7 +776,7 @@ async def test_update_task_provider_change_refreshes_snapshot_endpoint():
     task.worker_profile_snapshot = snapshot
 
     new_provider = _provider_mock(
-        55, wire_protocol="openai_responses", base_url="https://api-new.example"
+        55, model_protocol="openai_responses", base_url="https://api-new.example"
     )
     new_provider.model = "new-model"
     new_provider.credential_ref = "mc-rotated-1"
@@ -812,7 +813,7 @@ async def test_update_task_provider_change_refreshes_snapshot_endpoint():
         )
 
     assert task.provider_id == 55
-    assert snapshot.model_endpoint_snapshot["wire_protocol"] == "openai_responses"
+    assert snapshot.model_endpoint_snapshot["model_protocol"] == "openai_responses"
     assert snapshot.model_endpoint_snapshot["base_url"] == "https://api-new.example"
     assert snapshot.model_endpoint_snapshot["model"] == "new-model"
     assert snapshot.credential_ref == "mc-rotated-1"

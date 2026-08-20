@@ -250,27 +250,27 @@ def capability_policy(
     return effective
 
 
-def validate_protocol_compatibility(harness_key: str, wire_protocol: str) -> None:
+def validate_protocol_compatibility(harness_key: str, model_protocol: str) -> None:
     validate_harness_key(harness_key)
-    if wire_protocol not in HARNESS_PROVIDER_PROTOCOLS[harness_key]:
+    if model_protocol not in HARNESS_PROVIDER_PROTOCOLS[harness_key]:
         raise HarnessRegistryError(
-            f"harness {harness_key!r} cannot consume wire protocol {wire_protocol!r}"
+            f"harness {harness_key!r} cannot consume model protocol {model_protocol!r}"
         )
 
 
-def compatible_harness_keys(wire_protocol: str | None) -> list[str]:
-    """Harness keys whose Adapter can consume the given wire protocol.
+def compatible_harness_keys(model_protocol: str | None) -> list[str]:
+    """Harness keys whose Adapter can consume the given model protocol.
 
     Backend-computed reverse lookup so the Frontend never reimplements the
     harness/Endpoint compatibility matrix. A null protocol defaults to the
-    legacy Claude wire protocol, matching endpoint normalization.
+    legacy Claude model protocol, matching endpoint normalization.
     """
-    if not wire_protocol:
-        wire_protocol = "anthropic_messages"
+    if not model_protocol:
+        model_protocol = "anthropic_messages"
     return sorted(
         key
         for key, protocols in HARNESS_PROVIDER_PROTOCOLS.items()
-        if wire_protocol in protocols
+        if model_protocol in protocols
     )
 
 
@@ -408,7 +408,7 @@ def harness_options(
     enabled_harnesses: Iterable[str],
     default_harness_key: str,
     available_harnesses: Iterable[str] = ("claude",),
-    wire_protocol: str | None = None,
+    model_protocol: str | None = None,
 ) -> list[dict[str, Any]]:
     """Compatibility-return structure consumed directly by the Frontend.
 
@@ -427,9 +427,9 @@ def harness_options(
         disabled_reason: str | None = None
         if key not in available:
             disabled_reason = f"{DISPLAY_NAMES[key]} adapter is not available"
-        elif wire_protocol is not None:
+        elif model_protocol is not None:
             try:
-                validate_protocol_compatibility(key, wire_protocol)
+                validate_protocol_compatibility(key, model_protocol)
             except HarnessRegistryError as exc:
                 disabled_reason = str(exc)
         if key == "codex":

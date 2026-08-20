@@ -135,7 +135,7 @@ def serialize_task(*args, **kwargs) -> dict:
                     "image_digest": snapshot.image_digest,
                     "runtime_bundle_digest": snapshot.runtime_bundle_digest,
                     "endpoint_protocol": (
-                        (snapshot.model_endpoint_snapshot or {}).get("wire_protocol")
+                        (snapshot.model_endpoint_snapshot or {}).get("model_protocol")
                         if snapshot.model_endpoint_snapshot
                         else None
                     ),

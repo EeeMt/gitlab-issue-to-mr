@@ -198,7 +198,7 @@ def _build_container_env_with_settings(
                 "OPENAI_API_KEY": api_key,
                 "OPENAI_MODEL": model,
             }
-            if (getattr(provider, "wire_protocol", "") or "").startswith("openai")
+            if (getattr(provider, "model_protocol", "") or "").startswith("openai")
             else {}
         ),
         "TASK_TIMEOUT": str(settings.task_timeout),

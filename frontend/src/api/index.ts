@@ -189,7 +189,8 @@ export interface AIProvider {
   base_url: string
   api_key_configured: boolean
   provider_kind?: string
-  wire_protocol?: string
+  model_protocol?: string
+  compat_profile?: string | null
   compatible_harnesses?: string[]
   provider_driver?: string | null
   provider_options?: Record<string, unknown>
@@ -212,7 +213,8 @@ export interface CreateProviderRequest {
   max_turns?: number
   system_prompt?: string
   provider_kind?: string
-  wire_protocol?: string
+  model_protocol?: string
+  compat_profile?: string | null
   is_disabled?: boolean
 }
 
@@ -226,7 +228,8 @@ export interface UpdateProviderRequest {
   system_prompt?: string | null
   clear_system_prompt?: boolean
   provider_kind?: string
-  wire_protocol?: string
+  model_protocol?: string
+  compat_profile?: string | null
   is_disabled?: boolean
 }
 

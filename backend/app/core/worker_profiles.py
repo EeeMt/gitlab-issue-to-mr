@@ -22,6 +22,10 @@ from app.core.docker_client import (
     canonicalize_docker_host,
     resolve_docker_connection,
 )
+from app.core.harness_options import (
+    deep_merge_options,
+    validate_namespaced_options,
+)
 from app.core.harness_registry import capability_policy
 from app.core.skills import (
     SkillValidationError,
@@ -581,6 +585,20 @@ async def resolve_provider_for_issue(
     return provider
 
 
+def _freeze_harness_options(profile: WorkerProfile) -> dict[str, Any]:
+    """Validate and deep-merge the Profile's namespaced harness_options.
+
+    Merges the Profile default with any Task override (none is plumbed through
+    task creation yet) and returns a deterministically-ordered payload frozen
+    into ``harness_config_snapshot["options"]``.  Invalid typed option values on
+    a Profile are rejected at snapshot time so a misconfigured Profile cannot
+    silently reach a Task.
+    """
+    raw = getattr(profile, "harness_options", None) or {}
+    validated = validate_namespaced_options(raw)
+    return deep_merge_options(validated, None)
+
+
 def snapshot_from_profile(
     task: Task,
     profile: WorkerProfile,
@@ -674,6 +692,7 @@ def snapshot_from_profile(
             "capabilities": effective_capabilities,
             "sandbox_mode": effective_capabilities.get("sandbox_mode"),
             "constraints": dict(getattr(profile, "harness_constraints", None) or {}),
+            "options": _freeze_harness_options(profile),
         },
         image_digest=getattr(profile, "image_digest", None),
         model_endpoint_snapshot=endpoint.as_snapshot() if endpoint is not None else None,

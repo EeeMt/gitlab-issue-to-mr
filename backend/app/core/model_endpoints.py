@@ -15,7 +15,15 @@ from typing import Any
 
 from app.core.harness_registry import validate_protocol_compatibility
 
-_FINGERPRINT_VERSION = "v1"
+# v2: compatibility-meaningful inputs changed (model_protocol replaces the
+# legacy protocol name, and compat_profile was added), so fingerprints must
+# not mix with v1 values.
+_FINGERPRINT_VERSION = "v2"
+
+# Backend allowlist for compat_profile. This describes known differences of
+# OpenAI-compatible services without creating a new protocol name per gateway.
+# Unknown values are rejected at Task creation (see task_creation_service).
+COMPAT_PROFILES = frozenset({"openai-compatible"})
 
 
 @dataclass(frozen=True)
@@ -25,7 +33,8 @@ class ModelEndpoint:
     base_url: str
     model: str
     provider_kind: str
-    wire_protocol: str
+    model_protocol: str
+    compat_profile: str | None = None
     provider_driver: str | None = None
     provider_options: dict[str, Any] = field(default_factory=dict)
     credential_ref: str | None = None
@@ -42,7 +51,8 @@ class ModelEndpoint:
             "base_url": self.base_url,
             "model": self.model,
             "provider_kind": self.provider_kind,
-            "wire_protocol": self.wire_protocol,
+            "model_protocol": self.model_protocol,
+            "compat_profile": self.compat_profile,
             "provider_driver": self.provider_driver,
             "provider_options": self.provider_options,
             "credential_ref": self.credential_ref,
@@ -63,13 +73,17 @@ def normalize_endpoint(provider: Any) -> ModelEndpoint:
     credential_ref = getattr(provider, "credential_ref", None)
     if not isinstance(credential_ref, str):
         credential_ref = None
+    compat_profile = getattr(provider, "compat_profile", None)
+    if not isinstance(compat_profile, str) or not compat_profile:
+        compat_profile = None
     return ModelEndpoint(
         id=getattr(provider, "id", None),
         name=_attr_str(provider, "name", ""),
         base_url=_attr_str(provider, "base_url", ""),
         model=_attr_str(provider, "model", ""),
         provider_kind=_attr_str(provider, "provider_kind", "anthropic_compatible"),
-        wire_protocol=_attr_str(provider, "wire_protocol", "anthropic_messages"),
+        model_protocol=_attr_str(provider, "model_protocol", "anthropic_messages"),
+        compat_profile=compat_profile,
         provider_driver=_attr_str(provider, "provider_driver", None),
         provider_options=provider_options,
         credential_ref=credential_ref,
@@ -85,7 +99,8 @@ def endpoint_fingerprint(endpoint: ModelEndpoint) -> str:
     """
     payload = {
         "provider_kind": endpoint.provider_kind,
-        "wire_protocol": endpoint.wire_protocol,
+        "model_protocol": endpoint.model_protocol,
+        "compat_profile": endpoint.compat_profile,
         "provider_driver": endpoint.provider_driver,
         "base_url": endpoint.base_url,
         "model": endpoint.model,
@@ -102,4 +117,4 @@ def ensure_harness_protocol_compatibility(
     harness_key: str, endpoint: ModelEndpoint
 ) -> None:
     """Reject a harness/endpoint pairing that cannot speak to each other."""
-    validate_protocol_compatibility(harness_key, endpoint.wire_protocol)
+    validate_protocol_compatibility(harness_key, endpoint.model_protocol)

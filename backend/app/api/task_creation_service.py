@@ -35,6 +35,7 @@ from app.core.issue_task_order import (
     validate_schedule_time_locked,
 )
 from app.core.model_endpoints import (
+    COMPAT_PROFILES,
     ensure_harness_protocol_compatibility,
     normalize_endpoint,
 )
@@ -461,6 +462,10 @@ async def create_task_record(
         validate_enabled_harnesses(enabled_harnesses, default_harness_key=harness_key)
         endpoint = normalize_endpoint(provider)
         ensure_harness_protocol_compatibility(harness_key, endpoint)
+        if endpoint.compat_profile is not None and endpoint.compat_profile not in COMPAT_PROFILES:
+            raise HarnessRegistryError(
+                f"unknown compat_profile: {endpoint.compat_profile!r}"
+            )
     except (HarnessRegistryError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,

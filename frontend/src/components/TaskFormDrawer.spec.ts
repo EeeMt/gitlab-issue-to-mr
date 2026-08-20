@@ -1254,8 +1254,8 @@ describe('TaskFormDrawer', () => {
 
     it('filters providers by harness protocol and auto-selects a compatible provider', async () => {
       mockApi.getProviders.mockResolvedValue([
-        { id: 6, name: 'ds', model: 'deepseek-v4-flash', is_default: true, is_disabled: false, wire_protocol: 'anthropic_messages', compatible_harnesses: ['claude'] },
-        { id: 7, name: 'ds-openai', model: 'deepseek-v4-flash', is_default: false, is_disabled: false, wire_protocol: 'openai_responses', compatible_harnesses: ['codex'] },
+        { id: 6, name: 'ds', model: 'deepseek-v4-flash', is_default: true, is_disabled: false, model_protocol: 'anthropic_messages', compatible_harnesses: ['claude'] },
+        { id: 7, name: 'ds-openai', model: 'deepseek-v4-flash', is_default: false, is_disabled: false, model_protocol: 'openai_responses', compatible_harnesses: ['codex'] },
       ])
       mockApi.getWorkerProfiles.mockResolvedValue([
         { ...mockWorkerProfiles[0], enabled_harnesses: ['claude', 'codex'] },
@@ -1288,7 +1288,7 @@ describe('TaskFormDrawer', () => {
 
     it('disables a harness when no enabled provider uses its required protocol', async () => {
       mockApi.getProviders.mockResolvedValue([
-        { id: 6, name: 'ds', model: 'deepseek-v4-flash', is_default: true, is_disabled: false, wire_protocol: 'anthropic_messages', compatible_harnesses: ['claude'] },
+        { id: 6, name: 'ds', model: 'deepseek-v4-flash', is_default: true, is_disabled: false, model_protocol: 'anthropic_messages', compatible_harnesses: ['claude'] },
       ])
       mockApi.getWorkerProfiles.mockResolvedValue([
         { ...mockWorkerProfiles[0], enabled_harnesses: ['claude', 'codex'] },
@@ -1309,7 +1309,7 @@ describe('TaskFormDrawer', () => {
     it('treats legacy providers without a wire protocol as Anthropic', async () => {
       mockApi.getProviders.mockResolvedValue([
         { id: 6, name: 'legacy-ds', model: 'deepseek-v4-flash', is_default: true, is_disabled: false, compatible_harnesses: ['claude'] },
-        { id: 7, name: 'ds-openai', model: 'deepseek-v4-flash', is_default: false, is_disabled: false, wire_protocol: 'openai_responses', compatible_harnesses: ['codex'] },
+        { id: 7, name: 'ds-openai', model: 'deepseek-v4-flash', is_default: false, is_disabled: false, model_protocol: 'openai_responses', compatible_harnesses: ['codex'] },
       ])
       mockApi.getWorkerProfiles.mockResolvedValue([
         { ...mockWorkerProfiles[0], enabled_harnesses: ['claude', 'codex'] },
@@ -1324,8 +1324,8 @@ describe('TaskFormDrawer', () => {
 
     it('restores a manually selected provider after switching harness back', async () => {
       mockApi.getProviders.mockResolvedValue([
-        { id: 6, name: 'ds', model: 'deepseek-v4-flash', is_default: true, is_disabled: false, wire_protocol: 'anthropic_messages', compatible_harnesses: ['claude'] },
-        { id: 7, name: 'ds-openai', model: 'deepseek-v4-flash', is_default: false, is_disabled: false, wire_protocol: 'openai_responses', compatible_harnesses: ['codex'] },
+        { id: 6, name: 'ds', model: 'deepseek-v4-flash', is_default: true, is_disabled: false, model_protocol: 'anthropic_messages', compatible_harnesses: ['claude'] },
+        { id: 7, name: 'ds-openai', model: 'deepseek-v4-flash', is_default: false, is_disabled: false, model_protocol: 'openai_responses', compatible_harnesses: ['codex'] },
       ])
       mockApi.getWorkerProfiles.mockResolvedValue([
         { ...mockWorkerProfiles[0], enabled_harnesses: ['claude', 'codex'] },

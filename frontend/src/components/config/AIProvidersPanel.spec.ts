@@ -206,10 +206,10 @@ describe('AIProvidersPanel', () => {
 
     await wrapper.vm.openCreate()
     expect(wrapper.vm.formValue.provider_kind).toBe('anthropic_compatible')
-    expect(wrapper.vm.formValue.wire_protocol).toBe('anthropic_messages')
+    expect(wrapper.vm.formValue.model_protocol).toBe('anthropic_messages')
 
     wrapper.vm.handleProviderKindChange('openai_compatible')
-    expect(wrapper.vm.formValue.wire_protocol).toBe('openai_responses')
+    expect(wrapper.vm.formValue.model_protocol).toBe('openai_responses')
     expect(wrapper.vm.wireProtocolOptions.map(option => option.value))
       .toEqual(['openai_responses'])
   })
@@ -230,13 +230,13 @@ describe('AIProvidersPanel', () => {
       api_key_configured: true,
       system_prompt: null,
       provider_kind: 'openai_compatible',
-      wire_protocol: 'openai_chat_completions',
+      model_protocol: 'openai_chat_completions',
       is_default: false,
       is_disabled: false
     }
 
     await wrapper.vm.openEdit(provider)
-    expect(wrapper.vm.formValue.wire_protocol).toBe('openai_chat_completions')
+    expect(wrapper.vm.formValue.model_protocol).toBe('openai_chat_completions')
     expect(wrapper.vm.wireProtocolOptions.map(option => option.value))
       .toEqual(['openai_responses', 'openai_chat_completions'])
   })
@@ -259,7 +259,7 @@ describe('AIProvidersPanel', () => {
 
     expect(mockApi.createProvider).toHaveBeenCalledWith(expect.objectContaining({
       provider_kind: 'openai_compatible',
-      wire_protocol: 'openai_responses'
+      model_protocol: 'openai_responses'
     }))
   })
 
@@ -273,7 +273,7 @@ describe('AIProvidersPanel', () => {
       api_key_configured: true,
       system_prompt: null,
       provider_kind: 'openai_compatible',
-      wire_protocol: 'openai_responses',
+      model_protocol: 'openai_responses',
       is_default: false,
       is_disabled: false
     }
@@ -286,7 +286,7 @@ describe('AIProvidersPanel', () => {
 
     await wrapper.vm.openEdit(provider)
     expect(wrapper.vm.formValue.provider_kind).toBe('openai_compatible')
-    expect(wrapper.vm.formValue.wire_protocol).toBe('openai_responses')
+    expect(wrapper.vm.formValue.model_protocol).toBe('openai_responses')
   })
 
   it('disables actions that would violate provider status rules', async () => {

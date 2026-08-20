@@ -91,7 +91,7 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
         self,
         provider_id: int,
         *,
-        wire_protocol: str = "anthropic_messages",
+        model_protocol: str = "anthropic_messages",
         provider_kind: str = "anthropic_compatible",
     ) -> AIProvider:
         return AIProvider(
@@ -101,7 +101,7 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
             api_key="secret",
             model="test-model",
             provider_kind=provider_kind,
-            wire_protocol=wire_protocol,
+            model_protocol=model_protocol,
             is_default=provider_id == 3,
             is_disabled=False,
         )
@@ -142,7 +142,7 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
         default_provider_id=3,
         worker_profile_id=2,
         latest_task_provider_id=3,
-        provider_wire_protocol: str | None = None,
+        provider_model_protocol: str | None = None,
         provider_provider_kind: str | None = None,
         harness_key: str = "claude",
         enabled_harnesses: list[str] | None = None,
@@ -152,7 +152,7 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
             [
                 self._provider(
                     provider_id,
-                    wire_protocol=provider_wire_protocol or "anthropic_messages",
+                    model_protocol=provider_model_protocol or "anthropic_messages",
                     provider_kind=provider_provider_kind or "anthropic_compatible",
                 )
                 for provider_id in sorted(provider_ids)
@@ -398,7 +398,7 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
                 default_provider_id=22,
                 worker_profile_id=11,
                 latest_task_provider_id=3,
-                provider_wire_protocol="anthropic_messages",
+                provider_model_protocol="anthropic_messages",
                 harness_key="codex",
                 enabled_harnesses=["codex"],
             )
