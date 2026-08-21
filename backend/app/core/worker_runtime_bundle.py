@@ -282,6 +282,10 @@ _ADAPTER_DIGEST_FILES = (
     "deploy/worker-entrypoint/harness/adapters/pi_events.py",
     "deploy/worker-entrypoint/harness/adapters/pi_bridge.py",
     "deploy/worker-entrypoint/legacy/pi-run.sh",
+    "deploy/worker-entrypoint/harness/adapters/opencode.sh",
+    "deploy/worker-entrypoint/harness/adapters/opencode_events.py",
+    "deploy/worker-entrypoint/harness/adapters/opencode_bridge.py",
+    "deploy/worker-entrypoint/legacy/opencode-run.sh",
 )
 
 

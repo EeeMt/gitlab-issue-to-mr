@@ -327,10 +327,13 @@ def validate_runtime_bundle_manifest(manifest: dict[str, Any]) -> None:
         capabilities = adapter.get("capabilities")
         if capabilities is not None:
             validate_adapter_capabilities(key, capabilities)
-        protocols = adapter.get("provider_protocols")
+        # The V1 host manifest uses ``provider_protocols``; the v2-ready
+        # ``opencode`` block carries ``model_protocols`` instead. Accept either
+        # so a v2-ready block validates in place without a model_protocols copy.
+        protocols = adapter.get("provider_protocols", adapter.get("model_protocols"))
         if not isinstance(protocols, list) or not protocols:
             raise HarnessRegistryError(
-                f"adapter {key!r} has no provider_protocols"
+                f"adapter {key!r} has no provider_protocols/model_protocols"
             )
         allowed = HARNESS_PROVIDER_PROTOCOLS[key]
         for protocol in protocols:

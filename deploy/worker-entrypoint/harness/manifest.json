@@ -52,6 +52,35 @@
         "follow_up": true,
         "sandbox_mode": "container-boundary"
       }
+    },
+    "opencode": {
+      "version": "2.0.0",
+      "cli_version": "1.18.19",
+      "cli_version_range": ">=1.18.19 <1.19.0",
+      "options_schema": "opencode/v1",
+      "support_tier": "first-class",
+      "source": {
+        "repository": "https://github.com/sst/opencode",
+        "license": "Apache-2.0",
+        "artifact_version": "1.18.19",
+        "artifact_sha256": "<computed at freeze>"
+      },
+      "adapter": { "version": "2.0.0", "digest": "<computed at bundle build>" },
+      "control_transport": { "kind": "server_http", "protocol": "opencode-server" },
+      "model_protocols": ["anthropic_messages", "openai_responses", "openai_chat_completions"],
+      "capabilities": {
+        "resume": true,
+        "task_skills": true,
+        "max_turns": false,
+        "usage_tokens": true,
+        "usage_cost": true,
+        "run_text": false,
+        "codegraph": false,
+        "steering": false,
+        "follow_up": false,
+        "sandbox_mode": "container-boundary"
+      },
+      "files": []
     }
   }
 }

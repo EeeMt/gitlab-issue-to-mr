@@ -67,7 +67,9 @@ def test_v2_fixture_validates_and_replays_offline(path: Path):
         assert set(normalized["harness"]["model_protocols"]) == expected["protocols"]
     replay = replay_events(events)
     assert replay.harness_key == harness
-    assert replay.terminal_type == "run.completed"
+    # A fixture may end in either task terminal (success vs harness failure);
+    # the replay terminal must match the fixture's final event type.
+    assert replay.terminal_type == events[-1]["type"]
     # Control events only appear for command-capable harnesses.
     control_types = {e["type"] for e in events if e["type"] in CONTROL_EVENT_TYPES}
     if expected["control"]:
