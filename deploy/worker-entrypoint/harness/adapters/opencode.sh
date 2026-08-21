@@ -111,7 +111,7 @@ opencode_adapter_prepare_config() {
             --arg model "${model}" \
             --arg base_url "${base_url}" \
             --arg npm "${provider_npm}" \
-            '{provider:{codify:{npm:$npm,options:{baseURL:$base_url,apiKey:"{env:OPENCODE_SNAPSHOT_KEY}"},models:{($model):{id:$model,provider:"codify"}}}}}' \
+            '{provider:{codify:{npm:$npm,options:{baseURL:$base_url,apiKey:"{env:OPENCODE_SNAPSHOT_KEY}"},models:{($model):{id:$model,provider:{id:"codify"}}}}}}' \
             > "${config_dir}/opencode.json"
         chown "${CODIFY_RUN_UID:-1000}:${CODIFY_RUN_GID:-1000}" "${config_dir}/opencode.json" 2>/dev/null || true
     fi

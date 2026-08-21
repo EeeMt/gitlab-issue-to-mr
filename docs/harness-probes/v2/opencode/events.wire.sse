@@ -1,0 +1,15 @@
+// OpenCode Server SSE wire fixture — captured from a live `opencode serve` (1.18.19)
+// via `curl -s -N -u opencode:<pw> http://127.0.0.1:PORT/event` on 2026-08-21.
+// Format: single-line `data: {json}` per event, terminated by a blank line.
+// This is the actual `/event` wire framing the bridge's parse_sse must consume.
+// First frame is verbatim (id evt_0243db697001U5L8xei9l1Hum4); the remaining
+// frames are representative session-settlement events (ids redacted to <ID>).
+
+data: {"id":"evt_0243db697001U5L8xei9l1Hum4","type":"server.connected","properties":{}}
+
+data: {"id":"<ID>","type":"session.status","properties":{"sessionID":"<ID>","status":{"type":"busy"}}}
+
+data: {"id":"<ID>","type":"message.part.delta","properties":{"sessionID":"<ID>","messageID":"<ID>","partID":"<ID>","delta":"<R>"}}
+
+data: {"id":"<ID>","type":"session.idle","properties":{"sessionID":"<ID>"}}
+

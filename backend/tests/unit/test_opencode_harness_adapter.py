@@ -278,6 +278,56 @@ def test_opencode_parse_sse_unwraps_wire_frame(tmp_path):
     assert events[1]["properties"] == {"sessionID": "ses-1"}
 
 
+def test_opencode_parse_sse_data_frames_from_11819(tmp_path):
+    """1.18.19 /event emits single-line ``data: {json}`` frames (probe evidence).
+
+    Each event is ``data: {\"id\",\"type\",\"properties\"}`` terminated by a blank
+    line. parse_sse must surface server.connected so the bridge can subscribe
+    before prompt (O2 regression).
+    """
+    bridge = _load_bridge()
+    wire = (
+        'data: {"id":"ev-1","type":"server.connected","properties":{}}\n'
+        '\n'
+        'data: {"id":"ev-2","type":"session.idle","properties":{"sessionID":"ses-1"}}\n'
+        '\n'
+    )
+    events = list(bridge.parse_sse(wire))
+    assert len(events) == 2
+    assert events[0]["id"] == "ev-1"
+    assert events[0]["type"] == "server.connected"
+    assert events[0].get("properties", {}) == {}
+    assert events[1]["type"] == "session.idle"
+    assert events[1]["properties"] == {"sessionID": "ses-1"}
+
+
+def test_opencode_parse_sse_data_frame_split_across_chunks(tmp_path):
+    """A data: event split at a chunk boundary surfaces exactly once (no dup)."""
+    bridge = _load_bridge()
+    first_chunk = 'data: {"id":"ev-1","type":"server.connected","prop'
+    second_chunk = 'erties":{}}\n\n'
+    events = list(bridge.parse_sse(first_chunk))
+    assert events == []
+    events = list(bridge.parse_sse(first_chunk + second_chunk))
+    assert len(events) == 1
+    assert events[0]["type"] == "server.connected"
+
+
+def test_opencode_parse_sse_from_captured_11819_wire(tmp_path):
+    """The live-captured /event fixture (events.wire.sse) parses at churn.
+
+    First frame is verbatim from a real 1.18.19 server.connected event; the
+    bridge's subscription waits on exactly this record before prompting (O2).
+    """
+    bridge = _load_bridge()
+    wire = (PROBE_ROOT / "events.wire.sse").read_text(encoding="utf-8")
+    records = list(bridge.parse_sse(wire))
+    assert records[0]["id"] == "evt_0243db697001U5L8xei9l1Hum4"
+    assert records[0]["type"] == "server.connected"
+    assert records[0].get("properties", {}) == {}
+    assert any(r["type"] == "session.idle" for r in records)
+
+
 def test_opencode_client_sets_basic_auth(tmp_path):
     bridge = _load_bridge()
     client = bridge.OpenCodeServerClient(port=8099, password="pw", username="opencode")
@@ -490,6 +540,11 @@ def test_opencode_prepare_config_writes_snapshot_endpoint(tmp_path):
     assert provider["options"]["baseURL"] == "https://api.deepseek.com/anthropic"
     assert provider["options"]["apiKey"] == "{env:OPENCODE_SNAPSHOT_KEY}"
     assert "sk-snapshot-secret" not in config.read_text(encoding="utf-8")
+    # OpenCode 1.18.19 config schema: models.<id>.provider must be an object
+    # {id: <provider-id>}, not a bare string (ConfigInvalidError otherwise).
+    model = provider["models"]["deepseek-v4-flash"]
+    assert model["id"] == "deepseek-v4-flash"
+    assert model["provider"] == {"id": "codify"}
     # A free loopback port was probed and a Task password generated.
     assert result.stdout.strip().isdigit()
 

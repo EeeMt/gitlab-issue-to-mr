@@ -67,14 +67,16 @@ def negotiate_capabilities(harness_key: str) -> dict:
 def parse_sse(raw: str) -> Iterator[dict]:
     """Unwrap a ``text/event-stream`` payload into ``{id,type,properties}``.
 
-    OpenCode Server writes each event with a JSON-compatible field set, e.g.::
+    OpenCode Server 1.18.19 writes each event as a single-line ``data:`` frame
+    carrying the whole JSON record, e.g.::
 
-        id: <event-id>
-        type: session.idle
-        properties: {"sessionID":"ses_..."}
+        data: {"id":"<id>","type":"session.idle","properties":{"sessionID":"ses_..."}}
 
-    (a blank line terminates an event). Any field may be absent; ``properties``
-    defaults to ``{}``. This is the only SSE knowledge the adapter needs.
+    (a blank line terminates each event). Legacy field-line frames (``id:`` /
+    ``type:`` / ``properties:``) are also accepted for backward compatibility.
+    Any field may be absent; ``properties`` defaults to ``{}`` in the caller.
+    Only blank-line-terminated events are yielded so a mid-stream chunk that
+    splits an event is never emitted (and re-emitted) twice.
     """
     event: dict = {}
     for line in raw.splitlines():
@@ -82,6 +84,27 @@ def parse_sse(raw: str) -> Iterator[dict]:
             if event:
                 yield event
                 event = {}
+            continue
+        if line.startswith("data:"):
+            value = line[5:].strip()
+            if not value:
+                continue
+            try:
+                record = json.loads(value)
+            except json.JSONDecodeError:
+                record = None
+            if isinstance(record, dict):
+                # The data payload is the full event record on the 1.18.19 wire;
+                # merge it so the {id,type,properties} shape is preserved.
+                if record.get("id") is not None:
+                    event["id"] = record["id"]
+                if record.get("type") is not None:
+                    event["type"] = record["type"]
+                properties = record.get("properties")
+                if isinstance(properties, dict):
+                    event["properties"] = properties
+                continue
+            event.setdefault("properties", {})
             continue
         if ":" in line:
             key, _, value = line.partition(":")
@@ -98,8 +121,6 @@ def parse_sse(raw: str) -> Iterator[dict]:
                 event["properties"] = json.loads(value)
             except json.JSONDecodeError:
                 event["properties"] = {}
-    if event:
-        yield event
 
 
 class OpenCodeServerClient:

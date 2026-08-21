@@ -42,6 +42,7 @@ COPY --from=closure-builder /tmp/runtime-store-path /tmp/runtime-store-path
 COPY --from=closure-builder /tmp/nixpkgs-version /tmp/nixpkgs-version
 COPY --from=closure-builder /tmp/nixpkgs-revision /tmp/nixpkgs-revision
 COPY deploy/entrypoint.worker.sh /worker-kit/entrypoint.sh
+COPY deploy/ci-claude.sh /worker-kit/ci-claude.sh
 COPY deploy/worker-entrypoint/ /worker-kit/worker-entrypoint/
 COPY deploy/scripts/validate_mermaid_summary.mjs /worker-kit/validate_mermaid_summary.mjs
 RUN runtime_store="$(cat /tmp/runtime-store-path)" \
@@ -56,9 +57,21 @@ RUN runtime_store="$(cat /tmp/runtime-store-path)" \
       --arg nixpkgs_revision "${nixpkgs_revision}" \
       '{schema_version: 2, kit_version: $version, platform: $platform, runtime_bin: $runtime_bin, bash: $bash, entrypoint: "/opt/codify-kit/entrypoint.sh", runtime_compatibility: {harness_contracts:["codify.worker.harness/v2","codify.worker.harness/v1"], event_schemas:["codify.worker.event/v2","codify.worker.event/v1"], bootstrap_version:"1.0.0"}, cli_runtimes:{pi:{source:"image",minimum_version:"0.84.2"},opencode:{source:"image",minimum_version:"1.18.19"},claude:{source:"image",minimum_version:"2.1.153"},codex:{source:"image",minimum_version:"0.146.0"}}, components: {nixpkgs: $nixpkgs_version, nixpkgs_revision: $nixpkgs_revision}}' \
       > /worker-kit/manifest.json \
-    && chmod 755 /worker-kit/launcher /worker-kit/bin/* /worker-kit/entrypoint.sh \
+    && chmod 755 /worker-kit/launcher /worker-kit/bin/codify-run-as /worker-kit/entrypoint.sh \
+      /worker-kit/ci-claude.sh \
+      /worker-kit/worker-entrypoint/legacy/pi-run.sh \
+      /worker-kit/worker-entrypoint/legacy/opencode-run.sh \
+      /worker-kit/worker-entrypoint/legacy/codex-run.sh \
+      /worker-kit/worker-entrypoint/harness/adapters/pi.sh \
+      /worker-kit/worker-entrypoint/harness/adapters/opencode.sh \
+      /worker-kit/worker-entrypoint/harness/adapters/claude.sh \
+      /worker-kit/worker-entrypoint/harness/adapters/codex.sh \
     && test -d /worker-kit/nix/store \
     && test -s /worker-kit/manifest.json \
+    && test -x /worker-kit/ci-claude.sh \
+    && test -x /worker-kit/worker-entrypoint/legacy/pi-run.sh \
+    && test -x /worker-kit/worker-entrypoint/legacy/opencode-run.sh \
+    && test -x /worker-kit/worker-entrypoint/legacy/codex-run.sh \
     && test -d /worker-kit/worker-entrypoint/harness/adapters \
     && test -s /worker-kit/worker-entrypoint/harness/manifest.json
 
