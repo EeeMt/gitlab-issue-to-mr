@@ -12,9 +12,11 @@ import pytest
 
 from app.core.harness_protocol import (
     CANONICAL_EVENT_SCHEMA_V2,
+    CANONICAL_RESULT_SCHEMA_V2,
     replay_events,
     validate_event,
     validate_event_v2,
+    validate_result_v2,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -523,14 +525,20 @@ def test_codex_v2_contract_emits_v2_envelope_and_result(tmp_path):
     assert usage["output_tokens"] == 4
     assert by_type["harness.completed"]["payload"]["session_id"] == "6ad6e4f5-6205-8e2a-9b3c-1a2b3c4d5e6f"
 
-    # The V2 result keeps the flat V1-compatible shape with the v2 schema
-    # string, matching the accepted pi/opencode/claude level (the frozen
-    # nested `harness` result block is a Phase 5 hard-switch target).
+    # The V2 result carries the nested `harness` block matching the event
+    # envelope, so the frozen result validator accepts it (Phase 5 hard-switch
+    # closes the neither-nor gap: flat V2 results are now rejected).
     result = json.loads((runtime_dir / "harness-result.json").read_text(encoding="utf-8"))
-    assert result["schema"] == "codify.worker.result/v2"
-    assert result["harness_key"] == "codex"
+    assert result["schema"] == CANONICAL_RESULT_SCHEMA_V2
+    assert result["harness"]["key"] == "codex"
+    assert result["harness"]["control_transport"] == {
+        "kind": "cli_jsonl",
+        "protocol": "codex-jsonl",
+    }
+    assert result["harness"]["model_protocols"] == ["openai_responses"]
     assert result["session_id"] == "6ad6e4f5-6205-8e2a-9b3c-1a2b3c4d5e6f"
     assert result["result"] == "done"
+    assert validate_result_v2(result)["schema"] == CANONICAL_RESULT_SCHEMA_V2
 
 
 def test_codex_v2_metadata_reports_v2_contract(tmp_path):

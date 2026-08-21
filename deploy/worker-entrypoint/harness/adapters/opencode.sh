@@ -163,14 +163,18 @@ opencode_adapter_normalize_result() {
     local result_file="$1"
     local authoritative="${CODIFY_HARNESS_RESULT_FILE:-${result_file}}"
     [ -s "${authoritative}" ] || return 1
+    # OpenCode is a V2-only adapter: the harness identity is nested under `harness`.
     jq -e \
         --arg harness_key opencode \
         --arg adapter_version "${CODIFY_ADAPTER_VERSION}" \
         --arg cli_version "${CODIFY_CLI_VERSION}" \
         '.schema == "codify.worker.result/v2"
-         and .harness_key == $harness_key
-         and .adapter_version == $adapter_version
-         and .cli_version == $cli_version
+         and .harness.key == $harness_key
+         and .harness.adapter_version == $adapter_version
+         and .harness.cli_version == $cli_version
+         and .harness.control_transport.kind != null
+         and (.harness.model_protocols | type == "array")
+         and (.harness.model_protocols | length > 0)
          and (.status | IN("completed", "failed", "cancelled", "protocol_error"))
          and (.success | type == "boolean")
          and (.usage | type == "object")

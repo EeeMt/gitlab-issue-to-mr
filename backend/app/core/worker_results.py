@@ -14,6 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import WORKER_RUNTIME_ARCHIVE_MAX_BYTES
 from app.core.change_stats import validate_change_statistics
+from app.core.harness_protocol import (
+    CANONICAL_RESULT_SCHEMA_V2,
+    HarnessProtocolError,
+    validate_result_v2,
+)
 from app.core.task_event_archive import archive_bundle_name
 from app.core.usage_limits import upsert_task_usage_ledger
 from app.core.utcnow import utcnow
@@ -21,6 +26,8 @@ from app.models import Issue, Task, TaskLog, TaskRunArchive, TaskStatus
 
 logger = logging.getLogger(__name__)
 _CONTAINER_RUNTIME_DIR = "/tmp/codify-runtime"
+_ARCHIVE_STORE = "/opt/codify-archives"
+_HARNESS_RESULT_MEMBER = "harness-result.json"
 
 _THINK_BLOCK_RE = re.compile(r'<think\b[^>]*>.*?</think>', re.IGNORECASE | re.DOTALL)
 _OPEN_THINK_RE = re.compile(r'<think\b[^>]*>', re.IGNORECASE)
@@ -257,6 +264,47 @@ async def _load_latest_log_metadata(db: AsyncSession, task_id: int, log_type: st
         return {}
 
 
+def _read_archived_harness_result(task_id: int) -> dict[str, Any] | None:
+    """Read the archived ``harness-result.json`` envelope, or None if absent."""
+    archive_path = _os.path.join(_ARCHIVE_STORE, archive_bundle_name(task_id=task_id))
+    if not _os.path.exists(archive_path):
+        return None
+    try:
+        with _tarfile.open(archive_path, "r:gz") as archive:
+            member = next(
+                (item for item in archive.getmembers() if item.name == _HARNESS_RESULT_MEMBER),
+                None,
+            )
+            if member is None:
+                return None
+            extracted = archive.extractfile(member)
+            if extracted is None:
+                return None
+            parsed = _json.loads(extracted.read().decode("utf-8"))
+            return parsed if isinstance(parsed, dict) else None
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[Task %s] V2 result archive read failed: %s", task_id, exc)
+        return None
+
+
+def _v2_result_validation_error(task_id: int) -> str:
+    """Validate the archived V2 result envelope when present.
+
+    Returns a ``protocol_error`` message when a ``codify.worker.result/v2``
+    envelope exists but fails the frozen V2 contract, closing the "neither-nor"
+    gap where a V2-shaped result could be accepted without ever being validated.
+    Absent/unreadable archives are best-effort: they do not fail the task.
+    """
+    result = _read_archived_harness_result(task_id)
+    if result is None or result.get("schema") != CANONICAL_RESULT_SCHEMA_V2:
+        return ""
+    try:
+        validate_result_v2(result)
+    except HarnessProtocolError as exc:
+        return f"protocol_error: V2 result envelope rejected: {exc}"
+    return ""
+
+
 async def parse_task_result(
     task: Task,
     logs: str,
@@ -272,6 +320,7 @@ async def parse_task_result(
     usage_final_meta = await _load_latest_log_metadata(db, task.id, "usage_final")
     system_init_meta = await _load_latest_log_metadata(db, task.id, "system_init")
     finalization_meta = await _load_latest_log_metadata(db, task.id, "worker_finalization")
+    v2_result_error = _v2_result_validation_error(task.id)
 
     usage = (
         usage_final_meta.get("usage")
@@ -320,6 +369,10 @@ async def parse_task_result(
         task.error_message = (
             "protocol_error: run.completed conflicts with the worker process exit state"
         )
+    elif terminal_type == "run.completed" and v2_result_error:
+        task.status = TaskStatus.FAILED
+        task.completed_at = utcnow()
+        task.error_message = v2_result_error
     elif terminal_type == "run.completed":
         task.status = TaskStatus.COMPLETED
         task.completed_at = utcnow()

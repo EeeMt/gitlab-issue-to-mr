@@ -168,10 +168,29 @@ claude_adapter_normalize_result() {
     # The streaming translator atomically writes the Canonical Result. Validate
     # its portable shape and frozen Adapter identity before public delivery.
     # Accept the result schema matching the active contract (v1 in production
-    # today, v2 once the runtime contract flips).
+    # today, v2 once the runtime contract flips). The V2 envelope nests the
+    # harness identity under a `harness` block; the V1 envelope keeps it flat.
     local schema="codify.worker.result/v1"
     if [ "${CODIFY_RUNTIME_CONTRACT_VERSION:-}" = "codify.worker.harness/v2" ]; then
         schema="codify.worker.result/v2"
+        jq -e \
+            --arg harness_key "${CODIFY_HARNESS_KEY}" \
+            --arg adapter_version "${CODIFY_ADAPTER_VERSION}" \
+            --arg cli_version "${CODIFY_CLI_VERSION}" \
+            --arg schema "${schema}" \
+            '.schema == $schema
+             and .harness.key == $harness_key
+             and .harness.adapter_version == $adapter_version
+             and .harness.cli_version == $cli_version
+             and .harness.control_transport.kind != null
+             and (.harness.model_protocols | type == "array")
+             and (.harness.model_protocols | length > 0)
+             and (.status | IN("completed", "failed", "cancelled", "protocol_error"))
+             and (.success | type == "boolean")
+             and (.usage | type == "object")
+             and (.capability_warnings | type == "array")' \
+            "${CODIFY_HARNESS_RESULT_FILE}" >/dev/null
+        return $?
     fi
     jq -e \
         --arg harness_key "${CODIFY_HARNESS_KEY}" \

@@ -41,8 +41,10 @@ codify_harness_mark_delivery_started() {
 codify_harness_ensure_result() {
     local exit_code="${1:-1}"
     local result_schema="codify.worker.result/v1"
+    local result_v2=""
     if [ "${CODIFY_RUNTIME_CONTRACT_VERSION:-}" = "codify.worker.harness/v2" ]; then
         result_schema="codify.worker.result/v2"
+        result_v2=1
     fi
     if [ -s "${CODIFY_HARNESS_RESULT_FILE}" ] \
         && jq -e --arg schema "${result_schema}" '.schema == $schema' \
@@ -62,26 +64,71 @@ codify_harness_ensure_result() {
         protocol_error) result_status="protocol_error" ;;
         *) result_status="failed" ;;
     esac
+    # V2 synthesize the nested `harness` block (key/adapter_version/cli_version
+    # plus control transport and model protocols); V1 keeps the flat identity.
+    local kind_var=""
+    local protocol_var=""
+    local model_protocols_var="[]"
+    if [ -n "${result_v2}" ]; then
+        kind_var="${CODIFY_HARNESS_CONTROL_TRANSPORT_KIND:-rpc_stdio}"
+        protocol_var="${CODIFY_HARNESS_CONTROL_TRANSPORT_PROTOCOL:-}"
+        local protocols=""
+        protocols="$(printf '%s' "${CODIFY_HARNESS_MODEL_PROTOCOLS:-}" | tr ',' '\n' | sed '/^[[:space:]]*$/d')"
+        if [ -z "${protocols}" ]; then
+            protocols="${CODIFY_HARNESS_MODEL_PROTOCOL:-anthropic_messages}"
+        fi
+        model_protocols_var="$(printf '%s\n' "${protocols}" | jq -R . | jq -s -c .)"
+    fi
     if [ "${exit_code}" -eq 0 ] && codify_event_type_exists "harness.completed"; then
-        jq -nc \
-            --arg schema "${result_schema}" \
-            --arg harness_key "${CODIFY_HARNESS_KEY}" \
-            --arg adapter_version "${CODIFY_ADAPTER_VERSION}" \
-            --arg cli_version "${CODIFY_CLI_VERSION}" \
-            '{schema:$schema,status:"completed",success:true,result:"",harness_key:$harness_key,adapter_version:$adapter_version,cli_version:$cli_version,session_id:null,model:null,usage:{input_tokens:null,cached_input_tokens:null,output_tokens:null,reasoning_tokens:null,cost:null,currency:null,engine_fields:{}},failure:null,capability_warnings:[]}' \
-            > "${CODIFY_HARNESS_RESULT_FILE}.tmp"
+        if [ -n "${result_v2}" ]; then
+            jq -nc \
+                --arg schema "${result_schema}" \
+                --arg harness_key "${CODIFY_HARNESS_KEY}" \
+                --arg adapter_version "${CODIFY_ADAPTER_VERSION}" \
+                --arg cli_version "${CODIFY_CLI_VERSION}" \
+                --arg kind "${kind_var}" \
+                --arg protocol "${protocol_var}" \
+                --argjson model_protocols "${model_protocols_var}" \
+                '{schema:$schema,status:"completed",success:true,result:"",harness:{key:$harness_key,adapter_version:$adapter_version,cli_version:$cli_version,control_transport:{kind:$kind,protocol:(if $protocol == "" then null else $protocol end)},model_protocols:$model_protocols},session_id:null,model:null,usage:{input_tokens:null,cached_input_tokens:null,output_tokens:null,reasoning_tokens:null,cost:null,currency:null,engine_fields:{}},failure:null,capability_warnings:[]}' \
+                > "${CODIFY_HARNESS_RESULT_FILE}.tmp"
+        else
+            jq -nc \
+                --arg schema "${result_schema}" \
+                --arg harness_key "${CODIFY_HARNESS_KEY}" \
+                --arg adapter_version "${CODIFY_ADAPTER_VERSION}" \
+                --arg cli_version "${CODIFY_CLI_VERSION}" \
+                '{schema:$schema,status:"completed",success:true,result:"",harness_key:$harness_key,adapter_version:$adapter_version,cli_version:$cli_version,session_id:null,model:null,usage:{input_tokens:null,cached_input_tokens:null,output_tokens:null,reasoning_tokens:null,cost:null,currency:null,engine_fields:{}},failure:null,capability_warnings:[]}' \
+                > "${CODIFY_HARNESS_RESULT_FILE}.tmp"
+        fi
     else
-        jq -nc \
-            --arg schema "${result_schema}" \
-            --arg status "${result_status}" \
-            --arg kind "${failure_kind}" \
-            --argjson exit_code "${exit_code}" \
-            --arg message "${failure_message}" \
-            --arg harness_key "${CODIFY_HARNESS_KEY}" \
-            --arg adapter_version "${CODIFY_ADAPTER_VERSION}" \
-            --arg cli_version "${CODIFY_CLI_VERSION}" \
-            '{schema:$schema,status:$status,success:false,result:"",harness_key:$harness_key,adapter_version:$adapter_version,cli_version:$cli_version,session_id:null,model:null,usage:{input_tokens:null,cached_input_tokens:null,output_tokens:null,reasoning_tokens:null,cost:null,currency:null,engine_fields:{}},failure:{kind:$kind,exit_code:$exit_code,message:$message},capability_warnings:[]} | del(.failure.message | select(. == ""))' \
-            > "${CODIFY_HARNESS_RESULT_FILE}.tmp"
+        if [ -n "${result_v2}" ]; then
+            jq -nc \
+                --arg schema "${result_schema}" \
+                --arg status "${result_status}" \
+                --arg kind "${failure_kind}" \
+                --argjson exit_code "${exit_code}" \
+                --arg message "${failure_message}" \
+                --arg harness_key "${CODIFY_HARNESS_KEY}" \
+                --arg adapter_version "${CODIFY_ADAPTER_VERSION}" \
+                --arg cli_version "${CODIFY_CLI_VERSION}" \
+                --arg ctl_kind "${kind_var}" \
+                --arg protocol "${protocol_var}" \
+                --argjson model_protocols "${model_protocols_var}" \
+                '{schema:$schema,status:$status,success:false,result:"",harness:{key:$harness_key,adapter_version:$adapter_version,cli_version:$cli_version,control_transport:{kind:$ctl_kind,protocol:(if $protocol == "" then null else $protocol end)},model_protocols:$model_protocols},session_id:null,model:null,usage:{input_tokens:null,cached_input_tokens:null,output_tokens:null,reasoning_tokens:null,cost:null,currency:null,engine_fields:{}},failure:{kind:$kind,exit_code:$exit_code,message:$message},capability_warnings:[]} | del(.failure.message | select(. == ""))' \
+                > "${CODIFY_HARNESS_RESULT_FILE}.tmp"
+        else
+            jq -nc \
+                --arg schema "${result_schema}" \
+                --arg status "${result_status}" \
+                --arg kind "${failure_kind}" \
+                --argjson exit_code "${exit_code}" \
+                --arg message "${failure_message}" \
+                --arg harness_key "${CODIFY_HARNESS_KEY}" \
+                --arg adapter_version "${CODIFY_ADAPTER_VERSION}" \
+                --arg cli_version "${CODIFY_CLI_VERSION}" \
+                '{schema:$schema,status:$status,success:false,result:"",harness_key:$harness_key,adapter_version:$adapter_version,cli_version:$cli_version,session_id:null,model:null,usage:{input_tokens:null,cached_input_tokens:null,output_tokens:null,reasoning_tokens:null,cost:null,currency:null,engine_fields:{}},failure:{kind:$kind,exit_code:$exit_code,message:$message},capability_warnings:[]} | del(.failure.message | select(. == ""))' \
+                > "${CODIFY_HARNESS_RESULT_FILE}.tmp"
+        fi
     fi
     mv "${CODIFY_HARNESS_RESULT_FILE}.tmp" "${CODIFY_HARNESS_RESULT_FILE}"
 }

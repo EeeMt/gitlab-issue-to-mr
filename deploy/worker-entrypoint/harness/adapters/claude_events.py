@@ -10,6 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from result_builder import is_v2_contract, result_schema, v2_harness_block
 from sanitize import redact_hidden_reasoning, sanitize
 
 _REAL_SESSION_ID: str = ""
@@ -84,13 +85,6 @@ def _usage(record: dict) -> dict:
     }
 
 
-def _result_schema() -> str:
-    """Result schema matches the active runtime contract (v1 default, v2 once flipped)."""
-    if os.environ.get("CODIFY_RUNTIME_CONTRACT_VERSION", "") == "codify.worker.harness/v2":
-        return "codify.worker.result/v2"
-    return "codify.worker.result/v1"
-
-
 def _write_result(record: dict, *, success: bool, usage: dict) -> None:
     result_path = Path(os.environ["CODIFY_HARNESS_RESULT_FILE"])
     failure = None
@@ -101,7 +95,7 @@ def _write_result(record: dict, *, success: bool, usage: dict) -> None:
             "message": record.get("result") or record.get("subtype") or "AI execution failed",
         }
     result = {
-        "schema": _result_schema(),
+        "schema": result_schema(),
         "status": (
             "completed"
             if success
@@ -113,15 +107,24 @@ def _write_result(record: dict, *, success: bool, usage: dict) -> None:
         ),
         "success": success,
         "result": record.get("result") or "",
-        "harness_key": "claude",
-        "adapter_version": os.environ.get("CODIFY_ADAPTER_VERSION", "1.0.1"),
-        "cli_version": os.environ.get("CODIFY_CLI_VERSION", "unknown"),
         "session_id": _session_id(record),
         "model": os.environ.get("ANTHROPIC_MODEL") or None,
         "usage": usage,
         "failure": failure,
         "capability_warnings": [],
     }
+    if is_v2_contract():
+        # Nested harness block matching the event envelope so the archived
+        # result passes validate_result_v2 (flat shape is rejected outright).
+        result["harness"] = v2_harness_block()
+    else:
+        result.update(
+            {
+                "harness_key": "claude",
+                "adapter_version": os.environ.get("CODIFY_ADAPTER_VERSION", "1.0.1"),
+                "cli_version": os.environ.get("CODIFY_CLI_VERSION", "unknown"),
+            }
+        )
     temp_path = result_path.with_suffix(".json.tmp")
     temp_path.write_text(
         json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n",

@@ -10,10 +10,12 @@ import pytest
 
 from app.core.harness_protocol import (
     CANONICAL_EVENT_SCHEMA_V2,
+    CANONICAL_RESULT_SCHEMA_V2,
     replay_events,
     validate_event,
     validate_event_v2,
     validate_result,
+    validate_result_v2,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -745,16 +747,21 @@ def test_claude_v2_contract_emits_v2_envelope_and_result(tmp_path):
     assert by_type["usage.final"]["payload"]["usage"]["input_tokens"] == 10
     assert by_type["harness.completed"]["payload"]["session_id"] == "s1"
 
-    # The V2 result keeps the flat V1-compatible shape with the v2 schema
-    # string, matching the accepted pi/opencode level (the frozen nested
-    # `harness` result block is a Phase 5 hard-switch target not yet produced
-    # by any adapter). The v2 schema string is the contract signal here.
+    # The V2 result carries the nested `harness` block matching the event
+    # envelope, so the frozen result validator accepts it (Phase 5 hard-switch
+    # closes the neither-nor gap: flat V2 results are now rejected).
     result = json.loads((runtime_dir / "harness-result.json").read_text())
-    assert result["schema"] == "codify.worker.result/v2"
-    assert result["harness_key"] == "claude"
-    assert result["adapter_version"] == "1.0.0"
+    assert result["schema"] == CANONICAL_RESULT_SCHEMA_V2
+    assert result["harness"]["key"] == "claude"
+    assert result["harness"]["adapter_version"] == "1.0.0"
+    assert result["harness"]["control_transport"] == {
+        "kind": "cli_stream_json",
+        "protocol": "claude-json",
+    }
+    assert result["harness"]["model_protocols"] == ["anthropic_messages"]
     assert result["session_id"] == "s1"
     assert result["success"] is True
+    assert validate_result_v2(result)["schema"] == CANONICAL_RESULT_SCHEMA_V2
 
 
 def test_claude_v2_metadata_reports_v2_contract(tmp_path):
@@ -783,6 +790,9 @@ def test_claude_v2_normalize_result_accepts_v2_schema(tmp_path):
         "CODIFY_HARNESS_KEY": "claude",
         "CODIFY_ADAPTER_VERSION": "2.0.0",
         "CODIFY_CLI_VERSION": "2.1.152",
+        "CODIFY_HARNESS_CONTROL_TRANSPORT_KIND": "cli_stream_json",
+        "CODIFY_HARNESS_CONTROL_TRANSPORT_PROTOCOL": "claude-json",
+        "CODIFY_HARNESS_MODEL_PROTOCOLS": "anthropic_messages",
     }
     result_file = tmp_path / "harness-result.json"
     result_file.write_text(
@@ -791,10 +801,14 @@ def test_claude_v2_normalize_result_accepts_v2_schema(tmp_path):
                 "schema": "codify.worker.result/v2",
                 "status": "completed",
                 "success": True,
-                "result": "ok",
-                "harness_key": "claude",
-                "adapter_version": "2.0.0",
-                "cli_version": "2.1.152",
+                "result": {"text": "ok"},
+                "harness": {
+                    "key": "claude",
+                    "adapter_version": "2.0.0",
+                    "cli_version": "2.1.152",
+                    "control_transport": {"kind": "cli_stream_json", "protocol": "claude-json"},
+                    "model_protocols": ["anthropic_messages"],
+                },
                 "session_id": None,
                 "model": None,
                 "usage": {},
@@ -813,6 +827,9 @@ CODIFY_RUNTIME_CONTRACT_VERSION=codify.worker.harness/v2
 CODIFY_HARNESS_KEY=claude
 CODIFY_ADAPTER_VERSION=2.0.0
 CODIFY_CLI_VERSION=2.1.152
+CODIFY_HARNESS_CONTROL_TRANSPORT_KIND=cli_stream_json
+CODIFY_HARNESS_CONTROL_TRANSPORT_PROTOCOL=claude-json
+CODIFY_HARNESS_MODEL_PROTOCOLS=anthropic_messages
 CODIFY_HARNESS_RESULT_FILE={result_file!s}
 source "$ENTRYPOINT_LIB_DIR/harness/common.sh"
 source "$ENTRYPOINT_LIB_DIR/harness/adapters/claude.sh"
@@ -847,7 +864,8 @@ codify_harness_ensure_result 1
     result = json.loads((tmp_path / "harness-result.json").read_text(encoding="utf-8"))
     assert result["schema"] == "codify.worker.result/v2"
     assert result["status"] == "failed"
-    assert result["harness_key"] == "claude"
+    assert result["harness"]["key"] == "claude"
+    assert result["harness"]["model_protocols"] == ["anthropic_messages"]
 
 
 def test_claude_v1_ensure_result_synthesizes_v1_without_contract(tmp_path):

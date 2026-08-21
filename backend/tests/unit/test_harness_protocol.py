@@ -430,22 +430,31 @@ def test_v2_result_requires_harness_block_and_validates_usage():
     assert result["usage"]["cost"] is None
 
 
-def test_v2_result_rejects_missing_harness_block():
-    with pytest.raises(HarnessProtocolError, match="harness"):
-        validate_result_v2(
-            {
-                "schema": "codify.worker.result/v2",
-                "status": "completed",
-                "success": True,
-                "result": {"text": "ok"},
-                "harness_key": "pi",
-                "session_id": "s",
-                "model": "m",
-                "usage": {},
-                "failure": None,
-                "capability_warnings": [],
-            }
-        )
+def test_v2_result_pass_accepts_full_nested_harness_block():
+    # Positive case: the frozen V2 result envelope (nested `harness` block with
+    # control transport and model protocols) validates and is normalized.
+    result = validate_result_v2(
+        {
+            "schema": "codify.worker.result/v2",
+            "status": "completed",
+            "success": True,
+            "result": {"text": "ok"},
+            "harness": {
+                "key": "pi",
+                "adapter_version": "2.0.0",
+                "cli_version": "0.84.2",
+                "control_transport": {"kind": "rpc_stdio", "protocol": "pi-rpc"},
+                "model_protocols": ["anthropic_messages"],
+            },
+            "session_id": "s",
+            "model": "m",
+            "usage": {},
+            "failure": None,
+            "capability_warnings": [],
+        }
+    )
+    assert result["schema"] == "codify.worker.result/v2"
+    assert result["harness"]["key"] == "pi"
 
 
 def test_command_payload_digest_is_canonical_and_stable():

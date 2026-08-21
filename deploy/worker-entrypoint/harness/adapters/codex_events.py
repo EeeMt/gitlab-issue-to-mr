@@ -15,6 +15,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from result_builder import is_v2_contract, result_schema, v2_harness_block
 from sanitize import clean_message, sanitize
 
 # Per-stream in-memory state. The terminal is decided at EOF, so a later
@@ -109,13 +110,6 @@ def _usage(record: dict) -> dict:
     }
 
 
-def _result_schema() -> str:
-    """Result schema matches the active runtime contract (v1 default, v2 once flipped)."""
-    if os.environ.get("CODIFY_RUNTIME_CONTRACT_VERSION", "") == "codify.worker.harness/v2":
-        return "codify.worker.result/v2"
-    return "codify.worker.result/v1"
-
-
 def _write_result(
     *,
     success: bool,
@@ -129,19 +123,22 @@ def _write_result(
         message = failure_message or result or "Codex execution failed"
         failure = {"kind": _failure_kind(message), "message": message}
     payload = {
-        "schema": _result_schema(),
+        "schema": result_schema(),
         "status": "completed" if success else "failed",
         "success": success,
         "result": result,
-        "harness_key": "codex",
-        "adapter_version": os.environ.get("CODIFY_ADAPTER_VERSION", "1.0.0"),
-        "cli_version": os.environ.get("CODIFY_CLI_VERSION", "unknown"),
         "session_id": _STATE["thread_id"] or None,
         "model": os.environ.get("ANTHROPIC_MODEL") or None,
         "usage": usage,
         "failure": failure,
         "capability_warnings": [],
     }
+    if is_v2_contract():
+        payload["harness"] = v2_harness_block()
+    else:
+        payload["harness_key"] = "codex"
+        payload["adapter_version"] = os.environ.get("CODIFY_ADAPTER_VERSION", "1.0.0")
+        payload["cli_version"] = os.environ.get("CODIFY_CLI_VERSION", "unknown")
     temp_path = result_path.with_suffix(".json.tmp")
     temp_path.write_text(
         json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n",

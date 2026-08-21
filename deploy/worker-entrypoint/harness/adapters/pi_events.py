@@ -29,6 +29,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from result_builder import v2_harness_block
 from sanitize import clean_message, sanitize
 
 SCHEMA = "codify.worker.event/v2"
@@ -131,9 +132,7 @@ def _write_result(*, success: bool, result: str, usage: dict, failure_message: s
         "status": "completed" if success else "failed",
         "success": success,
         "result": result,
-        "harness_key": "pi",
-        "adapter_version": os.environ.get("CODIFY_ADAPTER_VERSION", "2.0.0"),
-        "cli_version": os.environ.get("CODIFY_CLI_VERSION", "unknown"),
+        "harness": v2_harness_block(),
         "session_id": _STATE["session_id"],
         "model": _STATE["model_id"],
         "usage": usage,
