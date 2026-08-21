@@ -328,6 +328,64 @@ def test_opencode_parse_sse_from_captured_11819_wire(tmp_path):
     assert any(r["type"] == "session.idle" for r in records)
 
 
+def test_opencode_event_stream_reads_small_chunks_from_wire(tmp_path, monkeypatch):
+    """GET /event must be consumed in small chunks (read1), not read(8192).
+
+    The 1.18.19 wire fixture starts with an ~89B server.connected frame; a plain
+    ``read(8192)`` stalls until the whole buffer fills, so the subscription never
+    sees the connected signal. ``read1`` surfaces the small frame immediately.
+    The fixture is delivered one blank-line-terminated event per chunk, and the
+    first record is yielded from the first patch alone (chunked-SSE boundary).
+    """
+    bridge = _load_bridge()
+    wire = (PROBE_ROOT / "events.wire.sse").read_text(encoding="utf-8")
+    events = [e for e in wire.split("\n\n") if e.strip()]
+    event_chunks = [(e + "\n\n").encode() for e in events]
+    methods_used: list[str] = []
+
+    class _ChunkedResponse:
+        def __init__(self, chunks):
+            self._chunks = iter(chunks)
+            self._remainder = b""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self, size=-1):
+            methods_used.append("read")
+            return b""  # a streaming stub; read() blocks until the full size
+
+        def read1(self, size=-1):
+            methods_used.append("read1")
+            if self._remainder:
+                chunk, self._remainder = self._remainder, b""
+                return chunk
+            try:
+                return next(self._chunks)
+            except StopIteration:
+                return b""
+
+    def _urlopen(request, timeout=None, **_kw):
+        return _ChunkedResponse(event_chunks)
+
+    monkeypatch.setattr(bridge.urllib.request, "urlopen", _urlopen)
+    client = bridge.OpenCodeServerClient(port=8099, password="pw")
+    stream = client.event_stream()
+    first = next(stream)  # server.connected is the first fixture event
+    assert first["type"] == "server.connected"
+    assert first["id"] == "evt_0243db697001U5L8xei9l1Hum4"
+    assert "read1" in methods_used
+    rest = list(stream)
+    assert [r["type"] for r in rest] == [
+        "session.status",
+        "message.part.delta",
+        "session.idle",
+    ]
+
+
 def test_opencode_client_sets_basic_auth(tmp_path):
     bridge = _load_bridge()
     client = bridge.OpenCodeServerClient(port=8099, password="pw", username="opencode")

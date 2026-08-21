@@ -218,7 +218,11 @@ class OpenCodeServerClient:
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as resp:  # noqa: S310
                 while True:
-                    chunk = resp.read(8192)
+                    # read1 returns as soon as any bytes are available instead of
+                    # stalling until the full 8192 arrives; the 89B
+                    # server.connected first frame therefore surfaces immediately
+                    # (a plain read(8192) blocked on it and drained in minutes).
+                    chunk = resp.read1(8192)
                     if not chunk:
                         break
                     buffer += chunk.decode("utf-8", errors="replace")

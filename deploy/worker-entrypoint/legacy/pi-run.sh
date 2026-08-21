@@ -63,9 +63,13 @@ req_writer=$!
 "${PI_COMMAND[@]}" < "${REQ_FIFO}" > "${STREAM_FIFO}" 2>&1 &
 pi_pid=$!
 
-# Issue the initial RPC handshake: new_session (opt. continuing a parent
-# session), get_state (verify version/capability gate is enforced by the
-# adapter before this runner is reached) then prompt with the frozen task text.
+# Drive the initial RPC handshake as a SEQUENTIAL state machine, not a burst:
+# pi 0.84.2 processes requests asynchronously, so pushing new_session/get_state/
+# prompt back-to-back let prompt run before new_session completed — the model
+# call never initiated (0 sockets, permanent hang, reproduced on ox-alpha-free).
+# The runner therefore reads the pi stdout stream line-by-line and issues the
+# next request only after the previous step's ACK/response is observed:
+#   new_session (id:1) -> ACK success -> get_state (id:2) -> response -> prompt (id:3)
 # Requests use Pi 0.84.2 framing -- ``type=<command>`` with the prompt body in a
 # top-level ``message`` field (recovered handleCommand), NOT the enveloping
 # ``{"type":"request","command":...,"payload":...}`` wrapper that pi rejects with
@@ -73,19 +77,46 @@ pi_pid=$!
 # ``new_session`` + ``parentSessionId`` (real 0.84.2 accepts it), while a first
 # run sends bare ``new_session``; real 0.84.2 rejects the old ``type:resume``
 # frame with ``Unknown command: resume``. Requests are written to the pipe held
-# open by req_writer.
+# open by req_writer. Every streamed line is buffered so the translator still
+# sees the full ordered stream (handshake ACKs + the turn) at raw_line parity.
 prompt_json="$(jq -Rs . < "${PROMPT_FILE}")"
 first_frame='{"id":1,"type":"new_session"}'
 if [ -n "${CODIFY_RESUME_SESSION}" ]; then
-    first_frame="$(jq -nc --arg parent "${CODIFY_RESUME_SESSION}" '{id:1, type:"new_session", parentSessionId:$parent}')"
+    first_frame="$(jq -nc --arg parent "${CODIFY_RESUME_SESSION}" \
+        '{id:1, type:"new_session", parentSessionId:$parent}')"
 fi
 printf '%s\n' "${first_frame}" > "${REQ_FIFO}"
-printf '{"id":2,"type":"get_state"}\n' > "${REQ_FIFO}"
-printf '{"id":3,"type":"prompt","message":%s}\n' \
-    "${prompt_json}" > "${REQ_FIFO}"
+HANDSHAKE_BUF="${RUN_DIR}/pi-handshake.jsonl"
+: > "${HANDSHAKE_BUF}"
+ack_session=0
+ack_state=0
+while IFS= read -r line; do
+    printf '%s\n' "${line}" >> "${HANDSHAKE_BUF}"
+    if [ "${ack_state}" -eq 1 ]; then
+        continue  # handshake complete; the rest is the turn stream (drain as-is)
+    fi
+    cmd="$(printf '%s' "${line}" | jq -r '.command // empty' 2>/dev/null || true)"
+    success="$(printf '%s' "${line}" | jq -r '.success // empty' 2>/dev/null || true)"
+    case "${cmd}" in
+        new_session)
+            if [ "${ack_session}" -eq 0 ] && [ "${success}" = "true" ]; then
+                ack_session=1
+                printf '{"id":2,"type":"get_state"}\n' > "${REQ_FIFO}"
+            fi
+            ;;
+        get_state)
+            if [ "${ack_state}" -eq 0 ]; then
+                ack_state=1
+                printf '{"id":3,"type":"prompt","message":%s}\n' \
+                    "${prompt_json}" > "${REQ_FIFO}"
+            fi
+            ;;
+    esac
+done < "${STREAM_FIFO}"
 
-# Root context drains stdout through the translator as ONE streaming process.
-python3 "${CODIFY_PI_EVENT_TRANSLATOR}" --raw-file "${CODIFY_PI_RAW_EVENT_JSONL}" < "${STREAM_FIFO}"
+# Root context hands the buffered ordered stream to the translator as ONE
+# process, preserving raw-line ordering for the canonical events.
+python3 "${CODIFY_PI_EVENT_TRANSLATOR}" --raw-file "${CODIFY_PI_RAW_EVENT_JSONL}" < "${HANDSHAKE_BUF}"
 python3 "${CODIFY_PI_BRIDGE}" >/dev/null 2>&1 <<< '{}'  # (no-op warm-up retained for parity)
 wait "${pi_pid}"
 exit_code=$?
