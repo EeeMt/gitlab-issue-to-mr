@@ -9,7 +9,7 @@ export GIT_COMMIT
 # Enable Docker BuildKit for faster builds
 export DOCKER_BUILDKIT := 1
 export COMPOSE_DOCKER_CLI_BUILD := 1
-WORKER_KIT_VERSION ?= 0.3.10
+WORKER_KIT_VERSION ?= 0.3.12
 WORKER_KIT_PLATFORM ?= linux/amd64
 
 # ============================================
