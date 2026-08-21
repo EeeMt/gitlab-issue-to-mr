@@ -36,17 +36,29 @@ def test_pi_v1_accepts_valid_values():
 
 # ── opencode/v1 typed validator ───────────────────────────────────────────────
 
-def test_opencode_v1_validates_generic_options():
-    options = validate_namespaced_options(
-        {"opencode": {"agent": "build", "command": "test", "model_variant": "v1"}}
-    )
+def test_opencode_v1_validates_allowlisted_values():
+    # Defaults apply: agent build, command/model_variant null.
+    options = validate_namespaced_options({"opencode": {}})
+    assert options["opencode"] == {"agent": "build", "command": None, "model_variant": None}
+    # agent may only be the manifest allowlist value "build".
+    options = validate_namespaced_options({"opencode": {"agent": "build"}})
     assert options["opencode"]["agent"] == "build"
-    assert options["opencode"]["command"] == "test"
 
 
 def test_opencode_v1_rejects_unknown_keys():
     with pytest.raises(HarnessOptionsError):
         validate_namespaced_options({"opencode": {"not_a_field": True}})
+
+
+def test_opencode_v1_fails_closed_outside_allowlist():
+    # §7.3: agent must be in the manifest/Snapshot allowlist ({build}).
+    with pytest.raises(HarnessOptionsError):
+        validate_namespaced_options({"opencode": {"agent": "code"}})
+    # command / model_variant must be null in the first release.
+    with pytest.raises(HarnessOptionsError):
+        validate_namespaced_options({"opencode": {"command": "test"}})
+    with pytest.raises(HarnessOptionsError):
+        validate_namespaced_options({"opencode": {"model_variant": "v1"}})
 
 
 # ── unknown namespaces are tolerated (forward-compat) ─────────────────────────
@@ -59,14 +71,21 @@ def test_unknown_namespace_is_tolerated():
 # ── task-override allowlist ───────────────────────────────────────────────────
 
 def test_task_override_rejects_non_override_field():
-    # opencode has no task_override fields -> any override rejected
-    with pytest.raises(HarnessOptionsError):
-        validate_task_overrides({"opencode": {"agent": "build"}})
     # pi: unknown field rejected
     with pytest.raises(HarnessOptionsError):
         validate_task_overrides({"pi": {"hidden_option": 1}})
     # pi: an allowed field passes
     validate_task_overrides({"pi": {"steering_mode": "one-at-a-time"}})
+
+
+def test_task_override_allows_only_flagged_opencode_fields():
+    # agent/command/model_variant are the task_override-flagged opencode fields.
+    overrides = validate_task_overrides({"opencode": {"agent": "build"}})
+    assert overrides["opencode"]["agent"] == "build"
+    assert set(TASK_OVERRIDE_KEYS["opencode/v1"]) == {"agent", "command", "model_variant"}
+    # ...but the values still fail-closed against the allowlist.
+    with pytest.raises(HarnessOptionsError):
+        validate_task_overrides({"opencode": {"agent": "code"}})
 
 
 def test_task_override_accepts_only_flagged_fields():

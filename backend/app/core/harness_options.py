@@ -34,10 +34,11 @@ NS_TO_OPTIONS_SCHEMA = {
 
 # Fields a Task may override for each options-schema, mirroring the manifest
 # `task_override=true` flag.  Phase-1 policy: pi exposes its three high-frequency
-# fields; opencode exposes none yet (conservative — reject any override).
+# fields; opencode exposes agent/command/model_variant (design phase3 §7.3),
+# each restricted to the allowlist in OpenCodeV1Options.
 TASK_OVERRIDE_KEYS: dict[str, frozenset[str]] = {
     "pi/v1": frozenset({"thinking_level", "steering_mode", "follow_up_mode"}),
-    "opencode/v1": frozenset(),
+    "opencode/v1": frozenset({"agent", "command", "model_variant"}),
 }
 
 
@@ -72,7 +73,13 @@ class PiV1Options(BaseModel):
 
 
 class OpenCodeV1Options(BaseModel):
-    """Options schema ``opencode/v1`` (see open-harness-v2 phase1 design §6.2)."""
+    """Options schema ``opencode/v1`` (see open-harness-v2 phase3 design §7.3).
+
+    First release only allows the manifest/Snapshot allowlist values and fails
+    closed on anything else: ``agent`` must be ``"build"`` (the only shipped
+    OpenCode agent), and ``command``/``model_variant`` must be null (no live
+    command/variant support yet).
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -83,8 +90,24 @@ class OpenCodeV1Options(BaseModel):
     @field_validator("agent")
     @classmethod
     def _agent(cls, v: str | None) -> str | None:
-        if v is not None and not str(v).strip():
-            raise ValueError("agent must be a non-empty string or null")
+        if v is None:
+            return v
+        if str(v).strip() not in {"build"}:
+            raise ValueError(f"agent must be one of {sorted({'build'})}")
+        return v
+
+    @field_validator("command")
+    @classmethod
+    def _command(cls, v: str | None) -> str | None:
+        if v is not None:
+            raise ValueError("command must be null (no command support in first release)")
+        return v
+
+    @field_validator("model_variant")
+    @classmethod
+    def _model_variant(cls, v: str | None) -> str | None:
+        if v is not None:
+            raise ValueError("model_variant must be null (no variant support in first release)")
         return v
 
 
