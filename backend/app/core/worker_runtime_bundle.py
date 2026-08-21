@@ -278,6 +278,10 @@ _ADAPTER_DIGEST_FILES = (
     "deploy/worker-entrypoint/harness/adapters/codex_events.py",
     "deploy/worker-entrypoint/harness/adapters/sanitize.py",
     "deploy/worker-entrypoint/legacy/codex-run.sh",
+    "deploy/worker-entrypoint/harness/adapters/pi.sh",
+    "deploy/worker-entrypoint/harness/adapters/pi_events.py",
+    "deploy/worker-entrypoint/harness/adapters/pi_bridge.py",
+    "deploy/worker-entrypoint/legacy/pi-run.sh",
 )
 
 

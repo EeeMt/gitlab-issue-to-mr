@@ -33,6 +33,25 @@
         "codegraph": false,
         "sandbox_mode": "container-boundary"
       }
+    },
+    "pi": {
+      "version": "2.0.0",
+      "cli_version": "0.84.2",
+      "cli_version_range": ">=0.84.2 <0.85.0",
+      "provider_protocols": ["anthropic-messages", "openai-responses", "openai-chat-completions"],
+      "options_schema": "pi/v1",
+      "capabilities": {
+        "resume": true,
+        "task_skills": true,
+        "max_turns": false,
+        "usage_tokens": true,
+        "usage_cost": true,
+        "run_text": false,
+        "codegraph": false,
+        "steering": true,
+        "follow_up": true,
+        "sandbox_mode": "container-boundary"
+      }
     }
   }
 }

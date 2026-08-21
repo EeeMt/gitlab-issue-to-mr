@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 SCHEMA = "codify.worker.event/v1"
+V2_CONTRACT = "codify.worker.harness/v2"
 TASK_TERMINALS = {"run.completed", "run.failed"}
 HARNESS_TERMINAL_TYPES = {"harness.completed", "harness.failed"}
 KNOWN_TYPES = {
@@ -36,6 +37,10 @@ KNOWN_TYPES = {
     "worker.finalization",
     "run.completed",
     "run.failed",
+    "control.command.delivered",
+    "control.command.rejected",
+    "control.queue.updated",
+    "agent_settled",
     "diagnostic",
 }
 
@@ -129,11 +134,31 @@ def emit(event_type: str, payload: dict, raw_ref: dict | None) -> dict:
             "adapter_version": _required_env("CODIFY_ADAPTER_VERSION"),
             "cli_version": _required_env("CODIFY_CLI_VERSION"),
         }
+        # V2 attempts carry the control transport and the model protocols under
+        # the harness envelope; the frozen manifest (or the adapter-exported
+        # env) supplies them. Default to the V1 envelope when unset.
+        contract = os.getenv("CODIFY_RUNTIME_CONTRACT_VERSION", "").strip()
+        if contract == V2_CONTRACT:
+            # Reuse the V2 schema when the adapter declares it.
+            harness["control_transport"] = {
+                "kind": os.getenv("CODIFY_HARNESS_CONTROL_TRANSPORT_KIND", "rpc_stdio"),
+                "protocol": os.getenv("CODIFY_HARNESS_CONTROL_TRANSPORT_PROTOCOL"),
+            }
+            protocols = os.getenv("CODIFY_HARNESS_MODEL_PROTOCOLS", "")
+            harness["model_protocols"] = [
+                p for p in protocols.split(",") if p.strip()
+            ] or [os.getenv("CODIFY_HARNESS_MODEL_PROTOCOL", "anthropic_messages")]
+        schema = SCHEMA
+        event_schema_env = os.getenv("CODIFY_EVENT_SCHEMA", "")
+        if event_schema_env:
+            schema = event_schema_env
+        elif contract == V2_CONTRACT:
+            schema = "codify.worker.event/v2"
         if first_event is not None and first_event.get("harness") != harness:
             raise RuntimeError("Harness identity changed inside one canonical attempt")
         seq = last_seq + 1
         event = {
-            "schema": SCHEMA,
+            "schema": schema,
             "event_id": str(uuid.uuid4()),
             "attempt_id": _required_env("CODIFY_ATTEMPT_ID"),
             "seq": seq,
