@@ -1,11 +1,27 @@
+# syntax=docker/dockerfile:1.7
+
 # Java 21 + Maven project runtime image for mounted worker-kit profiles.
 #
 # Codify-owned tools, entrypoint scripts, CodeGraph, Mermaid validation, and ci-claude
-# are supplied by the mounted worker kit. Claude CLI is supplied by the worker profile,
-# usually through a read-only volume mounted at /usr/local/bin/claude.
+# are supplied by the mounted worker kit.
+#
+# Harness CLIs (V2): the four exact-version CLIs are baked in-image at the
+# adapter-preferred paths so every harness can run without host mounts:
+#   pi 0.84.2      -> /opt/codify-pi/bin/pi        (package + native layout)
+#   opencode 1.18.19 -> /opt/codify-opencode/bin/opencode
+#   codex 0.146.0  -> /opt/codify-codex/bin/codex  (bundle + resources)
+#   claude 2.1.153 -> /usr/local/bin/claude
+# The binaries are NOT committed. The deployment stages them as ./worker-cli/
+# inside the build context (see dev-env docs); this image is built on the dev
+# host where the provisioned binaries live.
 FROM maven:3.9.9-eclipse-temurin-21
 
 WORKDIR /workspace
+
+COPY worker-cli/pi/ /opt/codify-pi/
+COPY worker-cli/opencode/opencode /opt/codify-opencode/bin/opencode
+COPY worker-cli/claude /usr/local/bin/claude
+COPY worker-cli/codex/ /opt/codify-codex/
 
 # Keep this image focused on project build tools. The worker kit supplies jq,
 # ripgrep, Node.js, Python helpers, and Codify orchestration scripts. The base
@@ -14,6 +30,11 @@ RUN ln -sf /opt/java/openjdk/bin/java /usr/local/bin/java \
     && ln -sf /opt/java/openjdk/bin/keytool /usr/local/bin/keytool \
     && mkdir -p /workspace /home/codify/.m2/repository \
     && chown -R 1000:1000 /workspace /home/codify \
+    && chmod 755 /opt/codify-pi/bin/pi \
+      /opt/codify-opencode/bin/opencode \
+      /opt/codify-codex/bin/codex \
+      /opt/codify-codex/bin/codex-code-mode-host \
+      /usr/local/bin/claude \
     && java -version \
     && keytool -help >/dev/null \
     && mvn -version

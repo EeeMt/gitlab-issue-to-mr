@@ -72,6 +72,9 @@ temporary/*.png
 deploy/codify-offline-bundle*.tar.gz
 deploy/offline-bundle/images/*.tar.xz
 
+# Harness CLI binaries staged for the worker image build (large, not in git)
+deploy/worker-cli/
+
 # Logs
 logs/
 scripts/demo/.env
