@@ -849,3 +849,55 @@ codify_harness_ensure_result 1
     assert result["status"] == "failed"
     assert result["harness_key"] == "claude"
 
+
+def test_claude_v1_ensure_result_synthesizes_v1_without_contract(tmp_path):
+    # The V1 production default (CODIFY_RUNTIME_CONTRACT_VERSION unset) must
+    # synthesize a codify.worker.result/v1 fallback — proving the common.sh
+    # contract-aware change is a strict no-op under V1.
+    env = {
+        **_environment(tmp_path),
+        "ENTRYPOINT_LIB_DIR": str(REPO_ROOT / "deploy/worker-entrypoint"),
+        "CODIFY_HARNESS_KEY": "claude",
+        "CODIFY_ADAPTER_VERSION": "1.0.0",
+        "CODIFY_CLI_VERSION": "2.1.152",
+    }
+    (tmp_path / "event.jsonl").write_text(
+        json.dumps({"type": "harness.failed", "payload": {"failure": {"kind": "crash", "message": "x"}}})
+        + "\n",
+        encoding="utf-8",
+    )
+    command = '''
+source "$ENTRYPOINT_LIB_DIR/harness/common.sh"
+CODIFY_HARNESS_TERMINAL_SEEN=1
+codify_harness_ensure_result 1
+'''
+    subprocess.run(["bash", "-c", command], env=env, check=True)
+    result = json.loads((tmp_path / "harness-result.json").read_text(encoding="utf-8"))
+    assert result["schema"] == "codify.worker.result/v1"
+    assert result["status"] == "failed"
+    assert result["harness_key"] == "claude"
+
+
+def test_claude_v1_translator_ignores_transport_env_exports(tmp_path):
+    # The transport/model env the adapters export in prepare_config is a no-op
+    # for the V1 contract: events.py only reads them under the V2 gate, so a V1
+    # attempt (contract unset) must still emit a V1 envelope with no
+    # control_transport/model_protocols even when those vars are present.
+    runtime_dir = tmp_path / "v1-with-transport"
+    runtime_dir.mkdir()
+    env = {
+        **_environment(runtime_dir),
+        **CLAUDE_V2_TRANSPORT,  # exported vars present but contract is still V1
+    }
+    subprocess.run(
+        ["python3", str(EVENT_WRITER), "run.started", "--payload", '{}'],
+        check=True,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    event = _events(runtime_dir)[0]
+    assert event["schema"] == "codify.worker.event/v1"
+    assert "control_transport" not in event["harness"]
+    assert "model_protocols" not in event["harness"]
+
