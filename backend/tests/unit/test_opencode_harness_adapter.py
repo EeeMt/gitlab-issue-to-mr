@@ -285,6 +285,153 @@ def test_opencode_client_sets_basic_auth(tmp_path):
     assert headers["Authorization"].startswith("Basic ")
 
 
+# ── _run_attempt: subscribe-before-prompt (F1) + BrokenPipe tolerance (F2) ────
+
+def _run_attempt_env(tmp_path: Path) -> dict[str, str]:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("do the thing", encoding="utf-8")
+    return {
+        **_environment(tmp_path),
+        **V2_ENV,
+        "OPENCODE_PORT": "8099",
+        "OPENCODE_SERVER_PASSWORD": "pw",
+        "OPENCODE_SERVER_USERNAME": "opencode",
+        "OPENCODE_MODEL": "deepseek-v4-flash",
+        "CODIFY_OPENCODE_EVENT_TRANSLATOR": str(TRANSLATOR),
+        "CODIFY_OPENCODE_RAW_EVENT_JSONL": str(tmp_path / "harness-events/opencode.jsonl"),
+        "PROMPT_FILE": str(prompt_file),
+    }
+
+
+class _OrderedFakeClient:
+    """Fake Server client that records the order of calls (F1 verification).
+
+    ``event_stream`` models the real generator: the HTTP ``GET /event`` is sent
+    lazily on first advancement (recorded as ``stream_established``), then
+    ``server.connected`` arrives to confirm the subscription.
+    """
+
+    def __init__(self, calls: list[str], records: list[dict]):
+        self.calls = calls
+        self.records = records
+
+    def create_session(self, model_id: str, provider_id: str):
+        self.calls.append("create_session")
+        return 200, {"info": {"id": "ses-oc-run"}}
+
+    def event_stream(self):
+        self.calls.append("stream_established")
+        for record in self.records:
+            yield record
+
+    def prompt_async(self, session_id: str, text: str):
+        self.calls.append("prompt_async")
+        return 204, {}
+
+    def status(self, session_id: str):
+        self.calls.append("status")
+        return 200, {"info": {"status": {"type": "idle"}}}
+
+
+def test_opencode_run_attempt_subscribes_before_prompt(tmp_path, monkeypatch):
+    bridge = _load_bridge()
+    calls: list[str] = []
+    fake = _OrderedFakeClient(
+        calls,
+        [
+            {"id": "e1", "type": "server.connected", "properties": {}},
+            {"id": "e2", "type": "session.status", "properties": {"sessionID": "ses-oc-run", "status": {"type": "busy"}}},
+            {"id": "e3", "type": "message.part.delta", "properties": {"sessionID": "ses-oc-run", "delta": "ok"}},
+            {"id": "e4", "type": "session.idle", "properties": {"sessionID": "ses-oc-run"}},
+            {"id": "e5", "type": "server.heartbeat", "properties": {}},
+        ],
+    )
+    monkeypatch.setattr(bridge, "OpenCodeServerClient", lambda **kw: fake)
+    for key, value in _run_attempt_env(tmp_path).items():
+        monkeypatch.setenv(key, value)
+    _emit(tmp_path, "run.started", {"runtime_bundle_digest": "d" * 64})
+
+    rc = bridge._run_attempt()
+
+    assert rc == 0
+    # Subscription established (GET /event advanced, server.connected seen) BEFORE prompt.
+    assert calls.index("stream_established") < calls.index("prompt_async")
+    # No status fallback on a clean stream.
+    assert "status" not in calls
+
+
+def test_opencode_run_attempt_status_fallback_after_disconnect(tmp_path, monkeypatch):
+    bridge = _load_bridge()
+
+    def _disconnecting_stream():
+        yield {"id": "e1", "type": "server.connected", "properties": {}}
+        yield {"id": "e2", "type": "session.status", "properties": {"sessionID": "ses-oc-run", "status": {"type": "busy"}}}
+        raise ConnectionError("stream dropped")
+
+    calls: list[str] = []
+
+    class _Fake:
+        def create_session(self, *a, **k):
+            return 200, {"info": {"id": "ses-oc-run"}}
+
+        def event_stream(self):
+            calls.append("stream_established")
+            return _disconnecting_stream()
+
+        def prompt_async(self, *a, **k):
+            calls.append("prompt_async")
+            return 204, {}
+
+        def status(self, *a, **k):
+            calls.append("status")
+            return 200, {"info": {"status": {"type": "idle"}}}
+
+    monkeypatch.setattr(bridge, "OpenCodeServerClient", lambda **kw: _Fake())
+    for key, value in _run_attempt_env(tmp_path).items():
+        monkeypatch.setenv(key, value)
+    _emit(tmp_path, "run.started", {"runtime_bundle_digest": "d" * 64})
+
+    rc = bridge._run_attempt()
+
+    assert rc == 0
+    assert "status" in calls  # disconnect triggered the GET /session/status fallback
+    # The status-reported idle recovered a settled turn: single completed terminal.
+    types = [e["type"] for e in _events(tmp_path)]
+    assert types.count("harness.completed") == 1
+
+
+class _Pipe:
+    """Minimal stand-in for a translator ``Popen`` exposing ``.stdin``."""
+
+    def __init__(self, stdin):
+        self.stdin = stdin
+
+
+def test_opencode_forward_tolerates_closed_stdin(tmp_path):
+    # F2: after the translator converges its terminal its stdin read end is
+    # closed; a later write from the still-draining stream raises EPIPE, which
+    # _forward must swallow rather than crash the Bridge.
+    bridge = _load_bridge()
+    read_fd, write_fd = os.pipe()
+    os.close(read_fd)  # read end closed -> write raises BrokenPipeError (EPIPE)
+    stdin = os.fdopen(write_fd, "w", encoding="utf-8")
+    try:
+        raw_path = tmp_path / "raw.jsonl"
+        with raw_path.open("w", encoding="utf-8") as raw:
+            bridge._forward(
+                {"id": None, "type": "server.heartbeat", "properties": {}},
+                raw,
+                _Pipe(stdin),
+            )
+        # No exception propagated; the record still reached the raw archive.
+        assert "server.heartbeat" in raw_path.read_text(encoding="utf-8")
+    finally:
+        try:
+            stdin.close()
+        except BrokenPipeError:
+            pass
+
+
 # ── opencode.sh adapter shell ───────────────────────────────────────────────
 
 def _source_adapter(script: str, env: dict[str, str]):

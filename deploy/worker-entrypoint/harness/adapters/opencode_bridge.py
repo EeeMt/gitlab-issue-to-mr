@@ -46,7 +46,6 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
 
@@ -256,6 +255,58 @@ class OpenCodeBridge:
         return {"status": "reject", "rejection_code": code, "rejection_message": message}
 
 
+def _forward(record: dict, raw_handle, proc: subprocess.Popen) -> None:
+    """Write one SSE record to the raw archive and the translator's stdin.
+
+    After the translator has converged its terminal it exits and closes its
+    stdin read end; a subsequent write from a still-draining stream (e.g. a
+    trailing ``server.heartbeat``) would otherwise raise ``BrokenPipeError``.
+    That is best-effort after the terminal is final, so the broken pipe is
+    tolerated (F2).
+    """
+    line = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+    raw_handle.write(line + "\n")
+    raw_handle.flush()
+    try:
+        proc.stdin.write(line + "\n")
+        proc.stdin.flush()
+    except BrokenPipeError:
+        pass
+
+
+def _recover_status(
+    client: OpenCodeServerClient,
+    session_id: str,
+    raw_handle,
+    proc: subprocess.Popen,
+) -> None:
+    """After an SSE disconnect, poll ``GET /session/status`` to recover the state.
+
+    Best-effort: if the Server reports the session idle, forward a synthetic
+    ``session.idle`` record so the translator settles on the real final state
+    (final assistant text included) instead of only the EOF fallback.
+    """
+    try:
+        status_code, body = client.status(session_id)
+    except Exception as exc:  # noqa: BLE001 - best-effort recovery path
+        print(f"OpenCode status fallback failed: {exc}", file=sys.stderr)
+        return
+    if status_code != 200:
+        return
+    info = body.get("info") if isinstance(body.get("info"), dict) else body
+    status = info.get("status")
+    if isinstance(status, dict) and status.get("type") == "idle":
+        _forward(
+            {
+                "id": None,
+                "type": "session.idle",
+                "properties": {"sessionID": session_id},
+            },
+            raw_handle,
+            proc,
+        )
+
+
 def _run_attempt() -> int:
     """Drive one OpenCode attempt: session -> subscribe SSE -> prompt -> drain.
 
@@ -265,6 +316,12 @@ def _run_attempt() -> int:
     record to it, sends ``prompt_async``, and waits for the translator to
     converge the single harness terminal (it exits once ``session.idle``/error/
     EOF settles — see opencode_events.py).
+
+    Subscribe-before-prompt (design §3.1): the ``GET /event`` subscription is
+    established first and ``server.connected`` awaited, so no early prompt event
+    (``session.status(busy)``, first ``message.part.*``) is missed; only then is
+    ``prompt_async`` sent. On a mid-run disconnect the bridge falls back to
+    ``GET /session/status`` to recover a terminal state.
     """
     port = int(os.environ["OPENCODE_PORT"])
     password = os.environ.get("OPENCODE_SERVER_PASSWORD", "")
@@ -289,9 +346,7 @@ def _run_attempt() -> int:
         return 1
 
     raw_file.parent.mkdir(parents=True, exist_ok=True)
-    with raw_file.open("w", encoding="utf-8") as raw_handle:
-        # Force the raw-archive stream to exist so the translator can append.
-        pass
+    raw_handle = raw_file.open("w", encoding="utf-8")
 
     proc = subprocess.Popen(
         [sys.executable, str(translator), "--raw-file", str(raw_file)],
@@ -303,26 +358,43 @@ def _run_attempt() -> int:
 
     prompt_file = Path(os.environ["PROMPT_FILE"])
     prompt_text = prompt_file.read_text(encoding="utf-8")
-    # Establish the SSE subscription (and let server.connected arrive) before
-    # prompt so no early event is missed (design §3.1). The translator waits on
-    # session.idle; prompt_async is a 204 async-ack.
-    status, _ = client.prompt_async(session_id, prompt_text)
-    if status not in (200, 202, 204):
-        print(f"OpenCode prompt_async failed: status={status}", file=sys.stderr)
-        proc.stdin.close()
-        proc.wait()
-        return 1
 
     try:
-        for record in client.event_stream():
-            line = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
-            raw_handle.write(line + "\n")
-            raw_handle.flush()
-            proc.stdin.write(line + "\n")
-            proc.stdin.flush()
-    except ConnectionError as exc:
-        print(f"OpenCode SSE stream closed: {exc}", file=sys.stderr)
+        # 1. Establish the SSE subscription and await server.connected (design
+        #    §3.1) before prompt so no early event is missed. Record forwarding
+        #    is idempotent here; the translator drops server.connected itself.
+        stream = client.event_stream()
+        subscribed = False
+        try:
+            for record in stream:
+                _forward(record, raw_handle, proc)
+                if record.get("type") == "server.connected":
+                    subscribed = True
+                    break
+        except ConnectionError as exc:
+            print(f"OpenCode SSE subscription failed: {exc}", file=sys.stderr)
+            return 1
+        if not subscribed:
+            print("OpenCode SSE subscription: server.connected not received", file=sys.stderr)
+            return 1
+
+        # 2. Now prompt (an async 204/202/200 ack); early events arrive on the
+        #    already-established stream and are drained in step 3.
+        status, _ = client.prompt_async(session_id, prompt_text)
+        if status not in (200, 202, 204):
+            print(f"OpenCode prompt_async failed: status={status}", file=sys.stderr)
+            return 1
+
+        # 3. Drain the remainder of the stream; on disconnect, fall back to
+        #    GET /session/status to recover a terminal state (best-effort).
+        try:
+            for record in stream:
+                _forward(record, raw_handle, proc)
+        except ConnectionError as exc:
+            print(f"OpenCode SSE stream closed: {exc}", file=sys.stderr)
+            _recover_status(client, session_id, raw_handle, proc)
     finally:
+        raw_handle.close()
         proc.stdin.close()
 
     rc = proc.wait()

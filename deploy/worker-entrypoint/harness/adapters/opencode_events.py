@@ -216,7 +216,6 @@ def _handle_session_created(properties: dict, raw_line: int) -> None:
 
 
 def _handle_session_error(properties: dict, raw_line: int) -> None:
-    session_id = properties.get("sessionID")
     message = properties.get("error") or properties.get("message") or "OpenCode session error"
     # session.error is an unhandled SSE path (probe 待测); classify deterministically
     # and converge to a failed terminal so the attempt does not hang.
@@ -291,12 +290,10 @@ def translate(record: dict, raw_line: int) -> None:
     properties = record.get("properties") if isinstance(record.get("properties"), dict) else {}
     if record_type in ("server.connected", "server.heartbeat"):
         return
-    if record_type == "session.created":
-        _handle_session_created(properties, raw_line)
-    elif record_type == "session.updated":
-        _handle_session_created(properties, raw_line)
-    elif record_type == "session.status":
+    if record_type == "session.status":
         _handle_session_status(properties, raw_line)
+    elif record_type in ("session.created", "session.updated"):
+        _handle_session_created(properties, raw_line)
     elif record_type == "message.updated":
         _handle_message_updated(properties, raw_line)
     elif record_type == "message.part.updated":
