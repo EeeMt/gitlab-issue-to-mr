@@ -39,6 +39,7 @@ This directory aggregates the main project documentation. Start from the root [R
 - [Multi-Harness 接入调试与通用经验](multi-harness-debugging.md) — 通用接入断层清单（含 codex 专项）与验证命令
 - [Open-Harness V2 冻结 Schema 与合同](architecture/open-harness-v2-schemas.md) — 五个 V2 schema / §3.5 冻结清单 / 五风险评审
 - [Open-Harness V2 — 074 Migration 设计与 Phase 1 接口骨架](architecture/open-harness-v2-phase1-design.md) — 数据模型 / command plane / 执行策略接口契约
+- [Open-Harness V2 — Phase 3 技术方案：OpenCode 一级 Harness](architecture/open-harness-v2-phase3-opencode-design.md) — Task-scoped Server/SDK、settled 判定、错误分类、与 Phase 2 复用/差异
 
 ## 安全
 
