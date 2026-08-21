@@ -736,6 +736,15 @@ def test_claude_v2_contract_emits_v2_envelope_and_result(tmp_path):
         assert harness["control_transport"] == {"kind": "cli_stream_json", "protocol": "claude-json"}
         assert harness["model_protocols"] == ["anthropic_messages"]
 
+    # Session / usage / model mapping is preserved in V2 mode (scope: retain
+    # the Session/usage/model/failure projection, only the envelope contract
+    # changes).
+    by_type = {e["type"]: e for e in events}
+    assert by_type["model.resolved"]["payload"]["model"] == "claude-probe"
+    assert by_type["model.resolved"]["payload"]["session_id"] == "s1"
+    assert by_type["usage.final"]["payload"]["usage"]["input_tokens"] == 10
+    assert by_type["harness.completed"]["payload"]["session_id"] == "s1"
+
     # The V2 result keeps the flat V1-compatible shape with the v2 schema
     # string, matching the accepted pi/opencode level (the frozen nested
     # `harness` result block is a Phase 5 hard-switch target not yet produced
@@ -744,6 +753,7 @@ def test_claude_v2_contract_emits_v2_envelope_and_result(tmp_path):
     assert result["schema"] == "codify.worker.result/v2"
     assert result["harness_key"] == "claude"
     assert result["adapter_version"] == "1.0.0"
+    assert result["session_id"] == "s1"
     assert result["success"] is True
 
 

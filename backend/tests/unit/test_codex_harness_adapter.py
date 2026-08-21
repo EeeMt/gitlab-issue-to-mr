@@ -513,12 +513,23 @@ def test_codex_v2_contract_emits_v2_envelope_and_result(tmp_path):
         assert harness["control_transport"] == {"kind": "cli_jsonl", "protocol": "codex-jsonl"}
         assert harness["model_protocols"] == ["openai_responses"]
 
+    # Session / usage / model mapping is preserved in V2 mode (scope: retain
+    # the Session/usage/model/failure projection, only the envelope contract
+    # changes). Codex resolves the model from ANTHROPIC_MODEL at first record.
+    by_type = {e["type"]: e for e in events}
+    assert by_type["model.resolved"]["payload"]["session_id"] == "6ad6e4f5-6205-8e2a-9b3c-1a2b3c4d5e6f"
+    usage = by_type["usage.final"]["payload"]["usage"]
+    assert usage["input_tokens"] == 10
+    assert usage["output_tokens"] == 4
+    assert by_type["harness.completed"]["payload"]["session_id"] == "6ad6e4f5-6205-8e2a-9b3c-1a2b3c4d5e6f"
+
     # The V2 result keeps the flat V1-compatible shape with the v2 schema
     # string, matching the accepted pi/opencode/claude level (the frozen
     # nested `harness` result block is a Phase 5 hard-switch target).
     result = json.loads((runtime_dir / "harness-result.json").read_text(encoding="utf-8"))
     assert result["schema"] == "codify.worker.result/v2"
     assert result["harness_key"] == "codex"
+    assert result["session_id"] == "6ad6e4f5-6205-8e2a-9b3c-1a2b3c4d5e6f"
     assert result["result"] == "done"
 
 
