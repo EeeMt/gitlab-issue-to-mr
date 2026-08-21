@@ -1,63 +1,76 @@
 {
-  "schema": "codify.worker.runtime-manifest/v1",
-  "contract_version": "codify.worker.harness/v1",
-  "event_schema": "codify.worker.event/v1",
-  "orchestration_version": "1.0.0",
+  "schema": "codify.worker.runtime-manifest/v2",
+  "maturity": "internal_preview",
+  "contract_version": "codify.worker.harness/v2",
+  "event_schema": "codify.worker.event/v2",
+  "command_schema": "codify.worker.command/v2",
+  "result_schema": "codify.worker.result/v2",
   "adapters": {
     "claude": {
-      "version": "1.0.1",
+      "support_tier": "default",
+      "source": {
+        "repository": "https://github.com/anthropics/claude-code",
+        "license": "MIT",
+        "artifact_version": "2.1.152",
+        "artifact_sha256": "<computed at freeze>"
+      },
+      "adapter": { "version": "1.0.1", "digest": "<computed at bundle build>" },
       "cli_version_range": ">=2.1.33 <3.0.0",
-      "provider_protocols": ["anthropic-messages"],
+      "control_transport": { "kind": "cli_stream_json", "protocol": "claude-json" },
+      "model_protocols": ["anthropic_messages"],
       "capabilities": {
         "resume": true,
         "task_skills": true,
-        "max_turns": true,
         "usage_tokens": true,
-        "usage_cost": true,
-        "run_text": true,
-        "codegraph": true,
-        "sandbox_mode": "container-boundary"
-      }
+        "steering": false,
+        "follow_up": false
+      },
+      "options_schema": "claude/v1"
     },
     "codex": {
-      "version": "1.0.0",
+      "support_tier": "default",
+      "source": {
+        "repository": "https://github.com/openai/codex",
+        "license": "Apache-2.0",
+        "artifact_version": "0.146.0",
+        "artifact_sha256": "<computed at freeze>"
+      },
+      "adapter": { "version": "1.0.0", "digest": "<computed at bundle build>" },
       "cli_version_range": ">=0.146.0 <0.160.0",
-      "provider_protocols": ["openai-responses"],
+      "control_transport": { "kind": "cli_jsonl", "protocol": "codex-jsonl" },
+      "model_protocols": ["openai_responses"],
       "capabilities": {
         "resume": true,
         "task_skills": true,
-        "max_turns": false,
         "usage_tokens": true,
-        "usage_cost": true,
-        "run_text": false,
-        "codegraph": false,
-        "sandbox_mode": "container-boundary"
-      }
+        "steering": false,
+        "follow_up": false
+      },
+      "options_schema": "codex/v1"
     },
     "pi": {
-      "version": "2.0.0",
+      "support_tier": "default",
+      "source": {
+        "repository": "https://github.com/earendil-works/pi",
+        "license": "MIT",
+        "artifact_version": "0.84.2",
+        "artifact_sha256": "<computed at freeze>"
+      },
+      "adapter": { "version": "2.0.0", "digest": "<computed at bundle build>" },
       "cli_version": "0.84.2",
       "cli_version_range": ">=0.84.2 <0.85.0",
-      "provider_protocols": ["anthropic-messages", "openai-responses", "openai-chat-completions"],
-      "options_schema": "pi/v1",
+      "control_transport": { "kind": "rpc_stdio", "protocol": "pi-rpc" },
+      "model_protocols": ["anthropic_messages", "openai_responses", "openai_chat_completions"],
       "capabilities": {
         "resume": true,
         "task_skills": true,
-        "max_turns": false,
         "usage_tokens": true,
-        "usage_cost": true,
-        "run_text": false,
-        "codegraph": false,
         "steering": true,
-        "follow_up": true,
-        "sandbox_mode": "container-boundary"
-      }
+        "follow_up": true
+      },
+      "options_schema": "pi/v1"
     },
     "opencode": {
-      "version": "2.0.0",
-      "cli_version": "1.18.19",
-      "cli_version_range": ">=1.18.19 <1.19.0",
-      "options_schema": "opencode/v1",
       "support_tier": "first-class",
       "source": {
         "repository": "https://github.com/sst/opencode",
@@ -66,21 +79,19 @@
         "artifact_sha256": "<computed at freeze>"
       },
       "adapter": { "version": "2.0.0", "digest": "<computed at bundle build>" },
+      "cli_version": "1.18.19",
+      "cli_version_range": ">=1.18.19 <1.19.0",
       "control_transport": { "kind": "server_http", "protocol": "opencode-server" },
       "model_protocols": ["anthropic_messages", "openai_responses", "openai_chat_completions"],
       "capabilities": {
         "resume": true,
         "task_skills": true,
-        "max_turns": false,
         "usage_tokens": true,
-        "usage_cost": true,
-        "run_text": false,
-        "codegraph": false,
         "steering": false,
-        "follow_up": false,
-        "sandbox_mode": "container-boundary"
+        "follow_up": false
       },
-      "files": []
+      "options_schema": "opencode/v1"
     }
-  }
+  },
+  "files": []
 }

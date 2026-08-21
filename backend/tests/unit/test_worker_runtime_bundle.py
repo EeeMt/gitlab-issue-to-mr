@@ -48,7 +48,7 @@ def test_runtime_bundle_is_byte_deterministic_and_manifested():
     assert first.manifest["event_schema"] == "codify.worker.event/v1"
     assert (
         first.manifest["adapters"]["claude"]["version"]
-        == source_manifest["adapters"]["claude"]["version"]
+        == source_manifest["adapters"]["claude"]["adapter"]["version"]
     )
     assert len(first.manifest["adapters"]["claude"]["digest"]) == 64
     assert first.manifest["bundle_digest"] == first.digest

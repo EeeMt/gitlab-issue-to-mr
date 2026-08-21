@@ -132,8 +132,10 @@ claude_adapter_metadata
     assert metadata["contract_version"] == "codify.worker.harness/v1"
     assert metadata["event_schema"] == "codify.worker.event/v1"
     assert metadata["capabilities"]["resume"] is True
-    assert metadata["capabilities"]["run_text"] is True
-    assert metadata["capabilities"]["codegraph"] is True
+    assert metadata["capabilities"]["task_skills"] is True
+    assert metadata["capabilities"]["usage_tokens"] is True
+    assert metadata["capabilities"]["steering"] is False
+    assert metadata["capabilities"]["follow_up"] is False
 
 
 def test_adapter_exposes_every_required_contract_operation(tmp_path):
@@ -152,7 +154,10 @@ adapter_detect_capabilities
     result = subprocess.run(["bash", "-c", command], check=True, capture_output=True, text=True)
     capabilities = json.loads(result.stdout)
     assert capabilities["resume"] is True
-    assert capabilities["run_text"] is True
+    assert capabilities["task_skills"] is True
+    assert capabilities["usage_tokens"] is True
+    assert capabilities["steering"] is False
+    assert capabilities["follow_up"] is False
 
 
 def test_translator_builds_complete_canonical_attempt_and_result(tmp_path):

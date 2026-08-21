@@ -18,7 +18,7 @@ pi_adapter_metadata() {
         --arg contract "${CODIFY_RUNTIME_CONTRACT_VERSION:-codify.worker.harness/v2}" \
         --arg event_schema "codify.worker.event/v2" \
         '{ key: $key,
-           adapter_version: (.adapters.pi.version // ""),
+           adapter_version: (.adapters.pi.version // .adapters.pi.adapter.version // ""),
            adapter_digest: (.adapters.pi.digest // ""),
            contract_version: $contract,
            event_schema: $event_schema }' \

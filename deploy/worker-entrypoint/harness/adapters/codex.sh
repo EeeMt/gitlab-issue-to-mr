@@ -27,7 +27,7 @@ codex_adapter_metadata() {
         --arg contract "${contract}" \
         --arg event_schema "${event_schema}" \
         '{ key: $key,
-           adapter_version: (.adapters.codex.version // ""),
+           adapter_version: (.adapters.codex.version // .adapters.codex.adapter.version // ""),
            adapter_digest: (.adapters.codex.digest // ""),
            contract_version: $contract,
            event_schema: $event_schema }' \

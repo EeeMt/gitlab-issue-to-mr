@@ -23,7 +23,7 @@ claude_adapter_metadata() {
         | .adapters.claude
         | . + {
             key:"claude",
-            adapter_version:.version,
+            adapter_version:(.version // .adapter.version // ""),
             contract_version:$contract,
             event_schema:$event_schema
         }

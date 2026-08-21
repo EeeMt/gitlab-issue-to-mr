@@ -334,27 +334,33 @@ def build_runtime_bundle(source_dir: Path | None = None) -> BuiltRuntimeBundle:
     harness_manifest = json.loads(
         source_by_name["deploy/worker-entrypoint/harness/manifest.json"]
     )
-    expected_protocol = {
-        "contract_version": HARNESS_CONTRACT_VERSION,
-        "event_schema": CANONICAL_EVENT_SCHEMA,
-        "orchestration_version": ORCHESTRATION_VERSION,
-    }
-    for key, expected in expected_protocol.items():
-        if harness_manifest.get(key) != expected:
-            raise RuntimeError(f"Runtime source {key} does not match executable protocol")
+    # The frozen source manifest is now runtime-manifest/v2; validate the full
+    # V2 envelope (approved adapter keys, control transport, model protocols,
+    # capability keys) before projecting it into the stable V1 bundle shape.
+    validate_manifest(harness_manifest)
     source_adapters = harness_manifest.get("adapters") or {}
     if not isinstance(source_adapters, dict) or not source_adapters:
         raise RuntimeError("Runtime source has no Adapter declarations")
     adapters: dict[str, dict[str, Any]] = {}
     for adapter_key, metadata in source_adapters.items():
-        if not isinstance(metadata, dict) or not metadata.get("version"):
+        if not isinstance(metadata, dict):
             raise RuntimeError(
-                f"Runtime source Adapter {adapter_key!r} has no version"
+                f"Runtime source Adapter {adapter_key!r} is not an object"
+            )
+        nested = metadata.get("adapter")
+        adapter_version = (
+            str(nested.get("version")) if isinstance(nested, Mapping) else ""
+        )
+        if not adapter_version:
+            raise RuntimeError(
+                f"Runtime source Adapter {adapter_key!r} has no adapter.version"
             )
         capabilities = metadata.get("capabilities")
         if capabilities is not None:
             validate_adapter_capabilities(adapter_key, capabilities)
+        del metadata["adapter"]
         adapter_metadata = dict(metadata)
+        adapter_metadata["version"] = adapter_version
         adapter_metadata["digest"] = _adapter_digest(source_files)
         adapters[adapter_key] = adapter_metadata
     manifest = {
