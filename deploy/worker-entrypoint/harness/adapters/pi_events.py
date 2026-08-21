@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Translate a Pi RPC stdio stream to Canonical Event v2 records.
 
-Pi 0.84.2 RPC framing is JSONL over stdio: requests are written by the Bridge
-as ``{"id": N, "type": "request", "command": ..., "payload": ...}`` and responses
-/unsolicited stream events arrive on stdout. This translator reads the raw stream
-(one JSON object per line, LF-only framing per the Phase-0 probe) and maps each
-record to a canonical event.
+Pi 0.84.2 RPC framing is JSONL over stdio: requests are written by the Bridge as
+``{"id": N, "type": "<command>", "message": "<text>"}`` (or ``{"type":"get_state"}``)
+and responses / unsolicited stream events arrive on stdout as
+``{"id": N, "type": "response", "command": <cmd>, "success": bool}``. This
+translator reads the raw stream (one JSON object per line, LF-only framing per the
+Phase-0 probe) and maps each record to a canonical event.
 
 The ``delivered`` semantics follow open-harness-v2-schemas.md §3.3: a native
 ``response success:true`` to steer/follow_up is an interface ACK (the command was

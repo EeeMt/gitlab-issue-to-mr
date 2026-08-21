@@ -11,7 +11,7 @@
       "source": {
         "repository": "https://github.com/anthropics/claude-code",
         "license": "MIT",
-        "artifact_version": "2.1.152",
+        "artifact_version": "2.1.153",
         "artifact_sha256": "<computed at freeze>"
       },
       "adapter": { "version": "1.0.1", "digest": "<computed at bundle build>" },

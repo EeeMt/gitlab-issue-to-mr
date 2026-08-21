@@ -311,7 +311,10 @@ def test_codex_verify_runtime_warns_but_does_not_enforce_version_range(tmp_path)
 
     result = _codex_verify_runtime(tmp_path, cli, digest)
     assert result.returncode == 0, result.stderr
-    assert "WARNING: codex CLI codex 9.9.9 is outside the declared range" in result.stderr
+    # CODIFY_CLI_VERSION is normalized to the trailing version token
+    # (codex --version prints "codex 9.9.9"), so the advisory warning reflects
+    # the clean version, not the full "codex 9.9.9" string.
+    assert "WARNING: codex CLI 9.9.9 is outside the declared range" in result.stderr
 
 
 def _walk_keys(value):

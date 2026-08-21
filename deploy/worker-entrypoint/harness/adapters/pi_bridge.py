@@ -12,6 +12,11 @@ Contract (schemas.md §3.3 / §4):
 
 * ``delivered`` = native interface ACK (``response success:true`` for steer /
   follow_up), NOT model consumption. The true settled signal is ``agent_settled``.
+* Pi 0.84.2 RPC framing (Phase-0 probe + recovered embedded ``handleCommand``)
+  is ``type=<command>`` with the prompt/follow_up/steer body carried in a
+  ``message`` field — NOT an enveloping ``{"type":"request","command":...,...}``
+  wrapper (pi rejects that with ``Unknown command: request``). Responses are
+  ``{"id": N, "type": "response", "command": <cmd>, "success": bool}``.
 * Pi's native ``queue_update`` carries no command_id (probe fact 2), so the bridge
   correlates its OWN request ``id`` with the frame's ``command_id`` and attaches
   it on the ACK; it never guesses an id from text.
@@ -78,35 +83,65 @@ class PiBridge:
     without a live Pi process: the RPC is abstracted behind ``_send_request``.
     """
 
-    def __init__(self, *, gate: PiGateState | None = None, stream=None) -> None:
+    def __init__(
+        self,
+        *,
+        gate: PiGateState | None = None,
+        stream=None,
+        native_id_start: int = 1,
+    ) -> None:
         self.gate = gate or PiGateState()
         self._stream = stream
         self._lock = threading.Lock()
         self._in_flight: PendingCommand | None = None
+        # Monotonic native request-id sequence. The runner seeds the handshake
+        # ids (get_state/prompt/resume) in pi-run.sh; a bridge created after the
+        # handshake continues the same id stream via native_id_start so pi can
+        # correlate each ACK (native ids are sequential, one-at-a-time).
+        self._native_seq = max(1, int(native_id_start or 1)) - 1
 
     def _next_native_id(self) -> int:
-        return 1  # real-stream request ids are assigned by the runner sequencing
+        self._native_seq += 1
+        return self._native_seq
 
-    def _send_request(self, command: str, payload: dict) -> dict:
-        """Write a native request to the RPC stream and return its ACK.
+    def _send_request(self, command: str, payload: dict, *, native_id: int) -> dict:
+        """Write a native Pi RPC request and return its ACK.
 
-        Offline/tests override this; the live runner replaces it with the real
-        write-to-wire + read-corresponding-response in order, clamping to the
-        one-at-a-time in-flight slice (no parallel native requests).
+        Pi 0.84.2 request framing is ``type=<command>`` with the text body in a
+        top-level ``message`` field (recovered ``handleCommand``:
+        ``case "prompt": session3.prompt(command.message, ...)``). The old
+        ``{"type":"request","command":...,"payload":...}`` wrapper is rejected at
+        the handshake (``Unknown command: request``). Offline/tests override this
+        method; the live runner replaces it with the real write-to-wire + read
+        matching ``{"id":N,"type":"response","command":...,"success":bool}`` in
+        order, clamped to the one-at-a-time in-flight slice.
+
+        ``native_id`` is allocated once by ``dispatch`` so the pending command and
+        the wire frame share the same sequential id (one-at-a-time in flight).
         """
         if self._stream is None:
             return {
+                "id": native_id,
                 "type": "response",
                 "command": command,
                 "success": False,
-                "errorMessage": "no Pi RPC stream connected",
+                "error": "no Pi RPC stream connected",
             }
-        request = {"id": self._next_native_id(), "type": "request", "command": command, "payload": payload}
+        if command == "get_state":
+            request = {"id": native_id, "type": "get_state"}
+        else:
+            request = {"id": native_id, "type": command, "message": payload.get("text", "")}
         self._stream.write(json.dumps(request, separators=(",", ":")) + "\n")
         self._stream.flush()
         # Live runner waits for the matching response line; offline callers pass
         # anticipations through ``_anticipate``. This default returns the echo.
-        return {"type": "response", "command": command, "success": True, "__shifted": True}
+        return {
+            "id": native_id,
+            "type": "response",
+            "command": command,
+            "success": True,
+            "__shifted": True,
+        }
 
     def _attach_ack(self, pending: PendingCommand, resp: dict) -> dict:
         """Fold the Codify command identity onto the native ACK for the translator."""
@@ -143,9 +178,12 @@ class PiBridge:
         command_id = frame.get("command_id")
         if not command_id:
             return self._reject("delivery_outcome_unknown", "frame missing command_id")
+        # One native id per command frame: it seeds both the pending command and
+        # the wire request, so pi's ACK id correlates back to this command.
+        native_id = self._next_native_id()
         pending = PendingCommand(
             frame=frame,
-            native_id=self._next_native_id(),
+            native_id=native_id,
             command_id=command_id,
             sequence_no=frame.get("sequence_no"),
             payload_digest=frame.get("payload_digest"),
@@ -156,7 +194,7 @@ class PiBridge:
         # is a projection concern at the audit/queue boundary, not the wire).
         native_payload = {"text": text}
         try:
-            resp = self._send_request(native_command, native_payload)
+            resp = self._send_request(native_command, native_payload, native_id=native_id)
             ack = self._attach_ack(pending, resp)
             self._in_flight = None
             return {

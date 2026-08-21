@@ -492,3 +492,28 @@ def test_opencode_prepare_config_writes_snapshot_endpoint(tmp_path):
     assert "sk-snapshot-secret" not in config.read_text(encoding="utf-8")
     # A free loopback port was probed and a Task password generated.
     assert result.stdout.strip().isdigit()
+
+
+def test_opencode_prepare_config_exports_transport_env_defaults(tmp_path):
+    # P2: prepare_config default-exports the OpenCode transport/model identity
+    # (server_http / opencode-server / three protocols) when the runner did not
+    # inject it, so result_builder.v2_harness_block forms the correct V2 envelope.
+    env = {
+        "CODIFY_RUNTIME_DIR": str(tmp_path),
+        "CODIFY_ORCHESTRATION_DIR": str(REPO_ROOT / "deploy"),
+        "CODIFY_RUN_UID": "1000",
+        "CODIFY_RUN_GID": "1000",
+    }
+    result = _source_adapter(
+        "unset CODIFY_HARNESS_CONTROL_TRANSPORT_KIND "
+        "CODIFY_HARNESS_CONTROL_TRANSPORT_PROTOCOL CODIFY_HARNESS_MODEL_PROTOCOLS || true; "
+        "opencode_adapter_prepare_config && printf '%s|%s|%s' "
+        '"$CODIFY_HARNESS_CONTROL_TRANSPORT_KIND" '
+        '"$CODIFY_HARNESS_CONTROL_TRANSPORT_PROTOCOL" '
+        '"$CODIFY_HARNESS_MODEL_PROTOCOLS"',
+        env,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == (
+        "server_http|opencode-server|anthropic_messages,openai_responses,openai_chat_completions"
+    )

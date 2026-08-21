@@ -79,6 +79,13 @@ opencode_adapter_prepare_config() {
     mkdir -p "${config_dir}"
     chown -R "${CODIFY_RUN_UID:-1000}:${CODIFY_RUN_GID:-1000}" "${config_dir}" 2>/dev/null || true
 
+    # Export the OpenCode transport/model identity so events.py forms the
+    # correct V2 harness envelope (server_http / opencode-server / three model
+    # protocols per the manifest). Harmless under V1; no-op when injected.
+    export CODIFY_HARNESS_CONTROL_TRANSPORT_KIND="${CODIFY_HARNESS_CONTROL_TRANSPORT_KIND:-server_http}"
+    export CODIFY_HARNESS_CONTROL_TRANSPORT_PROTOCOL="${CODIFY_HARNESS_CONTROL_TRANSPORT_PROTOCOL:-opencode-server}"
+    export CODIFY_HARNESS_MODEL_PROTOCOLS="${CODIFY_HARNESS_MODEL_PROTOCOLS:-anthropic_messages,openai_responses,openai_chat_completions}"
+
     # Port bridge: probe a free loopback port for the Server's explicit --port.
     OPENCODE_PORT="$(opencode_probe_port)"
     export OPENCODE_PORT

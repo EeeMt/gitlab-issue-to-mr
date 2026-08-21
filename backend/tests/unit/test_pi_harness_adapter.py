@@ -241,7 +241,7 @@ def _load_bridge():
 def test_pi_bridge_maps_steer_frame_to_native_ack(tmp_path):
     bridge = _load_bridge()
     b = bridge.PiBridge()
-    b._send_request = lambda _cmd, _p: {  # type: ignore[method-assign]
+    b._send_request = lambda _cmd, _p, **_kw: {  # type: ignore[method-assign]
         "type": "response",
         "command": "steer",
         "success": True,
@@ -257,6 +257,63 @@ def test_pi_bridge_maps_steer_frame_to_native_ack(tmp_path):
     )
     assert outcome["status"] == "ack"
     assert outcome["command_id"] == "cmd-1"
+
+
+def test_pi_bridge_writes_real_0842_request_frames(tmp_path):
+    # Real pi 0.84.2 rejects the enveloping ``{"type":"request",...}`` wrapper
+    # (``Unknown command: request``); the shipped bridge must write
+    # ``{"type":<cmd>,"message":<text>}`` with a sequential id (probe fact).
+    import io
+
+    bridge = _load_bridge()
+    stream = io.StringIO()
+    b = bridge.PiBridge(stream=stream, native_id_start=4)  # after handshake ids 1..3
+    outcome = b.dispatch(
+        {
+            "frame_version": "1",
+            "command_id": "cmd-steer",
+            "sequence_no": 5,
+            "type": "follow_up",
+            "payload": {"text": "keep going"},
+        }
+    )
+    assert outcome["status"] == "ack"
+    written = json.loads(stream.getvalue().strip())
+    assert written == {"id": 4, "type": "follow_up", "message": "keep going"}
+    # id sequence advances one-at-a-time
+    b.dispatch(
+        {
+            "frame_version": "1",
+            "command_id": "cmd-steer-2",
+            "sequence_no": 6,
+            "type": "steer",
+            "payload": {"text": "stop now"},
+        }
+    )
+    written2 = json.loads(stream.getvalue().strip().splitlines()[1])
+    assert written2["id"] == 5
+
+
+def test_pi_bridge_steer_frame_carries_message_not_envelope(tmp_path):
+    import io
+
+    bridge = _load_bridge()
+    stream = io.StringIO()
+    b = bridge.PiBridge(stream=stream, native_id_start=2)
+    b.dispatch(
+        {
+            "frame_version": "1",
+            "command_id": "cmd-x",
+            "sequence_no": 1,
+            "type": "steer",
+            "payload": {"text": "go"},
+        }
+    )
+    # steer maps to a message-carrying frame (no regression to the
+    # ``{"type":"request",...,"payload":...}`` envelope wrapper pi rejects).
+    written = json.loads(stream.getvalue().strip())
+    assert written["type"] == "steer"
+    assert written["message"] == "go"
 
 
 def test_pi_bridge_rejects_closed_gate_and_wrong_type(tmp_path):
@@ -342,6 +399,31 @@ def test_pi_config_maps_snapshot_endpoint_to_models_json(tmp_path):
     # Snapshot model/base/credential win; Pi native config cannot override.
     assert content["models"]["deepseek-v4-flash"]["baseUrl"] == "https://api.deepseek.com/anthropic"
     assert content["providers"]["codify"]["apiKey"] == "sk-snapshot-secret"
+
+
+def test_pi_prepare_config_exports_transport_env_defaults(tmp_path):
+    # P2: prepare_config default-exports the Pi transport/model identity
+    # (rpc_stdio / pi-rpc / three protocols) when the runner did not inject it,
+    # so result_builder.v2_harness_block forms the correct V2 envelope.
+    env = {
+        "CODIFY_RUNTIME_DIR": str(tmp_path),
+        "CODIFY_ORCHESTRATION_DIR": str(REPO_ROOT / "deploy"),
+        "CODIFY_RUN_UID": "1000",
+        "CODIFY_RUN_GID": "1000",
+    }
+    result = _source_adapter(
+        "unset CODIFY_HARNESS_CONTROL_TRANSPORT_KIND "
+        "CODIFY_HARNESS_CONTROL_TRANSPORT_PROTOCOL CODIFY_HARNESS_MODEL_PROTOCOLS || true; "
+        "pi_adapter_prepare_config && printf '%s|%s|%s' "
+        '"$CODIFY_HARNESS_CONTROL_TRANSPORT_KIND" '
+        '"$CODIFY_HARNESS_CONTROL_TRANSPORT_PROTOCOL" '
+        '"$CODIFY_HARNESS_MODEL_PROTOCOLS"',
+        env,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == (
+        "rpc_stdio|pi-rpc|anthropic_messages,openai_responses,openai_chat_completions"
+    )
 
 
 def test_pi_materializes_skills_to_pi_native_dir_not_claude(tmp_path):

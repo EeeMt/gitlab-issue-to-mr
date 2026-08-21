@@ -65,14 +65,18 @@ pi_pid=$!
 
 # Issue the initial RPC handshake: get_state (verify version/capability gate is
 # enforced by the adapter before this runner is reached) then prompt with the
-# frozen task text. Requests are written to the pipe held open by req_writer.
+# frozen task text. Requests use Pi 0.84.2 framing -- ``type=<command>`` with the
+# prompt body in a top-level ``message`` field (recovered handleCommand), NOT the
+# enveloping ``{"type":"request","command":...,"payload":...}`` wrapper that pi
+# rejects with ``Unknown command: request``. Requests are written to the pipe
+# held open by req_writer.
 prompt_json="$(jq -Rs . < "${PROMPT_FILE}")"
 if [ -n "${CODIFY_RESUME_SESSION}" ]; then
-    printf '{"id":1,"type":"request","command":"resume","payload":{"sessionId":"%s"}}\n' \
+    printf '{"id":1,"type":"resume","sessionId":"%s"}\n' \
         "${CODIFY_RESUME_SESSION}" > "${REQ_FIFO}"
 fi
-printf '{"id":2,"type":"request","command":"get_state"}\n' > "${REQ_FIFO}"
-printf '{"id":3,"type":"request","command":"prompt","payload":{"text":%s}}\n' \
+printf '{"id":2,"type":"get_state"}\n' > "${REQ_FIFO}"
+printf '{"id":3,"type":"prompt","message":%s}\n' \
     "${prompt_json}" > "${REQ_FIFO}"
 
 # Root context drains stdout through the translator as ONE streaming process.

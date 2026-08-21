@@ -72,6 +72,13 @@ pi_adapter_prepare_config() {
     mkdir -p "${PI_HOME}"
     chown -R "${CODIFY_RUN_UID:-1000}:${CODIFY_RUN_GID:-1000}" "${PI_HOME}" 2>/dev/null || true
 
+    # Export the Pi transport/model identity so events.py forms the correct V2
+    # harness envelope (rpc_stdio / pi-rpc / three model protocols per the
+    # manifest). Harmless under V1; no-op when already injected by the runner.
+    export CODIFY_HARNESS_CONTROL_TRANSPORT_KIND="${CODIFY_HARNESS_CONTROL_TRANSPORT_KIND:-rpc_stdio}"
+    export CODIFY_HARNESS_CONTROL_TRANSPORT_PROTOCOL="${CODIFY_HARNESS_CONTROL_TRANSPORT_PROTOCOL:-pi-rpc}"
+    export CODIFY_HARNESS_MODEL_PROTOCOLS="${CODIFY_HARNESS_MODEL_PROTOCOLS:-anthropic_messages,openai_responses,openai_chat_completions}"
+
     # Model endpoint mapping. The Snapshot's model / base URL / credential are
     # frozen by the backend and injected as env (ANTHROPIC_MODEL / base / key or
     # OPENAI_*). Pi reads custom providers from ~/.pi/agent/models.json; we

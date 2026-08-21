@@ -47,7 +47,9 @@ codex_adapter_verify_runtime() {
         echo "Could not read Codex CLI version" >&2
         return 1
     fi
-    CODIFY_CLI_VERSION="${version_output}"
+    # codex --version prints "codex-cli 0.146.0" (or bare "0.146.0"); store only
+    # the version token so the V2 envelope and manifest match stay exact.
+    CODIFY_CLI_VERSION="$(printf '%s\n' "${version_output}" | awk '{print $NF}')"
     export CODIFY_CLI_VERSION
     # cli_version_range in the manifest is an advisory fast-startup hint, not an
     # enforced gate: an out-of-range CLI logs a warning and is allowed to run.
