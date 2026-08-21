@@ -109,6 +109,13 @@ def _usage(record: dict) -> dict:
     }
 
 
+def _result_schema() -> str:
+    """Result schema matches the active runtime contract (v1 default, v2 once flipped)."""
+    if os.environ.get("CODIFY_RUNTIME_CONTRACT_VERSION", "") == "codify.worker.harness/v2":
+        return "codify.worker.result/v2"
+    return "codify.worker.result/v1"
+
+
 def _write_result(
     *,
     success: bool,
@@ -122,7 +129,7 @@ def _write_result(
         message = failure_message or result or "Codex execution failed"
         failure = {"kind": _failure_kind(message), "message": message}
     payload = {
-        "schema": "codify.worker.result/v1",
+        "schema": _result_schema(),
         "status": "completed" if success else "failed",
         "success": success,
         "result": result,

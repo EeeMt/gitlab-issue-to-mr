@@ -84,6 +84,13 @@ def _usage(record: dict) -> dict:
     }
 
 
+def _result_schema() -> str:
+    """Result schema matches the active runtime contract (v1 default, v2 once flipped)."""
+    if os.environ.get("CODIFY_RUNTIME_CONTRACT_VERSION", "") == "codify.worker.harness/v2":
+        return "codify.worker.result/v2"
+    return "codify.worker.result/v1"
+
+
 def _write_result(record: dict, *, success: bool, usage: dict) -> None:
     result_path = Path(os.environ["CODIFY_HARNESS_RESULT_FILE"])
     failure = None
@@ -94,7 +101,7 @@ def _write_result(record: dict, *, success: bool, usage: dict) -> None:
             "message": record.get("result") or record.get("subtype") or "AI execution failed",
         }
     result = {
-        "schema": "codify.worker.result/v1",
+        "schema": _result_schema(),
         "status": (
             "completed"
             if success

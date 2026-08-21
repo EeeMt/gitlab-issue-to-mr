@@ -7,14 +7,25 @@ claude_adapter_metadata() {
     if [ ! -r "${manifest_path}" ]; then
         manifest_path="${ENTRYPOINT_LIB_DIR}/harness/manifest.json"
     fi
-    jq -ce '
+    # Claude emits the V1 or V2 envelope/result per the runtime contract the
+    # backend freezes into the attempt. The manifest top-level stays V1 until
+    # the Phase 5 hard switch; this operator honours an explicit override.
+    local contract="${CODIFY_RUNTIME_CONTRACT_VERSION:-codify.worker.harness/v1}"
+    local event_schema="${CODIFY_EVENT_SCHEMA:-codify.worker.event/v1}"
+    if [ "${contract}" = "codify.worker.harness/v2" ]; then
+        event_schema="${CODIFY_EVENT_SCHEMA:-codify.worker.event/v2}"
+    fi
+    jq -ce \
+        --arg contract "${contract}" \
+        --arg event_schema "${event_schema}" \
+        '
         . as $manifest
         | .adapters.claude
         | . + {
             key:"claude",
             adapter_version:.version,
-            contract_version:$manifest.contract_version,
-            event_schema:$manifest.event_schema
+            contract_version:$contract,
+            event_schema:$event_schema
         }
     ' "${manifest_path}"
 }
@@ -77,6 +88,14 @@ claude_adapter_prepare_config() {
     mkdir -p /home/codify/.claude "${CODIFY_HARNESS_RAW_DIR}"
     codify_chown -R /home/codify/.claude "${CODIFY_HARNESS_RAW_DIR}"
     chmod 700 /home/codify/.claude
+
+    # Export the claude transport/model identity so events.py forms the
+    # correct V2 harness envelope (cli_stream_json / claude-json /
+    # anthropic_messages). Harmless under V1 (events.py ignores them). No-op
+    # when the attempt already injects them.
+    export CODIFY_HARNESS_CONTROL_TRANSPORT_KIND="${CODIFY_HARNESS_CONTROL_TRANSPORT_KIND:-cli_stream_json}"
+    export CODIFY_HARNESS_CONTROL_TRANSPORT_PROTOCOL="${CODIFY_HARNESS_CONTROL_TRANSPORT_PROTOCOL:-claude-json}"
+    export CODIFY_HARNESS_MODEL_PROTOCOLS="${CODIFY_HARNESS_MODEL_PROTOCOLS:-anthropic_messages}"
 
     local claude_system_prompt_file="/tmp/claude_system_prompt.txt"
     if [ -n "${APPEND_SYSTEM_PROMPT:-}" ]; then
@@ -148,11 +167,18 @@ claude_adapter_stream_events() {
 claude_adapter_normalize_result() {
     # The streaming translator atomically writes the Canonical Result. Validate
     # its portable shape and frozen Adapter identity before public delivery.
+    # Accept the result schema matching the active contract (v1 in production
+    # today, v2 once the runtime contract flips).
+    local schema="codify.worker.result/v1"
+    if [ "${CODIFY_RUNTIME_CONTRACT_VERSION:-}" = "codify.worker.harness/v2" ]; then
+        schema="codify.worker.result/v2"
+    fi
     jq -e \
         --arg harness_key "${CODIFY_HARNESS_KEY}" \
         --arg adapter_version "${CODIFY_ADAPTER_VERSION}" \
         --arg cli_version "${CODIFY_CLI_VERSION}" \
-        '.schema == "codify.worker.result/v1"
+        --arg schema "${schema}" \
+        '.schema == $schema
          and .harness_key == $harness_key
          and .adapter_version == $adapter_version
          and .cli_version == $cli_version

@@ -13,11 +13,19 @@ codify_codex_bin() {
 }
 
 codex_adapter_metadata() {
+    # Codex emits the V1 or V2 envelope/result per the runtime contract the
+    # backend freezes into the attempt. The manifest top-level stays V1 until
+    # the Phase 5 hard switch; this operator honours an explicit override.
+    local contract="${CODIFY_RUNTIME_CONTRACT_VERSION:-codify.worker.harness/v1}"
+    local event_schema="${CODIFY_EVENT_SCHEMA:-codify.worker.event/v1}"
+    if [ "${contract}" = "codify.worker.harness/v2" ]; then
+        event_schema="${CODIFY_EVENT_SCHEMA:-codify.worker.event/v2}"
+    fi
     # Frozen manifest is the single source of truth for adapter version/digest.
     jq -c \
         --arg key codex \
-        --arg contract "${CODIFY_RUNTIME_CONTRACT_VERSION:-codify.worker.harness/v1}" \
-        --arg event_schema "codify.worker.event/v1" \
+        --arg contract "${contract}" \
+        --arg event_schema "${event_schema}" \
         '{ key: $key,
            adapter_version: (.adapters.codex.version // ""),
            adapter_digest: (.adapters.codex.digest // ""),
@@ -82,6 +90,12 @@ codex_adapter_prepare_config() {
     fi
     mkdir -p "${CODEX_HOME}"
     chown -R "${CODIFY_RUN_UID:-1000}:${CODIFY_RUN_GID:-1000}" "${CODEX_HOME}" 2>/dev/null || true
+    # Export the codex transport/model identity so events.py forms the
+    # correct V2 harness envelope (cli_jsonl / codex-jsonl / openai_responses).
+    # Harmless under V1 (events.py ignores them). No-op when already injected.
+    export CODIFY_HARNESS_CONTROL_TRANSPORT_KIND="${CODIFY_HARNESS_CONTROL_TRANSPORT_KIND:-cli_jsonl}"
+    export CODIFY_HARNESS_CONTROL_TRANSPORT_PROTOCOL="${CODIFY_HARNESS_CONTROL_TRANSPORT_PROTOCOL:-codex-jsonl}"
+    export CODIFY_HARNESS_MODEL_PROTOCOLS="${CODIFY_HARNESS_MODEL_PROTOCOLS:-openai_responses}"
     # Point codex at the frozen Snapshot endpoint/model (codex does not honour
     # OPENAI_BASE_URL for the Responses API, so write an explicit config).
     local base_url="${OPENAI_BASE_URL:-}"
@@ -192,11 +206,18 @@ codex_adapter_normalize_result() {
     # legacy CLI stdout and must not be used for canonical normalization.
     local authoritative="${CODIFY_HARNESS_RESULT_FILE:-${result_file}}"
     [ -s "${authoritative}" ] || return 1
+    # Accept the result schema matching the active contract (v1 in production
+    # today, v2 once the runtime contract flips).
+    local schema="codify.worker.result/v1"
+    if [ "${CODIFY_RUNTIME_CONTRACT_VERSION:-}" = "codify.worker.harness/v2" ]; then
+        schema="codify.worker.result/v2"
+    fi
     jq -e \
         --arg harness_key codex \
         --arg adapter_version "${CODIFY_ADAPTER_VERSION}" \
         --arg cli_version "${CODIFY_CLI_VERSION}" \
-        '.schema == "codify.worker.result/v1"
+        --arg schema "${schema}" \
+        '.schema == $schema
          and .harness_key == $harness_key
          and .adapter_version == $adapter_version
          and .cli_version == $cli_version

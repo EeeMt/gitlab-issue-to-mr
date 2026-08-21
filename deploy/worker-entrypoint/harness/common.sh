@@ -40,8 +40,12 @@ codify_harness_mark_delivery_started() {
 
 codify_harness_ensure_result() {
     local exit_code="${1:-1}"
+    local result_schema="codify.worker.result/v1"
+    if [ "${CODIFY_RUNTIME_CONTRACT_VERSION:-}" = "codify.worker.harness/v2" ]; then
+        result_schema="codify.worker.result/v2"
+    fi
     if [ -s "${CODIFY_HARNESS_RESULT_FILE}" ] \
-        && jq -e '.schema == "codify.worker.result/v1"' \
+        && jq -e --arg schema "${result_schema}" '.schema == $schema' \
             "${CODIFY_HARNESS_RESULT_FILE}" >/dev/null 2>&1; then
         return 0
     fi
@@ -60,13 +64,15 @@ codify_harness_ensure_result() {
     esac
     if [ "${exit_code}" -eq 0 ] && codify_event_type_exists "harness.completed"; then
         jq -nc \
+            --arg schema "${result_schema}" \
             --arg harness_key "${CODIFY_HARNESS_KEY}" \
             --arg adapter_version "${CODIFY_ADAPTER_VERSION}" \
             --arg cli_version "${CODIFY_CLI_VERSION}" \
-            '{schema:"codify.worker.result/v1",status:"completed",success:true,result:"",harness_key:$harness_key,adapter_version:$adapter_version,cli_version:$cli_version,session_id:null,model:null,usage:{input_tokens:null,cached_input_tokens:null,output_tokens:null,reasoning_tokens:null,cost:null,currency:null,engine_fields:{}},failure:null,capability_warnings:[]}' \
+            '{schema:$schema,status:"completed",success:true,result:"",harness_key:$harness_key,adapter_version:$adapter_version,cli_version:$cli_version,session_id:null,model:null,usage:{input_tokens:null,cached_input_tokens:null,output_tokens:null,reasoning_tokens:null,cost:null,currency:null,engine_fields:{}},failure:null,capability_warnings:[]}' \
             > "${CODIFY_HARNESS_RESULT_FILE}.tmp"
     else
         jq -nc \
+            --arg schema "${result_schema}" \
             --arg status "${result_status}" \
             --arg kind "${failure_kind}" \
             --argjson exit_code "${exit_code}" \
@@ -74,7 +80,7 @@ codify_harness_ensure_result() {
             --arg harness_key "${CODIFY_HARNESS_KEY}" \
             --arg adapter_version "${CODIFY_ADAPTER_VERSION}" \
             --arg cli_version "${CODIFY_CLI_VERSION}" \
-            '{schema:"codify.worker.result/v1",status:$status,success:false,result:"",harness_key:$harness_key,adapter_version:$adapter_version,cli_version:$cli_version,session_id:null,model:null,usage:{input_tokens:null,cached_input_tokens:null,output_tokens:null,reasoning_tokens:null,cost:null,currency:null,engine_fields:{}},failure:{kind:$kind,exit_code:$exit_code,message:$message},capability_warnings:[]} | del(.failure.message | select(. == ""))' \
+            '{schema:$schema,status:$status,success:false,result:"",harness_key:$harness_key,adapter_version:$adapter_version,cli_version:$cli_version,session_id:null,model:null,usage:{input_tokens:null,cached_input_tokens:null,output_tokens:null,reasoning_tokens:null,cost:null,currency:null,engine_fields:{}},failure:{kind:$kind,exit_code:$exit_code,message:$message},capability_warnings:[]} | del(.failure.message | select(. == ""))' \
             > "${CODIFY_HARNESS_RESULT_FILE}.tmp"
     fi
     mv "${CODIFY_HARNESS_RESULT_FILE}.tmp" "${CODIFY_HARNESS_RESULT_FILE}"
