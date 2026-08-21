@@ -8,7 +8,13 @@ from pathlib import Path
 
 import pytest
 
-from app.core.harness_protocol import replay_events, validate_event, validate_result
+from app.core.harness_protocol import (
+    CANONICAL_EVENT_SCHEMA_V2,
+    replay_events,
+    validate_event,
+    validate_event_v2,
+    validate_result,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 HARNESS_DIR = REPO_ROOT / "deploy/worker-entrypoint/harness"
@@ -651,3 +657,185 @@ codify_harness_finalize_attempt {exit_code}
     assert terminal["payload"]["failure"]["kind"] == expected_kind
     assert terminal["payload"]["status"] == expected_status
     assert terminal["payload"]["failure"]["message"] == "normalized failure"
+
+
+# ── V2 contract migration (Phase 4): the adapter honours CODIFY_RUNTIME_CONTRACT_VERSION ──
+
+V2_CONTRACT = "codify.worker.harness/v2"
+CLAUDE_V2_TRANSPORT = {
+    "CODIFY_HARNESS_CONTROL_TRANSPORT_KIND": "cli_stream_json",
+    "CODIFY_HARNESS_CONTROL_TRANSPORT_PROTOCOL": "claude-json",
+    "CODIFY_HARNESS_MODEL_PROTOCOLS": "anthropic_messages",
+}
+
+
+def _v2_environment(runtime_dir: Path) -> dict[str, str]:
+    return {
+        **_environment(runtime_dir),
+        "CODIFY_RUNTIME_CONTRACT_VERSION": V2_CONTRACT,
+        **CLAUDE_V2_TRANSPORT,
+    }
+
+
+def _emit_v2(runtime_dir: Path, event_type: str, payload: dict | None = None) -> None:
+    subprocess.run(
+        ["python3", str(EVENT_WRITER), event_type, "--payload", json.dumps(payload or {})],
+        check=True,
+        env=_v2_environment(runtime_dir),
+        capture_output=True,
+        text=True,
+    )
+
+
+def _translate_stream_v2(runtime_dir: Path, records: list[dict]) -> None:
+    raw_file = runtime_dir / "harness-events/claude.jsonl"
+    raw_file.parent.mkdir(parents=True, exist_ok=True)
+    raw_file.touch(exist_ok=True)
+    payload = "".join(
+        json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
+        for record in records
+    )
+    subprocess.run(
+        ["python3", str(TRANSLATOR), "--raw-file", str(raw_file)],
+        input=payload,
+        check=True,
+        env=_v2_environment(runtime_dir),
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_claude_v2_contract_emits_v2_envelope_and_result(tmp_path):
+    runtime_dir = tmp_path / "v2"
+    runtime_dir.mkdir()
+    _emit_v2(runtime_dir, "run.started", {"runtime_bundle_digest": "d" * 64})
+    _translate_stream_v2(
+        runtime_dir,
+        [
+            {"type": "system", "subtype": "init", "model": "claude-probe", "session_id": "s1"},
+            {
+                "type": "result",
+                "subtype": "success",
+                "result": "ok",
+                "session_id": "s1",
+                "total_cost_usd": 0.0,
+                "usage": {"input_tokens": 10, "output_tokens": 4},
+            },
+        ],
+    )
+    _emit_v2(runtime_dir, "delivery.started")
+    _emit_v2(runtime_dir, "delivery.completed")
+    _emit_v2(runtime_dir, "worker.finalization", {"exit_code": 0})
+    _emit_v2(runtime_dir, "run.completed", {"status": "completed", "success": True})
+
+    events = _events(runtime_dir)
+    for event in events:
+        normalized = validate_event_v2(event)
+        assert normalized["schema"] == CANONICAL_EVENT_SCHEMA_V2
+        harness = normalized["harness"]
+        assert harness["control_transport"] == {"kind": "cli_stream_json", "protocol": "claude-json"}
+        assert harness["model_protocols"] == ["anthropic_messages"]
+
+    # The V2 result keeps the flat V1-compatible shape with the v2 schema
+    # string, matching the accepted pi/opencode level (the frozen nested
+    # `harness` result block is a Phase 5 hard-switch target not yet produced
+    # by any adapter). The v2 schema string is the contract signal here.
+    result = json.loads((runtime_dir / "harness-result.json").read_text())
+    assert result["schema"] == "codify.worker.result/v2"
+    assert result["harness_key"] == "claude"
+    assert result["adapter_version"] == "1.0.0"
+    assert result["success"] is True
+
+
+def test_claude_v2_metadata_reports_v2_contract(tmp_path):
+    command = f'''
+set -e
+CODIFY_RUNTIME_DIR={tmp_path!s}
+ENTRYPOINT_LIB_DIR={REPO_ROOT / "deploy/worker-entrypoint"!s}
+CODIFY_ORCHESTRATION_DIR={REPO_ROOT / "deploy"!s}
+CODIFY_RUNTIME_CONTRACT_VERSION=codify.worker.harness/v2
+source "$ENTRYPOINT_LIB_DIR/harness/common.sh"
+source "$ENTRYPOINT_LIB_DIR/harness/adapters/claude.sh"
+claude_adapter_metadata
+'''
+    result = subprocess.run(["bash", "-c", command], check=True, capture_output=True, text=True)
+    metadata = json.loads(result.stdout)
+    assert metadata["contract_version"] == "codify.worker.harness/v2"
+    assert metadata["event_schema"] == "codify.worker.event/v2"
+
+
+def test_claude_v2_normalize_result_accepts_v2_schema(tmp_path):
+    env = {
+        **_environment(tmp_path),
+        "CODIFY_RUNTIME_CONTRACT_VERSION": V2_CONTRACT,
+        "ENTRYPOINT_LIB_DIR": str(REPO_ROOT / "deploy/worker-entrypoint"),
+        "CODIFY_ORCHESTRATION_DIR": str(REPO_ROOT / "deploy"),
+        "CODIFY_HARNESS_KEY": "claude",
+        "CODIFY_ADAPTER_VERSION": "2.0.0",
+        "CODIFY_CLI_VERSION": "2.1.152",
+    }
+    result_file = tmp_path / "harness-result.json"
+    result_file.write_text(
+        json.dumps(
+            {
+                "schema": "codify.worker.result/v2",
+                "status": "completed",
+                "success": True,
+                "result": "ok",
+                "harness_key": "claude",
+                "adapter_version": "2.0.0",
+                "cli_version": "2.1.152",
+                "session_id": None,
+                "model": None,
+                "usage": {},
+                "failure": None,
+                "capability_warnings": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    command = f'''
+set -e
+CODIFY_RUNTIME_DIR={tmp_path!s}
+ENTRYPOINT_LIB_DIR={REPO_ROOT / "deploy/worker-entrypoint"!s}
+CODIFY_ORCHESTRATION_DIR={REPO_ROOT / "deploy"!s}
+CODIFY_RUNTIME_CONTRACT_VERSION=codify.worker.harness/v2
+CODIFY_HARNESS_KEY=claude
+CODIFY_ADAPTER_VERSION=2.0.0
+CODIFY_CLI_VERSION=2.1.152
+CODIFY_HARNESS_RESULT_FILE={result_file!s}
+source "$ENTRYPOINT_LIB_DIR/harness/common.sh"
+source "$ENTRYPOINT_LIB_DIR/harness/adapters/claude.sh"
+claude_adapter_normalize_result
+'''
+    subprocess.run(["bash", "-c", command], env=env, check=True)
+
+
+def test_claude_v2_ensure_result_synthesizes_v2_on_absent_terminal(tmp_path):
+    # When the adapter never wrote a result (e.g. harness died before a
+    # terminal), the shared fallback must synthesize the result schema matching
+    # the active contract. Under V2 that is codify.worker.result/v2.
+    env = {
+        **_environment(tmp_path),
+        "CODIFY_RUNTIME_CONTRACT_VERSION": V2_CONTRACT,
+        "ENTRYPOINT_LIB_DIR": str(REPO_ROOT / "deploy/worker-entrypoint"),
+        "CODIFY_HARNESS_KEY": "claude",
+        "CODIFY_ADAPTER_VERSION": "2.0.0",
+        "CODIFY_CLI_VERSION": "2.1.152",
+    }
+    (tmp_path / "event.jsonl").write_text(
+        json.dumps({"type": "harness.failed", "payload": {"failure": {"kind": "crash", "message": "x"}}})
+        + "\n",
+        encoding="utf-8",
+    )
+    command = '''
+source "$ENTRYPOINT_LIB_DIR/harness/common.sh"
+CODIFY_HARNESS_TERMINAL_SEEN=1
+codify_harness_ensure_result 1
+'''
+    subprocess.run(["bash", "-c", command], env=env, check=True)
+    result = json.loads((tmp_path / "harness-result.json").read_text(encoding="utf-8"))
+    assert result["schema"] == "codify.worker.result/v2"
+    assert result["status"] == "failed"
+    assert result["harness_key"] == "claude"
+
