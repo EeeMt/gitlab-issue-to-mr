@@ -466,3 +466,43 @@ def test_pi_verify_runtime_enforces_pinned_cli_version(tmp_path):
     bad = _source_adapter("pi_adapter_verify_runtime", env2)
     assert bad.returncode != 0
     assert "version mismatch" in bad.stderr
+
+
+def test_pi_continuation_raw_stream_maps_model_resolved(tmp_path):
+    # Real pi 0.84.2 continuation wire (docs/harness-probes/v2/pi/continuation.raw.jsonl):
+    # the runner sends ``new_session`` with ``parentSessionId`` to continue a task;
+    # pi accepts it (success:true) and the following get_state returns the new child
+    # session, from which the translator captures model + session_id. The new_session
+    # ACK itself carries no canonical event and a handshake-only stream (no model
+    # turn) emits no harness terminal at EOF.
+    runtime_dir = tmp_path / "continuation"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started", {"runtime_bundle_digest": "d" * 64})
+    _translate(runtime_dir, _probe_records("continuation"))
+    events = [e for e in _events(runtime_dir) if e["type"] != "run.started"]
+    for event in events:
+        normalized = validate_event_v2(event)
+        assert normalized["schema"] == CANONICAL_EVENT_SCHEMA_V2
+    by_type = [e["type"] for e in events]
+    assert "model.resolved" in by_type
+    resolved = next(e for e in events if e["type"] == "model.resolved")
+    assert resolved["payload"]["model"] == "deepseek-v4-flash"
+    assert resolved["payload"]["session_id"] == "<SESSION_UUID>"
+    assert "harness.completed" not in by_type
+
+
+def test_pi_runner_handshake_uses_new_session_not_resume():
+    # Finding 1 regression guard: real pi 0.84.2 rejects the old handshake frame
+    # ``{"type":"resume","sessionId":...}`` (``Unknown command: resume``); the pi
+    # runner must request sessions via ``new_session`` (+ optional
+    # ``parentSessionId`` for a continued task), then keep get_state -> prompt.
+    runner = (REPO_ROOT / "deploy/worker-entrypoint/legacy/pi-run.sh").read_text(encoding="utf-8")
+    assert '"type":"resume"' not in runner
+    # Continuations reference the parent; first sessions use the bare frame.
+    assert "parentSessionId" in runner
+    assert '{id:1, type:"new_session", parentSessionId:$parent}' in runner
+    assert '{"id":1,"type":"new_session"}' in runner
+    # get_state / prompt frame sequence is preserved after the handshake.
+    assert '{"id":2,"type":"get_state"}' in runner
+    assert '{"id":3,"type":"prompt"' in runner
+    assert runner.index('"type":"get_state"') < runner.index('"type":"prompt"')

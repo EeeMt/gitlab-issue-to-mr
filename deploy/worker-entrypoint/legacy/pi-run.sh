@@ -63,18 +63,23 @@ req_writer=$!
 "${PI_COMMAND[@]}" < "${REQ_FIFO}" > "${STREAM_FIFO}" 2>&1 &
 pi_pid=$!
 
-# Issue the initial RPC handshake: get_state (verify version/capability gate is
-# enforced by the adapter before this runner is reached) then prompt with the
-# frozen task text. Requests use Pi 0.84.2 framing -- ``type=<command>`` with the
-# prompt body in a top-level ``message`` field (recovered handleCommand), NOT the
-# enveloping ``{"type":"request","command":...,"payload":...}`` wrapper that pi
-# rejects with ``Unknown command: request``. Requests are written to the pipe
-# held open by req_writer.
+# Issue the initial RPC handshake: new_session (opt. continuing a parent
+# session), get_state (verify version/capability gate is enforced by the
+# adapter before this runner is reached) then prompt with the frozen task text.
+# Requests use Pi 0.84.2 framing -- ``type=<command>`` with the prompt body in a
+# top-level ``message`` field (recovered handleCommand), NOT the enveloping
+# ``{"type":"request","command":...,"payload":...}`` wrapper that pi rejects with
+# ``Unknown command: request``. A continued run (CODIFY_RESUME_SESSION) sends
+# ``new_session`` + ``parentSessionId`` (real 0.84.2 accepts it), while a first
+# run sends bare ``new_session``; real 0.84.2 rejects the old ``type:resume``
+# frame with ``Unknown command: resume``. Requests are written to the pipe held
+# open by req_writer.
 prompt_json="$(jq -Rs . < "${PROMPT_FILE}")"
+first_frame='{"id":1,"type":"new_session"}'
 if [ -n "${CODIFY_RESUME_SESSION}" ]; then
-    printf '{"id":1,"type":"resume","sessionId":"%s"}\n' \
-        "${CODIFY_RESUME_SESSION}" > "${REQ_FIFO}"
+    first_frame="$(jq -nc --arg parent "${CODIFY_RESUME_SESSION}" '{id:1, type:"new_session", parentSessionId:$parent}')"
 fi
+printf '%s\n' "${first_frame}" > "${REQ_FIFO}"
 printf '{"id":2,"type":"get_state"}\n' > "${REQ_FIFO}"
 printf '{"id":3,"type":"prompt","message":%s}\n' \
     "${prompt_json}" > "${REQ_FIFO}"
