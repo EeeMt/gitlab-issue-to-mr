@@ -318,7 +318,29 @@ class WorkerEventProjector:
         elif event_type in CONTROL_EVENT_TYPES:
             # V2 control-plane audit events. Projector only records them as a
             # product-visible diagnostic; it never writes back to
-            # task_harness_commands rows (schemas.md §3.4 / §4.1).
+            # task_harness_commands rows (schemas.md §3.4 / §4.1). Command text
+            # carried by queue.updated is projected only through the existing
+            # sanitizer so tokens are never echoed verbatim (plan §5.3).
+            sanitized_payload = dict(payload)
+            if event_type == "control.queue.updated" and isinstance(payload.get("queue"), list):
+                sanitized_queue = []
+                for item in payload["queue"]:
+                    entry = dict(item) if isinstance(item, dict) else {"text": item}
+                    text = entry.get("text")
+                    if isinstance(text, str):
+                        entry["text"] = self._sanitize_sensitive_data(text)
+                    sanitized_queue.append(entry)
+                sanitized_payload["queue"] = sanitized_queue
+            db.add(
+                TaskLog(
+                    task_id=task_id,
+                    log_level="INFO",
+                    message="",
+                    log_type="control_event",
+                    log_metadata=_dumps({"type": event_type, **sanitized_payload}),
+                )
+            )
+        elif event_type == "agent_settled":
             db.add(
                 TaskLog(
                     task_id=task_id,

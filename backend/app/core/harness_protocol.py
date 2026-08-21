@@ -35,6 +35,9 @@ MODEL_PROTOCOLS = frozenset(
 CONTROL_EVENT_TYPES = frozenset(
     {"control.command.delivered", "control.command.rejected", "control.queue.updated"}
 )
+# V2 attempt-level settled signal (Pi probe fact: agent_settled is the true
+# settled state; delivered ACKs are not). Audited, never terminal by itself.
+V2_AUDIT_EVENT_TYPES = frozenset(CONTROL_EVENT_TYPES | {"agent_settled"})
 # Deterministic command rejection codes (open-harness-v2-schemas.md §4.2).
 REJECTION_CODES = frozenset(
     {
@@ -278,7 +281,7 @@ def _validate_event_core(
         str(event.get("type") or ""),
         payload,
         raw_ref=event.get("raw_ref"),
-        extra_known_types=CONTROL_EVENT_TYPES if require_v2_harness else frozenset(),
+        extra_known_types=V2_AUDIT_EVENT_TYPES if require_v2_harness else frozenset(),
     )
     if event_type in {"usage.updated", "usage.final"}:
         normalized_payload["usage"] = normalize_usage(normalized_payload.get("usage"))

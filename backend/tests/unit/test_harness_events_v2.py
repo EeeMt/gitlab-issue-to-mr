@@ -105,3 +105,18 @@ def test_v2_event_rejects_schema_drift_mid_attempt():
     drifted["harness"]["model_protocols"] = ["openai_responses"]
     with pytest.raises(HarnessProtocolError, match="model_protocols changed"):
         replay.ingest(drifted)
+
+
+def test_v2_agent_settled_is_recognized_not_downgraded():
+    # Pi's agent_settled is the true settled signal (probe fact 1); the V2
+    # validator must recognize it as an auditable type rather than downgrading
+    # it to a diagnostic unknown_event_type.
+    events = _jsonl(FIXTURE_ROOT / "pi" / "success.v2.jsonl")
+    settled = json.loads(json.dumps(events[1]))
+    settled["event_id"] = "pi-fixture-agent-settled"
+    settled["seq"] = 99
+    settled["type"] = "agent_settled"
+    settled["payload"] = {"aborted": False, "settled_line": 12}
+    normalized = validate_event_v2(settled)
+    assert normalized["type"] == "agent_settled"
+    assert normalized["schema"] == CANONICAL_EVENT_SCHEMA_V2
