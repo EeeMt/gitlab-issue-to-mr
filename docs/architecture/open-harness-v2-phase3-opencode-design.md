@@ -12,7 +12,7 @@
 
 | 维度 | Phase 2 (Pi, 已验收) | Phase 3 (OpenCode, 本方案) | 复用 | 差异 |
 |---|---|---|---|---|
-| 控制传输 | `rpc_stdio`（Pi RPC JSONL over stdio） | `server_http`（每 Task `opencode serve`，loopback 随机端口） | 无 | **架构分界**：stdio 单进程 vs 独立 Server + HTTP/SDK 客户端 |
+| 控制传输 | `rpc_stdio`（Pi RPC JSONL over stdio） | `server_http`（每 Task `opencode serve`，loopback 显式端口） | 无 | **架构分界**：stdio 单进程 vs 独立 Server + HTTP/SDK 客户端 |
 | 适配器骨架 | `pi.sh` + `pi_bridge.py` + `pi_events.py` | `opencode.sh` + `opencode_bridge.py` + `opencode_events.py` | 同一 `adapter_{}` 合同、`_emit`/`_write_result`/`_usage` 归一化范式 | Server 生命周期、事件订阅、settled 判定 |
 | 事件归一化 | 单 streaming 进程读 stdin→`_emit` canonical | Server 事件订阅（SSE）+ 最终消息拉取 | `_emit`、`sanitize`、`_failure_kind`、`_usage` | 事件来源是 HTTP/SSE 而非流 |
 | control gate | `accepting→closing→drain` + `agent_settled` | `disabled`（首发无 command）+ **capability negotiation + deterministic reject** | Phase-1 `bridge.try_dispatch` / `control_client.py` 的 outcome 合同 | Pi 是 `accepting` 真接收；OpenCode 是 `disabled` 但谈判+拒绝 |
@@ -29,7 +29,9 @@
 
 ### 1.1 启动与生命周期
 
-- 每 Task 启动**一个** `opencode serve --hostname 127.0.0.1 --port <random>`。随机端口由 OpenCode 分配，Bridge 启动后从本地控制端点读取（probe 已证实可显式 `--port` 或默认随机）。
+- 每 Task 启动**一个** `opencode serve --hostname 127.0.0.1 --port <n>`。**端口交接方式（冻结，无竞态）**：不依赖 OpenCode 自分配随机端口后的“发现通道”（不存在该实体），而是由 Runner/`opencode.sh` 在启动前**先探测一个空闲 loopback 端口**并**显式 `--port <n>` 传入**（probe 已证实“可显式 `--port` 或默认随机”）。桥接无需发现即可用同一 `$OPENCODE_PORT` 直连，消除“Server 已绑某随机端口而 Bridge 不知”的竞态/不可达。
+  - 探测：绑定 `127.0.0.1:0` 取内核分配的临时端口后立即释放，随即用于 `--port`；探测与 Server 绑定之间存在微小窗口，readiness 超时（§1.1）内对 `connection_refused` 重试即可覆盖（Server 尚未监听，非端口被占错误）。
+  - `OPENCODE_PORT` 只经容器内环境注入给 `opencode.sh` 与 Bridge；不进用户日志/raw archive（同凭据规则）。
 - **认证**：`opencode serve` 在未设 `OPENCODE_SERVER_PASSWORD` 时**未受保护**（probe 事实），因此**必须**设 `OPENCODE_SERVER_PASSWORD` 为 Task 私有随机值，用户名默认 `opencode`（`OPENCODE_SERVER_USERNAME` 可改）。Basic 认证：`Authorization: Basic opencode:<pw>`；校验以 401/200 区分。
 - **端口/凭据只保存在容器内**，不进入用户日志、`event.jsonl`、raw archive 或诊断输出。密码不写盘（或写入 0600 Task 私有文件），只通过环境注入给 Bridge。
 - **readiness 超时（冻结）**：`start()` 后必须等待 Server readiness（health/`/session` 可达），超时（默认 30s，profile `harness_options` 可调）则 `adapter_verify_runtime`/启动失败 → attempt 收敛为 `failed`（`failure.kind=engine_error` 或 `crash`），不进入 run。readiness 失败不重试启动。
@@ -48,10 +50,10 @@
 **备援/诊断**：HTTP 直连 + 自维护 SSE 解析（仅在 Node 依赖不可接受时启用）。
 
 - **选 SDK 的理由（probe 结论）**：稳定 OpenAPI 3.1 是唯一事实协议源；SDK 由该 spec 生成，类型与运行时一致，避免 hand-rolled 代理漂移；SDK 对 SSE 流式事件有封装，比裸 curl 订阅稳；`abort` 返回类型化 `true`，方法签名与 spec 对齐。
-- **成本/风险（纳入 Phase 2 已核算的 Node bundle）**：新增 Node runtime + 冻结 SDK 版本（对齐 Server `1.18.19`）；Worker-kit 需核算 Node bundle 体积与离线安装。若不可接受 → 退化 HTTP 直连（诊断路径），Phase 3 decision gate。
+- **成本/风险（评审裁决 ②：实现前置 gate，非后置）**：SDK 冻结为正确生产路径，但整条 Phase 3 都建在 Node runtime 上——若 Node bundle 成本在实现后才被否，需整段重写 HTTP 退化路径。因此 **Node bundle 成本（Node runtime + SDK 版本冻结 + Worker 镜像离线安装体积）必须在编写 `opencode.sh`/Bridge **之前**以成本估算定案**（与 Phase 2 已核算的 Node bundle 叠加）；不满足 → **立即切 HTTP 直连**（诊断路径升级为生产路径，自维护 SSE 解析），避免在可逆转假设上开工。该门禁项前置到实现起步，见 §10 交付切分。
 
 **SDK 使用边界**
-- 每 Task 一个 Server，Bridge 只连本 Task 的 `127.0.0.1:<port>`，不连外部/共享 Server。
+- 每 Task 一个 Server，Bridge 只连本 Task 的 `127.0.0.1:${OPENCODE_PORT}`（显式传入，§1.1），不连外部/共享 Server。
 - `model`/`baseURL`/`apiKey` 全部来自**冻结 Snapshot**（经 env `{env:...}` 插值注入），OpenCode 原生 Agent/Command/model variant 只能改变 Snapshot 允许的变体，**不能覆盖冻结 Endpoint**。
 - OpenCode env 插值语法为 **`{env:VAR}`**（非 `$VAR`，probe 关键事实）；`compat_profile`（如 `deepseek-anthropic`）在 Endpoint 声明，不从 provider 层新增协议名。
 
@@ -162,25 +164,34 @@ backend/tests/fixtures/harness_events_v2/opencode/             # 离线 fixture�
 backend/tests/unit/test_opencode_harness_adapter.py
 ```
 
-`manifest.json` 新增 `opencode` 块（对齐 Pi 已有块结构）：
+`manifest.json` 新增 `opencode` 块。**该块按冻结 `runtime-manifest/v2` 的字段命名与结构落地（v2-ready），不沿用 V1 风格 `provider_protocols`**——使后续 v2 升级只是纯机械 rename/补字段，不重塑 opencode 条目：
 
 ```json
 "opencode": {
-  "version": "2.0.0",
+  "support_tier": "first-class",
+  "source": {
+    "repository": "https://github.com/sst/opencode",
+    "license": "Apache-2.0",
+    "artifact_version": "1.18.19",
+    "artifact_sha256": "7bb35487…"
+  },
+  "adapter": { "version": "2.0.0", "digest": "<sha256>" },
+  "control_transport": { "kind": "server_http", "protocol": "opencode-server" },
+  "model_protocols": ["anthropic_messages", "openai_responses", "openai_chat_completions"],
   "cli_version": "1.18.19",
   "cli_version_range": ">=1.18.19 <1.19.0",
-  "provider_protocols": ["anthropic-messages", "openai-responses", "openai-chat-completions"],
   "options_schema": "opencode/v1",
   "capabilities": {
     "resume": true, "task_skills": true, "max_turns": false,
     "usage_tokens": true, "usage_cost": true, "run_text": false,
     "steering": false, "follow_up": false,
     "sandbox_mode": "container-boundary"
-  }
+  },
+  "files": []
 }
 ```
 
-> **注意（manifest schema 决策点，交 Leader/审查）**：当前 `manifest.json` 是 `codify.worker.runtime-manifest/v1`（Pi 块混入 V1 文件）。Phase 3/4 需按冻结 `runtime-manifest/v2` 结构（`schema`、`contract_version`、`event_schema`、`command_schema`、`result_schema`、`adapters.<key>.control_transport`/`model_protocols`/`source`/`adapter.digest`、`files[]`）迁移整个 manifest。本方案**建议**在 Phase 3 一并升级 manifest 到 v2（OpenCode 是首个非-Claude/Codex 演化原生的 Server Harness，需 `control_transport`/`files` 语义），但**不改 V2 schema 本体**——manifest v2 已在冻结 schema 文档 §6 定稿，属落地实现而非 schema 变更。若该升级超出 Phase 3 范围，可拆为独立委派，但 OpenCode 块字段需同时满足 `runtime-manifest/v2` 结构。
+> **manifest schema 决策点（评审裁决 ①）**：`runtime-manifest/v1`→`v2` **不并入 Phase 3**，拆为独立委派（属跨全量 Harness claude/codex/pi + bundle/verify/build 路径的横切变更，与“交付 OpenCode 一级 Harness”正交，捆绑会扩大波及/审查面、复杂化回滚——§8.2“移除即回滚”只对新增 Harness 成立，不覆盖 manifest 整体迁移）。**叠加 Finding 2**：opencode 块按上表 v2-ready 字段书写（`model_protocols`/`control_transport`/`source`/`adapter.digest`/`support_tier`），使后续 v2 升级只是 rename/补字段、可机械完成；代价是 opencode 条目后续随 v2 升级做一次有界调整，属可接受单一权衡。当前 `manifest.json` 仍为 `runtime-manifest/v1`，因 opencode 块 v2-ready，即使宿主文件仍 v1 也**不会**污染 registry/verify 消费面（消费端按 `model_protocols` 读取）。
 
 ### 7.3 options schema（`opencode/v1`，非 JSON 编辑器）
 
@@ -217,7 +228,7 @@ backend/tests/unit/test_opencode_harness_adapter.py
 | 风险 | 缓解 |
 |---|---|
 | Server busy/queue 语义演进（上游活跃） | 固定版本 `1.18.19`；settled 组合判定不依赖单一字段；首发不开 command |
-| SDK/HTTP 依赖新增 Node bundle | 备案到 Worker-kit 体积/离线；不可接受则退化 HTTP 直连（decision gate） |
+| SDK/HTTP 依赖新增 Node bundle | **实现前置 gate**（评审裁决 ②）：编写 adapter 前以成本估算（Node runtime + SDK 冻结 + Worker 镜像离线安装体积）定案；不满足立即切 HTTP 直连（诊断路径升级为生产路径，自维护 SSE 解析），不在可逆转假设上开工 |
 | 事件订阅首漏（订阅晚于 prompt） | 先订阅 `server.connected` 再 `prompt_async`（§3.1） |
 | Server daemon 泄漏 | 公共信号树 + 进程组收敛 + 退出后验证（§1.2） |
 | 未触发 SSE 场景（session.error/权限阻塞/自发崩溃） | 镜像内完成，列实机项（§9），Probe README 待决 3 |
@@ -236,7 +247,7 @@ backend/tests/unit/test_opencode_harness_adapter.py
 4. **三模型协议实机**：openai_responses / openai_chat_completions 用对应端点验证（仅 anthropic 端点已实测）。
 5. **Abort 实机**：thinking/tool/idle 三阶段 abort + 后续消息错误态收敛。
 6. **§6.4 OpenCode 完成门槛**：Server 启动/Session/Agent/Command/variant/Abort/crash/usage/Git delivery 全覆盖真实 Host canary；fresh/continue 不串 Session。
-7. **manifest→v2 升级 + verify-runtime**：逐 manifest Adapter 实际启动最小 Server probe（§8.1）。
+7. **manifest→v2 升级 + verify-runtime**（独立委派，评审裁决 ①）：逐 manifest Adapter 实际启动最小 Server probe（§8.1）；opencode 块已按 v2-ready 书写，升级为纯机械 rename/补字段。
 
 以上与 Phase 2 的实机门禁（§5.2/§5.3/§5.5）同属硬切前远端验证清单，统一收口。
 
@@ -246,9 +257,9 @@ backend/tests/unit/test_opencode_harness_adapter.py
 
 | 委派 | 责任区 |
 |---|---|
-| OpenCode adapter（`opencode.sh`/`opencode_bridge.py`/`opencode_events.py`） | §1–§6 全部行为 |
+| OpenCode adapter（`opencode.sh`/`opencode_bridge.py`/`opencode_events.py`） | §1–§6 全部行为。**前置条件（评审裁决 ②）**：先完成 Node bundle 成本估算并定案 SDK 或 HTTP 直连（实现前置 gate），再写 adapter，避免在可逆转假设上开工 |
 | OpenCode fixture + unit | `harness_events_v2/opencode/` + `test_opencode_harness_adapter.py`（settled/abort/crash/session_missing/invalid） |
-| manifest/registry/options | manifest →`opencode` 块（按 v2 结构）、`harness_registry.py` allowlist、`opencode/v1` Options validator |
+| manifest/registry/options | manifest →`opencode` 块（按 v2-ready 结构，见 §7.2）、`harness_registry.py` allowlist、`opencode/v1` Options validator |
 | Backend registry API 投影 | 四 Harness 展示、OpenCode×Endpoint 矩阵交集 |
 
-**方案审查退出条件**：§1–§9 冻结点可审核、约束满足（不改 V2 schema / Endpoint 唯一事实源 / 每 Task Server 不泄漏 / 无 daemon 遗留）；实机项如实分离；据此可分派 OpenCode 开发与审查。
+**方案审查退出条件**：§1–§9 冻结点可审核、约束满足（不改 V2 schema / Endpoint 唯一事实源 / 每 Task Server 不泄漏 / 无 daemon 遗留）；**Finding 1（无竞态端口交接，§1.1）与 Finding 2（manifest 块 v2-ready 字段，§7.2）已修订满足**；Node bundle 实现前置 gate 已列入；实机项如实分离。据此可分派 OpenCode 开发与审查复验。
