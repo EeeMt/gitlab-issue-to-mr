@@ -1184,7 +1184,13 @@ const harnessOptions = computed(() => {
         provider => !provider.is_disabled && providerCompatibleWithHarness(provider, key),
       )
     return {
-      label: key === 'codex' ? t('createTask.harnessCodex') : t('createTask.harnessClaude'),
+      label: key === 'codex'
+        ? t('createTask.harnessCodex')
+        : key === 'pi'
+          ? t('createTask.harnessPi')
+          : key === 'opencode'
+            ? t('createTask.harnessOpenCode')
+            : t('createTask.harnessClaude'),
       value: key,
       disabled: !harnessLocked.value && !compatibleProviderAvailable,
     }

@@ -299,6 +299,8 @@ const harnessMeta = computed(() => {
   const key = props.task.harness_key
   if (key === 'codex') return t('taskView.harnessCodex')
   if (key === 'claude') return t('taskView.harnessClaude')
+  if (key === 'pi') return t('taskView.harnessPi')
+  if (key === 'opencode') return t('taskView.harnessOpenCode')
   return key || t('common.notAvailable')
 })
 
