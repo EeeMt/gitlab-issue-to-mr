@@ -18,8 +18,11 @@ Implements the frozen command-plane delivery contract (open-harness-v2-schemas.m
 
 from __future__ import annotations
 
+import asyncio
+import io
 import json
 import logging
+import tarfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Awaitable, Callable
@@ -39,9 +42,66 @@ CONTROL_FRAME_VERSION = "1"
 DEFAULT_LEASE_TTL_SECONDS = 120
 
 # Result outcome strings returned by the fixed control_client transport.
+CONTROL_CLIENT_PATH = "/tmp/codify-runtime/orchestration/worker-entrypoint/harness/control_client.py"
+KIT_MANIFEST_PATH = "/opt/codify-kit/manifest.json"
+
+# Result outcome strings returned by the fixed control_client transport.
 DISPATCH_ACK = "ack"
 DISPATCH_REJECT = "reject"
 DISPATCH_UNKNOWN = "unknown"
+
+
+def sys_executable() -> str:
+    """Interpreter used inside the Worker container (python3 on PATH)."""
+    return "python3"
+
+
+def _async_session_local():
+    from app.database import AsyncSessionLocal
+
+    return AsyncSessionLocal()
+
+
+async def run_pump_until_task_ends(
+    task_id: int,
+    *,
+    session_factory,
+    owner: str,
+    interval_seconds: float = 2.0,
+) -> int:
+    """Drive the command pump while ``task_id`` is RUNNING (plan §4.7).
+
+    The worker task thread launches this alongside container monitoring: each
+    cycle claims an accepting attempt for this exact task, promotes a
+    ``starting`` gate once the bridge answers its probe, and drains the queue
+    front in strict order. Returns the number of commands processed.
+    """
+    processed = 0
+    while True:
+        async with session_factory() as db:
+            still_running = await db.scalar(
+                select(Task.status).where(Task.id == task_id)
+            )
+            if still_running != TaskStatus.RUNNING:
+                break
+            async def _task_scoped_transport(frame, command=None, attempt=None, **_kw):
+                if attempt is None or attempt.task_id != task_id:
+                    return {
+                        "status": DISPATCH_UNKNOWN,
+                        "rejection_code": "wrong_attempt",
+                    }
+                task = await db.get(Task, task_id)
+                return await docker_exec_control_transport(
+                    frame, attempt, task=task, db=db
+                )
+
+            cycle = await run_pump_cycle(
+                db, owner=owner, transport=_task_scoped_transport
+            )
+            await db.commit()
+            processed += cycle.commands_processed
+        await asyncio.sleep(interval_seconds)
+    return processed
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +159,176 @@ async def _claim_next_attempt(
     attempt.command_dispatch_expires_at = _future(lease_ttl)
     await db.flush()
     return attempt
+
+
+async def _promote_starting_attempt(
+    db: AsyncSession, *, owner: str, lease_ttl: int
+) -> TaskHarnessAttempt | None:
+    """Promote one ``starting`` attempt whose bridge is ready to ``accepting``.
+
+    Probes the in-container bridge with a ``get_state`` control frame; an ACK
+    proves the control endpoint is live, so the gate CASes ``starting ->
+    accepting`` under the same attempt lease the dispatcher uses. Anything
+    other than a clean ACK leaves the gate untouched (a later cycle retries;
+    cancel/failure paths converge it to ``closed`` independently).
+    """
+    now = utcnow()
+    stmt = (
+        select(TaskHarnessAttempt)
+        .join(Task, Task.id == TaskHarnessAttempt.task_id)
+        .where(
+            Task.status == TaskStatus.RUNNING,
+            TaskHarnessAttempt.control_state == "starting",
+        )
+        .where(
+            (TaskHarnessAttempt.command_dispatch_expires_at.is_(None))
+            | (TaskHarnessAttempt.command_dispatch_expires_at < now)
+            | (TaskHarnessAttempt.command_dispatch_owner == owner)
+        )
+        .order_by(TaskHarnessAttempt.attempt_id)
+        .limit(1)
+        .with_for_update(skip_locked=True)
+    )
+    attempt = (await db.execute(stmt)).scalars().first()
+    if attempt is None:
+        return None
+    attempt.command_dispatch_owner = owner
+    attempt.command_dispatch_expires_at = _future(lease_ttl)
+    await db.flush()
+
+    try:
+        task = await db.get(Task, attempt.task_id)
+        if task is None:
+            return attempt
+        outcome = await _probe_bridge(attempt, task, db=db)
+    except Exception:  # noqa: BLE001 - transport probe must never crash the pump
+        outcome = {"status": "unknown"}
+    if outcome.get("status") == "ack":
+        attempt.control_state = "accepting"
+        await db.flush()
+    else:
+        logger.warning(
+            "Gate probe for attempt %s: %s",
+            attempt.attempt_id,
+            outcome,
+        )
+    return attempt
+
+
+async def _probe_bridge(attempt: TaskHarnessAttempt, task, db) -> dict:
+    """Send one ``get_state`` frame through the docker-exec transport."""
+    return await docker_exec_control_transport(
+        {
+            "frame_version": CONTROL_FRAME_VERSION,
+            "control_gate": attempt.control_state,
+            "type": "get_state",
+        },
+        attempt,
+        task,
+        db=db,
+    )
+
+
+async def docker_exec_control_transport(
+    frame: dict, attempt: TaskHarnessAttempt, task=None, db: AsyncSession | None = None
+) -> dict:
+    """Run the fixed in-image control client for one frame via Docker exec.
+
+    Resolves the attempt's RUNNING task container, pipes the frame JSON to
+    ``control_client.py`` on stdin, and parses the outcome dict from stdout.
+    Any failure maps to ``unknown`` — never an exception into the pump loop.
+    """
+    import asyncio
+
+    from app.config import get_settings
+    from app.core.worker_docker_targets import find_task_container
+
+    settings = get_settings()
+    if task is not None:
+        try:
+            _db, container, _connection = await find_task_container(
+                db,
+                task,
+                settings,
+                getattr(task, "container_id", None)
+                or f"{settings.worker_container_prefix}-{task.id}-issue{task.issue_id}",
+            )
+        except Exception:  # noqa: BLE001 - unreachable/stopped container
+            return {"status": DISPATCH_UNKNOWN, "rejection_code": "container_unreachable"}
+        if container is None:
+            return {"status": DISPATCH_UNKNOWN, "rejection_code": "container_missing"}
+
+        def _exec() -> dict:
+            # Remote-daemon safe: pass the frame as a file argument instead of
+            # stdin (exec sockets over TCP are HTTP-framed and unusable).
+            import shlex
+
+            frame_path = "/tmp/codify-runtime/control-frame.json"
+            payload = json.dumps(frame).encode()
+            tar_buffer = io.BytesIO()
+            with tarfile.open(fileobj=tar_buffer, mode="w") as archive:
+                info = tarfile.TarInfo(name="control-frame.json")
+                info.size = len(payload)
+                info.mode = 0o600
+                archive.addfile(info, io.BytesIO(payload))
+            container.put_archive(
+                "/tmp/codify-runtime", tar_buffer.getvalue()
+            )
+
+            def _read(path: str) -> bytes:
+                probe = container.client.api.exec_create(
+                    container.id, ["cat", path], stdout=True
+                )
+                out = container.client.api.exec_start(probe["Id"])
+                if isinstance(out, bytes):
+                    return out
+                return b"".join(out)
+
+            try:
+                kit_manifest = json.loads(_read(KIT_MANIFEST_PATH))
+                bash_bin = str(kit_manifest.get("bash") or "")
+                runtime_bin = str(kit_manifest.get("runtime_bin") or "")
+            except Exception:  # noqa: BLE001 - fall back below
+                bash_bin, runtime_bin = "", ""
+            if not bash_bin or not runtime_bin:
+                return {
+                    "status": DISPATCH_UNKNOWN,
+                    "rejection_code": "delivery_outcome_unknown",
+                    "rejection_message": "kit runtime unavailable in container",
+                }
+            command = [
+                bash_bin,
+                "-c",
+                f'exec "{runtime_bin}/python3" "{CONTROL_CLIENT_PATH}" < {shlex.quote(frame_path)}',
+            ]
+            result = container.client.api.exec_create(
+                container.id,
+                command,
+                stdout=True,
+                stderr=True,
+            )
+            output = container.client.api.exec_start(result["Id"])
+            if not isinstance(output, bytes):
+                output = b"".join(output)
+            try:
+                return json.loads(output.decode(errors="replace").strip().splitlines()[-1])
+            except (ValueError, IndexError):
+                return {
+                    "status": DISPATCH_UNKNOWN,
+                    "rejection_code": "delivery_outcome_unknown",
+                    "rejection_message": f"unparseable control client output: {output[:200]}",
+                }
+
+        try:
+            return await asyncio.to_thread(_exec)
+        except Exception as exc:  # noqa: BLE001 - transport errors are outcomes
+            logger.warning("Control transport error: %s", exc)
+            return {
+                "status": DISPATCH_UNKNOWN,
+                "rejection_code": "delivery_outcome_unknown",
+                "rejection_message": str(exc)[:500],
+            }
+
 
 
 async def _drop_lease(db: AsyncSession, attempt: TaskHarnessAttempt, *, owner: str) -> None:
@@ -217,6 +447,11 @@ async def run_pump_cycle(
     caller is responsible for committing the session.
     """
     attempt = await _claim_next_attempt(db, owner=owner, lease_ttl=lease_ttl)
+    if attempt is None:
+        # Plan §4.7: command-capable attempts open in `starting`; once the
+        # bridge control endpoint answers a get_state probe the pump promotes
+        # the gate to `accepting` so queued commands become deliverable.
+        attempt = await _promote_starting_attempt(db, owner=owner, lease_ttl=lease_ttl)
     if attempt is None:
         return PumpCycleResult(attempts_seen=0, commands_processed=0, commands_updated=0)
 

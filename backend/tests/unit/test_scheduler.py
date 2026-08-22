@@ -102,6 +102,12 @@ def test_run_worker_task_disposes_engine_before_loop_close() -> None:
         def __init__(self):
             self.closed = False
 
+        def create_task(self, coro):
+            # The command pump task is cancelled before run_task completes;
+            # closing the coroutine prevents a never-awaited warning.
+            coro.close()
+            return MagicMock()
+
         def run_until_complete(self, coro):
             assert not self.closed
             events.append(coro.cr_code.co_name)

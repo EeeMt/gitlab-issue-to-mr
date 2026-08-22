@@ -2691,11 +2691,26 @@ def _run_worker_task(task_id: int) -> bool:
     )
 
     from app.core.worker import WorkerExecutor
+    from app.core.worker_command_pump import run_pump_until_task_ends
 
     async def run_task():
-        async with ThreadSessionLocal() as db:
-            worker = WorkerExecutor(session_factory=ThreadSessionLocal)
-            return await worker.execute_task(db, task_id)
+        pump_task = loop.create_task(
+            run_pump_until_task_ends(
+                task_id,
+                session_factory=ThreadSessionLocal,
+                owner=f"scheduler-thread-{task_id}",
+            )
+        )
+        try:
+            async with ThreadSessionLocal() as db:
+                worker = WorkerExecutor(session_factory=ThreadSessionLocal)
+                return await worker.execute_task(db, task_id)
+        finally:
+            pump_task.cancel()
+            try:
+                await pump_task
+            except BaseException:  # noqa: BLE001 - cancellation cleanup
+                pass
 
     try:
         return loop.run_until_complete(run_task())

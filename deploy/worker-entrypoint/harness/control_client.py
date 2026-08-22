@@ -22,6 +22,9 @@ import sys
 
 FRAME_VERSION = "1"
 SUPPORTED_FRAME_TYPES = {"steer", "follow_up"}
+# Liveness probe frame: proves the control endpoint is reachable without
+# touching the harness conversation (pump promotes starting -> accepting).
+PROBE_FRAME_TYPE = "get_state"
 
 
 def _read_frame() -> dict:
@@ -42,6 +45,9 @@ def handle(frame: dict) -> dict:
     if frame.get("frame_version") != FRAME_VERSION:
         return {"status": "reject", "rejection_code": "unsupported_frame_version",
                 "rejection_message": f"frame_version={frame.get('frame_version')}"}
+    if frame.get("type") == PROBE_FRAME_TYPE:
+        return {"status": "ack", "probe": True,
+                "command_id": frame.get("command_id")}
     if frame.get("type") not in SUPPORTED_FRAME_TYPES:
         return {"status": "reject", "rejection_code": "invalid_command_type",
                 "rejection_message": f"unsupported command type {frame.get('type')}"}
