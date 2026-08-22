@@ -594,8 +594,10 @@ def test_opencode_prepare_config_writes_snapshot_endpoint(tmp_path):
     assert config.exists()
     content = json.loads(config.read_text(encoding="utf-8"))
     provider = content["provider"]["codify"]
-    # Snapshot base URL wins; credential referenced by env name, never inlined.
-    assert provider["options"]["baseURL"] == "https://api.deepseek.com/anthropic"
+    # Snapshot base URL wins, normalized to the /v1 root so @ai-sdk/anthropic
+    # (which appends /messages) hits /v1/messages; credential referenced by env
+    # name, never inlined.
+    assert provider["options"]["baseURL"] == "https://api.deepseek.com/anthropic/v1"
     assert provider["options"]["apiKey"] == "{env:OPENCODE_SNAPSHOT_KEY}"
     assert "sk-snapshot-secret" not in config.read_text(encoding="utf-8")
     # OpenCode 1.18.19 config schema: models.<id>.provider must be an object
@@ -605,6 +607,28 @@ def test_opencode_prepare_config_writes_snapshot_endpoint(tmp_path):
     assert model["provider"] == {"id": "codify"}
     # A free loopback port was probed and a Task password generated.
     assert result.stdout.strip().isdigit()
+
+
+def test_opencode_prepare_config_normalizes_relay_root_to_v1(tmp_path):
+    env = {
+        "CODIFY_RUNTIME_DIR": str(tmp_path),
+        "CODIFY_ORCHESTRATION_DIR": str(REPO_ROOT / "deploy"),
+        "CODIFY_RUN_UID": "1000",
+        "CODIFY_RUN_GID": "1000",
+        "OPENCODE_MODEL": "ox-alpha-free",
+        "OPENCODE_BASE_URL": "http://192.168.50.45:15721",
+        "OPENCODE_API_KEY": "PROXY_MANAGED",
+    }
+    result = _source_adapter("opencode_adapter_prepare_config", env)
+    assert result.returncode == 0, result.stderr
+    content = json.loads(
+        (tmp_path / "opencode" / "opencode.json").read_text(encoding="utf-8")
+    )
+    provider = content["provider"]["codify"]
+    # Relay root normalized to /v1 so @ai-sdk/anthropic hits /v1/messages (200)
+    # instead of /messages (404).
+    assert provider["options"]["baseURL"] == "http://192.168.50.45:15721/v1"
+    assert provider["options"]["apiKey"] == "{env:OPENCODE_SNAPSHOT_KEY}"
 
 
 def test_opencode_prepare_config_exports_transport_env_defaults(tmp_path):

@@ -89,7 +89,17 @@ pi_adapter_prepare_config() {
     local base_url="${PI_BASE_URL:-${ANTHROPIC_BASE_URL:-${OPENAI_BASE_URL:-}}}"
     local api_key="${PI_API_KEY:-${ANTHROPIC_API_KEY:-${OPENAI_API_KEY:-}}}"
     if [ -n "${model}" ] && [ -n "${base_url}" ] && [ -n "${api_key}" ]; then
-        local models_file="${PI_HOME}/agent/models.json"
+        # pi 0.84.2 reads custom providers only from ~/.pi/agent/models.json
+        # (the CLI subprocess HOME); it ignores the PI_HOME env var. PI_HOME
+        # above is kept ONLY for the issue-shared session/skills persistence.
+        # The CLI parses only the array form of providers.<name>.models, so the
+        # frozen Snapshot must be written in that shape or --list-models is
+        # empty and every prompt fails with "Model not found".
+        local models_file="${HOME:-/root}/.pi/agent/models.json"
+        local api="anthropic-messages"
+        if [ -z "${ANTHROPIC_BASE_URL:-}" ] && [ -n "${OPENAI_BASE_URL:-}" ]; then
+            api="openai-chat-completions"
+        fi
         mkdir -p "$(dirname "${models_file}")"
         # The provider id/name are namespaced to Codify so Pi never shares state
         # with another harness; baseUrl is the frozen Snapshot endpoint.
@@ -97,9 +107,11 @@ pi_adapter_prepare_config() {
             --arg model "${model}" \
             --arg base_url "${base_url}" \
             --arg api_key "${api_key}" \
-            '{providers:{codify:{apiKey:$api_key}},models:{($model):{provider:"codify",baseUrl:$base_url,id:$model}}}' \
+            --arg api "${api}" \
+            '{providers:{codify:{baseUrl:$base_url,api:$api,apiKey:$api_key,models:[{id:$model,name:$model,reasoning:false,input:["text"],contextWindow:128000,maxTokens:8192}]}}}' \
             > "${models_file}"
         chown "${CODIFY_RUN_UID:-1000}:${CODIFY_RUN_GID:-1000}" "${models_file}" 2>/dev/null || true
+        chmod 600 "${models_file}" 2>/dev/null || true
     fi
     return 0
 }

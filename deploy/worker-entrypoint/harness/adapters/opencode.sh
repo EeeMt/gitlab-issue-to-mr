@@ -107,11 +107,15 @@ opencode_adapter_prepare_config() {
         # never reaches opencode.json / the raw archive. The runner passes
         # OPENCODE_SNAPSHOT_KEY through to the Server, which interpolates it.
         export OPENCODE_SNAPSHOT_KEY="${api_key}"
+        # @ai-sdk/anthropic appends /messages to options.baseURL, so the raw
+        # relay root gives /messages (404). Normalize to the /v1 root so the SDK
+        # hits /v1/messages, which the relay answers with 200.
+        local api_base="${base_url%/}/v1"
         jq -nc \
             --arg model "${model}" \
-            --arg base_url "${base_url}" \
+            --arg api_base "${api_base}" \
             --arg npm "${provider_npm}" \
-            '{provider:{codify:{npm:$npm,options:{baseURL:$base_url,apiKey:"{env:OPENCODE_SNAPSHOT_KEY}"},models:{($model):{id:$model,provider:{id:"codify"}}}}}}' \
+            '{provider:{codify:{npm:$npm,options:{baseURL:$api_base,apiKey:"{env:OPENCODE_SNAPSHOT_KEY}"},models:{($model):{id:$model,provider:{id:"codify"}}}}}}' \
             > "${config_dir}/opencode.json"
         chown "${CODIFY_RUN_UID:-1000}:${CODIFY_RUN_GID:-1000}" "${config_dir}/opencode.json" 2>/dev/null || true
     fi

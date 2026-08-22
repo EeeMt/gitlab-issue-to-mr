@@ -381,24 +381,54 @@ def _pi_prepare_config(tmp_path: Path) -> Path:
         "CODIFY_ORCHESTRATION_DIR": str(REPO_ROOT / "deploy"),
         "CODIFY_RUN_UID": "1000",
         "CODIFY_RUN_GID": "1000",
-        "PI_HOME": str(tmp_path / "pi-home"),
+        "HOME": str(tmp_path / "home"),
         "PI_MODEL": "deepseek-v4-flash",
         "ANTHROPIC_BASE_URL": "https://api.deepseek.com/anthropic",
         "ANTHROPIC_API_KEY": "sk-snapshot-secret",
     }
     result = _source_adapter("pi_adapter_prepare_config", env)
     assert result.returncode == 0, result.stderr
-    return tmp_path / "pi-home"
+    return tmp_path / "home"
 
 
 def test_pi_config_maps_snapshot_endpoint_to_models_json(tmp_path):
-    pi_home = _pi_prepare_config(tmp_path)
-    models_file = pi_home / "agent/models.json"
+    home = _pi_prepare_config(tmp_path)
+    # pi 0.84.2 reads custom providers only from ~/.pi/agent/models.json (the
+    # CLI subprocess HOME), not from PI_HOME.
+    models_file = home / ".pi/agent/models.json"
     assert models_file.exists()
     content = json.loads(models_file.read_text(encoding="utf-8"))
-    # Snapshot model/base/credential win; Pi native config cannot override.
-    assert content["models"]["deepseek-v4-flash"]["baseUrl"] == "https://api.deepseek.com/anthropic"
-    assert content["providers"]["codify"]["apiKey"] == "sk-snapshot-secret"
+    provider = content["providers"]["codify"]
+    # Snapshot model/base/credential win; pi only parses the array form.
+    assert provider["baseUrl"] == "https://api.deepseek.com/anthropic"
+    assert provider["api"] == "anthropic-messages"
+    assert provider["apiKey"] == "sk-snapshot-secret"
+    assert provider["models"][0]["id"] == "deepseek-v4-flash"
+    assert provider["models"][0]["name"] == "deepseek-v4-flash"
+    assert provider["models"][0]["contextWindow"] == 128000
+
+
+def test_pi_config_uses_openai_chat_completions_when_only_openai(tmp_path):
+    env = {
+        "CODIFY_RUNTIME_DIR": str(tmp_path),
+        "CODIFY_ORCHESTRATION_DIR": str(REPO_ROOT / "deploy"),
+        "CODIFY_RUN_UID": "1000",
+        "CODIFY_RUN_GID": "1000",
+        "HOME": str(tmp_path / "home"),
+        "ANTHROPIC_BASE_URL": "",
+        "OPENAI_MODEL": "gpt-4o-mini",
+        "OPENAI_BASE_URL": "https://api.openai.example/v1",
+        "OPENAI_API_KEY": "sk-openai-secret",
+    }
+    result = _source_adapter("pi_adapter_prepare_config", env)
+    assert result.returncode == 0, result.stderr
+    content = json.loads(
+        (tmp_path / "home/.pi/agent/models.json").read_text(encoding="utf-8")
+    )
+    provider = content["providers"]["codify"]
+    assert provider["baseUrl"] == "https://api.openai.example/v1"
+    assert provider["api"] == "openai-chat-completions"
+    assert provider["models"][0]["id"] == "gpt-4o-mini"
 
 
 def test_pi_prepare_config_exports_transport_env_defaults(tmp_path):
