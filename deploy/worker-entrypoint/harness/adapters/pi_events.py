@@ -146,6 +146,14 @@ def _write_result(*, success: bool, result: str, usage: dict, failure_message: s
         encoding="utf-8",
     )
     os.replace(temp_path, result_path)
+    if usage:
+        # Canonical usage.final feeds the projector's usage_final log
+        # metadata, which worker_results uses to populate the ledger.
+        _emit(
+            "usage.final",
+            {"usage": usage},
+            _STATE["terminal_line"] or 0,
+        )
 
 
 def _emit_terminal_at_eof() -> None:
