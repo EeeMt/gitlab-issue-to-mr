@@ -34,6 +34,9 @@ services:
       - DOCKER_TLS_KEY=
       - WORKER_WORKSPACE_HOST_PATH=${WORKER_WORKSPACE_HOST_PATH:-/opt/codify-workspaces}
       - AUTO_MIGRATE=true
+      # Plan §4.8: explicit harness execution mode; preflight compares the
+      # values reported by the Backend and Scheduler /health endpoints.
+      - HARNESS_EXECUTION_MODE=${HARNESS_EXECUTION_MODE:-dual_canary}
       - COOKIE_SECURE=false
       # Custom CA certificate — mount from local file (not baked into image).
       # Place deploy/ca.crt on the Docker host; see .env.test for CUSTOM_CA_BUNDLE.
@@ -84,6 +87,8 @@ services:
       - DOCKER_TLS_KEY=
       - WORKER_WORKSPACE_HOST_PATH=${WORKER_WORKSPACE_HOST_PATH:-/opt/codify-workspaces}
       - AUTO_MIGRATE=true
+      # Must match the Backend value; the preflight script compares both.
+      - HARNESS_EXECUTION_MODE=${HARNESS_EXECUTION_MODE:-dual_canary}
       # Custom CA certificate is mounted from local file (not baked into image).
       # CUSTOM_CA_BUNDLE tells the scheduler and worker entrypoints where to find it.
       - CUSTOM_CA_BUNDLE=/etc/ssl/certs/custom-ca.crt
@@ -92,6 +97,10 @@ services:
       # Alternative: use WORKER_VOLUME_MOUNTS for a full JSON mount list.
       - WORKER_CA_CERT_HOST_PATH=${WORKER_CA_CERT_HOST_PATH:-}
       - WORKER_VOLUME_MOUNTS=${WORKER_VOLUME_MOUNTS:-}
+      # Scheduler /health endpoint (execution mode for the preflight script).
+      - SCHEDULER_HEALTH_PORT=${SCHEDULER_HEALTH_PORT:-8001}
+    ports:
+      - "${SCHEDULER_HEALTH_PORT:-8001}:8001"
     depends_on:
       postgres:
         condition: service_healthy

@@ -170,7 +170,14 @@ async def root() -> dict:
 async def health(request: Request) -> dict:
     """Health check endpoint with dependency checks."""
     trace_id = get_trace_id(request)
-    health_status = {"status": "healthy", "checks": {}, "trace_id": trace_id}
+    health_status = {
+        "status": "healthy",
+        "checks": {},
+        "trace_id": trace_id,
+        # Plan §4.8: readiness displays the current execution mode so a
+        # deployment preflight can compare Backend/Scheduler values.
+        "harness_execution_mode": get_settings().harness_execution_mode,
+    }
 
     # Check database connection
     try:

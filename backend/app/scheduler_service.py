@@ -4,6 +4,9 @@ import asyncio
 import logging
 import signal
 
+import uvicorn
+from fastapi import FastAPI
+
 from app.config import get_effective_settings, get_settings
 from app.core.ci_failure_collector import start_ci_failure_collector
 from app.core.docker_client import close_docker_clients
@@ -38,6 +41,33 @@ async def run_scheduler_service() -> None:
     logger.info("Active task prompt backfill completed: %s task(s)", backfilled)
     stop_event = asyncio.Event()
 
+    # Plan §4.8: the Scheduler must expose its execution mode for the
+    # deployment preflight, which compares Backend/Scheduler /health payloads.
+    health_app = FastAPI()
+
+    @health_app.get("/health")
+    async def _health() -> dict:
+        return {
+            "status": "running",
+            "harness_execution_mode": get_settings().harness_execution_mode,
+        }
+
+    health_config = uvicorn.Config(
+        health_app,
+        host="0.0.0.0",
+        port=settings.scheduler_health_port,
+        log_level=settings.log_level.lower(),
+        access_log=False,
+    )
+    health_server = uvicorn.Server(health_config)
+    health_server.install_signal_handlers = lambda *a, **k: None
+    health_task = asyncio.create_task(health_server.serve())
+    logger.info(
+        "Scheduler health endpoint listening on :%s (mode=%s)",
+        settings.scheduler_health_port,
+        get_settings().harness_execution_mode,
+    )
+
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
@@ -68,6 +98,9 @@ async def run_scheduler_service() -> None:
 
     for task in pending:
         task.cancel()
+
+    health_server.should_exit = True
+    await health_task
 
     close_docker_clients()
     await close_db()

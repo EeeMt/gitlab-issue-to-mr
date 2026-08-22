@@ -213,6 +213,9 @@ class Settings(BaseSettings):
     # scheduler each validate this at startup; `v2_only` fails closed on any
     # residual legacy V1 contract.
     harness_execution_mode: str = Field(default="dual_canary")
+    # Port for the Scheduler's standalone /health endpoint (plan §4.8
+    # preflight). Set 0 to disable the listener.
+    scheduler_health_port: int = Field(default=8001, ge=0, le=65_535)
 
     @field_validator("harness_execution_mode", mode="before")
     @classmethod
