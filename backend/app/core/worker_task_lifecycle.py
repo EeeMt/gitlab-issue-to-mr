@@ -318,6 +318,13 @@ async def create_execute_container(
         task=task,
         harness_key=harness_key,
         adapter_version=str(adapter_meta.get("version") or "1.0.0"),
+        event_schema=str(
+            runtime_bundle.manifest.get("event_schema") or "codify.worker.event/v1"
+        ),
+        control_supported=bool(
+            runtime_bundle.contract_version == "codify.worker.harness/v2"
+            and (adapter_meta.get("capabilities") or {}).get("steering")
+        ),
     )
 
     # Execution contract gate (phase1-design §2.3): under ``v2_only`` the worker

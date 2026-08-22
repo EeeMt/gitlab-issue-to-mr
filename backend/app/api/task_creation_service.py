@@ -598,7 +598,7 @@ async def create_task_record(
             endpoint=endpoint,
             shared_configuration=shared,
         )
-        bundle = await services.bind_runtime_bundle(db, task)
+        bundle = await services.bind_runtime_bundle(db, task, harness_key=harness_key)
         # Execution policy: under v2_only, refuse to create a Task whose bound
         # bundle pins a legacy V1 contract (reject up front instead of letting
         # recovery terminalize it later).

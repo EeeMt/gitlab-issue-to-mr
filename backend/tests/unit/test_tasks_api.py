@@ -28,7 +28,7 @@ from app.models import Task, TaskSkillVersionReference, TaskStatus, TaskWorkerPr
 
 @pytest.fixture(autouse=True)
 def _stub_runtime_bundle_binding():
-    async def bind(_db, task, *, source_task=None):
+    async def bind(_db, task, *, source_task=None, harness_key=None):
         source_id = getattr(source_task, "runtime_bundle_id", None) if source_task else None
         task.runtime_bundle_id = source_id if isinstance(source_id, int) else 9001
         return SimpleNamespace(id=task.runtime_bundle_id, digest="d" * 64)

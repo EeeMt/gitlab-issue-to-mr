@@ -439,14 +439,68 @@ async def get_or_create_runtime_bundle(
         return existing
 
 
+async def get_or_create_runtime_bundle_v2(
+    db: AsyncSession,
+    *,
+    source_dir: Path | None = None,
+) -> WorkerRuntimeBundle:
+    """Build/bind a manifest-only V2 bundle for V2-contract tasks (plan §4.3).
+
+    The V2 bundle has no code archive: ``bundle_bytes`` is empty and the
+    authoritative content is the frozen manifest itself, digest-addressed by
+    the recursive files digest. The worker materializes its runtime from the
+    mounted kit; the bundle supplies contract identity + adapter digests.
+    """
+    root = (source_dir or default_runtime_source_dir()).resolve()
+    harness_manifest = json.loads(
+        (root / "deploy/worker-entrypoint/harness/manifest.json").read_bytes()
+    )
+    built = build_runtime_bundle_v2(harness_manifest)
+    existing = (
+        await db.execute(
+            select(WorkerRuntimeBundle).where(WorkerRuntimeBundle.digest == built.digest)
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing
+
+    created = WorkerRuntimeBundle(
+        digest=built.digest,
+        bundle_bytes=b"",
+        contract_version=built.contract_version,
+        orchestration_version=ORCHESTRATION_VERSION,
+        manifest=built.manifest,
+        size_bytes=0,
+    )
+    try:
+        async with db.begin_nested():
+            db.add(created)
+            await db.flush()
+        return created
+    except IntegrityError:
+        return (
+            await db.execute(
+                select(WorkerRuntimeBundle).where(
+                    WorkerRuntimeBundle.digest == built.digest
+                )
+            )
+        ).scalar_one()
+
+
 async def bind_runtime_bundle(
     db: AsyncSession,
     task: Task,
     *,
     source_task: Task | None = None,
     source_dir: Path | None = None,
+    harness_key: str | None = None,
 ) -> WorkerRuntimeBundle:
-    """Bind the immutable bundle during task creation or clone it for retry."""
+    """Bind the immutable bundle during task creation or clone it for retry.
+
+    A task whose frozen harness is declared in the V2 runtime manifest binds a
+    V2 (manifest-only) bundle; retry/clone always reuses the source binding so
+    an attempt keeps its original contract.
+    """
     source_bundle_id = getattr(source_task, "runtime_bundle_id", None)
     if source_task is not None and source_bundle_id is None:
         raise RuntimeError(
@@ -457,11 +511,28 @@ async def bind_runtime_bundle(
         bundle = await db.get(WorkerRuntimeBundle, source_bundle_id)
         if bundle is None:
             raise RuntimeError("retry source references a missing Runtime Bundle")
+    elif harness_key and _manifest_declares_adapter(source_dir, harness_key):
+        bundle = await get_or_create_runtime_bundle_v2(db, source_dir=source_dir)
     else:
         bundle = await get_or_create_runtime_bundle(db, source_dir=source_dir)
     task.runtime_bundle_id = bundle.id
     await db.flush()
     return bundle
+
+
+def _manifest_declares_adapter(
+    source_dir: Path | None, harness_key: str
+) -> bool:
+    """True when the frozen V2 runtime-manifest declares ``harness_key``."""
+    root = (source_dir or default_runtime_source_dir()).resolve()
+    try:
+        manifest = json.loads(
+            (root / "deploy/worker-entrypoint/harness/manifest.json").read_bytes()
+        )
+    except (OSError, json.JSONDecodeError):
+        return False
+    adapters = manifest.get("adapters")
+    return isinstance(adapters, dict) and harness_key in adapters
 
 
 def verify_bundle_bytes(bundle: WorkerRuntimeBundle) -> None:
@@ -543,5 +614,15 @@ async def load_bound_runtime_bundle(
     ).scalar_one_or_none()
     if bundle is None:
         raise RuntimeError("Task Runtime Bundle binding is missing")
+    if bundle.contract_version == HARNESS_CONTRACT_VERSION_V2:
+        # Manifest-only V2 bundle: verify the recursive files digest against
+        # the stored manifest instead of unpacking a code archive.
+        expected = bundle_manifest_digest_from_files(bundle.manifest.get("files") or [])
+        if expected != bundle.digest or bundle.manifest.get("bundle_digest") != bundle.digest:
+            raise RuntimeError(
+                "V2 Runtime Bundle manifest digest mismatch: "
+                f"expected {bundle.digest}, manifest says {expected}"
+            )
+        return bundle
     verify_bundle_bytes(bundle)
     return bundle
