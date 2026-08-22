@@ -135,6 +135,58 @@ def test_pi_stream_maps_probe_to_v2_canonical_events(tmp_path):
     assert replay.terminal_type == "run.completed"
 
 
+
+def test_pi_message_end_does_not_duplicate_completed(tmp_path):
+    """message_end(stop) must not re-emit message.completed after text_end.
+
+    Task 646: the same final assistant text appeared as two consecutive
+    message.completed events because both text_end and message_end emitted it.
+    """
+    runtime_dir = tmp_path / "dup"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    records = [
+        _get_state_record(),
+        {"id": 2, "type": "response", "command": "prompt", "success": True},
+        {"type": "agent_start"},
+        {"type": "turn_start"},
+        {
+            "type": "message_update",
+            "assistantMessageEvent": {"type": "text_start", "index": 0},
+        },
+        {
+            "type": "message_update",
+            "assistantMessageEvent": {"type": "text_delta", "delta": "hello "},
+        },
+        {
+            "type": "message_update",
+            "assistantMessageEvent": {
+                "type": "text_end",
+                "content": "hello world",
+                "index": 0,
+            },
+        },
+        {
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "hello world"}],
+                "stopReason": "stop",
+            },
+        },
+        {"type": "agent_end", "messages": []},
+        {"type": "agent_settled"},
+    ]
+    _translate(runtime_dir, records)
+
+    completed = [
+        e for e in _events(runtime_dir) if e["type"] == "message.completed"
+    ]
+    assert len(completed) == 1, (
+        f"expected exactly one message.completed, got {len(completed)}"
+    )
+    assert completed[0]["payload"]["text"] == "hello world"
+
 def test_pi_delivered_is_native_ack_not_model_consumption(tmp_path):
     # A steer response with success:true followed by the turn completing emits
     # control.command.delivered; delivered == interface ACK, and the probe's

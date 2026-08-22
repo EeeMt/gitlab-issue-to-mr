@@ -291,11 +291,10 @@ def _handle_message_end(record: dict, raw_line: int) -> None:
         _write_result(success=False, result="", usage=_STATE["usage"], failure_message=str(failure["message"]))
         return
     if stop_reason in ("stop", "end_turn"):
-        text = "".join(_STATE["text_parts"])
-        # message.completed is emitted from text_end for deltas; keep the final
-        # aggregated assistant text for the harness result.
-        if text:
-            _emit("message.completed", {"message_id": None, "text": text}, raw_line)
+        # message.completed is emitted exactly once from text_end. Do NOT
+        # re-emit here: message_end carries the same aggregated content and
+        # would duplicate the final assistant message (task 646 seq 34==35).
+        pass
 
 
 def _handle_queue_update(record: dict, raw_line: int) -> None:
