@@ -617,7 +617,7 @@ def test_opencode_prepare_config_normalizes_relay_root_to_v1(tmp_path):
         "CODIFY_RUN_GID": "1000",
         "OPENCODE_MODEL": "ox-alpha-free",
         "OPENCODE_BASE_URL": "http://192.168.50.45:15721",
-        "OPENCODE_API_KEY": "PROXY_MANAGED",
+        "OPENCODE_API_KEY": "sk-test-relay-key",
     }
     result = _source_adapter("opencode_adapter_prepare_config", env)
     assert result.returncode == 0, result.stderr
