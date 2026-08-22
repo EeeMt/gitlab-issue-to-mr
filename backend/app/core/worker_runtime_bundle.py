@@ -487,6 +487,105 @@ async def get_or_create_runtime_bundle_v2(
         ).scalar_one()
 
 
+def v2_launcher_manifest_bytes(bundle: WorkerRuntimeBundle) -> bytes:
+    """Canonical bytes of the launcher-facing V2 manifest projection.
+
+    The kit launcher expects ``adapters.<key> = {version, digest}``; the frozen
+    V2 manifest nests them under an ``adapter`` object. Both the materialized
+    ``orchestration/manifest.json`` and the ``CODIFY_RUNTIME_MANIFEST_DIGEST``
+    env must derive from these exact bytes so the launcher's fileDigest
+    comparison matches.
+    """
+    launcher_manifest = dict(bundle.manifest)
+    flat_adapters: dict[str, Any] = {}
+    for key, meta in (bundle.manifest.get("adapters") or {}).items():
+        nested = (meta or {}).get("adapter") if isinstance(meta, dict) else None
+        flat_adapters[key] = {
+            "version": (nested or {}).get("version", ""),
+            "digest": (nested or {}).get("digest", ""),
+        }
+    launcher_manifest["adapters"] = flat_adapters
+    return json.dumps(
+        launcher_manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode()
+
+
+def build_v2_runtime_materialization_manifest_bytes(
+    bundle: WorkerRuntimeBundle, *, source_dir: Path | None = None
+) -> bytes:
+    """Exact bytes of the materialized ``orchestration/manifest.json``.
+
+    ``CODIFY_RUNTIME_MANIFEST_DIGEST`` must hash these bytes so the kit
+    launcher's fileDigest comparison matches what the container receives.
+    """
+    root = (source_dir or default_runtime_source_dir()).resolve()
+    source_files = _controlled_source_files(root)
+    manifest = json.loads(v2_launcher_manifest_bytes(bundle))
+    manifest["files"] = [
+        {
+            "path": _archive_name(name).removeprefix(f"{RUNTIME_ARCHIVE_ROOT}/"),
+            "sha256": _sha256(payload),
+            "size": len(payload),
+        }
+        for name, payload in source_files
+    ]
+    return json.dumps(
+        manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode()
+
+
+def _controlled_source_files(root: Path) -> list[tuple[str, bytes]]:
+    return [
+        (path.relative_to(root).as_posix(), path.read_bytes())
+        for path in _controlled_paths(root)
+    ]
+
+
+def build_v2_runtime_materialization_archive(
+    bundle: WorkerRuntimeBundle, *, source_dir: Path | None = None
+) -> bytes:
+    """Tar the full controlled runtime source under a V2-contract manifest.
+
+    The worker entrypoint verifies its orchestration snapshot exactly like
+    V1 (every file listed with size + sha256, ``entrypoint.sh`` manifested),
+    so the V2 materialization ships the same controlled file set as the V1
+    bundle — only ``manifest.json`` differs: it carries the frozen V2 identity
+    (contract/event schema, flattened adapter digests) that the digest env
+    vars are computed from.
+    """
+    root = (source_dir or default_runtime_source_dir()).resolve()
+    source_files = _controlled_source_files(root)
+    launcher_manifest = build_v2_runtime_materialization_manifest_bytes(
+        bundle, source_dir=root
+    )
+
+    files: list[tuple[str, bytes]] = [
+        ("codify-runtime/orchestration/manifest.json", launcher_manifest)
+    ]
+    files.extend(
+        (_archive_name(name), payload) for name, payload in source_files
+    )
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w", format=tarfile.PAX_FORMAT) as archive:
+        seen_dirs: set[str] = set()
+        for name, payload in files:
+            parts = name.split("/")
+            for i in range(1, len(parts)):
+                dir_name = "/".join(parts[:i])
+                if dir_name in seen_dirs:
+                    continue
+                seen_dirs.add(dir_name)
+                info = tarfile.TarInfo(name=dir_name)
+                info.type = tarfile.DIRTYPE
+                info.mode = 0o755
+                info.mtime = 0
+                archive.addfile(info)
+            mode = 0o755 if name.endswith((".sh", ".py")) else 0o644
+            _add_bytes(archive, name, payload, mode=mode)
+    return buffer.getvalue()
+
+
+
 async def bind_runtime_bundle(
     db: AsyncSession,
     task: Task,

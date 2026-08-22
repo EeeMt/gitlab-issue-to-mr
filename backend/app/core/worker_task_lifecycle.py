@@ -1,6 +1,7 @@
 """Task lifecycle helpers for WorkerExecutor."""
 
 import asyncio
+import hashlib
 import json
 import logging
 import time
@@ -40,7 +41,11 @@ from app.core.worker_runtime import (
     capture_provider_runtime_snapshot,
     worker_custom_scripts_configured,
 )
-from app.core.worker_runtime_bundle import load_bound_runtime_bundle
+from app.core.worker_runtime_bundle import (
+    build_v2_runtime_materialization_archive,
+    build_v2_runtime_materialization_manifest_bytes,
+    load_bound_runtime_bundle,
+)
 from app.core.worker_runtime_readiness import (
     is_kit_mount_error,
     recheck_runtime_on_container_error,
@@ -313,18 +318,29 @@ async def create_execute_container(
     except Exception:  # noqa: BLE001
         harness_key = "claude"
     adapter_meta = (runtime_bundle.manifest.get("adapters") or {}).get(harness_key) or {}
+    # V2 manifests nest the adapter identity under an "adapter" object; V1
+    # projections keep it at the top level.
+    if runtime_bundle.contract_version == "codify.worker.harness/v2":
+        adapter_identity = dict(adapter_meta.get("adapter") or {})
+        adapter_version = str(adapter_identity.get("version") or "1.0.0")
+    else:
+        adapter_version = str(adapter_meta.get("version") or "1.0.0")
+    control_supported = bool(
+        runtime_bundle.contract_version == "codify.worker.harness/v2"
+        and (adapter_meta.get("capabilities") or {}).get("steering")
+    )
     attempt = await create_task_attempt(
         db,
         task=task,
         harness_key=harness_key,
-        adapter_version=str(adapter_meta.get("version") or "1.0.0"),
+        adapter_version=adapter_version,
         event_schema=str(
             runtime_bundle.manifest.get("event_schema") or "codify.worker.event/v1"
         ),
-        control_supported=bool(
-            runtime_bundle.contract_version == "codify.worker.harness/v2"
-            and (adapter_meta.get("capabilities") or {}).get("steering")
-        ),
+        # Plan §4.7: command-capable attempts open in `starting`; the bridge
+        # moves the gate to `accepting` once its control endpoint is ready.
+        control_state="starting" if control_supported else "disabled",
+        control_supported=control_supported,
     )
 
     # Execution contract gate (phase1-design §2.3): under ``v2_only`` the worker
@@ -426,8 +442,15 @@ async def create_execute_container(
             "CODIFY_ADAPTER_VERSION": attempt.adapter_version,
             "CODIFY_ATTEMPT_ID": attempt.attempt_id,
             "CODIFY_RUNTIME_BUNDLE_DIGEST": runtime_bundle.digest,
+            # V1 bundles verify the archive's inner manifest digest; V2
+            # materializes the launcher-facing manifest projection, so the
+            # env digest must hash exactly those bytes.
             "CODIFY_RUNTIME_MANIFEST_DIGEST": str(
-                runtime_bundle.manifest.get("archive_manifest_digest") or ""
+                runtime_bundle.manifest.get("archive_manifest_digest")
+                if runtime_bundle.contract_version != "codify.worker.harness/v2"
+                else hashlib.sha256(
+                    build_v2_runtime_materialization_manifest_bytes(runtime_bundle)
+                ).hexdigest()
             ),
             "CODIFY_RUNTIME_CONTRACT_VERSION": runtime_bundle.contract_version,
         }
@@ -495,7 +518,14 @@ async def create_execute_container(
             await _remove_created_container(worker, db, task, container)
             return None
         try:
-            worker.docker.put_archive(container, "/tmp", runtime_bundle.bundle_bytes)
+            if runtime_bundle.contract_version == "codify.worker.harness/v2":
+                worker.docker.put_archive(
+                    container,
+                    "/tmp",
+                    build_v2_runtime_materialization_archive(runtime_bundle),
+                )
+            else:
+                worker.docker.put_archive(container, "/tmp", runtime_bundle.bundle_bytes)
             worker.docker.put_archive(container, "/tmp", runtime_archive)
         except Exception:
             await _remove_created_container(worker, db, task, container)
