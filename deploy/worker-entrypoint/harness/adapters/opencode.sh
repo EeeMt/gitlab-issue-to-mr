@@ -109,8 +109,14 @@ opencode_adapter_prepare_config() {
         export OPENCODE_SNAPSHOT_KEY="${api_key}"
         # @ai-sdk/anthropic appends /messages to options.baseURL, so the raw
         # relay root gives /messages (404). Normalize to the /v1 root so the SDK
-        # hits /v1/messages, which the relay answers with 200.
-        local api_base="${base_url%/}/v1"
+        # hits /v1/messages, which the relay answers with 200. An endpoint that
+        # already carries /v1 must be left untouched, or the SDK double-hangs as
+        # /v1/v1.
+        local api_base
+        case "${base_url}" in
+            */v1|*/v1/) api_base="${base_url%/}" ;;
+            *) api_base="${base_url%/}/v1" ;;
+        esac
         jq -nc \
             --arg model "${model}" \
             --arg api_base "${api_base}" \

@@ -631,6 +631,52 @@ def test_opencode_prepare_config_normalizes_relay_root_to_v1(tmp_path):
     assert provider["options"]["apiKey"] == "{env:OPENCODE_SNAPSHOT_KEY}"
 
 
+def test_opencode_prepare_config_keeps_existing_v1_endpoint(tmp_path):
+    # G1 (code-review P2-1): @ai-sdk/anthropic appends /messages to
+    # options.baseURL, so a config base that already ends in /v1 must be left
+    # untouched — normalizing it again would double-hang as /v1/v1 (a 200 root
+    # becomes a 404 and the probe fails). Two arms: trailing slash and bare /v1.
+    env = {
+        "CODIFY_RUNTIME_DIR": str(tmp_path),
+        "CODIFY_ORCHESTRATION_DIR": str(REPO_ROOT / "deploy"),
+        "CODIFY_RUN_UID": "1000",
+        "CODIFY_RUN_GID": "1000",
+        "OPENCODE_MODEL": "ox-alpha-free",
+        "OPENCODE_BASE_URL": "http://192.168.50.45:15721/v1",
+        "OPENCODE_API_KEY": "sk-test-relay-key",
+    }
+    result = _source_adapter("opencode_adapter_prepare_config", env)
+    assert result.returncode == 0, result.stderr
+    content = json.loads(
+        (tmp_path / "opencode" / "opencode.json").read_text(encoding="utf-8")
+    )
+    provider = content["provider"]["codify"]
+    assert provider["options"]["baseURL"] == "http://192.168.50.45:15721/v1"
+    assert provider["options"]["apiKey"] == "{env:OPENCODE_SNAPSHOT_KEY}"
+
+
+def test_opencode_prepare_config_normalizes_v1_trailing_slash(tmp_path):
+    # G1 sibling arm: a config base ending in /v1/ is stripped to /v1 by the
+    # %/ suffix removal — /v1/v1 is never produced for either spelling.
+    env = {
+        "CODIFY_RUNTIME_DIR": str(tmp_path),
+        "CODIFY_ORCHESTRATION_DIR": str(REPO_ROOT / "deploy"),
+        "CODIFY_RUN_UID": "1000",
+        "CODIFY_RUN_GID": "1000",
+        "OPENCODE_MODEL": "ox-alpha-free",
+        "OPENCODE_BASE_URL": "http://192.168.50.45:15721/v1/",
+        "OPENCODE_API_KEY": "sk-test-relay-key",
+    }
+    result = _source_adapter("opencode_adapter_prepare_config", env)
+    assert result.returncode == 0, result.stderr
+    content = json.loads(
+        (tmp_path / "opencode" / "opencode.json").read_text(encoding="utf-8")
+    )
+    provider = content["provider"]["codify"]
+    assert provider["options"]["baseURL"] == "http://192.168.50.45:15721/v1"
+    assert provider["options"]["apiKey"] == "{env:OPENCODE_SNAPSHOT_KEY}"
+
+
 def test_opencode_prepare_config_exports_transport_env_defaults(tmp_path):
     # P2: prepare_config default-exports the OpenCode transport/model identity
     # (server_http / opencode-server / three protocols) when the runner did not

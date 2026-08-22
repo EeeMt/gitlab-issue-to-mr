@@ -536,3 +536,110 @@ def test_pi_runner_handshake_uses_new_session_not_resume():
     assert '{"id":2,"type":"get_state"}' in runner
     assert '{"id":3,"type":"prompt"' in runner
     assert runner.index('"type":"get_state"') < runner.index('"type":"prompt"')
+
+
+def test_pi_runner_pins_codify_provider_and_snapshot_model():
+    # Defect A guard (integration test 04:59): pi 0.84.2 launched as
+    # ``pi --mode rpc`` without a provider/model defaults to its built-in
+    # ``anthropic`` provider and sends the relay key to api.anthropic.com (401).
+    # The runner must pin the adapter's ``codify`` provider and the Snapshot
+    # model so the key goes to the relay endpoint carved into
+    # $HOME/.pi/agent/models.json.
+    runner = (REPO_ROOT / "deploy/worker-entrypoint/legacy/pi-run.sh").read_text(encoding="utf-8")
+    assert "--mode rpc --provider codify" in runner
+    assert "--model \"${PI_MODEL_RPC}\"" in runner
+    # The model resolves from the same adapter env chain as pi.sh prepare_config.
+    assert 'PI_MODEL_RPC="${PI_MODEL:-${ANTHROPIC_MODEL:-${OPENAI_MODEL:-}}}"' in runner
+    # Provider pin lives in the base command, before the CODIFY_PI_RUN_AS wrapper.
+    base = runner[: runner.index('if [ -n "${CODIFY_PI_RUN_AS:-}" ]')]
+    assert "--provider codify" in base
+    assert "--mode rpc --provider codify" in base
+
+
+def test_pi_runner_terminates_on_agent_settled_before_ack_continue():
+    # Defect B guard: a successful turn ends with ``agent_settled``; the runner
+    # must close the request FIFO write end (kill $req_writer) so pi sees stdin
+    # EOF, exits, and STREAM_FIFO reaches EOF for the translator to persist the
+    # V2 result. Without it the runner hangs until TASK_TIMEOUT. The kill must
+    # be evaluated before the ``ack_state`` continue so it also fires on the
+    # already-in-progress turn stream.
+    runner = (REPO_ROOT / "deploy/worker-entrypoint/legacy/pi-run.sh").read_text(encoding="utf-8")
+    assert '.type == "agent_settled"' in runner
+    assert 'kill "${req_writer}"' in runner
+    assert runner.index('.type == "agent_settled"') < runner.index(
+        'if [ "${ack_state}" -eq 1 ]'
+    )
+
+
+STUB_PI_TMPL = r'''#!/usr/bin/env python3
+import json, sys
+
+TURN = {turn!r}
+
+def emit(obj):
+    print(json.dumps(obj, separators=(",", ":")), flush=True)
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        req = json.loads(line)
+    except ValueError:
+        continue
+    typ = req.get("type")
+    rid = req.get("id", 1)
+    if typ == "new_session":
+        emit({{"id": rid, "type": "response", "command": "new_session", "success": True, "data": {{"cancelled": False}}}})
+    elif typ == "get_state":
+        emit({{"id": rid, "type": "response", "command": "get_state", "success": True, "data": {{"model": {{"id": "ox-alpha-free", "api": "anthropic-messages", "provider": "codify"}}, "thinkingLevel": "medium", "isStreaming": False, "steeringMode": "one-at-a-time", "followUpMode": "one-at-a-time", "sessionId": "pi-sess-test", "messageCount": 0, "pendingMessageCount": 0}}}})
+    elif typ == "prompt":
+        emit({{"id": rid, "type": "response", "command": "prompt", "success": True}})
+        for event in TURN:
+            emit(event)
+'''
+
+
+def test_pi_runner_terminates_and_persists_result_after_settled(tmp_path):
+    # Defect B end-to-end: drive the real pi-run.sh against a stub ``pi --mode
+    # rpc`` that answers the handshake and replays a completed turn ending in
+    # agent_settled. On agent_settled the runner must close the request FIFO
+    # write end, which gives the stub stdin EOF so it exits; STREAM_FIFO then
+    # reaches EOF and the translator persists a completed V2 result. Without the
+    # fix the runner hangs until the test timeout (was 0/22 -> TASK_TIMEOUT).
+    runtime_dir = tmp_path / "run"
+    runtime_dir.mkdir()
+    prompt = runtime_dir / "prompt.txt"
+    prompt.write_text("Reply with the single word PROBE_OK.\n", encoding="utf-8")
+    turn = _probe_records("success")[2:]
+    stub = tmp_path / "pi-stub"
+    stub.write_text(STUB_PI_TMPL.format(turn=turn), encoding="utf-8")
+    stub.chmod(0o755)
+    # The harness runner (runner.sh) emits run.started before handing control to
+    # the adapter runner; pi-run.sh only translates the stream, so seed the first
+    # canonical event here to match the real execution order.
+    _emit(runtime_dir, "run.started", {"runtime_bundle_digest": "d" * 64})
+    env = {
+        **_environment(runtime_dir),
+        "CODIFY_PI_BIN": str(stub),
+        "CODIFY_ORCHESTRATION_DIR": str(REPO_ROOT / "deploy"),
+        "PROMPT_FILE": str(prompt),
+        "ANTHROPIC_MODEL": "ox-alpha-free",
+        "HOME": str(tmp_path),
+    }
+    proc = subprocess.run(
+        ["bash", str(REPO_ROOT / "deploy/worker-entrypoint/legacy/pi-run.sh")],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    result_file = runtime_dir / "harness-result.json"
+    assert result_file.exists()
+    result = json.loads(result_file.read_text(encoding="utf-8"))
+    assert result["status"] == "completed"
+    assert result["success"] is True
+    # The canonical audit trail surfaced the settled signal for the projector.
+    by_type = [e["type"] for e in _events(runtime_dir)]
+    assert "agent_settled" in by_type

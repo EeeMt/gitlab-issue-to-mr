@@ -41,7 +41,17 @@ STREAM_FIFO="${RUN_DIR}/pi-stream.fifo"
 mkfifo "${REQ_FIFO}" "${STREAM_FIFO}"
 trap 'rm -rf "${RUN_DIR}"' EXIT
 
-PI_COMMAND=("${CODIFY_PI_BIN}" --mode rpc)
+# Select the Snapshot model explicitly. pi 0.84.2 defaults to its built-in
+# ``anthropic`` provider, which sends the relay key to api.anthropic.com and
+# fails with ``401 invalid x-api-key``; the Snapshot model is registered under
+# the ``codify`` provider in $HOME/.pi/agent/models.json, so pin both here so
+# the key goes to the relay endpoint carved by the adapter.
+PI_MODEL_RPC="${PI_MODEL:-${ANTHROPIC_MODEL:-${OPENAI_MODEL:-}}}"
+
+PI_COMMAND=("${CODIFY_PI_BIN}" --mode rpc --provider codify)
+if [ -n "${PI_MODEL_RPC}" ]; then
+    PI_COMMAND+=(--model "${PI_MODEL_RPC}")
+fi
 if [ -n "${CODIFY_PI_RUN_AS:-}" ]; then
     if [[ "${CODIFY_PI_RUN_AS}" != /* || ! -x "${CODIFY_PI_RUN_AS}" ]]; then
         echo "CODIFY_PI_RUN_AS must be an executable absolute path: ${CODIFY_PI_RUN_AS}" >&2
@@ -92,6 +102,14 @@ ack_session=0
 ack_state=0
 while IFS= read -r line; do
     printf '%s\n' "${line}" >> "${HANDSHAKE_BUF}"
+    # Terminal settle: pi 0.84.2 emits agent_settled when the turn completes.
+    # Close the request FIFO write end (req_writer) so pi sees EOF on stdin and
+    # exits; only then does STREAM_FIFO reach EOF and the translator persist the
+    # V2 result — without this the runner hangs until TASK_TIMEOUT. Must run
+    # before the ack_state continue so it also applies to the turn stream.
+    if printf '%s' "${line}" | jq -e '.type == "agent_settled"' >/dev/null 2>&1; then
+        kill "${req_writer}" 2>/dev/null || true
+    fi
     if [ "${ack_state}" -eq 1 ]; then
         continue  # handshake complete; the rest is the turn stream (drain as-is)
     fi
