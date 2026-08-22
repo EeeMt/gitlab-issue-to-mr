@@ -1258,6 +1258,8 @@ const sharedRunInstructionTab = ref<'execute' | 'plan' | 'ci_auto_repair'>('exec
 const harnessSelectOptions = computed(() => [
   { label: t('createTask.harnessClaude'), value: 'claude' },
   { label: t('createTask.harnessCodex'), value: 'codex' },
+  { label: t('createTask.harnessPi'), value: 'pi' },
+  { label: t('createTask.harnessOpenCode'), value: 'opencode' },
 ])
 const knownPromptPlaceholders = computed(() => [
   ...new Set(builtIns.value?.execute.known_placeholders ?? [

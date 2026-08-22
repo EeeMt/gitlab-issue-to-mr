@@ -876,7 +876,11 @@ const harnessOptions = computed(() => {
       ? t('createTask.harnessCodex')
       : key === 'claude'
         ? t('createTask.harnessClaude')
-        : key,
+        : key === 'pi'
+          ? t('createTask.harnessPi')
+          : key === 'opencode'
+            ? t('createTask.harnessOpenCode')
+            : key,
     value: key,
   }))
 })
