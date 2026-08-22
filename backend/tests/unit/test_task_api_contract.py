@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
+from fastapi import APIRouter
 from fastapi.routing import APIRoute
 from pydantic import ValidationError
 
@@ -67,13 +68,19 @@ EXPECTED_TASK_ROUTES = {
 
 
 def test_task_router_preserves_public_method_and_path_surface() -> None:
-    actual = {
-        (method, route.path)
-        for route in router.routes
-        if isinstance(route, APIRoute)
-        for method in route.methods
-    }
-    assert actual == EXPECTED_TASK_ROUTES
+    def collect_routes(router: APIRouter) -> set[tuple[str, str]]:
+        routes: set[tuple[str, str]] = set()
+        for route in router.routes:
+            if isinstance(route, APIRoute):
+                for method in route.methods:
+                    routes.add((method, route.path))
+            elif type(route).__name__ == "_IncludedRouter":
+                # FastAPI >= 0.141 wraps included routers instead of copying
+                # their routes; recurse into the original router.
+                routes |= collect_routes(route.original_router)
+        return routes
+
+    assert collect_routes(router) == EXPECTED_TASK_ROUTES
 
 
 @pytest.mark.parametrize(
