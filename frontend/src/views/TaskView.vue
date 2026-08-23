@@ -10,6 +10,9 @@
         <template #title>
           <h2 class="task-view__title">{{ t('taskView.title', { id: taskId }) }}</h2>
           <n-tag v-if="task" :type="statusColors[task.status]" round>{{ t(`status.${task.status}`) }}</n-tag>
+          <n-tag v-if="isLegacyReadOnly" type="warning" round>
+            {{ t('taskView.legacyReadOnly') }}
+          </n-tag>
         </template>
         <template v-if="task" #subtitle>
           <div class="task-view__context">
@@ -44,7 +47,7 @@
           <div class="task-actions task-actions--header" data-testid="task-actions">
             <div class="task-actions__toolbar">
               <n-button
-                v-if="task && ['pending', 'queued', 'running'].includes(task.status)"
+                v-if="task && (task.status === 'running' || (!isLegacyReadOnly && ['pending', 'queued'].includes(task.status)))"
                 class="task-actions__command task-actions__command--danger"
                 type="error"
                 secondary
@@ -74,7 +77,7 @@
               </div>
 
               <n-button
-                v-if="task && ['failed', 'cancelled'].includes(task.status) && !activeRetryTask"
+                v-if="task && !isLegacyReadOnly && ['failed', 'cancelled'].includes(task.status) && !activeRetryTask"
                 class="task-actions__command task-actions__command--retry"
                 type="primary"
                 strong
@@ -88,7 +91,7 @@
               </n-button>
 
               <n-button
-                v-if="task && ['failed', 'cancelled'].includes(task.status) && !activeRetryTask"
+                v-if="task && !isLegacyReadOnly && ['failed', 'cancelled'].includes(task.status) && !activeRetryTask"
                 class="task-actions__command task-actions__command--primary"
                 type="info"
                 secondary
@@ -116,7 +119,7 @@
               </n-button>
 
               <n-button
-                v-if="task?.status === 'pending'"
+                v-if="task?.status === 'pending' && !isLegacyReadOnly"
                 class="task-actions__command task-actions__command--primary"
                 type="primary"
                 strong
@@ -130,7 +133,7 @@
               </n-button>
 
               <n-button
-                v-if="task && ['pending', 'queued'].includes(task.status)"
+                v-if="task && !isLegacyReadOnly && ['pending', 'queued'].includes(task.status)"
                 class="task-actions__command task-actions__command--neutral"
                 secondary
                 strong
@@ -157,7 +160,7 @@
               </n-button>
 
               <n-button
-                v-if="task?.status === 'completed'"
+                v-if="task?.status === 'completed' && !isLegacyReadOnly"
                 class="task-actions__command task-actions__command--danger"
                 type="error"
                 secondary
@@ -170,7 +173,7 @@
               </n-button>
 
               <n-button
-                v-if="task?.status === 'failed'"
+                v-if="task?.status === 'failed' && !isLegacyReadOnly"
                 class="task-actions__command task-actions__command--neutral"
                 type="success"
                 secondary
@@ -430,8 +433,8 @@
                 v-if="task"
                 :task-id="task.id"
                 :task-status="task.status"
-                :harness-key="attemptHarnessKey ?? task.harness_key ?? issueCurrentHarness"
                 :control-state="controlState"
+                :capabilities="attemptHarnessCapabilities"
                 data-testid="steering-panel-wrapper"
               />
 
@@ -618,6 +621,7 @@ import {
   getIssue,
   getTaskArchive,
   getTaskWorkerRuntimeSummary,
+  getTaskHarnessCatalog,
   verifyTaskWorkerRuntime,
   type Issue,
   type Task,
@@ -692,6 +696,7 @@ function copyPromptSource() {
 const task = ref<Task | null>(null)
 const controlState = ref<string | null>(null)
 const attemptHarnessKey = ref<string | null>(null)
+const attemptHarnessCapabilities = ref<{ steering?: boolean; follow_up?: boolean } | null>(null)
 const logs = ref('')
 const containerLogs = ref('')
 const containerLogsTruncated = ref(false)
@@ -897,6 +902,7 @@ const hasActionDetails = computed(() => {
 })
 
 const canReschedule = computed(() => {
+  if (isLegacyReadOnly.value) return false
   const s = task.value?.status
   if (s === 'queued') return true
   return s === 'pending' && !!task.value?.scheduled_at
@@ -904,6 +910,7 @@ const canReschedule = computed(() => {
 const isWorkerRuntimeBlocked = computed(
   () => task.value?.waiting_reason === 'worker_runtime_unavailable'
 )
+const isLegacyReadOnly = computed(() => task.value?.execution_contract?.read_only === true)
 const blockedWorkerKitVersion = computed(
   () => blockedWorkerSummary.value?.worker_kit_version ?? task.value?.worker_kit_version ?? null
 )
@@ -937,6 +944,7 @@ const isLatestIssueTask = computed(() =>
 
 const canAppendFollowupTask = computed(() =>
   isTerminal.value
+  && !isLegacyReadOnly.value
   && isLatestIssueTask.value
   && issueStatus.value !== 'closed'
   && canManageTask.value
@@ -1066,6 +1074,9 @@ async function refreshIssueTasks(requestedTaskId: number) {
 async function fetchTask(): Promise<boolean> {
   const requestGeneration = ++taskRequestGeneration
   const requestedTaskId = taskId.value
+  // Keep the command plane fail-closed while a refresh or task switch is
+  // waiting for the immutable catalog response.
+  attemptHarnessCapabilities.value = null
   loading.value = true
   try {
     const previousStatus = task.value?.status
@@ -1076,6 +1087,10 @@ async function fetchTask(): Promise<boolean> {
     task.value = fetchedTask
     controlState.value = fetchedTask.control_state ?? null
     attemptHarnessKey.value = fetchedTask.attempt_harness_key ?? null
+    await fetchHarnessCatalog(requestedTaskId, requestGeneration, fetchedTask)
+    if (requestGeneration !== taskRequestGeneration || requestedTaskId !== taskId.value) {
+      return false
+    }
     if (task.value.waiting_reason === 'worker_runtime_unavailable') {
       await fetchBlockedWorkerSummary(requestedTaskId, requestGeneration)
     } else {
@@ -1116,6 +1131,25 @@ async function fetchTask(): Promise<boolean> {
     if (requestGeneration === taskRequestGeneration) {
       hasLoadedOnce.value = true
       loading.value = false
+    }
+  }
+}
+
+async function fetchHarnessCatalog(
+  requestedTaskId: number,
+  requestGeneration: number,
+  fetchedTask: Task,
+) {
+  try {
+    const response = await getTaskHarnessCatalog(requestedTaskId)
+    if (requestGeneration !== taskRequestGeneration || requestedTaskId !== taskId.value) return
+    const harnessKey = fetchedTask.attempt_harness_key ?? fetchedTask.harness_key
+    const adapter = response.catalog.find(entry => entry.key === harnessKey)
+    attemptHarnessCapabilities.value = adapter?.capabilities ?? null
+  } catch {
+    // Fail closed: an unavailable catalog must not enable a control input.
+    if (requestGeneration === taskRequestGeneration && requestedTaskId === taskId.value) {
+      attemptHarnessCapabilities.value = null
     }
   }
 }

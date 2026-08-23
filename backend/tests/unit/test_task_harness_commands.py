@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from alembic import command
-from app.core.harness_protocol import CANONICAL_EVENT_SCHEMA_V2
+from app.core.harness_protocol import CANONICAL_EVENT_SCHEMA_V2, HARNESS_CONTRACT_VERSION_V2
 from app.core.task_harness_commands import (
     CommandError,
     create_command,
@@ -137,16 +137,73 @@ async def _insert_issue(db, *, project_id=1):
 
 
 async def _insert_task(db, *, issue_id, status="pending"):
+    bundle_id = await _insert_v2_bundle(db)
     return (
         await db.execute(
             sa.text(
                 "INSERT INTO tasks (issue_id, project_id, user_prompt, status, priority, "
                 "additions, deletions, total_changes, require_changes, task_mode, "
-                "trigger_source, session_mode, issue_sequence, created_at, updated_at) "
+                "trigger_source, session_mode, issue_sequence, runtime_bundle_id, created_at, updated_at) "
                 "VALUES (:i, 1, 'do', :s, 0, 0, 0, 0, true, 'execute', "
-                "'manual', 'continue', 1, now(), now()) RETURNING id"
+                "'manual', 'continue', 1, :bundle_id, now(), now()) RETURNING id"
             ),
-            {"i": issue_id, "s": status},
+            {"i": issue_id, "s": status, "bundle_id": bundle_id},
+        )
+    ).scalar_one()
+
+
+async def _insert_v2_bundle(db, *, pi_steering=True, pi_follow_up=True):
+    manifest = {
+        "schema": "codify.worker.runtime-manifest/v2",
+        "maturity": "internal_preview",
+        "contract_version": HARNESS_CONTRACT_VERSION_V2,
+        "event_schema": CANONICAL_EVENT_SCHEMA_V2,
+        "command_schema": "codify.worker.command/v2",
+        "result_schema": "codify.worker.result/v2",
+        "files": [],
+        "adapters": {
+            "pi": {
+                "support_tier": "default",
+                "adapter": {"version": "2.0.0", "digest": "a" * 64},
+                "control_transport": {"kind": "rpc_stdio"},
+                "model_protocols": ["anthropic_messages"],
+                "capabilities": {
+                    "resume": True,
+                    "task_skills": True,
+                    "usage_tokens": True,
+                    "steering": pi_steering,
+                    "follow_up": pi_follow_up,
+                },
+            },
+            "claude": {
+                "support_tier": "default",
+                "adapter": {"version": "1.0.0", "digest": "b" * 64},
+                "control_transport": {"kind": "cli_stream_json"},
+                "model_protocols": ["anthropic_messages"],
+                "capabilities": {
+                    "resume": True,
+                    "task_skills": True,
+                    "usage_tokens": True,
+                    "steering": False,
+                    "follow_up": False,
+                },
+            },
+        },
+    }
+    return (
+        await db.execute(
+            sa.text(
+                "INSERT INTO worker_runtime_bundles "
+                "(digest, bundle_bytes, contract_version, orchestration_version, manifest, size_bytes, created_at) "
+                "VALUES (:digest, :bundle_bytes, :contract_version, '1.0.0', CAST(:manifest AS json), 1, now()) "
+                "RETURNING id"
+            ),
+            {
+                "digest": uuid.uuid4().hex + uuid.uuid4().hex,
+                "bundle_bytes": b"x",
+                "contract_version": HARNESS_CONTRACT_VERSION_V2,
+                "manifest": __import__("json").dumps(manifest),
+            },
         )
     ).scalar_one()
 
@@ -294,6 +351,50 @@ async def test_create_command_rejects_unsupported_harness(maker):
         assert r.rejection_code == "unsupported_harness"
 
 
+async def test_create_command_reads_capability_from_frozen_bundle(maker):
+    async with maker() as db:
+        issue_id = await _insert_issue(db)
+        task_id = await _insert_task(db, issue_id=issue_id, status="running")
+        await db.execute(
+            sa.text(
+                "UPDATE worker_runtime_bundles SET manifest = CAST(:manifest AS json) "
+                "WHERE id = (SELECT runtime_bundle_id FROM tasks WHERE id = :task_id)"
+            ),
+            {
+                "task_id": task_id,
+                "manifest": __import__("json").dumps(
+                    {
+                        **{
+                            "schema": "codify.worker.runtime-manifest/v2",
+                            "maturity": "internal_preview",
+                            "contract_version": HARNESS_CONTRACT_VERSION_V2,
+                            "event_schema": CANONICAL_EVENT_SCHEMA_V2,
+                            "command_schema": "codify.worker.command/v2",
+                            "result_schema": "codify.worker.result/v2",
+                            "files": [],
+                        },
+                        "adapters": {
+                            "pi": {
+                                "support_tier": "default",
+                                "adapter": {"version": "2.0.0", "digest": "a" * 64},
+                                "control_transport": {"kind": "rpc_stdio"},
+                                "model_protocols": ["anthropic_messages"],
+                                "capabilities": {"steering": False, "follow_up": True},
+                            }
+                        },
+                    }
+                ),
+            },
+        )
+        await _insert_v2_attempt(db, task_id=task_id)
+        await db.commit()
+        result = await create_command(
+            db, task_id=task_id, command_id=_cid("cmd"), command_type="steer",
+            payload={"text": "x"}, created_by="alice",
+        )
+        assert result.rejection_code == "unsupported_harness"
+
+
 async def test_create_command_rejects_closed_control_gate(maker):
     async with maker() as db:
         issue_id = await _insert_issue(db)
@@ -438,6 +539,27 @@ def _mock_db_for_flush_race(*, existing_digest: str, flush_raises: bool):
 
     task = MagicMock()
     task.status = TaskStatus.RUNNING
+    task.runtime_bundle = MagicMock(
+        contract_version=HARNESS_CONTRACT_VERSION_V2,
+        manifest={
+            "schema": "codify.worker.runtime-manifest/v2",
+            "maturity": "internal_preview",
+            "contract_version": HARNESS_CONTRACT_VERSION_V2,
+            "event_schema": CANONICAL_EVENT_SCHEMA_V2,
+            "command_schema": "codify.worker.command/v2",
+            "result_schema": "codify.worker.result/v2",
+            "files": [],
+            "adapters": {
+                "pi": {
+                    "support_tier": "default",
+                    "adapter": {"version": "2.0.0", "digest": "a" * 64},
+                    "control_transport": {"kind": "rpc_stdio"},
+                    "model_protocols": ["anthropic_messages"],
+                    "capabilities": {"steering": True, "follow_up": True},
+                }
+            },
+        },
+    )
     attempt = MagicMock()
     attempt.harness_key = "pi"
     attempt.event_schema = CANONICAL_EVENT_SCHEMA_V2

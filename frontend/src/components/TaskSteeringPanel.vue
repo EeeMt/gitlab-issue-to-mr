@@ -10,8 +10,8 @@
     </div>
 
     <n-radio-group v-model:value="commandType" size="small" :disabled="!inputEnabled">
-      <n-radio-button value="steer">{{ t('taskView.steeringSteer') }}</n-radio-button>
-      <n-radio-button value="follow_up">{{ t('taskView.steeringFollowUp') }}</n-radio-button>
+      <n-radio-button value="steer" :disabled="!steeringSupported">{{ t('taskView.steeringSteer') }}</n-radio-button>
+      <n-radio-button value="follow_up" :disabled="!followUpSupported">{{ t('taskView.steeringFollowUp') }}</n-radio-button>
     </n-radio-group>
 
     <n-input
@@ -41,11 +41,13 @@
       </span>
     </div>
 
-    <ul v-if="deliveredCommands.length" class="steering-panel__history" data-testid="steering-history">
-      <li v-for="cmd in deliveredCommands" :key="cmd.command_id" class="steering-panel__history-item">
-        <span class="steering-panel__history-type">{{ cmd.command_type === 'steer' ? t('taskView.steeringSteer') : t('taskView.steeringFollowUp') }}</span>
-        <span class="steering-panel__history-text">{{ cmd.payload.text }}</span>
-        <span class="steering-panel__history-status">{{ t('taskView.steeringDelivered') }}</span>
+    <ul v-if="history.length" class="steering-panel__history" data-testid="steering-history">
+      <li v-for="cmd in history" :key="cmd.command_id" class="steering-panel__history-item">
+        <span class="steering-panel__history-type">{{ cmd.type === 'steer' ? t('taskView.steeringSteer') : t('taskView.steeringFollowUp') }}</span>
+        <span class="steering-panel__history-sequence">#{{ cmd.sequence_no }}</span>
+        <span class="steering-panel__history-status" :data-testid="`steering-command-${cmd.status}`">{{ commandStatusLabel(cmd.status) }}</span>
+        <time class="steering-panel__history-time">{{ commandTime(cmd) }}</time>
+        <span v-if="cmd.rejection_message" class="steering-panel__history-rejection">{{ cmd.rejection_message }}</span>
       </li>
     </ul>
 
@@ -62,8 +64,8 @@ import { listHarnessCommands, sendHarnessCommand, type HarnessCommand } from '..
 const props = defineProps<{
   taskId: number
   taskStatus: string
-  harnessKey: string | null | undefined
   controlState: string | null | undefined
+  capabilities: { steering?: boolean; follow_up?: boolean } | null | undefined
 }>()
 
 const emit = defineEmits<{ (e: 'command-delivered'): void }>()
@@ -75,18 +77,22 @@ const commandType = ref<'steer' | 'follow_up'>('steer')
 const text = ref('')
 const sending = ref(false)
 const history = ref<HarnessCommand[]>([])
+let historyRequestGeneration = 0
 
-const CONTROL_CAPABLE = new Set(['pi'])
+const steeringSupported = computed(() => props.capabilities?.steering === true)
+const followUpSupported = computed(() => props.capabilities?.follow_up === true)
 
 const visible = computed(() => {
-  if (!CONTROL_CAPABLE.has(props.harnessKey ?? '')) return false
+  if (!steeringSupported.value && !followUpSupported.value) return false
   return ['running', 'completed', 'failed', 'cancelled'].includes(props.taskStatus)
 })
 
-// Only Pi attempts with a live control gate accept commands; completed runs
-// keep the panel for read-only history.
+// A catalog-capable attempt with a live control gate accepts commands;
+// completed runs keep the panel for read-only history.
 const inputEnabled = computed(
-  () => props.taskStatus === 'running' && props.controlState === 'accepting'
+  () => props.taskStatus === 'running'
+    && props.controlState === 'accepting'
+    && (commandType.value === 'steer' ? steeringSupported.value : followUpSupported.value)
 )
 
 const gateLabel = computed(() => {
@@ -111,26 +117,60 @@ const hintText = computed(() => {
   return ''
 })
 
-const deliveredCommands = computed(() =>
-  history.value.filter(cmd => cmd.status === 'delivered')
-)
+function commandStatusLabel(status: HarnessCommand['status']): string {
+  return t(`taskView.steeringStatus${status.replace(/(^|_)([a-z])/g, (_, prefix, char) => `${prefix}${char.toUpperCase()}`)}`)
+}
+
+function commandTime(command: HarnessCommand): string {
+  const value = command.native_ack_at
+    ?? command.delivered_at
+    ?? command.outcome_unknown_at
+    ?? command.rejected_at
+    ?? command.dispatch_started_at
+    ?? command.created_at
+  if (!value) return ''
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
 
 async function refreshHistory(): Promise<void> {
+  const requestGeneration = ++historyRequestGeneration
+  const requestedTaskId = props.taskId
   try {
-    history.value = await listHarnessCommands(props.taskId)
+    const commands = await listHarnessCommands(requestedTaskId)
+    if (requestGeneration === historyRequestGeneration && requestedTaskId === props.taskId) {
+      history.value = commands
+    }
   } catch {
-    history.value = []
+    if (requestGeneration === historyRequestGeneration && requestedTaskId === props.taskId) {
+      history.value = []
+    }
   }
 }
 
 watch(
-  () => [props.taskId, props.controlState],
-  () => {
-    text.value = ''
-    if (visible.value) void refreshHistory()
+  () => [props.taskId, props.taskStatus, props.controlState, steeringSupported.value, followUpSupported.value],
+  (current, previous) => {
+    const taskChanged = previous !== undefined && current[0] !== previous[0]
+    if (taskChanged) {
+      // Do this synchronously so a route transition never shows another task's draft/history.
+      historyRequestGeneration += 1
+      history.value = []
+      text.value = ''
+    }
+    if (visible.value) {
+      void refreshHistory()
+    } else if (taskChanged) {
+      history.value = []
+    }
   },
   { immediate: true }
 )
+
+watch([steeringSupported, followUpSupported], ([steering, followUp]) => {
+  if (commandType.value === 'steer' && !steering && followUp) commandType.value = 'follow_up'
+  if (commandType.value === 'follow_up' && !followUp && steering) commandType.value = 'steer'
+}, { immediate: true })
 
 async function send(): Promise<void> {
   const body = text.value.trim()
@@ -242,6 +282,7 @@ async function send(): Promise<void> {
   display: flex;
   gap: 6px;
   align-items: baseline;
+  flex-wrap: wrap;
   font-size: 12px;
 }
 
@@ -251,15 +292,27 @@ async function send(): Promise<void> {
   font-weight: 500;
 }
 
-.steering-panel__history-text {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.steering-panel__history-sequence,
+.steering-panel__history-time {
+  color: #888;
   white-space: nowrap;
 }
 
 .steering-panel__history-status {
   color: #999;
   white-space: nowrap;
+}
+
+.steering-panel__history-rejection {
+  flex-basis: 100%;
+  overflow-wrap: anywhere;
+  color: #d03050;
+}
+
+@media (max-width: 767px) {
+  .steering-panel :deep(.n-radio-button),
+  .steering-panel :deep(.n-button) {
+    min-height: 44px;
+  }
 }
 </style>

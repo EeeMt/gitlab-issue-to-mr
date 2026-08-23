@@ -15,13 +15,16 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.harness_protocol import (
     CANONICAL_EVENT_SCHEMA_V2,
+    HARNESS_CONTRACT_VERSION_V2,
 )
 from app.core.harness_protocol import (
     command_payload_digest as canonical_digest,
 )
+from app.core.harness_registry import HarnessRegistryError, registry_catalog_from_manifest
 from app.core.utcnow import utcnow
 from app.models import (
     Task,
@@ -29,10 +32,6 @@ from app.models import (
     TaskHarnessCommand,
     TaskStatus,
 )
-
-# Harnesses that declare command capability (schemas.md §4 / §6): only Pi
-# supports steer/follow_up in the first release. OpenCode/Claude/Codex do not.
-COMMAND_CAPABLE_HARNESSES = frozenset({"pi"})
 
 
 class CommandError(ValueError):
@@ -55,16 +54,32 @@ class CommandCreateResult:
     rejection_message: str | None = None
 
 
-async def harness_supports_command(harness_key: str, command_type: str) -> bool:
-    """Whether the harness declares the given command capability.
+def bundle_supports_command(
+    bundle: object | None, harness_key: str, command_type: str
+) -> bool:
+    """Read command eligibility from the task's immutable V2 manifest.
 
-    First release: only Pi (steer/follow_up). Kept as a function so the
-    manifest-driven registry (Phase 1 area 5) can replace it without callers
-    changing.
+    This is intentionally the same safe projection used by the catalog API:
+    neither a harness key supplied by the client nor today's source checkout
+    can upgrade a historical task's control capability.  Any malformed,
+    legacy, or incomplete bundle is not command-capable.
     """
     if command_type not in {"steer", "follow_up"}:
         return False
-    return harness_key in COMMAND_CAPABLE_HARNESSES
+    if getattr(bundle, "contract_version", None) != HARNESS_CONTRACT_VERSION_V2:
+        return False
+    manifest = getattr(bundle, "manifest", None)
+    if not isinstance(manifest, dict):
+        return False
+    try:
+        catalog = registry_catalog_from_manifest(manifest)
+    except (HarnessRegistryError, ValueError, TypeError):
+        return False
+    adapter = next((entry for entry in catalog if entry["key"] == harness_key), None)
+    if adapter is None:
+        return False
+    capability_name = "steering" if command_type == "steer" else "follow_up"
+    return adapter["capabilities"].get(capability_name) is True
 
 
 async def _load_current_attempt(
@@ -146,7 +161,12 @@ async def create_command(
         )
 
     task = (
-        await db.execute(select(Task).where(Task.id == task_id).with_for_update())
+        await db.execute(
+            select(Task)
+            .options(selectinload(Task.runtime_bundle))
+            .where(Task.id == task_id)
+            .with_for_update()
+        )
     ).scalar_one_or_none()
     if task is None:
         raise CommandError("unknown task", code="task_not_found")
@@ -160,9 +180,7 @@ async def create_command(
             rejection_message="task is not RUNNING",
         )
 
-    attempt = await _load_current_attempt(
-        db, task_id=task_id, for_update=True
-    )
+    attempt = await _load_current_attempt(db, task_id=task_id, for_update=True)
     if attempt is None:
         return CommandCreateResult(
             command_id=command_id,
@@ -181,14 +199,17 @@ async def create_command(
             rejection_code="attempt_mismatch",
             rejection_message="attempt is not an exact V2 attempt",
         )
-    if not await harness_supports_command(attempt.harness_key, command_type):
+    if not bundle_supports_command(task.runtime_bundle, attempt.harness_key, command_type):
         return CommandCreateResult(
             command_id=command_id,
             sequence_no=0,
             created=False,
             outcome="unsupported_harness",
             rejection_code="unsupported_harness",
-            rejection_message=f"harness {attempt.harness_key} does not support {command_type}",
+            rejection_message=(
+                f"frozen Runtime Bundle harness {attempt.harness_key} does not support "
+                f"{command_type}"
+            ),
         )
     if attempt.control_state != "accepting":
         return CommandCreateResult(

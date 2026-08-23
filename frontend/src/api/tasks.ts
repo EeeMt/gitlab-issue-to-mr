@@ -106,6 +106,12 @@ export interface Task {
   worker_profile_id: number | null
   worker_profile_name?: string | null
   harness_key?: string | null
+  execution_contract?: {
+    contract_version: string | null
+    legacy: boolean
+    read_only: boolean
+    reason: string | null
+  }
   worker_image?: string | null
   worker_runtime_mode?: 'baked_image' | 'mounted_kit' | string | null
   worker_kit_version?: string | null
@@ -638,19 +644,37 @@ export async function updateTask(
 
 export interface HarnessCommand {
   command_id: string
-  task_id: number
-  attempt_id: string
   sequence_no: number
-  command_type: 'steer' | 'follow_up'
-  payload: { text: string }
-  payload_digest: string
-  status: 'queued' | 'delivered' | 'rejected'
-  created_by: string
+  type: 'steer' | 'follow_up'
+  status: 'queued' | 'dispatching' | 'delivered' | 'rejected' | 'outcome_unknown'
   created_at: string
+  dispatch_started_at: string | null
+  native_ack_at: string | null
+  outcome_unknown_at: string | null
   delivered_at: string | null
   rejected_at: string | null
   rejection_code: string | null
   rejection_message: string | null
+}
+
+export interface HarnessCatalogEntry {
+  key: string
+  display_name: string
+  support_tier: string | null
+  control_transport: Record<string, unknown>
+  model_protocols: string[]
+  capabilities: Record<string, boolean>
+  options_schema: string | null
+}
+
+export interface TaskHarnessCatalog {
+  source: 'task_runtime_bundle' | 'legacy_task' | string
+  contract_version: string | null
+  bundle_digest: string | null
+  legacy: boolean
+  read_only: boolean
+  reason?: string
+  catalog: HarnessCatalogEntry[]
 }
 
 function generateCommandId(): string {
@@ -678,4 +702,9 @@ export async function listHarnessCommands(taskId: number): Promise<HarnessComman
   const response = await api.get(`/tasks/${taskId}/commands`)
   const data = response.data
   return Array.isArray(data) ? data : (data.items ?? data.commands ?? [])
+}
+
+export async function getTaskHarnessCatalog(taskId: number): Promise<TaskHarnessCatalog> {
+  const response = await api.get(`/tasks/${taskId}/harness-catalog`)
+  return response.data
 }

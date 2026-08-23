@@ -6,11 +6,12 @@ import TaskView from './TaskView.vue'
 import { createMockTask, createMockTaskLog } from '../test/mocks/api'
 
 // Use hoisted to ensure proper initialization order
-const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
+const { mockApi, resetMockApi, mockMessage, mockWindowSize } = vi.hoisted(() => {
   const mock = {
     getTask: vi.fn<() => Promise<any>>(),
     getTaskModelServiceSummary: vi.fn<() => Promise<any>>(),
     getTaskWorkerRuntimeSummary: vi.fn<() => Promise<any>>(),
+    getTaskHarnessCatalog: vi.fn<() => Promise<any>>(),
     verifyTaskWorkerRuntime: vi.fn<() => Promise<any>>(),
     getTaskLogs: vi.fn<() => Promise<any[]>>(),
     getTaskContainerLogs: vi.fn<() => Promise<any>>(),
@@ -36,7 +37,11 @@ const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
     })
   }
   const mockMsg = { error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn() }
-  return { mockApi: mock, resetMockApi, mockMessage: mockMsg }
+  const mockViewport = {
+    width: { value: 1200 },
+    height: { value: 900 }
+  }
+  return { mockApi: mock, resetMockApi, mockMessage: mockMsg, mockWindowSize: mockViewport }
 })
 
 // Mock i18n module
@@ -69,6 +74,7 @@ vi.mock('../api', () => ({
   getTask: mockApi.getTask,
   getTaskModelServiceSummary: mockApi.getTaskModelServiceSummary,
   getTaskWorkerRuntimeSummary: mockApi.getTaskWorkerRuntimeSummary,
+  getTaskHarnessCatalog: mockApi.getTaskHarnessCatalog,
   verifyTaskWorkerRuntime: mockApi.verifyTaskWorkerRuntime,
   getTaskLogs: mockApi.getTaskLogs,
   getTaskContainerLogs: mockApi.getTaskContainerLogs,
@@ -112,10 +118,7 @@ vi.mock('../utils/slotError', () => ({
 }))
 
 vi.mock('@vueuse/core', () => ({
-  useWindowSize: vi.fn(() => ({
-    width: { value: 1200 },
-    height: { value: 900 }
-  }))
+  useWindowSize: vi.fn(() => mockWindowSize)
 }))
 
 // Mock EventSource - create once, reuse
@@ -536,10 +539,19 @@ describe('TaskView', () => {
     })
   }
 
+  const legacyReadOnlyExecutionContract = {
+    contract_version: 'codify.worker.harness/v1',
+    legacy: true,
+    read_only: true,
+    reason: 'legacy_contract_not_executable'
+  }
+
   beforeEach(async () => {
     vi.clearAllMocks()
     resetMockApi()
     Object.values(mockMessage).forEach(fn => fn.mockReset())
+    mockWindowSize.width.value = 1200
+    mockWindowSize.height.value = 900
     mockEventSourceInstance.close.mockClear()
     mockEventSourceInstance.onerror = null
     mockEventSourceInstance.addEventListener.mockClear()
@@ -717,6 +729,49 @@ describe('TaskView', () => {
     await flushPromises()
 
     expect(wrapper.vm.task?.id).toBe(2)
+  })
+
+  it('keeps steering fail-closed while a delayed catalog switches tasks', async () => {
+    const piCatalog = {
+      catalog: [{ key: 'pi', capabilities: { steering: true, follow_up: true } }],
+    }
+    ;(mockApi.getTaskHarnessCatalog as Mock).mockResolvedValue(piCatalog)
+    await mountComponent({
+      status: 'pending',
+      harness_key: 'pi',
+      attempt_harness_key: 'pi',
+      control_state: 'accepting',
+    })
+    expect(wrapper.vm.attemptHarnessCapabilities).toEqual({ steering: true, follow_up: true })
+
+    let resolveStaleCatalog!: (value: unknown) => void
+    const staleCatalog = new Promise(resolve => { resolveStaleCatalog = resolve })
+    ;(mockApi.getTask as Mock).mockImplementation((id: number) =>
+      Promise.resolve(createMockTaskWithStatus('running', {
+        id,
+        harness_key: id === 1 ? 'pi' : 'opencode',
+        attempt_harness_key: id === 1 ? 'pi' : 'opencode',
+        control_state: 'accepting',
+      }))
+    )
+    ;(mockApi.getTaskHarnessCatalog as Mock).mockImplementation((id: number) =>
+      id === 1
+        ? staleCatalog
+        : Promise.resolve({ catalog: [{ key: 'opencode', capabilities: { steering: false, follow_up: false } }] })
+    )
+
+    const staleRefresh = wrapper.vm.fetchTask()
+    expect(wrapper.vm.attemptHarnessCapabilities).toBeNull()
+    await router.push('/tasks/2')
+    await vi.waitFor(() => expect(wrapper.vm.task?.id).toBe(2))
+    await flushPromises()
+    expect(wrapper.vm.attemptHarnessCapabilities).toEqual({ steering: false, follow_up: false })
+
+    resolveStaleCatalog(piCatalog)
+    await staleRefresh
+    await flushPromises()
+    expect(wrapper.vm.task?.id).toBe(2)
+    expect(wrapper.vm.attemptHarnessCapabilities).toEqual({ steering: false, follow_up: false })
   })
 
   it('loads logs when routing to another terminal task in the same view', async () => {
@@ -1294,6 +1349,103 @@ describe('TaskView', () => {
 
       // canManageTask should be false for non-admin non-initiator
       expect(wrapper.vm.canManageTask).toBe(false)
+    })
+
+    describe('Legacy V1 read-only contract', () => {
+      it('TaskView - pending V1 task - exposes history without execution writers', async () => {
+        await mountComponent({
+          status: 'pending',
+          scheduled_at: '2026-09-01T10:00:00Z',
+          execution_contract: legacyReadOnlyExecutionContract
+        })
+
+        const toolbar = wrapper.find('.task-actions__toolbar')
+        const toolbarText = toolbar.text()
+
+        expect(wrapper.find('.n-tag--warning').text()).toContain('taskView.legacyReadOnly')
+        expect(toolbarText).not.toContain('common.execute')
+        expect(toolbarText).not.toContain('taskView.editTask')
+        expect(toolbarText).not.toContain('taskView.rescheduleTask')
+        expect(toolbarText).not.toContain('common.cancel')
+        expect(wrapper.vm.canReschedule).toBe(false)
+        expect(wrapper.findComponent({ name: 'TaskMetadataPanel' }).exists()).toBe(true)
+        expect(wrapper.findComponent({ name: 'TaskProcessPanel' }).props('taskLogs')).toHaveLength(2)
+        expect(wrapper.find('[data-testid="task-prompt-card"]').text()).toContain('Fix the login bug')
+      })
+
+      it('TaskView - failed V1 task - keeps result, logs, and archive while hiding retry writers', async () => {
+        await mountComponent({
+          status: 'failed',
+          issue_id: 10,
+          completed_at: '2026-08-23T10:05:00Z',
+          execution_contract: legacyReadOnlyExecutionContract
+        })
+        wrapper.vm.issueTasks = [
+          createMockTask({
+            id: 1,
+            issue_id: 10,
+            status: 'failed',
+            created_at: '2026-08-23T10:00:00Z'
+          })
+        ]
+        wrapper.vm.issueStatus = 'open'
+        wrapper.vm.archiveMetadata = {
+          archive_name: 'task-1-runtime-archive.tar.gz',
+          archive_size_bytes: 1024,
+          created_at: '2026-08-23T10:05:00Z',
+          file_exists: true
+        }
+        await nextTick()
+
+        const toolbarText = wrapper.find('.task-actions__toolbar').text()
+        const continuationPanel = wrapper.findComponent({ name: 'TaskContinuationPanel' })
+
+        expect(wrapper.find('.n-tag--warning').text()).toContain('taskView.legacyReadOnly')
+        expect(toolbarText).not.toContain('common.retry')
+        expect(toolbarText).not.toContain('taskView.retryWithSchedule')
+        expect(toolbarText).not.toContain('taskView.markAsCompleted')
+        expect(toolbarText).toContain('taskView.downloadRuntimeArchive')
+        expect(wrapper.findComponent({ name: 'TaskResultPanel' }).exists()).toBe(true)
+        expect(wrapper.findComponent({ name: 'TaskMetadataPanel' }).exists()).toBe(true)
+        expect(wrapper.findComponent({ name: 'TaskProcessPanel' }).props('taskLogs')).toHaveLength(2)
+        expect(continuationPanel.exists()).toBe(true)
+        expect(continuationPanel.props('canAppendFollowupTask')).toBe(false)
+        expect(continuationPanel.text()).not.toContain('taskView.appendFollowupTask')
+      })
+
+      it('TaskView - running V1 task - retains only the cancel safety action', async () => {
+        await mountComponent({
+          status: 'running',
+          harness_key: 'claude',
+          execution_contract: legacyReadOnlyExecutionContract
+        })
+
+        const toolbarText = wrapper.find('.task-actions__toolbar').text()
+
+        expect(toolbarText).toContain('common.cancel')
+        expect(toolbarText).not.toContain('common.execute')
+        expect(toolbarText).not.toContain('taskView.editTask')
+        expect(wrapper.findComponent({ name: 'TaskProcessPanel' }).exists()).toBe(true)
+      })
+
+      it('TaskView - pending V1 task at 390px - keeps the mobile toolbar free of writers', async () => {
+        mockWindowSize.width.value = 390
+
+        await mountComponent({
+          status: 'pending',
+          scheduled_at: '2026-09-01T10:00:00Z',
+          execution_contract: legacyReadOnlyExecutionContract
+        })
+
+        const headerActions = wrapper.find('[data-testid="task-actions"]')
+
+        expect(wrapper.vm.isMobile).toBe(true)
+        expect(headerActions.classes()).toContain('task-actions--header')
+        expect(headerActions.text()).not.toContain('common.execute')
+        expect(headerActions.text()).not.toContain('taskView.editTask')
+        expect(headerActions.text()).not.toContain('taskView.rescheduleTask')
+        expect(headerActions.text()).not.toContain('common.cancel')
+      })
     })
   })
 

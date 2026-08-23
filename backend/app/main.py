@@ -219,6 +219,7 @@ from app.api import (
     config_integration,
     config_runtime,
     containers,
+    harness_catalog,
     issues,
     maintenance,
     mattermost,
@@ -255,6 +256,12 @@ app.include_router(
     task_command_routes.router,
     prefix="/api",
     tags=["task-commands"],
+    dependencies=[Depends(require_authenticated_user)],
+)
+app.include_router(
+    harness_catalog.router,
+    prefix="/api",
+    tags=["harness-catalog"],
     dependencies=[Depends(require_authenticated_user)],
 )
 app.include_router(
