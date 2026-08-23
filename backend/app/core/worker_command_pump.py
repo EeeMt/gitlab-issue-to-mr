@@ -95,11 +95,17 @@ async def run_pump_until_task_ends(
                     frame, attempt, task=task, db=db
                 )
 
-            cycle = await run_pump_cycle(
-                db, owner=owner, transport=_task_scoped_transport
-            )
-            await db.commit()
-            processed += cycle.commands_processed
+            try:
+                cycle = await run_pump_cycle(
+                    db, owner=owner, transport=_task_scoped_transport
+                )
+                await db.commit()
+                processed += cycle.commands_processed
+            except Exception:  # noqa: BLE001 - one bad cycle must not kill the pump
+                logger.exception(
+                    "Command pump cycle failed for task %s", task_id
+                )
+                await db.rollback()
         await asyncio.sleep(interval_seconds)
     return processed
 

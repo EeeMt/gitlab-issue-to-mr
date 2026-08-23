@@ -2757,18 +2757,32 @@ def _run_worker_resume_task(
     )
 
     from app.core.worker import WorkerExecutor
+    from app.core.worker_command_pump import run_pump_until_task_ends
 
     async def run_task():
-        async with ThreadSessionLocal() as db:
-            if recovery_connection is None:
-                worker = WorkerExecutor(session_factory=ThreadSessionLocal)
-            else:
-                worker = WorkerExecutor(
-                    docker_client=get_docker_client(recovery_connection),
-                    session_factory=ThreadSessionLocal,
-                )
-            return await worker.resume_task(db, task_id, container_name)
-
+        pump_task = loop.create_task(
+            run_pump_until_task_ends(
+                task_id,
+                session_factory=ThreadSessionLocal,
+                owner=f"scheduler-resume-{task_id}",
+            )
+        )
+        try:
+            async with ThreadSessionLocal() as db:
+                if recovery_connection is None:
+                    worker = WorkerExecutor(session_factory=ThreadSessionLocal)
+                else:
+                    worker = WorkerExecutor(
+                        docker_client=get_docker_client(recovery_connection),
+                        session_factory=ThreadSessionLocal,
+                    )
+                return await worker.resume_task(db, task_id, container_name)
+        finally:
+            pump_task.cancel()
+            try:
+                await pump_task
+            except BaseException:  # noqa: BLE001 - cancellation cleanup
+                pass
     try:
         return loop.run_until_complete(run_task())
     finally:

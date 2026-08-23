@@ -426,6 +426,15 @@
                 </div>
               </n-card>
 
+              <TaskSteeringPanel
+                v-if="task"
+                :task-id="task.id"
+                :task-status="task.status"
+                :harness-key="attemptHarnessKey ?? task.harness_key ?? issueCurrentHarness"
+                :control-state="controlState"
+                data-testid="steering-panel-wrapper"
+              />
+
               <TaskContinuationPanel
                 v-if="task && isTerminal"
                 :task="task"
@@ -623,6 +632,7 @@ import TaskProcessPanel from '../components/TaskProcessPanel.vue'
 import TaskResultPanel from '../components/TaskResultPanel.vue'
 import TaskRunMetrics from '../components/TaskRunMetrics.vue'
 import TaskContinuationPanel from '../components/TaskContinuationPanel.vue'
+import TaskSteeringPanel from '../components/TaskSteeringPanel.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import {
   CalendarOutline,
@@ -680,6 +690,8 @@ function copyPromptSource() {
 }
 
 const task = ref<Task | null>(null)
+const controlState = ref<string | null>(null)
+const attemptHarnessKey = ref<string | null>(null)
 const logs = ref('')
 const containerLogs = ref('')
 const containerLogsTruncated = ref(false)
@@ -1062,6 +1074,8 @@ async function fetchTask(): Promise<boolean> {
       return false
     }
     task.value = fetchedTask
+    controlState.value = fetchedTask.control_state ?? null
+    attemptHarnessKey.value = fetchedTask.attempt_harness_key ?? null
     if (task.value.waiting_reason === 'worker_runtime_unavailable') {
       await fetchBlockedWorkerSummary(requestedTaskId, requestGeneration)
     } else {

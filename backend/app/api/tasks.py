@@ -639,6 +639,24 @@ async def get_task(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=exc.detail,
             ) from exc
+    # Steering/follow-up UI state: the current attempt's control gate and
+    # command capability drive whether TaskView shows the live-command input
+    # (plan §10: only when control_state == accepting).
+    attempt_row = (
+        await db.execute(
+            select(
+                TaskHarnessAttempt.control_state,
+                TaskHarnessAttempt.harness_key,
+            )
+            .where(TaskHarnessAttempt.task_id == task.id)
+            .order_by(TaskHarnessAttempt.attempt_no.desc())
+            .limit(1)
+        )
+    ).first()
+    if attempt_row is not None:
+        result_data["control_state"] = attempt_row.control_state
+        result_data["attempt_harness_key"] = attempt_row.harness_key
+
     failure_summary = await load_task_failure_summary(db, task.id)
     result_data.update(failure_summary)
     t4 = time.time()

@@ -76,6 +76,8 @@ export interface Task {
   initiator_username?: string | null
   status: TaskStatus
   priority: number
+  control_state?: 'disabled' | 'starting' | 'accepting' | 'closing' | 'closed' | null
+  attempt_harness_key?: string | null
   is_retry: boolean
   retry_source_task_id: number | null
   trigger_source: 'manual' | 'retry' | 'follow_up' | 'ci_auto_repair' | string
@@ -632,4 +634,48 @@ export async function updateTask(
 ): Promise<Task> {
   const response = await api.patch(`/tasks/${taskId}`, request)
   return response.data
+}
+
+export interface HarnessCommand {
+  command_id: string
+  task_id: number
+  attempt_id: string
+  sequence_no: number
+  command_type: 'steer' | 'follow_up'
+  payload: { text: string }
+  payload_digest: string
+  status: 'queued' | 'delivered' | 'rejected'
+  created_by: string
+  created_at: string
+  delivered_at: string | null
+  rejected_at: string | null
+  rejection_code: string | null
+  rejection_message: string | null
+}
+
+function generateCommandId(): string {
+  const hex = '0123456789abcdef'
+  let id = '01J'
+  for (let i = 0; i < 23; i += 1) {
+    id += hex[Math.floor(Math.random() * 16)]
+  }
+  return id + Date.now().toString(16)
+}
+
+export async function sendHarnessCommand(
+  taskId: number,
+  request: { type: 'steer' | 'follow_up'; text: string }
+): Promise<{ command: HarnessCommand; created: boolean }> {
+  const commandId = generateCommandId()
+  const response = await api.put(
+    `/tasks/${taskId}/commands/${commandId}`,
+    request
+  )
+  return response.data
+}
+
+export async function listHarnessCommands(taskId: number): Promise<HarnessCommand[]> {
+  const response = await api.get(`/tasks/${taskId}/commands`)
+  const data = response.data
+  return Array.isArray(data) ? data : (data.items ?? data.commands ?? [])
 }
