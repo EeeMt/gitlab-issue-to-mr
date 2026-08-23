@@ -207,7 +207,8 @@ def _v2_adapter(
     support_tier="default",
     artifact_version="0.84.2",
     control_kind="rpc_stdio",
-    protocols=("anthropic_messages", "openai_responses", "openai_chat_completions"),
+    control_protocol="pi-rpc",
+    protocols=("anthropic_messages",),
     capabilities=None,
     options_schema="pi/v1",
 ):
@@ -220,7 +221,7 @@ def _v2_adapter(
             "artifact_sha256": "aa" * 32,
         },
         "adapter": {"version": "2.0.0", "digest": "dd" * 32},
-        "control_transport": {"kind": control_kind, "protocol": "pi-rpc"},
+        "control_transport": {"kind": control_kind, "protocol": control_protocol},
         "model_protocols": list(protocols),
         "capabilities": dict(capabilities)
         if capabilities is not None
@@ -240,6 +241,7 @@ def _v2_manifest(**adapter_overrides):
         "pi": _v2_adapter(),
         "opencode": _v2_adapter(
             control_kind="server_http",
+            control_protocol="opencode-server",
             capabilities={
                 "resume": False,
                 "task_skills": True,
@@ -251,6 +253,7 @@ def _v2_manifest(**adapter_overrides):
         ),
         "claude": _v2_adapter(
             control_kind="cli_stream_json",
+            control_protocol="claude-json",
             protocols=("anthropic_messages",),
             capabilities={
                 "resume": True,
@@ -263,6 +266,7 @@ def _v2_manifest(**adapter_overrides):
         ),
         "codex": _v2_adapter(
             control_kind="cli_jsonl",
+            control_protocol="codex-jsonl",
             protocols=("openai_responses",),
             capabilities={
                 "resume": True,

@@ -1,97 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# The Worker Kit archive is the integrity boundary. The installed Kit carries
+# both this release verifier and its portable manifest validator; this wrapper
+# never falls back to a checkout copy.
 KIT_PATH=""
-IMAGE=""
-SMOKE=""
-HARNESS_KEY="claude"
-HARNESS_HOST_PATH=""
-HARNESS_CONTAINER_PATH=""
-
-while [ "$#" -gt 0 ]; do
-    case "$1" in
-        --kit) KIT_PATH="${2:?missing --kit value}"; shift 2 ;;
-        --image) IMAGE="${2:?missing --image value}"; shift 2 ;;
-        --harness-key) HARNESS_KEY="${2:?missing --harness-key value}"; shift 2 ;;
-        --harness-host-path) HARNESS_HOST_PATH="${2:?missing --harness-host-path value}"; shift 2 ;;
-        --harness-container-path) HARNESS_CONTAINER_PATH="${2:?missing --harness-container-path value}"; shift 2 ;;
-        --claude-host-path) HARNESS_KEY="claude"; HARNESS_HOST_PATH="${2:?missing --claude-host-path value}"; shift 2 ;;
-        --claude-container-path) HARNESS_CONTAINER_PATH="${2:?missing --claude-container-path value}"; shift 2 ;;
-        --smoke) SMOKE="${2:?missing --smoke value}"; shift 2 ;;
-        *) echo "Unknown argument: $1" >&2; exit 2 ;;
-    esac
-done
-
-[ -n "${KIT_PATH}" ] || { echo "--kit is required" >&2; exit 2; }
-[ -n "${IMAGE}" ] || { echo "--image is required" >&2; exit 2; }
-[ -x "${KIT_PATH}/launcher" ] || { echo "Invalid worker kit: ${KIT_PATH}" >&2; exit 1; }
-[ -d "${KIT_PATH}/nix/store" ] || { echo "Worker kit Nix store is missing" >&2; exit 1; }
-case "${HARNESS_KEY}" in
-    claude|codex) ;;
-    *) echo "Unsupported --harness-key: ${HARNESS_KEY} (expected claude|codex)" >&2; exit 2 ;;
-esac
-if [ -n "${HARNESS_HOST_PATH}" ] && [ -z "${HARNESS_CONTAINER_PATH}" ]; then
-    case "${HARNESS_KEY}" in
-        claude) HARNESS_CONTAINER_PATH="/usr/local/bin/claude" ;;
-        codex) HARNESS_CONTAINER_PATH="/usr/local/bin/codex" ;;
-    esac
-fi
-if [ -n "${HARNESS_HOST_PATH}" ]; then
-    [ -x "${HARNESS_HOST_PATH}" ] || { echo "Harness executable is not executable: ${HARNESS_HOST_PATH}" >&2; exit 1; }
-    case "${HARNESS_CONTAINER_PATH}" in
-        /*) ;;
-        *) echo "--harness-container-path must be absolute" >&2; exit 2 ;;
-    esac
-fi
-docker image inspect "${IMAGE}" >/dev/null
-
-VERSION="$(sed -n 's/.*"kit_version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${KIT_PATH}/manifest.json")"
-[ -n "${VERSION}" ] || { echo "Could not read kit version" >&2; exit 1; }
-
-skill_capable_kit=0
-if [[ "${VERSION}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-    version_major=$((10#${BASH_REMATCH[1]}))
-    version_minor=$((10#${BASH_REMATCH[2]}))
-    version_patch=$((10#${BASH_REMATCH[3]}))
-    if (( version_major > 0 \
-        || version_minor > 3 \
-        || (version_minor == 3 && version_patch >= 5) )); then
-        skill_capable_kit=1
+previous=""
+for argument in "$@"; do
+    if [ "${previous}" = "--kit" ]; then
+        KIT_PATH="${argument}"
+        break
     fi
-fi
-
-ARGS=(
-    --rm
-    --user 0:0
-    --tmpfs /workspace:rw,exec,mode=1777
-    --volume "${KIT_PATH}:/opt/codify-kit:ro"
-    --volume "${KIT_PATH}/nix/store:/nix/store:ro"
-)
-if [ -n "${HARNESS_HOST_PATH}" ]; then
-    ARGS+=(--volume "${HARNESS_HOST_PATH}:${HARNESS_CONTAINER_PATH}:ro")
-fi
-ARGS+=(
-    --entrypoint /opt/codify-kit/launcher
-    --env "CODIFY_KIT_VERSION=${VERSION}"
-    --env "CODIFY_RUNTIME_IMAGE=${IMAGE}"
-    --env "CODIFY_HARNESS_KEY=${HARNESS_KEY}"
-)
-if [ -n "${HARNESS_HOST_PATH}" ]; then
-    case "${HARNESS_KEY}" in
-        claude) ARGS+=(--env "CODIFY_CLAUDE_BIN=${HARNESS_CONTAINER_PATH}") ;;
-        codex)
-            ARGS+=(
-                --env "CODIFY_CODEX_BIN=${HARNESS_CONTAINER_PATH}"
-                --env "CODIFY_HARNESS_CLI_BIN=${HARNESS_CONTAINER_PATH}"
-            )
-            ;;
-    esac
-fi
-ARGS+=("${IMAGE}" --verify)
-if [ "${skill_capable_kit}" -eq 1 ]; then
-    ARGS+=(--require-skill-support)
-fi
-if [ -n "${SMOKE}" ]; then
-    ARGS+=(--smoke "${SMOKE}")
-fi
-docker run "${ARGS[@]}"
+    previous="${argument}"
+done
+[ -n "${KIT_PATH}" ] || { echo "--kit is required" >&2; exit 2; }
+[ -x "${KIT_PATH}/verify-runtime.sh" ] || {
+    echo "Installed Kit is missing its integrity-protected verifier" >&2
+    exit 1
+}
+exec "${KIT_PATH}/verify-runtime.sh" "$@"

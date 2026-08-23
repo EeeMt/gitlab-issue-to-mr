@@ -46,12 +46,7 @@ def _adapter(
         },
         "adapter": {"version": "2.0.0", "digest": "dd" * 32},
         "control_transport": {"kind": control_kind, "protocol": protocol},
-        "model_protocols": protocols
-        or [
-            "anthropic_messages",
-            "openai_responses",
-            "openai_chat_completions",
-        ],
+        "model_protocols": protocols or ["anthropic_messages"],
         "capabilities": capabilities
         or {
             "resume": True,

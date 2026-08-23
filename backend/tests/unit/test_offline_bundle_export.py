@@ -1,5 +1,7 @@
 import gzip
 import hashlib
+import importlib.util
+import io
 import json
 import os
 import re
@@ -9,6 +11,16 @@ import subprocess
 import tarfile
 import tempfile
 from pathlib import Path
+
+import pytest
+
+_worker_kit_spec = importlib.util.spec_from_file_location(
+    "worker_kit_fixture", Path(__file__).with_name("test_worker_kit.py")
+)
+_worker_kit_module = importlib.util.module_from_spec(_worker_kit_spec)
+assert _worker_kit_spec.loader is not None
+_worker_kit_spec.loader.exec_module(_worker_kit_module)
+_runtime_verifier_fixture = _worker_kit_module._runtime_verifier_fixture
 
 
 def test_worker_kit_uses_content_addressed_nixpkgs_lock():
@@ -178,6 +190,8 @@ def test_verify_runtime_scripts_mount_claude_without_breaking_docker_args():
             '{"schema_version":1,"kit_version":"0.3.5"}',
             encoding="utf-8",
         )
+        shutil.copy2(repo_root / "deploy/worker-kit/verify-runtime.sh", kit / "verify-runtime.sh")
+        (kit / "verify-runtime.sh").chmod(0o755)
         claude = root / "claude"
         claude.write_text("#!/bin/sh\n", encoding="utf-8")
         claude.chmod(claude.stat().st_mode | stat.S_IEXEC)
@@ -258,6 +272,56 @@ def test_verify_runtime_scripts_mount_claude_without_breaking_docker_args():
             ]
 
 
+def test_extracted_offline_bundle_runs_portable_v2_verifier_without_checkout():
+    repo_root = Path(__file__).resolve().parents[3]
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        kit, bundle, artifact, fake_docker = _runtime_verifier_fixture(root / "fixture")
+        shutil.copy2(repo_root / "deploy/worker-kit/verify-runtime.sh", kit / "verify-runtime.sh")
+        (kit / "verify-runtime.sh").chmod(0o755)
+        source = root / "offline-bundle"
+        scripts = source / "scripts"
+        scripts.mkdir(parents=True)
+        shutil.copy2(repo_root / "deploy/offline-bundle/scripts/verify-worker-runtime.sh", scripts / "verify-worker-runtime.sh")
+        (scripts / "verify-worker-runtime.sh").chmod(0o755)
+        archive = root / "offline-bundle.tar.gz"
+        with tarfile.open(archive, "w:gz") as output:
+            output.add(source, arcname="offline-bundle")
+        extracted = root / "extracted"
+        extracted.mkdir()
+        with tarfile.open(archive, "r:gz") as input_archive:
+            input_archive.extractall(extracted)
+        wrapper = extracted / "offline-bundle/scripts/verify-worker-runtime.sh"
+
+        def run(document=None, *, actual_sha="a" * 64, extra=None):
+            runtime = root / "runtime.json"
+            args = [str(wrapper), "--kit", str(kit), "--image", "fake:image"]
+            if document is not None:
+                runtime.write_text(json.dumps(document), encoding="utf-8")
+                args += ["--runtime-manifest", str(runtime)]
+            args += extra or ["--all-harnesses"]
+            return subprocess.run(
+                args,
+                cwd=extracted,
+                env={
+                    **os.environ,
+                    "PATH": f"{fake_docker.parent}{os.pathsep}{os.environ['PATH']}",
+                    "ARTIFACT_PATH": str(artifact),
+                    "ACTUAL_CLI_SHA": actual_sha,
+                },
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        assert run(bundle).returncode == 0
+        assert run(None).returncode != 0
+        assert run(bundle, actual_sha="e" * 64).returncode != 0
+        mismatched = json.loads(json.dumps(bundle))
+        mismatched["adapters"]["pi"]["source"]["artifact_sha256"] = "f" * 64
+        assert run(mismatched).returncode != 0
+
+
 def test_package_bundle_script_creates_archive_under_deploy_directory():
     repo_root = Path(__file__).resolve().parents[3]
     script_path = repo_root / "deploy" / "offline-bundle" / "scripts" / "package-bundle.sh"
@@ -273,11 +337,32 @@ def test_package_bundle_script_creates_archive_under_deploy_directory():
         scripts_dir.mkdir(parents=True)
         images_dir.mkdir(parents=True)
         kits_dir.mkdir(parents=True)
+        worker_kit_dir = deploy_dir / "worker-kit"
+        worker_kit_dir.mkdir(parents=True)
+        for name in ("verify-runtime.sh", "validate-runtime-manifest.py"):
+            shutil.copy2(repo_root / f"deploy/worker-kit/{name}", worker_kit_dir / name)
+        (worker_kit_dir / "verify-runtime.sh").chmod(0o755)
+        shutil.copy2(
+            repo_root / "deploy/offline-bundle/scripts/verify-worker-runtime.sh",
+            scripts_dir / "verify-worker-runtime.sh",
+        )
+        shutil.copy2(
+            repo_root / "deploy/offline-bundle/scripts/validate-kit-archive.py",
+            scripts_dir / "validate-kit-archive.py",
+        )
+        (scripts_dir / "verify-worker-runtime.sh").chmod(0o755)
         (bundle_dir / "README.md").write_text("offline bundle", encoding="utf-8")
         (images_dir / "codify-offline-images.tar.gz").write_text("image archive", encoding="utf-8")
         kit_archive = kits_dir / "codify-worker-kit-0.1.0-linux-amd64.tar.gz"
-        kit_archive.write_text("kit archive", encoding="utf-8")
-        (kits_dir / f"{kit_archive.name}.sha256").write_text("checksum", encoding="utf-8")
+        real_kit, fixture_manifest, artifact, fake_docker = _runtime_verifier_fixture(tmp_path / "source-kit")
+        shutil.copy2(repo_root / "deploy/worker-kit/verify-runtime.sh", real_kit / "verify-runtime.sh")
+        (real_kit / "verify-runtime.sh").chmod(0o755)
+        with tarfile.open(kit_archive, "w:gz") as kit_output:
+            kit_output.add(real_kit, arcname="0.1.0-linux-amd64")
+        kit_digest = hashlib.sha256(kit_archive.read_bytes()).hexdigest()
+        (kits_dir / f"{kit_archive.name}.sha256").write_text(
+            f"{kit_digest}  {kit_archive.name}\n", encoding="utf-8"
+        )
 
         script_copy = scripts_dir / "package-bundle.sh"
         shutil.copy2(script_path, script_copy)
@@ -295,6 +380,10 @@ def test_package_bundle_script_creates_archive_under_deploy_directory():
 
         archive_path = deploy_dir / "codify-offline-bundle.tar.gz"
         assert archive_path.exists()
+        checksum_path = Path(f"{archive_path}.sha256")
+        assert checksum_path.exists()
+        checksum = checksum_path.read_text(encoding="utf-8").split()[0]
+        assert checksum == hashlib.sha256(archive_path.read_bytes()).hexdigest()
 
         with tarfile.open(archive_path, "r:gz") as archive:
             names = archive.getnames()
@@ -302,7 +391,179 @@ def test_package_bundle_script_creates_archive_under_deploy_directory():
         assert "offline-bundle/README.md" in names
         assert "offline-bundle/images/codify-offline-images.tar.gz" in names
         assert "offline-bundle/kits/codify-worker-kit-0.1.0-linux-amd64.tar.gz" in names
+        assert "offline-bundle/scripts/verify-worker-runtime.sh" in names
+
+        checksum_result = subprocess.run(
+            ["sha256sum", "-c", str(archive_path) + ".sha256"],
+            cwd=deploy_dir,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert checksum_result.returncode == 0, checksum_result.stderr
+        extracted = tmp_path / "packaged-extracted"
+        extracted.mkdir()
+        with tarfile.open(archive_path, "r:gz") as packaged:
+            packaged.extractall(extracted)
+        wrapper = extracted / "offline-bundle/scripts/verify-worker-runtime.sh"
+        installed = tmp_path / "installed-kit"
+        installed.mkdir()
+        packaged_kit = extracted / "offline-bundle/kits/codify-worker-kit-0.1.0-linux-amd64.tar.gz"
+        with tarfile.open(packaged_kit, "r:gz") as kit_input:
+            kit_input.extractall(installed)
+        kit = installed / "0.1.0-linux-amd64"
+        runtime_path = tmp_path / "packaged-runtime.json"
+        runtime_path.write_text(json.dumps(fixture_manifest), encoding="utf-8")
+        run_result = subprocess.run(
+            [str(wrapper), "--kit", str(kit), "--image", "fake:image", "--runtime-manifest", str(runtime_path), "--all-harnesses"],
+            cwd=extracted,
+            env={**os.environ, "PATH": f"{fake_docker.parent}{os.pathsep}{os.environ['PATH']}", "ARTIFACT_PATH": str(artifact), "ACTUAL_CLI_SHA": "a" * 64},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert run_result.returncode == 0, run_result.stderr
+
+        tampered = deploy_dir / "tampered-offline-bundle.tar.gz"
+        tampered.write_bytes(archive_path.read_bytes() + b"tampered")
+        tampered_checksum = Path(f"{tampered}.sha256")
+        tampered_checksum.write_text(
+            checksum_path.read_text(encoding="utf-8").replace(
+                archive_path.name, tampered.name
+            ),
+            encoding="utf-8",
+        )
+        tampered_result = subprocess.run(
+            ["sha256sum", "-c", str(tampered_checksum)],
+            cwd=deploy_dir,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert tampered_result.returncode != 0
         assert "codify-offline-bundle.tar.gz" not in names
+
+
+@pytest.mark.parametrize(
+    "member_name,link_name,link_type",
+    [
+        ("0.1.0-linux-amd64/../sentinel", None, None),
+        ("/tmp/codify-kit-escape", None, None),
+        ("wrong-root/file", None, None),
+        ("0.1.0-linux-amd64/link", "../../sentinel", tarfile.SYMTYPE),
+        ("0.1.0-linux-amd64/hardlink", "../../sentinel", tarfile.LNKTYPE),
+    ],
+)
+def test_package_bundle_rejects_unsafe_kit_tar_members(
+    tmp_path, member_name, link_name, link_type
+):
+    repo_root = Path(__file__).resolve().parents[3]
+    deploy_dir = tmp_path / "deploy"
+    bundle_dir = deploy_dir / "offline-bundle"
+    scripts_dir = bundle_dir / "scripts"
+    (bundle_dir / "images").mkdir(parents=True)
+    kits_dir = bundle_dir / "kits"
+    kits_dir.mkdir()
+    worker_kit_dir = deploy_dir / "worker-kit"
+    worker_kit_dir.mkdir()
+    scripts_dir.mkdir()
+    for name in ("verify-runtime.sh", "validate-runtime-manifest.py"):
+        shutil.copy2(repo_root / f"deploy/worker-kit/{name}", worker_kit_dir / name)
+    (worker_kit_dir / "verify-runtime.sh").chmod(0o755)
+    shutil.copy2(repo_root / "deploy/offline-bundle/scripts/package-bundle.sh", scripts_dir)
+    shutil.copy2(repo_root / "deploy/offline-bundle/scripts/validate-kit-archive.py", scripts_dir)
+    (scripts_dir / "package-bundle.sh").chmod(0o755)
+    (bundle_dir / "images/codify-offline-images.tar.gz").write_text("image", encoding="utf-8")
+    archive = kits_dir / "codify-worker-kit-0.1.0-linux-amd64.tar.gz"
+    with tarfile.open(archive, "w:gz") as output:
+        member = tarfile.TarInfo(member_name)
+        if link_name is None:
+            member.size = 1
+            output.addfile(member, io.BytesIO(b"x"))
+        else:
+            member.type = link_type
+            member.linkname = link_name
+            output.addfile(member)
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    (kits_dir / f"{archive.name}.sha256").write_text(
+        f"{digest}  {archive.name}\n", encoding="utf-8"
+    )
+    sentinel = tmp_path / "sentinel"
+    sentinel.write_text("untouched", encoding="utf-8")
+
+    result = subprocess.run(
+        [str(scripts_dir / "package-bundle.sh")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert not (deploy_dir / "codify-offline-bundle.tar.gz").exists()
+    assert sentinel.read_text(encoding="utf-8") == "untouched"
+
+
+@pytest.mark.parametrize(
+    "kind,expected",
+    [
+        ("safe", 0),
+        ("root-relative-escape", 1),
+        ("relative-escape", 1),
+        ("missing", 1),
+        ("cycle", 1),
+    ],
+)
+def test_validate_kit_archive_resolves_links_safely(tmp_path, kind, expected):
+    repo_root = Path(__file__).resolve().parents[3]
+    helper = repo_root / "deploy/offline-bundle/scripts/validate-kit-archive.py"
+    archive = tmp_path / "kit.tar.gz"
+    root = "0.1.0-linux-amd64"
+    with tarfile.open(archive, "w:gz") as output:
+        root_member = tarfile.TarInfo(root)
+        root_member.type = tarfile.DIRTYPE
+        output.addfile(root_member)
+        file_member = tarfile.TarInfo(f"{root}/a")
+        file_member.size = 1
+        output.addfile(file_member, io.BytesIO(b"a"))
+        if kind == "safe":
+            link = tarfile.TarInfo(f"{root}/b")
+            link.type = tarfile.LNKTYPE
+            link.linkname = f"{root}/a"
+            output.addfile(link)
+            symlink = tarfile.TarInfo(f"{root}/sub/link")
+            symlink.type = tarfile.SYMTYPE
+            symlink.linkname = "../a"
+            output.addfile(symlink)
+        elif kind == "root-relative-escape":
+            link = tarfile.TarInfo(f"{root}/b")
+            link.type = tarfile.LNKTYPE
+            link.linkname = f"{root}/../escape"
+            output.addfile(link)
+        elif kind == "relative-escape":
+            link = tarfile.TarInfo(f"{root}/sub/link")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "../../escape"
+            output.addfile(link)
+        elif kind == "missing":
+            link = tarfile.TarInfo(f"{root}/b")
+            link.type = tarfile.LNKTYPE
+            link.linkname = f"{root}/missing"
+            output.addfile(link)
+        else:
+            for name, target in (("x", "y"), ("y", "x")):
+                link = tarfile.TarInfo(f"{root}/{name}")
+                link.type = tarfile.SYMTYPE
+                link.linkname = f"{root}/{target}"
+                output.addfile(link)
+
+    result = subprocess.run(
+        ["python3", str(helper), str(archive), root],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == expected, result.stderr
 
 
 def test_worker_kit_installer_verifies_and_refuses_version_overwrite():

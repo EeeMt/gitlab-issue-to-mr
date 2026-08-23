@@ -13,6 +13,8 @@ This folder contains the artifacts needed to deploy the current Codify build int
 - `scripts/health-check.sh`: verify backend/frontend health
 - `scripts/export-images.sh`: regenerate image archives from an online build machine
 - `scripts/package-bundle.sh`: package the whole `offline-bundle/` directory for distribution
+- `scripts/verify-worker-runtime.sh`: compatibility wrapper that delegates to the verifier and
+  validator protected by the installed Worker Kit archive checksum
 - `images/`: Docker image archives and checksum files
 - `kits/`: versioned worker-kit archives and checksums
 
@@ -49,11 +51,14 @@ reference runtime must be available offline.
 ## Quick start on the offline host
 
 1. Copy this entire `offline-bundle/` directory to the target machine.
-2. Copy `config/.env.offline.example` to `config/.env.offline`.
-3. Edit `config/.env.offline` and fill in your real values.
-4. Run `./scripts/load-images.sh`.
-5. On every Docker host, install the kit with `./scripts/install-worker-kit.sh kits/<archive>`.
-6. Verify each runtime image per harness on the Docker host:
+2. Before extracting or executing any bundle script, verify the top-level archive sidecar. On Linux run **only**:
+   `sha256sum -c codify-offline-bundle.tar.gz.sha256`; on macOS run **only**:
+   `shasum -a 256 -c codify-offline-bundle.tar.gz.sha256`.
+3. After the checksum succeeds, extract the archive and copy `config/.env.offline.example` to `config/.env.offline`.
+4. Edit `config/.env.offline` and fill in your real values.
+5. Run `./scripts/load-images.sh`.
+6. On every Docker host, install the kit with `./scripts/install-worker-kit.sh kits/<archive>`; that command verifies the Kit archive sidecar before extraction.
+7. Verify each runtime image per harness on the Docker host:
 
    ```bash
    ./scripts/verify-worker-runtime.sh \
@@ -73,6 +78,19 @@ reference runtime must be available offline.
      --smoke 'test -x /opt/codify-codex/bin/codex && /opt/codify-codex/bin/codex --version'
    ```
 
+   For a frozen V2 release, pass the persisted Runtime Bundle manifest and verify all four
+   Harnesses in one invocation. This works from the extracted offline bundle without a Codify
+   checkout or `PYTHONPATH`:
+
+   ```bash
+   ./scripts/verify-worker-runtime.sh \
+     --kit /opt/codify/worker-kits/0.3.15-linux-amd64 \
+     --image <runtime-image> \
+     --runtime-manifest /srv/codify/releases/<release>/runtime-bundle.v2.json \
+     --all-harnesses \
+     --smoke 'java -version && mvn -version'
+   ```
+
    The legacy `--claude-host-path <host-claude-bin>` form is still accepted. Then run
    `/api/worker-profiles/<id>/verify-runtime` through Codify so the immutable image repo digest and
    `verified_at` are persisted on the profile.
@@ -81,8 +99,12 @@ reference runtime must be available offline.
 > under `kits/` or `images/`, record its SHA-256 in `config/worker-binaries.txt` (see the
 > `worker-binaries.txt.example`), and mount it read-only at the path declared by the Worker
 > Profile `harness_runtimes.codex`. Never rely on online install or a mutable `latest` tag.
-7. Run `./scripts/start.sh` and then `./scripts/health-check.sh`.
-8. Create worker profiles through the API with `runtime_mode=mounted_kit`, the runtime image,
+
+The Worker Kit archive checksum protects the verifier and validator at installation time. A
+privileged user who later modifies an installed Kit root is outside that archive-integrity
+boundary; re-run the checksum against the original archive before trusting the installation.
+8. Run `./scripts/start.sh` and then `./scripts/health-check.sh`.
+9. Create worker profiles through the API with `runtime_mode=mounted_kit`, the runtime image,
    kit version, and the same absolute kit path installed on that profile's Docker host.
 
 ## Quick start on the export machine

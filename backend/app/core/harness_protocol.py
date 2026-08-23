@@ -608,6 +608,12 @@ APPROVED_MANIFEST_ADAPTER_KEYS = frozenset({"pi", "opencode", "claude", "codex"}
 CONTROL_TRANSPORT_KINDS = frozenset(
     {"rpc_stdio", "server_http", "cli_stream_json", "cli_jsonl"}
 )
+HARNESS_PROTOCOL_MATRIX = {
+    "pi": (("rpc_stdio", "pi-rpc"), frozenset({"anthropic_messages"})),
+    "opencode": (("server_http", "opencode-server"), frozenset({"anthropic_messages"})),
+    "claude": (("cli_stream_json", "claude-json"), frozenset({"anthropic_messages"})),
+    "codex": (("cli_jsonl", "codex-jsonl"), frozenset({"openai_responses"})),
+}
 HARNESS_CAPABILITY_KEYS = frozenset(
     {"resume", "task_skills", "usage_tokens", "steering", "follow_up"}
 )
@@ -739,12 +745,22 @@ def _validate_manifest_adapter(key: str, adapter: Mapping[str, Any]) -> None:
         raise HarnessProtocolError(
             f"manifest.adapters.{key}.control_transport.kind unsupported"
         )
+    expected_transport, allowed_protocols = HARNESS_PROTOCOL_MATRIX[key]
+    actual_transport = (control_transport.get("kind"), control_transport.get("protocol"))
+    if actual_transport != expected_transport:
+        raise HarnessProtocolError(
+            f"manifest.adapters.{key}.control_transport does not match the approved protocol"
+        )
     model_protocols = adapter.get("model_protocols")
     if not isinstance(model_protocols, list) or not model_protocols:
         raise HarnessProtocolError(f"manifest.adapters.{key}.model_protocols required")
     if not all(isinstance(mp, str) and mp in MODEL_PROTOCOLS for mp in model_protocols):
         raise HarnessProtocolError(
             f"manifest.adapters.{key}.model_protocols unsupported; fail closed"
+        )
+    if not set(model_protocols) <= allowed_protocols:
+        raise HarnessProtocolError(
+            f"manifest.adapters.{key}.model_protocols do not match the approved protocol"
         )
     capabilities = adapter.get("capabilities")
     if not isinstance(capabilities, Mapping):

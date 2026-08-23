@@ -45,6 +45,8 @@ COPY deploy/entrypoint.worker.sh /worker-kit/entrypoint.sh
 COPY deploy/ci-claude.sh /worker-kit/ci-claude.sh
 COPY deploy/worker-entrypoint/ /worker-kit/worker-entrypoint/
 COPY deploy/worker-kit/bridge-selfcheck.sh /worker-kit/bridge-selfcheck.sh
+COPY deploy/worker-kit/verify-runtime.sh /worker-kit/verify-runtime.sh
+COPY deploy/worker-kit/validate-runtime-manifest.py /worker-kit/validate-runtime-manifest.py
 COPY deploy/scripts/validate_mermaid_summary.mjs /worker-kit/validate_mermaid_summary.mjs
 RUN runtime_store="$(cat /tmp/runtime-store-path)" \
     && nixpkgs_version="$(cat /tmp/nixpkgs-version)" \
@@ -60,6 +62,8 @@ RUN runtime_store="$(cat /tmp/runtime-store-path)" \
       > /worker-kit/manifest.json \
     && chmod 755 /worker-kit/launcher /worker-kit/bin/codify-run-as /worker-kit/entrypoint.sh \
       /worker-kit/ci-claude.sh \
+      /worker-kit/verify-runtime.sh \
+      /worker-kit/validate-runtime-manifest.py \
       /worker-kit/bridge-selfcheck.sh \
       /worker-kit/worker-entrypoint/legacy/pi-run.sh \
       /worker-kit/worker-entrypoint/legacy/opencode-run.sh \

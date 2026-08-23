@@ -16,6 +16,7 @@ from app.core.harness_protocol import (
     CANONICAL_EVENT_SCHEMA,
     HARNESS_CAPABILITY_KEYS,
     HARNESS_CONTRACT_VERSION,
+    HARNESS_PROTOCOL_MATRIX,
     MODEL_PROTOCOLS,
     validate_manifest,
 )
@@ -116,12 +117,7 @@ V2_SYSTEM_CAPABILITY_UPPER_BOUND: dict[str, dict[str, bool]] = {
 
 # provider wire protocols each harness may consume.
 HARNESS_PROVIDER_PROTOCOLS: dict[str, frozenset[str]] = {
-    "claude": frozenset({"anthropic_messages"}),
-    "codex": frozenset({"openai_responses"}),
-    # Pi/OpenCode have only been fixed-version smoke-tested against the
-    # Anthropic-compatible endpoint. Do not advertise unproven mappings.
-    "pi": frozenset({"anthropic_messages"}),
-    "opencode": frozenset({"anthropic_messages"}),
+    key: protocols for key, (_transport, protocols) in HARNESS_PROTOCOL_MATRIX.items()
 }
 
 DISPLAY_NAMES: dict[str, str] = {

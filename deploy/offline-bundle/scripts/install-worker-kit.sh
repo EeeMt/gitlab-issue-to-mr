@@ -23,10 +23,7 @@ fi
 STAGING="$(mktemp -d "${INSTALL_ROOT}/.worker-kit-install.XXXXXX")"
 cleanup() { rm -rf "${STAGING}"; }
 trap cleanup EXIT
-if tar -tzf "${ARCHIVE}" | awk -v root="${KIT_NAME}/" '
-    index($0, root) != 1 || $0 ~ /(^|\/)\.\.($|\/)/ { invalid = 1 }
-    END { exit invalid }
-'; then
+if python3 "$(dirname "${BASH_SOURCE[0]}")/validate-kit-archive.py" "${ARCHIVE}" "${KIT_NAME}"; then
     tar -C "${STAGING}" -xzf "${ARCHIVE}"
 else
     echo "Worker kit archive contains an unexpected path" >&2

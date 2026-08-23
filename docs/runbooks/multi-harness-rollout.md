@@ -95,9 +95,10 @@ the Kit contract/event compatibility, image platform, exact CLI version/SHA and 
 first-class self-checks. It does not treat the Kit manifest as a Runtime Bundle manifest. A normal
 Profile/API verification remains one `default_harness_key` at a time and may omit
 `RUNTIME_MANIFEST`; that preserves the historical installation-preflight boundary.
-The path must be a release-stamped `codify.worker.runtime-manifest/v2` document containing the
-exported CLI identity SHA values. Do not pass a Kit manifest, a Backend-generated
-`runtime-bundle/v2` projection, or the repository template with placeholder SHA values.
+The path must be a release-stamped `codify.worker.runtime-manifest/v2` document, or the
+persisted `codify.worker.runtime-bundle/v2` document containing exported CLI identity SHA values
+and nested `adapter.version/digest` identities. Do not pass a Kit manifest, the container-only
+flattened Launcher projection, or the repository template with placeholder SHA values.
 
 For an explicit one-Harness host-mount override, use the same command with `HARNESS_KEY`,
 `HARNESS_HOST_PATH`, and `HARNESS_CONTAINER_PATH`:

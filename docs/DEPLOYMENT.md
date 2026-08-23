@@ -267,9 +267,9 @@ make worker-kit-verify \
   SMOKE='java -version && mvn -version'
 ```
 
-`RUNTIME_MANIFEST` 必须是 release lock 已写入 artifact SHA 的
-`codify.worker.runtime-manifest/v2` 文档；不能传入 Kit manifest、Backend 生成的
-`runtime-bundle/v2` projection，或仓库中带 `<computed at freeze>` 占位符的 source template。此命令只是 L1/L2 source/image/Kit verification；随后仍需按 Profile 调用 API verify-runtime，并在真实
+`RUNTIME_MANIFEST` 必须是 release lock 已写入 artifact SHA 的冻结
+`codify.worker.runtime-manifest/v2` 文档，或数据库绑定时持久化的
+`codify.worker.runtime-bundle/v2` 文档（必须保留嵌套的 `adapter.version/digest` identity）；不能传入 Kit manifest、仅供容器 Launcher 使用的扁平化 projection，或仓库中带 `<computed at freeze>` 占位符的 source template。此命令只是 L1/L2 source/image/Kit verification；随后仍需按 Profile 调用 API verify-runtime，并在真实
 Docker Host 上完成最小 Task/MR smoke 后才有 L3/L4 证据。若 `WORKER_IMAGE` 使用其他 tag/digest，
 必须同步更新 Profile 并重新验证。
 
