@@ -617,6 +617,12 @@ class TaskHarnessAttempt(Base):
     control_state: Mapped[str] = mapped_column(
         String(16), nullable=False, default="disabled"
     )
+    # A follow_up was ACKed while draining but Pi has not emitted the next
+    # native turn-start evidence.  It blocks closing the owner prematurely.
+    awaiting_follow_up_turn: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    pending_follow_up_command_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    pending_follow_up_native_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    force_close_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # Next attempt-scoped command sequence to allocate (>= 1).
     next_command_sequence: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     # Command dispatch lease (worker/container id + expiry) — single dispatcher.
@@ -698,8 +704,9 @@ class TaskHarnessEventReceipt(Base):
 class TaskHarnessCommand(Base):
     """V2 control command queued for an in-flight Harness attempt.
 
-    ``queued -> delivered|rejected`` transitions are written only by the command
-    pump via CAS; ``delivered``/``rejected`` are immutable terminal states.
+    ``queued -> dispatching -> delivered|rejected|outcome_unknown`` transitions
+    are written only by the command pump via CAS. ``outcome_unknown`` is
+    terminal and must never be replayed after owner recovery.
     Command lifecycle stats never feed Issue lifecycle statistics.
     """
 
@@ -727,6 +734,11 @@ class TaskHarnessCommand(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
     delivery_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    dispatch_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    native_request_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    native_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    native_ack_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    outcome_unknown_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     rejected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     rejection_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -744,11 +756,11 @@ class TaskHarnessCommand(Base):
             name="ck_task_harness_command_type",
         ),
         CheckConstraint(
-            "status IN ('queued','delivered','rejected')",
+            "status IN ('queued','dispatching','delivered','rejected','outcome_unknown')",
             name="ck_task_harness_command_status",
         ),
         CheckConstraint(
-            "(status = 'queued') = (delivered_at IS NULL AND rejected_at IS NULL)",
+            "(status IN ('queued','dispatching','outcome_unknown')) = (delivered_at IS NULL AND rejected_at IS NULL)",
             name="ck_task_harness_command_queued_consistency",
         ),
         CheckConstraint(
@@ -758,6 +770,10 @@ class TaskHarnessCommand(Base):
         CheckConstraint(
             "(status = 'rejected') = (rejected_at IS NOT NULL)",
             name="ck_task_harness_command_rejected_consistency",
+        ),
+        CheckConstraint(
+            "(status = 'outcome_unknown') = (outcome_unknown_at IS NOT NULL)",
+            name="ck_task_harness_command_unknown_consistency",
         ),
         UniqueConstraint(
             "attempt_id", "sequence_no", name="uq_task_harness_command_attempt_seq"

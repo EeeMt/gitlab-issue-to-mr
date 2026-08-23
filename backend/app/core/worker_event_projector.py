@@ -19,6 +19,11 @@ from app.core.harness_protocol import (
     HarnessProtocolError,
     validate_event_by_schema,
 )
+from app.core.task_command_gate import (
+    begin_control_drain,
+    close_control_gate,
+    reopen_control_after_native_turn_start,
+)
 from app.core.task_event_archive import (
     archive_bundle_name,
     decode_event_line,
@@ -225,6 +230,15 @@ class WorkerEventProjector:
         event_type = normalized["type"]
         payload = normalized["payload"]
 
+        if event_type == "agent_settled":
+            await begin_control_drain(db, attempt=ingest.attempt)
+        elif event_type in {"run.completed", "run.failed"}:
+            await close_control_gate(
+                db,
+                attempt=ingest.attempt,
+                reason="harness reached terminal event",
+            )
+
         if event_type == "model.resolved":
             db.add(
                 TaskLog(
@@ -351,6 +365,13 @@ class WorkerEventProjector:
                 )
             )
         elif event_type == "diagnostic":
+            if payload.get("code") == "pi_follow_up_turn_started":
+                await reopen_control_after_native_turn_start(
+                    db,
+                    attempt=ingest.attempt,
+                    command_id=payload.get("command_id"),
+                    native_id=payload.get("native_id"),
+                )
             db.add(
                 TaskLog(
                     task_id=task_id,

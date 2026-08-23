@@ -282,12 +282,12 @@ async def write_command_delivery(
             .with_for_update()
         )
     ).scalar_one_or_none()
-    if command is None or command.status != "queued":
+    if command is None or command.status != "dispatching":
         return False
     command.status = "delivered"
     command.delivered_at = delivered_at
-    command.delivery_attempts += 1
     command.last_attempt_at = delivered_at
+    command.native_ack_at = delivered_at
     await db.flush()
     return True
 
@@ -300,7 +300,36 @@ async def write_command_rejection(
     rejection_message: str,
     rejected_at: datetime,
 ) -> bool:
-    """CAS ``queued -> rejected`` (pump only). Ignores non-queued rows."""
+    """CAS an unsent command to rejected during pump/gate terminalization."""
+    command = (
+        await db.execute(
+            select(TaskHarnessCommand)
+            .where(TaskHarnessCommand.command_id == command_id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if command is None or command.status not in {"queued", "dispatching"}:
+        return False
+    command.status = "rejected"
+    command.rejected_at = rejected_at
+    command.rejection_code = rejection_code
+    command.rejection_message = rejection_message
+    command.last_attempt_at = rejected_at
+    if command.native_sent_at is not None:
+        command.native_ack_at = rejected_at
+    await db.flush()
+    return True
+
+
+async def begin_command_dispatch(
+    db: AsyncSession, *, command_id: str, started_at: datetime
+) -> TaskHarnessCommand | None:
+    """Durably claim the queue head before a native send.
+
+    The caller commits this transition before entering the container.  A crash
+    after that point is intentionally recovered as ``outcome_unknown`` rather
+    than replayed: the native write may already have happened.
+    """
     command = (
         await db.execute(
             select(TaskHarnessCommand)
@@ -309,20 +338,64 @@ async def write_command_rejection(
         )
     ).scalar_one_or_none()
     if command is None or command.status != "queued":
-        return False
-    command.status = "rejected"
-    command.rejected_at = rejected_at
-    command.rejection_code = rejection_code
-    command.rejection_message = rejection_message
+        return None
+    command.status = "dispatching"
+    command.dispatch_started_at = started_at
+    command.last_attempt_at = started_at
     command.delivery_attempts += 1
-    command.last_attempt_at = rejected_at
+    await db.flush()
+    return command
+
+
+async def mark_command_native_sent(
+    db: AsyncSession,
+    *,
+    command_id: str,
+    native_request_id: str | None,
+    sent_at: datetime,
+) -> bool:
+    """Record owner evidence that the native frame was handed to Pi."""
+    command = await db.get(TaskHarnessCommand, command_id, with_for_update=True)
+    if command is None or command.status != "dispatching":
+        return False
+    command.native_request_id = native_request_id
+    command.native_sent_at = sent_at
     await db.flush()
     return True
 
 
-async def list_commands(
-    db: AsyncSession, *, task_id: int
-) -> list[TaskHarnessCommand]:
+async def requeue_pre_send_failure(db: AsyncSession, *, command_id: str) -> bool:
+    """Return a command to the head only when the bridge proved no native send."""
+    command = await db.get(TaskHarnessCommand, command_id, with_for_update=True)
+    if command is None or command.status != "dispatching" or command.native_sent_at is not None:
+        return False
+    command.status = "queued"
+    command.dispatch_started_at = None
+    await db.flush()
+    return True
+
+
+async def write_command_outcome_unknown(
+    db: AsyncSession,
+    *,
+    command_id: str,
+    message: str,
+    occurred_at: datetime,
+) -> bool:
+    """Terminalize an ambiguous native outcome without ever replaying it."""
+    command = await db.get(TaskHarnessCommand, command_id, with_for_update=True)
+    if command is None or command.status != "dispatching":
+        return False
+    command.status = "outcome_unknown"
+    command.outcome_unknown_at = occurred_at
+    command.rejection_code = "delivery_outcome_unknown"
+    command.rejection_message = message
+    command.last_attempt_at = occurred_at
+    await db.flush()
+    return True
+
+
+async def list_commands(db: AsyncSession, *, task_id: int) -> list[TaskHarnessCommand]:
     """Return a task's commands ordered by attempt/sequence for recovery."""
     return list(
         (

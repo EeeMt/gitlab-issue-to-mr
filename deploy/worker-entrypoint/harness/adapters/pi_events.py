@@ -264,7 +264,7 @@ def _handle_response(record: dict, raw_line: int) -> None:
                     "command_id": ack["command_id"],
                     "payload_digest": ack.get("payload_digest"),
                     "sequence_no": ack.get("sequence_no"),
-                    "delivered_at": record.get("_delivered_at"),
+                    "delivered_at": ack.get("_delivered_at"),
                 },
                 raw_line,
             )
@@ -422,6 +422,13 @@ def _handle_agent_settled(record: dict, raw_line: int) -> None:
 def translate(record: dict, raw_line: int) -> None:
     _STATE["last_raw_line"] = raw_line
     record_type = record.get("type")
+    reopen = record.get("__pi_reopen_after")
+    if isinstance(reopen, dict):
+        _emit(
+            "diagnostic",
+            {"code": "pi_follow_up_turn_started", "command_id": reopen.get("command_id"), "native_id": reopen.get("native_id")},
+            raw_line,
+        )
     if record_type == "response":
         _handle_response(record, raw_line)
     elif record_type == "agent_start":
@@ -453,6 +460,11 @@ def translate(record: dict, raw_line: int) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--raw-file", required=True, type=Path)
+    parser.add_argument(
+        "--no-archive-input",
+        action="store_true",
+        help="translate an already-durable raw capture without appending it again",
+    )
     args = parser.parse_args()
     args.raw_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -471,9 +483,24 @@ def main() -> int:
                 record = None
                 raw_text = input_text
             else:
+                # Owner-only correlation drives canonical ACK/reopen events;
+                # it is not part of Pi's raw archive and must not be persisted
+                # as if the CLI emitted it.
+                if isinstance(record, dict):
+                    archive_record = dict(record)
+                    archive_record.pop("__command_ack", None)
+                    archive_record.pop("__pi_reopen_after", None)
+                else:
+                    archive_record = record
                 raw_text = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
-            handle.write(raw_text + "\n")
-            handle.flush()
+            if not args.no_archive_input:
+                archive_text = (
+                    json.dumps(archive_record, ensure_ascii=False, separators=(",", ":"))
+                    if record is not None
+                    else raw_text
+                )
+                handle.write(archive_text + "\n")
+                handle.flush()
             line_no += 1
             if record is None:
                 _emit("diagnostic", {"code": "non_json_raw_line", "text": raw_text[:500]}, line_no)

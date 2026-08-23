@@ -28,6 +28,7 @@ from app.core.issue_task_lineage import (
     record_projected_output_session,
     resolve_projected_resume_session,
 )
+from app.core.task_command_gate import close_task_control_gates
 from app.core.utcnow import utcnow
 from app.core.worker_docker_targets import (
     DockerConnectionsUnavailableError,
@@ -917,6 +918,14 @@ async def monitor_container_run(
     # cancellation intent never downgrades a run that actually completed (the
     # cancel request can land after the container already exited with success).
     await worker._parse_task_result(task, logs, db, exit_code, issue=issue)
+    # Container exit, cancellation and timeout are terminal from the command
+    # plane's perspective even if a damaged adapter omitted its final event.
+    # Close before any later delivery work so API/pump/socket converge.
+    await close_task_control_gates(
+        db,
+        task_id=task.id,
+        reason="worker container exited",
+    )
     if exit_code == 0:
         await _save_delivery_summary_from_container(worker, container, task, db)
 

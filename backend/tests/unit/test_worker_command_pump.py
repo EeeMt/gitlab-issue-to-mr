@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from alembic import command
-from app.core.harness_protocol import CANONICAL_EVENT_SCHEMA_V2
+from app.core.harness_protocol import CANONICAL_EVENT_SCHEMA_V2, HARNESS_CONTRACT_VERSION_V2
 from app.core.task_harness_commands import create_command
 from app.core.worker_command_pump import (
     dispatch_one_command,
@@ -77,7 +77,7 @@ def pump_db():
     original_url = os.environ.get("DATABASE_URL")
     os.environ["DATABASE_URL"] = url
     try:
-        command.upgrade(cfg, "074_open_harness_v2")
+        command.upgrade(cfg, "075_pi_command_dispatch_journal")
         yield {"url": url, "cfg": cfg, "dbname": dbname}
     finally:
         asyncio.run(_drop_database(dbname))
@@ -123,16 +123,59 @@ async def _insert_issue(db, *, project_id=1):
 
 
 async def _insert_task(db, *, issue_id, status="running"):
+    bundle_id = await _insert_v2_bundle(db)
     return (
         await db.execute(
             sa.text(
                 "INSERT INTO tasks (issue_id, project_id, user_prompt, status, priority, "
                 "additions, deletions, total_changes, require_changes, task_mode, "
-                "trigger_source, session_mode, issue_sequence, created_at, updated_at) "
+                "trigger_source, session_mode, issue_sequence, runtime_bundle_id, created_at, updated_at) "
                 "VALUES (:i, 1, 'do', :s, 0, 0, 0, 0, true, 'execute', "
-                "'manual', 'continue', 1, now(), now()) RETURNING id"
+                "'manual', 'continue', 1, :bundle_id, now(), now()) RETURNING id"
             ),
-            {"i": issue_id, "s": status},
+            {"i": issue_id, "s": status, "bundle_id": bundle_id},
+        )
+    ).scalar_one()
+
+
+async def _insert_v2_bundle(db):
+    import json
+
+    manifest = {
+        "schema": "codify.worker.runtime-manifest/v2",
+        "maturity": "internal_preview",
+        "contract_version": HARNESS_CONTRACT_VERSION_V2,
+        "event_schema": CANONICAL_EVENT_SCHEMA_V2,
+        "command_schema": "codify.worker.command/v2",
+        "result_schema": "codify.worker.result/v2",
+        "files": [],
+        "adapters": {
+            "pi": {
+                "support_tier": "default",
+                "adapter": {"version": "2.0.0", "digest": "a" * 64},
+                "control_transport": {"kind": "rpc_stdio"},
+                "model_protocols": ["anthropic_messages"],
+                "capabilities": {
+                    "resume": True, "task_skills": True, "usage_tokens": True,
+                    "steering": True, "follow_up": True,
+                },
+            }
+        },
+    }
+    return (
+        await db.execute(
+            sa.text(
+                "INSERT INTO worker_runtime_bundles "
+                "(digest, bundle_bytes, contract_version, orchestration_version, manifest, size_bytes, created_at) "
+                "VALUES (:digest, :bundle_bytes, :contract_version, '1.0.0', CAST(:manifest AS json), 1, now()) "
+                "RETURNING id"
+            ),
+            {
+                "digest": uuid.uuid4().hex + uuid.uuid4().hex,
+                "bundle_bytes": b"x",
+                "contract_version": HARNESS_CONTRACT_VERSION_V2,
+                "manifest": json.dumps(manifest),
+            },
         )
     ).scalar_one()
 
@@ -269,8 +312,8 @@ async def test_pump_journals_reject_to_rejected(maker):
         assert row.rejection_code == "control_gate_closed"
 
 
-async def test_pump_journals_unknown_outcome_to_rejected(maker):
-    """Uncertain outcome -> delivery_outcome_unknown, never left queued."""
+async def test_pump_journals_unknown_outcome_fail_closed(maker):
+    """Uncertain post-send outcome is terminal and never left queued."""
     _, _, command_ids = await _seed_task_with_commands(maker, count=1)
     async with maker() as db:
         result = await run_pump_cycle(
@@ -287,11 +330,11 @@ async def test_pump_journals_unknown_outcome_to_rejected(maker):
                 {"c": command_ids[0]},
             )
         ).one()
-        assert row.status == "rejected"
+        assert row.status == "outcome_unknown"
         assert row.rejection_code == "delivery_outcome_unknown"
 
 
-async def test_pump_transport_error_journals_unknown(maker):
+async def test_pump_transport_error_fails_closed(maker):
     _, _, command_ids = await _seed_task_with_commands(maker, count=1)
 
     async def exploding_transport(frame, **kwargs):
@@ -312,7 +355,7 @@ async def test_pump_transport_error_journals_unknown(maker):
                 {"c": command_ids[0]},
             )
         ).one()
-        assert row.status == "rejected"
+        assert row.status == "outcome_unknown"
         assert row.rejection_code == "delivery_outcome_unknown"
 
 
@@ -325,6 +368,115 @@ async def test_pump_does_not_claim_closed_control_gate(maker):
         await db.commit()
         assert result.attempts_seen == 0
         assert result.commands_processed == 0
+
+
+async def test_closing_queue_drains_then_owner_ack_closes_gate(maker):
+    _, attempt_id, command_ids = await _seed_task_with_commands(maker, count=1)
+    seen = []
+
+    async def transport(frame, **_kwargs):
+        seen.append(frame["type"])
+        return {"status": "ack"}
+
+    async with maker() as db:
+        # The command was admitted while accepting; settled races afterward.
+        await db.execute(
+            sa.text("UPDATE task_harness_attempts SET control_state = 'closing' WHERE attempt_id = :a"),
+            {"a": attempt_id},
+        )
+        result = await run_pump_cycle(db, owner=_owner(), transport=transport)
+        await db.commit()
+        assert result.commands_processed == 1
+        assert seen == ["steer", "close"]
+        assert await _row_status(db, command_ids[0]) == "delivered"
+        state = (await db.execute(
+            sa.text("SELECT control_state FROM task_harness_attempts WHERE attempt_id = :a"),
+            {"a": attempt_id},
+        )).scalar_one()
+        assert state == "closed"
+
+
+async def test_follow_up_ack_keeps_closing_until_native_turn_start(maker):
+    _, attempt_id, command_ids = await _seed_task_with_commands(maker, count=1)
+    seen = []
+
+    async def transport(frame, **_kwargs):
+        seen.append(frame["type"])
+        return {"status": "ack"}
+
+    async with maker() as db:
+        await db.execute(
+            sa.text(
+                "UPDATE task_harness_commands SET command_type = 'follow_up' WHERE command_id = :c"
+            ),
+            {"c": command_ids[0]},
+        )
+        await db.execute(
+            sa.text("UPDATE task_harness_attempts SET control_state = 'closing' WHERE attempt_id = :a"),
+            {"a": attempt_id},
+        )
+        await run_pump_cycle(db, owner=_owner(), transport=transport)
+        await db.commit()
+        assert seen == ["follow_up"]
+        state = (await db.execute(
+            sa.text("SELECT control_state FROM task_harness_attempts WHERE attempt_id = :a"),
+            {"a": attempt_id},
+        )).scalar_one()
+        assert state == "closing"
+
+
+async def test_force_close_cas_does_nothing_when_terminal_wins(maker):
+    from app.core.task_command_gate import request_force_close_after_unknown_follow_up
+    from app.models import TaskHarnessAttempt
+
+    _, attempt_id, command_ids = await _seed_task_with_commands(maker, count=1)
+    async with maker() as db:
+        await db.execute(
+            sa.text(
+                "UPDATE task_harness_attempts SET control_state='closed', awaiting_follow_up_turn=true, "
+                "pending_follow_up_command_id=:c, pending_follow_up_native_id='1000001' WHERE attempt_id=:a"
+            ),
+            {"a": attempt_id, "c": command_ids[0]},
+        )
+        attempt = await db.get(TaskHarnessAttempt, attempt_id)
+        assert attempt is not None
+        assert not await request_force_close_after_unknown_follow_up(
+            db, attempt=attempt, command_id=command_ids[0], native_id="1000001", reason="test"
+        )
+        await db.commit()
+        row = (await db.execute(sa.text(
+            "SELECT control_state, force_close_requested FROM task_harness_attempts WHERE attempt_id=:a"
+        ), {"a": attempt_id})).one()
+        assert row.control_state == "closed"
+        assert row.force_close_requested is False
+
+
+async def test_force_close_cas_arms_closing_attempt_for_owner_reap(maker):
+    from app.core.task_command_gate import request_force_close_after_unknown_follow_up
+    from app.models import TaskHarnessAttempt
+
+    _, attempt_id, command_ids = await _seed_task_with_commands(maker, count=1)
+    async with maker() as db:
+        await db.execute(
+            sa.text(
+                "UPDATE task_harness_attempts SET control_state='closing', awaiting_follow_up_turn=true, "
+                "pending_follow_up_command_id=:c, pending_follow_up_native_id='1000001' WHERE attempt_id=:a"
+            ),
+            {"a": attempt_id, "c": command_ids[0]},
+        )
+        attempt = await db.get(TaskHarnessAttempt, attempt_id)
+        assert attempt is not None
+        assert await request_force_close_after_unknown_follow_up(
+            db, attempt=attempt, command_id=command_ids[0], native_id="1000001", reason="test"
+        )
+        await db.commit()
+        row = (await db.execute(sa.text(
+            "SELECT control_state, force_close_requested, awaiting_follow_up_turn "
+            "FROM task_harness_attempts WHERE attempt_id=:a"
+        ), {"a": attempt_id})).one()
+        assert row.control_state == "closing"
+        assert row.force_close_requested is True
+        assert row.awaiting_follow_up_turn is False
 
 
 async def test_dispatch_one_command_returns_final_status(maker):
@@ -353,3 +505,35 @@ async def test_dispatch_one_command_returns_final_status(maker):
         )
         await db.commit()
         assert status == "delivered"
+
+
+async def test_pump_recovers_dispatching_as_outcome_unknown(maker):
+    """Crash after durable dispatch claim never causes a second native send."""
+    _, _, command_ids = await _seed_task_with_commands(maker, count=1)
+    async with maker() as db:
+        await db.execute(
+            sa.text(
+                "UPDATE task_harness_commands SET status = 'dispatching', "
+                "dispatch_started_at = now(), delivery_attempts = 1 WHERE command_id = :c"
+            ),
+            {"c": command_ids[0]},
+        )
+        await db.commit()
+        calls = 0
+
+        async def must_not_send(*_args, **_kwargs):
+            nonlocal calls
+            calls += 1
+            return {"status": "ack"}
+
+        await run_pump_cycle(db, owner=_owner(), transport=must_not_send)
+        await db.commit()
+        assert calls == 0
+        row = (
+            await db.execute(
+                sa.text("SELECT status, rejection_code FROM task_harness_commands WHERE command_id = :c"),
+                {"c": command_ids[0]},
+            )
+        ).one()
+        assert row.status == "outcome_unknown"
+        assert row.rejection_code == "delivery_outcome_unknown"

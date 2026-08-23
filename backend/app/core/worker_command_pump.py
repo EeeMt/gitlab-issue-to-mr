@@ -30,7 +30,14 @@ from typing import Any, Awaitable, Callable
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.task_harness_commands import write_command_delivery, write_command_rejection
+from app.core.task_harness_commands import (
+    begin_command_dispatch,
+    mark_command_native_sent,
+    requeue_pre_send_failure,
+    write_command_delivery,
+    write_command_outcome_unknown,
+    write_command_rejection,
+)
 from app.core.utcnow import utcnow
 from app.models import Task, TaskHarnessAttempt, TaskHarnessCommand, TaskStatus
 
@@ -42,7 +49,9 @@ CONTROL_FRAME_VERSION = "1"
 DEFAULT_LEASE_TTL_SECONDS = 120
 
 # Result outcome strings returned by the fixed control_client transport.
-CONTROL_CLIENT_PATH = "/tmp/codify-runtime/orchestration/worker-entrypoint/harness/control_client.py"
+CONTROL_CLIENT_PATH = (
+    "/tmp/codify-runtime/orchestration/worker-entrypoint/harness/control_client.py"
+)
 KIT_MANIFEST_PATH = "/opt/codify-kit/manifest.json"
 
 # Result outcome strings returned by the fixed control_client transport.
@@ -79,11 +88,10 @@ async def run_pump_until_task_ends(
     processed = 0
     while True:
         async with session_factory() as db:
-            still_running = await db.scalar(
-                select(Task.status).where(Task.id == task_id)
-            )
+            still_running = await db.scalar(select(Task.status).where(Task.id == task_id))
             if still_running != TaskStatus.RUNNING:
                 break
+
             async def _task_scoped_transport(frame, command=None, attempt=None, **_kw):
                 if attempt is None or attempt.task_id != task_id:
                     return {
@@ -91,20 +99,14 @@ async def run_pump_until_task_ends(
                         "rejection_code": "wrong_attempt",
                     }
                 task = await db.get(Task, task_id)
-                return await docker_exec_control_transport(
-                    frame, attempt, task=task, db=db
-                )
+                return await docker_exec_control_transport(frame, attempt, task=task, db=db)
 
             try:
-                cycle = await run_pump_cycle(
-                    db, owner=owner, transport=_task_scoped_transport
-                )
+                cycle = await run_pump_cycle(db, owner=owner, transport=_task_scoped_transport)
                 await db.commit()
                 processed += cycle.commands_processed
             except Exception:  # noqa: BLE001 - one bad cycle must not kill the pump
-                logger.exception(
-                    "Command pump cycle failed for task %s", task_id
-                )
+                logger.exception("Command pump cycle failed for task %s", task_id)
                 await db.rollback()
         await asyncio.sleep(interval_seconds)
     return processed
@@ -147,7 +149,7 @@ async def _claim_next_attempt(
         .join(Task, Task.id == TaskHarnessAttempt.task_id)
         .where(
             Task.status == TaskStatus.RUNNING,
-            TaskHarnessAttempt.control_state == "accepting",
+            TaskHarnessAttempt.control_state.in_(("accepting", "closing")),
         )
         .where(
             (TaskHarnessAttempt.command_dispatch_expires_at.is_(None))
@@ -226,6 +228,8 @@ async def _probe_bridge(attempt: TaskHarnessAttempt, task, db) -> dict:
     return await docker_exec_control_transport(
         {
             "frame_version": CONTROL_FRAME_VERSION,
+            "task_id": task.id,
+            "attempt_id": attempt.attempt_id,
             "control_gate": attempt.control_state,
             "type": "get_state",
         },
@@ -277,14 +281,10 @@ async def docker_exec_control_transport(
                 info.size = len(payload)
                 info.mode = 0o600
                 archive.addfile(info, io.BytesIO(payload))
-            container.put_archive(
-                "/tmp/codify-runtime", tar_buffer.getvalue()
-            )
+            container.put_archive("/tmp/codify-runtime", tar_buffer.getvalue())
 
             def _read(path: str) -> bytes:
-                probe = container.client.api.exec_create(
-                    container.id, ["cat", path], stdout=True
-                )
+                probe = container.client.api.exec_create(container.id, ["cat", path], stdout=True)
                 out = container.client.api.exec_start(probe["Id"])
                 if isinstance(out, bytes):
                     return out
@@ -307,7 +307,7 @@ async def docker_exec_control_transport(
                 bash_bin,
                 "-c",
                 f'exec "{runtime_bin}/python3" "{CONTROL_CLIENT_PATH}" '
-                f'< {shlex.quote(frame_path)} > {shlex.quote(outcome_path)} 2>&1',
+                f"< {shlex.quote(frame_path)} > {shlex.quote(outcome_path)} 2>&1",
             ]
             run = container.client.api.exec_create(
                 container.id,
@@ -336,13 +336,12 @@ async def docker_exec_control_transport(
         try:
             return await asyncio.to_thread(_exec)
         except Exception as exc:  # noqa: BLE001 - transport errors are outcomes
-            logger.warning("Control transport error: %s", exc)
+            logger.warning("Control transport failed with %s", type(exc).__name__)
             return {
                 "status": DISPATCH_UNKNOWN,
                 "rejection_code": "delivery_outcome_unknown",
-                "rejection_message": str(exc)[:500],
+                "rejection_message": "control transport failed",
             }
-
 
 
 async def _record_control_event(
@@ -362,9 +361,7 @@ async def _record_control_event(
             log_level="INFO",
             message="",
             log_type="control_event",
-            log_metadata=json.dumps(
-                {"type": event_type, **payload}, ensure_ascii=False
-            ),
+            log_metadata=json.dumps({"type": event_type, **payload}, ensure_ascii=False),
         )
     )
 
@@ -381,21 +378,78 @@ async def _drop_lease(db: AsyncSession, attempt: TaskHarnessAttempt, *, owner: s
     )
 
 
-async def _load_head_command(
-    db: AsyncSession, attempt_id: str
-) -> TaskHarnessCommand | None:
+async def _load_head_command(db: AsyncSession, attempt_id: str) -> TaskHarnessCommand | None:
     """Load the lowest non-terminal command for the attempt (queue front)."""
     stmt = (
         select(TaskHarnessCommand)
         .where(
             TaskHarnessCommand.attempt_id == attempt_id,
-            TaskHarnessCommand.status == "queued",
+            TaskHarnessCommand.status.in_(("queued", "dispatching")),
         )
         .order_by(TaskHarnessCommand.sequence_no.asc())
         .limit(1)
         .with_for_update(skip_locked=True)
     )
     return (await db.execute(stmt)).scalars().first()
+
+
+async def _recover_dispatching_head(db: AsyncSession, *, command: TaskHarnessCommand) -> bool:
+    """Fail closed after a dispatcher/owner restart.
+
+    A durable ``dispatching`` row is proof that the old owner crossed the
+    commit-before-send boundary.  We cannot establish whether Pi accepted the
+    bytes, therefore it is terminalized as unknown and is never re-injected.
+    """
+    if command.status != "dispatching":
+        return False
+    return await write_command_outcome_unknown(
+        db,
+        command_id=command.command_id,
+        message="dispatcher recovery cannot prove native send outcome",
+        occurred_at=utcnow(),
+    )
+
+
+async def _record_unknown_outcome(db: AsyncSession, command: TaskHarnessCommand) -> None:
+    """Audit ambiguity without retaining command text or transport errors."""
+    await _record_control_event(
+        db,
+        task_id=command.task_id,
+        event_type="control.command.outcome_unknown",
+        payload={
+            "command_id": command.command_id,
+            "payload_digest": command.payload_digest,
+            "sequence_no": command.sequence_no,
+            "code": "delivery_outcome_unknown",
+        },
+    )
+
+
+async def _close_drained_attempt(
+    *, db: AsyncSession, attempt: TaskHarnessAttempt, transport: CommandTransport
+) -> bool:
+    """Ask the sole Pi owner to end only after its backend queue drained.
+
+    The IPC ACK is the final causal edge: without it we leave the database gate
+    in ``closing`` so a later pump can retry safely instead of finalizing the
+    worker while the owner is still able to accept an already-admitted command.
+    """
+    outcome = await transport(
+        {
+            "frame_version": CONTROL_FRAME_VERSION,
+            "task_id": attempt.task_id,
+            "attempt_id": attempt.attempt_id,
+            "type": "close",
+            "control_gate": "closing",
+        },
+        attempt=attempt,
+    )
+    if outcome.get("status") != DISPATCH_ACK:
+        return False
+    attempt.control_state = "closed"
+    attempt.force_close_requested = False
+    await db.flush()
+    return True
 
 
 async def dispatch_one_command(
@@ -408,12 +462,40 @@ async def dispatch_one_command(
 ) -> str:
     """Send one queued command and CAS it to a terminal state.
 
-    Returns the final status ("delivered"/"rejected"). The transport is the only
+    Returns the final status. The transport is the only
     boundary to the in-image ``control_client.py``; it must return an outcome
     dict with ``status`` in {ack, reject, unknown} plus optional rejection fields.
     Any transport error is journaled as ``delivery_outcome_unknown``.
     """
     now = utcnow()
+    native_request_id = str(1_000_000 + command.sequence_no)
+    if command.command_type == "follow_up" and attempt.control_state == "closing":
+        armed = await db.execute(
+            update(TaskHarnessAttempt)
+            .where(
+                TaskHarnessAttempt.attempt_id == attempt.attempt_id,
+                TaskHarnessAttempt.control_state == "closing",
+                TaskHarnessAttempt.awaiting_follow_up_turn.is_(False),
+                TaskHarnessAttempt.task_id == Task.id,
+                Task.status == TaskStatus.RUNNING,
+            )
+            .values(
+                awaiting_follow_up_turn=True,
+                pending_follow_up_command_id=command.command_id,
+                pending_follow_up_native_id=native_request_id,
+            )
+        )
+        if not armed.rowcount:
+            return "terminalized"
+        attempt.awaiting_follow_up_turn = True
+        attempt.pending_follow_up_command_id = command.command_id
+        attempt.pending_follow_up_native_id = native_request_id
+    claimed = await begin_command_dispatch(db, command_id=command.command_id, started_at=now)
+    if claimed is None:
+        return command.status
+    # This is the critical crash boundary.  Persist it before Docker exec so a
+    # new pump sees ``dispatching`` and fails closed instead of duplicating Pi.
+    await db.commit()
     frame = {
         "frame_version": CONTROL_FRAME_VERSION,
         "command_id": command.command_id,
@@ -425,27 +507,41 @@ async def dispatch_one_command(
         "payload_digest": command.payload_digest,
         "control_gate": attempt.control_state,
         "dispatcher": owner,
+        "native_request_id": native_request_id,
     }
     try:
-        outcome = await transport(frame, command=command, attempt=attempt)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "Command %s dispatch transport error: %s; journaling delivery_outcome_unknown",
-            command.command_id,
-            exc,
-        )
-        await write_command_rejection(
+        outcome = await transport(frame, command=claimed, attempt=attempt)
+    except Exception:  # noqa: BLE001
+        # A transport exception has no trustworthy pre-send proof.  Docker exec
+        # may have entered the control client, so fail closed rather than replay.
+        await write_command_outcome_unknown(
             db,
             command_id=command.command_id,
-            rejection_code="delivery_outcome_unknown",
-            rejection_message="transport error during dispatch",
-            rejected_at=now,
+            message="transport exited before reporting dispatch outcome",
+            occurred_at=utcnow(),
         )
-        return "rejected"
+        await _record_unknown_outcome(db, command)
+        if command.command_type == "follow_up":
+            await _fail_pending_follow_up(db, attempt, command.command_id, "follow-up transport outcome unknown")
+        return "outcome_unknown"
 
     status = outcome.get("status")
+    returned_native_id = outcome.get("native_request_id") or outcome.get("native_id")
+    if outcome.get("native_sent"):
+        sent = await mark_command_native_sent(
+            db,
+            command_id=command.command_id,
+            native_request_id=str(returned_native_id) if returned_native_id is not None else None,
+            sent_at=utcnow(),
+        )
+        if not sent:
+            # Cancellation/terminalization won the race.  Do not resurrect a
+            # terminal command with a late native ACK.
+            return "terminalized"
     if status == DISPATCH_ACK:
-        await write_command_delivery(db, command_id=command.command_id, delivered_at=now)
+        delivered = await write_command_delivery(db, command_id=command.command_id, delivered_at=now)
+        if not delivered:
+            return "terminalized"
         await _record_control_event(
             db,
             task_id=command.task_id,
@@ -460,7 +556,8 @@ async def dispatch_one_command(
         return "delivered"
     if status == DISPATCH_REJECT:
         code = outcome.get("rejection_code") or "delivery_outcome_unknown"
-        message = outcome.get("rejection_message") or "rejected by bridge"
+        # Transport text is untrusted (it can contain command/endpoint data).
+        message = "control command rejected by Pi owner"
         await write_command_rejection(
             db,
             command_id=command.command_id,
@@ -480,16 +577,58 @@ async def dispatch_one_command(
                 "rejection_message": message,
             },
         )
+        if command.command_type == "follow_up":
+            await _clear_pending_follow_up(db, attempt, command.command_id)
         return "rejected"
-    # Unknown / malformed outcome: do not leave the command ambiguous.
-    await write_command_rejection(
+    if status == "retry":
+        await requeue_pre_send_failure(db, command_id=command.command_id)
+        if command.command_type == "follow_up":
+            await _clear_pending_follow_up(db, attempt, command.command_id)
+        return "queued"
+    # Unknown / malformed outcome after a bridge response is ambiguous.  Do
+    # not coerce it to ``rejected``: it must remain visibly distinct in audit
+    # and must never be re-sent on recovery.
+    await write_command_outcome_unknown(
         db,
         command_id=command.command_id,
-        rejection_code="delivery_outcome_unknown",
-        rejection_message=json.dumps(outcome, sort_keys=True)[:2000],
-        rejected_at=now,
+        message="control transport returned an unrecognized outcome",
+        occurred_at=now,
     )
-    return "rejected"
+    await _record_unknown_outcome(db, command)
+    if command.command_type == "follow_up":
+        await _fail_pending_follow_up(db, attempt, command.command_id, "follow-up delivery outcome unknown")
+    return "outcome_unknown"
+
+
+async def _clear_pending_follow_up(db: AsyncSession, attempt: TaskHarnessAttempt, command_id: str) -> None:
+    await db.execute(
+        update(TaskHarnessAttempt)
+        .where(
+            TaskHarnessAttempt.attempt_id == attempt.attempt_id,
+            TaskHarnessAttempt.pending_follow_up_command_id == command_id,
+        )
+        .values(
+            awaiting_follow_up_turn=False,
+            pending_follow_up_command_id=None,
+            pending_follow_up_native_id=None,
+        )
+    )
+    attempt.awaiting_follow_up_turn = False
+    attempt.pending_follow_up_command_id = None
+    attempt.pending_follow_up_native_id = None
+
+
+async def _fail_pending_follow_up(db: AsyncSession, attempt: TaskHarnessAttempt, command_id: str, reason: str) -> None:
+    """Fail closed once a continuation may have reached Pi."""
+    from app.core.task_command_gate import request_force_close_after_unknown_follow_up
+
+    await request_force_close_after_unknown_follow_up(
+        db,
+        attempt=attempt,
+        command_id=command_id,
+        native_id=attempt.pending_follow_up_native_id,
+        reason=reason,
+    )
 
 
 async def run_pump_cycle(
@@ -522,6 +661,19 @@ async def run_pump_cycle(
         head = await _load_head_command(db, attempt.attempt_id)
         if head is None:
             break
+        if head.status == "dispatching":
+            # A previous owner died after its durable claim.  This is an
+            # explicit exactly-once boundary: fail closed, then allow only the
+            # following queue item on a future cycle.
+            await _recover_dispatching_head(db, command=head)
+            await _record_unknown_outcome(db, head)
+            if head.command_type == "follow_up":
+                await _fail_pending_follow_up(
+                    db, attempt, head.command_id, "dispatcher recovery cannot prove follow-up delivery"
+                )
+            processed += 1
+            updated += 1
+            break
         final_status = await dispatch_one_command(
             db,
             command=head,
@@ -530,8 +682,20 @@ async def run_pump_cycle(
             owner=owner,
         )
         processed += 1
-        updated += 0 if final_status == "delivered" else 1  # rejected counts as an update
+        updated += 0 if final_status in {"delivered", "queued"} else 1
         await db.flush()
+        if final_status == "queued":
+            # Pre-send retry keeps this exact head in place; do not spin it.
+            break
+    if attempt.control_state == "closing":
+        remaining = await _load_head_command(db, attempt.attempt_id)
+        if remaining is None and not attempt.awaiting_follow_up_turn:
+            # All commands admitted before the settled transition drained in
+            # sequence; new PUTs are rejected by the closing gate.
+            try:
+                await _close_drained_attempt(db=db, attempt=attempt, transport=transport)
+            except Exception:  # noqa: BLE001 - leave closing for a safe retry
+                logger.warning("Pi owner close IPC failed for attempt %s", attempt.attempt_id)
     # A delivered command leaves no more work; a rejected one also consumed the
     # head. The lease remains held while the attempt is still RUNNING so the
     # next cycle picks up the next head. We keep it owned and let the next

@@ -135,6 +135,33 @@ def test_pi_stream_maps_probe_to_v2_canonical_events(tmp_path):
     assert replay.terminal_type == "run.completed"
 
 
+def test_owner_ack_correlation_is_canonical_but_not_raw_archive(tmp_path):
+    runtime_dir = tmp_path / "correlated-ack"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    _translate(
+        runtime_dir,
+        [
+            _get_state_record(),
+            {
+                "id": 22,
+                "type": "response",
+                "command": "steer",
+                "success": True,
+                "__command_ack": {
+                    "command_id": "cmd-22", "sequence_no": 3, "payload_digest": "d" * 64,
+                    "_delivered_at": "2026-08-24T00:00:00+00:00",
+                },
+            },
+        ],
+    )
+    delivered = [e for e in _events(runtime_dir) if e["type"] == "control.command.delivered"]
+    assert delivered[0]["payload"]["command_id"] == "cmd-22"
+    assert delivered[0]["payload"]["delivered_at"] == "2026-08-24T00:00:00+00:00"
+    raw = (runtime_dir / "harness-events/pi.jsonl").read_text(encoding="utf-8")
+    assert "__command_ack" not in raw
+
+
 
 def test_pi_message_end_does_not_duplicate_completed(tmp_path):
     """message_end(stop) must not re-emit message.completed after text_end.
@@ -285,21 +312,22 @@ def test_pi_queue_update_text_is_sanitized_before_projection(tmp_path):
     # sanitizer strips secrets (plan §5.3: "命令文本经既有日志清洗后再投影").
     runtime_dir = tmp_path / "sanitize"
     runtime_dir.mkdir()
+    fake_provider_key = "sk-" + "ant-secret1234567890"
     _emit(runtime_dir, "run.started")
     _translate(
         runtime_dir,
         [
             _get_state_record(),
-            {"type": "queue_update", "steering": ["use sk-ant-secret1234567890"], "followUp": []},
+            {"type": "queue_update", "steering": [f"use {fake_provider_key}"], "followUp": []},
         ],
     )
     queue_events = [e for e in _events(runtime_dir) if e["type"] == "control.queue.updated"]
     assert queue_events
     text = json.dumps(queue_events[0]["payload"], ensure_ascii=False)
-    assert "sk-ant-secret1234567890" not in text
+    assert fake_provider_key not in text
     # raw archive is sanitized too (translator sanitizes each line)
     raw = (runtime_dir / "harness-events/pi.jsonl").read_text(encoding="utf-8")
-    assert "sk-ant-secret1234567890" not in raw
+    assert fake_provider_key not in raw
 
 
 def test_pi_abort_maps_to_cancelled_terminal(tmp_path):
@@ -624,16 +652,15 @@ def test_pi_runner_handshake_uses_new_session_not_resume():
     # ``{"type":"resume","sessionId":...}`` (``Unknown command: resume``); the pi
     # runner must request sessions via ``new_session`` (+ optional
     # ``parentSessionId`` for a continued task), then keep get_state -> prompt.
-    runner = (REPO_ROOT / "deploy/worker-entrypoint/legacy/pi-run.sh").read_text(encoding="utf-8")
-    assert '"type":"resume"' not in runner
+    owner = (REPO_ROOT / "deploy/worker-entrypoint/harness/adapters/pi_owner.py").read_text(encoding="utf-8")
+    assert '"type":"resume"' not in owner
     # Continuations reference the parent; first sessions use the bare frame.
-    assert "parentSessionId" in runner
-    assert '{id:1, type:"new_session", parentSessionId:$parent}' in runner
-    assert '{"id":1,"type":"new_session"}' in runner
-    # get_state / prompt frame sequence is preserved after the handshake.
-    assert '{"id":2,"type":"get_state"}' in runner
-    assert '{"id":3,"type":"prompt"' in runner
-    assert runner.index('"type":"get_state"') < runner.index('"type":"prompt"')
+    assert "parentSessionId" in owner
+    assert '("new_session", None' in owner
+    # get_state / prompt frame sequence is preserved by the single owner.
+    assert '("get_state", None' in owner
+    assert '("prompt", self.prompt' in owner
+    assert owner.index('("get_state", None') < owner.index('("prompt", self.prompt')
 
 
 def test_pi_runner_pins_codify_provider_and_snapshot_model():
@@ -647,7 +674,8 @@ def test_pi_runner_pins_codify_provider_and_snapshot_model():
     assert "--mode rpc --provider codify" in runner
     assert "--model \"${PI_MODEL_RPC}\"" in runner
     # The model resolves from the same adapter env chain as pi.sh prepare_config.
-    assert 'PI_MODEL_RPC="${PI_MODEL:-${ANTHROPIC_MODEL:-${OPENAI_MODEL:-}}}"' in runner
+    assert 'PI_MODEL_RPC="${PI_MODEL:-${ANTHROPIC_MODEL:-}}"' in runner
+    assert "OPENAI_MODEL" not in runner
     # Provider pin lives in the base command, before the CODIFY_PI_RUN_AS wrapper.
     base = runner[: runner.index('if [ -n "${CODIFY_PI_RUN_AS:-}" ]')]
     assert "--provider codify" in base
@@ -661,12 +689,9 @@ def test_pi_runner_terminates_on_agent_settled_before_ack_continue():
     # V2 result. Without it the runner hangs until TASK_TIMEOUT. The kill must
     # be evaluated before the ``ack_state`` continue so it also fires on the
     # already-in-progress turn stream.
-    runner = (REPO_ROOT / "deploy/worker-entrypoint/legacy/pi-run.sh").read_text(encoding="utf-8")
-    assert '.type == "agent_settled"' in runner
-    assert 'kill "${req_writer}"' in runner
-    assert runner.index('.type == "agent_settled"') < runner.index(
-        'if [ "${ack_state}" -eq 1 ]'
-    )
+    owner = (REPO_ROOT / "deploy/worker-entrypoint/harness/adapters/pi_owner.py").read_text(encoding="utf-8")
+    assert 'record.get("type") == "agent_settled"' in owner
+    assert "self.process.stdin.close()" in owner
 
 
 STUB_PI_TMPL = r'''#!/usr/bin/env python3
@@ -722,15 +747,17 @@ def test_pi_runner_terminates_and_persists_result_after_settled(tmp_path):
         "CODIFY_PI_BIN": str(stub),
         "CODIFY_ORCHESTRATION_DIR": str(REPO_ROOT / "deploy"),
         "PROMPT_FILE": str(prompt),
-        "ANTHROPIC_MODEL": "ox-alpha-free",
-        "HOME": str(tmp_path),
+            "ANTHROPIC_MODEL": "ox-alpha-free",
+            "HOME": str(tmp_path),
+            "CODIFY_PI_CONTROL_SOCKET": str(REPO_ROOT / f".pi-test-{os.getpid()}.sock"),
+            "CODIFY_PI_OWNER_NO_SOCKET": "1",
     }
     proc = subprocess.run(
         ["bash", str(REPO_ROOT / "deploy/worker-entrypoint/legacy/pi-run.sh")],
         env=env,
         capture_output=True,
         text=True,
-        timeout=60,
+            timeout=60,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
     result_file = runtime_dir / "harness-result.json"

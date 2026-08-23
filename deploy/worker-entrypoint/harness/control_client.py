@@ -18,6 +18,7 @@ Outcome ``status`` is one of ``ack`` | ``reject`` | ``unknown``.
 from __future__ import annotations
 
 import json
+import socket
 import sys
 
 FRAME_VERSION = "1"
@@ -33,8 +34,8 @@ def _read_frame() -> dict:
         return {}
     try:
         return json.loads(raw)
-    except json.JSONDecodeError as exc:
-        return {"_parse_error": str(exc)}
+    except json.JSONDecodeError:
+        return {"_parse_error": "invalid_json"}
 
 
 def handle(frame: dict) -> dict:
@@ -46,8 +47,11 @@ def handle(frame: dict) -> dict:
         return {"status": "reject", "rejection_code": "unsupported_frame_version",
                 "rejection_message": f"frame_version={frame.get('frame_version')}"}
     if frame.get("type") == PROBE_FRAME_TYPE:
-        return {"status": "ack", "probe": True,
-                "command_id": frame.get("command_id")}
+        return _forward_to_bridge(frame)
+    if frame.get("type") == "close":
+        if frame.get("control_gate") != "closing":
+            return {"status": "reject", "rejection_code": "control_gate_closed"}
+        return _forward_to_bridge(frame)
     if frame.get("type") not in SUPPORTED_FRAME_TYPES:
         return {"status": "reject", "rejection_code": "invalid_command_type",
                 "rejection_message": f"unsupported command type {frame.get('type')}"}
@@ -67,54 +71,39 @@ def handle(frame: dict) -> dict:
 
 
 def _forward_to_bridge(frame: dict) -> dict:
-    """Append the frame to the bridge request journal and await the native ACK.
-
-    The running ``pi-run.sh`` relay tails this journal, injects the native
-    steer/follow_up frame into Pi's RPC stdin, and records the outcome keyed
-    by ``command_id`` in the response journal. We poll that file so the
-    returned status reflects the real native ACK (plan §6.2: ``delivered``
-    means the harness interface acknowledged the command).
-    """
-    import os
-    import time
-    import uuid
-
-    runtime_dir = os.environ.get("CODIFY_RUNTIME_DIR", "/tmp/codify-runtime")
-    requests_path = os.path.join(runtime_dir, "pi-control-requests.jsonl")
-    responses_path = os.path.join(runtime_dir, "pi-control-responses.jsonl")
-    command_id = frame.get("command_id") or f"cmd-{uuid.uuid4().hex[:12]}"
-    request = dict(frame)
-    request["command_id"] = command_id
-    with open(requests_path, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(request, ensure_ascii=False) + "\n")
-
-    deadline = time.monotonic() + 15.0
-    while time.monotonic() < deadline:
-        if os.path.exists(responses_path):
-            with open(responses_path, "r", encoding="utf-8") as fh:
-                for line in fh:
-                    try:
-                        outcome = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if outcome.get("command_id") == command_id:
-                        if outcome.get("status") == "delivered":
-                            return {"status": "ack", "command_id": command_id}
-                        return {
-                            "status": "reject",
-                            "command_id": command_id,
-                            "rejection_code": outcome.get(
-                                "rejection_code", "delivery_outcome_unknown"
-                            ),
-                            "rejection_message": outcome.get("rejection_message"),
-                        }
-        time.sleep(0.2)
-    return {
-        "status": "unknown",
-        "command_id": command_id,
-        "rejection_code": "delivery_outcome_unknown",
-        "rejection_message": "bridge relay did not report a native outcome in time",
-    }
+    """Synchronously proxy one frame to the sole Pi owner Unix socket."""
+    task_id = frame.get("task_id")
+    if not isinstance(task_id, int) or task_id <= 0:
+        return {"status": "reject", "rejection_code": "invalid_command_type"}
+    # A Docker exec starts with a fresh environment, so both runner and client
+    # derive this path from the durable frame rather than a runner-only export.
+    socket_path = f"/tmp/codify-pi-{task_id}.sock"
+    connected = False
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(16)
+            client.connect(socket_path)
+            connected = True
+            client.sendall(json.dumps(frame, separators=(",", ":")).encode() + b"\n")
+            data = b""
+            while not data.endswith(b"\n"):
+                chunk = client.recv(8192)
+                if not chunk:
+                    break
+                data += chunk
+        return json.loads(data.decode() or "{}")
+    except Exception:
+        if not connected:
+            return {
+                "status": "retry",
+                "rejection_code": "control_owner_unreachable",
+                "rejection_message": "Pi control owner is unavailable",
+            }
+        return {
+            "status": "unknown",
+            "rejection_code": "delivery_outcome_unknown",
+            "rejection_message": "control socket outcome lost after connect",
+        }
 
 
 def main() -> int:
