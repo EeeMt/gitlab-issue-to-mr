@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import shutil
 import tarfile
 from pathlib import Path
 
@@ -16,11 +17,14 @@ os.environ.setdefault("CONFIG_ENCRYPTION_KEY", "unit-test-key")
 from app.core.worker_runtime_bundle import (  # noqa: E402
     bind_runtime_bundle,
     build_runtime_bundle,
+    build_v2_runtime_materialization_archive,
+    build_v2_runtime_materialization_manifest_bytes,
     get_or_create_runtime_bundle,
+    get_or_create_runtime_bundle_v2,
     load_bound_runtime_bundle,
     verify_bundle_bytes,
 )
-from app.models import Base, Task  # noqa: E402
+from app.models import Base, Task, WorkerRuntimeBundle  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -126,6 +130,145 @@ async def test_execution_rejects_historical_task_without_runtime_bundle(session_
         await db.flush()
 
         with pytest.raises(RuntimeError, match="historical Tasks are read-only"):
+            await load_bound_runtime_bundle(db, task)
+
+
+def _v2_test_runtime_source(tmp_path: Path) -> Path:
+    """Copy controlled source and make the fixture obey current capability bounds."""
+    root = tmp_path / "runtime-source"
+    shutil.copytree(REPO_ROOT / "deploy", root / "deploy")
+    manifest_path = root / "deploy/worker-entrypoint/harness/manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    # This test proves immutable bundle mechanics, not OpenCode resume support.
+    manifest["adapters"]["opencode"]["capabilities"]["resume"] = False
+    for adapter in manifest["adapters"].values():
+        adapter["source"]["artifact_sha256"] = "a" * 64
+    manifest_path.write_text(json.dumps(manifest))
+    return root
+
+
+def _write_cli_artifact_manifest(path: Path, source_manifest: dict, *, pi_digest: str) -> Path:
+    document = {
+        "schema": "codify.worker.cli-artifacts/v1",
+        "platform": "linux/amd64",
+        "artifacts": {
+            key: {
+                "path": f"/opt/{key}",
+                "version": adapter["source"]["artifact_version"],
+                "sha256": pi_digest if key == "pi" else "b" * 64,
+            }
+            for key, adapter in source_manifest["adapters"].items()
+        },
+    }
+    path.write_text(json.dumps(document))
+    return path
+
+
+@pytest.mark.asyncio
+async def test_v2_bundle_persists_frozen_payload_and_never_rescans_checkout(
+    session_factory, tmp_path
+):
+    source = _v2_test_runtime_source(tmp_path)
+    async with session_factory() as db:
+        first = await get_or_create_runtime_bundle_v2(db, source_dir=source)
+        assert first.bundle_bytes
+        assert first.size_bytes == len(first.bundle_bytes)
+        assert first.manifest["archive_sha256"]
+        assert first.manifest["files"]
+        verify_bundle_bytes(first)
+
+        bound = Task(id=1, issue_id=1, project_id=1, user_prompt="v2")
+        db.add(bound)
+        await db.flush()
+        await bind_runtime_bundle(db, bound, source_dir=source, harness_key="pi")
+        frozen_archive = build_v2_runtime_materialization_archive(first, source_dir=source)
+        frozen_manifest = build_v2_runtime_materialization_manifest_bytes(first, source_dir=source)
+
+        # A post-bind checkout edit cannot affect the already bound Task.
+        pi_adapter = source / "deploy/worker-entrypoint/harness/adapters/pi.sh"
+        pi_adapter.write_text(pi_adapter.read_text() + "\n# post-bind mutation\n")
+        loaded = await load_bound_runtime_bundle(db, bound)
+        assert build_v2_runtime_materialization_archive(loaded, source_dir=source) == frozen_archive
+        assert (
+            build_v2_runtime_materialization_manifest_bytes(loaded, source_dir=source)
+            == frozen_manifest
+        )
+
+        # A new binding observes the changed controlled source and gets a new
+        # bundle/adapter digest while the old one remains executable.
+        second = await get_or_create_runtime_bundle_v2(db, source_dir=source)
+        assert second.digest != first.digest
+        assert (
+            second.manifest["adapters"]["pi"]["adapter"]["digest"]
+            != first.manifest["adapters"]["pi"]["adapter"]["digest"]
+        )
+
+
+@pytest.mark.asyncio
+async def test_v2_bundle_stamps_release_cli_sha_into_addressed_source(session_factory, tmp_path):
+    source = _v2_test_runtime_source(tmp_path)
+    manifest_path = source / "deploy/worker-entrypoint/harness/manifest.json"
+    template = json.loads(manifest_path.read_text())
+    template["adapters"]["pi"]["source"]["artifact_sha256"] = "<computed at freeze>"
+    manifest_path.write_text(json.dumps(template))
+    first_lock = _write_cli_artifact_manifest(
+        tmp_path / "artifacts-first.json", template, pi_digest="1" * 64
+    )
+    second_lock = _write_cli_artifact_manifest(
+        tmp_path / "artifacts-second.json", template, pi_digest="2" * 64
+    )
+
+    async with session_factory() as db:
+        first = await get_or_create_runtime_bundle_v2(
+            db,
+            source_dir=source,
+            cli_artifact_manifest_path=first_lock,
+        )
+        second = await get_or_create_runtime_bundle_v2(
+            db,
+            source_dir=source,
+            cli_artifact_manifest_path=second_lock,
+        )
+
+    assert first.digest != second.digest
+    assert first.manifest["adapters"]["pi"]["source"]["artifact_sha256"] == "1" * 64
+    assert second.manifest["adapters"]["pi"]["source"]["artifact_sha256"] == "2" * 64
+    assert (
+        first.manifest["adapters"]["pi"]["adapter"]["digest"]
+        != second.manifest["adapters"]["pi"]["adapter"]["digest"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_v2_bundle_rejects_unstamped_cli_artifact_identity(session_factory, tmp_path):
+    source = _v2_test_runtime_source(tmp_path)
+    manifest_path = source / "deploy/worker-entrypoint/harness/manifest.json"
+    template = json.loads(manifest_path.read_text())
+    template["adapters"]["pi"]["source"]["artifact_sha256"] = "<computed at freeze>"
+    manifest_path.write_text(json.dumps(template))
+
+    async with session_factory() as db:
+        with pytest.raises(RuntimeError, match="no frozen artifact SHA-256"):
+            await get_or_create_runtime_bundle_v2(db, source_dir=source)
+
+
+@pytest.mark.asyncio
+async def test_v2_empty_legacy_payload_fails_closed(session_factory):
+    async with session_factory() as db:
+        bundle = WorkerRuntimeBundle(
+            digest="a" * 64,
+            bundle_bytes=b"",
+            contract_version="codify.worker.harness/v2",
+            orchestration_version="1.0.0",
+            manifest={"bundle_digest": "a" * 64, "files": []},
+            size_bytes=0,
+        )
+        task = Task(id=1, issue_id=1, project_id=1, user_prompt="legacy v2")
+        db.add_all([bundle, task])
+        await db.flush()
+        task.runtime_bundle_id = bundle.id
+        await db.flush()
+        with pytest.raises(RuntimeError, match="no persisted payload"):
             await load_bound_runtime_bundle(db, task)
 
 

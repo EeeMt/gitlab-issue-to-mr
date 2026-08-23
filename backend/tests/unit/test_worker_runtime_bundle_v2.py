@@ -46,7 +46,8 @@ def _adapter(
         },
         "adapter": {"version": "2.0.0", "digest": "dd" * 32},
         "control_transport": {"kind": control_kind, "protocol": protocol},
-        "model_protocols": protocols or [
+        "model_protocols": protocols
+        or [
             "anthropic_messages",
             "openai_responses",
             "openai_chat_completions",
@@ -75,7 +76,7 @@ def _frozen_v2_manifest(files=None, **adapter_overrides):
             protocol="opencode-server",
             directory="harness/adapters/opencode",
             capabilities={
-                "resume": True,
+                "resume": False,
                 "task_skills": True,
                 "usage_tokens": True,
                 "steering": False,
@@ -157,8 +158,8 @@ def test_build_runtime_bundle_v2_validates_frozen_manifest():
     # Per-adapter digests are stamped into the frozen adapter metadata.
     for key in APPROVED_MANIFEST_ADAPTER_KEYS:
         assert len(bundle.adapter_digests[key]) == 64
-        assert bundle.manifest["adapters"][key]["adapter"]["digest"] == (
-            bundle.adapter_digests[key]
+        assert (
+            bundle.manifest["adapters"][key]["adapter"]["digest"] == (bundle.adapter_digests[key])
         )
     assert bundle.manifest["bundle_digest"] == bundle.digest
 
@@ -207,7 +208,9 @@ def test_shared_file_change_alters_every_adapter_digest():
 def test_bundle_digest_is_recursive_over_files():
     # Removing / adding / altering any file changes the recursive bundle digest.
     baseline = build_runtime_bundle_v2(_frozen_v2_manifest())
-    altered = build_runtime_bundle_v2(_change_file(_frozen_v2_manifest(), "harness/shared/schema.py"))
+    altered = build_runtime_bundle_v2(
+        _change_file(_frozen_v2_manifest(), "harness/shared/schema.py")
+    )
     assert altered.digest != baseline.digest
 
     removed = _frozen_v2_manifest(files=_frozen_v2_manifest()["files"][:2])

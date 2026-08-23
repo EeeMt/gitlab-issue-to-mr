@@ -7,6 +7,7 @@ import io
 import json
 import os
 import tarfile
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Mapping
@@ -31,15 +32,14 @@ from app.models import Task, WorkerRuntimeBundle
 
 ORCHESTRATION_VERSION = "1.0.0"
 RUNTIME_SOURCE_ENV = "CODIFY_RUNTIME_SOURCE_DIR"
+CLI_ARTIFACT_MANIFEST_ENV = "CODIFY_WORKER_CLI_ARTIFACT_MANIFEST"
 RUNTIME_ARCHIVE_ROOT = PurePosixPath("codify-runtime/orchestration")
 
 _CONTROLLED_FILES = (
     "deploy/entrypoint.worker.sh",
     "deploy/ci-claude.sh",
 )
-_CONTROLLED_TREES = (
-    "deploy/worker-entrypoint",
-)
+_CONTROLLED_TREES = ("deploy/worker-entrypoint",)
 _ALLOWED_SUFFIXES = {".sh", ".py", ".json"}
 
 
@@ -54,10 +54,9 @@ class BuiltRuntimeBundle:
 class BuiltRuntimeBundleV2:
     """A content-addressed Runtime Bundle built from a V2 runtime-manifest.
 
-    Unlike the V1 archive bundle, a V2 bundle is manifest-only (no code archive
-    in this phase): the top-level ``digest`` is the recursive bundle digest over
-    the manifest ``files``, and each adapter carries an independent digest
-    derived from the file subset it references.
+    The top-level ``digest`` is the recursive bundle digest over the manifest
+    ``files``.  The database row additionally persists an archive containing
+    exactly those files; see ``get_or_create_runtime_bundle_v2``.
     """
 
     digest: str
@@ -71,6 +70,22 @@ class BuiltRuntimeBundleV2:
 _V2_ADAPTER_DIR_KEYS = ("directory", "dir")
 
 
+def _v2_adapter_scope_paths(adapter_key: str, files: Iterable[Mapping[str, Any]]) -> set[str]:
+    """Return the controlled, adapter-private paths for a built-in adapter.
+
+    This is deliberately code-held rather than inferred from a checkout at
+    execution time.  Adapter scripts and their legacy compatibility runner are
+    private; all remaining controlled runtime files are shared orchestration.
+    """
+    adapter_prefix = f"worker-entrypoint/harness/adapters/{adapter_key}"
+    legacy_path = f"legacy/{adapter_key}-run.sh"
+    return {
+        str(item.get("path"))
+        for item in files
+        if str(item.get("path")).startswith(adapter_prefix) or str(item.get("path")) == legacy_path
+    }
+
+
 def bundle_manifest_digest_from_files(
     manifest_files: Iterable[Mapping[str, Any]],
 ) -> str:
@@ -80,9 +95,7 @@ def bundle_manifest_digest_from_files(
     of the file entries ``{path, size, sha256}``. Any change to any file's
     content (sha256), size or set of files changes this digest.
     """
-    entries = sorted(
-        (str(item.get("path")), item) for item in manifest_files
-    )
+    entries = sorted((str(item.get("path")), item) for item in manifest_files)
     canonical = [
         {
             "path": item.get("path"),
@@ -103,6 +116,7 @@ def adapter_digest_from_manifest_files(
     *,
     adapter_dir: str | None = None,
     shared_files: Iterable[Mapping[str, Any]] | None = None,
+    adapter_paths: Iterable[str] | None = None,
 ) -> str:
     """Independent per-adapter digest over a V2 manifest's file subset.
 
@@ -124,12 +138,12 @@ def adapter_digest_from_manifest_files(
     still alters every adapter digest.
     """
     items = list(manifest_files)
-    if adapter_dir and shared_files is not None:
-        own = [
-            item
-            for item in items
-            if str(item.get("path") or "").startswith(f"{adapter_dir}/")
-        ]
+    if adapter_paths is not None and shared_files is not None:
+        own = [item for item in items if _file_entry_key(item) in set(adapter_paths)]
+        shared = sorted(shared_files, key=lambda item: str(item.get("path")))
+        subset = sorted(set(_file_entry_key(item) for item in own + shared), key=lambda path: path)
+    elif adapter_dir and shared_files is not None:
+        own = [item for item in items if str(item.get("path") or "").startswith(f"{adapter_dir}/")]
         shared = sorted(shared_files, key=lambda item: str(item.get("path")))
         subset = sorted(
             set(_file_entry_key(item) for item in own + shared),
@@ -137,9 +151,7 @@ def adapter_digest_from_manifest_files(
         )
     else:
         # Fallback: digest every file (no per-adapter partition declared).
-        subset = sorted(
-            set(_file_entry_key(item) for item in items), key=lambda path: path
-        )
+        subset = sorted(set(_file_entry_key(item) for item in items), key=lambda path: path)
     found = {_file_entry_key(item): item for item in items}
     canonical = [
         {
@@ -193,17 +205,24 @@ def build_runtime_bundle_v2(manifest: Mapping[str, Any]) -> BuiltRuntimeBundleV2
                     break
         adapter_dirs[key] = adapter_dir
 
-    declared_dirs = [d for d in adapter_dirs.values() if d]
-    if declared_dirs:
-        shared_files = [
-            item
-            for item in files
-            if not any(
-                str(item.get("path") or "").startswith(f"{d}/") for d in declared_dirs
-            )
-        ]
-    else:
-        shared_files = None
+    # The source manifest can optionally declare directories, but its current
+    # public shape predates the full V2 file inventory.  The built-in scope map
+    # makes the partition unambiguous even before those optional annotations
+    # land.  No adapter may receive an empty private scope.
+    adapter_paths = {
+        key: (
+            {
+                str(item.get("path"))
+                for item in files
+                if str(item.get("path") or "").startswith(f"{adapter_dirs[key]}/")
+            }
+            if adapter_dirs[key]
+            else _v2_adapter_scope_paths(key, files)
+        )
+        for key in adapters
+    }
+    known_private_paths = set().union(*adapter_paths.values()) if adapter_paths else set()
+    shared_files = [item for item in files if _file_entry_key(item) not in known_private_paths]
 
     adapter_digests: dict[str, str] = {}
     stamped_adapters: dict[str, dict[str, Any]] = {}
@@ -211,7 +230,11 @@ def build_runtime_bundle_v2(manifest: Mapping[str, Any]) -> BuiltRuntimeBundleV2
         adapter = dict(adapters[key])
         validate_v2_manifest_adapter_capabilities(key, adapter.get("capabilities") or {})
         digest = adapter_digest_from_manifest_files(
-            files, key, adapter_dir=adapter_dirs[key], shared_files=shared_files
+            files,
+            key,
+            adapter_dir=adapter_dirs[key],
+            shared_files=shared_files,
+            adapter_paths=adapter_paths[key],
         )
         adapter_digests[key] = digest
         adapter_meta = dict(adapter.get("adapter") or {})
@@ -327,13 +350,10 @@ def _add_bytes(archive: tarfile.TarFile, name: str, payload: bytes, *, mode: int
 def build_runtime_bundle(source_dir: Path | None = None) -> BuiltRuntimeBundle:
     root = (source_dir or default_runtime_source_dir()).resolve()
     source_files = [
-        (path.relative_to(root).as_posix(), path.read_bytes())
-        for path in _controlled_paths(root)
+        (path.relative_to(root).as_posix(), path.read_bytes()) for path in _controlled_paths(root)
     ]
     source_by_name = dict(source_files)
-    harness_manifest = json.loads(
-        source_by_name["deploy/worker-entrypoint/harness/manifest.json"]
-    )
+    harness_manifest = json.loads(source_by_name["deploy/worker-entrypoint/harness/manifest.json"])
     # The frozen source manifest is now runtime-manifest/v2; validate the full
     # V2 envelope (approved adapter keys, control transport, model protocols,
     # capability keys) before projecting it into the stable V1 bundle shape.
@@ -344,17 +364,11 @@ def build_runtime_bundle(source_dir: Path | None = None) -> BuiltRuntimeBundle:
     adapters: dict[str, dict[str, Any]] = {}
     for adapter_key, metadata in source_adapters.items():
         if not isinstance(metadata, dict):
-            raise RuntimeError(
-                f"Runtime source Adapter {adapter_key!r} is not an object"
-            )
+            raise RuntimeError(f"Runtime source Adapter {adapter_key!r} is not an object")
         nested = metadata.get("adapter")
-        adapter_version = (
-            str(nested.get("version")) if isinstance(nested, Mapping) else ""
-        )
+        adapter_version = str(nested.get("version")) if isinstance(nested, Mapping) else ""
         if not adapter_version:
-            raise RuntimeError(
-                f"Runtime source Adapter {adapter_key!r} has no adapter.version"
-            )
+            raise RuntimeError(f"Runtime source Adapter {adapter_key!r} has no adapter.version")
         capabilities = metadata.get("capabilities")
         if capabilities is not None:
             validate_adapter_capabilities(adapter_key, capabilities)
@@ -443,19 +457,54 @@ async def get_or_create_runtime_bundle_v2(
     db: AsyncSession,
     *,
     source_dir: Path | None = None,
+    cli_artifact_manifest_path: Path | None = None,
 ) -> WorkerRuntimeBundle:
-    """Build/bind a manifest-only V2 bundle for V2-contract tasks (plan §4.3).
+    """Build and persist an immutable V2 runtime payload during Task binding.
 
-    The V2 bundle has no code archive: ``bundle_bytes`` is empty and the
-    authoritative content is the frozen manifest itself, digest-addressed by
-    the recursive files digest. The worker materializes its runtime from the
-    mounted kit; the bundle supplies contract identity + adapter digests.
+    The repository manifest is a *template*, not execution truth.  We replace
+    its ``files`` with the allowlisted source bytes while binding, stamp all
+    digests, and persist the resulting deterministic archive.  Execution never
+    reads the current checkout again.
     """
     root = (source_dir or default_runtime_source_dir()).resolve()
-    harness_manifest = json.loads(
-        (root / "deploy/worker-entrypoint/harness/manifest.json").read_bytes()
+    source_files = _controlled_source_files(root)
+    source_by_name = dict(source_files)
+    manifest_source_name = "deploy/worker-entrypoint/harness/manifest.json"
+    harness_manifest = json.loads(source_by_name[manifest_source_name])
+    artifact_path = cli_artifact_manifest_path
+    if artifact_path is None:
+        configured_artifact_path = os.getenv(CLI_ARTIFACT_MANIFEST_ENV)
+        artifact_path = Path(configured_artifact_path) if configured_artifact_path else None
+    frozen_manifest = _freeze_cli_artifact_identities(
+        harness_manifest,
+        cli_artifact_manifest_path=artifact_path,
     )
-    built = build_runtime_bundle_v2(harness_manifest)
+    # The stamped source manifest is itself a controlled Runtime Bundle file.
+    # Replacing its template bytes before the file inventory is calculated
+    # makes artifact version/SHA changes alter the Bundle and every Adapter
+    # digest instead of only changing non-addressed metadata.
+    stamped_manifest_source = json.dumps(
+        frozen_manifest,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    source_files = [
+        (name, stamped_manifest_source if name == manifest_source_name else payload)
+        for name, payload in source_files
+    ]
+    frozen_manifest["files"] = [
+        {
+            "path": _archive_name(name).removeprefix(f"{RUNTIME_ARCHIVE_ROOT}/"),
+            "sha256": _sha256(payload),
+            "size": len(payload),
+        }
+        for name, payload in source_files
+    ]
+    built = build_runtime_bundle_v2(frozen_manifest)
+    archive_bytes = _build_v2_runtime_archive(built.manifest, source_files)
+    archive_sha256 = _sha256(archive_bytes)
+    stored_manifest = {**built.manifest, "archive_sha256": archive_sha256}
     existing = (
         await db.execute(
             select(WorkerRuntimeBundle).where(WorkerRuntimeBundle.digest == built.digest)
@@ -466,11 +515,11 @@ async def get_or_create_runtime_bundle_v2(
 
     created = WorkerRuntimeBundle(
         digest=built.digest,
-        bundle_bytes=b"",
+        bundle_bytes=archive_bytes,
         contract_version=built.contract_version,
         orchestration_version=ORCHESTRATION_VERSION,
-        manifest=built.manifest,
-        size_bytes=0,
+        manifest=stored_manifest,
+        size_bytes=len(archive_bytes),
     )
     try:
         async with db.begin_nested():
@@ -480,11 +529,77 @@ async def get_or_create_runtime_bundle_v2(
     except IntegrityError:
         return (
             await db.execute(
-                select(WorkerRuntimeBundle).where(
-                    WorkerRuntimeBundle.digest == built.digest
-                )
+                select(WorkerRuntimeBundle).where(WorkerRuntimeBundle.digest == built.digest)
             )
         ).scalar_one()
+
+
+def _freeze_cli_artifact_identities(
+    manifest: Mapping[str, Any], *, cli_artifact_manifest_path: Path | None
+) -> dict[str, Any]:
+    """Stamp and validate the four release CLI identities before Bundle bind.
+
+    ``deploy/worker-entrypoint/harness/manifest.json`` is a source template and
+    deliberately carries placeholders.  A release exports the immutable
+    ``codify.worker.cli-artifacts/v1`` document from its Worker image and points
+    ``CODIFY_WORKER_CLI_ARTIFACT_MANIFEST`` at that file.  Already-stamped
+    sources remain supported for hermetic builds/tests.  Placeholder, missing,
+    mismatched, or malformed identities fail closed.
+    """
+    frozen = deepcopy(dict(manifest))
+    adapters = frozen.get("adapters")
+    if not isinstance(adapters, dict) or not adapters:
+        raise RuntimeError("Runtime source has no Adapter declarations")
+
+    release_artifacts: Mapping[str, Any] | None = None
+    if cli_artifact_manifest_path is not None:
+        try:
+            artifact_document = json.loads(cli_artifact_manifest_path.read_bytes())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError("Worker CLI artifact manifest is unreadable") from exc
+        if artifact_document.get("schema") != "codify.worker.cli-artifacts/v1":
+            raise RuntimeError("Worker CLI artifact manifest has an unsupported schema")
+        platform = artifact_document.get("platform")
+        if not isinstance(platform, str) or not platform.startswith("linux/"):
+            raise RuntimeError("Worker CLI artifact manifest has an invalid platform")
+        release_artifacts = artifact_document.get("artifacts")
+        if not isinstance(release_artifacts, Mapping):
+            raise RuntimeError("Worker CLI artifact manifest has no artifacts")
+
+    expected_keys = set(adapters)
+    if release_artifacts is not None and set(release_artifacts) != expected_keys:
+        raise RuntimeError("Worker CLI artifact manifest must identify every Runtime Adapter")
+
+    for key, adapter in adapters.items():
+        if not isinstance(adapter, dict):
+            raise RuntimeError(f"Runtime source Adapter {key!r} is not an object")
+        source = adapter.get("source")
+        if not isinstance(source, dict):
+            raise RuntimeError(f"Runtime source Adapter {key!r} has no source identity")
+        pinned_version = source.get("artifact_version")
+        if not isinstance(pinned_version, str) or not pinned_version:
+            raise RuntimeError(f"Runtime source Adapter {key!r} has no artifact version")
+        if release_artifacts is not None:
+            released = release_artifacts.get(key)
+            if not isinstance(released, Mapping):
+                raise RuntimeError(f"Worker CLI artifact identity is missing for {key!r}")
+            if released.get("version") != pinned_version:
+                raise RuntimeError(
+                    f"Worker CLI artifact version mismatch for {key!r}: "
+                    f"Runtime={pinned_version!r}, image={released.get('version')!r}"
+                )
+            source["artifact_sha256"] = released.get("sha256")
+        digest = source.get("artifact_sha256")
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+        ):
+            raise RuntimeError(
+                f"Runtime source Adapter {key!r} has no frozen artifact SHA-256; "
+                f"set {CLI_ARTIFACT_MANIFEST_ENV} to the release image manifest"
+            )
+    return frozen
 
 
 def v2_launcher_manifest_bytes(bundle: WorkerRuntimeBundle) -> bytes:
@@ -497,6 +612,9 @@ def v2_launcher_manifest_bytes(bundle: WorkerRuntimeBundle) -> bytes:
     comparison matches.
     """
     launcher_manifest = dict(bundle.manifest)
+    # Archive checksum is DB transport integrity metadata.  Including it in the
+    # embedded manifest would create a self-referential archive hash.
+    launcher_manifest.pop("archive_sha256", None)
     flat_adapters: dict[str, Any] = {}
     for key, meta in (bundle.manifest.get("adapters") or {}).items():
         entry = dict(meta) if isinstance(meta, dict) else {}
@@ -521,26 +639,17 @@ def build_v2_runtime_materialization_manifest_bytes(
     ``CODIFY_RUNTIME_MANIFEST_DIGEST`` must hash these bytes so the kit
     launcher's fileDigest comparison matches what the container receives.
     """
-    root = (source_dir or default_runtime_source_dir()).resolve()
-    source_files = _controlled_source_files(root)
-    manifest = json.loads(v2_launcher_manifest_bytes(bundle))
-    manifest["files"] = [
-        {
-            "path": _archive_name(name).removeprefix(f"{RUNTIME_ARCHIVE_ROOT}/"),
-            "sha256": _sha256(payload),
-            "size": len(payload),
-        }
-        for name, payload in source_files
-    ]
-    return json.dumps(
-        manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode()
+    # ``source_dir`` remains accepted for V1-compatible callers but is
+    # intentionally ignored: a bound V2 Task must not be influenced by a newer
+    # checkout.  Return the exact launcher manifest bytes embedded in its
+    # persisted archive.
+    del source_dir
+    return _v2_archive_manifest_bytes(bundle)
 
 
 def _controlled_source_files(root: Path) -> list[tuple[str, bytes]]:
     return [
-        (path.relative_to(root).as_posix(), path.read_bytes())
-        for path in _controlled_paths(root)
+        (path.relative_to(root).as_posix(), path.read_bytes()) for path in _controlled_paths(root)
     ]
 
 
@@ -556,18 +665,25 @@ def build_v2_runtime_materialization_archive(
     (contract/event schema, flattened adapter digests) that the digest env
     vars are computed from.
     """
-    root = (source_dir or default_runtime_source_dir()).resolve()
-    source_files = _controlled_source_files(root)
-    launcher_manifest = build_v2_runtime_materialization_manifest_bytes(
-        bundle, source_dir=root
+    # Do not reconstruct from source_dir.  This payload was frozen at binding
+    # and verified on load; returning it directly preserves retry semantics.
+    del source_dir
+    verify_bundle_bytes(bundle)
+    return bundle.bundle_bytes
+
+
+def _build_v2_runtime_archive(
+    frozen_manifest: Mapping[str, Any], source_files: Iterable[tuple[str, bytes]]
+) -> bytes:
+    """Create a deterministic V2 archive from already-frozen source bytes."""
+    launcher_manifest = v2_launcher_manifest_bytes(
+        type("FrozenBundle", (), {"manifest": frozen_manifest})()
     )
 
     files: list[tuple[str, bytes]] = [
         ("codify-runtime/orchestration/manifest.json", launcher_manifest)
     ]
-    files.extend(
-        (_archive_name(name), payload) for name, payload in source_files
-    )
+    files.extend((_archive_name(name), payload) for name, payload in source_files)
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w", format=tarfile.PAX_FORMAT) as archive:
         seen_dirs: set[str] = set()
@@ -587,6 +703,18 @@ def build_v2_runtime_materialization_archive(
             _add_bytes(archive, name, payload, mode=mode)
     return buffer.getvalue()
 
+
+def _v2_archive_manifest_bytes(bundle: WorkerRuntimeBundle) -> bytes:
+    """Read the embedded launcher manifest without consulting runtime source."""
+    try:
+        with tarfile.open(fileobj=io.BytesIO(bundle.bundle_bytes), mode="r:") as archive:
+            member = archive.getmember(str(RUNTIME_ARCHIVE_ROOT / "manifest.json"))
+            extracted = archive.extractfile(member)
+            if extracted is None:
+                raise RuntimeError("V2 Runtime Bundle manifest cannot be read")
+            return extracted.read()
+    except (KeyError, tarfile.TarError) as exc:
+        raise RuntimeError("V2 Runtime Bundle archive is malformed") from exc
 
 
 async def bind_runtime_bundle(
@@ -622,9 +750,7 @@ async def bind_runtime_bundle(
     return bundle
 
 
-def _manifest_declares_adapter(
-    source_dir: Path | None, harness_key: str
-) -> bool:
+def _manifest_declares_adapter(source_dir: Path | None, harness_key: str) -> bool:
     """True when the frozen V2 runtime-manifest declares ``harness_key``."""
     root = (source_dir or default_runtime_source_dir()).resolve()
     try:
@@ -638,6 +764,9 @@ def _manifest_declares_adapter(
 
 
 def verify_bundle_bytes(bundle: WorkerRuntimeBundle) -> None:
+    if getattr(bundle, "contract_version", None) == HARNESS_CONTRACT_VERSION_V2:
+        _verify_v2_bundle_bytes(bundle)
+        return
     payload = bundle.bundle_bytes
     actual = _sha256(payload)
     if actual != bundle.digest:
@@ -698,15 +827,72 @@ def verify_bundle_bytes(bundle: WorkerRuntimeBundle) -> None:
         raise RuntimeError("Runtime Bundle archive is malformed") from exc
 
 
+def _verify_v2_bundle_bytes(bundle: WorkerRuntimeBundle) -> None:
+    """Verify that V2's DB truth, launcher manifest, and payload are one set."""
+    payload = bundle.bundle_bytes
+    if not payload:
+        raise RuntimeError("V2 Runtime Bundle has no persisted payload and is not executable")
+    if bundle.size_bytes != len(payload):
+        raise RuntimeError("V2 Runtime Bundle size does not match the database binding")
+    expected_archive_sha = bundle.manifest.get("archive_sha256")
+    if not isinstance(expected_archive_sha, str) or _sha256(payload) != expected_archive_sha:
+        raise RuntimeError("V2 Runtime Bundle archive digest mismatch")
+    files = bundle.manifest.get("files")
+    if not isinstance(files, list) or not files:
+        raise RuntimeError("V2 Runtime Bundle has no frozen files and is not executable")
+    expected_digest = bundle_manifest_digest_from_files(files)
+    if bundle.digest != expected_digest or bundle.manifest.get("bundle_digest") != bundle.digest:
+        raise RuntimeError("V2 Runtime Bundle manifest digest does not match the database binding")
+    try:
+        with tarfile.open(fileobj=io.BytesIO(payload), mode="r:") as archive:
+            members = archive.getmembers()
+            file_members = [member for member in members if member.isfile()]
+            names = [member.name for member in file_members]
+            if len(names) != len(set(names)):
+                raise RuntimeError("V2 Runtime Bundle contains duplicate archive paths")
+            for member in members:
+                path = PurePosixPath(member.name)
+                if (
+                    path.is_absolute()
+                    or ".." in path.parts
+                    or not (member.isfile() or member.isdir())
+                ):
+                    raise RuntimeError(f"Unsafe V2 Runtime Bundle member: {member.name}")
+            manifest_name = str(RUNTIME_ARCHIVE_ROOT / "manifest.json")
+            launcher_bytes = _v2_archive_manifest_bytes(bundle)
+            launcher = json.loads(launcher_bytes)
+            expected_launcher = json.loads(v2_launcher_manifest_bytes(bundle))
+            if launcher != expected_launcher:
+                raise RuntimeError("V2 Runtime Bundle launcher manifest is not frozen truth")
+            expected_names = {manifest_name}
+            for file_entry in files:
+                relative = PurePosixPath(str(file_entry.get("path") or ""))
+                if relative.is_absolute() or ".." in relative.parts or not relative.parts:
+                    raise RuntimeError("V2 Runtime Bundle manifest contains an unsafe file path")
+                name = str(RUNTIME_ARCHIVE_ROOT / relative)
+                expected_names.add(name)
+                member = archive.getmember(name)
+                extracted = archive.extractfile(member)
+                if extracted is None:
+                    raise RuntimeError(f"V2 Runtime Bundle file cannot be read: {relative}")
+                file_bytes = extracted.read()
+                if len(file_bytes) != file_entry.get("size"):
+                    raise RuntimeError(f"V2 Runtime Bundle file size mismatch: {relative}")
+                if _sha256(file_bytes) != file_entry.get("sha256"):
+                    raise RuntimeError(f"V2 Runtime Bundle file digest mismatch: {relative}")
+            if set(names) != expected_names:
+                raise RuntimeError("V2 Runtime Bundle archive and manifest file sets differ")
+    except (KeyError, json.JSONDecodeError, tarfile.TarError) as exc:
+        raise RuntimeError("V2 Runtime Bundle archive is malformed") from exc
+
+
 async def load_bound_runtime_bundle(
     db: AsyncSession,
     task: Task,
 ) -> WorkerRuntimeBundle:
     """Load immutable execution truth; historical unbound tasks are read-only."""
     if task.runtime_bundle_id is None:
-        raise RuntimeError(
-            "Task has no immutable Runtime Bundle; historical Tasks are read-only"
-        )
+        raise RuntimeError("Task has no immutable Runtime Bundle; historical Tasks are read-only")
     bundle = (
         await db.execute(
             select(WorkerRuntimeBundle)
@@ -717,14 +903,7 @@ async def load_bound_runtime_bundle(
     if bundle is None:
         raise RuntimeError("Task Runtime Bundle binding is missing")
     if bundle.contract_version == HARNESS_CONTRACT_VERSION_V2:
-        # Manifest-only V2 bundle: verify the recursive files digest against
-        # the stored manifest instead of unpacking a code archive.
-        expected = bundle_manifest_digest_from_files(bundle.manifest.get("files") or [])
-        if expected != bundle.digest or bundle.manifest.get("bundle_digest") != bundle.digest:
-            raise RuntimeError(
-                "V2 Runtime Bundle manifest digest mismatch: "
-                f"expected {bundle.digest}, manifest says {expected}"
-            )
+        _verify_v2_bundle_bytes(bundle)
         return bundle
     verify_bundle_bytes(bundle)
     return bundle
