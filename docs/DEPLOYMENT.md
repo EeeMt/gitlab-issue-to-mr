@@ -8,13 +8,15 @@
 
 - `postgres`：持久化任务、配置、用户、会话和审计数据
 - `backend`：HTTP API 与 Dashboard 后端
-- `scheduler`：任务调度、崩溃恢复、自动迁移
+- `scheduler`：任务调度与崩溃恢复
 - `nginx`：前端静态资源与反向代理入口
 
 当前 compose 约定：
 
 - `backend` 与 `scheduler` 共用 `codify-backend:latest`
-- `backend` 与 `scheduler` 均使用 `AUTO_MIGRATE=true`（启动时自动执行迁移）
+- `backend` 与 `scheduler` 均固定 `AUTO_MIGRATE=false`
+- migration 只由维护窗口内一次性的 `migrate` profile 执行
+- `HARNESS_EXECUTION_MODE` 必须显式设置为 `dual_canary` 或 `v2_only`
 - PostgreSQL 数据挂载在 Docker volume `postgres_data`
 
 ## 2. 部署前准备
@@ -55,6 +57,7 @@
 - `TASK_TIMEOUT`
 - `SCHEDULER_INTERVAL`
 - `DEFAULT_TARGET_BRANCH`
+- `HARNESS_EXECUTION_MODE`（验证阶段使用 `dual_canary`；硬切验收通过后才使用 `v2_only`）
 
 #### 可选认证配置
 
@@ -104,25 +107,41 @@ cp .env.test .env.production
 
 如果这两个值不稳定或被重置，会影响会话和配置解密。
 
-### 4.2 构建并启动服务
+### 4.2 唯一 migration owner
+
+先备份数据库并确认要执行的 Alembic revision，不允许 Backend、Scheduler 或两个副本竞争执行迁移，
+也不要在维护窗口使用会漂移的 `head`：
+
+```bash
+cd deploy
+export HARNESS_EXECUTION_MODE=dual_canary
+export MIGRATION_TARGET=<reviewed_revision>
+docker compose up -d postgres
+docker compose --profile maintenance run --rm migrate
+```
+
+物理 V2 schema 变更是 roll-forward-only。迁移后如果启动验证失败，应部署已评审的向前修复 revision，
+不得重新启动依赖旧物理 schema 的 V1 Backend/Scheduler。
+
+### 4.3 构建并启动服务
 
 在仓库根目录执行：
 
 ```bash
 cd deploy
-docker-compose up -d --build
+HARNESS_EXECUTION_MODE=dual_canary docker compose up -d --build backend scheduler nginx
 ```
 
 启动后建议检查：
 
 ```bash
-docker-compose ps
-docker-compose logs --tail 100 backend
-docker-compose logs --tail 100 scheduler
-docker-compose logs --tail 100 nginx
+docker compose ps
+docker compose logs --tail 100 backend
+docker compose logs --tail 100 scheduler
+docker compose logs --tail 100 nginx
 ```
 
-### 4.3 健康检查
+### 4.4 健康检查
 
 默认端口：
 
@@ -133,6 +152,7 @@ docker-compose logs --tail 100 nginx
 
 ```bash
 curl -f http://<host>:8000/health
+deploy/scripts/preflight-execution-mode.sh http://<host>:8000/health http://<host>:8001/health
 ```
 
 再访问前端首页确认 Dashboard 可打开。
