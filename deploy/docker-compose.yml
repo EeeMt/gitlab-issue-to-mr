@@ -33,10 +33,10 @@ services:
       - DOCKER_TLS_CERT=
       - DOCKER_TLS_KEY=
       - WORKER_WORKSPACE_HOST_PATH=${WORKER_WORKSPACE_HOST_PATH:-/opt/codify-workspaces}
-      - AUTO_MIGRATE=true
+      - AUTO_MIGRATE=false
       # Plan §4.8: explicit harness execution mode; preflight compares the
       # values reported by the Backend and Scheduler /health endpoints.
-      - HARNESS_EXECUTION_MODE=${HARNESS_EXECUTION_MODE:-dual_canary}
+      - HARNESS_EXECUTION_MODE=${HARNESS_EXECUTION_MODE:?set HARNESS_EXECUTION_MODE to dual_canary or v2_only}
       - COOKIE_SECURE=false
       # Custom CA certificate — mount from local file (not baked into image).
       # Place deploy/ca.crt on the Docker host; see .env.test for CUSTOM_CA_BUNDLE.
@@ -86,9 +86,9 @@ services:
       - DOCKER_TLS_CERT=
       - DOCKER_TLS_KEY=
       - WORKER_WORKSPACE_HOST_PATH=${WORKER_WORKSPACE_HOST_PATH:-/opt/codify-workspaces}
-      - AUTO_MIGRATE=true
+      - AUTO_MIGRATE=false
       # Must match the Backend value; the preflight script compares both.
-      - HARNESS_EXECUTION_MODE=${HARNESS_EXECUTION_MODE:-dual_canary}
+      - HARNESS_EXECUTION_MODE=${HARNESS_EXECUTION_MODE:?set HARNESS_EXECUTION_MODE to dual_canary or v2_only}
       # Custom CA certificate is mounted from local file (not baked into image).
       # CUSTOM_CA_BUNDLE tells the scheduler and worker entrypoints where to find it.
       - CUSTOM_CA_BUNDLE=/etc/ssl/certs/custom-ca.crt
@@ -124,6 +124,29 @@ services:
         bind:
           create_host_path: false
     restart: unless-stopped
+    networks:
+      - codify-network
+
+  # Maintenance-window migration owner. Run exactly once with a reviewed
+  # revision, for example:
+  # MIGRATION_TARGET=075_xxx docker compose --profile maintenance run --rm migrate
+  migrate:
+    profiles: ["maintenance"]
+    image: codify-backend:latest
+    env_file:
+      - .env.test
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://codify:codify_password@postgres:5432/codify
+      - AUTO_MIGRATE=false
+    command:
+      - python3
+      - -m
+      - alembic
+      - upgrade
+      - ${MIGRATION_TARGET:?set MIGRATION_TARGET to the reviewed Alembic revision}
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - codify-network
 

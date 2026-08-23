@@ -31,7 +31,22 @@ def _stub_runtime_bundle_binding():
     async def bind(_db, task, *, source_task=None, harness_key=None):
         source_id = getattr(source_task, "runtime_bundle_id", None) if source_task else None
         task.runtime_bundle_id = source_id if isinstance(source_id, int) else 9001
-        return SimpleNamespace(id=task.runtime_bundle_id, digest="d" * 64)
+        key = harness_key or "claude"
+        bundle = SimpleNamespace(
+            id=task.runtime_bundle_id,
+            digest="d" * 64,
+            contract_version="codify.worker.harness/v1",
+            orchestration_version="1.0.0",
+            manifest={
+                "adapters": {
+                    key: {
+                        "version": "1.0.0",
+                        "digest": "a" * 64,
+                    }
+                }
+            },
+        )
+        return bundle
 
     with patch("app.api.tasks.bind_runtime_bundle", new=AsyncMock(side_effect=bind)):
         yield
@@ -519,9 +534,7 @@ class TestEndpointProtocolLegacyFallback(unittest.TestCase):
             patch.object(tr, "skill_snapshots_from_task_snapshot", return_value=[]),
         ):
             body = tr.serialize_task(MagicMock())
-        self.assertEqual(
-            body["harness_snapshot"]["endpoint_protocol"], "anthropic_messages"
-        )
+        self.assertEqual(body["harness_snapshot"]["endpoint_protocol"], "anthropic_messages")
 
     def test_serialize_new_snapshot_uses_model_protocol_key(self):
         from app.api import task_responses as tr
@@ -537,8 +550,31 @@ class TestEndpointProtocolLegacyFallback(unittest.TestCase):
             patch.object(tr, "skill_snapshots_from_task_snapshot", return_value=[]),
         ):
             body = tr.serialize_task(MagicMock())
+        self.assertEqual(body["harness_snapshot"]["endpoint_protocol"], "openai_responses")
+
+    def test_serialize_marks_v1_task_read_only_under_v2_only(self):
+        from app.api import task_responses as tr
+
+        snapshot = _make_worker_snapshot()
+        with (
+            patch.object(tr, "_serialize_task_base", return_value={}),
+            patch.object(tr, "loaded_task_relationship", return_value=snapshot),
+            patch.object(tr, "skill_snapshots_from_task_snapshot", return_value=[]),
+            patch.object(
+                tr,
+                "get_effective_settings",
+                return_value=MagicMock(harness_execution_mode="v2_only"),
+            ),
+        ):
+            body = tr.serialize_task(MagicMock())
         self.assertEqual(
-            body["harness_snapshot"]["endpoint_protocol"], "openai_responses"
+            body["execution_contract"],
+            {
+                "contract_version": "codify.worker.harness/v1",
+                "legacy": True,
+                "read_only": True,
+                "reason": "legacy_contract_not_executable",
+            },
         )
 
 
@@ -589,6 +625,11 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     task.worker_profile_snapshot = _make_worker_snapshot(
         task_id=task_id,
         worker_profile_id=task.worker_profile_id,
+    )
+    task.runtime_bundle = MagicMock(
+        contract_version="codify.worker.harness/v1",
+        digest="a" * 64,
+        manifest={"adapters": {"claude": {}}},
     )
     task.runtime_bundle_id = 41
     task.provider_runtime_snapshot = {
@@ -650,6 +691,9 @@ def _make_worker_snapshot(task_id=101, worker_profile_id=12):
         default_execute_run_instruction_template="Execute {{user_prompt}}",
         default_plan_run_instruction_template="Plan {{user_prompt}}",
         ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+        harness_key="claude",
+        runtime_contract_version="codify.worker.harness/v1",
+        runtime_bundle_digest="a" * 64,
         created_at=datetime(2024, 1, 1, 12, 0, 0),
     )
 
@@ -1003,7 +1047,15 @@ class RetryTaskAPITests(unittest.TestCase):
 
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(
-            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue, _make_scalars_all_result([task]), _make_rows_all_result([]), _make_scalars_all_result([]), MagicMock()]
+            side_effect=[
+                mock_result_task,
+                mock_result_no_retry,
+                mock_result_issue,
+                _make_scalars_all_result([task]),
+                _make_rows_all_result([]),
+                _make_scalars_all_result([]),
+                MagicMock(),
+            ]
         )
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
@@ -1058,7 +1110,15 @@ class RetryTaskAPITests(unittest.TestCase):
         )
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(
-            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue, _make_scalars_all_result([task]), _make_rows_all_result([]), _make_scalars_all_result([]), MagicMock()]
+            side_effect=[
+                mock_result_task,
+                mock_result_no_retry,
+                mock_result_issue,
+                _make_scalars_all_result([task]),
+                _make_rows_all_result([]),
+                _make_scalars_all_result([]),
+                MagicMock(),
+            ]
         )
         mock_db.add = MagicMock()
 
@@ -1175,7 +1235,15 @@ class RetryTaskAPITests(unittest.TestCase):
 
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(
-            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue, _make_scalars_all_result([task]), _make_rows_all_result([]), _make_scalars_all_result([]), MagicMock()]
+            side_effect=[
+                mock_result_task,
+                mock_result_no_retry,
+                mock_result_issue,
+                _make_scalars_all_result([task]),
+                _make_rows_all_result([]),
+                _make_scalars_all_result([]),
+                MagicMock(),
+            ]
         )
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
@@ -1246,7 +1314,15 @@ class RetryTaskAPITests(unittest.TestCase):
 
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(
-            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue, _make_scalars_all_result([task]), _make_rows_all_result([]), _make_scalars_all_result([]), MagicMock()]
+            side_effect=[
+                mock_result_task,
+                mock_result_no_retry,
+                mock_result_issue,
+                _make_scalars_all_result([task]),
+                _make_rows_all_result([]),
+                _make_scalars_all_result([]),
+                MagicMock(),
+            ]
         )
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
@@ -1296,7 +1372,15 @@ class RetryTaskAPITests(unittest.TestCase):
 
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(
-            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue, _make_scalars_all_result([task]), _make_rows_all_result([]), _make_scalars_all_result([]), MagicMock()]
+            side_effect=[
+                mock_result_task,
+                mock_result_no_retry,
+                mock_result_issue,
+                _make_scalars_all_result([task]),
+                _make_rows_all_result([]),
+                _make_scalars_all_result([]),
+                MagicMock(),
+            ]
         )
         mock_db.add = MagicMock()
         mock_db.flush = AsyncMock()
@@ -1350,7 +1434,15 @@ class RetryTaskAPITests(unittest.TestCase):
 
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(
-            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue, _make_scalars_all_result([task]), _make_rows_all_result([]), _make_scalars_all_result([]), MagicMock()]
+            side_effect=[
+                mock_result_task,
+                mock_result_no_retry,
+                mock_result_issue,
+                _make_scalars_all_result([task]),
+                _make_rows_all_result([]),
+                _make_scalars_all_result([]),
+                MagicMock(),
+            ]
         )
         mock_db.add = MagicMock()
         mock_db.flush = AsyncMock()
@@ -1406,7 +1498,15 @@ class RetryTaskAPITests(unittest.TestCase):
 
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(
-            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue, _make_scalars_all_result([task]), _make_rows_all_result([]), _make_scalars_all_result([]), MagicMock()]
+            side_effect=[
+                mock_result_task,
+                mock_result_no_retry,
+                mock_result_issue,
+                _make_scalars_all_result([task]),
+                _make_rows_all_result([]),
+                _make_scalars_all_result([]),
+                MagicMock(),
+            ]
         )
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
@@ -1775,6 +1875,9 @@ class CreateTaskAPITests(unittest.TestCase):
 
         client = TestClient(app, raise_server_exceptions=False)
         with (
+            patch(
+                "app.api.task_creation_service.require_task_executable_contract"
+            ) as contract_guard,
             patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
             patch(
                 "app.api.tasks.resolve_worker_profile_for_issue",
@@ -1802,6 +1905,7 @@ class CreateTaskAPITests(unittest.TestCase):
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 200)
+        contract_guard.assert_called_once()
         data = response.json()
         self.assertIn("id", data)
         self.assertEqual(data["project_id"], 1)
@@ -2084,6 +2188,71 @@ class CancelTaskAdditionalTests(unittest.TestCase):
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 400)
+
+    def test_v2_only_rejects_legacy_pending_cancel_but_running_cancel_is_safe_convergence(self):
+        """Only RUNNING legacy cancellation remains available after the hard cut.
+
+        A PENDING V1 row is a read-only audit record in v2_only.  Conversely,
+        cancelling a RUNNING V1 row records shutdown intent for an already
+        active container; it must remain possible so recovery can converge it
+        without starting any new legacy execution.
+        """
+        from app.core.worker_docker_targets import TaskContainerNotFoundError
+
+        pending = _make_serializable_task(task_status=TaskStatus.PENDING, task_id=51)
+        pending.issue_id = 33
+        pending.runtime_bundle.contract_version = "codify.worker.harness/v1"
+        pending.worker_profile_snapshot.runtime_contract_version = "codify.worker.harness/v1"
+        pending.worker_profile_snapshot.runtime_bundle_digest = pending.runtime_bundle.digest
+        client, app = _make_app_client_with_db(
+            MagicMock(
+                execute=AsyncMock(
+                    return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=pending))
+                )
+            )
+        )
+        with (
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch(
+                "app.api.task_operations.get_effective_settings",
+                return_value=MagicMock(harness_execution_mode="v2_only"),
+            ),
+            patch(
+                "app.api.task_action_routes.get_effective_settings",
+                return_value=MagicMock(harness_execution_mode="v2_only"),
+            ),
+        ):
+            response = client.post("/api/tasks/51/cancel")
+        app.dependency_overrides.clear()
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"]["code"], "legacy_contract_not_executable")
+        self.assertEqual(pending.status, TaskStatus.PENDING)
+
+        running = _make_serializable_task(task_status=TaskStatus.RUNNING, task_id=52)
+        running.issue_id = 33
+        running.container_id = "legacy-running-52"
+        running.cancel_requested_at = None
+        running.raw_logs_finalized_at = None
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = running
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+        client, app = _make_app_client_with_db(mock_db)
+        with (
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch(
+                "app.api.task_action_routes.find_task_container",
+                new=AsyncMock(side_effect=TaskContainerNotFoundError("gone")),
+            ),
+            patch("app.api.task_action_routes.release_issue_execution_lock", new=AsyncMock()),
+        ):
+            response = client.post("/api/tasks/52/cancel")
+        app.dependency_overrides.clear()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(running.status, TaskStatus.RUNNING)
+        self.assertIsNotNone(running.cancel_requested_at)
 
 
 # ---------------------------------------------------------------------------
@@ -2731,9 +2900,7 @@ class RetryTaskFreeformTests(unittest.TestCase):
         created_task = _added_task(mock_db)
         self.assertEqual(created_task.task_mode, "freeform")
         self.assertIs(created_task.require_changes, False)
-        self.assertEqual(
-            created_task.run_instruction_template, FREEFORM_RUN_INSTRUCTION_TEMPLATE
-        )
+        self.assertEqual(created_task.run_instruction_template, FREEFORM_RUN_INSTRUCTION_TEMPLATE)
         self.assertEqual(created_task.rendered_prompt, "Freeform prompt snapshot")
 
     def test_retry_freeform_does_not_reread_current_profile_execute_template(self):
@@ -2753,9 +2920,7 @@ class RetryTaskFreeformTests(unittest.TestCase):
         )
 
         def _fail_if_called(*args, **kwargs):
-            raise AssertionError(
-                "Retry must not re-read the current Profile execute template"
-            )
+            raise AssertionError("Retry must not re-read the current Profile execute template")
 
         response, mock_db = self._post_retry(
             task,
@@ -2769,9 +2934,7 @@ class RetryTaskFreeformTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         created_task = _added_task(mock_db)
         self.assertEqual(created_task.task_mode, "freeform")
-        self.assertEqual(
-            created_task.run_instruction_template, FREEFORM_RUN_INSTRUCTION_TEMPLATE
-        )
+        self.assertEqual(created_task.run_instruction_template, FREEFORM_RUN_INSTRUCTION_TEMPLATE)
         self.assertEqual(created_task.rendered_prompt, "Freeform prompt snapshot")
 
     def test_retry_execute_preserves_mode_and_template(self):
@@ -2831,9 +2994,7 @@ class RetryTaskFreeformTests(unittest.TestCase):
         created_task = _added_task(mock_db)
         self.assertEqual(created_task.task_mode, "freeform")
         self.assertIs(created_task.require_changes, False)
-        self.assertEqual(
-            created_task.run_instruction_template, FREEFORM_RUN_INSTRUCTION_TEMPLATE
-        )
+        self.assertEqual(created_task.run_instruction_template, FREEFORM_RUN_INSTRUCTION_TEMPLATE)
         self.assertEqual(created_task.rendered_prompt, "Must change Test prompt")
 
 

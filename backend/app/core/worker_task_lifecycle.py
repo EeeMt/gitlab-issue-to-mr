@@ -17,8 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.ci_failure_logs import append_ci_failure_log
 from app.core.harness_attempts import create_task_attempt
 from app.core.harness_execution_policy import (
-    is_v2_only,
-    require_executable_contract_v2,
+    require_task_executable_contract,
 )
 from app.core.harness_sessions import (
     record_task_output_session,
@@ -68,7 +67,7 @@ from app.core.worker_task_outcomes import (
 )
 from app.core.worker_workspace import build_issue_workspace_paths
 from app.database import AsyncSessionLocal
-from app.models import CIFailureRun, Issue, Task, TaskLog, TaskStatus
+from app.models import CIFailureRun, Issue, Task, TaskHarnessAttempt, TaskLog, TaskStatus
 
 logger = logging.getLogger(__name__)
 _CONTAINER_RUNTIME_JSON = "/tmp/codify-runtime/runtime.json"
@@ -343,14 +342,14 @@ async def create_execute_container(
         control_supported=control_supported,
     )
 
-    # Execution contract gate (phase1-design §2.3): under ``v2_only`` the worker
-    # refuses to start a legacy V1 container and fails the task closed with the
-    # unified ``legacy_contract_not_executable`` code. The caller (run_execute_task)
-    # catches this ValueError and terminalizes the task. Settings objects that
-    # predate the field (or are lightweight test doubles) default to dual_canary.
-    execution_mode = getattr(settings, "harness_execution_mode", "dual_canary")
-    if is_v2_only(execution_mode):
-        require_executable_contract_v2(attempt, runtime_bundle)
+    # Always validate the immutable Task snapshot, bound Bundle and attempt;
+    # dual_canary is not a bypass for mismatched frozen execution identity.
+    require_task_executable_contract(
+        task,
+        runtime_bundle,
+        settings.harness_execution_mode,
+        attempt=attempt,
+    )
 
     if worker_custom_scripts_configured(settings):
         logger.debug(
@@ -754,6 +753,21 @@ async def prepare_resume_task_context(
         return None
 
     issue = await load_issue_for_task(db, task)
+    runtime_bundle = await load_bound_runtime_bundle(db, task)
+    attempt = (
+        await db.execute(
+            select(TaskHarnessAttempt)
+            .where(TaskHarnessAttempt.task_id == task.id)
+            .order_by(TaskHarnessAttempt.attempt_no.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    require_task_executable_contract(
+        task,
+        runtime_bundle,
+        settings.harness_execution_mode,
+        attempt=attempt,
+    )
     worker_runtime = await load_task_worker_runtime(db, task)
     worker._configure_docker_for_runtime(worker_runtime, settings)
     worker._reset_event_archive_state()

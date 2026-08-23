@@ -24,7 +24,8 @@ services:
       - DOCKER_TLS_CERT=
       - DOCKER_TLS_KEY=
       - WORKER_WORKSPACE_HOST_PATH=${WORKER_WORKSPACE_HOST_PATH:-/opt/codify-workspaces}
-      - AUTO_MIGRATE=true
+      - AUTO_MIGRATE=false
+      - HARNESS_EXECUTION_MODE=${HARNESS_EXECUTION_MODE:?set HARNESS_EXECUTION_MODE to dual_canary or v2_only}
       - COOKIE_SECURE=false
       - CUSTOM_CA_BUNDLE=/etc/ssl/certs/custom-ca.crt
     depends_on:
@@ -70,7 +71,8 @@ services:
       - DOCKER_TLS_CERT=
       - DOCKER_TLS_KEY=
       - WORKER_WORKSPACE_HOST_PATH=${WORKER_WORKSPACE_HOST_PATH:-/opt/codify-workspaces}
-      - AUTO_MIGRATE=true
+      - AUTO_MIGRATE=false
+      - HARNESS_EXECUTION_MODE=${HARNESS_EXECUTION_MODE:?set HARNESS_EXECUTION_MODE to dual_canary or v2_only}
       - CUSTOM_CA_BUNDLE=/etc/ssl/certs/custom-ca.crt
       - WORKER_CA_CERT_HOST_PATH=${WORKER_CA_CERT_HOST_PATH:-}
       - WORKER_VOLUME_MOUNTS=${WORKER_VOLUME_MOUNTS:-}
@@ -98,6 +100,25 @@ services:
         bind:
           create_host_path: false
     restart: unless-stopped
+    networks:
+      - codify-network
+
+  migrate:
+    profiles: ["maintenance"]
+    image: codify-backend:latest
+    env_file:
+      - ./config/.env.offline
+    environment:
+      - AUTO_MIGRATE=false
+    command:
+      - python3
+      - -m
+      - alembic
+      - upgrade
+      - ${MIGRATION_TARGET:?set MIGRATION_TARGET to the reviewed Alembic revision}
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - codify-network
 

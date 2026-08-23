@@ -28,6 +28,30 @@ services:
       timeout: 5s
       retries: 30
 
+  migrate:
+    image: codify-backend:latest
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    command:
+      - python3
+      - -m
+      - alembic
+      - upgrade
+      - ${MIGRATION_TARGET:-075_pi_command_dispatch_journal}
+    env_file:
+      - .env.test
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://codify:codify_password@postgres:5432/codify
+      - AUTO_MIGRATE=false
+      - HARNESS_EXECUTION_MODE=dual_canary
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - codify-e2e-network
+
   backend:
     image: codify-backend:latest
     build:
@@ -44,10 +68,13 @@ services:
       - DOCKER_TLS_CA=
       - DOCKER_TLS_CERT=
       - DOCKER_TLS_KEY=
-      - AUTO_MIGRATE=true
+      - AUTO_MIGRATE=false
+      - HARNESS_EXECUTION_MODE=dual_canary
       - COOKIE_SECURE=false
       - CUSTOM_CA_BUNDLE=/etc/ssl/certs/custom-ca.crt
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
     volumes:
@@ -102,6 +129,7 @@ services:
       - DOCKER_TLS_CERT=
       - DOCKER_TLS_KEY=
       - AUTO_MIGRATE=false
+      - HARNESS_EXECUTION_MODE=dual_canary
       - COOKIE_SECURE=false
       - CUSTOM_CA_BUNDLE=/etc/ssl/certs/custom-ca.crt
       - WORKER_CA_CERT_HOST_PATH=/opt/ca.crt

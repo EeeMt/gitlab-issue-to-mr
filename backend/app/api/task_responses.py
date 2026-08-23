@@ -5,6 +5,8 @@ from typing import Any
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_effective_settings
+from app.core.harness_protocol import HARNESS_CONTRACT_VERSION_V2
 from app.core.skills import skill_snapshots_from_task_snapshot
 from app.core.task_helpers import _serialize_task as _serialize_task_base
 from app.models import Task, TaskWorkerProfileSnapshot, User
@@ -98,6 +100,14 @@ def serialize_task(*args, **kwargs) -> dict:
                 skill_snapshots = skill_snapshots_from_task_snapshot(snapshot)
         except Exception:
             skill_snapshots = skill_snapshots_from_task_snapshot(snapshot)
+    runtime_contract_version = (
+        getattr(snapshot, "runtime_contract_version", None) if snapshot is not None else None
+    )
+    legacy_contract = runtime_contract_version != HARNESS_CONTRACT_VERSION_V2
+    execution_mode = get_effective_settings().harness_execution_mode
+    execution_read_only = legacy_contract and (
+        execution_mode == "v2_only" or runtime_contract_version is None
+    )
     data.update(
         {
             "worker_profile_id": worker_profile_id,
@@ -124,6 +134,14 @@ def serialize_task(*args, **kwargs) -> dict:
                 else "profile"
             ),
             "harness_key": getattr(snapshot, "harness_key", None) if snapshot is not None else None,
+            "execution_contract": {
+                "contract_version": runtime_contract_version,
+                "legacy": legacy_contract,
+                "read_only": execution_read_only,
+                "reason": (
+                    "legacy_contract_not_executable" if execution_read_only else None
+                ),
+            },
             "harness_snapshot": (
                 {
                     "harness_adapter_version": snapshot.harness_adapter_version,

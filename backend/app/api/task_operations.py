@@ -6,6 +6,12 @@ from typing import TYPE_CHECKING, Optional
 
 from fastapi import HTTPException, status
 
+from app.config import get_effective_settings
+from app.core.harness_execution_policy import (
+    ExecutionPolicyError,
+    execution_rejection_detail,
+    require_task_executable_contract,
+)
 from app.core.mattermost_notifications import (
     MATTERMOST_EVENT_TASK_CANCELLED,
     MATTERMOST_EVENT_TASK_EXECUTE_NOW,
@@ -60,6 +66,7 @@ async def get_task_with_access_check(
             selectinload(Task.worker_profile_snapshot).selectinload(
                 TaskWorkerProfileSnapshot.skill_references
             ),
+            selectinload(Task.runtime_bundle),
         )
         .where(Task.id == task_id)
     )
@@ -81,6 +88,25 @@ async def get_task_with_access_check(
         _require_task_operator(task, current_user)
 
     return task
+
+
+def require_task_execution_writer(task: Task, *, action: str) -> None:
+    """Apply the central execution policy before an API mutates runnable state."""
+    try:
+        require_task_executable_contract(
+            task,
+            task.runtime_bundle,
+            get_effective_settings().harness_execution_mode,
+        )
+    except ExecutionPolicyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=execution_rejection_detail(
+                exc,
+                action=action,
+                subject=getattr(task, "id", "?"),
+            ),
+        ) from exc
 
 
 def validate_task_status_for_cancel(task: Task) -> None:
@@ -183,10 +209,14 @@ async def notify_task_cancelled(task: Task) -> None:
     try:
         await notify_task_event(task, MATTERMOST_EVENT_TASK_CANCELLED)
     except Exception as exc:
-        logger.warning("Failed to send Mattermost cancel notification for task %s: %s", task.id, exc)
+        logger.warning(
+            "Failed to send Mattermost cancel notification for task %s: %s", task.id, exc
+        )
 
 
-async def notify_task_retried(task: Task, previous_scheduled_at: datetime | None, scheduled_at: datetime | None) -> None:
+async def notify_task_retried(
+    task: Task, previous_scheduled_at: datetime | None, scheduled_at: datetime | None
+) -> None:
     """Send notification for retried task.
 
     Args:
@@ -224,10 +254,14 @@ async def notify_task_execute_now(task: Task, previous_scheduled_at: datetime | 
             },
         )
     except Exception as exc:
-        logger.warning("Failed to send Mattermost execute-now notification for task %s: %s", task.id, exc)
+        logger.warning(
+            "Failed to send Mattermost execute-now notification for task %s: %s", task.id, exc
+        )
 
 
-async def notify_task_rescheduled(task: Task, previous_scheduled_at: datetime | None, scheduled_at: datetime) -> None:
+async def notify_task_rescheduled(
+    task: Task, previous_scheduled_at: datetime | None, scheduled_at: datetime
+) -> None:
     """Send notification for rescheduled task.
 
     Args:
@@ -245,4 +279,6 @@ async def notify_task_rescheduled(task: Task, previous_scheduled_at: datetime | 
             },
         )
     except Exception as exc:
-        logger.warning("Failed to send Mattermost reschedule notification for task %s: %s", task.id, exc)
+        logger.warning(
+            "Failed to send Mattermost reschedule notification for task %s: %s", task.id, exc
+        )

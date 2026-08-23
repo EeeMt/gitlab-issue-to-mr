@@ -112,7 +112,8 @@ docker-compose up -d
 
 ### 4.4 执行数据库迁移
 
-数据库迁移在服务启动时自动执行（由 `AUTO_MIGRATE` 环境变量控制）。如需手动迁移：
+Backend 与 Scheduler 默认都不自动迁移（`AUTO_MIGRATE=false`）。开发环境应先显式执行迁移，再启动
+长驻服务；生产/Canary 必须使用评审后的精确 revision，不能让多个服务竞争执行：
 
 ```bash
 # 方式一：后端本地运行时（在 backend/ 目录，有 Python 环境）
@@ -120,7 +121,7 @@ cd backend
 python -m alembic upgrade head
 
 # 方式二：后端在 Docker 中运行时
-docker exec codify-backend python -m alembic upgrade head
+MIGRATION_TARGET=<reviewed_revision> docker compose --profile maintenance run --rm migrate
 ```
 
 > 项目使用 Alembic 进行数据库迁移，迁移脚本位于 `backend/alembic/versions/`。
@@ -128,7 +129,7 @@ docker exec codify-backend python -m alembic upgrade head
 ### 4.5 本地启动后端
 
 ```bash
-uvicorn app.main:app --reload
+HARNESS_EXECUTION_MODE=dual_canary uvicorn app.main:app --reload
 ```
 
 默认后端地址通常是：

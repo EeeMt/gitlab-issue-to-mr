@@ -5,6 +5,7 @@ import os
 import sys
 import unittest
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -16,6 +17,7 @@ from app.models import TaskStatus
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_task(status: TaskStatus, task_id: int = 1, issue_id: int | None = 100) -> MagicMock:
     """Build a minimal mock Task for override endpoint tests."""
@@ -31,6 +33,24 @@ def _make_task(status: TaskStatus, task_id: int = 1, issue_id: int | None = 100)
     now = datetime(2024, 1, 1, 12, 0, 0)
     task.created_at = now
     task.updated_at = now
+    bundle_digest = "d" * 64
+    task.runtime_bundle = SimpleNamespace(
+        contract_version="codify.worker.harness/v1",
+        digest=bundle_digest,
+        manifest={
+            "adapters": {
+                "claude": {
+                    "version": "1.0.0",
+                    "digest": "a" * 64,
+                }
+            }
+        },
+    )
+    task.worker_profile_snapshot = SimpleNamespace(
+        runtime_contract_version="codify.worker.harness/v1",
+        runtime_bundle_digest=bundle_digest,
+        harness_key="claude",
+    )
     return task
 
 
@@ -66,11 +86,13 @@ def _make_client_with_task(task: MagicMock):
 # Override status endpoint tests
 # ---------------------------------------------------------------------------
 
+
 class OverrideTaskStatusTests(unittest.TestCase):
     """Tests for POST /api/tasks/{task_id}/override-status."""
 
     def tearDown(self):
         from app.main import app
+
         app.dependency_overrides.clear()
 
     def test_completed_to_failed_succeeds(self):
@@ -78,8 +100,10 @@ class OverrideTaskStatusTests(unittest.TestCase):
         task = _make_task(TaskStatus.COMPLETED, task_id=10)
         client, app, mock_db = _make_client_with_task(task)
 
-        with patch("app.core.task_helpers._require_task_operator", return_value=None), \
-            patch("app.api.task_action_routes.maybe_update_issue_status", new=AsyncMock()):
+        with (
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch("app.api.task_action_routes.maybe_update_issue_status", new=AsyncMock()),
+        ):
             response = client.post("/api/tasks/10/override-status", json={"status": "failed"})
 
         self.assertEqual(response.status_code, 200)
@@ -94,8 +118,10 @@ class OverrideTaskStatusTests(unittest.TestCase):
         task = _make_task(TaskStatus.FAILED, task_id=11)
         client, app, mock_db = _make_client_with_task(task)
 
-        with patch("app.core.task_helpers._require_task_operator", return_value=None), \
-            patch("app.api.task_action_routes.maybe_update_issue_status", new=AsyncMock()):
+        with (
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch("app.api.task_action_routes.maybe_update_issue_status", new=AsyncMock()),
+        ):
             response = client.post("/api/tasks/11/override-status", json={"status": "completed"})
 
         self.assertEqual(response.status_code, 200)
@@ -107,8 +133,10 @@ class OverrideTaskStatusTests(unittest.TestCase):
         task = _make_task(TaskStatus.COMPLETED, task_id=12)
         client, app, _ = _make_client_with_task(task)
 
-        with patch("app.core.task_helpers._require_task_operator", return_value=None), \
-            patch("app.api.task_action_routes.maybe_update_issue_status", new=AsyncMock()):
+        with (
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch("app.api.task_action_routes.maybe_update_issue_status", new=AsyncMock()),
+        ):
             response = client.post(
                 "/api/tasks/12/override-status",
                 json={"status": "failed", "reason": "Output was wrong"},
@@ -122,8 +150,10 @@ class OverrideTaskStatusTests(unittest.TestCase):
         task = _make_task(TaskStatus.FAILED, task_id=13)
         client, app, _ = _make_client_with_task(task)
 
-        with patch("app.core.task_helpers._require_task_operator", return_value=None), \
-            patch("app.api.task_action_routes.maybe_update_issue_status", new=AsyncMock()):
+        with (
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch("app.api.task_action_routes.maybe_update_issue_status", new=AsyncMock()),
+        ):
             response = client.post("/api/tasks/13/override-status", json={"status": "completed"})
 
         self.assertEqual(response.status_code, 200)
@@ -175,8 +205,10 @@ class OverrideTaskStatusTests(unittest.TestCase):
         client, app, _ = _make_client_with_task(task)
 
         mock_update = AsyncMock()
-        with patch("app.core.task_helpers._require_task_operator", return_value=None), \
-            patch("app.api.task_action_routes.maybe_update_issue_status", new=mock_update):
+        with (
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch("app.api.task_action_routes.maybe_update_issue_status", new=mock_update),
+        ):
             response = client.post("/api/tasks/18/override-status", json={"status": "failed"})
 
         self.assertEqual(response.status_code, 200)
@@ -188,8 +220,10 @@ class OverrideTaskStatusTests(unittest.TestCase):
         client, app, _ = _make_client_with_task(task)
 
         mock_update = AsyncMock()
-        with patch("app.core.task_helpers._require_task_operator", return_value=None), \
-            patch("app.api.task_action_routes.maybe_update_issue_status", new=mock_update):
+        with (
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch("app.api.task_action_routes.maybe_update_issue_status", new=mock_update),
+        ):
             response = client.post("/api/tasks/19/override-status", json={"status": "failed"})
 
         self.assertEqual(response.status_code, 200)
@@ -200,12 +234,36 @@ class OverrideTaskStatusTests(unittest.TestCase):
         task = _make_task(TaskStatus.FAILED, task_id=20)
         client, app, _ = _make_client_with_task(task)
 
-        with patch("app.core.task_helpers._require_task_operator", return_value=None), \
-            patch("app.api.task_action_routes.maybe_update_issue_status", new=AsyncMock()):
+        with (
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch("app.api.task_action_routes.maybe_update_issue_status", new=AsyncMock()),
+        ):
             response = client.post("/api/tasks/20/override-status", json={"status": "completed"})
 
         self.assertEqual(response.status_code, 200)
         self.assertIsNotNone(task.overridden_at)
+
+    def test_v2_only_rejects_legacy_override_as_read_only(self):
+        """A V1 terminal task remains immutable after the v2_only hard cut."""
+        task = _make_task(TaskStatus.COMPLETED, task_id=21)
+        client, app, mock_db = _make_client_with_task(task)
+
+        with (
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch(
+                "app.api.task_operations.get_effective_settings",
+                return_value=SimpleNamespace(harness_execution_mode="v2_only"),
+            ),
+        ):
+            response = client.post("/api/tasks/21/override-status", json={"status": "failed"})
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            response.json()["detail"]["code"],
+            "legacy_contract_not_executable",
+        )
+        self.assertEqual(response.json()["detail"]["action"], "override_status")
+        mock_db.commit.assert_not_called()
 
     def test_missing_task_returns_404(self):
         """Requesting override for a non-existent task returns 404."""

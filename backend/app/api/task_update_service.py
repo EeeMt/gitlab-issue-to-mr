@@ -16,6 +16,7 @@ from app.api.task_responses import (
     refresh_task_response_state,
     serialize_task,
 )
+from app.api.task_operations import require_task_execution_writer
 from app.api.task_schemas import UpdateTaskRequest
 from app.config import get_effective_settings
 from app.core.harness_registry import HarnessRegistryError
@@ -80,7 +81,6 @@ async def update_task_record(
         current_user,
         with_for_update=True,
     )
-
     if task.status not in (TaskStatus.PENDING, TaskStatus.QUEUED):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -89,6 +89,7 @@ async def update_task_record(
                 f"'{task.status.value}'. Only PENDING or QUEUED tasks can be updated."
             ),
         )
+    require_task_execution_writer(task, action="update")
 
     updated_fields = request.model_fields_set
     original_task_mode = task.task_mode or "execute"

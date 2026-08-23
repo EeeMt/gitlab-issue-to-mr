@@ -19,6 +19,8 @@ from app.core.harness_execution_policy import (
     require_creatable_bundle_v2,
     require_executable_contract,
     require_executable_contract_v2,
+    require_explicit_harness_execution_mode,
+    require_task_executable_contract,
     validate_harness_execution_mode,
 )
 from app.core.harness_protocol import (
@@ -32,12 +34,28 @@ from app.core.harness_protocol import (
 class Bundle:
     def __init__(self, contract_version: str | None):
         self.contract_version = contract_version
+        self.digest = "a" * 64
+        self.manifest = {"adapters": {"pi": {}}}
 
 
 class Attempt:
     def __init__(self, event_schema: str):
         self.event_schema = event_schema
         self.attempt_id = "attempt-1"
+        self.harness_key = "pi"
+
+
+class Snapshot:
+    def __init__(self, contract_version: str | None):
+        self.runtime_contract_version = contract_version
+        self.runtime_bundle_digest = "a" * 64
+        self.harness_key = "pi"
+
+
+class Task:
+    def __init__(self, contract_version: str | None):
+        self.id = 7
+        self.worker_profile_snapshot = Snapshot(contract_version)
 
 
 # ── mode validation ─────────────────────────────────────────────────────────
@@ -52,6 +70,27 @@ def test_rejects_unknown_mode():
     with pytest.raises(ExecutionPolicyError) as exc:
         validate_harness_execution_mode("canary_only")
     assert exc.value.code == "invalid_harness_execution_mode"
+
+
+def test_startup_requires_execution_mode_to_be_explicit():
+    implicit = type(
+        "Settings",
+        (),
+        {"harness_execution_mode": "dual_canary", "model_fields_set": set()},
+    )()
+    with pytest.raises(ExecutionPolicyError) as exc:
+        require_explicit_harness_execution_mode(implicit)
+    assert exc.value.code == "missing_harness_execution_mode"
+
+    explicit = type(
+        "Settings",
+        (),
+        {
+            "harness_execution_mode": "dual_canary",
+            "model_fields_set": {"harness_execution_mode"},
+        },
+    )()
+    assert require_explicit_harness_execution_mode(explicit) == "dual_canary"
 
 
 def test_is_v2_only_flag():
@@ -99,6 +138,39 @@ def test_v2_contract_rejects_v1_bundle():
             Attempt(CANONICAL_EVENT_SCHEMA_V2), Bundle(HARNESS_CONTRACT_VERSION)
         )
     assert exc.value.code == LEGACY_CONTRACT_NOT_EXECUTABLE
+
+
+def test_central_task_policy_validates_snapshot_bundle_and_attempt():
+    task = Task(HARNESS_CONTRACT_VERSION_V2)
+    bundle = Bundle(HARNESS_CONTRACT_VERSION_V2)
+    require_task_executable_contract(
+        task,
+        bundle,
+        "v2_only",
+        attempt=Attempt(CANONICAL_EVENT_SCHEMA_V2),
+    )
+
+
+def test_central_task_policy_rejects_legacy_writer_under_v2_only():
+    with pytest.raises(ExecutionPolicyError) as exc:
+        require_task_executable_contract(
+            Task(HARNESS_CONTRACT_VERSION),
+            Bundle(HARNESS_CONTRACT_VERSION),
+            "v2_only",
+        )
+    assert exc.value.code == LEGACY_CONTRACT_NOT_EXECUTABLE
+
+
+def test_central_task_policy_rejects_snapshot_bundle_digest_mismatch():
+    task = Task(HARNESS_CONTRACT_VERSION_V2)
+    task.worker_profile_snapshot.runtime_bundle_digest = "b" * 64
+    with pytest.raises(ExecutionPolicyError) as exc:
+        require_task_executable_contract(
+            task,
+            Bundle(HARNESS_CONTRACT_VERSION_V2),
+            "dual_canary",
+        )
+    assert exc.value.code == "execution_contract_mismatch"
 
 
 # ── v2_only creation gate (F5) ──────────────────────────────────────────────

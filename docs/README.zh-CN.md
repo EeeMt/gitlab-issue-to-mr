@@ -366,7 +366,8 @@ docker-compose up -d --build
 | `TASK_TIMEOUT` | 任务超时秒数 | `1800` |
 | `DEFAULT_TARGET_BRANCH` | 默认 MR 目标分支 | `main` |
 | `CONFIG_ENCRYPTION_KEY` | 配置加密密钥 | 32 字节 base64 |
-| `AUTO_MIGRATE` | 启动时是否自动执行数据库迁移 | `true` |
+| `AUTO_MIGRATE` | 仅一次性 migration owner 可设为 true；长驻服务必须关闭 | `false` |
+| `HARNESS_EXECUTION_MODE` | Harness 执行策略，必须显式配置 | `dual_canary` |
 
 > 运行时配置（并发数、超时、Max Turns、AI Provider 等）也可以通过 Dashboard 配置页面动态修改，无需重启服务。
 
@@ -413,7 +414,8 @@ docker build -f deploy/Dockerfile.worker-java21-maven -t codify-worker/java21-ma
 ## 运维备忘
 
 - `deploy/docker-compose.yml` 中，`backend` 和 `scheduler` 共用同一个 backend 镜像
-- 默认 Compose 中，`backend` 与 `scheduler` 均使用 `AUTO_MIGRATE=true`（启动时自动执行迁移）
+- 默认 Compose 中，`backend` 与 `scheduler` 均使用 `AUTO_MIGRATE=false`；迁移由 maintenance profile 的唯一 owner 执行
+- Backend/Scheduler 必须显式、且一致地设置 `HARNESS_EXECUTION_MODE=dual_canary|v2_only`
 - 配置页面路由为 `/configuration`
 - 认证用户能看到的项目和任务会按 GitLab 权限过滤
 

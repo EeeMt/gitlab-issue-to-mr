@@ -142,7 +142,9 @@ class Settings(BaseSettings):
     def dashboard_url(self) -> str:
         """URL used for task links in GitLab comments. Uses frontend_url when set."""
         return self.frontend_url.strip() or self.backend_url
-    auto_migrate: bool = Field(default=True)  # Auto-run migrations on startup
+    # Long-running Backend/Scheduler services never own schema migration.  A
+    # maintenance-window one-shot process must opt in explicitly.
+    auto_migrate: bool = Field(default=False)
 
     # OIDC Authentication
     oidc_enabled: bool = Field(default=False)

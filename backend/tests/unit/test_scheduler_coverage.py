@@ -14,6 +14,7 @@ Targets missed lines:
 
 import asyncio
 import unittest
+from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 from app.models import TaskStatus
@@ -21,6 +22,7 @@ from app.models import TaskStatus
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_mock_task(
     task_id: int = 1,
@@ -41,12 +43,23 @@ def _make_mock_task(
     task.completed_at = None
     task.is_retry = False
     task.retry_source_task_id = None
+    task.runtime_bundle = MagicMock(
+        contract_version="codify.worker.harness/v1",
+        digest="a" * 64,
+        manifest={"adapters": {"claude": {}}},
+    )
+    task.worker_profile_snapshot = MagicMock(
+        runtime_contract_version="codify.worker.harness/v1",
+        runtime_bundle_digest="a" * 64,
+        harness_key="claude",
+    )
     return task
 
 
 # ---------------------------------------------------------------------------
 # start() — lines 44-61
 # ---------------------------------------------------------------------------
+
 
 class TestSchedulerStart(unittest.IsolatedAsyncioTestCase):
     """Tests for Scheduler.start() to cover crash recovery + main loop."""
@@ -66,10 +79,12 @@ class TestSchedulerStart(unittest.IsolatedAsyncioTestCase):
             if cycle_count >= 2:
                 scheduler.running = False
 
-        with patch.object(scheduler, "_crash_recovery", new_callable=AsyncMock) as mock_recovery, \
-             patch.object(scheduler, "_run_cycle", side_effect=fake_run_cycle) as mock_cycle, \
-             patch("app.scheduler.get_settings") as mock_settings, \
-             patch("app.scheduler.asyncio.sleep", new_callable=AsyncMock):
+        with (
+            patch.object(scheduler, "_crash_recovery", new_callable=AsyncMock) as mock_recovery,
+            patch.object(scheduler, "_run_cycle", side_effect=fake_run_cycle) as mock_cycle,
+            patch("app.scheduler.get_settings") as mock_settings,
+            patch("app.scheduler.asyncio.sleep", new_callable=AsyncMock),
+        ):
             mock_settings.return_value = MagicMock(scheduler_interval=0)
             await scheduler.start()
 
@@ -86,11 +101,17 @@ class TestSchedulerStart(unittest.IsolatedAsyncioTestCase):
         async def stop_immediately() -> None:
             scheduler.running = False
 
-        with patch.object(scheduler, "_crash_recovery", new_callable=AsyncMock,
-                          side_effect=[RuntimeError("docker down"), None]) as mock_recovery, \
-             patch.object(scheduler, "_run_cycle", side_effect=stop_immediately) as mock_cycle, \
-             patch("app.scheduler.get_settings") as mock_settings, \
-             patch("app.scheduler.asyncio.sleep", new_callable=AsyncMock):
+        with (
+            patch.object(
+                scheduler,
+                "_crash_recovery",
+                new_callable=AsyncMock,
+                side_effect=[RuntimeError("docker down"), None],
+            ) as mock_recovery,
+            patch.object(scheduler, "_run_cycle", side_effect=stop_immediately) as mock_cycle,
+            patch("app.scheduler.get_settings") as mock_settings,
+            patch("app.scheduler.asyncio.sleep", new_callable=AsyncMock),
+        ):
             mock_settings.return_value = MagicMock(scheduler_interval=0)
             await scheduler.start()
 
@@ -111,10 +132,12 @@ class TestSchedulerStart(unittest.IsolatedAsyncioTestCase):
                 raise ValueError("DB connection lost")
             scheduler.running = False
 
-        with patch.object(scheduler, "_crash_recovery", new_callable=AsyncMock), \
-             patch.object(scheduler, "_run_cycle", side_effect=failing_then_stop), \
-             patch("app.scheduler.get_settings") as mock_settings, \
-             patch("app.scheduler.asyncio.sleep", new_callable=AsyncMock):
+        with (
+            patch.object(scheduler, "_crash_recovery", new_callable=AsyncMock),
+            patch.object(scheduler, "_run_cycle", side_effect=failing_then_stop),
+            patch("app.scheduler.get_settings") as mock_settings,
+            patch("app.scheduler.asyncio.sleep", new_callable=AsyncMock),
+        ):
             mock_settings.return_value = MagicMock(scheduler_interval=0)
             await scheduler.start()
 
@@ -125,6 +148,7 @@ class TestSchedulerStart(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 # _run_cycle — line 95 (manual task branch)
 # ---------------------------------------------------------------------------
+
 
 class TestRunCycleManualTask(unittest.IsolatedAsyncioTestCase):
     """Tests for _run_cycle when the task has issue_id=None (skips mutex)."""
@@ -139,19 +163,20 @@ class TestRunCycleManualTask(unittest.IsolatedAsyncioTestCase):
         mock_db = MagicMock()
         mock_db.__aenter__ = AsyncMock(return_value=mock_db)
         mock_db.__aexit__ = AsyncMock(return_value=False)
-
-        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
-             patch("app.scheduler.load_runtime_config_from_db", new_callable=AsyncMock), \
-             patch.object(scheduler, "_maybe_cleanup_sessions", new_callable=AsyncMock), \
-             patch.object(scheduler, "_maybe_cleanup_workspaces", new_callable=AsyncMock), \
-             patch.object(scheduler, "_maybe_cleanup_retained_containers", new_callable=AsyncMock), \
-             patch.object(scheduler, "_maybe_cleanup_issue_locks", new_callable=AsyncMock), \
-             patch.object(scheduler, "_reconcile_running_state", new_callable=AsyncMock), \
-             patch.object(scheduler, "_mark_eligible_as_queued", new_callable=AsyncMock), \
-             patch("app.scheduler.get_settings") as mock_settings, \
-             patch.object(scheduler, "_get_running_count", new_callable=AsyncMock, return_value=0), \
-             patch.object(scheduler, "_get_next_task", new_callable=AsyncMock, return_value=task), \
-             patch.object(scheduler, "_execute_task", new_callable=AsyncMock) as mock_exec:
+        with (
+            patch("app.scheduler.AsyncSessionLocal", return_value=mock_db),
+            patch("app.scheduler.load_runtime_config_from_db", new_callable=AsyncMock),
+            patch.object(scheduler, "_maybe_cleanup_sessions", new_callable=AsyncMock),
+            patch.object(scheduler, "_maybe_cleanup_workspaces", new_callable=AsyncMock),
+            patch.object(scheduler, "_maybe_cleanup_retained_containers", new_callable=AsyncMock),
+            patch.object(scheduler, "_maybe_cleanup_issue_locks", new_callable=AsyncMock),
+            patch.object(scheduler, "_reconcile_running_state", new_callable=AsyncMock),
+            patch.object(scheduler, "_mark_eligible_as_queued", new_callable=AsyncMock),
+            patch("app.scheduler.get_settings") as mock_settings,
+            patch.object(scheduler, "_get_running_count", new_callable=AsyncMock, return_value=0),
+            patch.object(scheduler, "_get_next_task", new_callable=AsyncMock, return_value=task),
+            patch.object(scheduler, "_execute_task", new_callable=AsyncMock) as mock_exec,
+        ):
             mock_settings.return_value = MagicMock(max_concurrency=5)
             await scheduler._run_cycle()
 
@@ -164,6 +189,7 @@ class TestRunCycleManualTask(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 # _run_task_background — lines 182, 201, 203-204
 # ---------------------------------------------------------------------------
+
 
 class TestRunTaskBackground(unittest.IsolatedAsyncioTestCase):
     """Tests for _run_task_background covering failure and cleanup paths."""
@@ -189,10 +215,11 @@ class TestRunTaskBackground(unittest.IsolatedAsyncioTestCase):
 
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        with patch("app.scheduler._worker_executor"), \
-             patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
-             patch("app.scheduler._run_worker_task", return_value=False):
-
+        with (
+            patch("app.scheduler._worker_executor"),
+            patch("app.scheduler.AsyncSessionLocal", return_value=mock_db),
+            patch("app.scheduler._run_worker_task", return_value=False),
+        ):
             loop = asyncio.get_event_loop()
             with patch.object(loop, "run_in_executor", new_callable=AsyncMock, return_value=False):
                 await scheduler._run_task_background(7)
@@ -317,8 +344,12 @@ class TestRunTaskBackground(unittest.IsolatedAsyncioTestCase):
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db):
             loop = asyncio.get_event_loop()
-            with patch.object(loop, "run_in_executor", new_callable=AsyncMock,
-                              side_effect=RuntimeError("thread pool boom")):
+            with patch.object(
+                loop,
+                "run_in_executor",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("thread pool boom"),
+            ):
                 await scheduler._run_task_background(88)
 
         self.assertNotIn(88, scheduler._running_tasks)
@@ -526,6 +557,7 @@ class TestRetainedContainerCleanup(unittest.IsolatedAsyncioTestCase):
 # _crash_recovery — lines 232-240 (container pattern matching + cleanup)
 # ---------------------------------------------------------------------------
 
+
 class TestCrashRecoveryContainers(unittest.IsolatedAsyncioTestCase):
     """Tests for _crash_recovery container cleanup logic."""
 
@@ -558,8 +590,10 @@ class TestCrashRecoveryContainers(unittest.IsolatedAsyncioTestCase):
         mock_result.scalars.return_value.all.return_value = []
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
-             patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker):
+        with (
+            patch("app.scheduler.AsyncSessionLocal", return_value=mock_db),
+            patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker),
+        ):
             await scheduler._crash_recovery()
 
         running_worker.remove.assert_called_once_with(force=True, v=True)
@@ -589,8 +623,10 @@ class TestCrashRecoveryContainers(unittest.IsolatedAsyncioTestCase):
         mock_result.scalars.return_value.all.return_value = []
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
-             patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker):
+        with (
+            patch("app.scheduler.AsyncSessionLocal", return_value=mock_db),
+            patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker),
+        ):
             await scheduler._crash_recovery()
 
         backend.remove.assert_not_called()
@@ -617,8 +653,10 @@ class TestCrashRecoveryContainers(unittest.IsolatedAsyncioTestCase):
         mock_docker = MagicMock()
         mock_docker.client.containers.list.return_value = []
 
-        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
-             patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker):
+        with (
+            patch("app.scheduler.AsyncSessionLocal", return_value=mock_db),
+            patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker),
+        ):
             await scheduler._crash_recovery()
 
         self.assertEqual(stuck_task.status, TaskStatus.FAILED)
@@ -644,16 +682,20 @@ class TestCrashRecoveryContainers(unittest.IsolatedAsyncioTestCase):
         mock_result.scalars.return_value.all.return_value = [stuck_task]
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
-             patch("app.scheduler._RECOVERY_RETRY_OFFSETS_SECONDS", (0, 0, 0)), \
-             patch("app.scheduler._get_recovery_docker_client", side_effect=RuntimeError("no docker")), \
-             patch.object(
-                 scheduler,
-                 "_coordinate_unavailable_recovery",
-                 new=MagicMock(return_value=object()),
-             ), \
-             patch("app.scheduler.asyncio.create_task", return_value=MagicMock()), \
-             patch("app.scheduler.release_issue_execution_lock", new=AsyncMock()) as release_lock:
+        with (
+            patch("app.scheduler.AsyncSessionLocal", return_value=mock_db),
+            patch("app.scheduler._RECOVERY_RETRY_OFFSETS_SECONDS", (0, 0, 0)),
+            patch(
+                "app.scheduler._get_recovery_docker_client", side_effect=RuntimeError("no docker")
+            ),
+            patch.object(
+                scheduler,
+                "_coordinate_unavailable_recovery",
+                new=MagicMock(return_value=object()),
+            ),
+            patch("app.scheduler.asyncio.create_task", return_value=MagicMock()),
+            patch("app.scheduler.release_issue_execution_lock", new=AsyncMock()) as release_lock,
+        ):
             await scheduler._crash_recovery()
 
         self.assertEqual(stuck_task.status, "running")
@@ -665,6 +707,7 @@ class TestCrashRecoveryContainers(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 # _crash_recovery — smart recovery (resume / orphan cleanup / _extract_task_id)
 # ---------------------------------------------------------------------------
+
 
 class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
     """Tests for the smart crash recovery behaviour (resume vs kill)."""
@@ -700,10 +743,12 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
         mock_docker = MagicMock()
         mock_docker.client.containers.list.return_value = [running_container]
 
-        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
-             patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker), \
-             patch.object(scheduler, "_resume_task_background", new=MagicMock()) as mock_resume, \
-             patch("app.scheduler.asyncio.create_task") as mock_create_task:
+        with (
+            patch("app.scheduler.AsyncSessionLocal", return_value=mock_db),
+            patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker),
+            patch.object(scheduler, "_resume_task_background", new=MagicMock()) as mock_resume,
+            patch("app.scheduler.asyncio.create_task") as mock_create_task,
+        ):
             await scheduler._crash_recovery()
 
         # Task should NOT be marked failed
@@ -740,10 +785,12 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
         mock_docker = MagicMock()
         mock_docker.client.containers.list.return_value = [container]
 
-        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
-             patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker), \
-             patch.object(scheduler, "_resume_task_background", new=MagicMock()), \
-             patch("app.scheduler.asyncio.create_task"):
+        with (
+            patch("app.scheduler.AsyncSessionLocal", return_value=mock_db),
+            patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker),
+            patch.object(scheduler, "_resume_task_background", new=MagicMock()),
+            patch("app.scheduler.asyncio.create_task"),
+        ):
             await scheduler._crash_recovery()
 
         self.assertNotEqual(stuck_task.status, TaskStatus.FAILED)
@@ -773,8 +820,10 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
         mock_docker = MagicMock()
         mock_docker.client.containers.list.return_value = [orphan]
 
-        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
-             patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker):
+        with (
+            patch("app.scheduler.AsyncSessionLocal", return_value=mock_db),
+            patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker),
+        ):
             await scheduler._crash_recovery()
 
         orphan.remove.assert_called_once_with(force=True, v=True)
@@ -785,11 +834,18 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
 
         scheduler = Scheduler()
 
-        task_with_container = _make_mock_task(task_id=10, project_id=100, issue_id=5, status="running")
-        task_without_container = _make_mock_task(task_id=20, project_id=200, issue_id=15, status="running")
+        task_with_container = _make_mock_task(
+            task_id=10, project_id=100, issue_id=5, status="running"
+        )
+        task_without_container = _make_mock_task(
+            task_id=20, project_id=200, issue_id=15, status="running"
+        )
 
         mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [task_with_container, task_without_container]
+        mock_result.scalars.return_value.all.return_value = [
+            task_with_container,
+            task_without_container,
+        ]
 
         mock_db = MagicMock()
         mock_db.__aenter__ = AsyncMock(return_value=mock_db)
@@ -803,10 +859,12 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
         mock_docker = MagicMock()
         mock_docker.client.containers.list.return_value = [container_10]
 
-        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
-             patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker), \
-             patch.object(scheduler, "_resume_task_background", new=MagicMock()), \
-             patch("app.scheduler.asyncio.create_task"):
+        with (
+            patch("app.scheduler.AsyncSessionLocal", return_value=mock_db),
+            patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker),
+            patch.object(scheduler, "_resume_task_background", new=MagicMock()),
+            patch("app.scheduler.asyncio.create_task"),
+        ):
             await scheduler._crash_recovery()
 
         # Task 10 should be resumed, not failed
@@ -847,10 +905,12 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
         mock_docker = MagicMock()
         mock_docker.client.containers.list.return_value = [exited_container]
 
-        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
-             patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker), \
-             patch.object(scheduler, "_resume_task_background", new=MagicMock()), \
-             patch("app.scheduler.asyncio.create_task") as mock_create_task:
+        with (
+            patch("app.scheduler.AsyncSessionLocal", return_value=mock_db),
+            patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker),
+            patch.object(scheduler, "_resume_task_background", new=MagicMock()),
+            patch("app.scheduler.asyncio.create_task") as mock_create_task,
+        ):
             await scheduler._crash_recovery()
 
         # Container should NOT be removed — it's being resumed
@@ -883,14 +943,16 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
         mock_docker = MagicMock()
         mock_docker.client.containers.list.return_value = [dead_container]
 
-        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
-             patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker), \
-             patch.object(
-                 scheduler,
-                 "_coordinate_unavailable_recovery",
-                 new=MagicMock(return_value=object()),
-             ) as coordinate_recovery, \
-             patch("app.scheduler.asyncio.create_task", return_value=MagicMock()) as create_task:
+        with (
+            patch("app.scheduler.AsyncSessionLocal", return_value=mock_db),
+            patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker),
+            patch.object(
+                scheduler,
+                "_coordinate_unavailable_recovery",
+                new=MagicMock(return_value=object()),
+            ) as coordinate_recovery,
+            patch("app.scheduler.asyncio.create_task", return_value=MagicMock()) as create_task,
+        ):
             await scheduler._crash_recovery()
 
         dead_container.remove.assert_not_called()
@@ -907,37 +969,44 @@ class TestExtractTaskId(unittest.TestCase):
     def test_standard_issue_container(self) -> None:
         """codify-123-issue789 → 123."""
         from app.scheduler import _extract_task_id
+
         self.assertEqual(_extract_task_id("codify-123-issue789"), 123)
 
     def test_another_issue_container(self) -> None:
         """codify-1-issue2 → 1."""
         from app.scheduler import _extract_task_id
+
         self.assertEqual(_extract_task_id("codify-1-issue2"), 1)
 
     def test_service_container_returns_none(self) -> None:
         """codify-backend → None (not a worker container)."""
         from app.scheduler import _extract_task_id
+
         self.assertIsNone(_extract_task_id("codify-backend"))
 
     def test_invalid_name_returns_none(self) -> None:
         """Completely unrelated name → None."""
         from app.scheduler import _extract_task_id
+
         self.assertIsNone(_extract_task_id("invalid"))
 
     def test_partial_match_returns_none(self) -> None:
         """codify-1-p100-other → None (invalid suffix)."""
         from app.scheduler import _extract_task_id
+
         self.assertIsNone(_extract_task_id("codify-1-p100-other"))
 
     def test_large_ids(self) -> None:
         """Large numeric IDs should be extracted correctly."""
         from app.scheduler import _extract_task_id
+
         self.assertEqual(_extract_task_id("codify-99999-issue77777"), 99999)
 
 
 # ---------------------------------------------------------------------------
 # Module-level helpers — lines 273-274, 279-280
 # ---------------------------------------------------------------------------
+
 
 class TestModuleLevelHelpers(unittest.IsolatedAsyncioTestCase):
     """Tests for start_scheduler() and stop_scheduler() module functions."""
@@ -986,34 +1055,39 @@ class TestModuleLevelHelpers(unittest.IsolatedAsyncioTestCase):
 # WORKER_CONTAINER_PATTERN regex — line 30
 # ---------------------------------------------------------------------------
 
+
 class TestWorkerContainerPattern(unittest.TestCase):
     """Tests for the _get_container_pattern() regex."""
 
-    @patch('app.scheduler.get_settings')
+    @patch("app.scheduler.get_settings")
     def test_matches_issue_container(self, mock_settings: MagicMock) -> None:
         from app.scheduler import _get_container_pattern
+
         mock_settings.return_value.worker_container_prefix = "codify"
         pattern = _get_container_pattern()
         self.assertIsNotNone(pattern.match("codify-1-issue10"))
 
-    @patch('app.scheduler.get_settings')
+    @patch("app.scheduler.get_settings")
     def test_matches_another_issue_container(self, mock_settings: MagicMock) -> None:
         from app.scheduler import _get_container_pattern
+
         mock_settings.return_value.worker_container_prefix = "codify"
         pattern = _get_container_pattern()
         self.assertIsNotNone(pattern.match("codify-42-issue200"))
 
-    @patch('app.scheduler.get_settings')
+    @patch("app.scheduler.get_settings")
     def test_rejects_service_container(self, mock_settings: MagicMock) -> None:
         from app.scheduler import _get_container_pattern
+
         mock_settings.return_value.worker_container_prefix = "codify"
         pattern = _get_container_pattern()
         self.assertIsNone(pattern.match("codify-backend"))
         self.assertIsNone(pattern.match("codify-postgres"))
 
-    @patch('app.scheduler.get_settings')
+    @patch("app.scheduler.get_settings")
     def test_rejects_partial_match(self, mock_settings: MagicMock) -> None:
         from app.scheduler import _get_container_pattern
+
         mock_settings.return_value.worker_container_prefix = "codify"
         pattern = _get_container_pattern()
         self.assertIsNone(pattern.match("codify-1-p100-other"))
@@ -1022,6 +1096,7 @@ class TestWorkerContainerPattern(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # _execute_task — exception path
 # ---------------------------------------------------------------------------
+
 
 class TestExecuteTask(unittest.IsolatedAsyncioTestCase):
     """Tests for _execute_task atomic claim and exception handling."""
@@ -1128,6 +1203,7 @@ class TestExecuteTask(unittest.IsolatedAsyncioTestCase):
 # _crash_recovery — lines 287-288 (dead container remove() raises)
 # ---------------------------------------------------------------------------
 
+
 class TestCrashRecoveryContainerRemoveFailures(unittest.IsolatedAsyncioTestCase):
     """Tests for container.remove() failure paths during crash recovery."""
 
@@ -1172,20 +1248,22 @@ class TestCrashRecoveryContainerRemoveFailures(unittest.IsolatedAsyncioTestCase)
         async def stop_after_retry(_delay: float) -> None:
             scheduler.running = False
 
-        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
-             patch(
-                 "app.scheduler.find_task_container",
-                 new=AsyncMock(return_value=(mock_docker, dead_container, connection)),
-             ), \
-             patch(
-                 "app.scheduler.persist_raw_log_snapshot",
-                 new=AsyncMock(),
-             ) as persist_snapshot, \
-             patch(
-                 "app.scheduler.release_issue_execution_lock",
-                 new=AsyncMock(),
-             ) as release_lock, \
-             patch("app.scheduler.asyncio.sleep", side_effect=stop_after_retry):
+        with (
+            patch("app.scheduler.AsyncSessionLocal", return_value=mock_db),
+            patch(
+                "app.scheduler.find_task_container",
+                new=AsyncMock(return_value=(mock_docker, dead_container, connection)),
+            ),
+            patch(
+                "app.scheduler.persist_raw_log_snapshot",
+                new=AsyncMock(),
+            ) as persist_snapshot,
+            patch(
+                "app.scheduler.release_issue_execution_lock",
+                new=AsyncMock(),
+            ) as release_lock,
+            patch("app.scheduler.asyncio.sleep", side_effect=stop_after_retry),
+        ):
             await scheduler._coordinate_unavailable_recovery(60)
 
         dead_container.remove.assert_called_once_with(force=True, v=True)
@@ -1222,8 +1300,10 @@ class TestCrashRecoveryContainerRemoveFailures(unittest.IsolatedAsyncioTestCase)
         mock_docker = MagicMock()
         mock_docker.client.containers.list.return_value = [orphan]
 
-        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
-             patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker):
+        with (
+            patch("app.scheduler.AsyncSessionLocal", return_value=mock_db),
+            patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker),
+        ):
             # Should NOT raise
             await scheduler._crash_recovery()
 
@@ -1250,8 +1330,10 @@ class TestCrashRecoveryContainerRemoveFailures(unittest.IsolatedAsyncioTestCase)
         mock_docker = MagicMock()
         mock_docker.client.containers.list.return_value = [orphan]
 
-        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
-             patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker):
+        with (
+            patch("app.scheduler.AsyncSessionLocal", return_value=mock_db),
+            patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker),
+        ):
             await scheduler._crash_recovery()
 
         # Exited orphan: force=False (c_status != "running")
@@ -1261,6 +1343,7 @@ class TestCrashRecoveryContainerRemoveFailures(unittest.IsolatedAsyncioTestCase)
 # ---------------------------------------------------------------------------
 # _resume_task_background — lines 323-352
 # ---------------------------------------------------------------------------
+
 
 class TestResumeTaskBackground(unittest.IsolatedAsyncioTestCase):
     """Tests for _resume_task_background covering all paths."""
@@ -1342,8 +1425,12 @@ class TestResumeTaskBackground(unittest.IsolatedAsyncioTestCase):
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db):
             loop = asyncio.get_event_loop()
-            with patch.object(loop, "run_in_executor", new_callable=AsyncMock,
-                              side_effect=RuntimeError("thread pool crashed")):
+            with patch.object(
+                loop,
+                "run_in_executor",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("thread pool crashed"),
+            ):
                 await scheduler._resume_task_background(44, "codify-44-issue30")
 
         self.assertNotIn(44, scheduler._running_tasks)
@@ -1461,6 +1548,7 @@ class TestResumeTaskBackground(unittest.IsolatedAsyncioTestCase):
 # _run_worker_resume_task — lines 441-476
 # ---------------------------------------------------------------------------
 
+
 class TestRunWorkerResumeTask(unittest.TestCase):
     """Tests for the module-level _run_worker_resume_task() function.
 
@@ -1471,7 +1559,7 @@ class TestRunWorkerResumeTask(unittest.TestCase):
     - app.core.worker.WorkerExecutor
     """
 
-    def _run_with_mocks(self, resume_return_value=True):
+    def _run_with_mocks(self, resume_return_value=True, *, snapshot_digest="d" * 64):
         """Helper: run _run_worker_resume_task with all imports mocked."""
         from app.scheduler import _run_worker_resume_task
 
@@ -1481,39 +1569,79 @@ class TestRunWorkerResumeTask(unittest.TestCase):
         mock_db = MagicMock()
         mock_db.__aenter__ = AsyncMock(return_value=mock_db)
         mock_db.__aexit__ = AsyncMock(return_value=False)
+        bundle = SimpleNamespace(
+            contract_version="codify.worker.harness/v2",
+            digest="d" * 64,
+            manifest={"adapters": {"pi": {}}},
+        )
+        task = SimpleNamespace(
+            id=42,
+            runtime_bundle=bundle,
+            worker_profile_snapshot=SimpleNamespace(
+                runtime_contract_version="codify.worker.harness/v2",
+                runtime_bundle_digest=snapshot_digest,
+                harness_key="pi",
+            ),
+        )
+        attempt = SimpleNamespace(
+            attempt_id="attempt-42",
+            event_schema="codify.worker.event/v2",
+            harness_key="pi",
+        )
+        task_result = MagicMock()
+        task_result.scalar_one_or_none.return_value = task
+        attempt_result = MagicMock()
+        attempt_result.scalar_one_or_none.return_value = attempt
+        mock_db.execute = AsyncMock(side_effect=[task_result, attempt_result])
 
         mock_engine = MagicMock()
         mock_engine.dispose = AsyncMock()
 
-        with patch("app.database._database_url", "sqlite+aiosqlite:///:memory:"), \
-             patch("sqlalchemy.ext.asyncio.create_async_engine", return_value=mock_engine), \
-             patch("sqlalchemy.ext.asyncio.async_sessionmaker") as mock_sm, \
-             patch("app.core.worker.WorkerExecutor", return_value=mock_worker):
+        pump = AsyncMock()
+        self.last_pump = pump
+        self.last_worker = mock_worker
+        with (
+            patch("app.database._database_url", "sqlite+aiosqlite:///:memory:"),
+            patch("sqlalchemy.ext.asyncio.create_async_engine", return_value=mock_engine),
+            patch("sqlalchemy.ext.asyncio.async_sessionmaker") as mock_sm,
+            patch("app.core.worker.WorkerExecutor", return_value=mock_worker),
+            patch("app.core.worker_command_pump.run_pump_until_task_ends", new=pump),
+        ):
             mock_sm.return_value = MagicMock(return_value=mock_db)
             result = _run_worker_resume_task(42, "codify-42-issue10")
 
-        return result, mock_worker, mock_engine
+        return result, mock_worker, mock_engine, pump
 
     def test_run_worker_resume_task_success(self) -> None:
         """Lines 441-476: successful resume returns True."""
-        result, mock_worker, _ = self._run_with_mocks(resume_return_value=True)
+        result, mock_worker, _, _ = self._run_with_mocks(resume_return_value=True)
         self.assertTrue(result)
         mock_worker.resume_task.assert_awaited_once()
 
     def test_run_worker_resume_task_failure(self) -> None:
         """_run_worker_resume_task returns False when worker returns False."""
-        result, _, _ = self._run_with_mocks(resume_return_value=False)
+        result, _, _, _ = self._run_with_mocks(resume_return_value=False)
         self.assertFalse(result)
 
     def test_run_worker_resume_task_disposes_engine(self) -> None:
         """Engine should be disposed in the finally block even on success."""
-        _, _, mock_engine = self._run_with_mocks(resume_return_value=True)
+        _, _, mock_engine, _ = self._run_with_mocks(resume_return_value=True)
         mock_engine.dispose.assert_called_once()
+
+    def test_invalid_recovery_contract_never_starts_command_pump(self) -> None:
+        """A mismatched frozen snapshot fails before transport can dispatch."""
+        from app.core.harness_execution_policy import ExecutionPolicyError
+
+        with self.assertRaises(ExecutionPolicyError):
+            self._run_with_mocks(snapshot_digest="x" * 64)
+        self.last_pump.assert_not_awaited()
+        self.last_worker.resume_task.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
 # _mark_eligible_as_queued — issue in_review → in_progress transition
 # ---------------------------------------------------------------------------
+
 
 class TestMarkEligibleAsQueuedIssueTransition(unittest.IsolatedAsyncioTestCase):
     """Tests that _mark_eligible_as_queued also transitions linked issues to in_progress.
@@ -1549,9 +1677,12 @@ class TestMarkEligibleAsQueuedIssueTransition(unittest.IsolatedAsyncioTestCase):
         scheduler = Scheduler()
         mock_db = AsyncMock()
 
-        mock_db.execute = AsyncMock(side_effect=self._mark_queued_execute(
-            promote_rowcount=2, queued_issues=[(5,)],
-        ))
+        mock_db.execute = AsyncMock(
+            side_effect=self._mark_queued_execute(
+                promote_rowcount=2,
+                queued_issues=[(5,)],
+            )
+        )
 
         with patch("app.scheduler.utcnow"):
             await scheduler._mark_eligible_as_queued(mock_db)
@@ -1568,9 +1699,12 @@ class TestMarkEligibleAsQueuedIssueTransition(unittest.IsolatedAsyncioTestCase):
         scheduler = Scheduler()
         mock_db = AsyncMock()
 
-        mock_db.execute = AsyncMock(side_effect=self._mark_queued_execute(
-            promote_rowcount=0, queued_issues=[],
-        ))
+        mock_db.execute = AsyncMock(
+            side_effect=self._mark_queued_execute(
+                promote_rowcount=0,
+                queued_issues=[],
+            )
+        )
 
         with patch("app.scheduler.utcnow"):
             await scheduler._mark_eligible_as_queued(mock_db)
@@ -1586,9 +1720,12 @@ class TestMarkEligibleAsQueuedIssueTransition(unittest.IsolatedAsyncioTestCase):
         scheduler = Scheduler()
         mock_db = AsyncMock()
 
-        mock_db.execute = AsyncMock(side_effect=self._mark_queued_execute(
-            promote_rowcount=1, queued_issues=[],
-        ))
+        mock_db.execute = AsyncMock(
+            side_effect=self._mark_queued_execute(
+                promote_rowcount=1,
+                queued_issues=[],
+            )
+        )
 
         with patch("app.scheduler.utcnow"):
             await scheduler._mark_eligible_as_queued(mock_db)
@@ -1605,9 +1742,12 @@ class TestMarkEligibleAsQueuedIssueTransition(unittest.IsolatedAsyncioTestCase):
         scheduler = Scheduler()
         mock_db = AsyncMock()
 
-        mock_db.execute = AsyncMock(side_effect=self._mark_queued_execute(
-            promote_rowcount=3, queued_issues=[(1,), (7,), (42,)],
-        ))
+        mock_db.execute = AsyncMock(
+            side_effect=self._mark_queued_execute(
+                promote_rowcount=3,
+                queued_issues=[(1,), (7,), (42,)],
+            )
+        )
 
         with patch("app.scheduler.utcnow"):
             await scheduler._mark_eligible_as_queued(mock_db)
@@ -1623,9 +1763,12 @@ class TestMarkEligibleAsQueuedIssueTransition(unittest.IsolatedAsyncioTestCase):
         scheduler = Scheduler()
         mock_db = AsyncMock()
 
-        mock_db.execute = AsyncMock(side_effect=self._mark_queued_execute(
-            promote_rowcount=1, queued_issues=[(5,)],
-        ))
+        mock_db.execute = AsyncMock(
+            side_effect=self._mark_queued_execute(
+                promote_rowcount=1,
+                queued_issues=[(5,)],
+            )
+        )
 
         with patch("app.scheduler.utcnow"):
             await scheduler._mark_eligible_as_queued(mock_db)
@@ -1666,11 +1809,14 @@ class TestMarkEligibleAsQueuedIssueTransition(unittest.IsolatedAsyncioTestCase):
         # The fourth statement is the issue-ID SELECT; compile and inspect it.
         self.assertGreaterEqual(len(captured_stmts), 4)
         from sqlalchemy.dialects import postgresql
+
         compiled = captured_stmts[3].compile(
             dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
         )
         sql_text = str(compiled).lower()
         self.assertNotIn("task_mode", sql_text, "Issue-ID query must include all task modes")
         self.assertNotIn("plan", sql_text, "Issue-ID query must include plan mode tasks")
-if __name__ == '__main__':
+
+
+if __name__ == "__main__":
     unittest.main()

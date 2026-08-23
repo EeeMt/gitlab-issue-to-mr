@@ -17,7 +17,7 @@ from fastapi import HTTPException
 
 from app.api.task_creation_service import TaskCreationServices, retry_task_record
 from app.api.task_schemas import RetryTaskRequest
-from app.models import Task, TaskWorkerProfileSnapshot
+from app.models import Task, TaskWorkerProfileSnapshot, WorkerRuntimeBundle
 
 SOURCE_PROJECTION = {
     "harness_key": "claude",
@@ -69,6 +69,20 @@ def _source_task(**overrides) -> Task:
         default_execute_run_instruction_template="Execute {{user_prompt}}",
         default_plan_run_instruction_template="Plan {{user_prompt}}",
         ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+        harness_key="claude",
+        runtime_contract_version="codify.worker.harness/v1",
+        runtime_bundle_digest="a" * 64,
+    )
+    # Retry is now an execution writer and must pass the same central contract
+    # guard as execute/schedule.  Keep this lineage fixture focused by giving
+    # it the immutable V1 truth that a real historical runnable task carries.
+    task.runtime_bundle = WorkerRuntimeBundle(
+        contract_version="codify.worker.harness/v1",
+        digest="a" * 64,
+        manifest={"adapters": {"claude": {}}},
+        bundle_bytes=b"",
+        orchestration_version="1.0.0",
+        size_bytes=0,
     )
     for key, value in overrides.items():
         setattr(task, key, value)

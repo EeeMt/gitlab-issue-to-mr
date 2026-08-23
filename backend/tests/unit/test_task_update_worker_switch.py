@@ -30,6 +30,7 @@ from app.models import (
     TaskStatus,
     TaskWorkerProfileSnapshot,
     WorkerProfile,
+    WorkerRuntimeBundle,
     WorkerRuntimeReadiness,
     WorkerSharedConfiguration,
     WorkerSharedEnvironmentVariable,
@@ -192,6 +193,17 @@ async def _seed_task(
 
 
 async def _seed_old_snapshot(db, task: Task, profile: WorkerProfile) -> TaskWorkerProfileSnapshot:
+    bundle = WorkerRuntimeBundle(
+        digest=f"{task.id:064x}",
+        bundle_bytes=b"fixture-runtime",
+        contract_version="codify.worker.harness/v1",
+        orchestration_version="fixture",
+        manifest={"adapters": {"claude": {}}},
+        size_bytes=len(b"fixture-runtime"),
+    )
+    db.add(bundle)
+    await db.flush()
+    task.runtime_bundle_id = bundle.id
     snapshot = TaskWorkerProfileSnapshot(
         task_id=task.id,
         worker_profile_id=profile.id,
@@ -208,6 +220,8 @@ async def _seed_old_snapshot(db, task: Task, profile: WorkerProfile) -> TaskWork
         default_plan_run_instruction_template="Plan {{user_prompt}}",
         ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
         harness_key="claude",
+        runtime_contract_version="codify.worker.harness/v1",
+        runtime_bundle_digest=bundle.digest,
         skill_selection_source="profile",
         shared_configuration_revision=1,
         created_at=datetime(2026, 8, 15, 9, 0, 0),

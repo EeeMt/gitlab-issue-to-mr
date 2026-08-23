@@ -12,6 +12,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.task_operations import require_task_execution_writer
 from app.api.task_responses import (
     apply_queue_context,
     attach_task_worker_snapshot,
@@ -24,6 +25,7 @@ from app.config import get_effective_settings
 from app.core.harness_execution_policy import (
     ExecutionPolicyError,
     require_creatable_bundle_v2,
+    require_task_executable_contract,
 )
 from app.core.harness_registry import (
     HarnessRegistryError,
@@ -116,6 +118,7 @@ async def retry_task_record(
         current_user,
     )
     services.validate_task_status_for_retry(original_task)
+    require_task_execution_writer(original_task, action="retry")
 
     existing_retry = (
         await db.execute(
@@ -138,9 +141,7 @@ async def retry_task_record(
     await _raise_if_usage_limited(db, current_user, services)
 
     issue = (
-        await db.execute(
-            select(Issue).where(Issue.id == original_task.issue_id).with_for_update()
-        )
+        await db.execute(select(Issue).where(Issue.id == original_task.issue_id).with_for_update())
     ).scalar_one_or_none()
     if issue is None:
         raise HTTPException(status_code=404, detail="Issue not found")
@@ -467,9 +468,7 @@ async def create_task_record(
         endpoint = normalize_endpoint(provider)
         ensure_harness_protocol_compatibility(harness_key, endpoint)
         if endpoint.compat_profile is not None and endpoint.compat_profile not in COMPAT_PROFILES:
-            raise HarnessRegistryError(
-                f"unknown compat_profile: {endpoint.compat_profile!r}"
-            )
+            raise HarnessRegistryError(f"unknown compat_profile: {endpoint.compat_profile!r}")
     except (HarnessRegistryError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -616,8 +615,14 @@ async def create_task_record(
             if isinstance(bundle_manifest, dict):
                 adapter = (bundle_manifest.get("adapters") or {}).get(harness_key) or {}
             if isinstance(adapter, dict):
-                snapshot.harness_adapter_version = adapter.get("version")
-                snapshot.harness_adapter_digest = adapter.get("digest")
+                # V2 preserves adapter identity under ``adapter`` while V1
+                # exposes it at the adapter root.  Freeze the actual V2 facts,
+                # never a missing top-level compatibility projection.
+                adapter_identity = adapter.get("adapter")
+                if not isinstance(adapter_identity, dict):
+                    adapter_identity = adapter
+                snapshot.harness_adapter_version = adapter_identity.get("version")
+                snapshot.harness_adapter_digest = adapter_identity.get("digest")
             bundle_digest = getattr(bundle, "digest", None)
             if isinstance(bundle_digest, str):
                 snapshot.runtime_bundle_digest = bundle_digest
@@ -636,6 +641,19 @@ async def create_task_record(
                 snapshot.cli_executable_path = cli_runtime.get("executable_path")
                 snapshot.cli_version = cli_runtime.get("version")
                 snapshot.cli_binary_digest = cli_runtime.get("binary_digest")
+            # The snapshot helper normally attaches this relationship, but
+            # keep the writer boundary explicit for alternate/test services.
+            task.worker_profile_snapshot = snapshot
+
+        # Creation is an execution writer too.  Validate the complete frozen
+        # Task/Snapshot/Bundle identity after all facts are populated and
+        # before the first commit, rather than deferring an invalid row to the
+        # Scheduler claim path.
+        require_task_executable_contract(
+            task,
+            bundle,
+            get_effective_settings().harness_execution_mode,
+        )
     except (TaskPromptValidationError, SkillValidationError, RuntimeError) as exc:
         await db.rollback()
         raise HTTPException(

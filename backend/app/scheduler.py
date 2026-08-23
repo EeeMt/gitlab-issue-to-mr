@@ -24,7 +24,12 @@ from app.core.docker_client import (
     DockerConnectionConfig,
     get_docker_client,
 )
-from app.core.harness_execution_policy import legacy_rejection_detail
+from app.core.harness_execution_policy import (
+    LEGACY_CONTRACT_NOT_EXECUTABLE,
+    ExecutionPolicyError,
+    execution_rejection_detail,
+    require_task_executable_contract,
+)
 from app.core.harness_protocol import HARNESS_CONTRACT_VERSION_V2
 from app.core.issue_execution_locks import (
     acquire_issue_execution_lock,
@@ -71,9 +76,11 @@ from app.models import (
     IssueExecutionLock,
     IssueStatus,
     Task,
+    TaskHarnessAttempt,
     TaskRunArchive,
     TaskStatus,
     TaskWorkerProfileSnapshot,
+    WorkerRuntimeBundle,
     WorkerRuntimeReadiness,
 )
 from app.runtime_config import load_runtime_config_from_db
@@ -273,26 +280,47 @@ class Scheduler:
         """
         row = await db.execute(
             select(Task)
-            .where(
-                Task.status.in_(
-                    (TaskStatus.PENDING, TaskStatus.QUEUED, TaskStatus.RUNNING)
-                )
+            .where(Task.status.in_((TaskStatus.PENDING, TaskStatus.QUEUED, TaskStatus.RUNNING)))
+            .options(
+                selectinload(Task.runtime_bundle),
+                selectinload(Task.worker_profile_snapshot),
             )
-            .options(selectinload(Task.runtime_bundle))
         )
         terminalized: set[int] = set()
         terminalized_issues: set[int] = set()
         for task in row.scalars().all():
             bundle = task.runtime_bundle
-            contract_version = getattr(bundle, "contract_version", None)
-            if contract_version == HARNESS_CONTRACT_VERSION_V2:
+            attempt = (
+                await db.execute(
+                    select(TaskHarnessAttempt)
+                    .where(TaskHarnessAttempt.task_id == task.id)
+                    .order_by(TaskHarnessAttempt.attempt_no.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            try:
+                require_task_executable_contract(
+                    task,
+                    bundle,
+                    "v2_only",
+                    attempt=attempt if task.status == TaskStatus.RUNNING else None,
+                )
+            except ExecutionPolicyError as exc:
+                rejection = execution_rejection_detail(
+                    exc,
+                    action="recovery",
+                    subject=task.id,
+                )
+            else:
                 continue
             is_running = getattr(task.status, "value", task.status) == TaskStatus.RUNNING.value
             cancelled = is_running and isinstance(
                 getattr(task, "cancel_requested_at", None), datetime
             )
-            task.status = TaskStatus.CANCELLED if (cancelled or not is_running) else TaskStatus.FAILED
-            task.error_message = legacy_rejection_detail(task.id)["message"]
+            task.status = (
+                TaskStatus.CANCELLED if (cancelled or not is_running) else TaskStatus.FAILED
+            )
+            task.error_message = json.dumps(rejection, sort_keys=True)
             task.completed_at = utcnow()
             if not is_running:
                 # A never-dispatched legacy task has no live container to reap.
@@ -310,11 +338,10 @@ class Scheduler:
             await db.flush()
             terminalized.add(task.id)
             logger.warning(
-                "v2_only remediation: terminalized legacy task %s as %s "
-                "(contract_version=%r)",
+                "v2_only remediation: terminalized legacy task %s as %s (rejection_code=%s)",
                 task.id,
                 task.status.value,
-                contract_version,
+                rejection["code"],
             )
         if terminalized:
             await db.commit()
@@ -425,6 +452,11 @@ class Scheduler:
         """Run one scheduler cycle."""
         async with AsyncSessionLocal() as db:
             await load_runtime_config_from_db(db)
+            if get_settings().harness_execution_mode == "v2_only":
+                # Re-apply the policy every cycle so rows inserted by an old or
+                # bypassing writer after startup can never sit in, or re-enter,
+                # the executable queue.
+                await self._remediate_legacy_contracts(db)
             await self._maybe_cleanup_sessions(db)
             await self._maybe_cleanup_runtime_archives(db)
             await self._maybe_cleanup_workspaces(db)
@@ -550,9 +582,7 @@ class Scheduler:
             select(Task.issue_id)
             .distinct()
             .where(
-                Task.status.in_(
-                    (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED)
-                ),
+                Task.status.in_((TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED)),
                 Task.container_id.is_not(None),
             )
         )
@@ -680,10 +710,7 @@ class Scheduler:
     async def _maybe_cleanup_runtime_archives(self, db: AsyncSession) -> None:
         """Delete expired runtime archive files without deleting their Tasks."""
         now = time.time()
-        if (
-            now - self._last_runtime_archive_cleanup_at
-            < _RUNTIME_ARCHIVE_CLEANUP_INTERVAL_SECONDS
-        ):
+        if now - self._last_runtime_archive_cleanup_at < _RUNTIME_ARCHIVE_CLEANUP_INTERVAL_SECONDS:
             return
 
         retention_days = get_settings().worker_runtime_archive_retention_days
@@ -827,9 +854,7 @@ class Scheduler:
             TaskStatus.CANCELLED,
         )
         active_worker_ids = {
-            task_id
-            for task_id, handle in self._worker_tasks.items()
-            if not handle.done()
+            task_id for task_id, handle in self._worker_tasks.items() if not handle.done()
         }
         candidate_stmt = (
             select(Task.id)
@@ -1005,9 +1030,7 @@ class Scheduler:
             .where(
                 Task.issue_id == Issue.id,
                 or_(
-                    Task.status.in_(
-                        (TaskStatus.PENDING, TaskStatus.QUEUED, TaskStatus.RUNNING)
-                    ),
+                    Task.status.in_((TaskStatus.PENDING, TaskStatus.QUEUED, TaskStatus.RUNNING)),
                     Task.container_id.is_not(None),
                 ),
             )
@@ -1124,14 +1147,10 @@ class Scheduler:
                 Task.issue_sequence.is_(None),
             )
         )
-        null_issue_ids = [
-            row[0] for row in null_issue_result.fetchall() if row[0] is not None
-        ]
+        null_issue_ids = [row[0] for row in null_issue_result.fetchall() if row[0] is not None]
         for issue_id in null_issue_ids:
             try:
-                await db.execute(
-                    select(Issue).where(Issue.id == issue_id).with_for_update()
-                )
+                await db.execute(select(Issue).where(Issue.id == issue_id).with_for_update())
                 report = await ensure_issue_order_integrity_locked(
                     db,
                     issue_id=issue_id,
@@ -1216,9 +1235,7 @@ class Scheduler:
                         task_alias.issue_sequence < Task.issue_sequence,
                     )
                 ),
-                ~exists(
-                    select(1).where(IssueExecutionLock.issue_id == Task.issue_id)
-                ),
+                ~exists(select(1).where(IssueExecutionLock.issue_id == Task.issue_id)),
                 # A PENDING task whose frozen Kit locator is known unavailable
                 # stays PENDING: promotion would only queue a run that must be
                 # parked again (§13.2).
@@ -1234,10 +1251,17 @@ class Scheduler:
             )
             .values(status=TaskStatus.QUEUED)
         )
-        if blocked_issue_ids:
+        if get_settings().harness_execution_mode == "v2_only":
             stmt = stmt.where(
-                (Task.issue_id.is_(None)) | (~Task.issue_id.in_(blocked_issue_ids))
+                exists(
+                    select(WorkerRuntimeBundle.id).where(
+                        WorkerRuntimeBundle.id == Task.runtime_bundle_id,
+                        WorkerRuntimeBundle.contract_version == HARNESS_CONTRACT_VERSION_V2,
+                    )
+                )
             )
+        if blocked_issue_ids:
+            stmt = stmt.where((Task.issue_id.is_(None)) | (~Task.issue_id.in_(blocked_issue_ids)))
         result = await db.execute(stmt)
         if result.rowcount > 0:
             await db.commit()
@@ -1307,10 +1331,17 @@ class Scheduler:
                     task_alias.issue_sequence < Task.issue_sequence,
                 )
             ),
-            ~exists(
-                select(1).where(IssueExecutionLock.issue_id == Task.issue_id)
-            ),
+            ~exists(select(1).where(IssueExecutionLock.issue_id == Task.issue_id)),
         )
+        if get_settings().harness_execution_mode == "v2_only":
+            stmt = stmt.where(
+                exists(
+                    select(WorkerRuntimeBundle.id).where(
+                        WorkerRuntimeBundle.id == Task.runtime_bundle_id,
+                        WorkerRuntimeBundle.contract_version == HARNESS_CONTRACT_VERSION_V2,
+                    )
+                )
+            )
         if self._running_issues:
             # Filtering in SQL avoids a queued task for a busy Issue sitting at the
             # head of the priority order and starving runnable tasks from other Issues.
@@ -1345,9 +1376,7 @@ class Scheduler:
         # head, acquire the IssueExecutionLock (ON CONFLICT DO NOTHING) and CAS
         # QUEUED→RUNNING. Only after the commit succeeds do we start the worker.
         try:
-            await db.execute(
-                select(Issue).where(Issue.id == issue_id).with_for_update()
-            )
+            await db.execute(select(Issue).where(Issue.id == issue_id).with_for_update())
             await ensure_issue_order_integrity_locked(
                 db,
                 issue_id=issue_id,
@@ -1373,6 +1402,10 @@ class Scheduler:
             await db.execute(
                 select(Task)
                 .where(Task.id == task_id)
+                .options(
+                    selectinload(Task.runtime_bundle),
+                    selectinload(Task.worker_profile_snapshot),
+                )
                 .with_for_update()
                 # _get_next_task already loaded this row into the session identity
                 # map; without populate_existing the FOR UPDATE re-read returns the
@@ -1412,6 +1445,33 @@ class Scheduler:
             return
         if await self._has_active_predecessor(db, task):
             await self._demote_queued_task(db, task, "predecessor_active")
+            return
+
+        try:
+            require_task_executable_contract(
+                task,
+                task.runtime_bundle,
+                get_settings().harness_execution_mode,
+            )
+        except ExecutionPolicyError as exc:
+            task.status = (
+                TaskStatus.CANCELLED
+                if exc.code == LEGACY_CONTRACT_NOT_EXECUTABLE
+                else TaskStatus.FAILED
+            )
+            task.error_message = json.dumps(
+                execution_rejection_detail(exc, action="claim", subject=task.id)
+            )
+            task.completed_at = utcnow()
+            task.raw_logs_finalized_at = task.raw_logs_finalized_at or utcnow()
+            await db.commit()
+            self._emit_event(
+                "issue_task_claim_rejected",
+                reason=exc.code,
+                issue_id=issue_id,
+                task_id=task_id,
+            )
+            await maybe_update_issue_status(db, issue_id)
             return
 
         # Usage limits are enforced before acquiring the lock so an over-limit
@@ -1497,9 +1557,7 @@ class Scheduler:
         """
         snapshot = await self._load_task_snapshot(db, task.id)
         fingerprint = (
-            getattr(snapshot, "runtime_locator_fingerprint", None)
-            if snapshot is not None
-            else None
+            getattr(snapshot, "runtime_locator_fingerprint", None) if snapshot is not None else None
         )
         if not fingerprint:
             # baked-image target (or a pre-071 legacy snapshot): no host Kit to
@@ -1543,9 +1601,7 @@ class Scheduler:
                 # this probe committed: fail the probed task and park unclaimed
                 # same-fingerprint tasks (§13.4).
                 await self._fail_task_for_runtime_check(db, task, outcome.readiness)
-                await self._park_other_queued_tasks(
-                    db, task, fingerprint, outcome.readiness
-                )
+                await self._park_other_queued_tasks(db, task, fingerprint, outcome.readiness)
             else:
                 # The probe was superseded by a concurrent check that concluded
                 # unavailable (§13.3 CAS). §13.3/§13.5: a late probe must not
@@ -1568,9 +1624,7 @@ class Scheduler:
         task_id: int,
     ) -> TaskWorkerProfileSnapshot | None:
         result = await db.execute(
-            select(TaskWorkerProfileSnapshot).where(
-                TaskWorkerProfileSnapshot.task_id == task_id
-            )
+            select(TaskWorkerProfileSnapshot).where(TaskWorkerProfileSnapshot.task_id == task_id)
         )
         return result.scalar_one_or_none()
 
@@ -1608,7 +1662,9 @@ class Scheduler:
         for other in result.scalars().all():
             await self._park_queued_task(db, other, readiness)
 
-    async def _park_queued_task(self, db: AsyncSession, task: Task, readiness: RuntimeReadiness) -> None:
+    async def _park_queued_task(
+        self, db: AsyncSession, task: Task, readiness: RuntimeReadiness
+    ) -> None:
         """Return one QUEUED Task to PENDING because its runtime is unavailable."""
         if task.status != TaskStatus.QUEUED:
             return
@@ -1646,9 +1702,7 @@ class Scheduler:
             ensure_ascii=False,
         )
         task.completed_at = utcnow()
-        task.raw_logs_finalized_at = (
-            getattr(task, "raw_logs_finalized_at", None) or utcnow()
-        )
+        task.raw_logs_finalized_at = getattr(task, "raw_logs_finalized_at", None) or utcnow()
         await db.commit()
         self._emit_event(
             "runtime_readiness_check_failed",
@@ -1742,9 +1796,7 @@ class Scheduler:
         finally:
             self._active_worker_threads -= 1
             if defer_recovery:
-                recovery_task = asyncio.create_task(
-                    self._coordinate_unavailable_recovery(task_id)
-                )
+                recovery_task = asyncio.create_task(self._coordinate_unavailable_recovery(task_id))
                 self._worker_tasks[task_id] = recovery_task
                 self._terminal_worker_seen_at.pop(task_id, None)
                 logger.info(
@@ -2585,9 +2637,7 @@ class Scheduler:
         finally:
             self._active_worker_threads -= 1
             if defer_recovery:
-                recovery_task = asyncio.create_task(
-                    self._coordinate_unavailable_recovery(task_id)
-                )
+                recovery_task = asyncio.create_task(self._coordinate_unavailable_recovery(task_id))
                 self._worker_tasks[task_id] = recovery_task
                 self._terminal_worker_seen_at.pop(task_id, None)
                 logger.info(
@@ -2760,6 +2810,38 @@ def _run_worker_resume_task(
     from app.core.worker_command_pump import run_pump_until_task_ends
 
     async def run_task():
+        # Recovery must prove the complete frozen Task/Bundle/attempt identity
+        # before a command pump can touch an already-running container.  The
+        # worker repeats this guard inside resume_task; this earlier check owns
+        # the command-delivery ordering boundary.
+        async with ThreadSessionLocal() as preflight_db:
+            task = (
+                await preflight_db.execute(
+                    select(Task)
+                    .where(Task.id == task_id)
+                    .options(
+                        selectinload(Task.runtime_bundle),
+                        selectinload(Task.worker_profile_snapshot),
+                    )
+                )
+            ).scalar_one_or_none()
+            if task is None:
+                return False
+            attempt = (
+                await preflight_db.execute(
+                    select(TaskHarnessAttempt)
+                    .where(TaskHarnessAttempt.task_id == task_id)
+                    .order_by(TaskHarnessAttempt.attempt_no.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            require_task_executable_contract(
+                task,
+                task.runtime_bundle,
+                get_settings().harness_execution_mode,
+                attempt=attempt,
+            )
+
         pump_task = loop.create_task(
             run_pump_until_task_ends(
                 task_id,
@@ -2783,6 +2865,7 @@ def _run_worker_resume_task(
                 await pump_task
             except BaseException:  # noqa: BLE001 - cancellation cleanup
                 pass
+
     try:
         return loop.run_until_complete(run_task())
     finally:

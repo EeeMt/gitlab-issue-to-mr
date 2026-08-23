@@ -35,6 +35,16 @@ def _claimable_task(task_id: int, issue_id: int, status=TaskStatus.QUEUED) -> Ma
     task.completed_at = None
     task.error_message = None
     task.raw_logs_finalized_at = None
+    task.runtime_bundle = MagicMock(
+        contract_version="codify.worker.harness/v1",
+        digest="a" * 64,
+        manifest={"adapters": {"claude": {}}},
+    )
+    task.worker_profile_snapshot = MagicMock(
+        runtime_contract_version="codify.worker.harness/v1",
+        runtime_bundle_digest="a" * 64,
+        harness_key="claude",
+    )
     return task
 
 
@@ -53,7 +63,9 @@ def _claim_execute(db: MagicMock, task: MagicMock) -> None:
 class SchedulerPriorityQueueTests(unittest.IsolatedAsyncioTestCase):
     """Tests for scheduler priority queue ordering."""
 
-    def _create_mock_task(self, task_id: int, priority: int, scheduled_at=None, created_at=None) -> MagicMock:
+    def _create_mock_task(
+        self, task_id: int, priority: int, scheduled_at=None, created_at=None
+    ) -> MagicMock:
         """Helper to create a mock Task."""
         task = MagicMock()
         task.id = task_id
@@ -337,14 +349,16 @@ class SchedulerTaskExecutionTests(unittest.IsolatedAsyncioTestCase):
 
         exceeded = UsageLimitExceeded(
             scope="execute",
-            exceeded_items=[{
-                "field": "daily_tasks",
-                "window": "daily",
-                "metric": "tasks",
-                "used": 6,
-                "limit": 5,
-                "reset_at": "2026-04-28T00:00:00+00:00",
-            }],
+            exceeded_items=[
+                {
+                    "field": "daily_tasks",
+                    "window": "daily",
+                    "metric": "tasks",
+                    "used": 6,
+                    "limit": 5,
+                    "reset_at": "2026-04-28T00:00:00+00:00",
+                }
+            ],
         )
 
         with (
@@ -358,8 +372,12 @@ class SchedulerTaskExecutionTests(unittest.IsolatedAsyncioTestCase):
             ),
             patch("app.scheduler.utcnow", return_value=datetime(2026, 4, 27, 12, 0, 0)),
             patch("app.scheduler.asyncio.create_task") as mock_create_task,
-            patch.object(scheduler, "_transition_issue_to_in_progress", new=AsyncMock()) as mock_transition,
-            patch("app.scheduler.maybe_update_issue_status", new=AsyncMock()) as mock_update_issue_status,
+            patch.object(
+                scheduler, "_transition_issue_to_in_progress", new=AsyncMock()
+            ) as mock_transition,
+            patch(
+                "app.scheduler.maybe_update_issue_status", new=AsyncMock()
+            ) as mock_update_issue_status,
             patch("app.scheduler.acquire_issue_execution_lock", new=AsyncMock(return_value=True)),
             patch("app.scheduler.release_issue_execution_lock", new=AsyncMock()),
         ):
@@ -438,6 +456,7 @@ class SchedulerStartStopTests(unittest.IsolatedAsyncioTestCase):
         sched_module._scheduler = None
         try:
             from app.scheduler import get_scheduler
+
             s1 = get_scheduler()
             s2 = get_scheduler()
             self.assertIs(s1, s2)
@@ -474,7 +493,9 @@ class SchedulerMaybeCleanupTests(unittest.IsolatedAsyncioTestCase):
 
         mock_db = MagicMock()
 
-        with patch("app.scheduler.cleanup_stale_sessions", new=AsyncMock(return_value=0)) as mock_cleanup:
+        with patch(
+            "app.scheduler.cleanup_stale_sessions", new=AsyncMock(return_value=0)
+        ) as mock_cleanup:
             await scheduler._maybe_cleanup_sessions(mock_db)
             mock_cleanup.assert_awaited_once_with(mock_db)
 
@@ -486,6 +507,7 @@ if __name__ == "__main__":
 # ---------------------------------------------------------------------------
 # _get_running_count
 # ---------------------------------------------------------------------------
+
 
 class SchedulerGetRunningCountTests(unittest.IsolatedAsyncioTestCase):
     """Tests for _get_running_count."""
@@ -527,6 +549,7 @@ class SchedulerGetRunningCountTests(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 # _crash_recovery
 # ---------------------------------------------------------------------------
+
 
 class SchedulerCrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
     """Tests for crash recovery logic."""
@@ -599,9 +622,7 @@ class SchedulerCrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
                 new=MagicMock(return_value=object()),
             ),
             patch("app.scheduler.asyncio.create_task", return_value=MagicMock()),
-            patch(
-                "app.scheduler.release_issue_execution_lock", new=AsyncMock()
-            ) as release_lock,
+            patch("app.scheduler.release_issue_execution_lock", new=AsyncMock()) as release_lock,
         ):
             await scheduler._crash_recovery()
 
@@ -681,6 +702,7 @@ class SchedulerCrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
 # _run_cycle
 # ---------------------------------------------------------------------------
 
+
 class SchedulerRunCycleTests(unittest.IsolatedAsyncioTestCase):
     """Tests for the main _run_cycle method."""
 
@@ -701,18 +723,34 @@ class SchedulerRunCycleTests(unittest.IsolatedAsyncioTestCase):
 
         scheduler = Scheduler()
         mock_context, mock_db = self._make_mock_db_context()
-        mock_settings = SimpleNamespace(max_concurrency=2, scheduler_interval=1)
+        mock_settings = SimpleNamespace(
+            max_concurrency=2,
+            scheduler_interval=1,
+            harness_execution_mode="dual_canary",
+        )
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_context):
             with patch("app.scheduler.load_runtime_config_from_db", new=AsyncMock()):
                 with patch.object(scheduler, "_maybe_cleanup_sessions", new=AsyncMock()):
                     with patch.object(scheduler, "_maybe_cleanup_workspaces", new=AsyncMock()):
                         with patch.object(scheduler, "_maybe_cleanup_issue_locks", new=AsyncMock()):
-                            with patch.object(scheduler, "_reconcile_running_state", new=AsyncMock()):
-                                with patch.object(scheduler, "_mark_eligible_as_queued", new=AsyncMock()):
-                                    with patch("app.scheduler.get_settings", return_value=mock_settings):
-                                        with patch.object(scheduler, "_get_running_count", new=AsyncMock(return_value=2)):
-                                            with patch.object(scheduler, "_get_next_task", new=AsyncMock()) as mock_next:
+                            with patch.object(
+                                scheduler, "_reconcile_running_state", new=AsyncMock()
+                            ):
+                                with patch.object(
+                                    scheduler, "_mark_eligible_as_queued", new=AsyncMock()
+                                ):
+                                    with patch(
+                                        "app.scheduler.get_settings", return_value=mock_settings
+                                    ):
+                                        with patch.object(
+                                            scheduler,
+                                            "_get_running_count",
+                                            new=AsyncMock(return_value=2),
+                                        ):
+                                            with patch.object(
+                                                scheduler, "_get_next_task", new=AsyncMock()
+                                            ) as mock_next:
                                                 await scheduler._run_cycle()
                                                 mock_next.assert_not_called()
 
@@ -724,19 +762,39 @@ class SchedulerRunCycleTests(unittest.IsolatedAsyncioTestCase):
 
         scheduler = Scheduler()
         mock_context, mock_db = self._make_mock_db_context()
-        mock_settings = SimpleNamespace(max_concurrency=4, scheduler_interval=1)
+        mock_settings = SimpleNamespace(
+            max_concurrency=4,
+            scheduler_interval=1,
+            harness_execution_mode="dual_canary",
+        )
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_context):
             with patch("app.scheduler.load_runtime_config_from_db", new=AsyncMock()):
                 with patch.object(scheduler, "_maybe_cleanup_sessions", new=AsyncMock()):
                     with patch.object(scheduler, "_maybe_cleanup_workspaces", new=AsyncMock()):
                         with patch.object(scheduler, "_maybe_cleanup_issue_locks", new=AsyncMock()):
-                            with patch.object(scheduler, "_reconcile_running_state", new=AsyncMock()):
-                                with patch.object(scheduler, "_mark_eligible_as_queued", new=AsyncMock()):
-                                    with patch("app.scheduler.get_settings", return_value=mock_settings):
-                                        with patch.object(scheduler, "_get_running_count", new=AsyncMock(return_value=0)):
-                                            with patch.object(scheduler, "_get_next_task", new=AsyncMock(return_value=None)):
-                                                with patch.object(scheduler, "_execute_task", new=AsyncMock()) as mock_exec:
+                            with patch.object(
+                                scheduler, "_reconcile_running_state", new=AsyncMock()
+                            ):
+                                with patch.object(
+                                    scheduler, "_mark_eligible_as_queued", new=AsyncMock()
+                                ):
+                                    with patch(
+                                        "app.scheduler.get_settings", return_value=mock_settings
+                                    ):
+                                        with patch.object(
+                                            scheduler,
+                                            "_get_running_count",
+                                            new=AsyncMock(return_value=0),
+                                        ):
+                                            with patch.object(
+                                                scheduler,
+                                                "_get_next_task",
+                                                new=AsyncMock(return_value=None),
+                                            ):
+                                                with patch.object(
+                                                    scheduler, "_execute_task", new=AsyncMock()
+                                                ) as mock_exec:
                                                     await scheduler._run_cycle()
                                                     mock_exec.assert_not_called()
 
@@ -748,7 +806,11 @@ class SchedulerRunCycleTests(unittest.IsolatedAsyncioTestCase):
 
         scheduler = Scheduler()
         mock_context, mock_db = self._make_mock_db_context()
-        mock_settings = SimpleNamespace(max_concurrency=4, scheduler_interval=1)
+        mock_settings = SimpleNamespace(
+            max_concurrency=4,
+            scheduler_interval=1,
+            harness_execution_mode="dual_canary",
+        )
 
         task = MagicMock()
         task.id = 1
@@ -763,12 +825,28 @@ class SchedulerRunCycleTests(unittest.IsolatedAsyncioTestCase):
                 with patch.object(scheduler, "_maybe_cleanup_sessions", new=AsyncMock()):
                     with patch.object(scheduler, "_maybe_cleanup_workspaces", new=AsyncMock()):
                         with patch.object(scheduler, "_maybe_cleanup_issue_locks", new=AsyncMock()):
-                            with patch.object(scheduler, "_reconcile_running_state", new=AsyncMock()):
-                                with patch.object(scheduler, "_mark_eligible_as_queued", new=AsyncMock()):
-                                    with patch("app.scheduler.get_settings", return_value=mock_settings):
-                                        with patch.object(scheduler, "_get_running_count", new=AsyncMock(return_value=0)):
-                                            with patch.object(scheduler, "_get_next_task", new=AsyncMock(return_value=task)):
-                                                with patch.object(scheduler, "_execute_task", new=AsyncMock()) as mock_exec:
+                            with patch.object(
+                                scheduler, "_reconcile_running_state", new=AsyncMock()
+                            ):
+                                with patch.object(
+                                    scheduler, "_mark_eligible_as_queued", new=AsyncMock()
+                                ):
+                                    with patch(
+                                        "app.scheduler.get_settings", return_value=mock_settings
+                                    ):
+                                        with patch.object(
+                                            scheduler,
+                                            "_get_running_count",
+                                            new=AsyncMock(return_value=0),
+                                        ):
+                                            with patch.object(
+                                                scheduler,
+                                                "_get_next_task",
+                                                new=AsyncMock(return_value=task),
+                                            ):
+                                                with patch.object(
+                                                    scheduler, "_execute_task", new=AsyncMock()
+                                                ) as mock_exec:
                                                     await scheduler._run_cycle()
                                                     mock_exec.assert_not_called()
 
@@ -780,7 +858,11 @@ class SchedulerRunCycleTests(unittest.IsolatedAsyncioTestCase):
 
         scheduler = Scheduler()
         mock_context, mock_db = self._make_mock_db_context()
-        mock_settings = SimpleNamespace(max_concurrency=4, scheduler_interval=1)
+        mock_settings = SimpleNamespace(
+            max_concurrency=4,
+            scheduler_interval=1,
+            harness_execution_mode="dual_canary",
+        )
 
         task = MagicMock()
         task.id = 2
@@ -792,12 +874,28 @@ class SchedulerRunCycleTests(unittest.IsolatedAsyncioTestCase):
                 with patch.object(scheduler, "_maybe_cleanup_sessions", new=AsyncMock()):
                     with patch.object(scheduler, "_maybe_cleanup_workspaces", new=AsyncMock()):
                         with patch.object(scheduler, "_maybe_cleanup_issue_locks", new=AsyncMock()):
-                            with patch.object(scheduler, "_reconcile_running_state", new=AsyncMock()):
-                                with patch.object(scheduler, "_mark_eligible_as_queued", new=AsyncMock()):
-                                    with patch("app.scheduler.get_settings", return_value=mock_settings):
-                                        with patch.object(scheduler, "_get_running_count", new=AsyncMock(return_value=0)):
-                                            with patch.object(scheduler, "_get_next_task", new=AsyncMock(return_value=task)):
-                                                with patch.object(scheduler, "_execute_task", new=AsyncMock()) as mock_exec:
+                            with patch.object(
+                                scheduler, "_reconcile_running_state", new=AsyncMock()
+                            ):
+                                with patch.object(
+                                    scheduler, "_mark_eligible_as_queued", new=AsyncMock()
+                                ):
+                                    with patch(
+                                        "app.scheduler.get_settings", return_value=mock_settings
+                                    ):
+                                        with patch.object(
+                                            scheduler,
+                                            "_get_running_count",
+                                            new=AsyncMock(return_value=0),
+                                        ):
+                                            with patch.object(
+                                                scheduler,
+                                                "_get_next_task",
+                                                new=AsyncMock(return_value=task),
+                                            ):
+                                                with patch.object(
+                                                    scheduler, "_execute_task", new=AsyncMock()
+                                                ) as mock_exec:
                                                     await scheduler._run_cycle()
                                                     mock_exec.assert_called_once_with(mock_db, task)
 
@@ -805,6 +903,7 @@ class SchedulerRunCycleTests(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 # _maybe_cleanup_sessions — with sessions deleted
 # ---------------------------------------------------------------------------
+
 
 class SchedulerCleanupWithDeletesTests(unittest.IsolatedAsyncioTestCase):
     """Tests for _maybe_cleanup_sessions when sessions are deleted."""
@@ -819,7 +918,9 @@ class SchedulerCleanupWithDeletesTests(unittest.IsolatedAsyncioTestCase):
         mock_db = MagicMock()
         mock_db.commit = AsyncMock()
 
-        with patch("app.scheduler.cleanup_stale_sessions", new=AsyncMock(return_value=5)) as mock_cleanup:
+        with patch(
+            "app.scheduler.cleanup_stale_sessions", new=AsyncMock(return_value=5)
+        ) as mock_cleanup:
             await scheduler._maybe_cleanup_sessions(mock_db)
             mock_cleanup.assert_awaited_once_with(mock_db)
 
@@ -930,9 +1031,7 @@ class SchedulerCleanupWithDeletesTests(unittest.IsolatedAsyncioTestCase):
         removed_result = MagicMock()
         removed_result.scalar_one_or_none.return_value = removed_issue
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(
-            side_effect=[candidate_result, failed_result, removed_result]
-        )
+        mock_db.execute = AsyncMock(side_effect=[candidate_result, failed_result, removed_result])
         mock_db.commit = AsyncMock()
         settings = SimpleNamespace(
             worker_workspace_host_path="/opt/codify-workspaces",
@@ -963,6 +1062,7 @@ class SchedulerCleanupWithDeletesTests(unittest.IsolatedAsyncioTestCase):
 # _execute_task
 # ---------------------------------------------------------------------------
 
+
 class SchedulerExecuteTaskTests(unittest.IsolatedAsyncioTestCase):
     """Tests for Scheduler._execute_task atomic claim."""
 
@@ -973,7 +1073,9 @@ class SchedulerExecuteTaskTests(unittest.IsolatedAsyncioTestCase):
                 "app.scheduler.ensure_issue_order_integrity_locked",
                 new=AsyncMock(return_value={"repaired_sequences": 0, "repaired_projections": 0}),
             ),
-            patch("app.scheduler.acquire_issue_execution_lock", new=AsyncMock(return_value=acquire)),
+            patch(
+                "app.scheduler.acquire_issue_execution_lock", new=AsyncMock(return_value=acquire)
+            ),
         ):
             yield
 
@@ -1061,6 +1163,16 @@ class SchedulerExecuteTaskTests(unittest.IsolatedAsyncioTestCase):
                 self.status = TaskStatus.QUEUED
                 self.issue_sequence = 1
                 self.scheduled_at = None
+                self.runtime_bundle = MagicMock(
+                    contract_version="codify.worker.harness/v1",
+                    digest="a" * 64,
+                    manifest={"adapters": {"claude": {}}},
+                )
+                self.worker_profile_snapshot = MagicMock(
+                    runtime_contract_version="codify.worker.harness/v1",
+                    runtime_bundle_digest="a" * 64,
+                    harness_key="claude",
+                )
 
             def _read(self, value):
                 if self.expired:
@@ -1414,6 +1526,7 @@ class RuntimeReadinessGateTests(unittest.IsolatedAsyncioTestCase):
 # _run_task_background
 # ---------------------------------------------------------------------------
 
+
 class SchedulerRunTaskBackgroundTests(unittest.IsolatedAsyncioTestCase):
     """Tests for _run_task_background method."""
 
@@ -1499,6 +1612,7 @@ class SchedulerReconcileRunningStateTests(unittest.IsolatedAsyncioTestCase):
 
     def _make_scheduler(self):
         from app.scheduler import Scheduler
+
         return Scheduler()
 
     def _mock_db(self, running_rows):
@@ -1660,7 +1774,7 @@ class SchedulerReconcileRunningStateTests(unittest.IsolatedAsyncioTestCase):
     async def test_orphaned_running_issues_entry_discarded(self):
         """An issue_id in _running_issues not covered by any task in _running_tasks is removed."""
         scheduler = self._make_scheduler()
-        scheduler._running_tasks.add(6)      # task 6 → issue 60
+        scheduler._running_tasks.add(6)  # task 6 → issue 60
         scheduler._running_issues.update({60, 99})  # 99 is orphaned
 
         # DB: only task 6 is RUNNING for issue 60; nothing for issue 99
@@ -1683,3 +1797,55 @@ class SchedulerReconcileRunningStateTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(mock_db.execute.await_count, 2)  # retained audit + fallback query
         self.assertNotIn(99, scheduler._running_issues)
+
+
+class SchedulerV2OnlyRemediationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_running_v2_task_with_snapshot_mismatch_is_failed_before_resume(self):
+        from types import SimpleNamespace
+
+        from app.scheduler import Scheduler
+
+        bundle = SimpleNamespace(
+            contract_version="codify.worker.harness/v2",
+            digest="d" * 64,
+            manifest={"adapters": {"pi": {}}},
+        )
+        task = SimpleNamespace(
+            id=91,
+            issue_id=None,
+            status=TaskStatus.RUNNING,
+            runtime_bundle=bundle,
+            worker_profile_snapshot=SimpleNamespace(
+                runtime_contract_version="codify.worker.harness/v2",
+                runtime_bundle_digest="x" * 64,
+                harness_key="pi",
+            ),
+            cancel_requested_at=None,
+            container_id="container-91",
+            error_message=None,
+            completed_at=None,
+        )
+        attempt = SimpleNamespace(
+            attempt_id="attempt-91",
+            event_schema="codify.worker.event/v2",
+            harness_key="pi",
+        )
+        tasks_result = MagicMock()
+        tasks_result.scalars.return_value.all.return_value = [task]
+        attempt_result = MagicMock()
+        attempt_result.scalar_one_or_none.return_value = attempt
+        db = MagicMock()
+        db.execute = AsyncMock(side_effect=[tasks_result, attempt_result])
+        db.flush = AsyncMock()
+        db.commit = AsyncMock()
+
+        terminalized = await Scheduler()._remediate_legacy_contracts(db)
+
+        self.assertEqual(terminalized, {91})
+        self.assertEqual(task.status, TaskStatus.FAILED)
+        self.assertEqual(
+            json.loads(task.error_message)["code"],
+            "execution_contract_mismatch",
+        )
+        self.assertEqual(task.container_id, "container-91")
+        db.commit.assert_awaited_once()

@@ -12,6 +12,7 @@ from app.api.task_operations import (
     notify_task_cancelled,
     notify_task_execute_now,
     notify_task_rescheduled,
+    require_task_execution_writer,
     validate_scheduled_datetime_in_future,
     validate_task_status_for_cancel,
     validate_task_status_for_execute,
@@ -80,6 +81,18 @@ async def cancel_task(
     task = await get_task_with_access_check(task_id, db, access_scope, current_user)
     validate_task_status_for_cancel(task)
     settings = get_effective_settings()
+
+    # ``v2_only`` keeps legacy V1 rows as an immutable audit surface.  A
+    # PENDING/QUEUED row has never owned a worker container, so cancelling it
+    # would be a lifecycle mutation rather than a safety action and is refused
+    # by the central writer policy.  RUNNING is deliberately different: its
+    # cancellation write records intent so the active legacy container can be
+    # stopped and converged safely; no new execution is introduced.
+    if settings.harness_execution_mode == "v2_only" and task.status in (
+        TaskStatus.PENDING,
+        TaskStatus.QUEUED,
+    ):
+        require_task_execution_writer(task, action="cancel")
     issue_id = task.issue_id
 
     # --- Phase A: Issue lock -> Task lock -> re-read authoritative status ----
@@ -183,8 +196,7 @@ async def cancel_task(
             )
         except (DockerConnectionsUnavailableError, TaskContainerLookupError) as exc:
             logger.warning(
-                "Cancellation deferred for task %s because container %s could not be "
-                "resolved: %s",
+                "Cancellation deferred for task %s because container %s could not be resolved: %s",
                 task_id,
                 container_reference,
                 exc,
@@ -198,8 +210,7 @@ async def cancel_task(
             ) from exc
         except Exception as exc:  # noqa: BLE001
             logger.exception(
-                "Cancellation deferred for task %s after an unexpected container "
-                "lookup failure",
+                "Cancellation deferred for task %s after an unexpected container lookup failure",
                 task_id,
             )
             raise HTTPException(
@@ -245,8 +256,7 @@ async def cancel_task(
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail=(
-                        "Cancellation could not stop the worker container; the task "
-                        "remains active"
+                        "Cancellation could not stop the worker container; the task remains active"
                     ),
                 ) from kill_error
 
@@ -348,6 +358,11 @@ async def override_task_status(
             detail="status must be 'completed' or 'failed'",
         )
 
+    # A terminal status override is still a write to the Task lifecycle.  In
+    # v2_only mode legacy V1 rows are an immutable audit surface, so route it
+    # through the same execution-contract guard as retry/edit/schedule.
+    require_task_execution_writer(task, action="override_status")
+
     new_status = TaskStatus(request.status)
     if task.status not in (TaskStatus.COMPLETED, TaskStatus.FAILED):
         raise HTTPException(
@@ -394,6 +409,7 @@ async def execute_task(
 
     task = await get_task_with_access_check(task_id, db, access_scope, current_user)
     validate_task_status_for_execute(task)
+    require_task_execution_writer(task, action="execute")
 
     previous_scheduled_at = task.scheduled_at
     task.scheduled_at = None
@@ -459,6 +475,7 @@ async def reschedule_task(
 
     task = await get_task_with_access_check(task_id, db, access_scope, current_user)
     validate_task_status_for_reschedule(task)
+    require_task_execution_writer(task, action="schedule")
     normalized_scheduled = validate_scheduled_datetime_in_future(request.scheduled_datetime)
 
     issue = (

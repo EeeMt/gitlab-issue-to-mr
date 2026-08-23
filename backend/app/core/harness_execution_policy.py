@@ -18,6 +18,7 @@ pass the real ORM objects.
 from __future__ import annotations
 
 from app.core.harness_protocol import (
+    CANONICAL_EVENT_SCHEMA,
     CANONICAL_EVENT_SCHEMA_V2,
     HARNESS_CONTRACT_VERSION,
     HARNESS_CONTRACT_VERSION_V2,
@@ -52,6 +53,21 @@ def validate_harness_execution_mode(mode: str) -> str:
     return mode
 
 
+def require_explicit_harness_execution_mode(settings) -> str:
+    """Fail startup when deployment omitted ``HARNESS_EXECUTION_MODE``.
+
+    ``Settings`` retains a development-friendly typed default so pure imports
+    and tooling remain usable, but long-running Backend/Scheduler processes must
+    prove that their mode came from explicit configuration.
+    """
+    if "harness_execution_mode" not in getattr(settings, "model_fields_set", set()):
+        raise ExecutionPolicyError(
+            "HARNESS_EXECUTION_MODE must be explicitly configured for Backend and Scheduler",
+            code="missing_harness_execution_mode",
+        )
+    return validate_harness_execution_mode(settings.harness_execution_mode)
+
+
 def is_v2_only(mode: str) -> bool:
     """True when the mode is exactly ``v2_only``.
 
@@ -83,8 +99,7 @@ def require_executable_contract(bundle) -> None:
     version = getattr(bundle, "contract_version", None)
     if version not in (HARNESS_CONTRACT_VERSION, HARNESS_CONTRACT_VERSION_V2):
         raise ExecutionPolicyError(
-            f"Runtime Bundle has no executable canonical contract "
-            f"(contract_version={version!r})",
+            f"Runtime Bundle has no executable canonical contract (contract_version={version!r})",
             code="missing_executable_contract",
         )
 
@@ -104,6 +119,84 @@ def require_executable_contract_v2(attempt, bundle) -> None:
             f"Bundle (contract_version={getattr(bundle, 'contract_version', None)!r})",
             code=LEGACY_CONTRACT_NOT_EXECUTABLE,
         )
+
+
+def require_task_executable_contract(task, bundle, mode: str, *, attempt=None) -> None:
+    """Validate the complete frozen execution identity at a writer boundary.
+
+    This is the central policy used by API writers, Scheduler claim/promotion,
+    Worker start, and recovery.  It intentionally validates the immutable Task
+    snapshot against the bound Bundle instead of trusting a route that happened
+    to validate an earlier version of either row.
+    """
+    validate_harness_execution_mode(mode)
+    require_executable_contract(bundle)
+
+    snapshot = getattr(task, "worker_profile_snapshot", None)
+    if snapshot is None:
+        raise ExecutionPolicyError(
+            f"task {getattr(task, 'id', '?')} has no immutable Worker snapshot",
+            code="missing_execution_snapshot",
+        )
+
+    bundle_contract = getattr(bundle, "contract_version", None)
+    snapshot_contract = getattr(snapshot, "runtime_contract_version", None)
+    if snapshot_contract != bundle_contract:
+        raise ExecutionPolicyError(
+            f"task {getattr(task, 'id', '?')} snapshot/Bundle contract mismatch "
+            f"(snapshot={snapshot_contract!r}, bundle={bundle_contract!r})",
+            code="execution_contract_mismatch",
+        )
+
+    bundle_digest = getattr(bundle, "digest", None)
+    snapshot_digest = getattr(snapshot, "runtime_bundle_digest", None)
+    if not bundle_digest or snapshot_digest != bundle_digest:
+        raise ExecutionPolicyError(
+            f"task {getattr(task, 'id', '?')} snapshot/Bundle digest mismatch",
+            code="execution_contract_mismatch",
+        )
+
+    harness_key = getattr(snapshot, "harness_key", None)
+    adapters = (getattr(bundle, "manifest", None) or {}).get("adapters") or {}
+    if not harness_key or harness_key not in adapters:
+        raise ExecutionPolicyError(
+            f"task {getattr(task, 'id', '?')} freezes an Adapter not present in its Bundle",
+            code="execution_contract_mismatch",
+        )
+
+    if is_v2_only(mode) and bundle_contract != HARNESS_CONTRACT_VERSION_V2:
+        raise ExecutionPolicyError(
+            f"task {getattr(task, 'id', '?')} pins a legacy V1 contract that is "
+            "read-only under HARNESS_EXECUTION_MODE=v2_only",
+            code=LEGACY_CONTRACT_NOT_EXECUTABLE,
+        )
+
+    if attempt is None:
+        return
+
+    if getattr(attempt, "harness_key", None) != harness_key:
+        raise ExecutionPolicyError(
+            f"attempt {getattr(attempt, 'attempt_id', '?')} does not match the "
+            "Task snapshot Harness",
+            code="execution_contract_mismatch",
+        )
+    if bundle_contract == HARNESS_CONTRACT_VERSION_V2:
+        require_executable_contract_v2(attempt, bundle)
+    elif getattr(attempt, "event_schema", None) != CANONICAL_EVENT_SCHEMA:
+        raise ExecutionPolicyError(
+            f"legacy attempt {getattr(attempt, 'attempt_id', '?')} has a non-V1 event schema",
+            code="execution_contract_mismatch",
+        )
+
+
+def execution_rejection_detail(error: ExecutionPolicyError, *, action: str, subject) -> dict:
+    """Return the stable structured API/Scheduler rejection payload."""
+    return {
+        "code": error.code,
+        "message": str(error),
+        "action": action,
+        "subject": str(subject),
+    }
 
 
 def require_creatable_bundle_v2(bundle, mode: str, subject=None) -> None:

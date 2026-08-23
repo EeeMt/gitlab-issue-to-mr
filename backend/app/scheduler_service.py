@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from app.config import get_effective_settings, get_settings
 from app.core.ci_failure_collector import start_ci_failure_collector
 from app.core.docker_client import close_docker_clients
+from app.core.harness_execution_policy import require_explicit_harness_execution_mode
 from app.core.task_prompt import backfill_active_task_prompts
 from app.database import AsyncSessionLocal, close_db, init_db
 from app.migrations import run_migrations
@@ -30,6 +31,7 @@ logger = logging.getLogger(__name__)
 async def run_scheduler_service() -> None:
     """Run scheduler as a dedicated process."""
     logger.info("Starting scheduler service...")
+    require_explicit_harness_execution_mode(settings)
 
     # Run migrations first
     run_migrations()

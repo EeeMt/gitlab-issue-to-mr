@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 from app.core.docker_client import close_docker_clients
+from app.core.harness_execution_policy import require_explicit_harness_execution_mode
 from app.core.logging import get_logger, setup_logging
 from app.database import AsyncSessionLocal, close_db, get_db, init_db
 from app.dependencies.auth import require_admin_user, require_authenticated_user
@@ -47,6 +48,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     # Startup
     logger.info("Starting Codify...")
+    require_explicit_harness_execution_mode(settings)
 
     # Run database migrations first
     try:
