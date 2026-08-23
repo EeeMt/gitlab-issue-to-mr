@@ -172,6 +172,15 @@ def _build_container_env_with_settings(
         provider,
     )
 
+    model_protocol = getattr(provider, "model_protocol", None) or "anthropic_messages"
+    supported_protocols = {
+        "anthropic_messages",
+        "openai_responses",
+        "openai_chat_completions",
+    }
+    if model_protocol not in supported_protocols:
+        raise RuntimeError(f"Unsupported model protocol for worker environment: {model_protocol!r}")
+
     environment = {
         "GITLAB_URL": settings.gitlab_url,
         "GITLAB_TOKEN": settings.gitlab_bot_token,
@@ -179,28 +188,12 @@ def _build_container_env_with_settings(
         "BRANCH_NAME": issue.branch_name,
         "USER_PROMPT": task.user_prompt,
         "TARGET_BRANCH": target_branch or "",
-        "ANTHROPIC_BASE_URL": base_url,
-        "ANTHROPIC_API_KEY": api_key,
-        "ANTHROPIC_MODEL": model,
-        # Sub-agents and background/side-queries in the Claude harness would
-        # otherwise fall back to the official Anthropic default models; pin them
-        # to the configured provider model so every sub-agent uses the same one.
-        "ANTHROPIC_DEFAULT_HAIKU_MODEL": model,
-        "ANTHROPIC_DEFAULT_SONNET_MODEL": model,
-        "ANTHROPIC_DEFAULT_OPUS_MODEL": model,
-        "ANTHROPIC_SMALL_FAST_MODEL": model,
-        "CLAUDE_CODE_SUBAGENT_MODEL": model,
+        # Adapters select their provider mapping from this frozen Snapshot
+        # value. They must not infer a protocol from whichever credential env
+        # happens to be present in a long-lived Worker image.
+        "CODIFY_MODEL_PROTOCOL": model_protocol,
         "CLAUDE_MAX_TURNS": max_turns,
         "TASK_ID": str(task.id),
-        **(
-            {
-                "OPENAI_BASE_URL": base_url,
-                "OPENAI_API_KEY": api_key,
-                "OPENAI_MODEL": model,
-            }
-            if (getattr(provider, "model_protocol", "") or "").startswith("openai")
-            else {}
-        ),
         "TASK_TIMEOUT": str(settings.task_timeout),
         "ISSUE_ID": str(issue.id),
         "ISSUE_TITLE": issue.title or "",
@@ -211,6 +204,30 @@ def _build_container_env_with_settings(
         "CODIFY_COAUTHOR_EMAIL": "codify@codify.local",
         "CODIFY_TASK_PROMPT_FILE": _TASK_PROMPT_CONTAINER_PATH,
     }
+
+    if model_protocol == "anthropic_messages":
+        environment.update(
+            {
+                "ANTHROPIC_BASE_URL": base_url,
+                "ANTHROPIC_API_KEY": api_key,
+                "ANTHROPIC_MODEL": model,
+                # Claude sub-agents otherwise select public defaults. These
+                # variables intentionally exist only on the Anthropic path.
+                "ANTHROPIC_DEFAULT_HAIKU_MODEL": model,
+                "ANTHROPIC_DEFAULT_SONNET_MODEL": model,
+                "ANTHROPIC_DEFAULT_OPUS_MODEL": model,
+                "ANTHROPIC_SMALL_FAST_MODEL": model,
+                "CLAUDE_CODE_SUBAGENT_MODEL": model,
+            }
+        )
+    else:
+        environment.update(
+            {
+                "OPENAI_BASE_URL": base_url,
+                "OPENAI_API_KEY": api_key,
+                "OPENAI_MODEL": model,
+            }
+        )
 
     if provider and provider.system_prompt:
         environment["APPEND_SYSTEM_PROMPT"] = provider.system_prompt

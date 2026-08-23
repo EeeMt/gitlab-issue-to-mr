@@ -37,12 +37,9 @@ def test_pi_v1_accepts_valid_values():
 # ── opencode/v1 typed validator ───────────────────────────────────────────────
 
 def test_opencode_v1_validates_allowlisted_values():
-    # Defaults apply: agent build, command/model_variant null.
+    # No native option mapping is evidenced yet, so the namespace is empty.
     options = validate_namespaced_options({"opencode": {}})
-    assert options["opencode"] == {"agent": "build", "command": None, "model_variant": None}
-    # agent may only be the manifest allowlist value "build".
-    options = validate_namespaced_options({"opencode": {"agent": "build"}})
-    assert options["opencode"]["agent"] == "build"
+    assert options["opencode"] == {}
 
 
 def test_opencode_v1_rejects_unknown_keys():
@@ -51,7 +48,9 @@ def test_opencode_v1_rejects_unknown_keys():
 
 
 def test_opencode_v1_fails_closed_outside_allowlist():
-    # §7.3: agent must be in the manifest/Snapshot allowlist ({build}).
+    # No placeholder agent/command/variant is exposed as a selectable option.
+    with pytest.raises(HarnessOptionsError):
+        validate_namespaced_options({"opencode": {"agent": "build"}})
     with pytest.raises(HarnessOptionsError):
         validate_namespaced_options({"opencode": {"agent": "code"}})
     # command / model_variant must be null in the first release.
@@ -79,11 +78,9 @@ def test_task_override_rejects_non_override_field():
 
 
 def test_task_override_allows_only_flagged_opencode_fields():
-    # agent/command/model_variant are the task_override-flagged opencode fields.
-    overrides = validate_task_overrides({"opencode": {"agent": "build"}})
-    assert overrides["opencode"]["agent"] == "build"
-    assert set(TASK_OVERRIDE_KEYS["opencode/v1"]) == {"agent", "command", "model_variant"}
-    # ...but the values still fail-closed against the allowlist.
+    assert not TASK_OVERRIDE_KEYS["opencode/v1"]
+    with pytest.raises(HarnessOptionsError):
+        validate_task_overrides({"opencode": {"agent": "build"}})
     with pytest.raises(HarnessOptionsError):
         validate_task_overrides({"opencode": {"agent": "code"}})
 
@@ -108,7 +105,7 @@ def test_deep_merge_profile_default_plus_task_override():
     profile = validate_namespaced_options(
         {
             "pi": {"thinking_level": "medium", "steering_mode": "one-at-a-time"},
-            "opencode": {"agent": "build"},
+            "opencode": {},
         }
     )
     overrides = {"pi": {"thinking_level": "high"}}
@@ -118,18 +115,18 @@ def test_deep_merge_profile_default_plus_task_override():
         "steering_mode": "one-at-a-time",
         "follow_up_mode": "one-at-a-time",  # default applied by validator
     }
-    assert merged["opencode"] == {"agent": "build", "command": None, "model_variant": None}
+    assert merged["opencode"] == {}
 
 
 def test_deep_merge_is_order_stable():
     profile = {
-        "opencode": {"agent": "build"},
+        "opencode": {},
         "pi": {"thinking_level": "medium"},
     }
     a = deep_merge_options(profile, {})
     # Reversed insertion order yields the same key ordering.
     b = deep_merge_options(
-        {"pi": {"thinking_level": "medium"}, "opencode": {"agent": "build"}}, {}
+        {"pi": {"thinking_level": "medium"}, "opencode": {}}, {}
     )
     assert list(a.keys()) == list(b.keys())
     assert a == b

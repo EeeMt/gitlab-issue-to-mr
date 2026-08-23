@@ -73,21 +73,26 @@ pi_adapter_prepare_config() {
     chown -R "${CODIFY_RUN_UID:-1000}:${CODIFY_RUN_GID:-1000}" "${PI_HOME}" 2>/dev/null || true
 
     # Export the Pi transport/model identity so events.py forms the correct V2
-    # harness envelope (rpc_stdio / pi-rpc / three model protocols per the
-    # manifest). Harmless under V1; no-op when already injected by the runner.
+    # harness envelope. Only the fixed-version Anthropic-compatible mapping is
+    # currently supported; the adapter must not infer a protocol from env.
     export CODIFY_HARNESS_CONTROL_TRANSPORT_KIND="${CODIFY_HARNESS_CONTROL_TRANSPORT_KIND:-rpc_stdio}"
     export CODIFY_HARNESS_CONTROL_TRANSPORT_PROTOCOL="${CODIFY_HARNESS_CONTROL_TRANSPORT_PROTOCOL:-pi-rpc}"
-    export CODIFY_HARNESS_MODEL_PROTOCOLS="${CODIFY_HARNESS_MODEL_PROTOCOLS:-anthropic_messages,openai_responses,openai_chat_completions}"
+    export CODIFY_HARNESS_MODEL_PROTOCOLS="${CODIFY_HARNESS_MODEL_PROTOCOLS:-anthropic_messages}"
 
     # Model endpoint mapping. The Snapshot's model / base URL / credential are
-    # frozen by the backend and injected as env (ANTHROPIC_MODEL / base / key or
-    # OPENAI_*). Pi reads custom providers from ~/.pi/agent/models.json; we
+    # frozen by the backend and injected as ANTHROPIC_MODEL / BASE_URL / API_KEY.
+    # Pi reads custom providers from ~/.pi/agent/models.json; we
     # translate the frozen snapshot into that file so the CLI uses EXACTLY the
     # Snapshot endpoint. Pi's own native config must never override the Snapshot,
     # so we do not read any pre-existing user models.json (PI_HOME is ephemeral).
-    local model="${PI_MODEL:-${ANTHROPIC_MODEL:-${OPENAI_MODEL:-}}}"
-    local base_url="${PI_BASE_URL:-${ANTHROPIC_BASE_URL:-${OPENAI_BASE_URL:-}}}"
-    local api_key="${PI_API_KEY:-${ANTHROPIC_API_KEY:-${OPENAI_API_KEY:-}}}"
+    local model_protocol="${CODIFY_MODEL_PROTOCOL:-anthropic_messages}"
+    if [ "${model_protocol}" != "anthropic_messages" ]; then
+        echo "Pi does not support model protocol ${model_protocol} in this Runtime Bundle" >&2
+        return 1
+    fi
+    local model="${PI_MODEL:-${ANTHROPIC_MODEL:-}}"
+    local base_url="${PI_BASE_URL:-${ANTHROPIC_BASE_URL:-}}"
+    local api_key="${PI_API_KEY:-${ANTHROPIC_API_KEY:-}}"
     if [ -n "${model}" ] && [ -n "${base_url}" ] && [ -n "${api_key}" ]; then
         # pi 0.84.2 reads custom providers only from ~/.pi/agent/models.json
         # (the CLI subprocess HOME); it ignores the PI_HOME env var. PI_HOME
@@ -97,9 +102,6 @@ pi_adapter_prepare_config() {
         # empty and every prompt fails with "Model not found".
         local models_file="${HOME:-/root}/.pi/agent/models.json"
         local api="anthropic-messages"
-        if [ -z "${ANTHROPIC_BASE_URL:-}" ] && [ -n "${OPENAI_BASE_URL:-}" ]; then
-            api="openai-chat-completions"
-        fi
         mkdir -p "$(dirname "${models_file}")"
         # The provider id/name are namespaced to Codify so Pi never shares state
         # with another harness; baseUrl is the frozen Snapshot endpoint.

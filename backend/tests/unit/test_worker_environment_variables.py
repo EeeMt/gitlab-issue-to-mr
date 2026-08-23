@@ -56,6 +56,25 @@ class WorkerEnvironmentVariableHelperTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "reserved"):
             validate_worker_environment_variable_key("TASK_ID")
 
+    def test_validate_worker_environment_variable_key_rejects_frozen_provider_namespaces(self) -> None:
+        for key in (
+            "CODIFY_MODEL_PROTOCOL",
+            "OPENAI_API_KEY",
+            "PI_MODEL",
+            "OPENCODE_API_KEY",
+            "CODIFY_HARNESS_KEY",
+            "CODIFY_RUNTIME_BUNDLE_DIGEST",
+            "CODIFY_RUNTIME_CONTRACT_VERSION",
+            "CODIFY_RUNTIME_EVENT_SCHEMA",
+            "CODIFY_HARNESS_MODEL_PROTOCOLS",
+            "CODIFY_HARNESS_CONTROL_TRANSPORT_KIND",
+            "CODIFY_HARNESS_CONTROL_TRANSPORT_PROTOCOL",
+            "ANTHROPIC_FUTURE_PROVIDER_OPTION",
+            "OPENAI_FUTURE_PROVIDER_OPTION",
+        ):
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, "reserved"):
+                validate_worker_environment_variable_key(key)
+
     def test_secret_api_serialization_hides_value(self) -> None:
         row = WorkerEnvironmentVariable(
             key="CUSTOM_SECRET",
@@ -142,7 +161,7 @@ class WorkerEnvironmentVariableHelperTests(unittest.TestCase):
         )
         provider = SimpleNamespace(
             id=None,
-            api_key="provider-key",
+            api_key="fake-key",
             base_url="http://provider.example/v1",
             model="provider-model",
             max_turns=33,
@@ -262,7 +281,7 @@ class WorkerEnvironmentVariableHelperTests(unittest.TestCase):
         )
         provider = SimpleNamespace(
             id=None,
-            api_key="provider-key",
+            api_key="fake-key",
             base_url="http://provider.example/v1",
             model="provider-model",
             max_turns=33,
@@ -358,7 +377,7 @@ class WorkerEnvironmentVariableHelperTests(unittest.TestCase):
         )
         provider = SimpleNamespace(
             id=None,
-            api_key="provider-key",
+            api_key="fake-key",
             base_url="http://provider.example/v1",
             model="provider-model",
             max_turns=33,
@@ -413,7 +432,7 @@ class WorkerEnvironmentVariableHelperTests(unittest.TestCase):
         )
         provider = SimpleNamespace(
             id=None,
-            api_key="provider-key",
+            api_key="fake-key",
             base_url="http://provider.example/v1",
             model="provider-model",
             max_turns=33,

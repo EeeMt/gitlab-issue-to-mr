@@ -28,7 +28,7 @@ V2_ENV = {
     "CODIFY_EVENT_SCHEMA": CANONICAL_EVENT_SCHEMA_V2,
     "CODIFY_HARNESS_CONTROL_TRANSPORT_KIND": "server_http",
     "CODIFY_HARNESS_CONTROL_TRANSPORT_PROTOCOL": "opencode-server",
-    "CODIFY_HARNESS_MODEL_PROTOCOLS": "anthropic_messages,openai_responses,openai_chat_completions",
+    "CODIFY_HARNESS_MODEL_PROTOCOLS": "anthropic_messages",
 }
 
 
@@ -94,6 +94,7 @@ def _success_records() -> list[dict]:
         _record("message.part.delta", {"sessionID": "ses-oc-1", "messageID": "m1", "partID": "p1", "delta": "Hello "}),
         _record("message.part.delta", {"sessionID": "ses-oc-1", "messageID": "m1", "partID": "p1", "delta": "world"}),
         _record("message.part.updated", {"sessionID": "ses-oc-1", "part": {"type": "text", "text": "Hello world", "messageID": "m1"}}),
+        _record("message.updated", {"sessionID": "ses-oc-1", "info": {"id": "m1", "role": "assistant"}}),
         _record("session.idle", {"sessionID": "ses-oc-1"}),
     ]
 
@@ -128,15 +129,15 @@ def test_opencode_stream_maps_sse_to_v2_canonical_events(tmp_path):
     assert "Hello world" in result["result"]
 
 
-def test_opencode_session_idle_converges_single_terminal(tmp_path):
+def test_opencode_session_idle_without_final_message_is_protocol_failure(tmp_path):
     runtime_dir = tmp_path / "idle"
     runtime_dir.mkdir()
     _emit(runtime_dir, "run.started")
     _translate(runtime_dir, [_record("session.idle", {"sessionID": "ses-oc-1"})])
-    _emit(runtime_dir, "worker.finalization", {"exit_code": 0})
-    _emit(runtime_dir, "run.completed", {"status": "completed", "success": True})
-    by_type = [e["type"] for e in _events(runtime_dir)]
-    assert by_type.count("harness.completed") == 1
+    result = json.loads((runtime_dir / "harness-result.json").read_text(encoding="utf-8"))
+    assert result["status"] == "protocol_error"
+    assert result["success"] is False
+    assert "harness.failed" in [e["type"] for e in _events(runtime_dir)]
 
 
 def test_opencode_abort_maps_to_cancelled_terminal(tmp_path):
@@ -257,6 +258,24 @@ def test_opencode_negotiate_capabilities_disabled(tmp_path):
     bridge = _load_bridge()
     caps = bridge.negotiate_capabilities("opencode")
     assert caps == {"steering": False, "follow_up": False}
+
+
+def test_opencode_bridge_rejects_unmapped_protocol_before_session_creation(tmp_path, monkeypatch):
+    bridge = _load_bridge()
+    created = False
+
+    class _UnexpectedClient:
+        def __init__(self, **_kwargs):
+            nonlocal created
+            created = True
+
+    monkeypatch.setattr(bridge, "OpenCodeServerClient", _UnexpectedClient)
+    for key, value in _run_attempt_env(tmp_path).items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("CODIFY_MODEL_PROTOCOL", "openai_responses")
+
+    assert bridge._run_attempt() == 1
+    assert created is False
 
 
 def test_opencode_parse_sse_unwraps_wire_frame(tmp_path):
@@ -503,9 +522,12 @@ def test_opencode_run_attempt_status_fallback_after_disconnect(tmp_path, monkeyp
 
     assert rc == 0
     assert "status" in calls  # disconnect triggered the GET /session/status fallback
-    # The status-reported idle recovered a settled turn: single completed terminal.
+    # Status-only idle is insufficient without an observed final assistant message.
     types = [e["type"] for e in _events(tmp_path)]
-    assert types.count("harness.completed") == 1
+    assert "harness.completed" not in types
+    assert types.count("harness.failed") == 1
+    result = json.loads((tmp_path / "harness-result.json").read_text(encoding="utf-8"))
+    assert result["status"] == "protocol_error"
 
 
 class _Pipe:
@@ -582,8 +604,9 @@ def test_opencode_prepare_config_writes_snapshot_endpoint(tmp_path):
         "CODIFY_RUN_UID": "1000",
         "CODIFY_RUN_GID": "1000",
         "OPENCODE_MODEL": "deepseek-v4-flash",
+        "OPENCODE_PORT": "8099",
         "ANTHROPIC_BASE_URL": "https://api.deepseek.com/anthropic",
-        "ANTHROPIC_API_KEY": "sk-snapshot-secret",
+        "ANTHROPIC_API_KEY": "fake-key",
     }
     result = _source_adapter(
         "opencode_adapter_prepare_config && printf '%s' \"$OPENCODE_PORT\"",
@@ -599,7 +622,7 @@ def test_opencode_prepare_config_writes_snapshot_endpoint(tmp_path):
     # name, never inlined.
     assert provider["options"]["baseURL"] == "https://api.deepseek.com/anthropic/v1"
     assert provider["options"]["apiKey"] == "{env:OPENCODE_SNAPSHOT_KEY}"
-    assert "sk-snapshot-secret" not in config.read_text(encoding="utf-8")
+    assert "fake-key" not in config.read_text(encoding="utf-8")
     # OpenCode 1.18.19 config schema: models.<id>.provider must be an object
     # {id: <provider-id>}, not a bare string (ConfigInvalidError otherwise).
     model = provider["models"]["deepseek-v4-flash"]
@@ -617,7 +640,7 @@ def test_opencode_prepare_config_normalizes_relay_root_to_v1(tmp_path):
         "CODIFY_RUN_GID": "1000",
         "OPENCODE_MODEL": "ox-alpha-free",
         "OPENCODE_BASE_URL": "http://192.168.50.45:15721",
-        "OPENCODE_API_KEY": "sk-test-relay-key",
+        "OPENCODE_API_KEY": "fake-key",
     }
     result = _source_adapter("opencode_adapter_prepare_config", env)
     assert result.returncode == 0, result.stderr
@@ -643,7 +666,7 @@ def test_opencode_prepare_config_keeps_existing_v1_endpoint(tmp_path):
         "CODIFY_RUN_GID": "1000",
         "OPENCODE_MODEL": "ox-alpha-free",
         "OPENCODE_BASE_URL": "http://192.168.50.45:15721/v1",
-        "OPENCODE_API_KEY": "sk-test-relay-key",
+        "OPENCODE_API_KEY": "fake-key",
     }
     result = _source_adapter("opencode_adapter_prepare_config", env)
     assert result.returncode == 0, result.stderr
@@ -665,7 +688,7 @@ def test_opencode_prepare_config_normalizes_v1_trailing_slash(tmp_path):
         "CODIFY_RUN_GID": "1000",
         "OPENCODE_MODEL": "ox-alpha-free",
         "OPENCODE_BASE_URL": "http://192.168.50.45:15721/v1/",
-        "OPENCODE_API_KEY": "sk-test-relay-key",
+        "OPENCODE_API_KEY": "fake-key",
     }
     result = _source_adapter("opencode_adapter_prepare_config", env)
     assert result.returncode == 0, result.stderr
@@ -679,7 +702,7 @@ def test_opencode_prepare_config_normalizes_v1_trailing_slash(tmp_path):
 
 def test_opencode_prepare_config_exports_transport_env_defaults(tmp_path):
     # P2: prepare_config default-exports the OpenCode transport/model identity
-    # (server_http / opencode-server / three protocols) when the runner did not
+    # (server_http / opencode-server / its supported protocol) when the runner did not
     # inject it, so result_builder.v2_harness_block forms the correct V2 envelope.
     env = {
         "CODIFY_RUNTIME_DIR": str(tmp_path),
@@ -698,5 +721,5 @@ def test_opencode_prepare_config_exports_transport_env_defaults(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == (
-        "server_http|opencode-server|anthropic_messages,openai_responses,openai_chat_completions"
+        "server_http|opencode-server|anthropic_messages"
     )

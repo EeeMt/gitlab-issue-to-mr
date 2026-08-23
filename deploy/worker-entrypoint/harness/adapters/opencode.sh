@@ -80,14 +80,16 @@ opencode_adapter_prepare_config() {
     chown -R "${CODIFY_RUN_UID:-1000}:${CODIFY_RUN_GID:-1000}" "${config_dir}" 2>/dev/null || true
 
     # Export the OpenCode transport/model identity so events.py forms the
-    # correct V2 harness envelope (server_http / opencode-server / three model
-    # protocols per the manifest). Harmless under V1; no-op when injected.
+    # correct V2 harness envelope. HTTP direct is the current production path;
+    # only the fixed-version Anthropic-compatible mapping is advertised.
     export CODIFY_HARNESS_CONTROL_TRANSPORT_KIND="${CODIFY_HARNESS_CONTROL_TRANSPORT_KIND:-server_http}"
     export CODIFY_HARNESS_CONTROL_TRANSPORT_PROTOCOL="${CODIFY_HARNESS_CONTROL_TRANSPORT_PROTOCOL:-opencode-server}"
-    export CODIFY_HARNESS_MODEL_PROTOCOLS="${CODIFY_HARNESS_MODEL_PROTOCOLS:-anthropic_messages,openai_responses,openai_chat_completions}"
+    export CODIFY_HARNESS_MODEL_PROTOCOLS="${CODIFY_HARNESS_MODEL_PROTOCOLS:-anthropic_messages}"
 
     # Port bridge: probe a free loopback port for the Server's explicit --port.
-    OPENCODE_PORT="$(opencode_probe_port)"
+    # Tests and controlled launchers may preallocate a loopback port; otherwise
+    # allocate one here. The Server remains bound only to loopback.
+    OPENCODE_PORT="${OPENCODE_PORT:-$(opencode_probe_port)}"
     export OPENCODE_PORT
 
     # Task-private Server password (mandatory: an unset password leaves the
@@ -98,9 +100,14 @@ opencode_adapter_prepare_config() {
     # Snapshot model / endpoint / credential are frozen by the backend and
     # injected as env. Translate into opencode.json so the Server uses EXACTLY
     # the Snapshot endpoint; OpenCode env-interpolates {env:VAR}, not $VAR.
-    local model="${OPENCODE_MODEL:-${ANTHROPIC_MODEL:-${OPENAI_MODEL:-}}}"
-    local base_url="${OPENCODE_BASE_URL:-${ANTHROPIC_BASE_URL:-${OPENAI_BASE_URL:-}}}"
-    local api_key="${OPENCODE_API_KEY:-${ANTHROPIC_API_KEY:-${OPENAI_API_KEY:-}}}"
+    local model_protocol="${CODIFY_MODEL_PROTOCOL:-anthropic_messages}"
+    if [ "${model_protocol}" != "anthropic_messages" ]; then
+        echo "OpenCode does not support model protocol ${model_protocol} in this Runtime Bundle" >&2
+        return 1
+    fi
+    local model="${OPENCODE_MODEL:-${ANTHROPIC_MODEL:-}}"
+    local base_url="${OPENCODE_BASE_URL:-${ANTHROPIC_BASE_URL:-}}"
+    local api_key="${OPENCODE_API_KEY:-${ANTHROPIC_API_KEY:-}}"
     local provider_npm="${OPENCODE_PROVIDER_NPM:-@ai-sdk/anthropic}"
     if [ -n "${model}" ] && [ -n "${base_url}" ] && [ -n "${api_key}" ]; then
         # The credential is referenced by a stable env name, not inlined, so it

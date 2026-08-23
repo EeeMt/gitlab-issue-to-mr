@@ -52,6 +52,14 @@ _STATE: dict = {
     "terminal_line": None,
     "terminal_failure": None,
     "aborted": False,
+    # A Pi stream is successful only when it contains the complete, ordered
+    # turn lifecycle below.  In particular, an EOF after text is not an
+    # implicit success: a truncated RPC stream must be surfaced as a protocol
+    # error rather than delivered as a completed task.
+    "assistant_final_line": None,
+    "agent_end_success_line": None,
+    "agent_settled_line": None,
+    "last_raw_line": 0,
 }
 
 
@@ -122,12 +130,19 @@ def _usage(record: dict) -> dict:
     }
 
 
-def _write_result(*, success: bool, result: str, usage: dict, failure_message: str | None = None) -> None:
+def _write_result(
+    *,
+    success: bool,
+    result: str,
+    usage: dict,
+    failure_message: str | None = None,
+    failure_kind: str | None = None,
+) -> None:
     result_path = Path(os.environ["CODIFY_HARNESS_RESULT_FILE"])
     failure = None
     if not success:
         message = failure_message or result or "Pi execution failed"
-        failure = {"kind": _failure_kind(message), "message": message}
+        failure = {"kind": failure_kind or _failure_kind(message), "message": message}
     payload = {
         "schema": "codify.worker.result/v2",
         "status": "completed" if success else "failed",
@@ -157,6 +172,45 @@ def _write_result(*, success: bool, result: str, usage: dict, failure_message: s
 
 
 def _emit_terminal_at_eof() -> None:
+    if _STATE["terminal"] is None:
+        assistant_line = _STATE["assistant_final_line"]
+        agent_end_line = _STATE["agent_end_success_line"]
+        settled_line = _STATE["agent_settled_line"]
+        if (
+            isinstance(assistant_line, int)
+            and isinstance(agent_end_line, int)
+            and isinstance(settled_line, int)
+            and assistant_line < agent_end_line < settled_line
+        ):
+            _STATE["terminal"] = "completed"
+            _STATE["terminal_line"] = settled_line
+            _write_result(
+                success=True,
+                result="".join(_STATE["text_parts"]).strip(),
+                usage=_STATE["usage"],
+            )
+        else:
+            missing = []
+            if not isinstance(assistant_line, int):
+                missing.append("final_assistant_text")
+            if not isinstance(agent_end_line, int):
+                missing.append("successful_agent_end")
+            if not isinstance(settled_line, int):
+                missing.append("agent_settled")
+            order_invalid = not missing and not (assistant_line < agent_end_line < settled_line)
+            detail = "out_of_order_turn_terminal" if order_invalid else ",".join(missing)
+            message = f"Pi protocol ended without complete terminal lifecycle: {detail}"
+            _STATE["terminal"] = "failed"
+            _STATE["terminal_line"] = _STATE["last_raw_line"] or 0
+            _STATE["terminal_failure"] = {"kind": "protocol_error", "message": message}
+            _write_result(
+                success=False,
+                result="".join(_STATE["text_parts"]),
+                usage=_STATE["usage"],
+                failure_message=message,
+                failure_kind="protocol_error",
+            )
+
     if _STATE["terminal"] == "completed":
         _emit(
             "harness.completed",
@@ -280,6 +334,8 @@ def _handle_message_update(record: dict, raw_line: int) -> None:
         content = event.get("content") or ""
         _STATE["text_parts"] = [content] if content else _STATE["text_parts"]
         _emit("message.completed", {"message_id": None, "text": content}, raw_line)
+        if isinstance(content, str) and content.strip():
+            _STATE["assistant_final_line"] = raw_line
 
 
 def _handle_message_end(record: dict, raw_line: int) -> None:
@@ -346,14 +402,9 @@ def _handle_agent_end(record: dict, raw_line: int) -> None:
             _STATE["terminal_failure"] = {"kind": _failure_kind(message), "message": message}
             _write_result(success=False, result="".join(_STATE["text_parts"]), usage=_STATE["usage"], failure_message=message)
     else:
-        # Final agent_end without retry -> the last completed turn is terminal.
-        _STATE["terminal"] = "completed"
-        _STATE["terminal_line"] = raw_line
-        _write_result(
-            success=True,
-            result="".join(_STATE["text_parts"]).strip(),
-            usage=_STATE["usage"],
-        )
+        # ``agent_end`` alone is not a terminal.  Pi emits agent_settled after
+        # the final turn, and losing that event at EOF is a protocol error.
+        _STATE["agent_end_success_line"] = raw_line
 
 
 def _handle_agent_settled(record: dict, raw_line: int) -> None:
@@ -365,16 +416,11 @@ def _handle_agent_settled(record: dict, raw_line: int) -> None:
         {"aborted": _STATE["aborted"], "settled_line": raw_line},
         raw_line,
     )
-    if _STATE["terminal"] is None:
-        # Settled without a recorded turn terminal is a protocol anomaly; fall
-        # back to a completed terminal so the attempt does not hang.
-        _STATE["terminal"] = "completed"
-        _STATE["terminal_line"] = raw_line
-        _STATE["text_parts"] = _STATE["text_parts"] or ["[settled without assistant turn]"]
-        _write_result(success=True, result="".join(_STATE["text_parts"]).strip(), usage=_STATE["usage"])
+    _STATE["agent_settled_line"] = raw_line
 
 
 def translate(record: dict, raw_line: int) -> None:
+    _STATE["last_raw_line"] = raw_line
     record_type = record.get("type")
     if record_type == "response":
         _handle_response(record, raw_line)

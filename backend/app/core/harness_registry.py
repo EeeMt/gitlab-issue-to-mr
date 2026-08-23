@@ -68,7 +68,7 @@ SYSTEM_CAPABILITIES: dict[str, dict[str, Any]] = {
         "sandbox_mode": "container-boundary",
     },
     "opencode": {
-        "resume": True,
+        "resume": False,
         "task_skills": True,
         "max_turns": False,
         "usage_tokens": True,
@@ -92,7 +92,7 @@ V2_SYSTEM_CAPABILITY_UPPER_BOUND: dict[str, dict[str, bool]] = {
         "follow_up": True,
     },
     "opencode": {
-        "resume": True,
+        "resume": False,
         "task_skills": True,
         "usage_tokens": True,
         "steering": False,
@@ -118,10 +118,10 @@ V2_SYSTEM_CAPABILITY_UPPER_BOUND: dict[str, dict[str, bool]] = {
 HARNESS_PROVIDER_PROTOCOLS: dict[str, frozenset[str]] = {
     "claude": frozenset({"anthropic_messages"}),
     "codex": frozenset({"openai_responses"}),
-    "pi": frozenset({"anthropic_messages", "openai_responses", "openai_chat_completions"}),
-    "opencode": frozenset(
-        {"anthropic_messages", "openai_responses", "openai_chat_completions"}
-    ),
+    # Pi/OpenCode have only been fixed-version smoke-tested against the
+    # Anthropic-compatible endpoint. Do not advertise unproven mappings.
+    "pi": frozenset({"anthropic_messages"}),
+    "opencode": frozenset({"anthropic_messages"}),
 }
 
 DISPLAY_NAMES: dict[str, str] = {

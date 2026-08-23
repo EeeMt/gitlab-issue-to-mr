@@ -27,11 +27,11 @@ def test_registry_knows_all_four_builtin_harnesses():
 
 
 def test_compatible_harness_keys_reverse_lookup():
-    # pi/opencode consume all three model protocols per the frozen V2 matrix.
+    # Pi/OpenCode only expose the fixed-version Anthropic-compatible mapping.
     assert compatible_harness_keys("anthropic_messages") == ["claude", "opencode", "pi"]
-    assert compatible_harness_keys("openai_responses") == ["codex", "opencode", "pi"]
+    assert compatible_harness_keys("openai_responses") == ["codex"]
     assert compatible_harness_keys(None) == ["claude", "opencode", "pi"]
-    assert compatible_harness_keys("openai_chat_completions") == ["opencode", "pi"]
+    assert compatible_harness_keys("openai_chat_completions") == []
     assert compatible_harness_keys("") == ["claude", "opencode", "pi"]
 
 
@@ -241,7 +241,7 @@ def _v2_manifest(**adapter_overrides):
         "opencode": _v2_adapter(
             control_kind="server_http",
             capabilities={
-                "resume": True,
+                "resume": False,
                 "task_skills": True,
                 "usage_tokens": True,
                 "steering": False,

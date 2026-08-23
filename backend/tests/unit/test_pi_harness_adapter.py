@@ -27,7 +27,7 @@ V2_ENV = {
     "CODIFY_EVENT_SCHEMA": CANONICAL_EVENT_SCHEMA_V2,
     "CODIFY_HARNESS_CONTROL_TRANSPORT_KIND": "rpc_stdio",
     "CODIFY_HARNESS_CONTROL_TRANSPORT_PROTOCOL": "pi-rpc",
-    "CODIFY_HARNESS_MODEL_PROTOCOLS": "anthropic_messages,openai_responses,openai_chat_completions",
+    "CODIFY_HARNESS_MODEL_PROTOCOLS": "anthropic_messages",
 }
 
 
@@ -197,6 +197,10 @@ def test_pi_delivered_is_native_ack_not_model_consumption(tmp_path):
     records = [
         _get_state_record(),
         {"id": 2, "type": "response", "command": "prompt", "success": True},
+        {
+            "type": "message_update",
+            "assistantMessageEvent": {"type": "text_end", "content": "done"},
+        },
         {"type": "queue_update", "steering": ["STEER: stop"], "followUp": []},
         {
             "id": 3,
@@ -223,6 +227,57 @@ def test_pi_delivered_is_native_ack_not_model_consumption(tmp_path):
     assert delivered[0]["sequence_no"] == 1
     assert "harness.completed" in types
     assert "control.queue.updated" in types
+
+
+def test_pi_rejects_incomplete_terminal_lifecycles_as_protocol_errors(tmp_path):
+    """No subset of Pi's three terminal observations may complete a task."""
+    cases = {
+        "agent-end-only": [
+            _get_state_record(),
+            {"type": "agent_end", "messages": [], "willRetry": False},
+        ],
+        "settled-only": [_get_state_record(), {"type": "agent_settled"}],
+        "eof-after-text": [
+            _get_state_record(),
+            {
+                "type": "message_update",
+                "assistantMessageEvent": {"type": "text_end", "content": "partial"},
+            },
+        ],
+    }
+    for name, records in cases.items():
+        runtime_dir = tmp_path / name
+        runtime_dir.mkdir()
+        _emit(runtime_dir, "run.started")
+        _translate(runtime_dir, records)
+        events = _events(runtime_dir)
+        assert "harness.completed" not in [event["type"] for event in events]
+        terminal = next(event for event in events if event["type"] == "harness.failed")
+        assert terminal["payload"]["failure"]["kind"] == "protocol_error"
+        # Canonical audit references remain tied to the raw stream line.
+        assert terminal["raw_ref"]["stream"] == "harness-events/pi.jsonl"
+        result = json.loads((runtime_dir / "harness-result.json").read_text(encoding="utf-8"))
+        assert result["failure"]["kind"] == "protocol_error"
+
+
+def test_pi_requires_ordered_text_agent_end_and_settled_for_completion(tmp_path):
+    runtime_dir = tmp_path / "ordered-terminal"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    _translate(
+        runtime_dir,
+        [
+            _get_state_record(),
+            {"type": "agent_settled"},
+            {
+                "type": "message_update",
+                "assistantMessageEvent": {"type": "text_end", "content": "late text"},
+            },
+            {"type": "agent_end", "messages": [], "willRetry": False},
+        ],
+    )
+    terminal = next(event for event in _events(runtime_dir) if event["type"] == "harness.failed")
+    assert terminal["payload"]["failure"]["kind"] == "protocol_error"
 
 
 def test_pi_queue_update_text_is_sanitized_before_projection(tmp_path):
@@ -436,7 +491,7 @@ def _pi_prepare_config(tmp_path: Path) -> Path:
         "HOME": str(tmp_path / "home"),
         "PI_MODEL": "deepseek-v4-flash",
         "ANTHROPIC_BASE_URL": "https://api.deepseek.com/anthropic",
-        "ANTHROPIC_API_KEY": "sk-snapshot-secret",
+        "ANTHROPIC_API_KEY": "fake-key",
     }
     result = _source_adapter("pi_adapter_prepare_config", env)
     assert result.returncode == 0, result.stderr
@@ -454,38 +509,29 @@ def test_pi_config_maps_snapshot_endpoint_to_models_json(tmp_path):
     # Snapshot model/base/credential win; pi only parses the array form.
     assert provider["baseUrl"] == "https://api.deepseek.com/anthropic"
     assert provider["api"] == "anthropic-messages"
-    assert provider["apiKey"] == "sk-snapshot-secret"
+    assert provider["apiKey"] == "fake-key"
     assert provider["models"][0]["id"] == "deepseek-v4-flash"
     assert provider["models"][0]["name"] == "deepseek-v4-flash"
     assert provider["models"][0]["contextWindow"] == 128000
 
 
-def test_pi_config_uses_openai_chat_completions_when_only_openai(tmp_path):
+def test_pi_config_rejects_openai_chat_completions(tmp_path):
     env = {
         "CODIFY_RUNTIME_DIR": str(tmp_path),
         "CODIFY_ORCHESTRATION_DIR": str(REPO_ROOT / "deploy"),
         "CODIFY_RUN_UID": "1000",
         "CODIFY_RUN_GID": "1000",
         "HOME": str(tmp_path / "home"),
-        "ANTHROPIC_BASE_URL": "",
-        "OPENAI_MODEL": "gpt-4o-mini",
-        "OPENAI_BASE_URL": "https://api.openai.example/v1",
-        "OPENAI_API_KEY": "sk-openai-secret",
+        "CODIFY_MODEL_PROTOCOL": "openai_chat_completions",
     }
     result = _source_adapter("pi_adapter_prepare_config", env)
-    assert result.returncode == 0, result.stderr
-    content = json.loads(
-        (tmp_path / "home/.pi/agent/models.json").read_text(encoding="utf-8")
-    )
-    provider = content["providers"]["codify"]
-    assert provider["baseUrl"] == "https://api.openai.example/v1"
-    assert provider["api"] == "openai-chat-completions"
-    assert provider["models"][0]["id"] == "gpt-4o-mini"
+    assert result.returncode != 0
+    assert "does not support model protocol" in result.stderr
 
 
 def test_pi_prepare_config_exports_transport_env_defaults(tmp_path):
     # P2: prepare_config default-exports the Pi transport/model identity
-    # (rpc_stdio / pi-rpc / three protocols) when the runner did not inject it,
+    # (rpc_stdio / pi-rpc / its supported protocol) when the runner did not inject it,
     # so result_builder.v2_harness_block forms the correct V2 envelope.
     env = {
         "CODIFY_RUNTIME_DIR": str(tmp_path),
@@ -504,7 +550,7 @@ def test_pi_prepare_config_exports_transport_env_defaults(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == (
-        "rpc_stdio|pi-rpc|anthropic_messages,openai_responses,openai_chat_completions"
+        "rpc_stdio|pi-rpc|anthropic_messages"
     )
 
 

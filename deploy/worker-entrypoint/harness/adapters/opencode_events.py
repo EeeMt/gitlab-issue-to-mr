@@ -132,7 +132,9 @@ def _write_result(*, success: bool, result: str, usage: dict, failure_message: s
         failure = {"kind": _failure_kind(message), "message": message}
     payload = {
         "schema": "codify.worker.result/v2",
-        "status": "completed" if success else "failed",
+        "status": "completed" if success else (
+            "protocol_error" if _STATE["terminal_failure"] and _STATE["terminal_failure"].get("kind") == "protocol_error" else "failed"
+        ),
         "success": success,
         "result": result,
         "harness": v2_harness_block(),
@@ -262,16 +264,20 @@ def _handle_session_idle(properties: dict, raw_line: int) -> None:
     _STATE["session_id"] = _STATE["session_id"] or session_id
     _STATE["idle_seen"] = True
     _STATE["busy"] = False
-    # Settled combination: session.idle implies the run is no longer busy; a
-    # final assistant message is present once any text part has been received.
-    # OpenCode first release has no command plane, so settled converges the
-    # single harness terminal directly (no accepting->closing->drain gate).
+    # Success requires all three observed signals: idle, a final assistant
+    # message, and no error/abort. A delta is not a final message: it may be a
+    # truncated SSE fragment. Never turn an idle-only status into fake success.
     if _STATE["terminal_failure"] is None and not _STATE["aborted"]:
-        # Emit the final assistant message once the turn is idle (OpenCode has
-        # no distinct "message end" event; session.idle is the turn terminal).
         final_text = "".join(_STATE["text_parts"])
-        if final_text:
-            _emit("message.completed", {"message_id": None, "text": final_text}, raw_line)
+        final_message = _STATE["message"]
+        if not isinstance(final_message, dict) or not final_text:
+            _STATE["terminal_failure"] = {
+                "kind": "protocol_error",
+                "message": "OpenCode protocol failure: session.idle without a final assistant message",
+            }
+            _finalize_terminal()
+            return
+        _emit("message.completed", {"message_id": final_message.get("id"), "text": final_text}, raw_line)
         _emit(
             "agent_settled",
             {"aborted": False, "settled": "idle", "settled_line": raw_line},
@@ -279,8 +285,6 @@ def _handle_session_idle(properties: dict, raw_line: int) -> None:
         )
         _STATE["settled"] = True
         _STATE["settled_line"] = raw_line
-        if not _STATE["text_parts"]:
-            _STATE["text_parts"] = ["[settled without assistant turn]"]
         _finalize_terminal()
 
 
@@ -350,9 +354,13 @@ def main() -> int:
             if _STATE["terminal"] is not None:
                 # Terminal is final; do not process further records.
                 break
-    # If the stream ended without an explicit settled/terminal (e.g. transport
-    # closed early), converge to a completed terminal so the attempt does not
-    # leave the Harness in a live-but-unresolved state.
+    # EOF without all settled signals is a protocol failure. In particular, a
+    # status/SSE fragment cannot prove an assistant turn completed successfully.
+    if _STATE["terminal"] is None and not _STATE["settled"]:
+        _STATE["terminal_failure"] = {
+            "kind": "protocol_error",
+            "message": "OpenCode protocol failure: event stream ended before settled idle",
+        }
     _finalize_terminal()
     return 0
 

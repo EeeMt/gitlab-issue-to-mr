@@ -30,9 +30,23 @@ RESERVED_WORKER_ENVIRONMENT_KEYS = frozenset(
         "CODIFY_COAUTHOR_EMAIL",
         "CODIFY_COAUTHOR_NAME",
         "CODIFY_CODEGRAPH_ENABLED",
+        "CODIFY_CLI_BINARY_DIGEST",
+        "CODIFY_ADAPTER_VERSION",
+        "CODIFY_ATTEMPT_ID",
+        "CODIFY_EVENT_SCHEMA",
         "CODIFY_GIT_CLONE_DEPTH",
         "CODIFY_GIT_CLONE_FILTER",
+        "CODIFY_HARNESS_CONTROL_TRANSPORT_KIND",
+        "CODIFY_HARNESS_CONTROL_TRANSPORT_PROTOCOL",
+        "CODIFY_HARNESS_KEY",
+        "CODIFY_HARNESS_MODEL_PROTOCOLS",
+        "CODIFY_HARNESS_SANDBOX_MODE",
+        "CODIFY_MODEL_PROTOCOL",
+        "CODIFY_RUNTIME_BUNDLE_DIGEST",
+        "CODIFY_RUNTIME_CONTRACT_VERSION",
         "CODIFY_RUNTIME_DIR",
+        "CODIFY_RUNTIME_EVENT_SCHEMA",
+        "CODIFY_RUNTIME_MANIFEST_DIGEST",
         "CODIFY_ARTIFACT_DIR",
         "CODIFY_TASK_PROMPT_FILE",
         "CODIFY_TASK_SKILLS_DIR",
@@ -45,9 +59,19 @@ RESERVED_WORKER_ENVIRONMENT_KEYS = frozenset(
         "ISSUE_ID",
         "ISSUE_TITLE",
         "MR_IID",
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+        "OPENAI_MODEL",
+        "OPENCODE_API_KEY",
+        "OPENCODE_BASE_URL",
+        "OPENCODE_MODEL",
+        "PI_API_KEY",
+        "PI_BASE_URL",
+        "PI_MODEL",
         "PROJECT_ID",
         "REQUIRE_CHANGES",
         "RESUME_SESSION",
+        "CODIFY_RESUME_SESSION",
         "START_FRESH_SESSION",
         "TARGET_BRANCH",
         "TASK_ID",
@@ -57,12 +81,20 @@ RESERVED_WORKER_ENVIRONMENT_KEYS = frozenset(
     }
 )
 
+# Provider selection and credentials belong to the task's frozen Provider
+# snapshot.  Keep this prefix check in addition to the explicit reserved set:
+# it blocks newly introduced provider knobs before an administrator can inject
+# them via shared/profile custom environment variables.
+_FROZEN_PROVIDER_ENVIRONMENT_PREFIXES = ("ANTHROPIC_", "OPENAI_")
+
 
 def validate_worker_environment_variable_key(key: str) -> str:
     """Validate a custom worker environment variable key."""
     if not WORKER_ENVIRONMENT_VARIABLE_KEY_PATTERN.fullmatch(key):
         raise ValueError("Worker environment variable keys must match ^[A-Z_][A-Z0-9_]*$")
-    if key in RESERVED_WORKER_ENVIRONMENT_KEYS:
+    if key in RESERVED_WORKER_ENVIRONMENT_KEYS or key.startswith(
+        _FROZEN_PROVIDER_ENVIRONMENT_PREFIXES
+    ):
         raise ValueError(f"Worker environment variable key {key} is reserved")
     return key
 

@@ -351,18 +351,23 @@ def _run_attempt() -> int:
     port = int(os.environ["OPENCODE_PORT"])
     password = os.environ.get("OPENCODE_SERVER_PASSWORD", "")
     username = os.environ.get("OPENCODE_SERVER_USERNAME", "opencode")
-    client = OpenCodeServerClient(port=port, password=password, username=username)
 
-    translator = Path(os.environ["CODIFY_OPENCODE_EVENT_TRANSLATOR"])
-    raw_file = Path(os.environ["CODIFY_OPENCODE_RAW_EVENT_JSONL"])
-
-    model_id = os.environ.get("OPENCODE_MODEL") or os.environ.get(
-        "ANTHROPIC_MODEL", os.environ.get("OPENAI_MODEL", "")
-    )
+    model_protocol = os.environ.get("CODIFY_MODEL_PROTOCOL", "anthropic_messages")
+    if model_protocol != "anthropic_messages":
+        print(
+            f"OpenCode protocol {model_protocol!r} is not supported by this Runtime Bundle",
+            file=sys.stderr,
+        )
+        return 1
+    model_id = os.environ.get("OPENCODE_MODEL") or os.environ.get("ANTHROPIC_MODEL", "")
     provider_id = os.environ.get("OPENCODE_PROVIDER") or "codify"
     if not model_id:
         print("OpenCode model is unset (OPENCODE_MODEL/ANTHROPIC_MODEL)", file=sys.stderr)
         return 1
+
+    client = OpenCodeServerClient(port=port, password=password, username=username)
+    translator = Path(os.environ["CODIFY_OPENCODE_EVENT_TRANSLATOR"])
+    raw_file = Path(os.environ["CODIFY_OPENCODE_RAW_EVENT_JSONL"])
 
     status, session = client.create_session(model_id, provider_id)
     session_id = session.get("info", {}).get("id") or session.get("id")
