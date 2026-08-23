@@ -1013,6 +1013,7 @@ async def test_verify_mounted_worker_profile_runs_preflight_on_profile_target():
     profile.runtime_mode = "mounted_kit"
     profile.worker_kit_version = "0.3.5"
     profile.worker_kit_path = "/opt/codify/worker-kits/0.3.5-linux-amd64"
+    profile.default_harness_key = "claude"
     profile.volume_mounts = [
         {
             "host_path": "/opt/codify/overrides/claude",
@@ -1078,6 +1079,7 @@ async def test_verify_mounted_worker_profile_runs_preflight_on_profile_target():
     assert create_kwargs["entrypoint"] == "/opt/codify-kit/launcher"
     assert create_kwargs["user"] == "0:0"
     assert create_kwargs["tmpfs"] == {"/workspace": "rw,exec,mode=1777"}
+    assert create_kwargs["environment"]["CODIFY_HARNESS_KEY"] == "claude"
     assert create_kwargs["environment"]["CODIFY_CLAUDE_BIN"] == "/usr/local/bin/claude"
     assert "RUNTIME_SECRET" not in create_kwargs["environment"]
     assert response["omitted_secret_environment_keys"] == ["RUNTIME_SECRET"]

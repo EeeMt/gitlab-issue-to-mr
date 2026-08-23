@@ -81,7 +81,14 @@ def _make_probe_client(*, manifest: bytes | None = None):
 
 
 def _valid_manifest(version: str = "0.3.5") -> bytes:
-    return json.dumps({"kit_version": version, "harness": "claude"}).encode()
+    return json.dumps(
+        {
+            "schema_version": 2,
+            "manifest_kind": "codify.worker.kit-manifest/v1",
+            "kit_version": version,
+            "harness": "claude",
+        }
+    ).encode()
 
 
 def _db_session_factory():
@@ -403,6 +410,28 @@ def test_probe_version_mismatch_is_deterministic_unavailable():
 
 def test_probe_missing_manifest_is_worker_kit_invalid():
     client = _make_probe_client(manifest=None)
+    with patch(
+        "app.core.worker_runtime_readiness.DockerClientWrapper", return_value=client
+    ):
+        result = probe_worker_kit(
+            SimpleNamespace(host="tcp://worker:2376", tls_ca=None),
+            image="worker:latest",
+            runtime_mode="mounted_kit",
+            worker_kit_version="0.3.5",
+            worker_kit_path="/opt/kit",
+        )
+    assert result.status == READINESS_UNAVAILABLE
+    assert result.failure_code == FAILURE_WORKER_KIT_INVALID
+
+
+def test_probe_rejects_runtime_bundle_manifest_as_a_worker_kit():
+    runtime_bundle = json.dumps(
+        {
+            "schema": "codify.worker.runtime-manifest/v2",
+            "kit_version": "0.3.5",
+        }
+    ).encode()
+    client = _make_probe_client(manifest=runtime_bundle)
     with patch(
         "app.core.worker_runtime_readiness.DockerClientWrapper", return_value=client
     ):

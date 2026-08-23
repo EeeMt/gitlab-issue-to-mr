@@ -31,13 +31,26 @@ therefore run inside glibc and musl-based images without borrowing libraries fro
 image. The target host does not need Nix installed.
 
 The kit includes Bash, Git, curl, jq, Python, Node.js, SSH, ripgrep, CodeGraph, and the
-Mermaid validator. Claude CLI is intentionally outside the kit and must be supplied by the
-runtime image or a profile volume mount.
+Mermaid validator. Harness CLIs are intentionally outside the kit. The V2 Java/Maven runtime
+image supplies Pi, OpenCode, Claude, and Codex at fixed image paths; a profile may still use an
+explicit read-only host mount for a one-Harness override.
 
-`deploy/Dockerfile.worker-java21-maven` builds `codify-worker/java21-maven:2026.07` as one
-mounted-kit runtime image. It contains the project-side Java 21 and Maven toolchain, workspace,
-and UID 1000 write setup, but no Python runtime, Codify entrypoint, Claude CLI, CodeGraph,
-Mermaid npm bundle, or ci-claude script.
+`deploy/Dockerfile.worker-java21-maven` builds the mounted-kit Java/Maven runtime image. It
+contains the project-side Java 21/Maven toolchain, workspace, UID 1000 write setup, and the four
+release-pinned Harness CLIs, but no Python runtime, Codify entrypoint, CodeGraph, Mermaid npm
+bundle, or ci-claude script.
+
+## V2 Worker CLI artifact identity
+
+The ignored `deploy/worker-cli/` directory is a local release input, not a source of truth. A
+release passes the four executable SHA-256 values to `make worker-runtime-image-build`; the
+Dockerfile verifies each executable/version/platform and writes the image-owned
+`/etc/codify-worker-cli-artifacts.json`. Export that document once with
+`make worker-cli-artifact-export`, preserve it immutably, and mount it read-only for both Backend
+and Scheduler as `CODIFY_WORKER_CLI_ARTIFACT_MANIFEST`. Runtime Bundle binding freezes its
+identities; the repository manifest placeholders are never a valid release lock. See
+[`DEPLOYMENT.md`](DEPLOYMENT.md#63-worker-镜像更新) for the reproducible commands and the required
+four-Harness Kit verification.
 
 ## Build and export
 

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from app.core.worker_kit import (
@@ -119,3 +121,67 @@ def test_unknown_runtime_mode_fails_before_container_creation():
 
     with pytest.raises(WorkerProfileValidationError, match="runtime_mode"):
         runtime.container_overrides()
+
+
+def test_worker_kit_and_runtime_bundle_manifests_have_distinct_launcher_contracts():
+    root = Path(__file__).resolve().parents[3]
+    launcher = (root / "deploy/worker-kit/launcher/main.go").read_text()
+    verifier = (root / "deploy/worker-kit/verify-runtime.sh").read_text()
+
+    assert 'ManifestKind         string               `json:"manifest_kind"`' in launcher
+    assert '"codify.worker.kit-manifest/v1"' in launcher
+    assert 'runtime.Schema != "codify.worker.runtime-bundle/v2"' in launcher
+    assert "Runtime Bundle digest does not match the Task binding" in launcher
+    assert "runtime.GOOS" in launcher
+    assert "--runtime-manifest must be runtime-manifest/v2, not a Kit manifest" in verifier
+    assert "--all-harnesses requires --runtime-manifest" in verifier
+
+
+def test_launcher_keeps_the_v1_install_verify_boundary_without_reusing_kit_as_runtime():
+    root = Path(__file__).resolve().parents[3]
+    launcher = (root / "deploy/worker-kit/launcher/main.go").read_text()
+
+    # A freshly installed historical Kit has no task bundle.  `--verify` may
+    # still reach its Kit-local entrypoint, while execution cannot do so.
+    assert "verifyRuntimeBundle(m, verifyOnly)" in launcher
+    assert "if allowMissing {\n\t\t\treturn kit.Entrypoint" in launcher
+    assert "legacy Kit fallback is disabled" in launcher
+
+
+def test_worker_kit_release_requires_exact_four_cli_artifacts_and_selfchecks():
+    root = Path(__file__).resolve().parents[3]
+    kit_dockerfile = (root / "deploy/Dockerfile.worker-kit").read_text()
+    runtime_dockerfile = (root / "deploy/Dockerfile.worker-java21-maven").read_text()
+    verifier = (root / "deploy/worker-kit/verify-runtime.sh").read_text()
+    artifact_input = (root / "deploy/worker-cli-artifacts.json").read_text()
+
+    for harness in ("claude", "codex", "pi", "opencode"):
+        assert f"bridge-selfcheck-{harness}" in kit_dockerfile
+        assert f'"{harness}"' in artifact_input
+    for build_arg in (
+        "PI_CLI_SHA256",
+        "OPENCODE_CLI_SHA256",
+        "CLAUDE_CLI_SHA256",
+        "CODEX_CLI_SHA256",
+    ):
+        assert f"ARG {build_arg}" in runtime_dockerfile
+        assert f'${{{build_arg}}}' in runtime_dockerfile
+    assert "cli_requirements" in kit_dockerfile
+    assert "codify.worker.cli-artifacts/v1" in runtime_dockerfile
+    assert "first-class adapter lacks self-check" in verifier
+    assert "Runtime Bundle artifact identity conflicts with image" in verifier
+
+
+def test_release_helpers_export_an_immutable_nonsecret_cli_identity_lock():
+    root = Path(__file__).resolve().parents[3]
+    makefile = (root / "Makefile").read_text()
+    helper = (root / "deploy/worker-kit/export-cli-artifact-manifest.sh").read_text()
+    deployment = (root / "docs/DEPLOYMENT.md").read_text()
+
+    assert "worker-runtime-image-build" in makefile
+    assert "All four *_CLI_SHA256 build arguments are required" in makefile
+    assert "worker-cli-artifact-export" in makefile
+    assert "CODIFY_WORKER_CLI_ARTIFACT_MANIFEST" in deployment
+    assert "Refusing to overwrite an existing CLI artifact manifest" in helper
+    assert "codify.worker.cli-artifacts/v1" in helper
+    assert "exactly four Harnesses" in helper

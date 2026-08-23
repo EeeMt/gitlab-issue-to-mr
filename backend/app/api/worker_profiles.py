@@ -703,6 +703,7 @@ async def verify_worker_profile_runtime(
                 environment={
                     **runtime.environment,
                     **overrides["environment"],
+                    "CODIFY_HARNESS_KEY": profile.default_harness_key or "claude",
                     "CODIFY_RUNTIME_IMAGE": runtime.image,
                 },
                 volumes=verification_volumes,

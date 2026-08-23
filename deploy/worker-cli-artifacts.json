@@ -1,0 +1,17 @@
+{
+  "schema": "codify.worker.cli-artifacts-input/v1",
+  "purpose": "Required non-secret build arguments for external Worker CLI payloads; this template is not a release lock.",
+  "release_workflow": [
+    "Stage reviewed payloads under deploy/worker-cli (ignored by Git).",
+    "Pass all four explicit SHA-256 build args to make worker-runtime-image-build.",
+    "Export the image-owned codify.worker.cli-artifacts/v1 document with make worker-cli-artifact-export.",
+    "Mount the exported immutable document read-only for Backend and Scheduler as CODIFY_WORKER_CLI_ARTIFACT_MANIFEST."
+  ],
+  "platform": "linux/<targetarch>",
+  "artifacts": {
+    "pi": {"path": "worker-cli/pi/bin/pi", "version_build_arg": "PI_CLI_VERSION", "sha256_build_arg": "PI_CLI_SHA256"},
+    "opencode": {"path": "worker-cli/opencode/opencode", "version_build_arg": "OPENCODE_CLI_VERSION", "sha256_build_arg": "OPENCODE_CLI_SHA256"},
+    "claude": {"path": "worker-cli/claude", "version_build_arg": "CLAUDE_CLI_VERSION", "sha256_build_arg": "CLAUDE_CLI_SHA256"},
+    "codex": {"path": "worker-cli/codex/bin/codex", "version_build_arg": "CODEX_CLI_VERSION", "sha256_build_arg": "CODEX_CLI_SHA256"}
+  }
+}

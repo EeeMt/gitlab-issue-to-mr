@@ -629,6 +629,18 @@ def _inspect_kit_contents(
                 f"Worker Kit manifest.json is not valid JSON under {worker_kit_path!r}"
             ),
         )
+    if (
+        manifest.get("schema_version") != 2
+        or manifest.get("manifest_kind") != "codify.worker.kit-manifest/v1"
+    ):
+        return RuntimeCheckResult(
+            status=READINESS_UNAVAILABLE,
+            failure_code=FAILURE_WORKER_KIT_INVALID,
+            failure_message=(
+                "Worker Kit manifest has an unsupported schema or is not a "
+                f"Kit manifest under {worker_kit_path!r}"
+            ),
+        )
     declared_version = manifest.get("kit_version")
     if declared_version != worker_kit_version:
         return RuntimeCheckResult(

@@ -11,6 +11,7 @@ export DOCKER_BUILDKIT := 1
 export COMPOSE_DOCKER_CLI_BUILD := 1
 WORKER_KIT_VERSION ?= 0.3.15
 WORKER_KIT_PLATFORM ?= linux/amd64
+RUNTIME_IMAGE ?= codify-worker/java21-maven:2026.07
 
 # ============================================
 # Development Environment
@@ -38,8 +39,18 @@ worker-kit-export: ## Build and export the portable mounted worker kit
 	WORKER_KIT_VERSION=$(WORKER_KIT_VERSION) WORKER_KIT_PLATFORM=$(WORKER_KIT_PLATFORM) $(PROJECT_ROOT)/deploy/worker-kit/export.sh
 
 .PHONY: worker-kit-verify
-worker-kit-verify: ## Verify KIT_PATH against RUNTIME_IMAGE (optional CLAUDE_HOST_PATH and SMOKE)
-	$(PROJECT_ROOT)/deploy/worker-kit/verify-runtime.sh --kit "$(KIT_PATH)" --image "$(RUNTIME_IMAGE)" $(if $(CLAUDE_HOST_PATH),--claude-host-path "$(CLAUDE_HOST_PATH)") $(if $(CLAUDE_CONTAINER_PATH),--claude-container-path "$(CLAUDE_CONTAINER_PATH)") $(if $(SMOKE),--smoke "$(SMOKE)")
+worker-kit-verify: ## Verify one Harness; add RUNTIME_MANIFEST and VERIFY_ALL_HARNESSES=1 for V2 release verification
+	$(PROJECT_ROOT)/deploy/worker-kit/verify-runtime.sh --kit "$(KIT_PATH)" --image "$(RUNTIME_IMAGE)" $(if $(HARNESS_KEY),--harness-key "$(HARNESS_KEY)") $(if $(HARNESS_HOST_PATH),--harness-host-path "$(HARNESS_HOST_PATH)") $(if $(HARNESS_CONTAINER_PATH),--harness-container-path "$(HARNESS_CONTAINER_PATH)") $(if $(RUNTIME_MANIFEST),--runtime-manifest "$(RUNTIME_MANIFEST)") $(if $(filter 1 true yes,$(VERIFY_ALL_HARNESSES)),--all-harnesses) $(if $(SMOKE),--smoke "$(SMOKE)")
+
+.PHONY: worker-runtime-image-build
+worker-runtime-image-build: ## Build four-CLI Worker image; every *_CLI_SHA256 must be supplied
+	@test -n "$(PI_CLI_SHA256)" && test -n "$(OPENCODE_CLI_SHA256)" && test -n "$(CLAUDE_CLI_SHA256)" && test -n "$(CODEX_CLI_SHA256)" || { echo "All four *_CLI_SHA256 build arguments are required" >&2; exit 2; }
+	docker build --platform "$(WORKER_KIT_PLATFORM)" --build-arg PI_CLI_SHA256="$(PI_CLI_SHA256)" --build-arg OPENCODE_CLI_SHA256="$(OPENCODE_CLI_SHA256)" --build-arg CLAUDE_CLI_SHA256="$(CLAUDE_CLI_SHA256)" --build-arg CODEX_CLI_SHA256="$(CODEX_CLI_SHA256)" -f $(PROJECT_ROOT)/deploy/Dockerfile.worker-java21-maven -t "$(RUNTIME_IMAGE)" $(PROJECT_ROOT)
+
+.PHONY: worker-cli-artifact-export
+worker-cli-artifact-export: ## Export immutable image CLI identity document; set CLI_ARTIFACT_MANIFEST
+	@test -n "$(CLI_ARTIFACT_MANIFEST)" || { echo "CLI_ARTIFACT_MANIFEST is required" >&2; exit 2; }
+	$(PROJECT_ROOT)/deploy/worker-kit/export-cli-artifact-manifest.sh "$(RUNTIME_IMAGE)" "$(CLI_ARTIFACT_MANIFEST)"
 
 .PHONY: up
 up: ## Start development environment (rebuilds backend and nginx images)

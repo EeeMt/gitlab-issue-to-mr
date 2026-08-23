@@ -82,21 +82,33 @@ sudo ./scripts/install-worker-kit.sh \
 在 daemon Host 侧执行（Kit path 与 host binary path 都是 daemon Host 路径）：
 
 ```bash
-./scripts/verify-worker-runtime.sh \
-  --kit /opt/codify/worker-kits/<release-version>-linux-amd64 \
-  --image <runtime-image> \
-  --harness-key claude \
-  --harness-host-path /usr/bin/claude \
-  --harness-container-path /usr/local/bin/claude \
-  --smoke 'java -version && mvn -version'
+make worker-kit-verify \
+  KIT_PATH=/opt/codify/worker-kits/<release-version>-linux-amd64 \
+  RUNTIME_IMAGE=<runtime-image> \
+  RUNTIME_MANIFEST=/srv/codify/releases/<release>/frozen-runtime-manifest.v2.json \
+  VERIFY_ALL_HARNESSES=1 \
+  SMOKE='java -version && mvn -version'
+```
 
-./scripts/verify-worker-runtime.sh \
-  --kit /opt/codify/worker-kits/<release-version>-linux-amd64 \
-  --image <runtime-image> \
-  --harness-key codex \
-  --harness-host-path /opt/codify/codex/bin/codex \
-  --harness-container-path /opt/codify-codex/bin/codex \
-  --smoke 'test -x /opt/codify-codex/bin/codex && /opt/codify-codex/bin/codex --version'
+`VERIFY_ALL_HARNESSES=1` is the release gate: it iterates the Runtime Bundle adapters, cross-checks
+the Kit contract/event compatibility, image platform, exact CLI version/SHA and mandatory
+first-class self-checks. It does not treat the Kit manifest as a Runtime Bundle manifest. A normal
+Profile/API verification remains one `default_harness_key` at a time and may omit
+`RUNTIME_MANIFEST`; that preserves the historical installation-preflight boundary.
+The path must be a release-stamped `codify.worker.runtime-manifest/v2` document containing the
+exported CLI identity SHA values. Do not pass a Kit manifest, a Backend-generated
+`runtime-bundle/v2` projection, or the repository template with placeholder SHA values.
+
+For an explicit one-Harness host-mount override, use the same command with `HARNESS_KEY`,
+`HARNESS_HOST_PATH`, and `HARNESS_CONTAINER_PATH`:
+
+```bash
+make worker-kit-verify \
+  KIT_PATH=/opt/codify/worker-kits/<release-version>-linux-amd64 \
+  RUNTIME_IMAGE=<runtime-image> \
+  HARNESS_KEY=codex \
+  HARNESS_HOST_PATH=/opt/codify/codex/bin/codex \
+  HARNESS_CONTAINER_PATH=/opt/codify-codex/bin/codex
 ```
 
 检查 Kit compatibility manifest、Runtime Bundle Adapter version/digest、CLI source/path/version/binary
@@ -104,10 +116,9 @@ digest、CA、PATH、工作区写权限、UID/GID、sandbox、Skills、Mermaid �
 对 remote Docker 特别验证 Host bind path、agent-state、Kit/Nix store 和 runtime bundle 均能在
 daemon 侧访问。任一 Host/Harness 失败即标记不可路由，不能靠其他 Host 成功放行。
 
-Kit 只包含 bootstrap 与验证工具，不包含执行 Adapter；`--verify` 的逐 Harness 检查通过 smoke 覆盖
-CLI 存在性/版本，Adapter 级别的 binary digest/version/config 校验由 Task 容器启动时以冻结的
-Runtime Bundle 执行（`CODIFY_CLI_BINARY_DIGEST`）。因此逐 Harness 验收必须同时包含离线
-verify-runtime 与一个真实 smoke Task。
+在 Build 后先以 `make worker-cli-artifact-export` 导出 image `/etc/codify-worker-cli-artifacts.json`，
+审查其 SHA 后以 `CODIFY_WORKER_CLI_ARTIFACT_MANIFEST` 同时注入 Backend/Scheduler。Runtime Bundle
+bind 会冻结该 identity；逐 Harness 验收仍必须同时包含离线 verify-runtime 与一个真实 smoke Task。
 
 ### 4.4 Codify API verify-runtime
 

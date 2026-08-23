@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 )
@@ -18,6 +19,7 @@ type runtimeCompatibility struct {
 
 type manifest struct {
 	SchemaVersion        int                  `json:"schema_version"`
+	ManifestKind         string               `json:"manifest_kind"`
 	KitVersion           string               `json:"kit_version"`
 	Platform             string               `json:"platform"`
 	RuntimeBin           string               `json:"runtime_bin"`
@@ -38,8 +40,10 @@ type runtimeAdapter struct {
 }
 
 type runtimeManifest struct {
+	Schema           string                    `json:"schema"`
 	ContractVersion string                    `json:"contract_version"`
 	EventSchema     string                    `json:"event_schema"`
+	BundleDigest    string                    `json:"bundle_digest"`
 	Adapters        map[string]runtimeAdapter `json:"adapters"`
 	Files           []runtimeFile             `json:"files"`
 }
@@ -111,6 +115,12 @@ func verifyRuntimeBundle(kit manifest, allowMissing bool) string {
 		!contains(kit.RuntimeCompatibility.EventSchemas, runtime.EventSchema) {
 		fail("Runtime Bundle contract/event schema is incompatible with this Kit")
 	}
+	if runtime.Schema != "codify.worker.runtime-bundle/v2" {
+		fail("Runtime Bundle manifest is not a codify.worker.runtime-bundle/v2 manifest")
+	}
+	if runtime.BundleDigest == "" || runtime.BundleDigest != os.Getenv("CODIFY_RUNTIME_BUNDLE_DIGEST") {
+		fail("Runtime Bundle digest does not match the Task binding")
+	}
 	if frozen := os.Getenv("CODIFY_RUNTIME_CONTRACT_VERSION"); frozen != runtime.ContractVersion {
 		fail("Runtime Bundle contract mismatch: task=%s bundle=%s", frozen, runtime.ContractVersion)
 	}
@@ -155,12 +165,16 @@ func main() {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		fail("parse manifest: %v", err)
 	}
-	if m.SchemaVersion != 2 || m.KitVersion == "" || m.RuntimeBin == "" || m.Bash == "" || m.Entrypoint == "" {
+	if m.SchemaVersion != 2 || m.ManifestKind != "codify.worker.kit-manifest/v1" ||
+		m.KitVersion == "" || m.Platform == "" || m.RuntimeBin == "" || m.Bash == "" || m.Entrypoint == "" {
 		fail("unsupported or incomplete manifest")
 	}
 	requestedVersion := os.Getenv("CODIFY_KIT_VERSION")
 	if requestedVersion != "" && requestedVersion != m.KitVersion {
 		fail("version mismatch: requested %s, mounted %s", requestedVersion, m.KitVersion)
+	}
+	if m.Platform != runtime.GOOS+"/"+runtime.GOARCH {
+		fail("platform mismatch: Kit declares %s, launcher is %s/%s", m.Platform, runtime.GOOS, runtime.GOARCH)
 	}
 	for _, path := range []string{m.RuntimeBin, m.Bash, m.Entrypoint} {
 		if _, err := os.Stat(path); err != nil {

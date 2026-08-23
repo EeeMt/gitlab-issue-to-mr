@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-KIT_PATH=""
-IMAGE=""
-SMOKE=""
-HARNESS_KEY="claude"
-HARNESS_HOST_PATH=""
-HARNESS_CONTAINER_PATH=""
-
+# A Kit manifest and a Runtime Bundle manifest are different contracts.  This
+# verifier only accepts the latter through --runtime-manifest; it never treats
+# the mounted Kit manifest as task orchestration truth.
+KIT_PATH="" IMAGE="" SMOKE="" HARNESS_KEY="claude"
+HARNESS_HOST_PATH="" HARNESS_CONTAINER_PATH="" RUNTIME_MANIFEST="" VERIFY_ALL=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --kit) KIT_PATH="${2:?missing --kit value}"; shift 2 ;;
@@ -15,158 +13,79 @@ while [ "$#" -gt 0 ]; do
         --harness-key) HARNESS_KEY="${2:?missing --harness-key value}"; shift 2 ;;
         --harness-host-path) HARNESS_HOST_PATH="${2:?missing --harness-host-path value}"; shift 2 ;;
         --harness-container-path) HARNESS_CONTAINER_PATH="${2:?missing --harness-container-path value}"; shift 2 ;;
-        --claude-host-path) HARNESS_KEY="claude"; HARNESS_HOST_PATH="${2:?missing --claude-host-path value}"; shift 2 ;;
+        --runtime-manifest) RUNTIME_MANIFEST="${2:?missing --runtime-manifest value}"; shift 2 ;;
+        --all-harnesses) VERIFY_ALL=1; shift ;;
+        --claude-host-path) HARNESS_KEY=claude; HARNESS_HOST_PATH="${2:?missing --claude-host-path value}"; shift 2 ;;
         --claude-container-path) HARNESS_CONTAINER_PATH="${2:?missing --claude-container-path value}"; shift 2 ;;
         --smoke) SMOKE="${2:?missing --smoke value}"; shift 2 ;;
         *) echo "Unknown argument: $1" >&2; exit 2 ;;
     esac
 done
-
 [ -n "${KIT_PATH}" ] || { echo "--kit is required" >&2; exit 2; }
 [ -n "${IMAGE}" ] || { echo "--image is required" >&2; exit 2; }
 [ -x "${KIT_PATH}/launcher" ] || { echo "Invalid worker kit: ${KIT_PATH}" >&2; exit 1; }
 [ -d "${KIT_PATH}/nix/store" ] || { echo "Worker kit Nix store is missing" >&2; exit 1; }
-case "${HARNESS_KEY}" in
-    claude|codex) ;;
-    *) echo "Unsupported --harness-key: ${HARNESS_KEY} (expected claude|codex)" >&2; exit 2 ;;
-esac
-if [ -n "${HARNESS_HOST_PATH}" ] && [ -z "${HARNESS_CONTAINER_PATH}" ]; then
-    case "${HARNESS_KEY}" in
-        claude) HARNESS_CONTAINER_PATH="/usr/local/bin/claude" ;;
-        codex) HARNESS_CONTAINER_PATH="/usr/local/bin/codex" ;;
-    esac
-fi
+[ -r "${KIT_PATH}/manifest.json" ] || { echo "Worker Kit manifest is missing" >&2; exit 1; }
+[ -z "${RUNTIME_MANIFEST}" ] || [ -r "${RUNTIME_MANIFEST}" ] || { echo "Runtime Bundle manifest is unreadable" >&2; exit 1; }
+[ "${VERIFY_ALL}" -eq 0 ] || [ -n "${RUNTIME_MANIFEST}" ] || { echo "--all-harnesses requires --runtime-manifest" >&2; exit 2; }
 if [ -n "${HARNESS_HOST_PATH}" ]; then
-    [ -x "${HARNESS_HOST_PATH}" ] || { echo "Harness executable is not executable: ${HARNESS_HOST_PATH}" >&2; exit 1; }
-    case "${HARNESS_CONTAINER_PATH}" in
-        /*) ;;
-        *) echo "--harness-container-path must be absolute" >&2; exit 2 ;;
-    esac
+    [ -x "${HARNESS_HOST_PATH}" ] || { echo "Harness executable is not executable" >&2; exit 1; }
+    HARNESS_CONTAINER_PATH="${HARNESS_CONTAINER_PATH:-/usr/local/bin/${HARNESS_KEY}}"
+    case "${HARNESS_CONTAINER_PATH}" in /*) ;; *) echo "--harness-container-path must be absolute" >&2; exit 2 ;; esac
 fi
 docker image inspect "${IMAGE}" >/dev/null
 
-# ── Manifest-driven mode (V2) ───────────────────────────────────────────────
-# When the kit's manifest.json is a codify.worker.runtime-manifest/v2, iterate
-# its `.adapters` generically (support_tier / artifact_version / control kind /
-# model_protocols / capabilities) instead of the hardcoded claude/codex case and
-# run a per-adapter Bridge self-check hook. Otherwise fall back to the legacy
-# claude/codex path below so V1 kits still verify exactly as before.
-MANIFEST_DRIVEN=0
-if command -v python3 >/dev/null 2>&1; then
-    if python3 - "${KIT_PATH}/manifest.json" <<'PY2DETECT'
-import json, sys
+IMAGE_ARTIFACT_MANIFEST="$(docker run --rm --entrypoint cat "${IMAGE}" /etc/codify-worker-cli-artifacts.json)"
+export KIT_PATH RUNTIME_MANIFEST VERIFY_ALL IMAGE_ARTIFACT_MANIFEST HARNESS_KEY
+ADAPTER_KEYS="$(python3 - <<'PY'
+import json, os, pathlib, sys
+def fail(message):
+    print('verify-runtime: ' + message, file=sys.stderr); raise SystemExit(1)
 try:
-    with open(sys.argv[1], encoding="utf-8") as fh:
-        data = json.load(fh)
-except Exception:
-    raise SystemExit(1)
-adapters = data.get("adapters")
-if data.get("schema") == "codify.worker.runtime-manifest/v2" \
-        and isinstance(adapters, dict) and adapters \
-        and all(isinstance(a, dict) for a in adapters.values()):
-    raise SystemExit(0)
-raise SystemExit(1)
-PY2DETECT
-    then
-        MANIFEST_DRIVEN=1
-    fi
-fi
+    kit = json.loads((pathlib.Path(os.environ['KIT_PATH']) / 'manifest.json').read_text())
+    image = json.loads(os.environ['IMAGE_ARTIFACT_MANIFEST'])
+except (OSError, ValueError) as exc: fail('invalid manifest input: ' + str(exc))
+if kit.get('schema_version') != 2 or kit.get('manifest_kind') != 'codify.worker.kit-manifest/v1': fail('mounted manifest is not a Kit manifest')
+platform = kit.get('platform')
+compat, requirements = kit.get('runtime_compatibility') or {}, kit.get('cli_requirements') or {}
+if not isinstance(platform, str) or not platform.startswith('linux/'): fail('Kit platform is invalid')
+if image.get('schema') != 'codify.worker.cli-artifacts/v1' or image.get('platform') != platform: fail('runtime image artifact platform conflicts with Kit')
+artifacts = image.get('artifacts') or {}
+if set(requirements) != {'claude', 'codex', 'pi', 'opencode'}: fail('Kit must declare all four CLI requirements')
+for key, expected in requirements.items():
+    actual = artifacts.get(key) or {}; digest = actual.get('sha256')
+    if actual.get('path') != expected.get('path') or actual.get('version') != expected.get('version'): fail('runtime image CLI mismatch: ' + key)
+    if not isinstance(digest, str) or len(digest) != 64 or set(digest) - set('0123456789abcdef'): fail('runtime image CLI SHA-256 is invalid: ' + key)
+runtime_path = os.environ['RUNTIME_MANIFEST']
+if not runtime_path:
+    print(os.environ['HARNESS_KEY']); raise SystemExit(0)
+try: runtime = json.loads(pathlib.Path(runtime_path).read_text())
+except (OSError, ValueError) as exc: fail('invalid Runtime Bundle manifest: ' + str(exc))
+if runtime.get('schema') != 'codify.worker.runtime-manifest/v2': fail('--runtime-manifest must be runtime-manifest/v2, not a Kit manifest')
+if runtime.get('contract_version') not in (compat.get('harness_contracts') or ()) or runtime.get('event_schema') not in (compat.get('event_schemas') or ()): fail('Runtime Bundle contract/event conflicts with Kit')
+adapters = runtime.get('adapters')
+if not isinstance(adapters, dict) or not adapters: fail('Runtime Bundle adapters are missing')
+for key, adapter in adapters.items():
+    if key not in requirements: fail('Runtime Bundle adapter is not supplied by Kit: ' + key)
+    source, artifact = adapter.get('source') or {}, artifacts[key]
+    if source.get('artifact_version') != artifact['version'] or source.get('artifact_sha256') != artifact['sha256']: fail('Runtime Bundle artifact identity conflicts with image: ' + key)
+    if adapter.get('support_tier') in {'default', 'first-class'} and not (pathlib.Path(os.environ['KIT_PATH']) / ('bridge-selfcheck-' + key)).is_file(): fail('first-class adapter lacks self-check: ' + key)
+keys = sorted(adapters) if os.environ['VERIFY_ALL'] == '1' else [os.environ['HARNESS_KEY']]
+if any(key not in adapters for key in keys): fail('requested harness is absent from Runtime Bundle')
+print('\n'.join(keys))
+PY
+)"
 
-if [ "${MANIFEST_DRIVEN}" -eq 1 ]; then
-    echo "verify-runtime: manifest-driven mode (runtime-manifest/v2)"
-    python3 - "${KIT_PATH}/manifest.json" <<'PY2'
-import json, sys
-with open(sys.argv[1], encoding="utf-8") as fh:
-    data = json.load(fh)
-for key in sorted(data.get("adapters") or {}):
-    ad = data["adapters"][key]
-    src = ad.get("source") or {}
-    ct = ad.get("control_transport") or {}
-    meta = ad.get("adapter") or {}
-    caps = ad.get("capabilities") or {}
-    print("\t".join([
-        key,
-        str(ad.get("support_tier") or ""),
-        str(src.get("artifact_version") or ""),
-        str(ct.get("kind") or ""),
-        ",".join(ad.get("model_protocols") or []),
-        str(meta.get("version") or ""),
-        ",".join(sorted(k for k, v in caps.items() if v)),
-    ]))
-PY2
-    python3 - "${KIT_PATH}/manifest.json" <<'PY2LOOP'
-import json, sys
-with open(sys.argv[1], encoding="utf-8") as fh:
-    data = json.load(fh)
-for key in sorted(data.get("adapters") or {}):
-    print(key)
-PY2LOOP
-    while IFS= read -r adapter_key; do
-        echo "  bridge self-check hook: ${adapter_key}"
-        if [ -x "${KIT_PATH}/bridge-selfcheck-${adapter_key}" ]; then
-            "${KIT_PATH}/bridge-selfcheck-${adapter_key}" \
-                || { echo "verify-runtime: ${adapter_key} bridge self-check failed" >&2; exit 1; }
-        else
-            echo "    (no bridge-selfcheck-${adapter_key} present; skipped)"
-        fi
-    done < <(python3 - "${KIT_PATH}/manifest.json" <<'PY2KEYS'
-import json, sys
-with open(sys.argv[1], encoding="utf-8") as fh:
-    data = json.load(fh)
-for key in sorted(data.get("adapters") or {}):
-    print(key)
-PY2KEYS
-)
-    exit 0
-fi
-
-VERSION="$(sed -n 's/.*"kit_version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${KIT_PATH}/manifest.json")"
-[ -n "${VERSION}" ] || { echo "Could not read kit version" >&2; exit 1; }
-
-skill_capable_kit=0
-if [[ "${VERSION}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-    version_major=$((10#${BASH_REMATCH[1]}))
-    version_minor=$((10#${BASH_REMATCH[2]}))
-    version_patch=$((10#${BASH_REMATCH[3]}))
-    if (( version_major > 0 \
-        || version_minor > 3 \
-        || (version_minor == 3 && version_patch >= 5) )); then
-        skill_capable_kit=1
-    fi
-fi
-
-ARGS=(
-    --rm
-    --user 0:0
-    --tmpfs /workspace:rw,exec,mode=1777
-    --volume "${KIT_PATH}:/opt/codify-kit:ro"
-    --volume "${KIT_PATH}/nix/store:/nix/store:ro"
-)
-if [ -n "${HARNESS_HOST_PATH}" ]; then
-    ARGS+=(--volume "${HARNESS_HOST_PATH}:${HARNESS_CONTAINER_PATH}:ro")
-fi
-ARGS+=(
-    --entrypoint /opt/codify-kit/launcher
-    --env "CODIFY_KIT_VERSION=${VERSION}"
-    --env "CODIFY_RUNTIME_IMAGE=${IMAGE}"
-    --env "CODIFY_HARNESS_KEY=${HARNESS_KEY}"
-)
-if [ -n "${HARNESS_HOST_PATH}" ]; then
-    case "${HARNESS_KEY}" in
-        claude) ARGS+=(--env "CODIFY_CLAUDE_BIN=${HARNESS_CONTAINER_PATH}") ;;
-        codex)
-            ARGS+=(
-                --env "CODIFY_CODEX_BIN=${HARNESS_CONTAINER_PATH}"
-                --env "CODIFY_HARNESS_CLI_BIN=${HARNESS_CONTAINER_PATH}"
-            )
-            ;;
-    esac
-fi
-ARGS+=("${IMAGE}" --verify)
-if [ "${skill_capable_kit}" -eq 1 ]; then
-    ARGS+=(--require-skill-support)
-fi
-if [ -n "${SMOKE}" ]; then
-    ARGS+=(--smoke "${SMOKE}")
-fi
-docker run "${ARGS[@]}"
+kit_version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["kit_version"])' "${KIT_PATH}/manifest.json")"
+run_one() {
+    local key="$1" path
+    path="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["cli_requirements"][sys.argv[2]]["path"])' "${KIT_PATH}/manifest.json" "${key}")"
+    [ -x "${KIT_PATH}/bridge-selfcheck-${key}" ] || { echo "verify-runtime: self-check missing for ${key}" >&2; return 1; }
+    docker run --rm --volume "${KIT_PATH}:/opt/codify-kit:ro" --volume "${KIT_PATH}/nix/store:/nix/store:ro" --entrypoint "/opt/codify-kit/bridge-selfcheck-${key}" "${IMAGE}" "${path}"
+    local args=(--rm --user 0:0 --tmpfs /workspace:rw,exec,mode=1777 --volume "${KIT_PATH}:/opt/codify-kit:ro" --volume "${KIT_PATH}/nix/store:/nix/store:ro" --entrypoint /opt/codify-kit/launcher --env "CODIFY_KIT_VERSION=${kit_version}" --env "CODIFY_RUNTIME_IMAGE=${IMAGE}" --env "CODIFY_HARNESS_KEY=${key}" --env "CODIFY_HARNESS_CLI_BIN=${path}")
+    if [ -n "${HARNESS_HOST_PATH}" ] && [ "${key}" = "${HARNESS_KEY}" ]; then args+=(--volume "${HARNESS_HOST_PATH}:${HARNESS_CONTAINER_PATH}:ro" --env "CODIFY_HARNESS_CLI_BIN=${HARNESS_CONTAINER_PATH}"); fi
+    args+=("${IMAGE}" --verify)
+    [ -z "${SMOKE}" ] || args+=(--smoke "${SMOKE}")
+    docker run "${args[@]}"
+}
+while IFS= read -r adapter_key; do [ -z "${adapter_key}" ] || run_one "${adapter_key}"; done <<< "${ADAPTER_KEYS}"

@@ -215,13 +215,63 @@ cd ../deploy && docker-compose build nginx && docker-compose up -d nginx
 - Worker 内依赖工具
 - Claude 执行环境
 
-请重建 Worker 镜像：
+V2 Worker image 必须把四个 CLI 的**精确版本和 executable SHA-256**写入镜像内
+`/etc/codify-worker-cli-artifacts.json`。`deploy/worker-cli/` 是本机构建输入，已被 Git
+ignore；只放二进制及其运行所需资源，绝不放 Provider token、`.env` 或凭据。
+
+先在受控构建机对已审核 payload 计算 digest（这些值不是秘密）：
 
 ```bash
-docker build -f deploy/Dockerfile.worker-java21-maven -t codify-worker/java21-maven:2026.07 .
+sha256sum deploy/worker-cli/pi/bin/pi deploy/worker-cli/opencode/opencode \
+  deploy/worker-cli/claude deploy/worker-cli/codex/bin/codex
 ```
 
-如果 `WORKER_IMAGE` 使用了其他标签，请同步更新配置。
+再显式传入四个 digest 构建。任何一个缺失、可执行文件不匹配、版本不匹配或目标平台不一致都会让构建失败：
+
+```bash
+make worker-runtime-image-build \
+  WORKER_KIT_PLATFORM=linux/amd64 \
+  RUNTIME_IMAGE=codify-worker/java21-maven:<release> \
+  PI_CLI_SHA256=<64-hex> \
+  OPENCODE_CLI_SHA256=<64-hex> \
+  CLAUDE_CLI_SHA256=<64-hex> \
+  CODEX_CLI_SHA256=<64-hex>
+```
+
+导出镜像实际写入的不可变 CLI identity 文档到受控发布目录（拒绝覆盖既有 lock）：
+
+```bash
+make worker-cli-artifact-export \
+  RUNTIME_IMAGE=codify-worker/java21-maven:<release> \
+  CLI_ARTIFACT_MANIFEST=/srv/codify/releases/<release>/worker-cli-linux-amd64.json
+```
+
+将这个**只读**文件以相同内容提供给 Backend 和 Scheduler，并显式设置：
+
+```bash
+CODIFY_WORKER_CLI_ARTIFACT_MANIFEST=/srv/codify/releases/<release>/worker-cli-linux-amd64.json
+```
+
+新 V2 Runtime Bundle bind 会从该 lock 写入每个 Adapter 的 artifact SHA；源 Runtime manifest 中的
+占位符不能替代它。一个 Bundle 对应一个发布的 image/platform identity，因此多架构部署应分别构建、
+导出、审查并为相应调度域使用正确 lock，不能混用 amd64 与 arm64 文档。
+
+完成 Kit 安装后，使用显式 Runtime manifest 验证四个 Harness：
+
+```bash
+make worker-kit-verify \
+  KIT_PATH=/opt/codify/worker-kits/<kit-release>-linux-amd64 \
+  RUNTIME_IMAGE=codify-worker/java21-maven:<release> \
+  RUNTIME_MANIFEST=/srv/codify/releases/<release>/frozen-runtime-manifest.v2.json \
+  VERIFY_ALL_HARNESSES=1 \
+  SMOKE='java -version && mvn -version'
+```
+
+`RUNTIME_MANIFEST` 必须是 release lock 已写入 artifact SHA 的
+`codify.worker.runtime-manifest/v2` 文档；不能传入 Kit manifest、Backend 生成的
+`runtime-bundle/v2` projection，或仓库中带 `<computed at freeze>` 占位符的 source template。此命令只是 L1/L2 source/image/Kit verification；随后仍需按 Profile 调用 API verify-runtime，并在真实
+Docker Host 上完成最小 Task/MR smoke 后才有 L3/L4 证据。若 `WORKER_IMAGE` 使用其他 tag/digest，
+必须同步更新 Profile 并重新验证。
 
 ## 7. 常见运维检查
 
