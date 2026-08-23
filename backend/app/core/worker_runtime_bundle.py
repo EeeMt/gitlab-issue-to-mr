@@ -499,11 +499,14 @@ def v2_launcher_manifest_bytes(bundle: WorkerRuntimeBundle) -> bytes:
     launcher_manifest = dict(bundle.manifest)
     flat_adapters: dict[str, Any] = {}
     for key, meta in (bundle.manifest.get("adapters") or {}).items():
-        nested = (meta or {}).get("adapter") if isinstance(meta, dict) else None
-        flat_adapters[key] = {
-            "version": (nested or {}).get("version", ""),
-            "digest": (nested or {}).get("digest", ""),
-        }
+        entry = dict(meta) if isinstance(meta, dict) else {}
+        nested = entry.get("adapter") if isinstance(entry.get("adapter"), dict) else {}
+        # The kit launcher reads version/digest at the top level; shell
+        # adapters additionally rely on capabilities/options_schema/etc. Keep
+        # the whole frozen entry and surface the nested identity beside it.
+        entry["version"] = nested.get("version", "")
+        entry["digest"] = nested.get("digest", "")
+        flat_adapters[key] = entry
     launcher_manifest["adapters"] = flat_adapters
     return json.dumps(
         launcher_manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")

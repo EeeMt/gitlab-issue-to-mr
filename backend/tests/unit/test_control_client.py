@@ -9,6 +9,7 @@ without a real Pi/OpenCode adapter.
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -56,10 +57,31 @@ def _frame(**overrides):
     return frame
 
 
-def test_control_client_acks_valid_frame(control_client):
+def test_control_client_acks_valid_frame(control_client, tmp_path, monkeypatch):
+    # The relay (pi-run.sh) records the native ACK keyed by command_id; the
+    # client polls the response journal and reports the real outcome.
+    monkeypatch.setenv("CODIFY_RUNTIME_DIR", str(tmp_path))
+    responses = tmp_path / "pi-control-responses.jsonl"
+    responses.write_text(
+        json.dumps({"command_id": "c-1", "status": "delivered"}) + "\n",
+        encoding="utf-8",
+    )
     outcome = control_client.handle(_frame())
     assert outcome["status"] == "ack"
     assert outcome["command_id"] == "c-1"
+    # The frame was journaled for the bridge relay to inject.
+    requests = tmp_path / "pi-control-requests.jsonl"
+    assert "c-1" in requests.read_text(encoding="utf-8")
+
+
+def test_control_client_unknown_when_bridge_silent(control_client, tmp_path, monkeypatch):
+    # No response journal entry: the client times out and reports unknown.
+    monkeypatch.setenv("CODIFY_RUNTIME_DIR", str(tmp_path))
+    monkeypatch.setattr("time.sleep", lambda _s: None)  # fast test (local import)
+    outcome = control_client.handle(_frame())
+    assert outcome["status"] == "unknown"
+    assert outcome["rejection_code"] == "delivery_outcome_unknown"
+    assert (tmp_path / "pi-control-requests.jsonl").exists()
 
 
 def test_control_client_rejects_closed_gate(control_client):

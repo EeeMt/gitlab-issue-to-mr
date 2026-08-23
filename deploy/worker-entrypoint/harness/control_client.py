@@ -63,8 +63,58 @@ def handle(frame: dict) -> dict:
     if len(text) > 4000:
         return {"status": "reject", "rejection_code": "payload_too_large",
                 "rejection_message": "payload.text exceeds 4000 chars"}
-    # Deterministic ack for a valid, supported command.
-    return {"status": "ack", "command_id": frame.get("command_id")}
+    return _forward_to_bridge(frame)
+
+
+def _forward_to_bridge(frame: dict) -> dict:
+    """Append the frame to the bridge request journal and await the native ACK.
+
+    The running ``pi-run.sh`` relay tails this journal, injects the native
+    steer/follow_up frame into Pi's RPC stdin, and records the outcome keyed
+    by ``command_id`` in the response journal. We poll that file so the
+    returned status reflects the real native ACK (plan §6.2: ``delivered``
+    means the harness interface acknowledged the command).
+    """
+    import os
+    import time
+    import uuid
+
+    runtime_dir = os.environ.get("CODIFY_RUNTIME_DIR", "/tmp/codify-runtime")
+    requests_path = os.path.join(runtime_dir, "pi-control-requests.jsonl")
+    responses_path = os.path.join(runtime_dir, "pi-control-responses.jsonl")
+    command_id = frame.get("command_id") or f"cmd-{uuid.uuid4().hex[:12]}"
+    request = dict(frame)
+    request["command_id"] = command_id
+    with open(requests_path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(request, ensure_ascii=False) + "\n")
+
+    deadline = time.monotonic() + 15.0
+    while time.monotonic() < deadline:
+        if os.path.exists(responses_path):
+            with open(responses_path, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    try:
+                        outcome = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if outcome.get("command_id") == command_id:
+                        if outcome.get("status") == "delivered":
+                            return {"status": "ack", "command_id": command_id}
+                        return {
+                            "status": "reject",
+                            "command_id": command_id,
+                            "rejection_code": outcome.get(
+                                "rejection_code", "delivery_outcome_unknown"
+                            ),
+                            "rejection_message": outcome.get("rejection_message"),
+                        }
+        time.sleep(0.2)
+    return {
+        "status": "unknown",
+        "command_id": command_id,
+        "rejection_code": "delivery_outcome_unknown",
+        "rejection_message": "bridge relay did not report a native outcome in time",
+    }
 
 
 def main() -> int:

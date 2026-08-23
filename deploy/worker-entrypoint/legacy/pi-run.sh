@@ -109,6 +109,7 @@ while IFS= read -r line; do
     # before the ack_state continue so it also applies to the turn stream.
     if printf '%s' "${line}" | jq -e '.type == "agent_settled"' >/dev/null 2>&1; then
         kill "${req_writer}" 2>/dev/null || true
+        kill "${BRIDGE_RELAY_PID:-0}" 2>/dev/null || true
     fi
     if [ "${ack_state}" -eq 1 ]; then
         continue  # handshake complete; the rest is the turn stream (drain as-is)
@@ -124,11 +125,54 @@ while IFS= read -r line; do
             ;;
         get_state)
             if [ "${ack_state}" -eq 0 ]; then
-                ack_state=1
-                printf '{"id":3,"type":"prompt","message":%s}\n' \
-                    "${prompt_json}" > "${REQ_FIFO}"
-            fi
-            ;;
+            ack_state=1
+            printf '{"id":3,"type":"prompt","message":%s}\n' \
+                "${prompt_json}" > "${REQ_FIFO}"
+            # Bridge relay: tail the control-plane request journal and inject
+            # native steer/follow_up frames into Pi's RPC stdin. Each outcome
+            # is recorded so the in-image control client can report the real
+            # native ACK to the command pump (plan §6.2).
+            REQUESTS_JOURNAL="${CODIFY_RUNTIME_DIR}/pi-control-requests.jsonl"
+            RESPONSES_JOURNAL="${CODIFY_RUNTIME_DIR}/pi-control-responses.jsonl"
+            : > "${REQUESTS_JOURNAL}"
+            (
+                LAST_POS=0
+                LAST_INODE=""
+                while :; do
+                    if [ -f "${REQUESTS_JOURNAL}" ]; then
+                        INODE="$(stat -c %i "${REQUESTS_JOURNAL}" 2>/dev/null || echo "")"
+                        if [ "${INODE}" != "${LAST_INODE}" ]; then
+                            LAST_INODE="${INODE}"
+                            LAST_POS=0
+                        fi
+                        SIZE="$(stat -c %s "${REQUESTS_JOURNAL}" 2>/dev/null || echo 0)"
+                        if [ "${SIZE}" -gt "${LAST_POS}" ]; then
+                            tail -c +"$((LAST_POS + 1))" "${REQUESTS_JOURNAL}" \
+                                | while IFS= read -r req_line; do
+                                    [ -n "${req_line}" ] || continue
+                                    rtype="$(printf '%s' "${req_line}" | jq -r '.type // empty' 2>/dev/null)"
+                                    cid="$(printf '%s' "${req_line}" | jq -r '.command_id // empty' 2>/dev/null)"
+                                    case "${rtype}" in
+                                        steer|follow_up)
+                                            text="$(printf '%s' "${req_line}" | jq -r '.payload.text // ""')"
+                                            REQ_ID="cmd-${cid}"
+                                            printf '{"id":"%s","type":"%s","message":{"role":"user","content":[{"type":"text","text":%s}],"timestamp":0}}\n' \
+                                                "${REQ_ID}" "${rtype}" \
+                                                "$(printf '%s' "${text}" | jq -Rs .)" > "${REQ_FIFO}"
+                                            printf '%s\n' "{\"command_id\":\"${cid}\",\"status\":\"delivered\",\"req_id\":\"${REQ_ID}\"}" \
+                                                >> "${RESPONSES_JOURNAL}"
+                                            ;;
+                                    esac
+                                done
+                            LAST_POS="${SIZE}"
+                        fi
+                    fi
+                    sleep 1
+                done
+            ) &
+            BRIDGE_RELAY_PID=$!
+        fi
+        ;;
     esac
 done < "${STREAM_FIFO}"
 

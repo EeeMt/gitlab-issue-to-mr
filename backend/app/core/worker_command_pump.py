@@ -296,16 +296,24 @@ async def docker_exec_control_transport(
                     "rejection_code": "delivery_outcome_unknown",
                     "rejection_message": "kit runtime unavailable in container",
                 }
+            outcome_path = "/tmp/codify-runtime/control-outcome.json"
             command = [
                 bash_bin,
                 "-c",
-                f'exec "{runtime_bin}/python3" "{CONTROL_CLIENT_PATH}" < {shlex.quote(frame_path)}',
+                f'exec "{runtime_bin}/python3" "{CONTROL_CLIENT_PATH}" '
+                f'< {shlex.quote(frame_path)} > {shlex.quote(outcome_path)} 2>&1',
             ]
-            result = container.client.api.exec_create(
+            run = container.client.api.exec_create(
                 container.id,
                 command,
                 stdout=True,
                 stderr=True,
+            )
+            container.client.api.exec_start(run["Id"])
+            result = container.client.api.exec_create(
+                container.id,
+                ["cat", outcome_path],
+                stdout=True,
             )
             output = container.client.api.exec_start(result["Id"])
             if not isinstance(output, bytes):
