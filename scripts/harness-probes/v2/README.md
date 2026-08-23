@@ -1,12 +1,39 @@
-# Open-Harness V2 probe 脚本目录
+# Open-Harness V2 probe scripts
 
-Phase 0 的 probe 生成/回放工具。raw 证据（脱敏后）落 `docs/harness-probes/v2/`；凭据与完整仓库内容不进入任何 fixture。
+These scripts consolidate the local WP0 experiments into a small, repeatable
+surface. They are evidence helpers, not a second Harness implementation: all
+full-chain execution delegates initialization and adapter selection to the
+frozen `worker-entrypoint/harness/runner.sh`.
 
-- [`replay_v2.py`](./replay_v2.py) — V1 canonical → V2 canonical 确定性回放（Claude/Codex），见 [docs/harness-probes/v2/claude/README.md](../../../docs/harness-probes/v2/claude/README.md)。
+Credentials must be injected by the caller. No script reads Codify's database,
+`deploy/.env.test`, a credential file, or a key dump; no script prints model
+output, request bodies, response bodies, or environment values.
 
-## Vi/OpenCode 探针说明
+## Commands
 
-Pi RPC / OpenCode Server 的真实 probe 在远端目标架构（linux/amd64）容器内执行，raw 输出经脱敏后冻结到 `docs/harness-probes/v2/{pi,opencode}/`。probe 驱动逻辑（RPC 交互、SSE 订阅、abort）不随仓库分发以避免固化 host 环境细节；V2 集成阶段由 Bridge 测试直接覆盖同一边界。
+```bash
+python3 scripts/harness-probes/v2/provider-matrix.py --base-url https://provider.example --model example --dry-run
+PROBE_API_KEY="${PROBE_API_KEY:?inject from a protected environment}" python3 scripts/harness-probes/v2/provider-matrix.py --base-url https://provider.example --model example
+scripts/harness-probes/v2/full-chain-driver.sh --harness pi --prompt /tmp/prompt.md
+scripts/harness-probes/v2/pi-rpc-sequence.sh --pi-bin /opt/codify-pi/bin/pi
+scripts/harness-probes/v2/resume.sh --harness pi --output-dir /tmp/v2-resume
+scripts/harness-probes/v2/recall.sh --harness pi --output-dir /tmp/v2-recall
+scripts/harness-probes/v2/benchmark.sh --harness pi --output-dir /tmp/v2-benchmark --count 20
+python3 scripts/harness-probes/v2/secret-scan.py
+python3 scripts/harness-probes/v2/secret-scan.py --staged
+```
 
-- Pi 四场景（success/steer/followup/abort）raw：`docs/harness-probes/v2/pi/*.raw.jsonl`
-- OpenCode 事件协议样本：`docs/harness-probes/v2/opencode/events.observed.jsonl`
+`resume.sh` verifies protocol-level continuation. `recall.sh` separately asks
+the model to recall a turn-one marker; passing the former does not establish the
+latter. `benchmark.sh` records only index and process status in `summary.tsv`.
+
+## Safety and evidence rules
+
+- Never put real credentials in shell history, command arguments, prompts,
+  fixtures, logs, reports, or `--base-url` user-info/query fields.
+- Do not commit a run archive. Preserve a formal canary only after redaction in
+  `docs/harness-probes/v2/acceptance/` with Bundle/image/Kit digests and task IDs.
+- `provider-matrix.py` establishes endpoint behaviour only. It does **not**
+  prove Harness protocol support, configuration selection, or acceptance.
+- The direct Pi RPC probe is diagnostic. Release evidence remains the
+  common-runner full chain and later real-Host/canary checks.

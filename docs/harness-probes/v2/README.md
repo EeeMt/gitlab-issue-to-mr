@@ -1,10 +1,52 @@
-# Open-Harness V2 上游协议探针与制品固定 (Phase 0)
+# Open-Harness V2 protocol probes and fixed evidence
 
-**日期：** 2026-08-21 · **归属计划：** [2026-08-21-open-harness-v2-implementation-plan.md](../../superpowers/plans/2026-08-21-open-harness-v2-implementation-plan.md) §3.1–3.5
+**Status:** Phase 0 evidence is useful input to V2 implementation, but the
+2026-08-23 stage audit classifies Phase 0 as **not exited**. Three-model
+endpoint validation, Pi compaction/auto-retry, OpenCode error/permission/crash
+coverage, and content-addressed artifact binding remain open. Nothing here is
+proof of production readiness or permission to switch the Pi default / hard-cut V1.
 
-**范围：** 固定 Pi / OpenCode / Claude CLI / Codex CLI 四个官方精确版本并核对离线可运行性；按 §3.2/§3.3/§3.4 矩阵跑真实 probe；把脱敏 raw fixture 与字段映射提交到本目录。凭据与完整仓库内容不进入任何 fixture。
+**Scope:** fixed Pi / OpenCode / Claude CLI / Codex CLI probe evidence and
+redacted field mappings. Credentials and complete repository contents do not
+enter fixtures.
 
-**结论摘要：** 本机/远端 Docker 实测可访问上游（github / pi.dev / opencode.ai / npmjs / api.deepseek.com 均 200）；网络**不是**阻塞项。四个制品的 linux/amd64 二进制均已在远端 Worker 同架构容器内实际执行成功（`--version` 返回真实版本），满足 §3.1 "目标 Worker 架构离线运行" 验收。
+## Recorded, sanitized facts
+
+| Harness | Fixed version / boundary | Evidence here | Limits |
+|---|---|---|---|
+| Pi | `0.84.2`, RPC stdio | Fresh/continuation/control raw captures under `pi/` | Native ACK and real full-chain recovery remain open V2 work. |
+| OpenCode | `1.18.19`, Server/SSE | Event samples under `opencode/` | HTTP-direct was diagnostic; resume/settled/error coverage is incomplete. |
+| Codex | `0.146.0`, JSONL | `codex/success.v2.jsonl` replay fixture | Fixture replay is not target-Host execution. |
+| Claude | `2.1.152`, JSON stream | `claude/success.v2.jsonl` replay fixture | Linux Worker artifact digest remains to be fixed. |
+
+The prior top-level Phase 0 report is retained as a historical working note.
+Its version, endpoint-configuration, SDK-cost, and uncertainty findings are
+summarized here; its former `RESULT: pass` label cannot override the current
+stage summary or architecture acceptance gates.
+
+## Evidence inventory
+
+- `pi/*.raw.jsonl`: redacted native samples for success, continuation,
+  steering, follow-up, and abort; this is not proof that all declared model
+  protocols were actually exercised.
+- `opencode/events.observed.jsonl` and `events.wire.sse`: redacted Server/SSE samples.
+- `claude/` and `codex/`: deterministic V1-to-V2 canonical replay fixtures.
+- `acceptance/` (created only for reviewed canaries): redacted metadata with
+  commit, Bundle/image/Kit digests, task IDs, config summary, and validation.
+
+## Reproduction and secret handling
+
+Use the consolidated [V2 probe scripts](../../../scripts/harness-probes/v2/README.md).
+They use operator-injected environment variables and write no credentials to fixtures.
+
+```bash
+python3 scripts/harness-probes/v2/secret-scan.py
+python3 scripts/harness-probes/v2/secret-scan.py --staged
+```
+
+The scanner prints only `file:rule` matches; it never prints matching text.
+Raw experimental output, database exports, and result archives remain outside
+the repository until manually redacted and reviewed.
 
 ---
 
@@ -36,7 +78,7 @@
 
 ## 各 harness 探针证据
 
-- [Pi RPC](pi/) — §3.2：init/version/clean shutdown、fresh/resume、三协议、steer/follow-up 队列与 ACK、settled/closing、abort/signal
+- [Pi RPC](pi/) — §3.2：init/version/clean shutdown、fresh/resume、steer/follow-up 队列与 ACK、settled/closing、abort/signal；其余模型协议仍待 V2 集成阶段实测。
 - [OpenCode Server](opencode/) — §3.3：start/health/auth/随机端口、Session/异步 Prompt/事件订阅/settled、Abort、Server 崩溃
 - [Claude / Codex V2 回放](claude/) · [Codex](codex/) — §3.4：V1 raw → V2 canonical 字段映射与回放 fixture
 
