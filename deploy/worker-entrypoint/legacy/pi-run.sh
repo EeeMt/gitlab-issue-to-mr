@@ -156,7 +156,7 @@ while IFS= read -r line; do
                                         steer|follow_up)
                                             text="$(printf '%s' "${req_line}" | jq -r '.payload.text // ""')"
                                             REQ_ID="cmd-${cid}"
-                                            printf '{"id":"%s","type":"%s","message":{"role":"user","content":[{"type":"text","text":%s}],"timestamp":0}}\n' \
+                                            printf '{"id":"%s","type":"%s","message":%s}\n' \
                                                 "${REQ_ID}" "${rtype}" \
                                                 "$(printf '%s' "${text}" | jq -Rs .)" > "${REQ_FIFO}"
                                             printf '%s\n' "{\"command_id\":\"${cid}\",\"status\":\"delivered\",\"req_id\":\"${REQ_ID}\"}" \

@@ -339,6 +339,30 @@ async def docker_exec_control_transport(
 
 
 
+async def _record_control_event(
+    db: AsyncSession, *, task_id: int, event_type: str, payload: dict
+) -> None:
+    """Project a control-plane audit event into the product-visible log.
+
+    Mirrors the projector's ``control_event`` TaskLog rows so the event
+    stream shows delivered/rejected alongside the DB status (plan §6.2).
+    Never touches task_harness_commands rows.
+    """
+    from app.models import TaskLog
+
+    db.add(
+        TaskLog(
+            task_id=task_id,
+            log_level="INFO",
+            message="",
+            log_type="control_event",
+            log_metadata=json.dumps(
+                {"type": event_type, **payload}, ensure_ascii=False
+            ),
+        )
+    )
+
+
 async def _drop_lease(db: AsyncSession, attempt: TaskHarnessAttempt, *, owner: str) -> None:
     """Clear the lease only if we still own it."""
     await db.execute(
@@ -416,6 +440,17 @@ async def dispatch_one_command(
     status = outcome.get("status")
     if status == DISPATCH_ACK:
         await write_command_delivery(db, command_id=command.command_id, delivered_at=now)
+        await _record_control_event(
+            db,
+            task_id=command.task_id,
+            event_type="control.command.delivered",
+            payload={
+                "command_id": command.command_id,
+                "payload_digest": command.payload_digest,
+                "sequence_no": command.sequence_no,
+                "delivered_at": now.isoformat(),
+            },
+        )
         return "delivered"
     if status == DISPATCH_REJECT:
         code = outcome.get("rejection_code") or "delivery_outcome_unknown"
@@ -426,6 +461,18 @@ async def dispatch_one_command(
             rejection_code=code,
             rejection_message=message,
             rejected_at=now,
+        )
+        await _record_control_event(
+            db,
+            task_id=command.task_id,
+            event_type="control.command.rejected",
+            payload={
+                "command_id": command.command_id,
+                "payload_digest": command.payload_digest,
+                "sequence_no": command.sequence_no,
+                "rejection_code": code,
+                "rejection_message": message,
+            },
         )
         return "rejected"
     # Unknown / malformed outcome: do not leave the command ambiguous.
