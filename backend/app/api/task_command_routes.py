@@ -35,7 +35,40 @@ from app.models import TaskHarnessCommand, User
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-COMMAND_STATUS_TERMINAL = {"delivered", "rejected"}
+COMMAND_STATUS_TERMINAL = {"delivered", "rejected", "outcome_unknown"}
+PUBLIC_COMMAND_TYPES = frozenset({"steer", "follow_up"})
+PUBLIC_COMMAND_STATUSES = frozenset(
+    {"queued", "dispatching", "delivered", "rejected", "outcome_unknown"}
+)
+
+# The persisted reason can come from a container bridge or an exception path.
+# It is diagnostic data, not an HTTP contract: never expose it to a task viewer.
+PUBLIC_REJECTION_MESSAGES = {
+    "existing_conflict": "This command ID is already in use.",
+    "task_not_running": "The task is not running.",
+    "attempt_mismatch": "The current attempt does not support commands.",
+    "unsupported_harness": "The current runtime does not support this command.",
+    "control_gate_closed": "The command channel is not accepting commands.",
+    "payload_too_large": "The command content exceeds the allowed length.",
+    "invalid_command_type": "The command type is invalid.",
+    "not_authorized": "You are not authorized to send this command.",
+    "wrong_attempt": "The command does not belong to the active attempt.",
+    "container_unreachable": "Command delivery is temporarily unavailable.",
+    "container_missing": "Command delivery is temporarily unavailable.",
+    "delivery_outcome_unknown": "The command delivery outcome is unknown.",
+}
+PUBLIC_FALLBACK_REJECTION_CODE = "command_rejected"
+PUBLIC_FALLBACK_REJECTION_MESSAGE = "The command was rejected."
+PUBLIC_PROJECTION_ERROR_CODE = "command_projection_unavailable"
+PUBLIC_PROJECTION_ERROR_MESSAGE = "Command history is temporarily unavailable."
+
+
+class ProjectionError(Exception):
+    """Raised when persisted command data cannot be safely projected publicly."""
+
+    def __init__(self) -> None:
+        # Do not retain the invalid value: this exception may cross an HTTP boundary.
+        super().__init__(PUBLIC_PROJECTION_ERROR_CODE)
 
 
 class CreateCommandRequest(BaseModel):
@@ -49,24 +82,40 @@ def _created_by(current_user: User | None) -> str:
     return getattr(current_user, "username", None) or f"user:{current_user.id}"
 
 
+def _public_rejection(rejection_code: str | None) -> tuple[str | None, str | None]:
+    """Return the stable, non-diagnostic rejection projection for viewers."""
+    if rejection_code is None:
+        return None, None
+    message = PUBLIC_REJECTION_MESSAGES.get(rejection_code)
+    if message is not None:
+        return rejection_code, message
+    return PUBLIC_FALLBACK_REJECTION_CODE, PUBLIC_FALLBACK_REJECTION_MESSAGE
+
+
 def _command_dict(cmd: TaskHarnessCommand) -> dict:
+    if not isinstance(cmd.command_type, str) or cmd.command_type not in PUBLIC_COMMAND_TYPES:
+        raise ProjectionError()
+    if not isinstance(cmd.status, str) or cmd.status not in PUBLIC_COMMAND_STATUSES:
+        raise ProjectionError()
+
+    # The terminal state itself is authoritative.  Do not expose a persisted
+    # diagnostic (or a missing code) for an unknown delivery outcome.
+    rejection_code, rejection_message = _public_rejection(
+        "delivery_outcome_unknown" if cmd.status == "outcome_unknown" else cmd.rejection_code
+    )
     return {
         "command_id": cmd.command_id,
-        "task_id": cmd.task_id,
-        "attempt_id": cmd.attempt_id,
         "sequence_no": cmd.sequence_no,
         "type": cmd.command_type,
-        "payload": cmd.payload,
-        "payload_digest": cmd.payload_digest,
         "status": cmd.status,
-        "created_by": cmd.created_by,
         "created_at": cmd.created_at.isoformat() if cmd.created_at else None,
-        "delivery_attempts": cmd.delivery_attempts,
-        "last_attempt_at": cmd.last_attempt_at.isoformat() if cmd.last_attempt_at else None,
+        "dispatch_started_at": cmd.dispatch_started_at.isoformat() if cmd.dispatch_started_at else None,
+        "native_ack_at": cmd.native_ack_at.isoformat() if cmd.native_ack_at else None,
+        "outcome_unknown_at": cmd.outcome_unknown_at.isoformat() if cmd.outcome_unknown_at else None,
         "delivered_at": cmd.delivered_at.isoformat() if cmd.delivered_at else None,
         "rejected_at": cmd.rejected_at.isoformat() if cmd.rejected_at else None,
-        "rejection_code": cmd.rejection_code,
-        "rejection_message": cmd.rejection_message,
+        "rejection_code": rejection_code,
+        "rejection_message": rejection_message,
     }
 
 
@@ -94,12 +143,24 @@ def _reject_http(result: CommandCreateResult, *, command_id: str) -> HTTPExcepti
         "invalid_command_type": status.HTTP_422_UNPROCESSABLE_CONTENT,
         "not_authorized": status.HTTP_403_FORBIDDEN,
     }
+    rejection_code, rejection_message = _public_rejection(result.rejection_code)
     return HTTPException(
         status_code=mapped_status.get(result.rejection_code, status.HTTP_409_CONFLICT),
         detail={
-            "code": result.rejection_code,
-            "message": result.rejection_message,
+            "code": rejection_code,
+            "message": rejection_message,
             "command_id": command_id,
+        },
+    )
+
+
+def _projection_http_error() -> HTTPException:
+    """Return the stable fail-closed error for unsafe persisted command data."""
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail={
+            "code": PUBLIC_PROJECTION_ERROR_CODE,
+            "message": PUBLIC_PROJECTION_ERROR_MESSAGE,
         },
     )
 
@@ -126,11 +187,12 @@ async def put_command(
         created_by=_created_by(current_user),
     )
     if result.outcome == "existing_conflict":
+        rejection_code, rejection_message = _public_rejection(result.rejection_code)
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
-                "code": "existing_conflict",
-                "message": "command_id already exists with a different payload",
+                "code": rejection_code,
+                "message": rejection_message,
                 "command_id": command_id,
             },
         )
@@ -145,11 +207,11 @@ async def put_command(
         )
     # Frozen contract: first creation is 201, an idempotent replay is 200.
     response.status_code = status.HTTP_201_CREATED if result.created else status.HTTP_200_OK
-    return {
-        "command": _command_dict(cmd),
-        "created": result.created,
-        "outcome": result.outcome,
-    }
+    try:
+        command = _command_dict(cmd)
+    except ProjectionError:
+        raise _projection_http_error() from None
+    return {"command": command, "created": result.created, "outcome": result.outcome}
 
 
 @router.get("/tasks/{task_id}/commands")
@@ -162,7 +224,11 @@ async def get_commands(
     """List a task's commands ordered by attempt/sequence for recovery."""
     await get_task_with_access_check(task_id, db, access_scope, current_user)
     commands = await list_commands(db, task_id=task_id)
-    return {"commands": [_command_dict(c) for c in commands]}
+    try:
+        projected = [_command_dict(c) for c in commands]
+    except ProjectionError:
+        raise _projection_http_error() from None
+    return {"commands": projected}
 
 
 @router.get("/tasks/{task_id}/commands/{command_id}")
@@ -181,4 +247,7 @@ async def get_command(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="command not found",
         )
-    return _command_dict(cmd)
+    try:
+        return _command_dict(cmd)
+    except ProjectionError:
+        raise _projection_http_error() from None
