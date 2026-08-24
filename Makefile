@@ -52,6 +52,12 @@ worker-cli-artifact-export: ## Export immutable image CLI identity document; set
 	@test -n "$(CLI_ARTIFACT_MANIFEST)" || { echo "CLI_ARTIFACT_MANIFEST is required" >&2; exit 2; }
 	$(PROJECT_ROOT)/deploy/worker-kit/export-cli-artifact-manifest.sh "$(RUNTIME_IMAGE)" "$(CLI_ARTIFACT_MANIFEST)"
 
+.PHONY: worker-runtime-bundle-export
+worker-runtime-bundle-export: ## Export one DB-bound V2 bundle; set exactly one of TASK_ID or BUNDLE_DIGEST and BUNDLE_EXPORT_DIR
+	@test -n "$(BUNDLE_EXPORT_DIR)" || { echo "BUNDLE_EXPORT_DIR is required" >&2; exit 2; }
+	@test -n "$(TASK_ID)" -a -z "$(BUNDLE_DIGEST)" -o -z "$(TASK_ID)" -a -n "$(BUNDLE_DIGEST)" || { echo "set exactly one of TASK_ID or BUNDLE_DIGEST" >&2; exit 2; }
+	docker-compose -f $(PROJECT_ROOT)/deploy/docker-compose.yml exec -T backend python -m app.scripts.export_runtime_bundle $(if $(TASK_ID),--task-id "$(TASK_ID)") $(if $(BUNDLE_DIGEST),--bundle-digest "$(BUNDLE_DIGEST)") --output-dir "$(BUNDLE_EXPORT_DIR)"
+
 .PHONY: up
 up: ## Start development environment (rebuilds backend and nginx images)
 	cd $(PROJECT_ROOT)/deploy && docker-compose --env-file .env.test up -d --build
