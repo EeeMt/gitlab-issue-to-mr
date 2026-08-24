@@ -9,6 +9,10 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import asyncio
+import hashlib
+import io
+import json
+import tarfile
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -34,35 +38,121 @@ mock_settings.worker_network = ""
 mock_settings.worker_extra_volumes = ""
 mock_settings.worker_workspace_host_path = "/tmp/test-codify-workspace"
 mock_settings.worker_skip_image_pull = True
+mock_settings.harness_execution_mode = "dual_canary"
 
 from app.core.worker import WorkerExecutor
+from app.core.worker_runtime_bundle import (
+    bundle_manifest_digest_from_files,
+    v2_launcher_manifest_bytes,
+)
 from app.models import Issue, Task, TaskStatus
+
+_V2_WORKER_IMAGE_IDENTITY = {
+    "schema": "codify.worker-image-identity/v1",
+    "daemon_key": "priority-tests",
+    "image_reference": f"registry.example.com/codify-worker@sha256:{'1' * 64}",
+    "image_id": f"sha256:{'2' * 64}",
+    "runtime_platform": "linux/amd64",
+    "cli_artifact_lock_sha256": "3" * 64,
+}
+_V2_HARNESS_EVIDENCE = {
+    "schema": "codify.worker-harness-verification/v1",
+    "harness_key": "claude",
+    "contract_version": "codify.worker.harness/v2",
+    "adapter": {"version": "1.0.0"},
+    "verification_input_digest": "4" * 64,
+    "image_identity": _V2_WORKER_IMAGE_IDENTITY,
+    "generation": 1,
+    "verified_at": "2026-08-24T00:00:00+00:00",
+}
+
+
+def _make_v2_runtime_bundle():
+    """Build persisted V2 bytes so priority tests traverse the real verifier."""
+    entrypoint = b"#!/bin/sh\nexit 0\n"
+    files = [
+        {
+            "path": "entrypoint.sh",
+            "size": len(entrypoint),
+            "sha256": hashlib.sha256(entrypoint).hexdigest(),
+        }
+    ]
+    files_digest = bundle_manifest_digest_from_files(files)
+    digest = hashlib.sha256(
+        json.dumps(
+            {
+                "files_digest": files_digest,
+                "worker_image_identity": _V2_WORKER_IMAGE_IDENTITY,
+                "harness_verification_evidence": _V2_HARNESS_EVIDENCE,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    manifest = {
+        "schema": "codify.worker.runtime-manifest/v2",
+        "contract_version": "codify.worker.harness/v2",
+        "event_schema": "codify.worker.event/v2",
+        "orchestration_version": "1.0.0",
+        "bundle_digest": digest,
+        "runtime_platform": "linux/amd64",
+        "worker_image_identity": _V2_WORKER_IMAGE_IDENTITY,
+        "harness_verification_evidence": _V2_HARNESS_EVIDENCE,
+        "files": files,
+        "adapters": {
+            "claude": {
+                "adapter": {"version": "1.0.0", "digest": digest},
+                "capabilities": {"steering": False},
+            }
+        },
+    }
+    launcher_manifest = v2_launcher_manifest_bytes(SimpleNamespace(manifest=manifest))
+    archive_buffer = io.BytesIO()
+    with tarfile.open(fileobj=archive_buffer, mode="w", format=tarfile.PAX_FORMAT) as archive:
+        for name, payload, mode in (
+            ("codify-runtime/orchestration/manifest.json", launcher_manifest, 0o644),
+            ("codify-runtime/orchestration/entrypoint.sh", entrypoint, 0o755),
+        ):
+            member = tarfile.TarInfo(name=name)
+            member.size = len(payload)
+            member.mode = mode
+            member.mtime = 0
+            archive.addfile(member, io.BytesIO(payload))
+    archive_bytes = archive_buffer.getvalue()
+    return SimpleNamespace(
+        id=81,
+        digest=digest,
+        contract_version="codify.worker.harness/v2",
+        orchestration_version="1.0.0",
+        manifest={
+            **manifest,
+            "archive_sha256": hashlib.sha256(archive_bytes).hexdigest(),
+        },
+        bundle_bytes=archive_bytes,
+        size_bytes=len(archive_bytes),
+    )
+
+
+_V2_RUNTIME_BUNDLE = _make_v2_runtime_bundle()
 
 
 @pytest.fixture(autouse=True)
 def _worker_test_dependencies():
     """Keep worker settings and sleep patches scoped to this test module."""
-    bundle = SimpleNamespace(
-        id=1,
-        digest="d" * 64,
-        contract_version="codify.worker.harness/v1",
-        manifest={
-            "archive_manifest_digest": "m" * 64,
-            "adapters": {"claude": {"version": "1.0.0", "digest": "a" * 64}},
-        },
-        bundle_bytes=b"runtime-bundle",
-    )
     attempt = SimpleNamespace(
         attempt_id="task-attempt-1",
         harness_key="claude",
         adapter_version="1.0.0",
+        event_schema="codify.worker.event/v2",
+        control_state="disabled",
+        control_supported=False,
     )
     with (
         patch('asyncio.sleep', new_callable=AsyncMock),
         patch('app.core.worker.get_settings', return_value=mock_settings),
         patch(
-            "app.core.worker_task_lifecycle.load_bound_runtime_bundle",
-            new=AsyncMock(return_value=bundle),
+            "app.core.worker_task_lifecycle.inspect_v2_worker_image_identity",
+            return_value=_V2_WORKER_IMAGE_IDENTITY,
         ),
         patch(
             "app.core.worker_task_lifecycle.create_task_attempt",
@@ -84,6 +174,7 @@ def create_mock_db(task, issue=None):
 
     if getattr(task, "worker_profile_id", None) is None:
         task.worker_profile_id = 1
+    task.runtime_bundle_id = _V2_RUNTIME_BUNDLE.id
     task.worker_profile_snapshot = TaskWorkerProfileSnapshot(
         task_id=task.id,
         worker_profile_id=task.worker_profile_id,
@@ -96,6 +187,17 @@ def create_mock_db(task, issue=None):
         default_execute_run_instruction_template="Execute {{user_prompt}}",
         default_plan_run_instruction_template="Plan {{user_prompt}}",
         ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+        harness_key="claude",
+        harness_config_snapshot={
+            "requested_runtime_contract_version": "codify.worker.harness/v2",
+            "v2_worker_image_identity": _V2_WORKER_IMAGE_IDENTITY,
+            "v2_harness_verification_evidence": _V2_HARNESS_EVIDENCE,
+        },
+        harness_adapter_version="1.0.0",
+        harness_adapter_digest=_V2_RUNTIME_BUNDLE.digest,
+        runtime_contract_version="codify.worker.harness/v2",
+        orchestration_version="1.0.0",
+        runtime_bundle_digest=_V2_RUNTIME_BUNDLE.digest,
     )
     # Ordered-turn projected lineage defaults (the scheduler repairs these before
     # claim; the worker fails closed on a missing projection).
@@ -127,6 +229,9 @@ def create_mock_db(task, issue=None):
             provider = getattr(task, 'provider', None)
             mock_result.scalar_one_or_none.return_value = provider
             mock_result.scalars.return_value.all.return_value = [provider] if provider else []
+        elif 'FROM worker_runtime_bundles' in statement_str:
+            mock_result.scalar_one_or_none.return_value = _V2_RUNTIME_BUNDLE
+            mock_result.scalars.return_value.all.return_value = [_V2_RUNTIME_BUNDLE]
         elif 'FROM issue_session_lineages' in statement_str:
             mock_result.scalar_one_or_none.return_value = None
             mock_result.scalars.return_value.all.return_value = []

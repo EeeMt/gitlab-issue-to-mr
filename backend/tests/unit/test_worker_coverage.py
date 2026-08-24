@@ -26,6 +26,7 @@ Covers functionality NOT tested by test_worker_new_patterns.py or test_mr_stats.
 import asyncio
 import hashlib
 import io
+import json
 import os
 import re
 import subprocess
@@ -48,6 +49,25 @@ from app.core.worker_runtime_bundle import (
 )
 from app.models import Task, TaskLog, TaskStatus
 
+_V2_WORKER_IMAGE_IDENTITY = {
+    "schema": "codify.worker-image-identity/v1",
+    "daemon_key": "worker-tests",
+    "image_reference": f"registry.example.com/codify-worker@sha256:{'1' * 64}",
+    "image_id": f"sha256:{'2' * 64}",
+    "runtime_platform": "linux/amd64",
+    "cli_artifact_lock_sha256": "3" * 64,
+}
+_V2_HARNESS_EVIDENCE = {
+    "schema": "codify.worker-harness-verification/v1",
+    "harness_key": "claude",
+    "contract_version": "codify.worker.harness/v2",
+    "adapter": {"version": "1.0.0"},
+    "verification_input_digest": "4" * 64,
+    "image_identity": _V2_WORKER_IMAGE_IDENTITY,
+    "generation": 1,
+    "verified_at": "2026-08-24T00:00:00+00:00",
+}
+
 
 def _make_v2_runtime_bundle():
     """Build a minimal persisted V2 bundle that passes production verification."""
@@ -59,13 +79,27 @@ def _make_v2_runtime_bundle():
             "sha256": hashlib.sha256(entrypoint).hexdigest(),
         }
     ]
-    digest = bundle_manifest_digest_from_files(files)
+    files_digest = bundle_manifest_digest_from_files(files)
+    digest = hashlib.sha256(
+        json.dumps(
+            {
+                "files_digest": files_digest,
+                "worker_image_identity": _V2_WORKER_IMAGE_IDENTITY,
+                "harness_verification_evidence": _V2_HARNESS_EVIDENCE,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
     manifest = {
         "schema": "codify.worker.runtime-manifest/v2",
         "contract_version": "codify.worker.harness/v2",
         "event_schema": "codify.worker.event/v2",
         "orchestration_version": "1.0.0",
         "bundle_digest": digest,
+        "runtime_platform": "linux/amd64",
+        "worker_image_identity": _V2_WORKER_IMAGE_IDENTITY,
+        "harness_verification_evidence": _V2_HARNESS_EVIDENCE,
         "files": files,
         "adapters": {
             "claude": {
@@ -131,6 +165,9 @@ def _stub_runtime_bundle_and_attempt():
     with patch(
         "app.core.worker_task_lifecycle.create_task_attempt",
         new=AsyncMock(side_effect=attempt),
+    ), patch(
+        "app.core.worker_task_lifecycle.inspect_v2_worker_image_identity",
+        return_value=_V2_WORKER_IMAGE_IDENTITY,
     ):
         yield
 
@@ -255,7 +292,9 @@ def _make_task(**kwargs):
         ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
         harness_key="claude",
         harness_config_snapshot={
-            "requested_runtime_contract_version": "codify.worker.harness/v2"
+            "requested_runtime_contract_version": "codify.worker.harness/v2",
+            "v2_worker_image_identity": _V2_WORKER_IMAGE_IDENTITY,
+            "v2_harness_verification_evidence": _V2_HARNESS_EVIDENCE,
         },
         harness_adapter_version="1.0.0",
         harness_adapter_digest=_V2_BUNDLE_DIGEST,
