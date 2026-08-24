@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from fastapi.testclient import TestClient
 
+from app.core.harness_protocol import HARNESS_CONTRACT_VERSION_V2
 from app.models import IssueExecutionLock, TaskStatus
 
 
@@ -33,6 +34,23 @@ def _make_task(task_id, *, issue_sequence, status, scheduled_at=None, issue_id=1
     # A frozen snapshot is absent for baked-image / legacy tasks, so the head
     # has no runtime locator fingerprint and no readiness gate applies.
     task.worker_profile_snapshot = None
+    return task
+
+
+def _attach_v2_execution_contract(task: MagicMock) -> MagicMock:
+    """Attach a consistent frozen V2 identity for API writer tests."""
+    task.worker_profile_snapshot = SimpleNamespace(
+        harness_key="claude",
+        runtime_contract_version=HARNESS_CONTRACT_VERSION_V2,
+        runtime_bundle_digest="b" * 64,
+    )
+    task.runtime_bundle_id = 41
+    task.runtime_bundle = SimpleNamespace(
+        id=task.runtime_bundle_id,
+        contract_version=HARNESS_CONTRACT_VERSION_V2,
+        digest="b" * 64,
+        manifest={"adapters": {"claude": {}}},
+    )
     return task
 
 
@@ -664,6 +682,7 @@ class ExecuteNowAPITests(unittest.TestCase):
 
     def test_non_head_execute_reports_predecessor_block(self):
         task = _make_task(9, issue_sequence=2, status=TaskStatus.PENDING)
+        _attach_v2_execution_contract(task)
         task.project_id = 1
         head = _make_task(1, issue_sequence=1, status=TaskStatus.RUNNING)
         mock_db = MagicMock()
@@ -688,6 +707,7 @@ class ExecuteNowAPITests(unittest.TestCase):
 
     def test_head_execute_returns_immediate_message(self):
         task = _make_task(10, issue_sequence=1, status=TaskStatus.PENDING)
+        _attach_v2_execution_contract(task)
         task.project_id = 1
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(
@@ -724,6 +744,7 @@ class RescheduleConflictAPITests(unittest.TestCase):
             status=TaskStatus.PENDING,
             scheduled_at=datetime(2099, 1, 1, 12, 0, 0),
         )
+        _attach_v2_execution_contract(task)
         task.project_id = 1
         issue = MagicMock()
         issue.id = 1

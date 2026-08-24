@@ -5,12 +5,14 @@ import os
 import sys
 import unittest
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from fastapi.testclient import TestClient
 
+from app.core.harness_protocol import HARNESS_CONTRACT_VERSION_V2
 from app.core.task_prompt import FREEFORM_RUN_INSTRUCTION_TEMPLATE
 from app.core.worker_profiles import WorkerProfileValidationError
 from app.models import Issue, TaskStatus, TaskWorkerProfileSnapshot
@@ -38,7 +40,6 @@ def _make_task(task_id=1, project_id=1, status=TaskStatus.PENDING):
     task.provider_runtime_snapshot = {"configured_model": "stale-model"}
     task.worker_profile_id = 12
     task.worker_profile = None
-    task.worker_profile_snapshot = None
     task.status = status
     task.initiator_user_id = None
     task.initiator_gitlab_user_id = None
@@ -70,6 +71,7 @@ def _make_task(task_id=1, project_id=1, status=TaskStatus.PENDING):
     task.updated_at = now
     task.started_at = None
     task.completed_at = None
+    _attach_v2_execution_contract(task)
     return task
 
 
@@ -88,7 +90,7 @@ def _make_issue(task):
 
 
 def _make_snapshot(task):
-    return TaskWorkerProfileSnapshot(
+    snapshot = TaskWorkerProfileSnapshot(
         task_id=task.id,
         worker_profile_id=task.worker_profile_id,
         profile_name="Default Worker",
@@ -100,7 +102,23 @@ def _make_snapshot(task):
         default_execute_run_instruction_template="Do {{user_prompt}}",
         default_plan_run_instruction_template="Plan {{user_prompt}}",
         ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+        harness_key="claude",
+        runtime_contract_version=HARNESS_CONTRACT_VERSION_V2,
+        runtime_bundle_digest="b" * 64,
         created_at=datetime(2024, 1, 1, 12, 0, 0),
+    )
+    return snapshot
+
+
+def _attach_v2_execution_contract(task):
+    """Attach the immutable V2 identity required by runnable-task writers."""
+    task.worker_profile_snapshot = _make_snapshot(task)
+    task.runtime_bundle_id = 41
+    task.runtime_bundle = SimpleNamespace(
+        id=task.runtime_bundle_id,
+        contract_version=HARNESS_CONTRACT_VERSION_V2,
+        digest="b" * 64,
+        manifest={"adapters": {"claude": {}}},
     )
 
 
@@ -132,7 +150,7 @@ def _mock_db_for_task(task):
     mock_db = MagicMock()
     mock_db.execute = AsyncMock(return_value=mock_result)
     issue = _make_issue(task)
-    snapshot = _make_snapshot(task)
+    snapshot = task.worker_profile_snapshot or _make_snapshot(task)
 
     async def get_model(model, _id):
         if model is Issue:
@@ -327,9 +345,10 @@ class UpdateTaskValidationTests(unittest.TestCase):
         resp = self._patch({"require_changes": None})
         self.assertEqual(resp.status_code, 422)
 
-    def test_prompt_change_without_worker_snapshot_returns_422(self):
+    def test_prompt_change_without_worker_snapshot_is_read_only(self):
         task = _make_task()
         task.run_instruction_template = None
+        task.worker_profile_snapshot = None
         mock_db = _mock_db_for_task(task)
         issue = _make_issue(task)
 
@@ -347,8 +366,13 @@ class UpdateTaskValidationTests(unittest.TestCase):
             resp = client.patch("/api/tasks/1", json={"user_prompt": "Changed"})
         app.dependency_overrides.clear()
 
-        self.assertEqual(resp.status_code, 422)
-        self.assertEqual(resp.json()["detail"], "Task has no worker profile snapshot")
+        self.assertEqual(resp.status_code, 409)
+        self.assertEqual(resp.json()["detail"]["code"], "missing_execution_snapshot")
+        self.assertEqual(resp.json()["detail"]["action"], "update")
+        self.assertEqual(task.user_prompt, "Original prompt")
+        mock_db.commit.assert_not_awaited()
+        mock_db.flush.assert_not_awaited()
+        mock_db.rollback.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
