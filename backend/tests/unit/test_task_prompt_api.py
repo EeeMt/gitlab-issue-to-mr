@@ -1,5 +1,7 @@
 """Focused API contract tests for task run-instruction templates."""
 
+import hashlib
+import json
 from contextlib import contextmanager
 from datetime import datetime
 from types import SimpleNamespace
@@ -16,14 +18,125 @@ from app.api.tasks import (
     get_run_instruction_template_defaults,
     preview_run_instruction_template,
 )
+from app.core.harness_protocol import HARNESS_CONTRACT_VERSION_V2
 from app.core.task_prompt import (
     BUILT_IN_EXECUTE_RUN_INSTRUCTION_TEMPLATE,
     BUILT_IN_PLAN_RUN_INSTRUCTION_TEMPLATE,
     FREEFORM_RUN_INSTRUCTION_TEMPLATE,
     PLACEHOLDER_NAMES,
 )
+from app.core.worker_runtime_bundle import (
+    adapter_digest_from_manifest_files,
+    bundle_manifest_digest_from_files,
+)
 from app.dependencies.project_access import ProjectAccessScope
 from app.models import AIProvider, Issue, TaskStatus, TaskWorkerProfileSnapshot
+
+_V2_IMAGE_IDENTITY = {
+    "schema": "codify.worker-image-identity/v1",
+    "daemon_key": "tcp://worker.example:2376",
+    "image_reference": "registry.example/worker@sha256:" + "c" * 64,
+    "image_id": "sha256:" + "d" * 64,
+    "runtime_platform": "linux/amd64",
+    "cli_artifact_lock_sha256": "e" * 64,
+}
+_V2_FILES = [
+    {
+        "path": "worker-entrypoint/harness/runner.sh",
+        "size": 0,
+        "sha256": hashlib.sha256(b"").hexdigest(),
+    }
+]
+
+
+def _v2_evidence(harness_key: str) -> dict[str, object]:
+    return {
+        "schema": "codify.worker-harness-verification/v1",
+        "harness_key": harness_key,
+        "contract_version": HARNESS_CONTRACT_VERSION_V2,
+        "adapter": {
+            "version": "1.0.0",
+            "digest": adapter_digest_from_manifest_files(_V2_FILES, harness_key),
+        },
+        "verification_input_digest": "f" * 64,
+        "image_identity": dict(_V2_IMAGE_IDENTITY),
+        "generation": 1,
+        "verified_at": "2026-08-24T00:00:00+00:00",
+    }
+
+
+def _v2_bundle_digest(harness_key: str) -> str:
+    payload = {
+        "files_digest": bundle_manifest_digest_from_files(_V2_FILES),
+        "worker_image_identity": _V2_IMAGE_IDENTITY,
+        "harness_verification_evidence": _v2_evidence(harness_key),
+    }
+    return hashlib.sha256(
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+
+
+def _v2_bundle():
+    """Return the canonical frozen V2 bundle required by create writers."""
+    harness_key = "claude"
+    evidence = _v2_evidence(harness_key)
+    bundle_digest = _v2_bundle_digest(harness_key)
+    return SimpleNamespace(
+        id=1,
+        digest=bundle_digest,
+        contract_version=HARNESS_CONTRACT_VERSION_V2,
+        orchestration_version="1.0.0",
+        manifest={
+            "schema": "codify.worker.runtime-manifest/v2",
+            "runtime_platform": "linux/amd64",
+            "worker_image_identity": dict(_V2_IMAGE_IDENTITY),
+            "harness_verification_evidence": evidence,
+            "files": [dict(item) for item in _V2_FILES],
+            "bundle_digest": bundle_digest,
+            "adapters": {
+                harness_key: {
+                    "adapter": dict(evidence["adapter"])
+                }
+            },
+        },
+    )
+
+
+def _v2_snapshot(task_id=10, worker_profile_id=12) -> TaskWorkerProfileSnapshot:
+    """Return the immutable V2 snapshot paired with ``_v2_bundle``."""
+    harness_key = "claude"
+    evidence = _v2_evidence(harness_key)
+    return TaskWorkerProfileSnapshot(
+        task_id=task_id,
+        worker_profile_id=worker_profile_id,
+        profile_name="Default Worker",
+        image=_V2_IMAGE_IDENTITY["image_reference"],
+        volume_mounts=[],
+        environment_variables=[],
+        pre_script="",
+        post_script="",
+        default_execute_run_instruction_template="Execute {{user_prompt}}",
+        default_plan_run_instruction_template="Plan {{user_prompt}}",
+        ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+        harness_key=harness_key,
+        harness_config_snapshot={
+            "requested_runtime_contract_version": HARNESS_CONTRACT_VERSION_V2,
+            "v2_worker_image_identity": dict(_V2_IMAGE_IDENTITY),
+            "v2_harness_verification_evidence": evidence,
+        },
+        effective_configuration_digest=evidence["verification_input_digest"],
+        harness_adapter_version="1.0.0",
+        harness_adapter_digest=evidence["adapter"]["digest"],
+        runtime_contract_version=HARNESS_CONTRACT_VERSION_V2,
+        orchestration_version="1.0.0",
+        runtime_bundle_digest=_v2_bundle_digest(harness_key),
+        created_at=datetime(2026, 6, 19, 10, 0, 0),
+    )
 
 
 def _scope() -> ProjectAccessScope:
@@ -49,20 +162,7 @@ def _make_create_task_fixtures() -> tuple[Any, ...]:
         is_disabled=False,
     )
     worker_profile = SimpleNamespace(id=12)
-    snapshot = TaskWorkerProfileSnapshot(
-        task_id=10,
-        worker_profile_id=12,
-        profile_name="Default Worker",
-        image="codify-worker/java21-maven:2026.07",
-        volume_mounts=[],
-        environment_variables=[],
-        pre_script="",
-        post_script="",
-        default_execute_run_instruction_template="Execute {{user_prompt}}",
-        default_plan_run_instruction_template="Plan {{user_prompt}}",
-        ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
-        created_at=datetime(2026, 6, 19, 10, 0, 0),
-    )
+    snapshot = _v2_snapshot()
     db = MagicMock()
     captured: dict[str, Any] = {}
 
@@ -91,6 +191,7 @@ def _make_create_task_fixtures() -> tuple[Any, ...]:
 
 @contextmanager
 def _create_task_patches(provider, worker_profile, snapshot):
+    bundle = _v2_bundle()
     with (
         patch(
             "app.api.tasks.get_project_metadata",
@@ -112,7 +213,11 @@ def _create_task_patches(provider, worker_profile, snapshot):
             "app.api.task_creation_service.readiness_for_profile",
             new=AsyncMock(return_value=SimpleNamespace(is_unavailable=False)),
         ),
-        patch("app.api.tasks.bind_runtime_bundle", new=AsyncMock(return_value=MagicMock(id=1))),
+        patch("app.api.tasks.bind_runtime_bundle", new=AsyncMock(return_value=bundle)),
+        patch(
+            "app.api.task_creation_service.get_effective_settings",
+            return_value=SimpleNamespace(harness_execution_mode="dual_canary"),
+        ),
         patch(
             "app.core.task_helpers.get_effective_settings",
             return_value=SimpleNamespace(
@@ -210,20 +315,8 @@ async def test_create_persists_snapshot_and_rendered_prompt_before_commit() -> N
     )
     db = MagicMock()
     worker_profile = SimpleNamespace(id=12)
-    snapshot = TaskWorkerProfileSnapshot(
-        task_id=10,
-        worker_profile_id=12,
-        profile_name="Default Worker",
-        image="codify-worker/java21-maven:2026.07",
-        volume_mounts=[],
-        environment_variables=[],
-        pre_script="",
-        post_script="",
-        default_execute_run_instruction_template="Execute {{user_prompt}}",
-        default_plan_run_instruction_template="Plan {{user_prompt}}",
-        ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
-        created_at=datetime(2026, 6, 19, 10, 0, 0),
-    )
+    snapshot = _v2_snapshot()
+    bundle = _v2_bundle()
 
     async def flush() -> None:
         task = db.add.call_args.args[0]
@@ -263,7 +356,11 @@ async def test_create_persists_snapshot_and_rendered_prompt_before_commit() -> N
             "app.api.task_creation_service.readiness_for_profile",
             new=AsyncMock(return_value=SimpleNamespace(is_unavailable=False)),
         ),
-        patch("app.api.tasks.bind_runtime_bundle", new=AsyncMock(return_value=MagicMock(id=1))),
+        patch("app.api.tasks.bind_runtime_bundle", new=AsyncMock(return_value=bundle)),
+        patch(
+            "app.api.task_creation_service.get_effective_settings",
+            return_value=SimpleNamespace(harness_execution_mode="dual_canary"),
+        ),
         patch(
             "app.core.task_helpers.get_effective_settings",
             return_value=SimpleNamespace(
@@ -296,20 +393,7 @@ async def test_create_rejects_explicitly_blank_run_instruction_template() -> Non
     )
     db = MagicMock()
     worker_profile = SimpleNamespace(id=12)
-    snapshot = TaskWorkerProfileSnapshot(
-        task_id=10,
-        worker_profile_id=12,
-        profile_name="Default Worker",
-        image="codify-worker/java21-maven:2026.07",
-        volume_mounts=[],
-        environment_variables=[],
-        pre_script="",
-        post_script="",
-        default_execute_run_instruction_template="Execute {{user_prompt}}",
-        default_plan_run_instruction_template="Plan {{user_prompt}}",
-        ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
-        created_at=datetime(2026, 6, 19, 10, 0, 0),
-    )
+    snapshot = _v2_snapshot()
 
     db.get = AsyncMock(return_value=issue)
     db.add = MagicMock()

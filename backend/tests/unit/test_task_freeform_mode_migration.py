@@ -49,8 +49,9 @@ def test_migration_extends_from_the_single_head() -> None:
     migration = revisions.get(REVISION)
     assert migration is not None
     assert migration.down_revision == BASE_REVISION
-    # 074 (open-harness v2) superseded 073 as the single linear head.
-    assert heads == ["074_open_harness_v2"]
+    # This historical migration must remain on the sole live migration path;
+    # later revisions may legitimately advance the head.
+    assert REVISION in {item.revision for item in script.iterate_revisions(heads[0], None)}
 
 
 def _alembic_config(url: str) -> Config:

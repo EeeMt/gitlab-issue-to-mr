@@ -3,12 +3,15 @@
 Unit tests for manual task creation API.
 """
 
+import hashlib
+import json
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from datetime import UTC, datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -20,10 +23,109 @@ from app.api.tasks import (
     RescheduleTaskRequest,
     reschedule_task,
 )
+from app.core.harness_protocol import HARNESS_CONTRACT_VERSION_V2
 from app.core.scheduling import normalize_scheduled_datetime, resolve_scheduled_at
 from app.core.task_helpers import _can_manage_task
+from app.core.worker_runtime_bundle import (
+    adapter_digest_from_manifest_files,
+    bundle_manifest_digest_from_files,
+)
 from app.dependencies.project_access import ProjectAccessScope
-from app.models import Task, TaskStatus, User
+from app.models import Task, TaskStatus, TaskWorkerProfileSnapshot, User, WorkerRuntimeBundle
+
+_V2_IMAGE_IDENTITY = {
+    "schema": "codify.worker-image-identity/v1",
+    "daemon_key": "tcp://worker.example:2376",
+    "image_reference": "registry.example/worker@sha256:" + "c" * 64,
+    "image_id": "sha256:" + "d" * 64,
+    "runtime_platform": "linux/amd64",
+    "cli_artifact_lock_sha256": "e" * 64,
+}
+_V2_FILES = [
+    {
+        "path": "worker-entrypoint/harness/runner.sh",
+        "size": 0,
+        "sha256": hashlib.sha256(b"").hexdigest(),
+    }
+]
+
+
+def _v2_evidence(harness_key: str) -> dict[str, object]:
+    return {
+        "schema": "codify.worker-harness-verification/v1",
+        "harness_key": harness_key,
+        "contract_version": HARNESS_CONTRACT_VERSION_V2,
+        "adapter": {
+            "version": "1.0.0",
+            "digest": adapter_digest_from_manifest_files(_V2_FILES, harness_key),
+        },
+        "verification_input_digest": "f" * 64,
+        "image_identity": dict(_V2_IMAGE_IDENTITY),
+        "generation": 1,
+        "verified_at": "2026-08-24T00:00:00+00:00",
+    }
+
+
+def _v2_bundle_digest(harness_key: str) -> str:
+    payload = {
+        "files_digest": bundle_manifest_digest_from_files(_V2_FILES),
+        "worker_image_identity": _V2_IMAGE_IDENTITY,
+        "harness_verification_evidence": _v2_evidence(harness_key),
+    }
+    return hashlib.sha256(
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+
+
+def _attach_v2_execution_contract(task: Task) -> None:
+    """Attach the immutable V2 snapshot and bundle required by writers."""
+    harness_key = "claude"
+    evidence = _v2_evidence(harness_key)
+    bundle_digest = _v2_bundle_digest(harness_key)
+    snapshot = TaskWorkerProfileSnapshot(
+        task_id=task.id,
+        worker_profile_id=1,
+        profile_name="Test worker",
+        image=_V2_IMAGE_IDENTITY["image_reference"],
+        harness_key=harness_key,
+        harness_config_snapshot={
+            "requested_runtime_contract_version": HARNESS_CONTRACT_VERSION_V2,
+            "v2_worker_image_identity": dict(_V2_IMAGE_IDENTITY),
+            "v2_harness_verification_evidence": evidence,
+        },
+        effective_configuration_digest=evidence["verification_input_digest"],
+        runtime_contract_version=HARNESS_CONTRACT_VERSION_V2,
+        orchestration_version="1.0.0",
+        runtime_bundle_digest=bundle_digest,
+    )
+    bundle = WorkerRuntimeBundle(
+        id=1,
+        digest=bundle_digest,
+        bundle_bytes=b"",
+        contract_version=HARNESS_CONTRACT_VERSION_V2,
+        orchestration_version="1.0.0",
+        manifest={
+            "schema": "codify.worker.runtime-manifest/v2",
+            "runtime_platform": "linux/amd64",
+            "worker_image_identity": dict(_V2_IMAGE_IDENTITY),
+            "harness_verification_evidence": evidence,
+            "files": [dict(item) for item in _V2_FILES],
+            "bundle_digest": bundle_digest,
+            "adapters": {
+                "claude": {
+                    "adapter": dict(evidence["adapter"])
+                }
+            },
+        },
+        size_bytes=0,
+    )
+    task.worker_profile_snapshot = snapshot
+    task.runtime_bundle = bundle
 
 
 class TestCreateTaskRequest:
@@ -316,6 +418,7 @@ class TestRescheduleTask:
             created_at=now,
             updated_at=now,
         )
+        _attach_v2_execution_contract(task)
         request = RescheduleTaskRequest(scheduled_datetime=now + timedelta(hours=2))
         db = AsyncMock()
         db.execute.return_value = MagicMock(scalar_one_or_none=lambda: task)
@@ -350,6 +453,10 @@ class TestRescheduleTask:
                 "app.core.issue_task_order.compute_schedule_window",
                 new=AsyncMock(return_value=schedule_window),
             ),
+            patch(
+                "app.api.task_operations.get_effective_settings",
+                return_value=SimpleNamespace(harness_execution_mode="dual_canary"),
+            ),
         ):
             result = await reschedule_task(
                 task_id=1,
@@ -362,9 +469,23 @@ class TestRescheduleTask:
         assert task.scheduled_at is not None
         assert abs((task.scheduled_at - (now + timedelta(hours=2))).total_seconds()) < 1
         db.commit.assert_awaited_once()
-        db.refresh.assert_awaited_once_with(
+        assert db.refresh.await_count == 2
+        db.refresh.assert_any_await(
             task,
             attribute_names=["id", "status", "created_at", "updated_at"],
+        )
+        db.refresh.assert_any_await(
+            task.worker_profile_snapshot,
+            attribute_names=[
+                "task_id",
+                "worker_profile_id",
+                "profile_name",
+                "image",
+                "runtime_mode",
+                "worker_kit_version",
+                "skill_selection_source",
+                "created_at",
+            ],
         )
         assert result["scheduled_at"] == task.scheduled_at.isoformat()
 

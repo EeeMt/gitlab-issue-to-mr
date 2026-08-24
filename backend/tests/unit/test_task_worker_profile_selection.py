@@ -1,3 +1,5 @@
+import hashlib
+import json
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -9,8 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.api.task_schemas import RetryTaskRequest, UpdateTaskRequest
 from app.api.tasks import CreateTaskRequest, create_task, update_task
+from app.core.harness_protocol import HARNESS_CONTRACT_VERSION_V2
 from app.core.skills import skill_snapshots_from_task_snapshot
 from app.core.worker_profiles import WorkerProfileValidationError, load_task_worker_runtime
+from app.core.worker_runtime_bundle import (
+    adapter_digest_from_manifest_files,
+    bundle_manifest_digest_from_files,
+)
 from app.dependencies.project_access import ProjectAccessScope
 from app.models import (
     AIProvider,
@@ -22,7 +29,119 @@ from app.models import (
     TaskStatus,
     TaskWorkerProfileSnapshot,
     WorkerProfile,
+    WorkerRuntimeBundle,
 )
+
+_V2_IMAGE_IDENTITY = {
+    "schema": "codify.worker-image-identity/v1",
+    "daemon_key": "tcp://worker.example:2376",
+    "image_reference": "registry.example/worker@sha256:" + "c" * 64,
+    "image_id": "sha256:" + "d" * 64,
+    "runtime_platform": "linux/amd64",
+    "cli_artifact_lock_sha256": "e" * 64,
+}
+_V2_FILES = [
+    {
+        "path": "worker-entrypoint/harness/runner.sh",
+        "size": 0,
+        "sha256": hashlib.sha256(b"").hexdigest(),
+    }
+]
+
+
+def _v2_evidence(harness_key: str) -> dict[str, object]:
+    return {
+        "schema": "codify.worker-harness-verification/v1",
+        "harness_key": harness_key,
+        "contract_version": HARNESS_CONTRACT_VERSION_V2,
+        "adapter": {
+            "version": "1.0.0",
+            "digest": adapter_digest_from_manifest_files(_V2_FILES, harness_key),
+        },
+        "verification_input_digest": "f" * 64,
+        "image_identity": dict(_V2_IMAGE_IDENTITY),
+        "generation": 1,
+        "verified_at": "2026-08-24T00:00:00+00:00",
+    }
+
+
+def _v2_bundle_digest(harness_key: str) -> str:
+    payload = {
+        "files_digest": bundle_manifest_digest_from_files(_V2_FILES),
+        "worker_image_identity": _V2_IMAGE_IDENTITY,
+        "harness_verification_evidence": _v2_evidence(harness_key),
+    }
+    return hashlib.sha256(
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+
+
+def _v2_bundle(harness_key="claude", bundle_id=1) -> WorkerRuntimeBundle:
+    """Build a canonical frozen V2 bundle for task-writer tests."""
+    evidence = _v2_evidence(harness_key)
+    bundle_digest = _v2_bundle_digest(harness_key)
+    return WorkerRuntimeBundle(
+        id=bundle_id,
+        digest=bundle_digest,
+        bundle_bytes=b"",
+        contract_version=HARNESS_CONTRACT_VERSION_V2,
+        orchestration_version="1.0.0",
+        manifest={
+            "schema": "codify.worker.runtime-manifest/v2",
+            "runtime_platform": "linux/amd64",
+            "worker_image_identity": dict(_V2_IMAGE_IDENTITY),
+            "harness_verification_evidence": evidence,
+            "files": [dict(item) for item in _V2_FILES],
+            "bundle_digest": bundle_digest,
+            "adapters": {
+                harness_key: {
+                    "adapter": dict(evidence["adapter"])
+                }
+            },
+        },
+        size_bytes=0,
+    )
+
+
+def _v2_snapshot(task_id: int, worker_profile_id: int, harness_key="claude"):
+    """Build the immutable V2 snapshot paired with ``_v2_bundle``."""
+    evidence = _v2_evidence(harness_key)
+    return TaskWorkerProfileSnapshot(
+        task_id=task_id,
+        worker_profile_id=worker_profile_id,
+        profile_name="Default Worker",
+        image="codify-worker/java21-maven:2026.07",
+        volume_mounts=[],
+        environment_variables=[],
+        pre_script="",
+        post_script="",
+        default_execute_run_instruction_template="Execute {{user_prompt}}",
+        default_plan_run_instruction_template="Plan {{user_prompt}}",
+        ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+        harness_key=harness_key,
+        harness_config_snapshot={
+            "requested_runtime_contract_version": HARNESS_CONTRACT_VERSION_V2,
+            "v2_worker_image_identity": dict(_V2_IMAGE_IDENTITY),
+            "v2_harness_verification_evidence": evidence,
+        },
+        effective_configuration_digest=evidence["verification_input_digest"],
+        harness_adapter_version="1.0.0",
+        harness_adapter_digest=evidence["adapter"]["digest"],
+        runtime_contract_version=HARNESS_CONTRACT_VERSION_V2,
+        orchestration_version="1.0.0",
+        runtime_bundle_digest=_v2_bundle_digest(harness_key),
+        created_at=datetime(2026, 6, 25, 9, 0, 0),
+    )
+
+
+def _attach_v2_execution_contract(task: Task, snapshot: TaskWorkerProfileSnapshot) -> None:
+    task.worker_profile_snapshot = snapshot
+    task.runtime_bundle = _v2_bundle(snapshot.harness_key)
 
 
 @pytest.mark.asyncio
@@ -59,6 +178,17 @@ async def test_create_task_uses_issue_pinned_worker_and_default_provider():
     worker_profile.default_execute_run_instruction_template = "Execute {{user_prompt}}"
     worker_profile.default_plan_run_instruction_template = "Plan {{user_prompt}}"
     worker_profile.ci_auto_repair_run_instruction_template = "Repair {{issue_title}}"
+    worker_profile.default_harness_key = "claude"
+    worker_profile.enabled_harnesses = ["claude"]
+    worker_profile.harness_runtimes = {
+        "claude": {"contract_version": HARNESS_CONTRACT_VERSION_V2}
+    }
+    worker_profile.v2_worker_image_identity = dict(_V2_IMAGE_IDENTITY)
+    worker_profile.verified_runtime_configuration_digest = "f" * 64
+    worker_profile.v2_worker_image_identity_generation = 1
+    worker_profile.v2_harness_verification_evidence = {
+        "claude": _v2_evidence("claude")
+    }
 
     provider = MagicMock()
     provider.id = 44
@@ -89,6 +219,8 @@ async def test_create_task_uses_issue_pinned_worker_and_default_provider():
         display_name=None,
         email=None,
     )
+    snapshot = _v2_snapshot(task_id=88, worker_profile_id=33)
+    bundle = _v2_bundle()
 
     with (
         patch(
@@ -96,8 +228,12 @@ async def test_create_task_uses_issue_pinned_worker_and_default_provider():
             new=AsyncMock(return_value=worker_profile),
         ),
         patch("app.api.tasks.resolve_provider_for_issue", new=AsyncMock(return_value=provider)),
-        patch("app.api.tasks.replace_task_worker_snapshot", new=AsyncMock(return_value=worker_profile)),
-        patch("app.api.tasks.bind_runtime_bundle", new=AsyncMock(return_value=MagicMock(id=1))),
+        patch("app.api.tasks.replace_task_worker_snapshot", new=AsyncMock(return_value=snapshot)),
+        patch("app.api.tasks.bind_runtime_bundle", new=AsyncMock(return_value=bundle)),
+        patch(
+            "app.api.task_creation_service.get_effective_settings",
+            return_value=SimpleNamespace(harness_execution_mode="dual_canary"),
+        ),
         patch("app.api.tasks.select_snapshot_run_instruction_template", return_value="Execute {{user_prompt}}"),
         patch(
             "app.api.task_creation_service.get_issue_latest_harness_key",
@@ -347,7 +483,9 @@ async def test_create_task_uses_issue_default_harness_when_request_omits_key():
         email=None,
     )
 
-    prepare_snapshot = AsyncMock(return_value=MagicMock(harness_key="codex"))
+    snapshot = _v2_snapshot(task_id=88, worker_profile_id=33, harness_key="codex")
+    bundle = _v2_bundle(harness_key="codex")
+    prepare_snapshot = AsyncMock(return_value=snapshot)
 
     with (
         patch(
@@ -356,7 +494,11 @@ async def test_create_task_uses_issue_default_harness_when_request_omits_key():
         ),
         patch("app.api.tasks.resolve_provider_for_issue", new=AsyncMock(return_value=provider)),
         patch("app.api.tasks.prepare_task_runtime_snapshot", new=prepare_snapshot),
-        patch("app.api.tasks.bind_runtime_bundle", new=AsyncMock(return_value=MagicMock(id=1))),
+        patch("app.api.tasks.bind_runtime_bundle", new=AsyncMock(return_value=bundle)),
+        patch(
+            "app.api.task_creation_service.get_effective_settings",
+            return_value=SimpleNamespace(harness_execution_mode="dual_canary"),
+        ),
         patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
         patch(
             "app.api.tasks.get_usage_quota_service",
@@ -597,21 +739,8 @@ async def test_update_task_preserves_worker_metadata_after_refresh_without_snaps
         created_at=datetime(2026, 6, 25, 9, 0, 0),
         updated_at=datetime(2026, 6, 25, 9, 0, 0),
     )
-    snapshot = TaskWorkerProfileSnapshot(
-        task_id=88,
-        worker_profile_id=33,
-        profile_name="Default Worker",
-        image="codify-worker/java21-maven:2026.07",
-        volume_mounts=[],
-        environment_variables=[],
-        pre_script="",
-        post_script="",
-        default_execute_run_instruction_template="Execute {{user_prompt}}",
-        default_plan_run_instruction_template="Plan {{user_prompt}}",
-        ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
-        created_at=datetime(2026, 6, 25, 9, 0, 0),
-    )
-    task.worker_profile_snapshot = snapshot
+    snapshot = _v2_snapshot(task_id=88, worker_profile_id=33)
+    _attach_v2_execution_contract(task, snapshot)
 
     async def refresh(obj, attribute_names=None):
         if attribute_names == ["status"]:
@@ -627,6 +756,10 @@ async def test_update_task_preserves_worker_metadata_after_refresh_without_snaps
     with (
         patch("app.api.tasks.get_task_with_access_check", new=AsyncMock(return_value=task)),
         patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
+        patch(
+            "app.api.task_operations.get_effective_settings",
+            return_value=SimpleNamespace(harness_execution_mode="dual_canary"),
+        ),
     ):
         response = await update_task(
             88,
@@ -676,27 +809,13 @@ async def test_update_task_rejects_provider_incompatible_with_frozen_harness():
         created_at=datetime(2026, 6, 25, 9, 0, 0),
         updated_at=datetime(2026, 6, 25, 9, 0, 0),
     )
-    snapshot = TaskWorkerProfileSnapshot(
-        task_id=99,
-        worker_profile_id=33,
-        profile_name="Default Worker",
-        image="codify-worker/java21-maven:2026.07",
-        volume_mounts=[],
-        environment_variables=[],
-        pre_script="",
-        post_script="",
-        default_execute_run_instruction_template="Execute {{user_prompt}}",
-        default_plan_run_instruction_template="Plan {{user_prompt}}",
-        ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
-        harness_key="codex",
-        model_endpoint_snapshot={
-            "model_protocol": "openai_responses",
-            "base_url": "https://api.deepseek.com",
-            "model": "deepseek-v4-flash",
-        },
-        created_at=datetime(2026, 6, 25, 9, 0, 0),
-    )
-    task.worker_profile_snapshot = snapshot
+    snapshot = _v2_snapshot(task_id=99, worker_profile_id=33, harness_key="codex")
+    snapshot.model_endpoint_snapshot = {
+        "model_protocol": "openai_responses",
+        "base_url": "https://api.deepseek.com",
+        "model": "deepseek-v4-flash",
+    }
+    _attach_v2_execution_contract(task, snapshot)
 
     new_provider = _provider_mock(55, model_protocol="anthropic_messages")
     issue = MagicMock()
@@ -722,6 +841,10 @@ async def test_update_task_rejects_provider_incompatible_with_frozen_harness():
             return_value="Execute {{user_prompt}}",
         ),
         patch("app.api.tasks.render_and_store_task_prompt", new=MagicMock()),
+        patch(
+            "app.api.task_operations.get_effective_settings",
+            return_value=SimpleNamespace(harness_execution_mode="dual_canary"),
+        ),
     ):
         with pytest.raises(HTTPException) as exc_info:
             await update_task(
@@ -752,28 +875,14 @@ async def test_update_task_provider_change_refreshes_snapshot_endpoint():
         created_at=datetime(2026, 6, 25, 9, 0, 0),
         updated_at=datetime(2026, 6, 25, 9, 0, 0),
     )
-    snapshot = TaskWorkerProfileSnapshot(
-        task_id=100,
-        worker_profile_id=33,
-        profile_name="Default Worker",
-        image="codify-worker/java21-maven:2026.07",
-        volume_mounts=[],
-        environment_variables=[],
-        pre_script="",
-        post_script="",
-        default_execute_run_instruction_template="Execute {{user_prompt}}",
-        default_plan_run_instruction_template="Plan {{user_prompt}}",
-        ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
-        harness_key="codex",
-        model_endpoint_snapshot={
-            "model_protocol": "openai_responses",
-            "base_url": "https://api-old.example",
-            "model": "old-model",
-        },
-        credential_ref=None,
-        created_at=datetime(2026, 6, 25, 9, 0, 0),
-    )
-    task.worker_profile_snapshot = snapshot
+    snapshot = _v2_snapshot(task_id=100, worker_profile_id=33, harness_key="codex")
+    snapshot.model_endpoint_snapshot = {
+        "model_protocol": "openai_responses",
+        "base_url": "https://api-old.example",
+        "model": "old-model",
+    }
+    snapshot.credential_ref = None
+    _attach_v2_execution_contract(task, snapshot)
 
     new_provider = _provider_mock(
         55, model_protocol="openai_responses", base_url="https://api-new.example"
@@ -803,6 +912,10 @@ async def test_update_task_provider_change_refreshes_snapshot_endpoint():
             return_value="Execute {{user_prompt}}",
         ),
         patch("app.api.tasks.render_and_store_task_prompt", new=MagicMock()),
+        patch(
+            "app.api.task_operations.get_effective_settings",
+            return_value=SimpleNamespace(harness_execution_mode="dual_canary"),
+        ),
     ):
         await update_task(
             100,

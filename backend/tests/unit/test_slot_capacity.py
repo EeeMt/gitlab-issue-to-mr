@@ -12,28 +12,140 @@ Covers:
 """
 
 import asyncio
+import hashlib
+import json
 import os
 import sys
 import unittest
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from fastapi.testclient import TestClient
 
+from app.core.harness_protocol import HARNESS_CONTRACT_VERSION_V2
 from app.core.slot_capacity import (
     SlotCapacityInfo,
     _get_slot_boundaries,
     check_slot_capacity,
     format_slot_rejection_message,
 )
-from app.models import TaskStatus
+from app.core.worker_runtime_bundle import (
+    adapter_digest_from_manifest_files,
+    bundle_manifest_digest_from_files,
+)
+from app.models import TaskStatus, TaskWorkerProfileSnapshot
 
 # ---------------------------------------------------------------------------
 # Helpers (matching project conventions from test_tasks_api.py)
 # ---------------------------------------------------------------------------
+
+_V2_IMAGE_IDENTITY = {
+    "schema": "codify.worker-image-identity/v1",
+    "daemon_key": "tcp://worker.example:2376",
+    "image_reference": "registry.example/worker@sha256:" + "c" * 64,
+    "image_id": "sha256:" + "d" * 64,
+    "runtime_platform": "linux/amd64",
+    "cli_artifact_lock_sha256": "e" * 64,
+}
+_V2_FILES = [
+    {
+        "path": "worker-entrypoint/harness/runner.sh",
+        "size": 0,
+        "sha256": hashlib.sha256(b"").hexdigest(),
+    }
+]
+
+
+def _v2_evidence(harness_key: str) -> dict[str, object]:
+    return {
+        "schema": "codify.worker-harness-verification/v1",
+        "harness_key": harness_key,
+        "contract_version": HARNESS_CONTRACT_VERSION_V2,
+        "adapter": {
+            "version": "1.0.0",
+            "digest": adapter_digest_from_manifest_files(_V2_FILES, harness_key),
+        },
+        "verification_input_digest": "f" * 64,
+        "image_identity": dict(_V2_IMAGE_IDENTITY),
+        "generation": 1,
+        "verified_at": "2026-08-24T00:00:00+00:00",
+    }
+
+
+def _v2_bundle_digest(harness_key: str) -> str:
+    payload = {
+        "files_digest": bundle_manifest_digest_from_files(_V2_FILES),
+        "worker_image_identity": _V2_IMAGE_IDENTITY,
+        "harness_verification_evidence": _v2_evidence(harness_key),
+    }
+    return hashlib.sha256(
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+
+
+def _v2_bundle(bundle_id=1, harness_key="claude"):
+    """Return the canonical frozen V2 bundle required by task writers."""
+    evidence = _v2_evidence(harness_key)
+    bundle_digest = _v2_bundle_digest(harness_key)
+    return SimpleNamespace(
+        id=bundle_id,
+        contract_version=HARNESS_CONTRACT_VERSION_V2,
+        orchestration_version="1.0.0",
+        digest=bundle_digest,
+        manifest={
+            "schema": "codify.worker.runtime-manifest/v2",
+            "runtime_platform": "linux/amd64",
+            "worker_image_identity": dict(_V2_IMAGE_IDENTITY),
+            "harness_verification_evidence": evidence,
+            "files": [dict(item) for item in _V2_FILES],
+            "bundle_digest": bundle_digest,
+            "adapters": {
+                harness_key: {
+                    "adapter": dict(evidence["adapter"])
+                }
+            },
+        },
+    )
+
+
+def _v2_snapshot(harness_key="claude"):
+    """Return a mapped snapshot carrying the explicit V2 release identity."""
+    evidence = _v2_evidence(harness_key)
+    return TaskWorkerProfileSnapshot(
+        task_id=0,
+        worker_profile_id=1,
+        profile_name="Test worker",
+        image=_V2_IMAGE_IDENTITY["image_reference"],
+        volume_mounts=[],
+        environment_variables=[],
+        skill_references=[],
+        pre_script="",
+        post_script="",
+        default_execute_run_instruction_template="Execute {{user_prompt}}",
+        default_plan_run_instruction_template="Plan {{user_prompt}}",
+        ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+        harness_key=harness_key,
+        harness_config_snapshot={
+            "requested_runtime_contract_version": HARNESS_CONTRACT_VERSION_V2,
+            "v2_worker_image_identity": dict(_V2_IMAGE_IDENTITY),
+            "v2_harness_verification_evidence": evidence,
+        },
+        effective_configuration_digest=evidence["verification_input_digest"],
+        runtime_contract_version=HARNESS_CONTRACT_VERSION_V2,
+        orchestration_version="1.0.0",
+        runtime_bundle_digest=_v2_bundle_digest(harness_key),
+        harness_adapter_version="1.0.0",
+        harness_adapter_digest=evidence["adapter"]["digest"],
+    )
 
 def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_id=1):
     """Create a mock task with all attributes needed for _serialize_task."""
@@ -62,12 +174,9 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     task.commit_message = None
     task.issue = None
     now = datetime(2024, 1, 1, 12, 0, 0)
-    task.worker_profile_snapshot = MagicMock(
-        worker_profile_id=1,
-        skill_references=[],
-        skill_selection_source="profile",
-        runtime_locator_fingerprint=None,
-    )
+    task.worker_profile_snapshot = _v2_snapshot()
+    task.worker_profile_snapshot.runtime_locator_fingerprint = None
+    task.runtime_bundle = _v2_bundle()
     task.provider_runtime_snapshot = {}
     task.rendered_prompt = "Rendered prompt"
     task.rendered_prompt_at = now
@@ -150,8 +259,10 @@ def _make_slot_info(
 @contextmanager
 def _mock_task_runtime_dependencies():
     """Isolate slot-capacity API tests from worker/provider snapshot setup."""
-    worker_profile = MagicMock(id=1)
+    worker_profile = MagicMock(id=1, default_harness_key="claude")
     provider = MagicMock(id=1)
+    snapshot = _v2_snapshot()
+    bundle = _v2_bundle()
     with (
         patch(
             "app.api.tasks.resolve_worker_profile_for_issue",
@@ -163,7 +274,7 @@ def _mock_task_runtime_dependencies():
         ),
         patch(
             "app.api.tasks.prepare_task_runtime_snapshot",
-            new=AsyncMock(return_value=None),
+            new=AsyncMock(return_value=snapshot),
         ),
         patch(
             "app.api.tasks.get_project_metadata",
@@ -171,11 +282,19 @@ def _mock_task_runtime_dependencies():
         ),
         patch(
             "app.api.tasks.clone_task_worker_snapshot",
-            new=AsyncMock(return_value=MagicMock()),
+            new=AsyncMock(return_value=snapshot),
         ),
         patch(
             "app.api.tasks.bind_runtime_bundle",
-            new=AsyncMock(return_value=MagicMock(id=1)),
+            new=AsyncMock(return_value=bundle),
+        ),
+        patch(
+            "app.api.task_creation_service.get_effective_settings",
+            return_value=SimpleNamespace(harness_execution_mode="dual_canary"),
+        ),
+        patch(
+            "app.api.task_operations.get_effective_settings",
+            return_value=SimpleNamespace(harness_execution_mode="dual_canary"),
         ),
     ):
         yield
@@ -641,6 +760,8 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
         mock_check.return_value = _make_slot_info(count=5, max_tasks=5, is_full=True, enforce=True)
 
         async def fake_refresh(task, attribute_names=None):
+            if isinstance(task, TaskWorkerProfileSnapshot):
+                return
             task.id = 99
             if task.status is None:
                 task.status = TaskStatus.PENDING
@@ -685,6 +806,8 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
         mock_check.return_value = _make_slot_info(count=5, max_tasks=5, is_full=True, enforce=False)
 
         async def fake_refresh(task, attribute_names=None):
+            if isinstance(task, TaskWorkerProfileSnapshot):
+                return
             task.id = 99
             if task.status is None:
                 task.status = TaskStatus.PENDING
@@ -728,6 +851,8 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
         mock_check.return_value = _make_slot_info(count=2, max_tasks=5, is_full=False, enforce=True)
 
         async def fake_refresh(task, attribute_names=None):
+            if isinstance(task, TaskWorkerProfileSnapshot):
+                return
             task.id = 99
             if task.status is None:
                 task.status = TaskStatus.PENDING
@@ -767,6 +892,8 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
     def test_unscheduled_task_no_capacity_check(self) -> None:
         """POST /tasks without scheduled_datetime should not check slot capacity."""
         async def fake_refresh(task, attribute_names=None):
+            if isinstance(task, TaskWorkerProfileSnapshot):
+                return
             task.id = 99
             if task.status is None:
                 task.status = TaskStatus.PENDING
