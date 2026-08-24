@@ -37,6 +37,9 @@ E. Misc:
 """
 
 import asyncio
+import hashlib
+import io
+import tarfile
 import time
 import unittest
 from datetime import UTC, datetime
@@ -47,36 +50,121 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.core.worker import WorkerExecutor
+from app.core.worker_runtime_bundle import (
+    _v2_bundle_digest,
+    bundle_manifest_digest_from_files,
+    v2_launcher_manifest_bytes,
+)
 from app.core.worker_task_artifacts import _stop_artifact_poller
 from app.core.worker_task_lifecycle import reconcile_task_input_session_from_runtime
 from app.models import Task, TaskStatus
 
+_V2_IMAGE_IDENTITY = {
+    "schema": "codify.worker-image-identity/v1",
+    "daemon_key": "http+unix:///var/run/docker.sock",
+    "image_reference": "test-worker@sha256:" + "a" * 64,
+    "image_id": "sha256:" + "b" * 64,
+    "runtime_platform": "linux/amd64",
+    "cli_artifact_lock_sha256": "c" * 64,
+}
+
+
+def _make_v2_runtime_bundle():
+    """Build one persisted V2 archive accepted by the production loader."""
+    entrypoint = b"#!/bin/sh\nexit 0\n"
+    files = [
+        {
+            "path": "entrypoint.sh",
+            "size": len(entrypoint),
+            "sha256": hashlib.sha256(entrypoint).hexdigest(),
+        }
+    ]
+    file_digest = bundle_manifest_digest_from_files(files)
+    evidence = {
+        "schema": "codify.worker-harness-verification/v1",
+        "harness_key": "claude",
+        "contract_version": "codify.worker.harness/v2",
+        "adapter": {"version": "1.0.0"},
+        "verification_input_digest": "d" * 64,
+        "image_identity": _V2_IMAGE_IDENTITY,
+        "generation": 1,
+        "verified_at": "2026-08-24T00:00:00+00:00",
+    }
+    digest = _v2_bundle_digest(files, _V2_IMAGE_IDENTITY, evidence)
+    manifest = {
+        "schema": "codify.worker.runtime-bundle/v2",
+        "contract_version": "codify.worker.harness/v2",
+        "event_schema": "codify.worker.event/v2",
+        "orchestration_version": "1.0.0",
+        "runtime_platform": "linux/amd64",
+        "worker_image_identity": _V2_IMAGE_IDENTITY,
+        "harness_verification_evidence": evidence,
+        "bundle_digest": digest,
+        "files": files,
+        "adapters": {
+            "claude": {
+                "adapter": {"version": "1.0.0", "digest": file_digest},
+                "capabilities": {"steering": False},
+            }
+        },
+    }
+    launcher_manifest = v2_launcher_manifest_bytes(SimpleNamespace(manifest=manifest))
+    archive_buffer = io.BytesIO()
+    with tarfile.open(fileobj=archive_buffer, mode="w", format=tarfile.PAX_FORMAT) as archive:
+        for name, payload, mode in (
+            ("codify-runtime/orchestration/manifest.json", launcher_manifest, 0o644),
+            ("codify-runtime/orchestration/entrypoint.sh", entrypoint, 0o755),
+        ):
+            member = tarfile.TarInfo(name=name)
+            member.size = len(payload)
+            member.mode = mode
+            member.mtime = 0
+            archive.addfile(member, io.BytesIO(payload))
+    archive_bytes = archive_buffer.getvalue()
+    return SimpleNamespace(
+        id=81,
+        digest=digest,
+        contract_version="codify.worker.harness/v2",
+        orchestration_version="1.0.0",
+        manifest={**manifest, "archive_sha256": hashlib.sha256(archive_bytes).hexdigest()},
+        bundle_bytes=archive_bytes,
+        size_bytes=len(archive_bytes),
+    )
+
+
+_V2_RUNTIME_BUNDLE = _make_v2_runtime_bundle()
+
 
 @pytest.fixture(autouse=True)
 def _stub_runtime_bundle_and_attempt():
-    bundle = SimpleNamespace(
-        id=81,
-        digest="d" * 64,
-        contract_version="codify.worker.harness/v1",
-        manifest={"adapters": {"claude": {"version": "1.0.0"}}},
-        bundle_bytes=b"runtime-bundle",
-    )
-
-    async def attempt(_db, *, task, harness_key, adapter_version, **_kwargs):
+    async def attempt(
+        _db,
+        *,
+        task,
+        harness_key,
+        adapter_version,
+        event_schema,
+        control_state,
+        control_supported,
+        **_kwargs,
+    ):
         return SimpleNamespace(
             attempt_id=f"task-{task.id}-attempt-1",
             harness_key=harness_key,
             adapter_version=adapter_version,
+            event_schema=event_schema,
+            control_state=control_state,
+            control_supported=control_supported,
         )
 
     with (
         patch(
-            "app.core.worker_task_lifecycle.load_bound_runtime_bundle",
-            new=AsyncMock(return_value=bundle),
-        ),
-        patch(
             "app.core.worker_task_lifecycle.create_task_attempt",
             new=AsyncMock(side_effect=attempt),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.inspect_v2_worker_image_identity",
+            return_value=_V2_IMAGE_IDENTITY,
         ),
     ):
         yield
@@ -184,11 +272,16 @@ def _make_settings(**overrides):
     s.backend_url = "http://localhost:8000"
     s.dashboard_url = "http://localhost:3000"
     s.custom_ca_bundle = None
+    s.docker_host = "unix:///var/run/docker.sock"
+    s.docker_tls_ca = None
+    s.docker_tls_cert = None
+    s.docker_tls_key = None
     s.worker_volume_mounts_parsed = []
     s.worker_workspace_host_path = "/tmp/codify-worker-tests"
     s.alert_on_failure = False
     s.alert_webhook_url = None
     s.claude_max_turns = 20
+    s.harness_execution_mode = "dual_canary"
     for k, v in overrides.items():
         setattr(s, k, v)
     return s
@@ -204,6 +297,16 @@ def _make_worker(mock_gitlab=None, mock_docker=None):
     ):
         if not isinstance(getattr(container, "status", None), str):
             container.status = "exited"
+        container.id = getattr(container, "id", None) or "container-1"
+        container.attrs = {
+            "Image": _V2_IMAGE_IDENTITY["image_id"],
+            "Config": {
+                "Labels": {
+                    "codify.task_id": "1",
+                    "codify.runtime_bundle_digest": _V2_RUNTIME_BUNDLE.digest,
+                }
+            },
+        }
     return WorkerExecutor(docker_client=mock_docker, gitlab_client=mock_gitlab)
 
 
@@ -230,6 +333,7 @@ def _make_task(**kwargs):
         user_prompt="Fix the bug",
         priority=0, status=TaskStatus.PENDING,
         is_retry=False, retry_source_task_id=None,
+        runtime_bundle_id=_V2_RUNTIME_BUNDLE.id,
         additions=0, deletions=0, total_changes=0,
         rendered_prompt="Fix the bug",
         projected_harness_key="claude",
@@ -256,6 +360,21 @@ def _make_task(**kwargs):
         default_execute_run_instruction_template="Execute {{user_prompt}}",
         default_plan_run_instruction_template="Plan {{user_prompt}}",
         ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+        harness_key="claude",
+        harness_config_snapshot={
+            "requested_runtime_contract_version": "codify.worker.harness/v2",
+            "v2_worker_image_identity": _V2_IMAGE_IDENTITY,
+            "v2_harness_verification_evidence": _V2_RUNTIME_BUNDLE.manifest[
+                "harness_verification_evidence"
+            ],
+        },
+        harness_adapter_version="1.0.0",
+        harness_adapter_digest=_V2_RUNTIME_BUNDLE.manifest["adapters"]["claude"]["adapter"][
+            "digest"
+        ],
+        runtime_contract_version="codify.worker.harness/v2",
+        orchestration_version="1.0.0",
+        runtime_bundle_digest=_V2_RUNTIME_BUNDLE.digest,
     )
 
     if provider is None:
@@ -292,7 +411,10 @@ def _make_task(**kwargs):
     return task
 
 
-def _make_db(task=None):
+_DEFAULT_ATTEMPT = object()
+
+
+def _make_db(task=None, attempt=_DEFAULT_ATTEMPT):
     """Create a mock async DB session."""
     from app.models import AIProvider, Issue, TaskWorkerProfileSnapshot
     db = MagicMock()
@@ -306,6 +428,22 @@ def _make_db(task=None):
             mock_result.scalars.return_value.all.return_value = [provider] if provider else []
         elif 'FROM worker_environment_variables' in statement_str or 'FROM issue_session_lineages' in statement_str:
             mock_result.scalar_one_or_none.return_value = None
+            mock_result.scalars.return_value.all.return_value = []
+        elif 'FROM worker_runtime_bundles' in statement_str:
+            mock_result.scalar_one_or_none.return_value = _V2_RUNTIME_BUNDLE
+            mock_result.scalars.return_value.all.return_value = [_V2_RUNTIME_BUNDLE]
+        elif 'FROM task_harness_attempts' in statement_str:
+            resolved_attempt = attempt
+            if resolved_attempt is _DEFAULT_ATTEMPT and task is not None:
+                resolved_attempt = SimpleNamespace(
+                    attempt_id=f"task-{task.id}-attempt-1",
+                    harness_key=task.worker_profile_snapshot.harness_key,
+                    adapter_version=task.worker_profile_snapshot.harness_adapter_version,
+                    event_schema="codify.worker.event/v2",
+                    control_state="accepting",
+                    control_supported=True,
+                )
+            mock_result.scalar_one_or_none.return_value = resolved_attempt
             mock_result.scalars.return_value.all.return_value = []
         else:
             mock_result.scalar_one_or_none.return_value = task
@@ -702,6 +840,41 @@ class TestResumeTaskNotFound(unittest.TestCase):
         self.assertFalse(result)
 
 
+class TestResumeTaskMissingAttempt(unittest.TestCase):
+    """V2 resume must converge a missing-attempt task to FAILED before attach."""
+
+    @patch('app.core.worker.get_settings')
+    def test_v2_missing_attempt_is_terminalized_without_container_attach(self, mock_get_settings):
+        mock_get_settings.return_value = _make_settings()
+        mock_docker = MagicMock()
+        worker = _make_worker(mock_docker=mock_docker)
+        task = _make_task(status=TaskStatus.RUNNING)
+        db = _make_db(task, attempt=None)
+
+        with (
+            patch(
+                "app.core.worker_task_lifecycle.load_bound_runtime_bundle",
+                new=AsyncMock(return_value=_V2_RUNTIME_BUNDLE),
+            ),
+            patch(
+                "app.core.worker_task_runner.close_task_control_gates",
+                new=AsyncMock(),
+            ) as close_gates,
+        ):
+            result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
+
+        self.assertFalse(result)
+        self.assertEqual(task.status, TaskStatus.FAILED)
+        self.assertIn('"code": "missing_execution_attempt"', task.error_message)
+        self.assertIsNotNone(task.completed_at)
+        mock_docker.client.containers.get.assert_not_called()
+        close_gates.assert_awaited_once_with(
+            db,
+            task_id=task.id,
+            reason="resume rejected: missing_execution_attempt",
+        )
+
+
 class TestResumeTaskContainerNotFound(unittest.TestCase):
     """Test resume_task when container is not found — lines 1073-1081."""
 
@@ -744,6 +917,57 @@ class TestResumeTaskContainerNotFound(unittest.TestCase):
 
         self.assertEqual(task.status, TaskStatus.RUNNING)
         self.assertIsNone(task.completed_at)
+
+
+class TestResumeTaskContainerIdentity(unittest.TestCase):
+    """V2 recovery must reject a retained container with a changed identity."""
+
+    @patch("app.core.worker.get_settings")
+    def test_wrong_image_is_terminalized_before_streaming(self, mock_get_settings):
+        mock_get_settings.return_value = _make_settings()
+        container = MagicMock(id="container-1")
+        container.attrs = {
+            "Image": "sha256:" + "f" * 64,
+            "Config": {
+                "Labels": {
+                    "codify.task_id": "1",
+                    "codify.runtime_bundle_digest": _V2_RUNTIME_BUNDLE.digest,
+                }
+            },
+        }
+        docker = MagicMock()
+        docker.client.containers.get.return_value = container
+        worker = _make_worker(mock_docker=docker)
+        docker.client.containers.get.return_value.attrs["Image"] = "sha256:" + "f" * 64
+        task = _make_task(status=TaskStatus.RUNNING)
+        db = _make_db(task)
+
+        with patch.object(worker, "_stream_logs_to_db", new=AsyncMock()) as stream:
+            result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
+
+        self.assertFalse(result)
+        self.assertEqual(task.status, TaskStatus.FAILED)
+        self.assertIn('"code": "execution_contract_mismatch"', task.error_message)
+        container.reload.assert_called_once_with()
+        stream.assert_not_awaited()
+
+    @patch("app.core.worker.get_settings")
+    def test_stored_container_id_mismatch_is_terminalized(self, mock_get_settings):
+        mock_get_settings.return_value = _make_settings()
+        docker = MagicMock()
+        container = docker.client.containers.get.return_value
+        container.id = "new-container-id"
+        worker = _make_worker(mock_docker=docker)
+        task = _make_task(status=TaskStatus.RUNNING, container_id="old-container-id")
+        db = _make_db(task)
+
+        with patch.object(worker, "_stream_logs_to_db", new=AsyncMock()) as stream:
+            result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
+
+        self.assertFalse(result)
+        self.assertEqual(task.status, TaskStatus.FAILED)
+        self.assertIn('"code": "execution_contract_mismatch"', task.error_message)
+        stream.assert_not_awaited()
 
 
 class TestResumeTaskSuccess(unittest.TestCase):

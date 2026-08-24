@@ -47,6 +47,7 @@ from app.models import (
     Task,
     TaskStatus,
     WebhookEvent,
+    WorkerProfile,
 )
 from app.runtime_config import refresh_runtime_config_if_stale
 
@@ -275,6 +276,34 @@ async def _count_ci_auto_repair_attempts(db: AsyncSession, issue_id: int) -> tup
         }
 
     return int(await db.scalar(query) or 0), details
+
+
+async def _resolve_ci_repair_execution_context(
+    db: AsyncSession,
+    issue: Issue,
+) -> tuple[Any, WorkerProfile, Any]:
+    """Lock the CI repair's shared baseline and selected Profile consistently.
+
+    A shared PATCH locks Shared first and later updates every Profile to
+    invalidate verification evidence.  CI repair must therefore acquire Shared
+    before ``resolve_worker_profile_for_issue`` takes the selected Profile row.
+    The returned shared context is also passed to readiness and snapshotting so
+    both use exactly this revision.
+    """
+    shared = await load_shared_configuration(db, for_update=True)
+    worker_profile = await resolve_worker_profile_for_issue(
+        db,
+        issue,
+        None,
+        allow_system_default=False,
+    )
+    provider = await resolve_provider_for_issue(
+        db,
+        issue,
+        None,
+        allow_system_default=False,
+    )
+    return shared, worker_profile, provider
 
 
 async def process_ci_failure_run(
@@ -638,26 +667,14 @@ async def process_ci_failure_run(
             )
             return run
         try:
-            worker_profile = await resolve_worker_profile_for_issue(
-                db,
-                issue,
-                None,
-                allow_system_default=False,
-            )
-            provider = await resolve_provider_for_issue(
-                db,
-                issue,
-                None,
-                allow_system_default=False,
-            )
+            shared, worker_profile, provider = await _resolve_ci_repair_execution_context(db, issue)
         except WorkerProfileValidationError as exc:
             raise RuntimeError(f"CI auto-repair cannot start: {exc}") from exc
 
         # Runtime readiness gate (§12): a CI repair task must not be created for
         # a Kit locator that is known unavailable; skip (ignore) the run instead.
-        # The shared baseline is loaded once under lock and handed to both the
-        # gate and the frozen snapshot below (§11.2).
-        shared = await load_shared_configuration(db, for_update=True)
+        # The already-locked shared baseline is handed to both the gate and the
+        # frozen snapshot below (§11.2).
         readiness = await readiness_for_profile(db, worker_profile, settings, shared=shared)
         if readiness.is_unavailable:
             await _ignore_run(
@@ -777,7 +794,7 @@ async def process_ci_failure_run(
             render_prompt=render_and_store_task_prompt,
             harness_key=profile_default_key,
             endpoint=endpoint,
-            shared_configuration=shared,
+        shared_configuration=shared,
         )
         await bind_runtime_bundle(db, repair_task)
         run.repair_task_id = repair_task.id

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any, Iterable, Mapping
@@ -18,6 +20,7 @@ from sqlalchemy.orm import selectinload
 from app.config import get_effective_settings
 from app.core.config_crypto import decrypt_config_secret
 from app.core.docker_client import (
+    DockerClientWrapper,
     DockerConnectionConfig,
     canonicalize_docker_host,
     resolve_docker_connection,
@@ -26,6 +29,7 @@ from app.core.harness_options import (
     deep_merge_options,
     validate_namespaced_options,
 )
+from app.core.harness_protocol import HARNESS_CONTRACT_VERSION, HARNESS_CONTRACT_VERSION_V2
 from app.core.harness_registry import capability_policy
 from app.core.skills import (
     SkillValidationError,
@@ -38,6 +42,7 @@ from app.core.task_prompt import (
     TaskPromptValidationError,
     validate_run_instruction_template,
 )
+from app.core.worker_docker_targets import docker_daemon_key
 from app.core.worker_environment_variables import (
     serialize_worker_environment_variable_value,
     validate_worker_environment_variable_key,
@@ -54,7 +59,10 @@ from app.core.worker_kit import (
     worker_kit_environment,
     worker_kit_mounts,
 )
-from app.core.worker_runtime_readiness import fingerprint_from_docker_target
+from app.core.worker_runtime_readiness import (
+    fingerprint_from_docker_target,
+    runtime_verification_input_digest,
+)
 from app.core.worker_shared_configuration import (
     load_shared_configuration,
     resolve_effective_configuration,
@@ -76,6 +84,175 @@ logger = logging.getLogger(__name__)
 _LEGACY_IGNORED_RUNTIME_ENVIRONMENT_KEYS = frozenset(
     {"CODIFY_RUNTIME_DIR", "CODIFY_ARTIFACT_DIR"}
 )
+_V2_IMAGE_IDENTITY_KEY = "v2_worker_image_identity"
+_V2_HARNESS_EVIDENCE_KEY = "v2_harness_verification_evidence"
+_V2_IMAGE_IDENTITY_SCHEMA = "codify.worker-image-identity/v1"
+_V2_HARNESS_EVIDENCE_SCHEMA = "codify.worker-harness-verification/v1"
+_LINUX_PLATFORM_RE = re.compile(r"^linux/[A-Za-z0-9][A-Za-z0-9_.-]*$")
+_IMAGE_REFERENCE_RE = re.compile(r"^[^@\s]+@sha256:[0-9a-f]{64}$")
+_IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _linux_platform(value: object) -> bool:
+    return isinstance(value, str) and _LINUX_PLATFORM_RE.fullmatch(value) is not None
+
+
+def validate_v2_worker_image_identity(identity: object) -> dict[str, str]:
+    """Validate the non-secret image identity frozen for an explicit V2 Task."""
+    if not isinstance(identity, Mapping) or identity.get("schema") != _V2_IMAGE_IDENTITY_SCHEMA:
+        raise WorkerProfileValidationError("explicit V2 Profile has no verified Worker image identity")
+    required = ("daemon_key", "image_reference", "image_id", "runtime_platform", "cli_artifact_lock_sha256")
+    normalized = {key: identity.get(key) for key in required}
+    if not all(isinstance(value, str) and value for value in normalized.values()):
+        raise WorkerProfileValidationError("explicit V2 Profile has an incomplete Worker image identity")
+    if any(character.isspace() for character in normalized["daemon_key"]):
+        raise WorkerProfileValidationError("explicit V2 Worker image identity has an invalid daemon key")
+    if _IMAGE_REFERENCE_RE.fullmatch(normalized["image_reference"]) is None:
+        raise WorkerProfileValidationError("explicit V2 Worker image identity is not repository-digest pinned")
+    if _IMAGE_ID_RE.fullmatch(normalized["image_id"]) is None:
+        raise WorkerProfileValidationError("explicit V2 Worker image identity has an invalid image ID")
+    if not _linux_platform(normalized["runtime_platform"]):
+        raise WorkerProfileValidationError("explicit V2 Worker image identity has an invalid platform")
+    digest = normalized["cli_artifact_lock_sha256"]
+    if _SHA256_RE.fullmatch(digest) is None:
+        raise WorkerProfileValidationError("explicit V2 Worker image identity has an invalid CLI lock digest")
+    return {"schema": _V2_IMAGE_IDENTITY_SCHEMA, **normalized}
+
+
+def _repository_name(image: str) -> str:
+    reference = image.split("@", 1)[0]
+    last_slash = reference.rfind("/")
+    last_colon = reference.rfind(":")
+    return reference[:last_colon] if last_colon > last_slash else reference
+
+
+def current_runtime_verification_digest(
+    profile: Any, effective: Any, settings: Any, *, harness_key: str | None = None
+) -> str:
+    """Recompute the exact non-secret verification input authority for a snapshot."""
+    connection = resolve_docker_connection(
+        settings,
+        docker_host=getattr(profile, "docker_host", None),
+        docker_tls_ca=getattr(profile, "docker_tls_ca", None),
+        docker_tls_cert=getattr(profile, "docker_tls_cert", None),
+        docker_tls_key=getattr(profile, "docker_tls_key", None),
+    )
+    return runtime_verification_input_digest(
+        docker_daemon_key=docker_daemon_key(connection), image=effective.image,
+        runtime_mode=effective.runtime_mode, worker_kit_version=effective.worker_kit_version,
+        worker_kit_path=effective.worker_kit_path, volume_mounts=list(effective.volume_mounts),
+        environment_variables=[{"key": str(item.get("key") or ""), "value": str(item.get("value") or "")}
+            for item in effective.environment_variables if not bool(item.get("is_secret"))],
+        harness_key=harness_key or getattr(profile, "default_harness_key", None) or "claude",
+        enabled_harnesses=list(getattr(profile, "enabled_harnesses", None) or ["claude"]),
+        harness_constraints=dict(getattr(profile, "harness_constraints", None) or {}),
+        harness_runtimes=dict(getattr(profile, "harness_runtimes", None) or {}),
+        require_skill_support=effective.runtime_mode == MOUNTED_KIT_MODE,
+    )
+
+
+def eligible_v2_harness_keys(profile: Any) -> tuple[str, ...]:
+    """Return enabled harnesses that explicitly opt into the V2 contract."""
+    runtimes = getattr(profile, "harness_runtimes", None) or {}
+    enabled = getattr(profile, "enabled_harnesses", None) or ["claude"]
+    return tuple(
+        key for key in dict.fromkeys(enabled)
+        if isinstance(key, str)
+        and isinstance(runtimes, Mapping)
+        and isinstance(runtimes.get(key), Mapping)
+        and runtimes[key].get("contract_version") == HARNESS_CONTRACT_VERSION_V2
+    )
+
+
+def validate_v2_harness_evidence(
+    evidence: object,
+    *,
+    harness_key: str,
+    verification_digest: str,
+    image_identity: Mapping[str, str],
+    generation: int,
+) -> dict[str, Any]:
+    """Validate one frozen per-Harness V2 verification record fail-closed."""
+    if not isinstance(evidence, Mapping) or evidence.get("schema") != _V2_HARNESS_EVIDENCE_SCHEMA:
+        raise WorkerProfileValidationError(f"explicit V2 Profile has no verified evidence for Harness {harness_key!r}")
+    if evidence.get("harness_key") != harness_key:
+        raise WorkerProfileValidationError("explicit V2 Profile verification evidence has the wrong Harness key")
+    if evidence.get("contract_version") != HARNESS_CONTRACT_VERSION_V2:
+        raise WorkerProfileValidationError("explicit V2 Profile verification evidence has the wrong contract")
+    if evidence.get("verification_input_digest") != verification_digest:
+        raise WorkerProfileValidationError("explicit V2 Profile verification evidence is stale")
+    if evidence.get("generation") != generation:
+        raise WorkerProfileValidationError("explicit V2 Profile verification evidence generation is stale")
+    if evidence.get("image_identity") != dict(image_identity):
+        raise WorkerProfileValidationError("explicit V2 Profile verification evidence image identity is stale")
+    adapter = evidence.get("adapter")
+    if (
+        not isinstance(adapter, Mapping)
+        or not isinstance(adapter.get("version"), str)
+        or not adapter["version"]
+        or not isinstance(adapter.get("digest"), str)
+        or _SHA256_RE.fullmatch(adapter["digest"]) is None
+    ):
+        raise WorkerProfileValidationError("explicit V2 Profile verification evidence has an invalid Adapter identity")
+    if not isinstance(evidence.get("verified_at"), str) or not evidence["verified_at"]:
+        raise WorkerProfileValidationError("explicit V2 Profile verification evidence has no verification time")
+    return dict(evidence)
+
+
+def inspect_v2_worker_image_identity(connection: DockerConnectionConfig, image: str) -> dict[str, str]:
+    """Read the selected daemon image and its image-owned CLI lock fail-closed.
+
+    This is deliberately a stopped, no-start container archive read.  It proves
+    the bytes belong to the daemon image, not merely to the backend release-lock
+    mount.  The returned record contains no Docker URL or credentials.
+    """
+    client = DockerClientWrapper(connection)
+    container = None
+    try:
+        image_obj = client.client.images.get(image)
+        attrs = image_obj.attrs or {}
+        repo_digests = [str(item) for item in (attrs.get("RepoDigests") or []) if "@sha256:" in str(item)]
+        expected_repo = _repository_name(image)
+        candidates = [item for item in repo_digests if _repository_name(item) == expected_repo]
+        if len(candidates) != 1:
+            raise WorkerProfileValidationError(
+                "explicit V2 Worker image must have exactly one repository digest matching its configured image"
+            )
+        image_reference = candidates[0]
+        image_id = attrs.get("Id")
+        platform = f"{attrs.get('Os')}/{attrs.get('Architecture')}"
+        if not isinstance(image_id, str) or not image_id or not _linux_platform(platform):
+            raise WorkerProfileValidationError("explicit V2 Worker image has no immutable ID or linux platform")
+        container = client.create_container(image=image_reference, command=["true"], start=False)
+        lock_bytes = client.read_file_from_container(container, "/etc/codify-worker-cli-artifacts.json")
+        if not lock_bytes:
+            raise WorkerProfileValidationError("explicit V2 Worker image has no CLI artifact lock")
+        try:
+            lock = json.loads(lock_bytes)
+        except (TypeError, ValueError) as exc:
+            raise WorkerProfileValidationError("explicit V2 Worker image CLI artifact lock is invalid") from exc
+        if lock.get("schema") != "codify.worker.cli-artifacts/v1" or lock.get("platform") != platform:
+            raise WorkerProfileValidationError("explicit V2 Worker image CLI artifact lock does not match image platform")
+        identity = {
+            "schema": _V2_IMAGE_IDENTITY_SCHEMA,
+            "daemon_key": docker_daemon_key(connection),
+            "image_reference": image_reference,
+            "image_id": image_id,
+            "runtime_platform": platform,
+            "cli_artifact_lock_sha256": hashlib.sha256(lock_bytes).hexdigest(),
+        }
+        return validate_v2_worker_image_identity(identity)
+    finally:
+        if container is not None:
+            try:
+                container.remove(force=True, v=True)
+            except Exception:  # noqa: BLE001 - preserve inspection error
+                pass
+        try:
+            client.close()
+        except Exception:  # noqa: BLE001 - preserve inspection error
+            pass
 
 
 class WorkerProfileValidationError(ValueError):
@@ -642,6 +819,33 @@ def snapshot_from_profile(
         resolved_harness_key,
         getattr(profile, "harness_constraints", None) or {},
     )
+    harness_runtime = (getattr(profile, "harness_runtimes", None) or {}).get(
+        resolved_harness_key, {}
+    )
+    requested_contract = (
+        harness_runtime.get("contract_version", HARNESS_CONTRACT_VERSION)
+        if isinstance(harness_runtime, dict)
+        else HARNESS_CONTRACT_VERSION
+    )
+    v2_image_identity = None
+    if requested_contract == "codify.worker.harness/v2":
+        v2_image_identity = validate_v2_worker_image_identity(
+            getattr(profile, "v2_worker_image_identity", None)
+        )
+        current_digest = current_runtime_verification_digest(
+            profile, effective, settings or get_effective_settings(), harness_key=resolved_harness_key
+        )
+        evidence_by_key = getattr(profile, "v2_harness_verification_evidence", None)
+        evidence = evidence_by_key.get(resolved_harness_key) if isinstance(evidence_by_key, Mapping) else None
+        v2_harness_evidence = validate_v2_harness_evidence(
+            evidence,
+            harness_key=resolved_harness_key,
+            verification_digest=current_digest,
+            image_identity=v2_image_identity,
+            generation=int(getattr(profile, "v2_worker_image_identity_generation", 0) or 0),
+        )
+    else:
+        v2_harness_evidence = None
     runtime_locator_fingerprint = fingerprint_from_docker_target(
         settings or get_effective_settings(),
         docker_host=getattr(profile, "docker_host", None),
@@ -689,6 +893,9 @@ def snapshot_from_profile(
         ),
         harness_key=resolved_harness_key,
         harness_config_snapshot={
+            "requested_runtime_contract_version": requested_contract,
+            **({_V2_IMAGE_IDENTITY_KEY: v2_image_identity} if v2_image_identity else {}),
+            **({_V2_HARNESS_EVIDENCE_KEY: v2_harness_evidence} if v2_harness_evidence else {}),
             "capabilities": effective_capabilities,
             "sandbox_mode": effective_capabilities.get("sandbox_mode"),
             "constraints": dict(getattr(profile, "harness_constraints", None) or {}),

@@ -16,6 +16,7 @@ from app.core.harness_protocol import (
     CANONICAL_EVENT_SCHEMA,
     HARNESS_CAPABILITY_KEYS,
     HARNESS_CONTRACT_VERSION,
+    HARNESS_CONTRACT_VERSION_V2,
     HARNESS_PROTOCOL_MATRIX,
     MODEL_PROTOCOLS,
     validate_manifest,
@@ -187,7 +188,13 @@ def validate_harness_runtimes(runtimes: dict[str, Any]) -> dict[str, Any]:
             raise HarnessRegistryError(
                 f"harness_runtimes[{key!r}] must be an object"
             )
-        allowed = {"source", "executable_path", "version", "binary_digest"}
+        allowed = {
+            "source",
+            "executable_path",
+            "version",
+            "binary_digest",
+            "contract_version",
+        }
         unknown = set(runtime) - allowed
         if unknown:
             raise HarnessRegistryError(
@@ -197,6 +204,15 @@ def validate_harness_runtimes(runtimes: dict[str, Any]) -> dict[str, Any]:
         if source not in {"image", "host_mount"}:
             raise HarnessRegistryError(
                 f"harness_runtimes[{key!r}].source must be image|host_mount"
+            )
+        contract_version = runtime.get("contract_version")
+        if contract_version is not None and contract_version not in {
+            HARNESS_CONTRACT_VERSION,
+            HARNESS_CONTRACT_VERSION_V2,
+        }:
+            raise HarnessRegistryError(
+                f"harness_runtimes[{key!r}].contract_version must be "
+                "codify.worker.harness/v1|v2"
             )
     return runtimes
 

@@ -6,9 +6,14 @@ from __future__ import annotations
 import json
 import hashlib
 import pathlib
+import re
 import sys
+from datetime import datetime
 
 APPROVED = {"pi", "opencode", "claude", "codex"}
+LINUX_PLATFORM_RE = re.compile(r"^linux/[A-Za-z0-9][A-Za-z0-9_.-]*$")
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+IMAGE_REFERENCE_RE = re.compile(r"^[^@\s]+@sha256:[0-9a-f]{64}$")
 CAPABILITIES = {"resume", "task_skills", "usage_tokens", "steering", "follow_up"}
 PROTOCOL_MATRIX = {
     "pi": (("rpc_stdio", "pi-rpc"), {"anthropic_messages"}),
@@ -37,6 +42,87 @@ def _digest_entries(entries: list[dict]) -> str:
     return hashlib.sha256(
         json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+
+
+def _validate_worker_image_identity(identity: object, runtime_platform: str) -> dict[str, str]:
+    if not isinstance(identity, dict) or identity.get("schema") != "codify.worker-image-identity/v1":
+        fail("worker_image_identity schema is invalid")
+    required = ("daemon_key", "image_reference", "image_id", "runtime_platform", "cli_artifact_lock_sha256")
+    if any(not isinstance(identity.get(key), str) or not identity[key] for key in required):
+        fail("worker_image_identity is incomplete")
+    if any(char.isspace() for char in identity["daemon_key"]):
+        fail("worker_image_identity daemon_key is invalid")
+    if IMAGE_REFERENCE_RE.fullmatch(identity["image_reference"]) is None:
+        fail("worker_image_identity image_reference is invalid")
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", identity["image_id"]):
+        fail("worker_image_identity image_id is invalid")
+    if LINUX_PLATFORM_RE.fullmatch(identity["runtime_platform"]) is None:
+        fail("worker_image_identity runtime_platform is invalid")
+    if identity["runtime_platform"] != runtime_platform:
+        fail("worker_image_identity platform conflicts with runtime_platform")
+    if SHA256_RE.fullmatch(identity["cli_artifact_lock_sha256"]) is None:
+        fail("worker_image_identity CLI lock digest is invalid")
+    return {key: identity[key] for key in ("schema", *required)}
+
+
+def _bundle_digest(
+    files: list[dict], worker_image_identity: object, harness_verification_evidence: object
+) -> str:
+    file_digest = _digest_entries(files)
+    if worker_image_identity is None:
+        fail("worker_image_identity is required")
+    if harness_verification_evidence is None:
+        fail("harness_verification_evidence is required")
+    return hashlib.sha256(
+        json.dumps(
+            {
+                "files_digest": file_digest,
+                "worker_image_identity": worker_image_identity,
+                "harness_verification_evidence": harness_verification_evidence,
+            },
+            ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
+
+
+def _validate_harness_verification_evidence(
+    evidence: object, *, worker_image_identity: dict[str, str], adapters: dict
+) -> dict:
+    if not isinstance(evidence, dict) or evidence.get("schema") != "codify.worker-harness-verification/v1":
+        fail("harness_verification_evidence schema is invalid")
+    harness_key = evidence.get("harness_key")
+    if not isinstance(harness_key, str) or harness_key not in adapters:
+        fail("harness_verification_evidence harness_key is invalid or absent from adapters")
+    if evidence.get("contract_version") != "codify.worker.harness/v2":
+        fail("harness_verification_evidence contract_version is invalid")
+    adapter = evidence.get("adapter")
+    if (
+        not isinstance(adapter, dict)
+        or not isinstance(adapter.get("version"), str)
+        or not adapter["version"]
+        or SHA256_RE.fullmatch(adapter.get("digest", "")) is None
+    ):
+        fail("harness_verification_evidence adapter is invalid")
+    selected_adapter = adapters[harness_key].get("adapter") if isinstance(adapters[harness_key], dict) else None
+    if adapter != selected_adapter:
+        fail("harness_verification_evidence adapter conflicts with selected runtime adapter")
+    if SHA256_RE.fullmatch(evidence.get("verification_input_digest", "")) is None:
+        fail("harness_verification_evidence verification_input_digest is invalid")
+    generation = evidence.get("generation")
+    if isinstance(generation, bool) or not isinstance(generation, int) or generation < 0:
+        fail("harness_verification_evidence generation is invalid")
+    verified_at = evidence.get("verified_at")
+    if not isinstance(verified_at, str) or not verified_at:
+        fail("harness_verification_evidence verified_at is invalid")
+    try:
+        parsed = datetime.fromisoformat(verified_at.replace("Z", "+00:00"))
+    except ValueError:
+        fail("harness_verification_evidence verified_at is invalid")
+    if parsed.tzinfo is None:
+        fail("harness_verification_evidence verified_at is invalid")
+    if evidence.get("image_identity") != worker_image_identity:
+        fail("harness_verification_evidence image_identity conflicts with worker_image_identity")
+    return evidence
 
 
 def _adapter_scope(key: str, adapter: dict, files: list[dict]) -> tuple[set[str], set[str]]:
@@ -98,9 +184,19 @@ def validate(document: dict) -> None:
     for field, value in expected.items():
         if document.get(field) != value:
             fail(f"{field} is incompatible")
+    platform = document.get("runtime_platform")
+    if not isinstance(platform, str) or LINUX_PLATFORM_RE.fullmatch(platform) is None:
+        fail("runtime_platform is missing or invalid")
+    worker_image_identity = document.get("worker_image_identity")
+    normalized_worker_image_identity = _validate_worker_image_identity(worker_image_identity, platform)
     adapters = document["adapters"]
     if not isinstance(adapters, dict) or not adapters or set(adapters) - APPROVED:
         fail("adapters are missing or contain non-approved keys")
+    harness_verification_evidence = _validate_harness_verification_evidence(
+        document.get("harness_verification_evidence"),
+        worker_image_identity=normalized_worker_image_identity,
+        adapters=adapters,
+    )
     global _CURRENT_ADAPTERS
     _CURRENT_ADAPTERS = adapters
     validated_files = document["files"]
@@ -154,13 +250,12 @@ def validate(document: dict) -> None:
     if "entrypoint.sh" not in seen:
         fail("entrypoint.sh is not manifested")
     if schema == "codify.worker.runtime-bundle/v2":
-        canonical = [
-            {"path": entry["path"], "size": entry["size"], "sha256": entry["sha256"]}
-            for entry in sorted(files, key=lambda item: item["path"])
-        ]
-        if hashlib.sha256(
-            json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest() != document["bundle_digest"]:
+        if _bundle_digest(files, worker_image_identity, harness_verification_evidence) != document["bundle_digest"]:
+            fail("bundle_digest does not match frozen files")
+    elif isinstance(document.get("bundle_digest"), str):
+        if not SHA256_RE.fullmatch(document["bundle_digest"]):
+            fail("bundle_digest is missing or invalid")
+        if _bundle_digest(files, worker_image_identity, harness_verification_evidence) != document["bundle_digest"]:
             fail("bundle_digest does not match frozen files")
 
 

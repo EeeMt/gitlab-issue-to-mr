@@ -19,6 +19,7 @@ from app.core.harness_protocol import (
     HarnessProtocolError,
 )
 from app.core.worker_runtime_bundle import (
+    adapter_digest_from_manifest_files,
     build_runtime_bundle,
     build_runtime_bundle_v2,
 )
@@ -63,6 +64,14 @@ def _frozen_v2_manifest(files=None, **adapter_overrides):
     """A small inline V2 runtime-manifest fixture (independent of the repo's
     real V1 manifest.json). Adapters declare per-adapter source directories so
     own-vs-shared file attribution is testable."""
+    worker_image_identity = {
+        "schema": "codify.worker-image-identity/v1",
+        "daemon_key": "tcp://worker.example:2376",
+        "image_reference": "registry.example/worker@sha256:" + "d" * 64,
+        "image_id": "sha256:" + "e" * 64,
+        "runtime_platform": "linux/amd64",
+        "cli_artifact_lock_sha256": "f" * 64,
+    }
     adapters = {
         "pi": _adapter(key="pi", directory="harness/adapters/pi"),
         "opencode": _adapter(
@@ -123,6 +132,15 @@ def _frozen_v2_manifest(files=None, **adapter_overrides):
                 "sha256": "c3" * 32,
             },
         ]
+    pi_paths = {item["path"] for item in files if item["path"].startswith("harness/adapters/pi/")}
+    private_paths = {
+        item["path"] for item in files
+        if any(item["path"].startswith(f"harness/adapters/{key}/") for key in adapters)
+    }
+    shared_files = [item for item in files if item["path"] not in private_paths]
+    pi_digest = adapter_digest_from_manifest_files(
+        files, "pi", adapter_dir="harness/adapters/pi", shared_files=shared_files, adapter_paths=pi_paths
+    )
     return {
         "schema": "codify.worker.runtime-manifest/v2",
         "maturity": "internal_preview",
@@ -130,6 +148,18 @@ def _frozen_v2_manifest(files=None, **adapter_overrides):
         "event_schema": "codify.worker.event/v2",
         "command_schema": "codify.worker.command/v2",
         "result_schema": "codify.worker.result/v2",
+        "runtime_platform": "linux/amd64",
+        "worker_image_identity": worker_image_identity,
+        "harness_verification_evidence": {
+            "schema": "codify.worker-harness-verification/v1",
+            "harness_key": "pi",
+            "contract_version": "codify.worker.harness/v2",
+            "adapter": {"version": "2.0.0", "digest": pi_digest},
+            "verification_input_digest": "f" * 64,
+            "image_identity": dict(worker_image_identity),
+            "generation": 0,
+            "verified_at": "2026-08-24T00:00:00+00:00",
+        },
         "adapters": adapters,
         "files": files,
     }
@@ -157,6 +187,34 @@ def test_build_runtime_bundle_v2_validates_frozen_manifest():
             bundle.manifest["adapters"][key]["adapter"]["digest"] == (bundle.adapter_digests[key])
         )
     assert bundle.manifest["bundle_digest"] == bundle.digest
+    assert bundle.manifest["runtime_platform"] == "linux/amd64"
+
+
+@pytest.mark.parametrize("platform", [None, "darwin/arm64", "linux/"])
+def test_build_runtime_bundle_v2_requires_frozen_linux_platform(platform):
+    manifest = _frozen_v2_manifest()
+    if platform is None:
+        manifest.pop("runtime_platform")
+    else:
+        manifest["runtime_platform"] = platform
+    with pytest.raises(RuntimeError, match="frozen linux/\\* platform"):
+        build_runtime_bundle_v2(manifest)
+
+
+def test_build_runtime_bundle_v2_requires_a_verified_worker_image_identity():
+    manifest = _frozen_v2_manifest()
+    manifest.pop("worker_image_identity")
+
+    with pytest.raises(RuntimeError, match="no verified Worker image identity"):
+        build_runtime_bundle_v2(manifest)
+
+
+def test_build_runtime_bundle_v2_requires_frozen_harness_verification_evidence():
+    manifest = _frozen_v2_manifest()
+    manifest.pop("harness_verification_evidence")
+
+    with pytest.raises(RuntimeError, match="requires frozen Harness verification evidence"):
+        build_runtime_bundle_v2(manifest)
 
 
 def test_build_runtime_bundle_v2_rejects_unknown_adapter_key_fail_closed():
@@ -171,6 +229,16 @@ def _change_file(manifest, path, new_sha_suffix="ff"):
     for item in m["files"]:
         if item["path"] == path:
             item["sha256"] = new_sha_suffix * (64 // 2)
+            pi_paths = {entry["path"] for entry in m["files"] if entry["path"].startswith("harness/adapters/pi/")}
+            private_paths = {
+                entry["path"] for entry in m["files"]
+                if any(entry["path"].startswith(f"harness/adapters/{key}/") for key in m["adapters"])
+            }
+            m["harness_verification_evidence"]["adapter"]["digest"] = adapter_digest_from_manifest_files(
+                m["files"], "pi", adapter_dir="harness/adapters/pi",
+                shared_files=[entry for entry in m["files"] if entry["path"] not in private_paths],
+                adapter_paths=pi_paths,
+            )
             return m
     raise AssertionError(f"file not found: {path}")
 

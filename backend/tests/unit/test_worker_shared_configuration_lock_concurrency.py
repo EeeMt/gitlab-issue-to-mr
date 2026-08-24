@@ -23,6 +23,8 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import sqlalchemy as sa
@@ -33,18 +35,28 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.pool import NullPool
 
 from alembic import command
+from app.api.task_creation_service import TaskCreationServices, create_task_record
+from app.api.task_operations import get_task_with_access_check
+from app.api.task_schemas import CreateTaskRequest, UpdateTaskRequest
+from app.api.task_update_service import TaskUpdateServices, update_task_record
 from app.api.worker_profiles import WorkerProfileUpdateRequest, update_worker_profile
 from app.api.worker_shared_configuration import (
     WorkerSharedConfigurationPatchRequest,
     update_shared_configuration,
 )
 from app.config import get_effective_settings
-from app.core.worker_profiles import replace_task_worker_snapshot
+from app.core.worker_profiles import (
+    replace_task_worker_snapshot,
+    resolve_worker_profile_for_issue,
+)
 from app.core.worker_runtime_readiness import readiness_for_profile
 from app.core.worker_shared_configuration import load_shared_configuration
+from app.dependencies.project_access import ProjectAccessScope
 from app.models import (
+    AIProvider,
     Issue,
     Task,
+    TaskWorkerProfileSnapshot,
     WorkerProfile,
     WorkerSharedConfiguration,
     WorkerSharedEnvironmentVariable,
@@ -293,6 +305,7 @@ async def test_task_create_gate_and_snapshot_share_one_locked_baseline(
             get_effective_settings(),
             shared=shared,
         )
+        assert not readiness.is_unavailable
         task = await create_db.get(Task, task_id)
         assert task is not None
         snapshot = await replace_task_worker_snapshot(
@@ -359,3 +372,332 @@ async def test_stale_profile_save_fails_409_when_patch_commits_first(
 
     assert exc.value.status_code == 409
     assert exc.value.detail == "shared_configuration_changed"
+
+
+# ── Global Shared -> Profile order for every dual-lock writer ────────────────
+
+
+async def test_duplicate_route_serializes_shared_patch_before_source_profile(
+    maker, migration_db, monkeypatch
+):
+    """The real duplicate route holds Shared before it locks its source Profile.
+
+    The barrier is intentionally placed *after* the source Profile is locked.
+    With the old Profile -> Shared order, PATCH would hold Shared and wait for
+    that Profile while duplicate waited for Shared: a PostgreSQL deadlock.  With
+    the global order, PATCH is already blocked on Shared and both writers finish.
+    """
+    _, profile_id, _, _ = await _seed(maker)
+    from app.api import worker_profiles as profiles_api
+
+    profile_locked = asyncio.Event()
+    release_profile = asyncio.Event()
+    original_load = profiles_api._load_profile_or_404
+
+    async def hold_locked_source(*args, **kwargs):
+        profile = await original_load(*args, **kwargs)
+        profile_locked.set()
+        await release_profile.wait()
+        return profile
+
+    monkeypatch.setattr(profiles_api, "_load_profile_or_404", hold_locked_source)
+
+    duplicate_db = maker()
+    duplicate = asyncio.create_task(
+        profiles_api.duplicate_worker_profile(profile_id, db=duplicate_db, _admin=None)
+    )
+    await asyncio.wait_for(profile_locked.wait(), timeout=2)
+
+    patch_db = maker()
+    patch_task = asyncio.create_task(_patch_pre_script(patch_db, expected_revision=1))
+    await asyncio.sleep(0.05)
+    assert not patch_task.done(), "PATCH must wait for duplicate's Shared lock"
+
+    release_profile.set()
+    response = await asyncio.wait_for(duplicate, timeout=2)
+    await asyncio.wait_for(patch_task, timeout=2)
+    await duplicate_db.close()
+    await patch_db.close()
+
+    assert response["name"].endswith("(copy)")
+    async with maker() as db:
+        shared = await db.get(WorkerSharedConfiguration, 1)
+        assert shared is not None and shared.revision == 2
+
+
+async def test_task_create_service_serializes_patch_and_snapshots_locked_revision(
+    maker, migration_db, monkeypatch
+):
+    """Task create passes its Shared-locked revision through to snapshotting."""
+    _, profile_id, issue_id, _ = await _seed(maker)
+    provider = AIProvider(
+        id=991,
+        name="lock-order-provider",
+        base_url="https://provider.example.test",
+        model="test-model",
+        provider_kind="anthropic_compatible",
+        model_protocol="anthropic_messages",
+        is_default=True,
+        is_disabled=False,
+    )
+    profile_locked = asyncio.Event()
+    release_profile = asyncio.Event()
+    captured_revisions: list[int] = []
+
+    async def hold_locked_profile(db, issue, *args, **kwargs):
+        profile = await resolve_worker_profile_for_issue(db, issue, *args, **kwargs)
+        assert profile.id == profile_id
+        profile_locked.set()
+        await release_profile.wait()
+        return profile
+
+    async def ready(*_args, shared, **_kwargs):
+        return SimpleNamespace(is_unavailable=False)
+
+    async def capture_snapshot(*_args, shared_configuration, **_kwargs):
+        captured_revisions.append(shared_configuration.revision)
+        raise RuntimeError("stop after snapshot revision capture")
+
+    services = TaskCreationServices(
+        require_issue_operator=MagicMock(),
+        get_task_with_access_check=AsyncMock(),
+        validate_task_status_for_retry=MagicMock(),
+        validate_scheduled_datetime_in_future=AsyncMock(),
+        get_usage_quota_service=MagicMock(),
+        get_project_metadata=AsyncMock(return_value={}),
+        resolve_provider_for_issue=AsyncMock(return_value=provider),
+        resolve_worker_profile_for_issue=hold_locked_profile,
+        prepare_task_runtime_snapshot=capture_snapshot,
+        replace_task_worker_snapshot=AsyncMock(),
+        clone_task_worker_snapshot=AsyncMock(),
+        bind_runtime_bundle=AsyncMock(),
+        select_snapshot_run_instruction_template=MagicMock(),
+        render_and_store_task_prompt=AsyncMock(),
+        notify_task_retried=AsyncMock(),
+    )
+
+    async def create() -> None:
+        async with maker() as db:
+            with pytest.raises(HTTPException, match="stop after snapshot"):
+                await create_task_record(
+                    request=CreateTaskRequest(issue_id=issue_id, user_prompt="lock-order"),
+                    db=db,
+                    current_user=None,
+                    access_scope=ProjectAccessScope(is_unrestricted=True, accessible_projects=[]),
+                    services=services,
+                )
+
+    with patch("app.api.task_creation_service.readiness_for_profile", ready):
+        create_task = asyncio.create_task(create())
+        await asyncio.wait_for(profile_locked.wait(), timeout=2)
+        patch_db = maker()
+        patch_task = asyncio.create_task(_patch_pre_script(patch_db, expected_revision=1))
+        await asyncio.sleep(0.05)
+        assert not patch_task.done(), "PATCH must wait for task create's Shared lock"
+        release_profile.set()
+        await asyncio.wait_for(create_task, timeout=2)
+        await asyncio.wait_for(patch_task, timeout=2)
+        await patch_db.close()
+
+    assert captured_revisions == [1]
+    async with maker() as db:
+        shared = await db.get(WorkerSharedConfiguration, 1)
+        assert shared is not None and shared.revision == 2
+
+
+async def test_ci_repair_context_service_serializes_patch_before_profile(
+    maker, migration_db, monkeypatch
+):
+    """The CI repair service uses the same order and returns that shared revision."""
+    _, profile_id, issue_id, _ = await _seed(maker)
+    from app.core import ci_failure_collector as collector
+
+    profile_locked = asyncio.Event()
+    release_profile = asyncio.Event()
+    provider = SimpleNamespace(id=992)
+
+    async def hold_locked_profile(db, issue, *args, **kwargs):
+        profile = await resolve_worker_profile_for_issue(db, issue, *args, **kwargs)
+        assert profile.id == profile_id
+        profile_locked.set()
+        await release_profile.wait()
+        return profile
+
+    monkeypatch.setattr(collector, "resolve_worker_profile_for_issue", hold_locked_profile)
+    monkeypatch.setattr(collector, "resolve_provider_for_issue", AsyncMock(return_value=provider))
+
+    async def resolve_context():
+        async with maker() as db:
+            issue = await db.get(Issue, issue_id)
+            assert issue is not None
+            return await collector._resolve_ci_repair_execution_context(db, issue)
+
+    context_task = asyncio.create_task(resolve_context())
+    await asyncio.wait_for(profile_locked.wait(), timeout=2)
+    patch_db = maker()
+    patch_task = asyncio.create_task(_patch_pre_script(patch_db, expected_revision=1))
+    await asyncio.sleep(0.05)
+    assert not patch_task.done(), "PATCH must wait for CI repair's Shared lock"
+    release_profile.set()
+    shared, profile, resolved_provider = await asyncio.wait_for(context_task, timeout=2)
+    await asyncio.wait_for(patch_task, timeout=2)
+    await patch_db.close()
+
+    assert shared.revision == 1
+    assert profile.id == profile_id
+    assert resolved_provider is provider
+
+
+async def test_f6_switch_reloads_target_profile_after_shared_lock_barrier(
+    maker, migration_db, monkeypatch
+):
+    """F6 must freeze the Profile version serialized after the Shared lock.
+
+    ``get_task_with_access_check`` eagerly loads the Task's current Profile, so
+    this reproduces the dangerous identity-map window: a Profile writer has an
+    uncommitted new image while F6 first observes the old image, then waits for
+    Shared.  Once the writer commits, F6 must lock and repopulate the target
+    Profile before readiness/snapshotting; reusing the identity-map object would
+    freeze the old image.
+    """
+    _, profile_id, issue_id, task_id = await _seed(maker)
+    old_image = "codify-worker/java21:2026.07"
+    new_image = "codify-worker/java21:2026.08"
+    async with maker() as db:
+        profile = await db.get(WorkerProfile, profile_id)
+        task = await db.get(Task, task_id)
+        assert profile is not None and profile.image == old_image
+        assert task is not None
+        provider = AIProvider(
+            name=f"f6-provider-{uuid.uuid4().hex[:8]}",
+            base_url="https://provider.example.test",
+            model="test-model",
+            provider_kind="anthropic_compatible",
+            model_protocol="anthropic_messages",
+            provider_options={},
+            is_default=False,
+            is_disabled=False,
+        )
+        db.add(provider)
+        await db.flush()
+        task.provider_id = provider.id
+        snapshot = TaskWorkerProfileSnapshot(
+            task_id=task.id,
+            worker_profile_id=profile.id,
+            profile_name=profile.name,
+            image=profile.image,
+            runtime_mode=profile.runtime_mode,
+            volume_mounts=[],
+            environment_variables=[],
+            pre_script="",
+            post_script="",
+            default_execute_run_instruction_template="execute {{user_prompt}}",
+            default_plan_run_instruction_template="plan {{user_prompt}}",
+            ci_auto_repair_run_instruction_template="repair {{issue_title}}",
+            harness_key="claude",
+            runtime_contract_version="codify.worker.harness/v1",
+            skill_selection_source="profile",
+            shared_configuration_revision=1,
+        )
+        snapshot.skill_references = []
+        db.add(snapshot)
+        await db.commit()
+        provider_id = provider.id
+
+    writer_ready = asyncio.Event()
+    release_writer = asyncio.Event()
+
+    async def profile_writer() -> None:
+        async with maker() as db:
+            shared = await load_shared_configuration(db, for_update=True)
+            assert shared.revision == 1
+            profile = await db.get(
+                WorkerProfile,
+                profile_id,
+                with_for_update=True,
+                populate_existing=True,
+            )
+            assert profile is not None
+            profile.image = new_image
+            await db.flush()
+            writer_ready.set()
+            await release_writer.wait()
+            await db.commit()
+
+    captured: list[tuple[str, int]] = []
+
+    class SnapshotCaptured(RuntimeError):
+        pass
+
+    async def ready(*_args, **_kwargs):
+        return SimpleNamespace(is_unavailable=False)
+
+    async def capture_snapshot(
+        _db,
+        _task,
+        target_profile,
+        *,
+        shared_configuration,
+        **_kwargs,
+    ):
+        captured.append((target_profile.image, shared_configuration.revision))
+        raise SnapshotCaptured
+
+    async def resolve_provider(db, _issue, _provider_id):
+        provider = await db.get(AIProvider, provider_id)
+        assert provider is not None
+        return provider
+
+    async def load_task(task_id, db, access_scope, current_user, *, with_for_update):
+        return await get_task_with_access_check(
+            task_id,
+            db,
+            access_scope,
+            current_user,
+            require_operator=False,
+            with_for_update=with_for_update,
+        )
+
+    services = TaskUpdateServices(
+        get_task_with_access_check=load_task,
+        get_project_metadata=AsyncMock(return_value={}),
+        resolve_provider_for_issue=resolve_provider,
+        select_snapshot_run_instruction_template=MagicMock(),
+        render_and_store_task_prompt=MagicMock(),
+    )
+
+    async def run_f6() -> None:
+        async with maker() as db:
+            with pytest.raises(SnapshotCaptured):
+                await update_task_record(
+                    task_id=task_id,
+                    request=UpdateTaskRequest(worker_profile_id=profile_id),
+                    db=db,
+                    current_user=None,
+                    access_scope=ProjectAccessScope(
+                        is_unrestricted=True,
+                        accessible_projects=[],
+                    ),
+                    services=services,
+                )
+
+    monkeypatch.setattr("app.api.task_update_service.readiness_for_profile", ready)
+    monkeypatch.setattr(
+        "app.api.task_update_service.replace_task_worker_snapshot",
+        capture_snapshot,
+    )
+    monkeypatch.setattr(
+        "app.api.task_update_service.require_task_execution_writer",
+        MagicMock(),
+    )
+
+    writer = asyncio.create_task(profile_writer())
+    await asyncio.wait_for(writer_ready.wait(), timeout=2)
+    f6 = asyncio.create_task(run_f6())
+    await asyncio.sleep(0.05)
+    assert not f6.done(), "F6 must wait for the Profile writer's Shared lock"
+
+    release_writer.set()
+    await asyncio.wait_for(asyncio.gather(writer, f6), timeout=5)
+
+    assert captured == [(new_image, 1)]

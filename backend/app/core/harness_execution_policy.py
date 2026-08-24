@@ -28,6 +28,7 @@ HARNESS_EXECUTION_MODES = frozenset({"dual_canary", "v2_only"})
 
 # Unified code for a legacy V1 contract that is not executable (v2_only).
 LEGACY_CONTRACT_NOT_EXECUTABLE = "legacy_contract_not_executable"
+MISSING_EXECUTION_ATTEMPT = "missing_execution_attempt"
 
 
 class ExecutionPolicyError(ValueError):
@@ -121,7 +122,14 @@ def require_executable_contract_v2(attempt, bundle) -> None:
         )
 
 
-def require_task_executable_contract(task, bundle, mode: str, *, attempt=None) -> None:
+def require_task_executable_contract(
+    task,
+    bundle,
+    mode: str,
+    *,
+    attempt=None,
+    require_attempt_for_v2: bool = False,
+) -> None:
     """Validate the complete frozen execution identity at a writer boundary.
 
     This is the central policy used by API writers, Scheduler claim/promotion,
@@ -172,6 +180,12 @@ def require_task_executable_contract(task, bundle, mode: str, *, attempt=None) -
         )
 
     if attempt is None:
+        if require_attempt_for_v2 and bundle_contract == HARNESS_CONTRACT_VERSION_V2:
+            raise ExecutionPolicyError(
+                f"task {getattr(task, 'id', '?')} has no durable execution attempt for V2 "
+                "resume/recovery",
+                code=MISSING_EXECUTION_ATTEMPT,
+            )
         return
 
     if getattr(attempt, "harness_key", None) != harness_key:

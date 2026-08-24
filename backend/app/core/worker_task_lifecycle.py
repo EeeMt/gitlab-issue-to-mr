@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.ci_failure_logs import append_ci_failure_log
 from app.core.harness_attempts import create_task_attempt
 from app.core.harness_execution_policy import (
+    ExecutionPolicyError,
     require_task_executable_contract,
 )
 from app.core.harness_sessions import (
@@ -33,8 +34,13 @@ from app.core.utcnow import utcnow
 from app.core.worker_docker_targets import (
     DockerConnectionsUnavailableError,
     TaskContainerLookupError,
+    docker_daemon_key,
 )
-from app.core.worker_profiles import load_task_worker_runtime
+from app.core.worker_profiles import (
+    inspect_v2_worker_image_identity,
+    load_task_worker_runtime,
+    validate_v2_worker_image_identity,
+)
 from app.core.worker_runtime import (
     TASK_SKILLS_CONTAINER_PATH,
     build_task_runtime_archive,
@@ -266,12 +272,6 @@ async def create_execute_container(
     worker_runtime = await load_task_worker_runtime(db, task)
     worker._configure_docker_for_runtime(worker_runtime, settings)
 
-    if not settings.worker_skip_image_pull:
-        try:
-            worker.docker.pull_image(worker_runtime.image, force=False)
-        except Exception as e:
-            logger.warning(f"Failed to pull image: {e}, using existing local image if available")
-
     # Freeform tasks defer MR create/reuse to post-push delivery (monitor_container_run):
     # they never get a pre-start MR_IID injected, and the Issue MR fields are left
     # untouched here. execute/plan keep the existing pre-run MR lifecycle.
@@ -306,6 +306,42 @@ async def create_execute_container(
     )
 
     runtime_bundle = await load_bound_runtime_bundle(db, task)
+    worker_image = worker_runtime.image
+    if runtime_bundle.contract_version == "codify.worker.harness/v2":
+        frozen_snapshot = task.worker_profile_snapshot
+        frozen_config = getattr(frozen_snapshot, "harness_config_snapshot", None)
+        snapshot_identity = (
+            frozen_config.get("v2_worker_image_identity") if isinstance(frozen_config, dict) else None
+        )
+        expected_identity = validate_v2_worker_image_identity(snapshot_identity)
+        bundle_identity = validate_v2_worker_image_identity(
+            runtime_bundle.manifest.get("worker_image_identity")
+        )
+        if bundle_identity != expected_identity:
+            raise RuntimeError("V2 Runtime Bundle Worker image identity does not match Task Snapshot")
+        snapshot_evidence = (
+            frozen_config.get("v2_harness_verification_evidence") if isinstance(frozen_config, dict) else None
+        )
+        if runtime_bundle.manifest.get("harness_verification_evidence") != snapshot_evidence:
+            raise RuntimeError("V2 Runtime Bundle Harness verification evidence does not match Task Snapshot")
+        worker_image = expected_identity["image_reference"]
+        if not settings.worker_skip_image_pull:
+            try:
+                worker.docker.pull_image(worker_image, force=False)
+            except Exception as exc:
+                raise RuntimeError("Could not pull frozen V2 Worker image") from exc
+        observed_identity = await asyncio.to_thread(
+            inspect_v2_worker_image_identity,
+            worker_runtime.docker_connection(settings),
+            worker_image,
+        )
+        if observed_identity != expected_identity:
+            raise RuntimeError("V2 Worker image identity changed on the Task Docker daemon")
+    elif not settings.worker_skip_image_pull:
+        try:
+            worker.docker.pull_image(worker_image, force=False)
+        except Exception as e:
+            logger.warning(f"Failed to pull image: {e}, using existing local image if available")
     # The harness is a per-Task choice frozen into the snapshot at creation;
     # never default to claude when the snapshot is loaded.
     harness_key = "claude"
@@ -350,6 +386,7 @@ async def create_execute_container(
         runtime_bundle,
         settings.harness_execution_mode,
         attempt=attempt,
+        require_attempt_for_v2=True,
     )
 
     if worker_custom_scripts_configured(settings):
@@ -497,7 +534,7 @@ async def create_execute_container(
             worker,
             task,
             container_name,
-            image=worker_runtime.image,
+            image=worker_image,
             command="",
             environment=environment,
             volumes=volumes if volumes else None,
@@ -543,7 +580,7 @@ async def create_execute_container(
             raise await recheck_runtime_on_container_error(
                 db,
                 connection=worker_runtime.docker_connection(settings),
-                image=worker_runtime.image,
+                image=worker_image,
                 runtime_mode=worker_runtime.runtime_mode,
                 worker_kit_version=worker_runtime.worker_kit_version or "",
                 worker_kit_path=worker_runtime.worker_kit_path or "",
@@ -768,6 +805,7 @@ async def prepare_resume_task_context(
         runtime_bundle,
         settings.harness_execution_mode,
         attempt=attempt,
+        require_attempt_for_v2=True,
     )
     worker_runtime = await load_task_worker_runtime(db, task)
     worker._configure_docker_for_runtime(worker_runtime, settings)
@@ -778,6 +816,10 @@ async def prepare_resume_task_context(
 
     try:
         container = worker.docker.client.containers.get(container_name)
+        # The object returned by docker-py may be a stale name lookup.  Refresh
+        # it before inspecting identity so a name-reused container cannot pass
+        # recovery based on cached attributes.
+        container.reload()
     except NotFound as e:
         return {
             "handled": True,
@@ -788,6 +830,14 @@ async def prepare_resume_task_context(
             f"Could not confirm resume container {container_name}: {e}"
         ) from e
 
+    if runtime_bundle.contract_version == "codify.worker.harness/v2":
+        validate_resume_container_identity(
+            container,
+            task=task,
+            runtime_bundle=runtime_bundle,
+            docker_connection=worker_runtime.docker_connection(settings),
+        )
+
     return {
         "handled": False,
         "settings": settings,
@@ -797,6 +847,58 @@ async def prepare_resume_task_context(
         "sudo_gl": sudo_gl,
         "container": container,
     }
+
+
+def validate_resume_container_identity(
+    container: Any,
+    *,
+    task: Task,
+    runtime_bundle: Any,
+    docker_connection: Any,
+) -> None:
+    """Fail closed when a V2 recovery container is not the frozen container.
+
+    Recovery may be initiated from a stable container id or from the historical
+    prefix-based name.  In either case Docker must prove that the object belongs
+    to this Task, was created from its immutable bundle, and is on the daemon
+    captured by the Task snapshot.
+    """
+    manifest = getattr(runtime_bundle, "manifest", None)
+    identity = manifest.get("worker_image_identity") if isinstance(manifest, dict) else None
+    expected_image_id = identity.get("image_id") if isinstance(identity, dict) else None
+    expected_daemon_key = identity.get("daemon_key") if isinstance(identity, dict) else None
+    actual_daemon_key = docker_daemon_key(docker_connection)
+    attrs = getattr(container, "attrs", None)
+    labels = None
+    if isinstance(attrs, dict):
+        config = attrs.get("Config")
+        if isinstance(config, dict):
+            labels = config.get("Labels")
+        if labels is None:
+            labels = attrs.get("Labels")
+    actual_image_id = attrs.get("Image") if isinstance(attrs, dict) else None
+    expected_container_id = str(getattr(task, "container_id", None) or "").strip()
+    actual_container_id = str(getattr(container, "id", None) or "").strip()
+    container_id_matches = not expected_container_id or (
+        bool(actual_container_id)
+        and (
+            actual_container_id == expected_container_id
+            or actual_container_id.startswith(expected_container_id)
+            or expected_container_id.startswith(actual_container_id)
+        )
+    )
+    if (
+        actual_daemon_key != expected_daemon_key
+        or actual_image_id != expected_image_id
+        or not container_id_matches
+        or not isinstance(labels, dict)
+        or labels.get("codify.task_id") != str(task.id)
+        or labels.get("codify.runtime_bundle_digest") != getattr(runtime_bundle, "digest", None)
+    ):
+        raise ExecutionPolicyError(
+            f"V2 resume container identity mismatch for task {task.id}",
+            code="execution_contract_mismatch",
+        )
 
 
 async def monitor_container_run(

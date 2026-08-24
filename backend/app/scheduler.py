@@ -43,6 +43,7 @@ from app.core.issue_task_order import (
     ensure_issue_order_integrity_locked,
 )
 from app.core.session import cleanup_stale_sessions
+from app.core.task_command_gate import close_task_control_gates
 from app.core.task_helpers import maybe_update_issue_status
 from app.core.task_log_payloads import persist_raw_log_snapshot
 from app.core.usage_limits import (
@@ -68,6 +69,7 @@ from app.core.worker_runtime_readiness import (
     read_runtime_readiness,
     run_deterministic_kit_probe,
 )
+from app.core.worker_task_lifecycle import validate_resume_container_identity
 from app.core.worker_workspace import cleanup_expired_ci_failure_bundles
 from app.core.worker_workspace_remote import remove_issue_workspace_remote
 from app.database import AsyncSessionLocal
@@ -304,6 +306,7 @@ class Scheduler:
                     bundle,
                     "v2_only",
                     attempt=attempt if task.status == TaskStatus.RUNNING else None,
+                    require_attempt_for_v2=task.status == TaskStatus.RUNNING,
                 )
             except ExecutionPolicyError as exc:
                 rejection = execution_rejection_detail(
@@ -1861,11 +1864,22 @@ class Scheduler:
                     datetime,
                 )
                 task.status = TaskStatus.CANCELLED if cancellation_requested else TaskStatus.FAILED
-                task.error_message = (
-                    "Cancelled by user before worker startup completed"
-                    if cancellation_requested
-                    else sanitize_sensitive_data(f"Worker failed to start: {exc}")[:2000]
-                )
+                if cancellation_requested:
+                    task.error_message = "Cancelled by user before worker startup completed"
+                elif isinstance(exc, ExecutionPolicyError):
+                    task.error_message = json.dumps(
+                        execution_rejection_detail(
+                            exc,
+                            action="resume",
+                            subject=task_id,
+                        ),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    )[:2000]
+                else:
+                    task.error_message = sanitize_sensitive_data(
+                        f"Worker failed to start: {exc}"
+                    )[:2000]
                 task.completed_at = utcnow()
                 if getattr(task, "container_id", None) is None:
                     task.raw_logs_finalized_at = (
@@ -1886,6 +1900,15 @@ class Scheduler:
                         owner_task_id=task.id,
                     )
                     self._running_issues.discard(task.issue_id)
+                await close_task_control_gates(
+                    db,
+                    task_id=task_id,
+                    reason=(
+                        f"worker startup rejected: {exc.code}"
+                        if isinstance(exc, ExecutionPolicyError)
+                        else "worker startup failed"
+                    ),
+                )
                 await db.commit()
         except Exception:
             logger.exception("Failed to persist worker bootstrap failure for task %s", task_id)
@@ -2840,7 +2863,37 @@ def _run_worker_resume_task(
                 task.runtime_bundle,
                 get_settings().harness_execution_mode,
                 attempt=attempt,
+                require_attempt_for_v2=True,
             )
+
+            # Validate a retained V2 container before starting the command
+            # pump.  WorkerExecutor repeats this check at its own boundary;
+            # this earlier check prevents a name-reused/wrong-daemon container
+            # from receiving control commands during scheduler recovery.
+            if task.runtime_bundle.contract_version == HARNESS_CONTRACT_VERSION_V2:
+                settings = get_settings()
+                connection = recovery_connection or await connection_for_task(
+                    preflight_db, task, settings
+                )
+                docker = get_docker_client(connection)
+                try:
+                    container = docker.client.containers.get(container_name)
+                    container.reload()
+                except NotFound:
+                    # The worker owns the existing missing-container terminal
+                    # path; no identity mismatch exists to reject here.
+                    pass
+                except Exception as exc:  # noqa: BLE001
+                    raise TaskContainerLookupError(
+                        f"Could not confirm resume container {container_name}: {exc}"
+                    ) from exc
+                else:
+                    validate_resume_container_identity(
+                        container,
+                        task=task,
+                        runtime_bundle=task.runtime_bundle,
+                        docker_connection=connection,
+                    )
 
         pump_task = loop.create_task(
             run_pump_until_task_ends(

@@ -1436,6 +1436,34 @@ class TestResumeTaskBackground(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(44, scheduler._running_tasks)
         self.assertNotIn(30, scheduler._running_issues)
 
+    async def test_resume_missing_attempt_bootstrap_failure_converges(self) -> None:
+        """Recovery policy rejection is handed to terminal bootstrap handling."""
+        from app.core.harness_execution_policy import ExecutionPolicyError
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        scheduler._running_tasks.add(46)
+        scheduler._running_issues.add(32)
+        rejection = ExecutionPolicyError(
+            "missing durable execution attempt",
+            code="missing_execution_attempt",
+        )
+        with patch.object(
+            asyncio.get_event_loop(),
+            "run_in_executor",
+            new_callable=AsyncMock,
+            side_effect=rejection,
+        ), patch.object(
+            scheduler,
+            "_mark_worker_bootstrap_failed",
+            new_callable=AsyncMock,
+        ) as mark_failed:
+            await scheduler._resume_task_background(46, "codify-46-issue32")
+
+        mark_failed.assert_awaited_once()
+        self.assertIs(mark_failed.await_args.args[1], rejection)
+        self.assertNotIn(46, scheduler._running_tasks)
+
     async def test_resume_lookup_error_restarts_deferred_recovery(self) -> None:
         """An inconclusive Docker lookup keeps ownership and restarts recovery."""
         from app.core.worker_docker_targets import TaskContainerLookupError
@@ -1559,7 +1587,13 @@ class TestRunWorkerResumeTask(unittest.TestCase):
     - app.core.worker.WorkerExecutor
     """
 
-    def _run_with_mocks(self, resume_return_value=True, *, snapshot_digest="d" * 64):
+    def _run_with_mocks(
+        self,
+        resume_return_value=True,
+        *,
+        snapshot_digest="d" * 64,
+        attempt_present=True,
+    ):
         """Helper: run _run_worker_resume_task with all imports mocked."""
         from app.scheduler import _run_worker_resume_task
 
@@ -1583,10 +1617,14 @@ class TestRunWorkerResumeTask(unittest.TestCase):
                 harness_key="pi",
             ),
         )
-        attempt = SimpleNamespace(
-            attempt_id="attempt-42",
-            event_schema="codify.worker.event/v2",
-            harness_key="pi",
+        attempt = (
+            SimpleNamespace(
+                attempt_id="attempt-42",
+                event_schema="codify.worker.event/v2",
+                harness_key="pi",
+            )
+            if attempt_present
+            else None
         )
         task_result = MagicMock()
         task_result.scalar_one_or_none.return_value = task
@@ -1600,12 +1638,17 @@ class TestRunWorkerResumeTask(unittest.TestCase):
         pump = AsyncMock()
         self.last_pump = pump
         self.last_worker = mock_worker
+        mock_docker = MagicMock()
+        mock_container = mock_docker.client.containers.get.return_value
+        mock_container.reload = MagicMock()
         with (
             patch("app.database._database_url", "sqlite+aiosqlite:///:memory:"),
             patch("sqlalchemy.ext.asyncio.create_async_engine", return_value=mock_engine),
             patch("sqlalchemy.ext.asyncio.async_sessionmaker") as mock_sm,
             patch("app.core.worker.WorkerExecutor", return_value=mock_worker),
             patch("app.core.worker_command_pump.run_pump_until_task_ends", new=pump),
+            patch("app.scheduler.get_docker_client", return_value=mock_docker),
+            patch("app.scheduler.validate_resume_container_identity"),
         ):
             mock_sm.return_value = MagicMock(return_value=mock_db)
             result = _run_worker_resume_task(42, "codify-42-issue10")
@@ -1634,6 +1677,19 @@ class TestRunWorkerResumeTask(unittest.TestCase):
 
         with self.assertRaises(ExecutionPolicyError):
             self._run_with_mocks(snapshot_digest="x" * 64)
+        self.last_pump.assert_not_awaited()
+        self.last_worker.resume_task.assert_not_awaited()
+
+    def test_v2_recovery_without_attempt_never_starts_command_pump(self) -> None:
+        """A V2 container without a durable attempt is not resumed."""
+        from app.core.harness_execution_policy import (
+            MISSING_EXECUTION_ATTEMPT,
+            ExecutionPolicyError,
+        )
+
+        with self.assertRaises(ExecutionPolicyError) as exc:
+            self._run_with_mocks(attempt_present=False)
+        self.assertEqual(exc.exception.code, MISSING_EXECUTION_ATTEMPT)
         self.last_pump.assert_not_awaited()
         self.last_worker.resume_task.assert_not_awaited()
 

@@ -1046,6 +1046,16 @@ class WorkerProfile(Base):
     # V2 namespaced per-harness options, e.g. {"pi":{...},"opencode":{...}}.
     harness_options: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     image_digest: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Non-secret daemon image evidence for explicit harness/v2 task snapshots.
+    # Kept as JSON so the snapshot can freeze the exact validated identity.
+    v2_worker_image_identity: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    v2_worker_image_identity_generation: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    # Evidence is keyed by the eligible V2 Harness key.  One image may be
+    # verified for several Harnesses, but success for (say) Claude must never
+    # authorize a Pi task without Pi's own strict verification.
+    v2_harness_verification_evidence: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     harness_runtimes: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)

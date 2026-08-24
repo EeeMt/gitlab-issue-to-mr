@@ -11,7 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, StrictInt, field_validator, model_validator
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -44,6 +44,9 @@ from app.core.worker_profiles import (
     WorkerProfileValidationError,
     build_worker_profile_environment_map,
     build_worker_profile_volume_map,
+    current_runtime_verification_digest,
+    eligible_v2_harness_keys,
+    inspect_v2_worker_image_identity,
     parse_worker_profile_mounts,
     replace_profile_environment_variables,
     serialize_profile_environment_variable_for_api,
@@ -59,6 +62,10 @@ from app.core.worker_profiles import (
 from app.core.worker_profiles import (
     list_worker_profiles as list_worker_profiles_domain,
 )
+from app.core.worker_runtime_bundle import (
+    build_v2_verification_candidate,
+    frozen_v2_adapter_identity,
+)
 from app.core.worker_runtime_readiness import (
     READINESS_UNKNOWN,
     RuntimeProbeTransientError,
@@ -66,7 +73,6 @@ from app.core.worker_runtime_readiness import (
     fingerprint_from_docker_target,
     read_runtime_readiness,
     run_deterministic_kit_probe,
-    runtime_verification_input_digest,
     serialize_runtime_readiness,
 )
 from app.core.worker_shared_configuration import (
@@ -436,25 +442,7 @@ def _verification_digest(
     settings: Any,
 ) -> str:
     """Compute the verification input digest (§10.2) for the resolved config."""
-    connection = runtime.docker_connection(settings)
-    return runtime_verification_input_digest(
-        docker_daemon_key=docker_daemon_key(connection),
-        image=runtime.image,
-        runtime_mode=runtime.runtime_mode,
-        worker_kit_version=runtime.worker_kit_version,
-        worker_kit_path=runtime.worker_kit_path,
-        volume_mounts=list(effective.volume_mounts),
-        environment_variables=[
-            {"key": str(item.get("key") or ""), "value": str(item.get("value") or "")}
-            for item in effective.environment_variables
-            if not bool(item.get("is_secret"))
-        ],
-        harness_key=getattr(profile, "default_harness_key", None) or "claude",
-        enabled_harnesses=list(getattr(profile, "enabled_harnesses", None) or ["claude"]),
-        harness_constraints=dict(getattr(profile, "harness_constraints", None) or {}),
-        harness_runtimes=dict(getattr(profile, "harness_runtimes", None) or {}),
-        require_skill_support=runtime_uses_skill_capable_worker_kit(runtime),
-    )
+    return current_runtime_verification_digest(profile, effective, settings)
 
 
 def _profile_scalar_source(profile: Any, field: str) -> str:
@@ -610,11 +598,48 @@ def _runtime_unavailable_detail(
     }
 
 
-async def _clear_profile_verification(db: AsyncSession, profile: WorkerProfile) -> None:
+async def _clear_profile_verification(
+    db: AsyncSession, profile: WorkerProfile, *, expected_generation: int | None = None
+) -> None:
     """Clear the profile's verification state after a deterministic failure."""
-    profile.verified_at = None
-    profile.verified_runtime_configuration_digest = None
+    generation = int(getattr(profile, "v2_worker_image_identity_generation", 0) or 0)
+    where = WorkerProfile.id == profile.id
+    if expected_generation is not None:
+        where = where & (WorkerProfile.v2_worker_image_identity_generation == expected_generation)
+    result = await db.execute(
+        update(WorkerProfile)
+        .where(where)
+        .values(
+            verified_at=None,
+            verified_runtime_configuration_digest=None,
+            v2_worker_image_identity=None,
+            v2_harness_verification_evidence=None,
+            v2_worker_image_identity_generation=generation + 1,
+        )
+    )
+    if expected_generation is not None and result.rowcount != 1:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="worker_profile_verification_superseded")
     await db.commit()
+
+
+def _profile_explicitly_requests_v2(profile: WorkerProfile) -> bool:
+    return bool(eligible_v2_harness_keys(profile))
+
+
+def _v2_harness_evidence(
+    profile: WorkerProfile, *, harness_key: str, verification_digest: str,
+    image_identity: dict[str, str], adapter_identity: dict[str, str], generation: int, verified_at,
+) -> dict[str, Any]:
+    return {
+        "schema": "codify.worker-harness-verification/v1",
+        "harness_key": harness_key,
+        "contract_version": "codify.worker.harness/v2",
+        "adapter": dict(adapter_identity),
+        "verification_input_digest": verification_digest,
+        "image_identity": dict(image_identity),
+        "generation": generation,
+        "verified_at": verified_at.isoformat(),
+    }
 
 
 @router.post("/worker-profiles/{profile_id}/verify-runtime")
@@ -649,7 +674,35 @@ async def verify_worker_profile_runtime(
     runtime = _build_verification_runtime(profile, effective, settings)
     connection = runtime.docker_connection(settings)
     verification_digest = _verification_digest(profile, effective, runtime, settings)
+    v2_harness_keys = eligible_v2_harness_keys(profile)
+    requires_v2_identity = bool(v2_harness_keys)
+    # A newer explicit verification supersedes this attempt even if the
+    # configuration digest happens to be identical. Persist the generation
+    # before Docker I/O so a late image observation cannot overwrite it.
+    # Every verify attempt, including V1, owns one Profile epoch before any
+    # Docker I/O.  Shared/Profile invalidation increments the same epoch, so a
+    # slow V1 success cannot write stale values back after a configuration edit.
+    prior_generation = int(getattr(profile, "v2_worker_image_identity_generation", 0) or 0)
+    result = await db.execute(
+        update(WorkerProfile)
+        .where(
+            WorkerProfile.id == profile.id,
+            WorkerProfile.v2_worker_image_identity_generation == prior_generation,
+        )
+        .values(
+            verified_at=None,
+            verified_runtime_configuration_digest=None,
+            v2_worker_image_identity=None,
+            v2_harness_verification_evidence=None,
+            v2_worker_image_identity_generation=prior_generation + 1,
+        )
+    )
+    if result.rowcount != 1:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="worker_profile_verification_superseded")
+    identity_generation = prior_generation + 1
+    await db.commit()
     started_at = time.monotonic()
+    candidate_verified_at = utcnow()
 
     # Layer 1: strict Kit probe through the generation/CAS readiness service.
     try:
@@ -684,40 +737,83 @@ async def verify_worker_profile_runtime(
     overrides = runtime.container_overrides()
     verification_volumes = build_worker_profile_volume_map(runtime.volume_mounts)
     verification_volumes.update(overrides["volumes"])
-    command = ["--verify"]
+    base_command = ["--verify"]
     if runtime_uses_skill_capable_worker_kit(runtime):
-        command.append("--require-skill-support")
+        base_command.append("--require-skill-support")
     smoke_command = (request.smoke_command or "").strip()
     if smoke_command:
-        command.extend(["--smoke", smoke_command])
+        base_command.extend(["--smoke", smoke_command])
+    candidate_evidence_by_key: dict[str, dict[str, Any]] = {}
 
-    def verify_runtime() -> tuple[int, str, str]:
+    def verify_runtime() -> tuple[int, str, str, dict[str, str] | None, dict[str, str]]:
         client = DockerClientWrapper(connection)
         container = None
         try:
             client.client.images.get(runtime.image)
-            repo_digest = client.resolve_image_repo_digest(runtime.image)
-            container = client.create_container(
-                image=runtime.image,
-                command=command,
-                environment={
-                    **runtime.environment,
-                    **overrides["environment"],
-                    "CODIFY_HARNESS_KEY": profile.default_harness_key or "claude",
-                    "CODIFY_RUNTIME_IMAGE": runtime.image,
-                },
-                volumes=verification_volumes,
-                entrypoint=overrides["entrypoint"],
-                user=overrides["user"],
-                tmpfs={"/workspace": "rw,exec,mode=1777"},
-                name=f"codify-worker-kit-verify-{profile_id}-{uuid.uuid4().hex[:8]}",
-                labels={
-                    "codify.worker_kit_verification": "true",
-                    "codify.worker_kit_version": runtime.worker_kit_version or "",
-                },
-            )
-            exit_code, logs = client.wait_for_container(container, timeout=180)
-            return exit_code, logs, repo_digest
+            image_identity = None
+            if requires_v2_identity:
+                # The V2 identity is read from the same daemon image before the
+                # verification container is created. It is intentionally not the
+                # backend's mounted release lock.
+                image_identity = inspect_v2_worker_image_identity(connection, runtime.image)
+                repo_digest = image_identity["image_reference"]
+            else:
+                repo_digest = client.resolve_image_repo_digest(runtime.image)
+            # V1-only Profiles retain one validation.  Every eligible V2
+            # Harness is independently executed against the same frozen image;
+            # a successful default Harness can never authorize another key.
+            keys = v2_harness_keys or (profile.default_harness_key or "claude",)
+            logs_by_key: dict[str, str] = {}
+            for harness_key in keys:
+                candidate_evidence = None
+                candidate_archive = None
+                if requires_v2_identity:
+                    adapter_identity = frozen_v2_adapter_identity(
+                        harness_key, worker_image_identity=image_identity
+                    )
+                    candidate_evidence = _v2_harness_evidence(
+                        profile, harness_key=harness_key,
+                        verification_digest=current_runtime_verification_digest(
+                            profile, effective, settings, harness_key=harness_key
+                        ), image_identity=image_identity, adapter_identity=adapter_identity,
+                        generation=identity_generation, verified_at=candidate_verified_at,
+                    )
+                    candidate_evidence_by_key[harness_key] = candidate_evidence
+                    _candidate_manifest, candidate_archive = build_v2_verification_candidate(
+                        source_dir=None, cli_artifact_manifest_path=None,
+                        worker_image_identity=image_identity,
+                        harness_verification_evidence=candidate_evidence,
+                    )
+                container = client.create_container(
+                    image=(image_identity or {}).get("image_reference") or runtime.image,
+                    command=list(base_command),
+                    environment={
+                        **runtime.environment, **overrides["environment"],
+                        "CODIFY_HARNESS_KEY": harness_key, "CODIFY_RUNTIME_IMAGE": runtime.image,
+                        **(
+                            {
+                                "CODIFY_ORCHESTRATION_DIR": "/tmp/codify-verify-runtime/codify-runtime/orchestration",
+                                "CODIFY_RUNTIME_VERIFICATION_MANIFEST": "/tmp/codify-verify-runtime/codify-runtime/orchestration/manifest.json",
+                            }
+                            if candidate_archive is not None else {}
+                        ),
+                    },
+                    volumes=verification_volumes, entrypoint=overrides["entrypoint"], user=overrides["user"],
+                    tmpfs={"/workspace": "rw,exec,mode=1777"},
+                    start=candidate_archive is None,
+                    name=f"codify-worker-kit-verify-{profile_id}-{harness_key}-{uuid.uuid4().hex[:8]}",
+                    labels={"codify.worker_kit_verification": "true", "codify.worker_kit_version": runtime.worker_kit_version or ""},
+                )
+                if candidate_archive is not None:
+                    client.put_archive(container, "/tmp/codify-verify-runtime", candidate_archive)
+                    client.start_container(container)
+                exit_code, logs = client.wait_for_container(container, timeout=180)
+                logs_by_key[harness_key] = logs
+                container.remove(force=True, v=True)
+                container = None
+                if exit_code != 0:
+                    return exit_code, logs, repo_digest, image_identity, logs_by_key
+            return 0, "\n".join(logs_by_key.values()), repo_digest, image_identity, logs_by_key
         finally:
             if container is not None:
                 with contextlib.suppress(Exception):
@@ -726,7 +822,7 @@ async def verify_worker_profile_runtime(
                 client.close()
 
     try:
-        exit_code, logs, repo_digest = await asyncio.wait_for(
+        exit_code, logs, repo_digest, image_identity, logs_by_key = await asyncio.wait_for(
             asyncio.to_thread(verify_runtime),
             timeout=200,
         )
@@ -741,7 +837,7 @@ async def verify_worker_profile_runtime(
         ) from exc
     if exit_code != 0:
         # Deterministic profile-specific failure: clear verification (§15.1).
-        await _clear_profile_verification(db, profile)
+        await _clear_profile_verification(db, profile, expected_generation=identity_generation)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
@@ -754,29 +850,47 @@ async def verify_worker_profile_runtime(
     # Reload profile+shared and recompute the digest: if the verification
     # inputs changed while verifying, the result is superseded (§15.1).
     fresh_profile = await _load_profile_or_404(db, profile_id, populate_existing=True)
-    fresh_shared = await load_shared_configuration(db)
+    fresh_shared = await load_shared_configuration(db, populate_existing=True)
     try:
         fresh_effective = resolve_effective_configuration(fresh_profile, fresh_shared)
         validate_effective_configuration(fresh_effective)
     except WorkerProfileValidationError as exc:
         raise _http_profile_error(exc) from exc
     fresh_runtime = _build_verification_runtime(fresh_profile, fresh_effective, settings)
-    fresh_digest = _verification_digest(
-        fresh_profile,
-        fresh_effective,
-        fresh_runtime,
-        settings,
-    )
+    fresh_digest = _verification_digest(fresh_profile, fresh_effective, fresh_runtime, settings)
     if fresh_digest != verification_digest:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="worker_profile_verification_superseded",
         )
+    where = (
+        (WorkerProfile.id == profile.id)
+        & (WorkerProfile.v2_worker_image_identity_generation == identity_generation)
+    )
+    verified_at = candidate_verified_at
+    evidence_by_key = dict(candidate_evidence_by_key)
+    if requires_v2_identity and set(evidence_by_key) != set(v2_harness_keys):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="worker_profile_verification_superseded")
+    result = await db.execute(
+        update(WorkerProfile)
+        .where(where)
+        .values(
+            verified_at=verified_at,
+            verified_runtime_configuration_digest=verification_digest,
+            image_digest=repo_digest,
+            v2_worker_image_identity=image_identity if requires_v2_identity else None,
+            v2_harness_verification_evidence=evidence_by_key if requires_v2_identity else None,
+        )
+    )
+    if result.rowcount != 1:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="worker_profile_verification_superseded")
+    await db.commit()
 
-    profile.verified_at = utcnow()
+    profile.verified_at = verified_at
     profile.verified_runtime_configuration_digest = verification_digest
     profile.image_digest = repo_digest
-    await db.commit()
+    profile.v2_worker_image_identity = image_identity if requires_v2_identity else None
+    profile.v2_harness_verification_evidence = evidence_by_key if requires_v2_identity else None
 
     return {
         "ok": True,
@@ -794,6 +908,7 @@ async def verify_worker_profile_runtime(
         ),
         "logs": logs[-8000:],
         "runtime_readiness": serialize_runtime_readiness(outcome.readiness),
+        "v2_harnesses_verified": list(v2_harness_keys),
     }
 
 
@@ -940,6 +1055,12 @@ async def update_worker_profile(
     fields = request.model_fields_set
     if "default_skill_ids" in fields:
         await acquire_worker_profile_skill_package_lock(db)
+    # Global lock order: Shared configuration before an individual Profile.
+    # Shared PATCH invalidates Profiles under this same order, preventing the
+    # Profile→Shared / Shared→Profile deadlock.
+    shared = await _load_shared_for_validation(
+        db, expected_shared_revision=request.expected_shared_revision
+    )
     profile = await _load_profile_or_404(db, profile_id, for_update=True)
     try:
         if "name" in fields and request.name is not None:
@@ -1155,10 +1276,6 @@ async def update_worker_profile(
                 request.default_skill_ids,
                 retained_disabled_skill_ids=existing_skill_ids,
             )
-        shared = await _load_shared_for_validation(
-            db,
-            expected_shared_revision=request.expected_shared_revision,
-        )
         _validate_combined_configuration(
             profile,
             shared,
@@ -1179,10 +1296,21 @@ async def update_worker_profile(
             "default_harness_key",
             "harness_constraints",
             "harness_runtimes",
+            "docker_host",
+            "docker_tls_ca",
+            "docker_tls_cert",
+            "docker_tls_key",
+            "environment_variables",
         }
         if stale_fields & fields:
             profile.image_digest = None
             profile.verified_at = None
+            profile.verified_runtime_configuration_digest = None
+            profile.v2_worker_image_identity = None
+            profile.v2_harness_verification_evidence = None
+            profile.v2_worker_image_identity_generation = (
+                int(getattr(profile, "v2_worker_image_identity_generation", 0) or 0) + 1
+            )
 
         await db.commit()
         await db.refresh(
@@ -1287,6 +1415,10 @@ async def duplicate_worker_profile(
 ):
     """Duplicate a worker profile, preserving encrypted secret values."""
     await acquire_worker_profile_skill_package_lock(db)
+    # Keep the global Shared -> Profile lock order.  Shared PATCH invalidates
+    # Profile verification evidence under the same order, so loading source
+    # first would reintroduce the Profile -> Shared deadlock.
+    shared = await load_shared_configuration(db, for_update=True)
     source = await _load_profile_or_404(db, profile_id, for_update=True)
     try:
         source_skill_ids = [skill.id for skill in source.default_skills]
@@ -1341,9 +1473,8 @@ async def duplicate_worker_profile(
         )
         # §11.3: the copy carries the source's inheritance/override/mask intent.
         # Re-validate its resolved effective configuration and its skills against
-        # that resolved config (not the raw source columns), under the shared
-        # lock so the baseline cannot change between validation and save.
-        shared = await load_shared_configuration(db, for_update=True)
+        # that resolved config (not the raw source columns), under the locked
+        # shared baseline so it cannot change between validation and save.
         effective = resolve_effective_configuration(copy, shared)
         validate_effective_configuration(effective)
         validate_runtime_supports_skills(

@@ -1,5 +1,61 @@
 #!/bin/bash
 
+codify_verify_v2_candidate_manifest() {
+    [ -n "${CODIFY_RUNTIME_VERIFICATION_MANIFEST:-}" ] || return 0
+
+    local manifest_path="${CODIFY_RUNTIME_VERIFICATION_MANIFEST}"
+    local validator_path="${CODIFY_KIT_HOME:?CODIFY_KIT_HOME is required for V2 candidate verification}/validate-runtime-manifest.py"
+    local harness_key="${CODIFY_HARNESS_KEY:?CODIFY_HARNESS_KEY is required for V2 candidate verification}"
+    local adapter_path="${CODIFY_ORCHESTRATION_DIR:?CODIFY_ORCHESTRATION_DIR is required for V2 candidate verification}/worker-entrypoint/harness/adapters/${harness_key}.sh"
+
+    [ -r "${manifest_path}" ] || {
+        echo "V2 candidate Runtime Bundle manifest is unreadable: ${manifest_path}" >&2
+        return 1
+    }
+    [ -r "${validator_path}" ] || {
+        echo "V2 candidate validator is unavailable: ${validator_path}" >&2
+        return 1
+    }
+    python3 "${validator_path}" "${manifest_path}" || return 1
+    python3 - "${manifest_path}" "${CODIFY_ORCHESTRATION_DIR}" "${harness_key}" "${adapter_path}" <<'PY'
+import hashlib
+import json
+import pathlib
+import sys
+
+manifest_path = pathlib.Path(sys.argv[1])
+orchestration_dir = pathlib.Path(sys.argv[2])
+key = sys.argv[3]
+adapter_path = pathlib.Path(sys.argv[4])
+if not key or key in {".", ".."} or "/" in key or "\\" in key:
+    raise SystemExit("V2 candidate Harness key is unsafe")
+root = orchestration_dir.resolve()
+if manifest_path.resolve() != (root / "manifest.json").resolve():
+    raise SystemExit("V2 candidate manifest is not the injected orchestration manifest")
+candidate_adapter = adapter_path.resolve()
+expected_adapter = (root / "worker-entrypoint" / "harness" / "adapters" / f"{key}.sh").resolve()
+if candidate_adapter != expected_adapter or root not in candidate_adapter.parents:
+    raise SystemExit("V2 candidate Adapter path is unsafe")
+if not candidate_adapter.is_file() or candidate_adapter.is_symlink():
+    raise SystemExit("V2 candidate Adapter is missing or unsafe")
+manifest = json.loads(manifest_path.read_bytes())
+evidence = manifest.get("harness_verification_evidence")
+if not isinstance(evidence, dict) or evidence.get("harness_key") != key:
+    raise SystemExit("V2 candidate evidence Harness key does not match CODIFY_HARNESS_KEY")
+adapters = manifest.get("adapters")
+selected = adapters.get(key) if isinstance(adapters, dict) else None
+if not isinstance(selected, dict) or evidence.get("adapter") != selected.get("adapter"):
+    raise SystemExit("V2 candidate evidence Adapter does not match selected Adapter")
+relative = pathlib.PurePosixPath("worker-entrypoint") / "harness" / "adapters" / f"{key}.sh"
+entry = next((item for item in manifest.get("files") or [] if item.get("path") == relative.as_posix()), None)
+if not isinstance(entry, dict):
+    raise SystemExit("V2 candidate selected Adapter is not manifested")
+payload = candidate_adapter.read_bytes()
+if len(payload) != entry.get("size") or hashlib.sha256(payload).hexdigest() != entry.get("sha256"):
+    raise SystemExit("V2 candidate selected Adapter bytes do not match manifest")
+PY
+}
+
 codify_verify_runtime() {
     local require_skill_support=0
     local smoke_command=""
@@ -52,6 +108,11 @@ codify_verify_runtime() {
     fi
     local adapter_path
     adapter_path="${CODIFY_ORCHESTRATION_DIR}/worker-entrypoint/harness/adapters/${CODIFY_HARNESS_KEY:-claude}.sh"
+    codify_verify_v2_candidate_manifest || return 1
+    if [ -n "${CODIFY_RUNTIME_VERIFICATION_MANIFEST:-}" ] && [ ! -r "${adapter_path}" ]; then
+        echo "V2 candidate selected Adapter is unavailable: ${adapter_path}" >&2
+        return 1
+    fi
     if [ -r "${adapter_path}" ]; then
         CODIFY_RUNTIME_DIR="${CODIFY_RUNTIME_DIR:-/tmp/codify-runtime}"
         mkdir -p "${CODIFY_RUNTIME_DIR}" "${CODIFY_RUNTIME_DIR}/harness-events"

@@ -12,6 +12,7 @@ import pytest
 
 from app.core.harness_execution_policy import (
     LEGACY_CONTRACT_NOT_EXECUTABLE,
+    MISSING_EXECUTION_ATTEMPT,
     ExecutionPolicyError,
     is_legacy_snapshot,
     is_v2_only,
@@ -148,6 +149,32 @@ def test_central_task_policy_validates_snapshot_bundle_and_attempt():
         bundle,
         "v2_only",
         attempt=Attempt(CANONICAL_EVENT_SCHEMA_V2),
+    )
+
+
+def test_v2_resume_recovery_requires_durable_attempt_but_prestart_allows_missing():
+    task = Task(HARNESS_CONTRACT_VERSION_V2)
+    bundle = Bundle(HARNESS_CONTRACT_VERSION_V2)
+
+    # Pre-start claim/creation validates the frozen identity before the first
+    # attempt exists, so the default remains intentionally permissive.
+    require_task_executable_contract(task, bundle, "dual_canary")
+
+    with pytest.raises(ExecutionPolicyError) as exc:
+        require_task_executable_contract(
+            task,
+            bundle,
+            "dual_canary",
+            require_attempt_for_v2=True,
+        )
+    assert exc.value.code == MISSING_EXECUTION_ATTEMPT
+
+    # V1 recovery remains compatible with the legacy path.
+    require_task_executable_contract(
+        Task(HARNESS_CONTRACT_VERSION),
+        Bundle(HARNESS_CONTRACT_VERSION),
+        "dual_canary",
+        require_attempt_for_v2=True,
     )
 
 

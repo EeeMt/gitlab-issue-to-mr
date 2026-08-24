@@ -1,11 +1,18 @@
 """Top-level task execution and resume orchestration."""
 
+import json
 import logging
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.harness_execution_policy import (
+    ExecutionPolicyError,
+    execution_rejection_detail,
+)
+from app.core.task_command_gate import close_task_control_gates
+from app.core.utcnow import utcnow
 from app.core.worker_docker_targets import (
     DockerConnectionsUnavailableError,
     TaskContainerLookupError,
@@ -97,13 +104,36 @@ async def run_resume_task(
     *,
     settings: Any,
 ) -> bool:
-    context = await prepare_resume_task_context(
-        worker,
-        db,
-        task_id,
-        container_name,
-        settings=settings,
-    )
+    try:
+        context = await prepare_resume_task_context(
+            worker,
+            db,
+            task_id,
+            container_name,
+            settings=settings,
+        )
+    except ExecutionPolicyError as error:
+        # Resume/recovery is a terminal boundary: a V2 task without its
+        # durable attempt must never remain RUNNING after direct invocation.
+        # Do not attach to the container or start the command pump; recovery
+        # will reconcile any retained container from the terminal task row.
+        result = await db.execute(select(Task).where(Task.id == task_id))
+        task = result.scalar_one_or_none()
+        if task is not None:
+            task.status = TaskStatus.FAILED
+            task.completed_at = task.completed_at or utcnow()
+            task.error_message = json.dumps(
+                execution_rejection_detail(error, action="resume", subject=task_id),
+                ensure_ascii=False,
+                sort_keys=True,
+            )[:1000]
+            await close_task_control_gates(
+                db,
+                task_id=task_id,
+                reason=f"resume rejected: {error.code}",
+            )
+            await db.commit()
+        return False
     if not context:
         return False
     if context["handled"]:

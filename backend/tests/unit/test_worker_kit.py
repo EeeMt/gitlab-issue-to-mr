@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import subprocess
@@ -11,7 +12,50 @@ from app.core.harness_protocol import (
     validate_manifest,
 )
 from app.core.harness_registry import V2_SYSTEM_CAPABILITY_UPPER_BOUND
-from app.core.worker_runtime_bundle import build_runtime_bundle_v2
+from app.core.worker_runtime_bundle import (
+    adapter_digest_from_manifest_files,
+    build_runtime_bundle_v2,
+    bundle_manifest_digest_from_files,
+)
+
+
+def _source_adapter_digest(source: dict, key: str) -> str:
+    """Match the Builder's source-file partition before Adapter stamping."""
+    files = source["files"]
+    adapter_paths: dict[str, set[str]] = {}
+    for adapter_key, adapter in source["adapters"].items():
+        directory = (adapter.get("source") or {}).get("directory")
+        if isinstance(directory, str) and directory:
+            adapter_paths[adapter_key] = {
+                item["path"] for item in files if item["path"].startswith(f"{directory}/")
+            }
+        else:
+            prefix = f"worker-entrypoint/harness/adapters/{adapter_key}"
+            legacy = f"legacy/{adapter_key}-run.sh"
+            adapter_paths[adapter_key] = {
+                item["path"]
+                for item in files
+                if item["path"].startswith(prefix) or item["path"] == legacy
+            }
+    private = set().union(*adapter_paths.values())
+    shared = [item for item in files if item["path"] not in private]
+    return adapter_digest_from_manifest_files(
+        files,
+        key,
+        adapter_paths=adapter_paths[key],
+        shared_files=shared,
+    )
+
+
+def _recompute_bundle_digest(bundle: dict) -> None:
+    payload = {
+        "files_digest": bundle_manifest_digest_from_files(bundle["files"]),
+        "worker_image_identity": bundle["worker_image_identity"],
+        "harness_verification_evidence": bundle["harness_verification_evidence"],
+    }
+    bundle["bundle_digest"] = hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def _runtime_verifier_fixture(tmp_path: Path, *, schema: str = "codify.worker.runtime-bundle/v2"):
@@ -84,17 +128,18 @@ def _runtime_verifier_fixture(tmp_path: Path, *, schema: str = "codify.worker.ru
         "event_schema": "codify.worker.event/v2",
         "command_schema": "codify.worker.command/v2",
         "result_schema": "codify.worker.result/v2",
+        "runtime_platform": "linux/amd64",
+        "worker_image_identity": {
+            "schema": "codify.worker-image-identity/v1",
+            "daemon_key": "tcp://worker.example:2376",
+            "image_reference": "registry.example/worker@sha256:" + "d" * 64,
+            "image_id": "sha256:" + "e" * 64,
+            "runtime_platform": "linux/amd64",
+            "cli_artifact_lock_sha256": "f" * 64,
+        },
         "adapters": adapters,
         "files": files,
     }
-    built = build_runtime_bundle_v2(source_manifest)
-    if schema.endswith("runtime-bundle/v2"):
-        bundle = built.manifest
-    else:
-        bundle = dict(built.manifest)
-        bundle.update({key: source_manifest[key] for key in ("maturity", "command_schema", "result_schema")})
-        bundle["schema"] = "codify.worker.runtime-manifest/v2"
-
     artifact = {
         "schema": "codify.worker.cli-artifacts/v1",
         "platform": "linux/amd64",
@@ -105,14 +150,47 @@ def _runtime_verifier_fixture(tmp_path: Path, *, schema: str = "codify.worker.ru
     }
     artifact_path = tmp_path / "artifacts.json"
     artifact_path.write_text(json.dumps(artifact))
+    source_manifest["worker_image_identity"]["cli_artifact_lock_sha256"] = hashlib.sha256(
+        artifact_path.read_bytes()
+    ).hexdigest()
+    source_manifest["harness_verification_evidence"] = {
+        "schema": "codify.worker-harness-verification/v1",
+        "harness_key": "pi",
+        "contract_version": "codify.worker.harness/v2",
+        "adapter": {
+            "version": "2.0.0",
+            "digest": bundle_manifest_digest_from_files(files),
+        },
+        "verification_input_digest": "1" * 64,
+        "image_identity": dict(source_manifest["worker_image_identity"]),
+        "generation": 0,
+        "verified_at": "2026-08-24T00:00:00+00:00",
+    }
+    built = build_runtime_bundle_v2(source_manifest)
+    if schema.endswith("runtime-bundle/v2"):
+        bundle = built.manifest
+    else:
+        bundle = dict(built.manifest)
+        bundle.update({key: source_manifest[key] for key in ("maturity", "command_schema", "result_schema")})
+        bundle["schema"] = "codify.worker.runtime-manifest/v2"
     fake_docker = tmp_path / "docker"
     fake_docker.write_text(
         "#!/bin/sh\n"
-        "if [ \"$1\" = image ] && [ \"$2\" = inspect ]; then exit 0; fi\n"
+        "if [ \"$1\" = image ] && [ \"$2\" = inspect ]; then\n"
+        "  case \"$*\" in\n"
+        "    *'{{json .}}'*) printf '%s\\n' \"$IMAGE_INSPECT\" ;;\n"
+        "  esac\n"
+        "  exit 0\n"
+        "fi\n"
         "if [ \"$1\" = run ]; then\n"
         "  for arg in \"$@\"; do\n"
         "    if [ \"$arg\" = cat ]; then cat \"$ARTIFACT_PATH\"; exit 0; fi\n"
-        "    if [ \"$arg\" = /bin/sh ]; then printf '%s\\n' \"$ACTUAL_CLI_SHA\"; exit 0; fi\n"
+        "    if [ \"$arg\" = /bin/sh ]; then\n"
+        "      case \"$*\" in\n"
+        "        *'/etc/codify-worker-cli-artifacts.json'*) sha256sum \"$ARTIFACT_PATH\" | awk '{print $1}'; exit 0 ;;\n"
+        "      esac\n"
+        "      printf '%s\\n' \"$ACTUAL_CLI_SHA\"; exit 0\n"
+        "    fi\n"
         "  done\n"
         "  exit 0\n"
         "fi\nexit 2\n"
@@ -130,10 +208,31 @@ def _run_runtime_verifier(
     all_harnesses=True,
     harness_key: str | None = None,
     actual_sha="a" * 64,
+    align_single_harness_evidence=True,
 ):
+    if not all_harnesses and harness_key and align_single_harness_evidence:
+        bundle = json.loads(json.dumps(bundle))
+        bundle["harness_verification_evidence"]["harness_key"] = harness_key
+        bundle["harness_verification_evidence"]["adapter"] = dict(
+            bundle["adapters"][harness_key]["adapter"]
+        )
+        _recompute_bundle_digest(bundle)
     runtime_path = tmp_path / "runtime.json"
     runtime_path.write_text(json.dumps(bundle))
-    env = dict(os.environ, PATH=f"{fake_docker.parent}:{os.environ['PATH']}", ARTIFACT_PATH=str(artifact_path), ACTUAL_CLI_SHA=actual_sha)
+    image_identity = bundle.get("worker_image_identity") or {}
+    image_inspect = {
+        "RepoDigests": [image_identity.get("image_reference", "")],
+        "Id": image_identity.get("image_id", ""),
+        "Os": "linux",
+        "Architecture": "amd64",
+    }
+    env = dict(
+        os.environ,
+        PATH=f"{fake_docker.parent}:{os.environ['PATH']}",
+        ARTIFACT_PATH=str(artifact_path),
+        ACTUAL_CLI_SHA=actual_sha,
+        IMAGE_INSPECT=json.dumps(image_inspect),
+    )
     args = [
         str(Path(__file__).resolve().parents[3] / "deploy/worker-kit/verify-runtime.sh"),
         "--kit", str(tmp_path / "kit"), "--image", "fake:image", "--runtime-manifest", str(runtime_path),
@@ -322,7 +421,7 @@ def test_runtime_verifier_rejects_bundle_digest_tampering(tmp_path):
     bundle["adapters"]["pi"]["adapter"]["digest"] = "e" * 64
     result = _run_runtime_verifier(tmp_path / "adapter", bundle, artifact, fake_docker)
     assert result.returncode != 0
-    assert "identity digest does not match" in result.stderr
+    assert "adapter conflicts" in result.stderr
 
 
 def test_runtime_verifier_rejects_empty_placeholder_and_missing_harness_inputs(tmp_path):
@@ -334,6 +433,7 @@ def test_runtime_verifier_rejects_empty_placeholder_and_missing_harness_inputs(t
 
     _, bundle, artifact, fake_docker = _runtime_verifier_fixture(tmp_path / "missing")
     del bundle["adapters"]["pi"]
+    bundle["harness_verification_evidence"]["harness_key"] = "claude"
     result = _run_runtime_verifier(tmp_path / "missing", bundle, artifact, fake_docker)
     assert result.returncode != 0
     assert "exactly the four Kit Harness adapters" in result.stderr
@@ -384,6 +484,258 @@ def test_portable_validator_matrix_matches_backend_contract_data():
     assert dumped["capabilities"] == V2_SYSTEM_CAPABILITY_UPPER_BOUND
 
 
+def test_portable_validator_rejects_missing_or_wrong_runtime_platform(tmp_path):
+    _, bundle, _, _ = _runtime_verifier_fixture(tmp_path)
+    validator = Path(__file__).resolve().parents[3] / "deploy/worker-kit/validate-runtime-manifest.py"
+    for index, platform in enumerate((None, "darwin/arm64", "linux/")):
+        candidate = dict(bundle)
+        if platform is None:
+            candidate.pop("runtime_platform")
+        else:
+            candidate["runtime_platform"] = platform
+        path = tmp_path / f"runtime-invalid-platform-{index}.json"
+        path.write_text(json.dumps(candidate))
+        result = subprocess.run(
+            ["python3", str(validator), str(path)], capture_output=True, text=True, check=False
+        )
+        assert result.returncode == 1
+        assert "runtime_platform is missing or invalid" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("schema", "codify.worker-image-identity/v0", "schema is invalid"),
+        ("daemon_key", "tcp://worker.example:2376 bad", "daemon_key is invalid"),
+        ("image_reference", "registry.example/worker:latest", "image_reference is invalid"),
+        ("image_id", "sha256:" + "a" * 63, "image_id is invalid"),
+        ("runtime_platform", "linux/amd64/extra", "runtime_platform is invalid"),
+        ("cli_artifact_lock_sha256", "g" * 64, "CLI lock digest is invalid"),
+    ],
+)
+def test_portable_validator_rejects_invalid_worker_image_identity(tmp_path, field, value, message):
+    _, bundle, _, _ = _runtime_verifier_fixture(tmp_path)
+    identity = bundle["worker_image_identity"]
+    identity[field] = value
+    validator = Path(__file__).resolve().parents[3] / "deploy/worker-kit/validate-runtime-manifest.py"
+    path = tmp_path / "runtime-invalid-identity.json"
+    path.write_text(json.dumps(bundle))
+    result = subprocess.run(["python3", str(validator), str(path)], capture_output=True, text=True, check=False)
+    assert result.returncode == 1
+    assert message in result.stderr
+
+
+def test_portable_validator_and_shell_verifier_use_backend_recursive_identity_digest(tmp_path):
+    _, bundle, artifact, fake_docker = _runtime_verifier_fixture(tmp_path)
+    files_only_digest = __import__("hashlib").sha256(
+        json.dumps(
+            sorted(bundle["files"], key=lambda item: item["path"]),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    assert bundle["bundle_digest"] != files_only_digest
+    result = _run_runtime_verifier(tmp_path, bundle, artifact, fake_docker)
+    assert result.returncode == 0, result.stderr
+
+    bundle["worker_image_identity"]["image_id"] = "sha256:" + "0" * 64
+    bundle["harness_verification_evidence"]["image_identity"]["image_id"] = "sha256:" + "0" * 64
+    tampered = _run_runtime_verifier(tmp_path, bundle, artifact, fake_docker)
+    assert tampered.returncode != 0
+    assert "bundle_digest does not match" in tampered.stderr or "image_id" in tampered.stderr
+
+
+def test_portable_validator_and_shell_verifier_reject_v2_bundle_without_image_identity(tmp_path):
+    _, bundle, artifact, fake_docker = _runtime_verifier_fixture(tmp_path)
+    bundle.pop("worker_image_identity")
+    validator = Path(__file__).resolve().parents[3] / "deploy/worker-kit/validate-runtime-manifest.py"
+    path = tmp_path / "runtime-without-image-identity.json"
+    path.write_text(json.dumps(bundle))
+
+    portable = subprocess.run(["python3", str(validator), str(path)], capture_output=True, text=True, check=False)
+    assert portable.returncode == 1
+    assert "worker_image_identity schema is invalid" in portable.stderr
+
+    verified = _run_runtime_verifier(tmp_path, bundle, artifact, fake_docker)
+    assert verified.returncode != 0
+    assert "Worker image identity schema is invalid" in verified.stderr
+
+
+def test_portable_validator_and_shell_verifier_reject_v2_bundle_without_harness_evidence(tmp_path):
+    _, bundle, artifact, fake_docker = _runtime_verifier_fixture(tmp_path)
+    bundle.pop("harness_verification_evidence")
+    validator = Path(__file__).resolve().parents[3] / "deploy/worker-kit/validate-runtime-manifest.py"
+    path = tmp_path / "runtime-without-harness-evidence.json"
+    path.write_text(json.dumps(bundle))
+
+    portable = subprocess.run(["python3", str(validator), str(path)], capture_output=True, text=True, check=False)
+    assert portable.returncode == 1
+    assert "harness_verification_evidence schema is invalid" in portable.stderr
+
+    verified = _run_runtime_verifier(tmp_path, bundle, artifact, fake_docker)
+    assert verified.returncode != 0
+    assert "Harness verification evidence schema is invalid" in verified.stderr
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (lambda evidence: evidence.update(schema="codify.worker-harness-verification/v0"), "schema"),
+        (lambda evidence: evidence.update(harness_key="omp"), "harness_key"),
+        (lambda evidence: evidence.update(contract_version="codify.worker.harness/v1"), "contract_version"),
+        (lambda evidence: evidence["adapter"].update(version=""), "adapter"),
+        (lambda evidence: evidence["adapter"].update(digest="0" * 64), "adapter conflicts"),
+        (lambda evidence: evidence.update(verification_input_digest="g" * 64), "verification_input_digest"),
+        (lambda evidence: evidence.update(generation=True), "generation"),
+        (lambda evidence: evidence.update(verified_at="2026-08-24T00:00:00"), "verified_at"),
+        (lambda evidence: evidence["image_identity"].update(image_id="sha256:" + "0" * 64), "image_identity"),
+    ],
+)
+def test_portable_validator_and_shell_verifier_reject_tampered_harness_evidence(
+    tmp_path, mutate, message
+):
+    _, bundle, artifact, fake_docker = _runtime_verifier_fixture(tmp_path)
+    candidate = json.loads(json.dumps(bundle))
+    mutate(candidate["harness_verification_evidence"])
+    validator = Path(__file__).resolve().parents[3] / "deploy/worker-kit/validate-runtime-manifest.py"
+    path = tmp_path / "runtime-with-tampered-harness-evidence.json"
+    path.write_text(json.dumps(candidate))
+
+    portable = subprocess.run(["python3", str(validator), str(path)], capture_output=True, text=True, check=False)
+    assert portable.returncode == 1
+    assert message in portable.stderr
+
+    verified = _run_runtime_verifier(tmp_path, candidate, artifact, fake_docker)
+    assert verified.returncode != 0
+    assert message.lower() in verified.stderr.lower()
+
+
+def test_single_harness_verifier_rejects_evidence_for_another_harness(tmp_path):
+    _, bundle, artifact, fake_docker = _runtime_verifier_fixture(tmp_path)
+
+    result = _run_runtime_verifier(
+        tmp_path,
+        bundle,
+        artifact,
+        fake_docker,
+        all_harnesses=False,
+        harness_key="claude",
+        align_single_harness_evidence=False,
+    )
+
+    assert result.returncode != 0
+    assert "does not match requested Harness" in result.stderr
+
+
+def test_candidate_verification_requires_exact_injected_selected_adapter(tmp_path):
+    kit, bundle, _, _ = _runtime_verifier_fixture(tmp_path)
+    source = json.loads(json.dumps(bundle))
+    source.pop("bundle_digest")
+    source.update(
+        schema="codify.worker.runtime-manifest/v2",
+        maturity="internal_preview",
+        command_schema="codify.worker.command/v2",
+        result_schema="codify.worker.result/v2",
+    )
+    adapter_bytes = b"#!/bin/bash\n# frozen pi adapter\n"
+    adapter_entry = {
+        "path": "worker-entrypoint/harness/adapters/pi.sh",
+        "size": len(adapter_bytes),
+        "sha256": hashlib.sha256(adapter_bytes).hexdigest(),
+    }
+    source["files"].append(adapter_entry)
+    source["harness_verification_evidence"]["adapter"] = {
+        "version": "2.0.0",
+        "digest": adapter_digest_from_manifest_files(
+            source["files"],
+            "pi",
+            adapter_paths={adapter_entry["path"]},
+            shared_files=[item for item in source["files"] if item != adapter_entry],
+        ),
+    }
+    frozen = build_runtime_bundle_v2(source).manifest
+
+    orchestration = tmp_path / "orchestration"
+    adapter_path = orchestration / "worker-entrypoint/harness/adapters/pi.sh"
+    adapter_path.parent.mkdir(parents=True)
+    adapter_path.write_bytes(adapter_bytes)
+    manifest_path = orchestration / "manifest.json"
+    manifest_path.write_text(json.dumps(frozen))
+    verification = Path(__file__).resolve().parents[3] / "deploy/worker-entrypoint/verification.sh"
+    env = dict(
+        os.environ,
+        CODIFY_KIT_HOME=str(kit),
+        CODIFY_ORCHESTRATION_DIR=str(orchestration),
+        CODIFY_RUNTIME_VERIFICATION_MANIFEST=str(manifest_path),
+        CODIFY_HARNESS_KEY="pi",
+    )
+    command = ["bash", "-c", f"source {verification}; codify_verify_v2_candidate_manifest"]
+
+    valid = subprocess.run(command, env=env, text=True, capture_output=True)
+    assert valid.returncode == 0, valid.stderr
+
+    adapter_path.write_text("#!/bin/bash\n# drift\n")
+    drifted = subprocess.run(command, env=env, text=True, capture_output=True)
+    assert drifted.returncode != 0
+    assert "selected Adapter bytes do not match manifest" in drifted.stderr
+
+    missing_env = dict(env, CODIFY_RUNTIME_VERIFICATION_MANIFEST=str(tmp_path / "missing.json"))
+    missing = subprocess.run(command, env=missing_env, text=True, capture_output=True)
+    assert missing.returncode != 0
+    assert "manifest is unreadable" in missing.stderr
+
+
+@pytest.mark.parametrize(
+    ("mismatch", "message"),
+    [
+        ({"RepoDigests": ["registry.example/worker@sha256:" + "0" * 64]}, "repository digest"),
+        ({"Id": "sha256:" + "0" * 64}, "image ID"),
+        ({"Os": "linux", "Architecture": "arm64"}, "platform"),
+    ],
+)
+def test_shell_verifier_rejects_actual_image_identity_mismatch(tmp_path, mismatch, message):
+    _, bundle, artifact, fake_docker = _runtime_verifier_fixture(tmp_path)
+    image_inspect = {
+        "RepoDigests": [bundle["worker_image_identity"]["image_reference"]],
+        "Id": bundle["worker_image_identity"]["image_id"],
+        "Os": "linux",
+        "Architecture": "amd64",
+    }
+    image_inspect.update(mismatch)
+    runtime_path = tmp_path / "runtime.json"
+    runtime_path.write_text(json.dumps(bundle))
+    env = dict(
+        os.environ,
+        PATH=f"{fake_docker.parent}:{os.environ['PATH']}",
+        ARTIFACT_PATH=str(artifact),
+        ACTUAL_CLI_SHA="a" * 64,
+        IMAGE_INSPECT=json.dumps(image_inspect),
+    )
+    result = subprocess.run(
+        [
+            str(Path(__file__).resolve().parents[3] / "deploy/worker-kit/verify-runtime.sh"),
+            "--kit", str(tmp_path / "kit"), "--image", "fake:image",
+            "--runtime-manifest", str(runtime_path), "--all-harnesses",
+        ],
+        env=env,
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode != 0
+    assert message in result.stderr
+
+
+def test_shell_verifier_rejects_actual_image_cli_lock_bytes_mismatch(tmp_path):
+    _, bundle, artifact, fake_docker = _runtime_verifier_fixture(tmp_path)
+    bundle["worker_image_identity"]["cli_artifact_lock_sha256"] = "0" * 64
+    result = _run_runtime_verifier(tmp_path, bundle, artifact, fake_docker)
+
+    assert result.returncode != 0
+    assert "CLI artifact lock bytes do not match frozen identity" in result.stderr
+
+
 @pytest.mark.parametrize("annotated", [False, True])
 def test_portable_validator_matches_builder_adapter_scopes_for_flat_files(tmp_path, annotated):
     kit, source, artifact, fake_docker = _runtime_verifier_fixture(tmp_path)
@@ -400,6 +752,10 @@ def test_portable_validator_matches_builder_adapter_scopes_for_flat_files(tmp_pa
     if annotated:
         source["adapters"]["pi"]["source"]["directory"] = "worker-entrypoint/harness/adapters/pi"
         source["adapters"]["opencode"]["source"]["directory"] = "worker-entrypoint/harness/adapters/opencode"
+    source["harness_verification_evidence"]["adapter"] = {
+        "version": "2.0.0",
+        "digest": _source_adapter_digest(source, "pi"),
+    }
     built = build_runtime_bundle_v2(source)
     bundle = built.manifest
     result = _run_runtime_verifier(tmp_path, bundle, artifact, fake_docker)
@@ -456,3 +812,15 @@ def test_release_helpers_export_an_immutable_nonsecret_cli_identity_lock():
     assert "Refusing to overwrite an existing CLI artifact manifest" in helper
     assert "codify.worker.cli-artifacts/v1" in helper
     assert "exactly four Harnesses" in helper
+
+
+def test_v2_release_compose_mounts_same_readonly_lock_into_backend_and_scheduler():
+    root = Path(__file__).resolve().parents[3]
+    base_compose = (root / "deploy/docker-compose.yml").read_text()
+    release_compose = (root / "deploy/docker-compose.v2-release.yml").read_text()
+
+    assert "CODIFY_WORKER_CLI_ARTIFACT_MANIFEST_HOST_PATH" not in base_compose
+    assert release_compose.count("${CODIFY_WORKER_CLI_ARTIFACT_MANIFEST_HOST_PATH:") == 2
+    assert release_compose.count("/run/codify/worker-cli-artifacts.json") == 4
+    assert release_compose.count("read_only: true") == 2
+    assert release_compose.count("create_host_path: false") == 2

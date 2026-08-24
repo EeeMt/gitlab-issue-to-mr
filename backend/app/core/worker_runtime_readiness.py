@@ -32,6 +32,7 @@ from typing import Any
 
 import docker
 from docker.types import Mount
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -486,16 +487,24 @@ async def finish_runtime_check(
     """
     if status not in READINESS_STATUSES:
         raise ValueError(f"invalid readiness status: {status!r}")
-    row = await db.get(WorkerRuntimeReadiness, fingerprint)
-    if row is None or row.check_generation != generation:
-        return False
-    row.status = status
-    row.checked_at = utcnow()
-    row.failure_code = failure_code
-    row.failure_message = failure_message
-    row.ready_until = ready_until if status == READINESS_READY else None
-    await db.flush()
-    return True
+    # A read-then-write is not CAS across two sessions: a newer probe can bump
+    # generation after the read and before flush. Put the generation predicate
+    # on the SQL UPDATE itself and use rowcount as the sole success authority.
+    result = await db.execute(
+        update(WorkerRuntimeReadiness)
+        .where(
+            WorkerRuntimeReadiness.runtime_locator_fingerprint == fingerprint,
+            WorkerRuntimeReadiness.check_generation == generation,
+        )
+        .values(
+            status=status,
+            checked_at=utcnow(),
+            failure_code=failure_code,
+            failure_message=failure_message,
+            ready_until=ready_until if status == READINESS_READY else None,
+        )
+    )
+    return result.rowcount == 1
 
 
 def _missing_bind_source(exc: Exception) -> bool:

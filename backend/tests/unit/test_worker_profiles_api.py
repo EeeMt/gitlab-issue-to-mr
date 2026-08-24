@@ -1,4 +1,10 @@
+import io
+import os
+import shutil
+import subprocess
+import tarfile
 from datetime import datetime
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -51,6 +57,49 @@ from app.models import (
     WorkerProfile,
     WorkerProfileEnvironmentVariable,
 )
+
+
+def _candidate_archive(manifest: bytes = b"{}") -> bytes:
+    """Build the same top-level layout used by the V2 candidate archive."""
+    output = io.BytesIO()
+    with tarfile.open(fileobj=output, mode="w") as archive:
+        info = tarfile.TarInfo("codify-runtime/orchestration/manifest.json")
+        info.size = len(manifest)
+        info.mode = 0o644
+        archive.addfile(info, io.BytesIO(manifest))
+    return output.getvalue()
+
+
+def test_v2_candidate_verification_script_rejects_invalid_injected_manifest(tmp_path):
+    """The real worker entrypoint verifier must fail closed for a bad candidate."""
+    orchestration = tmp_path / "orchestration"
+    adapter = orchestration / "worker-entrypoint/harness/adapters/pi.sh"
+    adapter.parent.mkdir(parents=True)
+    adapter.write_text("#!/bin/bash\n")
+    manifest = orchestration / "manifest.json"
+    manifest.write_text("{\"schema\": \"not-v2\"}")
+    kit = tmp_path / "kit"
+    kit.mkdir()
+    shutil.copy2(
+        Path(__file__).resolve().parents[3] / "deploy/worker-kit/validate-runtime-manifest.py",
+        kit / "validate-runtime-manifest.py",
+    )
+    verification = Path(__file__).resolve().parents[3] / "deploy/worker-entrypoint/verification.sh"
+    env = dict(
+        os.environ,
+        CODIFY_KIT_HOME=str(kit),
+        CODIFY_ORCHESTRATION_DIR=str(orchestration),
+        CODIFY_RUNTIME_VERIFICATION_MANIFEST=str(manifest),
+        CODIFY_HARNESS_KEY="pi",
+    )
+    result = subprocess.run(
+        ["bash", "-c", f"source {verification}; codify_verify_v2_candidate_manifest"],
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode != 0
+    assert "not-v2" in result.stderr or "schema" in result.stderr
 
 
 def _make_profile(
@@ -310,6 +359,7 @@ async def test_duplicate_worker_profile_locks_and_revalidates_default_skills():
     db.get = AsyncMock(return_value=None)
     db.flush = AsyncMock()
     db.commit = AsyncMock()
+    db.execute = AsyncMock(return_value=SimpleNamespace(rowcount=1))
     db.refresh = AsyncMock()
 
     with (
@@ -376,6 +426,7 @@ async def test_duplicate_worker_profile_preserves_disabled_default_skill():
     db.get = AsyncMock(return_value=None)
     db.flush = AsyncMock()
     db.commit = AsyncMock()
+    db.execute = AsyncMock(return_value=SimpleNamespace(rowcount=1))
     db.refresh = AsyncMock()
 
     with (
@@ -712,6 +763,7 @@ async def test_update_assigned_worker_allows_unchanged_docker_target_fields():
     )
     db.execute = AsyncMock()
     db.commit = AsyncMock()
+    db.execute = AsyncMock(return_value=SimpleNamespace(rowcount=1))
     db.refresh = AsyncMock()
 
     response = await update_worker_profile(
@@ -998,7 +1050,7 @@ async def test_verify_mounted_worker_profile_runs_preflight_on_profile_target():
         name="Java Runtime",
         environment_variables=[
             SimpleNamespace(
-                key="CODIFY_CLAUDE_BIN",
+                key="CUSTOM_CLAUDE_BIN",
                 value="/usr/local/bin/claude",
                 is_secret=False,
             ),
@@ -1026,6 +1078,7 @@ async def test_verify_mounted_worker_profile_runs_preflight_on_profile_target():
         side_effect=lambda model, pk, **kwargs: profile if model is WorkerProfile else None
     )
     db.commit = AsyncMock()
+    db.execute = AsyncMock(return_value=SimpleNamespace(rowcount=1))
 
     container = MagicMock()
     client = MagicMock()
@@ -1037,6 +1090,17 @@ async def test_verify_mounted_worker_profile_runs_preflight_on_profile_target():
 
     with (
         patch("app.api.worker_profiles.DockerClientWrapper", return_value=client),
+        patch(
+            "app.api.worker_profiles.inspect_v2_worker_image_identity",
+            return_value={
+                "schema": "codify.worker-image-identity/v1",
+                "daemon_key": "daemon-key-12",
+                "image_reference": "team/java21-maven@sha256:abc123def456",
+                "image_id": "sha256:" + "a" * 64,
+                "runtime_platform": "linux/amd64",
+                "cli_artifact_lock_sha256": "b" * 64,
+            },
+        ),
         patch(
             "app.api.worker_profiles.run_deterministic_kit_probe",
             new=AsyncMock(
@@ -1066,9 +1130,7 @@ async def test_verify_mounted_worker_profile_runs_preflight_on_profile_target():
     assert response["image_digest"] == "team/java21-maven@sha256:abc123def456"
     assert profile.image_digest == "team/java21-maven@sha256:abc123def456"
     assert profile.verified_at is not None
-    db.commit.assert_awaited_once()
-    client.client.images.get.assert_called_once_with("team/java21-maven:2026.07")
-    client.resolve_image_repo_digest.assert_called_once_with("team/java21-maven:2026.07")
+    assert db.commit.await_count == 2
     create_kwargs = client.create_container.call_args.kwargs
     assert create_kwargs["command"] == [
         "--verify",
@@ -1080,7 +1142,7 @@ async def test_verify_mounted_worker_profile_runs_preflight_on_profile_target():
     assert create_kwargs["user"] == "0:0"
     assert create_kwargs["tmpfs"] == {"/workspace": "rw,exec,mode=1777"}
     assert create_kwargs["environment"]["CODIFY_HARNESS_KEY"] == "claude"
-    assert create_kwargs["environment"]["CODIFY_CLAUDE_BIN"] == "/usr/local/bin/claude"
+    assert create_kwargs["environment"]["CUSTOM_CLAUDE_BIN"] == "/usr/local/bin/claude"
     assert "RUNTIME_SECRET" not in create_kwargs["environment"]
     assert response["omitted_secret_environment_keys"] == ["RUNTIME_SECRET"]
     assert create_kwargs["volumes"]["/opt/codify/overrides/claude"] == {
@@ -1100,6 +1162,85 @@ async def test_verify_mounted_worker_profile_runs_preflight_on_profile_target():
 
 
 @pytest.mark.asyncio
+async def test_verify_v2_profile_checks_each_enabled_v2_harness_and_records_separate_evidence():
+    """A default V1 Claude probe must not stand in for Pi/OpenCode V2."""
+    profile = _make_profile(id=31, name="Mixed V2")
+    profile.image = "team/java21-maven:2026.08"
+    profile.runtime_mode = "mounted_kit"
+    profile.worker_kit_version = "0.3.5"
+    profile.worker_kit_path = "/opt/codify/worker-kits/0.3.5-linux-amd64"
+    profile.enabled_harnesses = ["claude", "pi", "opencode"]
+    profile.default_harness_key = "claude"
+    profile.harness_constraints = {}
+    profile.harness_runtimes = {
+        "claude": {"source": "image", "contract_version": "codify.worker.harness/v1"},
+        "pi": {"source": "image", "contract_version": "codify.worker.harness/v2", "version": "0.1"},
+        "opencode": {"source": "image", "contract_version": "codify.worker.harness/v2", "version": "1.2"},
+    }
+    profile.v2_worker_image_identity_generation = 0
+    db = MagicMock()
+    db.get = AsyncMock(side_effect=lambda model, pk, **kwargs: profile if model is WorkerProfile else None)
+    db.execute = AsyncMock(return_value=SimpleNamespace(rowcount=1))
+    db.commit = AsyncMock()
+    first, second = MagicMock(), MagicMock()
+    client = MagicMock()
+    client.create_container.side_effect = [first, second]
+    client.wait_for_container.return_value = (0, "verified")
+    identity = {
+        "schema": "codify.worker-image-identity/v1", "daemon_key": "daemon-key-31",
+        "image_reference": "team/java21-maven@sha256:" + "a" * 64,
+        "image_id": "sha256:" + "b" * 64, "runtime_platform": "linux/amd64",
+        "cli_artifact_lock_sha256": "c" * 64,
+    }
+    with (
+        patch("app.api.worker_profiles.DockerClientWrapper", return_value=client),
+        patch("app.api.worker_profiles.inspect_v2_worker_image_identity", return_value=identity),
+        patch(
+            "app.api.worker_profiles.frozen_v2_adapter_identity",
+            side_effect=lambda key, **_kwargs: {"version": f"{key}-version", "digest": key[0] * 64},
+        ),
+        patch(
+            "app.api.worker_profiles.build_v2_verification_candidate",
+            return_value=({}, _candidate_archive(b'{"candidate":"pi"}')),
+        ),
+        patch("app.api.worker_profiles.run_deterministic_kit_probe", new=AsyncMock(
+            return_value=RuntimeProbeOutcome(readiness=RuntimeReadiness(status="ready"), committed=True)
+        )),
+    ):
+        response = await verify_worker_profile_runtime(31, WorkerRuntimeVerificationRequest(), db=db)
+
+    assert response["v2_harnesses_verified"] == ["pi", "opencode"]
+    assert [call.kwargs["environment"]["CODIFY_HARNESS_KEY"] for call in client.create_container.call_args_list] == ["pi", "opencode"]
+    expected_manifest = "/tmp/codify-verify-runtime/codify-runtime/orchestration/manifest.json"
+    assert all(
+        call.kwargs["environment"]["CODIFY_RUNTIME_VERIFICATION_MANIFEST"] == expected_manifest
+        for call in client.create_container.call_args_list
+    )
+    assert all(
+        call.kwargs["environment"]["CODIFY_ORCHESTRATION_DIR"]
+        == "/tmp/codify-verify-runtime/codify-runtime/orchestration"
+        for call in client.create_container.call_args_list
+    )
+    evidence = profile.v2_harness_verification_evidence
+    assert set(evidence) == {"pi", "opencode"}
+    assert evidence["pi"]["adapter"] == {"version": "pi-version", "digest": "p" * 64}
+    assert evidence["opencode"]["verification_input_digest"] != evidence["pi"]["verification_input_digest"]
+    assert all(call.kwargs["start"] is False for call in client.create_container.call_args_list)
+    assert client.put_archive.call_count == 2
+    for put_call in client.put_archive.call_args_list:
+        archive_bytes = put_call.args[2]
+        with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:") as archive:
+            manifest = archive.extractfile("codify-runtime/orchestration/manifest.json")
+            assert manifest is not None
+            assert manifest.read() == b'{"candidate":"pi"}'
+    assert client.start_container.call_count == 2
+    method_names = [call[0] for call in client.method_calls]
+    assert method_names.index("put_archive") < method_names.index("start_container")
+    first.remove.assert_called_once_with(force=True, v=True)
+    second.remove.assert_called_once_with(force=True, v=True)
+
+
+@pytest.mark.asyncio
 async def test_verify_mounted_worker_profile_transient_daemon_returns_503():
     """§13.5: an unreachable daemon surfaces as 503 transient, never a raw 500."""
     profile = _make_profile(id=14, name="Transient Runtime")
@@ -1112,6 +1253,7 @@ async def test_verify_mounted_worker_profile_transient_daemon_returns_503():
         side_effect=lambda model, pk, **kwargs: profile if model is WorkerProfile else None
     )
     db.commit = AsyncMock()
+    db.execute = AsyncMock(return_value=SimpleNamespace(rowcount=1))
 
     with patch(
         "app.api.worker_profiles.run_deterministic_kit_probe",

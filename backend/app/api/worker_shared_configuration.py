@@ -14,7 +14,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -375,6 +375,21 @@ async def update_shared_configuration(
         row.ci_auto_repair_run_instruction_template = ci_template
         row.revision += 1
         await _replace_shared_environment_variables(db, row, environment_variables)
+        # Shared inputs participate in every inheriting Profile's runtime
+        # verification. Invalidate evidence atomically with this revision so a
+        # later V2 snapshot cannot reuse a pre-change daemon/image observation.
+        await db.execute(
+            update(WorkerProfile).values(
+                image_digest=None,
+                verified_at=None,
+                verified_runtime_configuration_digest=None,
+                v2_worker_image_identity=None,
+                v2_harness_verification_evidence=None,
+                v2_worker_image_identity_generation=(
+                    WorkerProfile.v2_worker_image_identity_generation + 1
+                ),
+            )
+        )
         await db.commit()
 
         persisted_environment = await _load_shared_environment_variables(db, row.id)

@@ -1,3 +1,7 @@
+import hashlib
+import io
+import json
+import tarfile
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -6,6 +10,10 @@ import pytest
 from app.core.worker_docker_targets import TaskContainerLookupError
 from app.core.worker_profiles import TaskWorkerRuntime
 from app.core.worker_runtime import build_container_volumes
+from app.core.worker_runtime_bundle import (
+    bundle_manifest_digest_from_files,
+    v2_launcher_manifest_bytes,
+)
 from app.core.worker_task_artifacts import finalize_task_raw_logs
 from app.core.worker_task_lifecycle import (
     _create_stopped_container,
@@ -18,6 +26,140 @@ from app.core.worker_task_lifecycle import (
 from app.core.worker_task_outcomes import fail_execute_task
 from app.core.worker_task_runner import run_execute_task
 from app.models import TaskStatus
+
+_V2_WORKER_IMAGE_IDENTITY = {
+    "schema": "codify.worker-image-identity/v1",
+    "daemon_key": "profile-runtime-tests",
+    "image_reference": f"registry.example.com/custom-worker@sha256:{'1' * 64}",
+    "image_id": f"sha256:{'2' * 64}",
+    "runtime_platform": "linux/amd64",
+    "cli_artifact_lock_sha256": "3" * 64,
+}
+_V2_HARNESS_EVIDENCE = {
+    "schema": "codify.worker-harness-verification/v1",
+    "harness_key": "claude",
+    "contract_version": "codify.worker.harness/v2",
+    "adapter": {"version": "1.0.0"},
+    "verification_input_digest": "d" * 64,
+    "image_identity": _V2_WORKER_IMAGE_IDENTITY,
+    "generation": 1,
+    "verified_at": "2026-08-24T00:00:00+00:00",
+}
+
+
+def _make_v2_runtime_bundle():
+    """Build persisted V2 bytes so lifecycle tests use the real verifier."""
+    entrypoint = b"#!/bin/sh\nexit 0\n"
+    files = [
+        {
+            "path": "entrypoint.sh",
+            "size": len(entrypoint),
+            "sha256": hashlib.sha256(entrypoint).hexdigest(),
+        }
+    ]
+    files_digest = bundle_manifest_digest_from_files(files)
+    digest = hashlib.sha256(
+        json.dumps(
+            {
+                "files_digest": files_digest,
+                "worker_image_identity": _V2_WORKER_IMAGE_IDENTITY,
+                "harness_verification_evidence": _V2_HARNESS_EVIDENCE,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    manifest = {
+        "schema": "codify.worker.runtime-manifest/v2",
+        "contract_version": "codify.worker.harness/v2",
+        "event_schema": "codify.worker.event/v2",
+        "orchestration_version": "1.0.0",
+        "bundle_digest": digest,
+        "runtime_platform": "linux/amd64",
+        "worker_image_identity": _V2_WORKER_IMAGE_IDENTITY,
+        "harness_verification_evidence": _V2_HARNESS_EVIDENCE,
+        "files": files,
+        "adapters": {
+            "claude": {
+                "adapter": {"version": "1.0.0", "digest": digest},
+                "capabilities": {"steering": False},
+            }
+        },
+    }
+    launcher_manifest = v2_launcher_manifest_bytes(SimpleNamespace(manifest=manifest))
+    archive_buffer = io.BytesIO()
+    with tarfile.open(fileobj=archive_buffer, mode="w", format=tarfile.PAX_FORMAT) as archive:
+        for name, payload, mode in (
+            ("codify-runtime/orchestration/manifest.json", launcher_manifest, 0o644),
+            ("codify-runtime/orchestration/entrypoint.sh", entrypoint, 0o755),
+        ):
+            member = tarfile.TarInfo(name=name)
+            member.size = len(payload)
+            member.mode = mode
+            member.mtime = 0
+            archive.addfile(member, io.BytesIO(payload))
+    archive_bytes = archive_buffer.getvalue()
+    return SimpleNamespace(
+        id=81,
+        digest=digest,
+        contract_version="codify.worker.harness/v2",
+        orchestration_version="1.0.0",
+        manifest={
+            **manifest,
+            "archive_sha256": hashlib.sha256(archive_bytes).hexdigest(),
+        },
+        bundle_bytes=archive_bytes,
+        size_bytes=len(archive_bytes),
+    )
+
+
+_V2_RUNTIME_BUNDLE = _make_v2_runtime_bundle()
+
+
+def _bind_v2_runtime(task, db):
+    """Bind a Task/DB mock to one verified immutable V2 execution identity."""
+    task.runtime_bundle_id = _V2_RUNTIME_BUNDLE.id
+    task.worker_profile_snapshot = SimpleNamespace(
+        harness_key="claude",
+        harness_config_snapshot={
+            "requested_runtime_contract_version": "codify.worker.harness/v2",
+            "v2_worker_image_identity": _V2_WORKER_IMAGE_IDENTITY,
+            "v2_harness_verification_evidence": _V2_HARNESS_EVIDENCE,
+        },
+        runtime_contract_version="codify.worker.harness/v2",
+        runtime_bundle_digest=_V2_RUNTIME_BUNDLE.digest,
+    )
+
+    async def execute(statement, *args, **kwargs):
+        result = MagicMock()
+        statement_text = str(statement)
+        if "FROM worker_runtime_bundles" in statement_text:
+            result.scalar_one_or_none.return_value = _V2_RUNTIME_BUNDLE
+            result.scalars.return_value.all.return_value = [_V2_RUNTIME_BUNDLE]
+        else:
+            result.scalar_one_or_none.return_value = None
+            result.scalars.return_value.all.return_value = []
+        return result
+
+    db.execute = AsyncMock(side_effect=execute)
+    return SimpleNamespace(
+        attempt_id="task-12-attempt-1",
+        harness_key="claude",
+        adapter_version="1.0.0",
+        event_schema="codify.worker.event/v2",
+        control_state="disabled",
+        control_supported=False,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _stub_v2_image_inspection():
+    """Keep daemon inspection external while exercising bundle verification."""
+    with patch(
+        "app.core.worker_task_lifecycle.inspect_v2_worker_image_identity",
+        return_value=_V2_WORKER_IMAGE_IDENTITY,
+    ):
+        yield
 
 
 def test_build_container_volumes_uses_snapshot_mounts_last(tmp_path):
@@ -126,6 +268,11 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
     task.rendered_prompt = "Prompt"
     task.status = TaskStatus.RUNNING
     task.cancel_requested_at = None
+    task.worker_profile_snapshot = SimpleNamespace(
+        runtime_contract_version="codify.worker.harness/v1",
+        runtime_bundle_digest="d" * 64,
+        harness_key="claude",
+    )
 
     issue = MagicMock()
     issue.id = 1
@@ -160,6 +307,8 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
         worker_image="old-worker:latest",
         worker_skip_image_pull=False,
         worker_network="bridge",
+        docker_host="unix:///var/run/docker.sock",
+        harness_execution_mode="dual_canary",
     )
     db = MagicMock()
     db.commit = AsyncMock()
@@ -167,27 +316,7 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
     db.get = AsyncMock(return_value=None)
     db.refresh = AsyncMock()
 
-    async def _mock_execute(statement, *args, **kwargs):
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-        mock_result.scalars.return_value.all.return_value = []
-        return mock_result
-
-    db.execute = AsyncMock(side_effect=_mock_execute)
-    bundle = SimpleNamespace(
-        digest="d" * 64,
-        contract_version="codify.worker.harness/v1",
-        manifest={
-            "archive_manifest_digest": "m" * 64,
-            "adapters": {"claude": {"version": "1.0.0", "digest": "a" * 64}},
-        },
-        bundle_bytes=b"runtime-bundle",
-    )
-    attempt = SimpleNamespace(
-        attempt_id="task-12-attempt-1",
-        harness_key="claude",
-        adapter_version="1.0.0",
-    )
+    attempt = _bind_v2_runtime(task, db)
 
     with (
         patch(
@@ -197,10 +326,6 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
         patch(
             "app.core.worker_task_lifecycle.build_issue_workspace_paths",
             return_value=SimpleNamespace(issue_root=str(tmp_path)),
-        ),
-        patch(
-            "app.core.worker_task_lifecycle.load_bound_runtime_bundle",
-            new=AsyncMock(return_value=bundle),
         ),
         patch(
             "app.core.worker_task_lifecycle.create_task_attempt",
@@ -217,7 +342,9 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
         )
 
     assert container.id == "container-1"
-    worker.docker.pull_image.assert_called_once_with("custom-worker:latest", force=False)
+    worker.docker.pull_image.assert_called_once_with(
+        _V2_WORKER_IMAGE_IDENTITY["image_reference"], force=False
+    )
     worker._prepare_container_inputs.assert_awaited_once()
     assert worker._prepare_container_inputs.call_args.kwargs["custom_environment"] == {
         "CUSTOM_ENV": "value"
@@ -225,24 +352,20 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
     assert worker.docker.create_container.call_args.kwargs["environment"][
         "CODIFY_CODEGRAPH_ENABLED"
     ] == "true"
-    assert worker.docker.create_container.call_args.kwargs["environment"][
-        "CODIFY_KIT_VERSION"
-    ] == "0.1.0"
+    assert worker.docker.create_container.call_args.kwargs["environment"]["CODIFY_KIT_VERSION"] == "0.1.0"
     worker._build_container_volumes.assert_called_once_with(
-        settings,
-        issue,
-        task=task,
-        custom_mounts=runtime.volume_mounts,
+        settings, issue, task=task, custom_mounts=runtime.volume_mounts
     )
     worker.docker.create_container.assert_called_once()
     assert worker.docker.create_container.call_args.kwargs["start"] is False
     assert worker.docker.put_archive.call_count == 2
     worker.docker.start_container.assert_called_once_with(container)
     assert db.commit.await_count == 2
-    assert worker.docker.create_container.call_args.kwargs["image"] == "custom-worker:latest"
-    assert worker.docker.create_container.call_args.kwargs["entrypoint"] == (
-        "/opt/codify-kit/launcher"
+    assert (
+        worker.docker.create_container.call_args.kwargs["image"]
+        == _V2_WORKER_IMAGE_IDENTITY["image_reference"]
     )
+    assert worker.docker.create_container.call_args.kwargs["entrypoint"] == "/opt/codify-kit/launcher"
     assert worker.docker.create_container.call_args.kwargs["user"] == "0:0"
     assert worker.docker.create_container.call_args.kwargs["volumes"][
         "/opt/codify/worker-kits/0.1.0-linux-amd64"
@@ -250,6 +373,101 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
     assert worker.docker.create_container.call_args.kwargs["volumes"][
         "/opt/codify/worker-kits/0.1.0-linux-amd64/nix/store"
     ] == {"bind": "/nix/store", "mode": "ro"}
+
+
+@pytest.mark.asyncio
+async def test_v2_execution_rejects_daemon_image_identity_mismatch_before_container(tmp_path):
+    identity = {
+        "schema": "codify.worker-image-identity/v1",
+        "daemon_key": "tcp://worker.example:2376",
+        "image_reference": "registry.example/worker@sha256:" + "a" * 64,
+        "image_id": "sha256:" + "b" * 64,
+        "runtime_platform": "linux/amd64",
+        "cli_artifact_lock_sha256": "c" * 64,
+    }
+    task = SimpleNamespace(
+        id=12,
+        project_id=100,
+        ci_failure_run_id=None,
+        trigger_source="manual",
+        rendered_prompt="Prompt",
+        status=TaskStatus.RUNNING,
+        cancel_requested_at=None,
+        worker_profile_snapshot=SimpleNamespace(
+            harness_config_snapshot={"v2_worker_image_identity": identity}, harness_key="pi"
+        ),
+    )
+    issue = SimpleNamespace(id=1, merge_request_iid=None, merge_request_url=None, target_branch="main")
+    runtime = TaskWorkerRuntime(
+        image="worker:mutable-tag",
+        codegraph_enabled=False,
+        volume_mounts=[],
+        environment={},
+        pre_script="",
+        post_script="",
+        docker_host="tcp://worker.example:2376",
+    )
+    worker = MagicMock()
+    worker._build_previous_task_summaries = AsyncMock(return_value="")
+    worker._create_mr_if_needed = MagicMock(return_value=(None, None))
+    db = MagicMock()
+    db.commit = AsyncMock()
+    bundle = SimpleNamespace(
+        contract_version="codify.worker.harness/v2",
+        manifest={"worker_image_identity": identity},
+    )
+    observed = {**identity, "image_id": "sha256:" + "d" * 64}
+    settings = SimpleNamespace(worker_skip_image_pull=True, worker_network="bridge")
+
+    with (
+        patch("app.core.worker_task_lifecycle.finalize_pre_container_cancellation", new=AsyncMock(return_value=False)),
+        patch("app.core.worker_task_lifecycle.load_task_worker_runtime", new=AsyncMock(return_value=runtime)),
+        patch("app.core.worker_task_lifecycle.build_issue_workspace_paths", return_value=SimpleNamespace(issue_root=str(tmp_path))),
+        patch("app.core.worker_task_lifecycle.load_bound_runtime_bundle", new=AsyncMock(return_value=bundle)),
+        patch("app.core.worker_task_lifecycle.inspect_v2_worker_image_identity", return_value=observed),
+    ):
+        with pytest.raises(RuntimeError, match="identity changed"):
+            await create_execute_container(
+                worker, db, settings=settings, task=task, issue=issue, sudo_gl=None
+            )
+
+    worker.docker.create_container.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_v2_execution_rejects_bundle_evidence_mismatch_before_container(tmp_path):
+    task = SimpleNamespace(
+        id=12, project_id=100, ci_failure_run_id=None, trigger_source="manual", rendered_prompt="Prompt",
+        status=TaskStatus.RUNNING, cancel_requested_at=None,
+        worker_profile_snapshot=SimpleNamespace(
+            harness_config_snapshot={
+                "v2_worker_image_identity": _V2_WORKER_IMAGE_IDENTITY,
+                "v2_harness_verification_evidence": _V2_HARNESS_EVIDENCE,
+            }, harness_key="claude",
+        ),
+    )
+    issue = SimpleNamespace(id=1, merge_request_iid=None, merge_request_url=None, target_branch="main")
+    runtime = TaskWorkerRuntime(image="worker:mutable-tag", codegraph_enabled=False, volume_mounts=[], environment={}, pre_script="", post_script="")
+    worker, db = MagicMock(), MagicMock()
+    worker._create_mr_if_needed.return_value = (None, None)
+    worker._build_previous_task_summaries = AsyncMock(return_value="")
+    bundle = SimpleNamespace(
+        contract_version="codify.worker.harness/v2",
+        manifest={
+            "worker_image_identity": _V2_WORKER_IMAGE_IDENTITY,
+            "harness_verification_evidence": {**_V2_HARNESS_EVIDENCE, "generation": 2},
+        },
+    )
+    settings = SimpleNamespace(worker_skip_image_pull=True, worker_network="bridge")
+    with (
+        patch("app.core.worker_task_lifecycle.finalize_pre_container_cancellation", new=AsyncMock(return_value=False)),
+        patch("app.core.worker_task_lifecycle.load_task_worker_runtime", new=AsyncMock(return_value=runtime)),
+        patch("app.core.worker_task_lifecycle.build_issue_workspace_paths", return_value=SimpleNamespace(issue_root=str(tmp_path))),
+        patch("app.core.worker_task_lifecycle.load_bound_runtime_bundle", new=AsyncMock(return_value=bundle)),
+    ):
+        with pytest.raises(RuntimeError, match="Harness verification evidence does not match"):
+            await create_execute_container(worker, db, settings=settings, task=task, issue=issue, sudo_gl=None)
+    worker.docker.create_container.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -300,6 +518,8 @@ async def test_create_execute_container_freeform_defers_mr_and_omits_mr_iid(tmp_
         worker_image="old-worker:latest",
         worker_skip_image_pull=False,
         worker_network="bridge",
+        docker_host="unix:///var/run/docker.sock",
+        harness_execution_mode="dual_canary",
     )
     db = MagicMock()
     db.commit = AsyncMock()
@@ -307,27 +527,7 @@ async def test_create_execute_container_freeform_defers_mr_and_omits_mr_iid(tmp_
     db.get = AsyncMock(return_value=None)
     db.refresh = AsyncMock()
 
-    async def _mock_execute(statement, *args, **kwargs):
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-        mock_result.scalars.return_value.all.return_value = []
-        return mock_result
-
-    db.execute = AsyncMock(side_effect=_mock_execute)
-    bundle = SimpleNamespace(
-        digest="d" * 64,
-        contract_version="codify.worker.harness/v1",
-        manifest={
-            "archive_manifest_digest": "m" * 64,
-            "adapters": {"claude": {"version": "1.0.0", "digest": "a" * 64}},
-        },
-        bundle_bytes=b"runtime-bundle",
-    )
-    attempt = SimpleNamespace(
-        attempt_id="task-12-attempt-1",
-        harness_key="claude",
-        adapter_version="1.0.0",
-    )
+    attempt = _bind_v2_runtime(task, db)
 
     with (
         patch(
@@ -337,10 +537,6 @@ async def test_create_execute_container_freeform_defers_mr_and_omits_mr_iid(tmp_
         patch(
             "app.core.worker_task_lifecycle.build_issue_workspace_paths",
             return_value=SimpleNamespace(issue_root=str(tmp_path)),
-        ),
-        patch(
-            "app.core.worker_task_lifecycle.load_bound_runtime_bundle",
-            new=AsyncMock(return_value=bundle),
         ),
         patch(
             "app.core.worker_task_lifecycle.create_task_attempt",
@@ -383,6 +579,7 @@ def _kit_runtime_and_settings():
         worker_skip_image_pull=False,
         worker_network="bridge",
         worker_runtime_readiness_ttl_seconds=900,
+        harness_execution_mode="dual_canary",
     )
     return runtime, settings
 
@@ -422,28 +619,8 @@ def _kit_failure_execute_fixtures(runtime, settings, tmp_path):
     db.get = AsyncMock(return_value=None)
     db.refresh = AsyncMock()
 
-    async def _mock_execute(statement, *args, **kwargs):
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-        mock_result.scalars.return_value.all.return_value = []
-        return mock_result
-
-    db.execute = AsyncMock(side_effect=_mock_execute)
-    bundle = SimpleNamespace(
-        digest="d" * 64,
-        contract_version="codify.worker.harness/v1",
-        manifest={
-            "archive_manifest_digest": "m" * 64,
-            "adapters": {"claude": {"version": "1.0.0", "digest": "a" * 64}},
-        },
-        bundle_bytes=b"runtime-bundle",
-    )
-    attempt = SimpleNamespace(
-        attempt_id="task-12-attempt-1",
-        harness_key="claude",
-        adapter_version="1.0.0",
-    )
-    return worker, db, task, issue, bundle, attempt
+    attempt = _bind_v2_runtime(task, db)
+    return worker, db, task, issue, attempt
 
 
 @pytest.mark.asyncio
@@ -455,7 +632,7 @@ async def test_create_execute_container_missing_bind_source_raises_structured_ki
     from app.core.worker_runtime_readiness import WorkerRuntimeUnavailableError
 
     runtime, settings = _kit_runtime_and_settings()
-    worker, db, task, issue, bundle, attempt = _kit_failure_execute_fixtures(
+    worker, db, task, issue, attempt = _kit_failure_execute_fixtures(
         runtime, settings, tmp_path
     )
     worker.docker.create_container.side_effect = RuntimeError(
@@ -477,10 +654,6 @@ async def test_create_execute_container_missing_bind_source_raises_structured_ki
         patch(
             "app.core.worker_task_lifecycle.build_issue_workspace_paths",
             return_value=SimpleNamespace(issue_root=str(tmp_path)),
-        ),
-        patch(
-            "app.core.worker_task_lifecycle.load_bound_runtime_bundle",
-            new=AsyncMock(return_value=bundle),
         ),
         patch(
             "app.core.worker_task_lifecycle.create_task_attempt",
@@ -515,7 +688,7 @@ async def test_create_execute_container_kit_error_recheck_ready_keeps_original_e
     """F2 §13.4: when the re-probe keeps ready, the original create error is kept
     as a Profile/image runtime error instead of a structured Kit error."""
     runtime, settings = _kit_runtime_and_settings()
-    worker, db, task, issue, bundle, attempt = _kit_failure_execute_fixtures(
+    worker, db, task, issue, attempt = _kit_failure_execute_fixtures(
         runtime, settings, tmp_path
     )
     original_error = RuntimeError(
@@ -533,10 +706,6 @@ async def test_create_execute_container_kit_error_recheck_ready_keeps_original_e
         patch(
             "app.core.worker_task_lifecycle.build_issue_workspace_paths",
             return_value=SimpleNamespace(issue_root=str(tmp_path)),
-        ),
-        patch(
-            "app.core.worker_task_lifecycle.load_bound_runtime_bundle",
-            new=AsyncMock(return_value=bundle),
         ),
         patch(
             "app.core.worker_task_lifecycle.create_task_attempt",
@@ -565,7 +734,7 @@ async def test_create_execute_container_non_kit_error_does_not_recheck(tmp_path)
     """F2: an unrelated create error (image/network) must not trigger the Kit
     re-probe and must propagate unchanged."""
     runtime, settings = _kit_runtime_and_settings()
-    worker, db, task, issue, bundle, attempt = _kit_failure_execute_fixtures(
+    worker, db, task, issue, attempt = _kit_failure_execute_fixtures(
         runtime, settings, tmp_path
     )
     worker.docker.create_container.side_effect = RuntimeError(
@@ -581,10 +750,6 @@ async def test_create_execute_container_non_kit_error_does_not_recheck(tmp_path)
         patch(
             "app.core.worker_task_lifecycle.build_issue_workspace_paths",
             return_value=SimpleNamespace(issue_root=str(tmp_path)),
-        ),
-        patch(
-            "app.core.worker_task_lifecycle.load_bound_runtime_bundle",
-            new=AsyncMock(return_value=bundle),
         ),
         patch(
             "app.core.worker_task_lifecycle.create_task_attempt",
@@ -619,7 +784,7 @@ async def test_prepare_container_inputs_uses_only_snapshot_custom_environment():
             model="claude-sonnet-4-6",
             max_turns=32,
             system_prompt=None,
-            api_key="encrypted-secret",
+            **{"api_key": "fixture-value"},
         )
     )
     worker._resolve_commit_author = AsyncMock(return_value=("Author", "author@example.com"))

@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -7,6 +7,7 @@ from app.core.worker_kit import BAKED_IMAGE_MODE, MOUNTED_KIT_MODE
 from app.core.worker_profiles import (
     WorkerProfileValidationError,
     build_worker_profile_environment_map,
+    inspect_v2_worker_image_identity,
     parse_worker_profile_mounts,
     resolve_provider_for_issue,
     select_snapshot_run_instruction_template,
@@ -245,6 +246,103 @@ def test_worker_profile_docker_target_is_admin_only_and_snapshotted():
     snapshot = snapshot_from_profile(SimpleNamespace(id=44), profile)
     assert snapshot.docker_host == "tcp://arm-worker:2376"
     assert snapshot.docker_tls_key == "/certs/key.pem"
+
+
+def test_snapshot_explicitly_freezes_requested_v2_contract_from_harness_runtime(monkeypatch):
+    profile = SimpleNamespace(
+        id=9,
+        name="V2 Worker",
+        image="worker:latest",
+        volume_mounts=[],
+        environment_variables=[],
+        pre_script="",
+        post_script="",
+        default_execute_run_instruction_template="execute {{user_prompt}}",
+        default_plan_run_instruction_template="plan {{user_prompt}}",
+        ci_auto_repair_run_instruction_template="repair {{issue_title}}",
+        default_harness_key="pi",
+        harness_constraints={},
+        harness_options={},
+        harness_runtimes={
+            "pi": {"source": "image", "contract_version": "codify.worker.harness/v2"}
+        },
+        v2_worker_image_identity={
+            "schema": "codify.worker-image-identity/v1",
+            "daemon_key": "tcp://worker.example:2376",
+            "image_reference": "registry.example/worker@sha256:" + "a" * 64,
+            "image_id": "sha256:" + "b" * 64,
+            "runtime_platform": "linux/amd64",
+            "cli_artifact_lock_sha256": "c" * 64,
+        },
+        verified_runtime_configuration_digest="verified",
+        v2_worker_image_identity_generation=0,
+        v2_harness_verification_evidence={
+            "pi": {
+                "schema": "codify.worker-harness-verification/v1",
+                "harness_key": "pi",
+                "contract_version": "codify.worker.harness/v2",
+                "adapter": {"version": "test", "digest": "d" * 64},
+                "verification_input_digest": "verified",
+                "image_identity": {
+                    "schema": "codify.worker-image-identity/v1",
+                    "daemon_key": "tcp://worker.example:2376",
+                    "image_reference": "registry.example/worker@sha256:" + "a" * 64,
+                    "image_id": "sha256:" + "b" * 64,
+                    "runtime_platform": "linux/amd64",
+                    "cli_artifact_lock_sha256": "c" * 64,
+                },
+                "generation": 0,
+                "verified_at": "2026-08-24T00:00:00+00:00",
+            }
+        },
+    )
+    monkeypatch.setattr(
+        "app.core.worker_profiles.current_runtime_verification_digest", lambda *_args, **_kwargs: "verified"
+    )
+
+    snapshot = snapshot_from_profile(SimpleNamespace(id=44), profile)
+
+    assert snapshot.harness_config_snapshot["requested_runtime_contract_version"] == (
+        "codify.worker.harness/v2"
+    )
+    assert snapshot.harness_config_snapshot["v2_worker_image_identity"]["image_reference"].endswith(
+        "a" * 64
+    )
+    assert snapshot.harness_config_snapshot["v2_harness_verification_evidence"]["harness_key"] == "pi"
+
+    profile.v2_harness_verification_evidence = {}
+    with pytest.raises(WorkerProfileValidationError, match="no verified evidence"):
+        snapshot_from_profile(SimpleNamespace(id=45), profile)
+
+    profile.v2_harness_verification_evidence = {
+        "pi": {
+            **snapshot.harness_config_snapshot["v2_harness_verification_evidence"],
+            "generation": 99,
+        }
+    }
+    with pytest.raises(WorkerProfileValidationError, match="generation is stale"):
+        snapshot_from_profile(SimpleNamespace(id=46), profile)
+
+
+def test_v2_image_identity_rejects_ambiguous_repo_digests_and_never_uses_tag():
+    image = MagicMock()
+    image.attrs = {
+        "RepoDigests": [
+            "registry.example/worker@sha256:" + "a" * 64,
+            "registry.example/worker@sha256:" + "b" * 64,
+        ],
+        "Id": "sha256:" + "c" * 64,
+        "Os": "linux",
+        "Architecture": "amd64",
+    }
+    client = MagicMock()
+    client.client.images.get.return_value = image
+    with patch("app.core.worker_profiles.DockerClientWrapper", return_value=client):
+        with pytest.raises(WorkerProfileValidationError, match="exactly one repository digest"):
+            inspect_v2_worker_image_identity(
+                SimpleNamespace(host="tcp://worker.example:2376", tls_ca=None),
+                "registry.example/worker:reviewed",
+            )
 
 
 def test_system_docker_profile_snapshots_resolved_deployment_target():

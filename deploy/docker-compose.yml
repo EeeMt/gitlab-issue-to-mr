@@ -138,12 +138,10 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://codify:codify_password@postgres:5432/codify
       - AUTO_MIGRATE=false
-    command:
-      - python3
-      - -m
-      - alembic
-      - upgrade
-      - ${MIGRATION_TARGET:?set MIGRATION_TARGET to the reviewed Alembic revision}
+      # Blank is harmless during ordinary `docker compose config`; the
+      # migration-owner command rejects blank/head/unreviewed targets at run.
+      - MIGRATION_TARGET=${MIGRATION_TARGET:-}
+    command: ["/usr/local/bin/run-migration-owner"]
     depends_on:
       postgres:
         condition: service_healthy

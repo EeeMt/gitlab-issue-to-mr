@@ -88,6 +88,7 @@ async def load_shared_configuration(
     db: AsyncSession,
     *,
     for_update: bool = False,
+    populate_existing: bool = False,
 ) -> WorkerSharedConfigurationContext:
     """Load the shared configuration singleton and its environment variables.
 
@@ -99,7 +100,10 @@ async def load_shared_configuration(
     one consistent baseline. The lock is released at commit; callers must never
     hold it across remote Docker I/O.
     """
-    row = await db.get(WorkerSharedConfiguration, 1, with_for_update=for_update)
+    row = await db.get(
+        WorkerSharedConfiguration, 1, with_for_update=for_update,
+        populate_existing=populate_existing,
+    )
     if row is None:
         return WorkerSharedConfigurationContext()
     result = await db.execute(

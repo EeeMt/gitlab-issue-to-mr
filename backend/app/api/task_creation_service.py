@@ -421,6 +421,14 @@ async def create_task_record(
             detail="No prompt provided and issue has no description",
         )
 
+    # The only paths that need both locks use one global order: Shared
+    # configuration, then the selected Profile.  Shared PATCH takes that same
+    # order while invalidating Profile verification evidence.  Do this before
+    # resolving the profile (which SELECTs it FOR UPDATE), otherwise a task
+    # create can deadlock with a shared PATCH (Profile -> Shared versus Shared
+    # -> Profile).
+    shared = await load_shared_configuration(db, for_update=True)
+
     try:
         worker_profile = await services.resolve_worker_profile_for_issue(
             db,
@@ -477,10 +485,9 @@ async def create_task_record(
 
     # Runtime readiness gate (§12): refuse to create a Task for a Kit locator
     # that is known unavailable. Unknown/expired readiness never blocks. The
-    # shared baseline is loaded once under lock and handed to both the gate and
-    # the frozen snapshot below so a concurrent shared PATCH cannot interleave
-    # between the two reads (§11.2).
-    shared = await load_shared_configuration(db, for_update=True)
+    # already-locked shared baseline is handed to both the gate and the frozen
+    # snapshot below so a concurrent shared PATCH cannot interleave between the
+    # two reads (§11.2).
     readiness = await readiness_for_profile(
         db,
         worker_profile,

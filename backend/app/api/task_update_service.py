@@ -10,13 +10,13 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.api.task_operations import require_task_execution_writer
 from app.api.task_responses import (
     attach_task_worker_snapshot,
     loaded_task_relationship,
     refresh_task_response_state,
     serialize_task,
 )
-from app.api.task_operations import require_task_execution_writer
 from app.api.task_schemas import UpdateTaskRequest
 from app.config import get_effective_settings
 from app.core.harness_registry import HarnessRegistryError
@@ -166,6 +166,14 @@ async def update_task_record(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Task has no worker profile snapshot",
             )
+        # Every writer that needs both rows follows the same global order:
+        # Shared configuration, then the selected Profile.  In particular,
+        # get_task_with_access_check may already have put the Task's current
+        # Profile in this session's identity map before a concurrent Profile
+        # PATCH commits.  Lock Shared first, then force a locked re-read of the
+        # target Profile so readiness and snapshotting cannot use that stale
+        # identity-map value.
+        shared = await load_shared_configuration(db, for_update=True)
         new_profile = await db.get(
             WorkerProfile,
             request.worker_profile_id,
@@ -173,6 +181,8 @@ async def update_task_record(
                 selectinload(WorkerProfile.environment_variables),
                 selectinload(WorkerProfile.default_skills),
             ],
+            with_for_update=True,
+            populate_existing=True,
         )
         if new_profile is None:
             raise HTTPException(
@@ -194,10 +204,9 @@ async def update_task_record(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"Worker profile '{new_profile.name}' is disabled",
             )
-        # Load the shared baseline once under lock and hand the same context to
-        # both the readiness gate and the frozen snapshot so a concurrent shared
-        # PATCH cannot interleave between the two reads (§11.2).
-        shared = await load_shared_configuration(db, for_update=True)
+        # Hand the same locked Shared context to both the readiness gate and the
+        # frozen snapshot so a concurrent shared PATCH cannot interleave between
+        # the two reads (§11.2).
         readiness = await readiness_for_profile(
             db,
             new_profile,
