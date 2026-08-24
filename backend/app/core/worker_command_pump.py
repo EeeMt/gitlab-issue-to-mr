@@ -77,8 +77,9 @@ async def run_pump_until_task_ends(
     session_factory,
     owner: str,
     interval_seconds: float = 2.0,
+    startup_timeout_seconds: float = 300.0,
 ) -> int:
-    """Drive the command pump while ``task_id`` is RUNNING (plan §4.7).
+    """Drive the command pump from scheduler handoff until task termination.
 
     The worker task thread launches this alongside container monitoring: each
     cycle claims an accepting attempt for this exact task, promotes a
@@ -86,28 +87,45 @@ async def run_pump_until_task_ends(
     front in strict order. Returns the number of commands processed.
     """
     processed = 0
+    startup_deadline = asyncio.get_running_loop().time() + startup_timeout_seconds
     while True:
         async with session_factory() as db:
-            still_running = await db.scalar(select(Task.status).where(Task.id == task_id))
-            if still_running != TaskStatus.RUNNING:
+            status = await db.scalar(select(Task.status).where(Task.id == task_id))
+            if status is None or status in {
+                TaskStatus.COMPLETED,
+                TaskStatus.FAILED,
+                TaskStatus.CANCELLED,
+            }:
                 break
+            if status in {TaskStatus.PENDING, TaskStatus.QUEUED}:
+                # Scheduler starts the task thread before WorkerExecutor's
+                # causal RUNNING commit.  Remain owned/cancellable across that
+                # handoff rather than exiting forever on the first QUEUED read.
+                if asyncio.get_running_loop().time() >= startup_deadline:
+                    logger.warning("Command pump startup timed out for task %s", task_id)
+                    break
+                pass
+            elif status != TaskStatus.RUNNING:
+                break
+            else:
+                async def _task_scoped_transport(frame, command=None, attempt=None, **_kw):
+                    if attempt is None or attempt.task_id != task_id:
+                        return {
+                            "status": DISPATCH_UNKNOWN,
+                            "rejection_code": "wrong_attempt",
+                        }
+                    task = await db.get(Task, task_id)
+                    return await docker_exec_control_transport(frame, attempt, task=task, db=db)
 
-            async def _task_scoped_transport(frame, command=None, attempt=None, **_kw):
-                if attempt is None or attempt.task_id != task_id:
-                    return {
-                        "status": DISPATCH_UNKNOWN,
-                        "rejection_code": "wrong_attempt",
-                    }
-                task = await db.get(Task, task_id)
-                return await docker_exec_control_transport(frame, attempt, task=task, db=db)
-
-            try:
-                cycle = await run_pump_cycle(db, owner=owner, transport=_task_scoped_transport)
-                await db.commit()
-                processed += cycle.commands_processed
-            except Exception:  # noqa: BLE001 - one bad cycle must not kill the pump
-                logger.exception("Command pump cycle failed for task %s", task_id)
-                await db.rollback()
+                try:
+                    cycle = await run_pump_cycle(db, owner=owner, transport=_task_scoped_transport)
+                    await db.commit()
+                    processed += cycle.commands_processed
+                except Exception:  # noqa: BLE001 - one bad cycle must not kill the pump
+                    logger.exception("Command pump cycle failed for task %s", task_id)
+                    await db.rollback()
+        # Do not retain a database connection while waiting for WorkerExecutor
+        # to cross the causal QUEUED/PENDING -> RUNNING edge.
         await asyncio.sleep(interval_seconds)
     return processed
 

@@ -479,6 +479,55 @@ async def test_force_close_cas_arms_closing_attempt_for_owner_reap(maker):
         assert row.awaiting_follow_up_turn is False
 
 
+@pytest.mark.asyncio
+async def test_pump_waits_through_queued_scheduler_handoff(monkeypatch):
+    """The scheduler may create the pump before WorkerExecutor commits RUNNING."""
+    from app.core import worker_command_pump as module
+    from app.models import TaskStatus
+
+    statuses = iter([TaskStatus.QUEUED, TaskStatus.RUNNING, TaskStatus.COMPLETED])
+    cycles = []
+    closed_contexts = []
+
+    class Db:
+        async def scalar(self, _statement):
+            return next(statuses)
+
+        async def get(self, *_args):
+            return object()
+
+        async def commit(self):
+            return None
+
+        async def rollback(self):
+            return None
+
+    class Factory:
+        def __call__(self):
+            class Context:
+                async def __aenter__(self):
+                    return Db()
+
+                async def __aexit__(self, *_args):
+                    closed_contexts.append(True)
+                    return False
+            return Context()
+
+    async def cycle(*_args, **_kwargs):
+        cycles.append(True)
+        return module.PumpCycleResult(attempts_seen=0, commands_processed=0, commands_updated=0)
+
+    monkeypatch.setattr(module, "run_pump_cycle", cycle)
+    processed = await module.run_pump_until_task_ends(
+        1, session_factory=Factory(), owner="test", interval_seconds=0
+    )
+    assert processed == 0
+    assert cycles == [True]
+    # The QUEUED wait occurs after the first context exited; a backlog cannot
+    # pin one DB connection per scheduler thread during startup.
+    assert len(closed_contexts) == 3
+
+
 async def test_dispatch_one_command_returns_final_status(maker):
     _, attempt_id, command_ids = await _seed_task_with_commands(maker, count=1)
     async with maker() as db:
