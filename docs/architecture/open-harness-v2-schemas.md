@@ -33,7 +33,7 @@ verify_runtime()
 detect_capabilities()
 prepare_config(snapshot)
 materialize_skills(skills)
-start(request)            # 启动 Bridge，返回本地 control endpoint（Pi RPC / OpenCode HTTP）
+start(request)            # 启动 Bridge；Pi 返回本地 command control endpoint
 send_command(command)     # 可选：按 capability 接受或拒绝；Pi 支持 steer/follow_up
 wait()                    # 阻塞直到 Harness settled/failed（Pi agent_settled / OpenCode session.idle）
 normalize_result()        # 产出 codify.worker.result/v2
@@ -42,8 +42,8 @@ run_text()?               # 可选，Claude/Codex 兼容路径
 ```
 
 **冻结要点**
-- `start` 必须返回本地控制端点（`rpc_stdio` 的 stdin/stdout 句柄、`server_http` 的 `127.0.0.1` 随机端口 + Task 私有认证值）。端口/认证只保存在容器内，不进入用户日志。
-- `send_command` 对未声明 capability 的 Harness 确定性拒绝（Claude/Codex）。
+- Pi 的 `start` 必须返回本地 command control endpoint（`rpc_stdio` 的 stdin/stdout 句柄）；OpenCode 的 Task-local Server 端口与私有认证值仅供其执行 Bridge 使用，不是 public command endpoint。端口/认证只保存在容器内，不进入用户日志。
+- `send_command` 对未声明 capability 的 Harness 确定性拒绝（OpenCode/Claude/Codex）。
 - `wait()` 必须结合事件与最终状态，不能以单一 busy/idle 轮询判定 settled（OpenCode 以 `session.idle` + 最终 assistant message + session status 共同判定；Pi 以 `agent_settled` 为准）。
 - `normalize_result()` 产出 §5 的 result v2；失败必须带 `failure.kind` 与 raw archive locator。
 
@@ -69,7 +69,7 @@ run_text()?               # 可选，Claude/Codex 兼容路径
     "adapter_version": "2.0.0",
     "cli_version": "0.84.2",
     "control_transport": { "kind": "rpc_stdio", "protocol": "pi-rpc" },
-    "model_protocols": ["anthropic_messages", "openai_responses", "openai_chat_completions"]
+    "model_protocols": ["anthropic_messages"]
   },
   "payload": { … },
   "raw_ref": { "stream": "harness-events/pi/…", "line": 12 }
@@ -82,8 +82,8 @@ run_text()?               # 可选，Claude/Codex 兼容路径
 
 | Harness | `control_transport.kind` | `control_transport.protocol` | `model_protocols` |
 |---|---|---|---|
-| Pi | `rpc_stdio` | `pi-rpc` | `[anthropic_messages, openai_responses, openai_chat_completions]` |
-| OpenCode | `server_http` | `opencode-server` | `[anthropic_messages, openai_responses, openai_chat_completions]` |
+| Pi | `rpc_stdio` | `pi-rpc` | `[anthropic_messages]` |
+| OpenCode | `server_http` | `opencode-server` | `[anthropic_messages]` |
 | Claude | `cli_stream_json` | `claude-json` | `[anthropic_messages]` |
 | Codex | `cli_jsonl` | `codex-jsonl` | `[openai_responses]` |
 
@@ -97,7 +97,7 @@ run_text()?               # 可选，Claude/Codex 兼容路径
 
 | Type | 必填字段 | 语义 | 关联 command_id |
 |---|---|---|---|
-| `control.command.delivered` | `command_id`、`payload_digest`、`sequence_no`、`delivered_at` | Harness 原生接口返回成功 ACK（Pi `success:true` / OpenCode 204） | **必须** |
+| `control.command.delivered` | `command_id`、`payload_digest`、`sequence_no`、`delivered_at` | Pi 原生 `steer` / `follow_up` 返回 `success:true` ACK | **必须** |
 | `control.command.rejected` | `command_id`、`payload_digest`、`sequence_no`、`rejection_code`、`rejection_message` | 原生拒绝 / Task 已 closing / 确定性 transport 错误 | **必须** |
 | `control.queue.updated` | `queue`（内容数组） | attempt 级审计事件，Pi 原生 `queue_update` 的投影 | **不强制**（见 3.4 审计边界） |
 
@@ -113,11 +113,12 @@ run_text()?               # 可选，Claude/Codex 兼容路径
 
 ### 3.3 `delivered` = Harness 原生 ACK 的精确语义（冻结）
 
-`delivered`（以及 command API 的 `delivered` 状态）**精确定义为**：Harness 原生接口（RPC/HTTP）已返回成功 ACK——对 Pi 是 `steer success:true` / `follow_up success:true`，对 OpenCode 是 `prompt_async` 的 HTTP 204。它**不保证**该文本已被模型消费、执行或改变结果。
+`delivered`（以及 command API 的 `delivered` 状态）**精确定义为**：当前唯一 command-capable
+Harness Pi 的原生接口已返回成功 ACK（`steer success:true` / `follow_up success:true`）。它**不保证**该文本已被模型消费、执行或改变结果。
 
 - UI 对 `delivered` 显示 **“Harness 已接收”**，不显示“已执行”。
 - 真正的 settled 是 Pi `agent_settled` / OpenCode `session.idle`；`delivered` 从未等于 settled。
-- 原生拒绝、Task 已关闭控制入口、或确定性 transport 错误 → `rejected`。
+- 原生确定性拒绝或 Task 已关闭控制入口 → `rejected`。跨 native-send 边界的未知结果不是拒绝，必须成为 `outcome_unknown`。
 
 ### 3.4 queue update 无 command_id 时的审计边界（冻结）
 
@@ -166,13 +167,16 @@ Backend → 运行中 Harness 的控制命令。首发仅文本；只支持 `ste
 ### 4.1 Command 状态机（冻结）
 
 ```
-queued --(API 创建)-->*
-queued --(pump CAS)--> delivered   # 原生 ACK
-queued --(pump CAS)--> rejected    # 原生拒绝 / early closing / 确定性 error
+queued --(pump claim/CAS)--> dispatching
+dispatching --(native ACK)--> delivered
+dispatching --(native deterministic reject)--> rejected
+dispatching --(proven pre-send failure)--> queued
+dispatching --(cross-send result unknown/recovery)--> outcome_unknown
 ```
 
-- `queued` 是 API 接受并写库后的控制面状态，只由 API 创建。
-- `queued -> delivered|rejected` **只由 command pump 以 CAS 写入**；`delivered`/`rejected` 是**不可变终态**，不可重开。
+- `queued` 是 API 接受并写库后的控制面状态，只由 API 创建；`dispatching` 是 pump 在 native send 前的持久化 crash boundary。
+- command pump 是唯一状态 writer。它只在 Bridge 能证明尚未 native send 时允许 `dispatching -> queued`；普通 transport exception 不能推断 pre-send，必须 fail closed。
+- `delivered`、`rejected` 和 `outcome_unknown` 是**不可变终态**，不可重开；恢复 owner 遇到 `dispatching` 必须进入 `outcome_unknown`，不得重放。
 - Canonical control event、projector、SSE 日志**不参与** command 行状态写入。
 - 同一 `command_id` 重投不得产生两条用户消息。
 
@@ -189,16 +193,27 @@ queued --(pump CAS)--> rejected    # 原生拒绝 / early closing / 确定性 er
 | `not_authorized` | Issue 访问权限不足 |
 | `payload_too_large` | 文本超过最大长度 |
 | `invalid_command_type` | type 非 `steer`/`follow_up` |
-| `delivery_outcome_unknown` | Bridge 崩溃后上次投递结果不确定，拒绝再次注入 |
+| `delivery_outcome_unknown` | 跨 native-send 边界后 ACK/拒绝结果不确定；状态为 `outcome_unknown`，拒绝再次注入 |
 
-`delivery_outcome_unknown`（冻结）：Bridge 在原生发送前 fsync 写入 `command_id -> dispatching` journal，ACK 后写入结果。若发送后崩溃导致结果不确定，返回 `rejected`（`delivery_outcome_unknown`）——**不得冒险再次注入**。
+`delivery_outcome_unknown`（冻结）：pump 在原生发送前持久化 `command_id -> dispatching`。若能证明 native send 尚未发生，才允许回到 `queued`；若发送后崩溃或发送边界无法证明，写入**终态** `outcome_unknown`，其 public rejection code 为 `delivery_outcome_unknown`——**不得冒险再次注入**。
+
+`outcome_unknown` 是 command 行终态及 TaskLog 审计 metadata，不是第四个 Canonical Event v2 type；因此
+它不能被 projector 用来回写 command 行。
+
+**持久化时间与 public projection（与 migration 075 一致）**：command 行保留
+`created_at`、`last_attempt_at`、`dispatch_started_at`、`native_request_id`、`native_sent_at`、`native_ack_at`、
+`outcome_unknown_at`、`delivered_at`、`rejected_at`。`native_request_id` 与 `native_sent_at` 是内部诊断/恢复
+证据，不进入 public projection。列表/单项 API 固定投影 `command_id`、`sequence_no`、`type`、`status`、
+`created_at`、`dispatch_started_at`、`native_ack_at`、`outcome_unknown_at`、`delivered_at`、`rejected_at`、
+`rejection_code`、`rejection_message`；对 `outcome_unknown` 强制公开安全 code
+`delivery_outcome_unknown`，不暴露容器 Bridge 的原始诊断文字。
 
 ### 4.3 Bridge control endpoint framing 与最大文本长度（冻结）
 
 - **传输 framing**：Worker 通过 `docker exec` 调用镜像内**固定的** `control_client.py`（绝不拼接用户文本到 shell 命令）；文本经 **stdin JSON** 传输，client 连接 **Task 私有 Unix socket** 并等待 Bridge ACK。
 - **Bridge 控制端点**：协议与 §6.3 一致。请求体为 `codify.worker.command/v2` 信封，响应为 `{accepted:true}` 表示原生 ACK 已收到（→ delivered）或 `{rejected:true, code, message}`。
-- **最大文本长度（冻结）**：`payload.text` 最大 **4,000 字符**（UTF-16 code units）。超长在 API 层确定性 `payload_too_large` 拒绝。该上限满足 Pi/OpenCode 的 steer/follow-up 文本需求，且避免控制端点帧过大。
-- **attempt 内严格顺序（冻结）**：同一 attempt 任一时刻只有一个 dispatcher 处理队首；前一条未进入 `delivered|rejected` 终态时**不得**领取后一条。不能用 command 行级 `SKIP LOCKED` 越过队首。
+- **最大文本长度（冻结）**：`payload.text` 最大 **4,000 字符**（UTF-16 code units）。超长在 API 层确定性 `payload_too_large` 拒绝。该上限满足当前 Pi steer/follow-up 文本需求，且避免控制端点帧过大。
+- **attempt 内严格顺序（冻结）**：同一 attempt 任一时刻只有一个 dispatcher 处理队首；前一条未进入 `delivered|rejected|outcome_unknown` 终态时**不得**领取后一条。不能用 command 行级 `SKIP LOCKED` 越过队首。
 
 ---
 
@@ -217,7 +232,7 @@ queued --(pump CAS)--> rejected    # 原生拒绝 / early closing / 确定性 er
     "adapter_version": "2.0.0",
     "cli_version": "0.84.2",
     "control_transport": { "kind": "rpc_stdio", "protocol": "pi-rpc" },
-    "model_protocols": ["anthropic_messages", "openai_responses", "openai_chat_completions"]
+    "model_protocols": ["anthropic_messages"]
   },
   "session_id": "…",
   "model": "deepseek-v4-flash",
@@ -254,7 +269,7 @@ queued --(pump CAS)--> rejected    # 原生拒绝 / early closing / 确定性 er
                   "artifact_version": "0.84.2", "artifact_sha256": "906fbe78…" },
       "adapter": { "version": "2.0.0", "digest": "<sha256>" },
       "control_transport": { "kind": "rpc_stdio", "protocol": "pi-rpc" },
-      "model_protocols": ["anthropic_messages", "openai_responses", "openai_chat_completions"],
+      "model_protocols": ["anthropic_messages"],
       "capabilities": { "resume": true, "task_skills": true, "usage_tokens": true,
                         "steering": true, "follow_up": true },
       "options_schema": "pi/v1"
@@ -266,7 +281,7 @@ queued --(pump CAS)--> rejected    # 原生拒绝 / early closing / 确定性 er
 
 **冻结要点**
 - `model_protocols` 与事件/结果/矩阵一致；矩阵由 manifest 能力与 Endpoint 求交集，Task 创建与 verify-runtime 都验证，未知组合 **fail closed**。
-- OpenCode 能力：`steering=false`、`follow_up=false`（但 Bridge 仍实现 control endpoint 的 capability negotiation 与 deterministic reject，证明 command plane 无需未来再改）。
+- OpenCode 能力：`steering=false`、`follow_up=false`；当前不启动可投递 command 的 control endpoint，也不产生 `control.command.delivered`。
 - 每个 Adapter 有独立 digest，共享库变更会改变所有引用它的 Adapter digest；Runtime Bundle digest 从 manifest `files` 递归计算。
 - `verify-runtime.sh` 不再写死 claude/codex case；逐 manifest Adapter 验证官方制品、版本、摘要与 Bridge self-check。
 - Registry API 只返回可展示 schema，不暴露启动命令、宿主路径或任意插件入口。
@@ -282,11 +297,11 @@ queued --(pump CAS)--> rejected    # 原生拒绝 / early closing / 确定性 er
 | 1 | event type / 必填 / 唯一终态 / 序列 | §3.1–3.3 | V1 harness_protocol.py + replay 语义 |
 | 2 | command client ID / payload digest / attempt 内 sequence / 状态机 / ACK–reject | §4 | plan §4.6–4.7 + Pi/OpenCode probe |
 | 3 | Bridge control endpoint framing / 最大文本长度 | §4.3（stdin JSON + Unix socket，4000 字符） | plan §4.7 + runner harness 结构 |
-| 4 | `delivered`=原生 ACK 精确语义 | §3.3 | Pi `steer success:true` / `follow_up success:true` / OpenCode 204 |
+| 4 | `delivered`=原生 ACK 精确语义 | §3.3 | 当前仅 Pi `steer success:true` / `follow_up success:true` |
 | 5 | queue update 无 command_id 审计边界 | §3.4 | Pi `queue_update` 无 ID |
 | 6 | attempt control gate / 单 dispatcher 严格顺序 / settled/closing/drain 竞争 | §8 | plan §4.3 / §4.7 / §5.3 |
 | 7 | OpenCode settled 判定与 crash 分类 | §8 + §5 | OpenCode `session.idle` + `abort` probe |
-| 8 | 三模型协议 Harness 兼容矩阵 | §10 | plan §6.4 |
+| 8 | 当前 Harness 协议兼容矩阵 | §10 | manifest + protocol-specific tests |
 | 9 | 20 个 benchmark 任务/统计方法 | §11 | plan §8.5 / 架构 §13 |
 
 ---
@@ -320,18 +335,18 @@ disabled → starting → accepting ⇄ closing → closed
 
 ---
 
-## 10. 三模型协议 Harness 兼容矩阵（冻结）
+## 10. 当前 Harness 协议兼容矩阵（冻结）
 
 | Harness | Anthropic Messages | OpenAI Responses | OpenAI Chat Completions |
 |---|---:|---:|---:|
-| Pi | 是 | 是 | 是 |
-| OpenCode | 是 | 是 | 是 |
+| Pi | 是 | 否 | 否 |
+| OpenCode | 是 | 否 | 否 |
 | Claude | 是 | 否 | 否 |
 | Codex | 否 | 是 | 否 |
 
 矩阵由 Runtime Bundle manifest 能力与 Endpoint `model_protocol` 求交集，Task 创建与 verify-runtime 都要验证；未知组合 fail closed。Backend/Frontend 不再维护两份不同矩阵。
 
-> **probe 边界（如实）**：openai_responses / openai_chat_completions 仅在 anthropic-messages 兼容端点实测；其余两协议需 V2 集成阶段用对应端点验证（不假设）。矩阵按上游声明冻结，行为正确性留待 Phase 2/4 真实端点 conformance。
+> **扩展边界（冻结）**：Pi/OpenCode 当前只声明并实现 `anthropic_messages`。未来增加 `openai_responses` 或 `openai_chat_completions` 前，必须以对应协议的固定 endpoint smoke 证明配置、请求路径和结果语义；不能以 Anthropic-compatible probe 推断支持。
 
 ---
 

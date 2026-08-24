@@ -239,14 +239,15 @@ control.queue.updated
 `control.queue.updated` 是 attempt 级审计事件，不强制携带 `command_id`。Pi 的原生 queue update 只有
 队列内容而没有 Codify command ID，Bridge 只有在能证明关联时才可附带 ID 或顺序，不能按文本猜测。
 
-`queued` 是 API 接受并写入数据库后的控制面状态。`delivered` 精确定义为 Harness 原生接口已经返回
-成功 ACK，即 accepted/queued/handled；它不保证该文本已经被模型消费、执行或改变结果。UI 对该状态
-显示“Harness 已接收”，不显示“已执行”。原生接口拒绝、Task 已关闭控制入口或确定性 transport 错误
-产生 `rejected`。
+`queued` 是 API 接受并写入数据库后的控制面状态。pump 先持久化 `dispatching`，然后才尝试 native
+send；只有 Bridge 能证明尚未 native send 的失败才可回到 `queued` 重试。`delivered` 精确定义为 Harness
+原生接口已经返回成功 ACK，即 accepted/queued/handled；它不保证该文本已经被模型消费、执行或改变结果。
+UI 对该状态显示“Harness 已接收”，不显示“已执行”。原生接口确定性拒绝或 closing 前后确定性 gate 拒绝
+产生 `rejected`。只有跨过 native-send 边界、结果无法证明时才产生不可重放的 `outcome_unknown`。
 
-command 状态 API/数据库是 UI 恢复的事实源。创建后的 `queued -> delivered|rejected` 只由 command pump
-以 CAS 写入；Canonical control event 只用于审计、日志和投影展示，projector 不反向修改 command 行。
-`delivered`/`rejected` 是不可变终态。
+command 状态 API/数据库是 UI 恢复的事实源。创建后的状态迁移只由 command pump 以 CAS 写入；Canonical
+control event 只用于审计、日志和投影展示，projector 不反向修改 command 行。`delivered`、`rejected` 和
+`outcome_unknown` 是不可变终态。
 
 ### 6.3 Harness Command v2
 
@@ -295,8 +296,8 @@ openai_chat_completions
 
 | Harness | Anthropic Messages | OpenAI Responses | OpenAI Chat Completions |
 |---|---:|---:|---:|
-| Pi | 是 | 是 | 是 |
-| OpenCode | 是 | 是 | 是 |
+| Pi | 是 | 否 | 否 |
+| OpenCode | 是 | 否 | 否 |
 | Claude | 是 | 否 | 否 |
 | Codex | 否 | 是 | 否 |
 
@@ -335,9 +336,7 @@ V2 manifest 是内置运行时事实，不是第三方插件契约。Backend 仍
         "protocol": "pi-rpc"
       },
       "model_protocols": [
-        "anthropic_messages",
-        "openai_responses",
-        "openai_chat_completions"
+        "anthropic_messages"
       ],
       "capabilities": {
         "resume": true,
@@ -370,8 +369,9 @@ Bridge 负责：
 - 将 Task Snapshot 生成 Pi Provider/model/config 参数；
 - 转换 Pi Agent/turn/message/tool/usage/queue/settled 事件；
 - 用 native request id 关联 `command_id`；该 ID 只用于响应关联，不能假设 Pi 会原生去重；
-- 在原生发送前 fsync 写入 `dispatching` journal，ACK 后写入结果；重投返回已有结果，若上次发送结果
-  因 Bridge 崩溃而不确定，则返回 `delivery_outcome_unknown`，不得冒险再次注入；
+- 在原生发送前持久化 `dispatching` journal，ACK/确定性拒绝后写入终态；只有能证明未 native send 的失败
+  才可重入 `queued`。若跨 native-send 边界后因 Bridge 崩溃而无法判定，则写入 `outcome_unknown`
+  （public code `delivery_outcome_unknown`），不得冒险再次注入；
 - 输出 Session ID 和最终 usage；
 - 按 attempt control gate 完成 settled/closing/drain 握手后才返回 Harness terminal。
 
@@ -463,11 +463,16 @@ sequence_no         attempt 内单调递增
 command_type        steer | follow_up
 payload             JSON，首版仅 text
 payload_digest      规范化 task/attempt/type/payload 的 SHA-256
-status              queued | delivered | rejected
+status              queued | dispatching | delivered | rejected | outcome_unknown
 created_by
 created_at
 delivery_attempts
 last_attempt_at
+dispatch_started_at
+native_request_id    internal-only native correlation ID
+native_sent_at       internal-only send-boundary evidence
+native_ack_at
+outcome_unknown_at
 delivered_at
 rejected_at
 rejection_code
@@ -495,7 +500,9 @@ Command pump 使用独立 DB session，以 attempt 级 lease 保证同一 attemp
 `sequence_no` 一次处理队首，前一条未进入终态时不得领取后一条，不能用 command 行 `SKIP LOCKED`
 让并发 pump 越过队首。pump 通过远程 Docker exec 调用容器内固定 control client；Bridge 通过 Task
 私有 Unix socket 接收并等待原生 ACK。Scheduler 恢复容器时重建 pump。API 只创建 `queued`；此后
-pump 是 command 行的唯一状态迁移 writer，且只允许 CAS `queued -> delivered|rejected`。
+pump 是 command 行的唯一状态迁移 writer：`queued -> dispatching -> delivered|rejected|outcome_unknown`；
+仅在可证明 pre-send failure 时允许 `dispatching -> queued`，恢复发现遗留 `dispatching` 必须 fail closed 为
+`outcome_unknown`，绝不重放。
 
 Bridge 收到上游 settled candidate 时使用关闭握手解决最后一条 follow-up 的竞争：Worker 在 attempt 行锁内把
 `accepting -> closing`，此后 API 不再创建新 command；pump 继续按序处理所有在锁前已分配的命令。
