@@ -4,9 +4,9 @@
 
 **本次更新：** 2026-08-24
 
-**状态：** Implementation in progress / Internal Preview
+**状态：** Source stage complete / Internal Preview; external release gates open
 
-**代码基线：** `dev`，本次盘点时 `HEAD=5b9ec15e`
+**代码基线：** `dev`；以下台账按提交历史记录，不绑定易过时的 `HEAD` 值
 
 **架构依据：** [Open-Harness V2 架构方案](../../architecture/open-harness-v2.md)
 
@@ -14,8 +14,10 @@
 
 ## 1. 当前结论
 
-本轮已经把 WP0–WP7 的主要源码改动拆成可辨识提交，WP6 以独立提交 `5b9ec15e` 完成源码层收口。
-当前可以确认的是源码、合同和本地聚焦测试进展，不能据此宣布 Open-Harness V2 已完成或可硬切。
+本轮已经把 WP0–WP7 的主要源码改动拆成可辨识提交，重复实现已收敛，源码 L1/L2 与静态门禁完成。
+最近的实现和 fixture 修复分别落在 `abb56ae3`、`cda8e6ee`、`75182c38`、`fccfb8d9`、`90771085`、
+`203ca954`，并由 `61d3ec29` 补充 rollout 证据文档。当前可以确认的是源码、合同和本地聚焦测试
+进展，不能据此宣布 Open-Harness V2 已完成或可硬切。
 
 当前状态必须保持以下边界：
 
@@ -25,6 +27,8 @@
   Bundle/Image/Kit 上由真实 Worker/Scheduler 执行的 Task/MR 证据。
 - Pi 仍只是新建 Profile 默认值的候选；默认值 migration 和 `v2_only` 硬切均未执行。
 - OMP Phase 6 不在本轮首发范围内，也不得提前进入关键路径。
+- 文档、fake Docker、离线 fixture 或本地静态检查都不能冒充真实 Host、真实 Provider、L3 导出或 L4
+  Task/MR 证据。
 
 ## 2. 本轮分阶段提交台账
 
@@ -43,10 +47,31 @@
 | `0a012fd2` `feat(pi): complete durable rpc command plane` | WP2 | migration 075；`queued -> dispatching -> delivered/rejected/outcome_unknown` journal；常驻 Pi owner；原生 ACK correlation；gate drain/close；race、EOF、socket 权限和安全日志处理 | 本次与 API 一起复核为 35 passed、13 skipped；PostgreSQL/AF_UNIX skip 尚待可用环境重跑；无真实 Pi Host steering/follow-up Task |
 | `6eda3f2c` `fix(api): sanitize command history projection` | WP2/WP7 | command history 只投影公开状态和 allowlist rejection；不返回 payload、digest、native diagnostics 或内部计数 | 已包含在上述 35 passed、13 skipped 聚焦复核中；无浏览器/真实 Host 证据 |
 | `5b9ec15e` `fix(release): verify frozen multi-harness artifacts` | WP6 | 统一 Kit/Runtime Bundle/image artifact 验证；Backend Harness matrix 成为单一事实源；Kit archive、offline archive checksum 和 portable validators fail closed；移除 offline exec 后不可达的重复 verifier | 第八轮独立 review 无 P0/P1；主线程 focused 145 passed，Ruff、py_compile、shell syntax、diff check、secret scan 均通过；未执行真实 Docker build/export、L3/L4 |
+| `abb56ae3` `feat(harness): export frozen v2 runtime bundles` | WP1/WP6 | 增加按 Task 或 Bundle digest 选择的 DB-bound frozen V2 Runtime Bundle 导出路径；生成 canonical manifest、archive 与 sidecar digest，并对写入、秘密和制品边界 fail closed | 源码与 focused tests 已纳入本轮 L1/L2；尚未在 Linux `renameat2`/真实 fsync、真实 PG、四个已验证 Task 和真实 Host 上执行 L3 导出 |
+| `cda8e6ee` `feat(harness): bind v2 tasks to verified worker identity` | WP1/WP3–WP6 | 将 V2 Task 绑定到已验证 Worker image identity、Profile evidence、Adapter version/digest 和冻结 Bundle；dual-canary、resume、release preflight 与 V1 read-only 边界收口 | 源码静态门禁完成；仍缺远程 Docker live identity inspect、真实 Profile verify-runtime、真实 image repo digest 和 L3/L4 |
+| `75182c38` `test(api): align fixtures with verified v2 snapshots` | WP2/WP5 | API writer/profile/task fixtures 对齐 V2 snapshot、identity、evidence 和 contract 约束 | fixture 修复；计入本轮 focused 验证，不等于真实 PG 并发证据 |
+| `fccfb8d9` `test(worker): align fixtures with verified v2 runtime` | WP1/WP3–WP6 | Worker profile/runtime/coverage fixtures 对齐冻结 V2 bundle、image identity 和 verification evidence | fixture 修复；计入本轮 focused 验证，不等于真实 Docker Host 证据 |
+| `90771085` `test(worker): bind freeform fixtures to v2 identity` | WP1/WP6 | Freeform delivery fixtures 绑定 V2 identity/evidence 合同 | fixture 修复；不等于真实 Git/MR delivery |
+| `203ca954` `test(release): inspect image identity in offline bundle fixtures` | WP6 | Offline bundle fixtures 覆盖 image identity 校验和 release artifact 约束 | offline fixture 证据；未执行真实 Linux renameat2/fsync 或真实制品导出 |
+| `61d3ec29` `docs(harness): document verified v2 rollout evidence` | WP8 | 补充已验证 V2 rollout 的源码阶段证据及外部门禁边界 | 文档记录，不是执行日志；L3/L4 仍未完成 |
 
 `544bbcc9` 只提供 artifact identity 与 self-check 基础；`5b9ec15e` 才是 WP6 源码层统一验证的最终提交。
 两者都不包含真实 Docker build/export，也不能替代 release payload、不可变 image digest、目标 Host 或
 真实 Task/MR 证据。
+
+本轮已列明、可复核的 focused 分组共 **288 个测试**（`117 + 139 + 13 + 19`）。不把缺少独立命令
+记录的其他测试臆计入该分组。首次全后端单测结果为 **2956 passed, 61 skipped, 7 failed, 5 errors**：
+7 个失败中已有 5 个 fixture failure 通过后续提交修复；剩余 2 个是 scheduler bind 的沙箱限制，5 个
+error 是 PostgreSQL migration 环境不可达。随后排除 migration 068 和 scheduler lifecycle 后的最终
+回归命令为：
+
+```text
+backend/.venv/bin/python -m pytest backend/tests/unit -q --ignore=backend/tests/unit/test_068_migration.py -k 'not test_scheduler_service_lifecycle'
+```
+
+结果为 **2960 passed, 61 skipped, 2 deselected, 9 warnings, 96 subtests passed**，无代码失败。
+`2 deselected` 是两个需要 scheduler 端口绑定的 lifecycle 用例，未在当前沙箱执行；migration 068、真实
+PostgreSQL 并发和其他真实 Host 门禁仍须在外部环境完成，不能将这次回归解释为 L3/L4 通过。
 
 ## 3. 工作包状态
 
@@ -66,12 +91,14 @@ secret scan 均通过。
 
 ### WP1：Runtime Bundle content-addressed truth
 
-**源码状态：已提交；发布制品状态：未验收。**
+**源码状态：已提交；导出实现已提交；发布制品状态：未验收。**
 
 - 冻结 archive、文件清单、Bundle digest、Adapter identity 和物化输入已收敛到同一字节来源。
 - CLI artifact lock 缺失、占位或不匹配时源码路径 fail closed。
 - 当前只有本地源码/单测证据；尚无带真实 CLI payload 的 release-stamped Runtime Bundle，也没有
   目标 Host 上的 Snapshot/Bundle/Adapter digest 对账。
+- `abb56ae3` 提供 DB-bound 导出工具，但尚未证明真实 PostgreSQL 选择、Linux `renameat2`/fsync 原子
+  落盘，且尚未为四个 Harness 各自使用已验证 Task 完成四份 L3 导出。
 
 ### WP2：Pi durable RPC command plane
 
@@ -131,7 +158,8 @@ secret scan 均通过。
   `git diff --check` 和 secret scan 均通过。
 
 上述结果只关闭 WP6 的 L1/L2 源码门槛。本轮没有执行真实 Docker image build、Worker Kit export、offline
-bundle export、目标 Host Profile verify-runtime 或真实 Task/MR，因此不得把 WP6 提交登记为 L3/L4。
+bundle export、Linux renameat2/fsync、目标 Host Profile verify-runtime 或真实 Task/MR，因此不得把
+WP6 提交登记为 L3/L4。
 
 ### WP7：Manifest 驱动 UI 和命令历史
 
@@ -150,14 +178,19 @@ bundle export、目标 Host Profile verify-runtime 或真实 Task/MR，因此不
 
 仍缺：
 
-1. 四个固定版本 CLI 的可发布 payload；
-2. 新的、不可变的 Worker image `repository@sha256:...`，不能使用 mutable tag；
-3. 与该 image/runtime release lock 匹配的新 Worker Kit 版本与 digest；
-4. 真实 Provider 配置下目标 Docker Host 的 Profile verify-runtime；
-5. 同一冻结 Bundle/Image/Kit 上由真实 Worker/Scheduler 执行的四 Harness Task/MR smoke；
-6. Pi 至少 20 个同类内部 Task 的原始样本、质量/时延/command race/Git/MR/archive 指标；
-7. 唯一 migration owner 的维护窗口执行记录、`v2_only` 双服务启动和 V1 read-only 验收；
-8. 新建 Profile 默认 Pi 的独立 migration/commit 和硬切记录。
+1. 真实 PostgreSQL 并发验证（包括锁顺序、CAS/generation 和 migration 环境）；
+2. 四个固定版本 CLI 的可发布 payload、provider 授权和凭据轮换记录；
+3. 新的、不可变的 Worker image `repository@sha256:...`，不能使用 mutable tag，并在远程 Docker
+   Host live inspect identity；
+4. 与该 image/runtime release lock 匹配的新 Worker Kit 版本与 digest，以及 Linux `renameat2`/fsync
+   原子导出验证；
+5. 四个 Harness 各自使用已验证 Task 完成 DB-bound Runtime Bundle L3 导出；
+6. 真实 Provider 配置下目标 Docker Host 的 Profile verify-runtime；
+7. 同一冻结 Bundle/Image/Kit 上由真实 Worker/Scheduler 执行的四 Harness Task/MR smoke，包含真实
+   Host canary、L4 delivery/MR 和 archive 对账；
+8. Pi 至少 20 个同类内部 Task 的原始样本、质量/时延/command race/Git/MR/archive 指标；
+9. 唯一 migration owner 的维护窗口执行记录、`v2_only` 双服务启动和 V1 read-only 验收；
+10. 新建 Profile 默认 Pi 的独立 migration/commit 和 `v2_only` hard cut 记录。
 
 远端已有的旧 Worker image 不包含本轮 release lock 所要求的完整 artifact manifest；旧容器、旧 probe、
 候选报告和 direct RPC 成功都不能登记为 L3/L4 或 WP8 证据。
@@ -169,7 +202,7 @@ bundle export、目标 Host Profile verify-runtime 或真实 Task/MR，因此不
 | 层级 | 必须记录的事实 | 当前状态 |
 |---|---|---|
 | L1 合同/源码设计 | architecture、schema、状态机、manifest、runbook 一致，diff 已评审 | WP0–WP7 已按责任拆分提交；WP6 经八轮独立 review 无 P0/P1 |
-| L2 本地实现验证 | 精确测试命令、passed/failed/skipped、Ruff/build/bash、secret scan；skip 单列 | 多个工作包已有聚焦测试；WP2 仍有 PostgreSQL/AF_UNIX skip；WP6 主线程复验 145 passed |
+| L2 本地实现验证 | 精确测试命令、passed/failed/skipped、Ruff/build/bash、secret scan；skip 单列 | 已列明 focused 分组 288；最终排除 migration 068 和 scheduler lifecycle 后为 2960 passed、61 skipped、2 deselected、9 warnings、96 subtests；无代码失败 |
 | L3 Release/Host 安装验证 | release manifest、Bundle digest、`repository@sha256`、Kit version/digest、平台、四 CLI version/SHA、Profile verify-runtime 结果 | 未完成 |
 | L4 真实 Task/交付验收 | 真实 Host Task/attempt ID、Provider 协议、Harness fresh/resume/cancel/failure、command ACK、usage、Skills、Git commit/MR、archive | 未完成 |
 
@@ -197,25 +230,29 @@ acceptance report path:
 以下步骤按依赖顺序执行。除 operator 凭据轮换可与源码评审并行外，不得越级把后一步结果当作前一步
 通过。
 
-1. **关闭 WP0 外部安全动作。** operator 轮换本次使用过的真实 Provider 凭据；只通过受控 secret/env
+1. **关闭 WP0 外部安全动作。** operator 轮换本次使用过的真实 Provider 凭据并完成授权；只通过受控 secret/env
    注入新值；保留不含秘密的轮换完成记录。
-2. **准备 release lock。** 补齐四个真实 CLI payload，导出版本/SHA/平台；生成非占位 Runtime Bundle
+2. **先完成环境并发门禁。** 在真实 PostgreSQL 重跑并发锁/CAS/migration；在 Linux 上验证
+   `renameat2`/fsync 原子导出。
+3. **准备 release lock。** 补齐四个真实 CLI payload，导出版本/SHA/平台；生成非占位 Runtime Bundle
    manifest；冻结 source commit、Bundle/Adapter digest。
-3. **构建不可变制品。** 构建新 Worker image 和新 Kit；记录 image `repository@sha256`、Kit
-   version/digest/platform；离线包从同一 Kit verifier 构建并校验 archive checksum。
-4. **完成 L3。** 在目标 Docker Host 按真实 Profile 执行 verify-runtime；四 Harness 必须使用同一
-   release lock；任何 placeholder、mutable tag、平台错配、缺 self-check 或 SHA 不一致都 fail closed。
-5. **完成 L4 smoke。** 用真实 Provider 由真实 Worker/Scheduler 执行 Claude、Codex、Pi、OpenCode Task；
+4. **构建不可变制品。** 构建新 Worker image 和新 Kit；记录 image `repository@sha256`、Kit
+   version/digest/platform，并在远程 Docker Host live inspect；离线包从同一 Kit verifier 构建并校验
+   archive checksum。
+5. **完成 L3。** 对四个 Harness 各自选择已验证 Task 完成 DB-bound export；在目标 Docker Host 按真实
+   Profile 执行 verify-runtime；四 Harness 必须使用同一 release lock；任何 placeholder、mutable tag、
+   平台错配、缺 self-check 或 SHA 不一致都 fail closed。
+6. **完成 L4 smoke。** 用真实 Provider 由真实 Worker/Scheduler 执行 Claude、Codex、Pi、OpenCode Task；
    对账事件、result、usage、Skills、cancel/timeout/failure、Git commit/push/MR 和 archive。Pi 额外验证
    steering/follow-up native ACK、严格顺序、terminal/cancel race。
-6. **执行 Pi 20-task acceptance。** 使用可比任务集与固定配置，保留全部原始样本和失败；检查质量非劣、
+7. **执行 Pi 20-task acceptance。** 使用可比任务集与固定配置，保留全部原始样本和失败；检查质量非劣、
    command latency、protocol error、delivery 和资源指标。
-7. **完成产品验收。** 复跑 PostgreSQL 与 AF_UNIX 被跳过的测试；完成 390×844、768px、桌面浏览器验证；
+8. **完成产品验收。** 复跑 PostgreSQL 与 AF_UNIX 被跳过的测试；完成 390×844、768px、桌面浏览器验证；
    确认 V1 UI read-only 和 command history 脱敏。
-8. **维护窗口硬切。** 排空 V1；唯一 migration owner 执行 upgrade；以显式 `v2_only` 和
+9. **维护窗口硬切。** 排空 V1；唯一 migration owner 执行 upgrade；以显式 `v2_only` 和
    `AUTO_MIGRATE=false` 启动 Backend/Scheduler；验收 V1 read/statistics 与全部 writer 拒绝；最后单独执行
    新建 Profile 默认 Pi 的变更。
-9. **归档证据。** 固定 commit、Bundle/Image/Kit digest、测试结果、Host/Profile、Task/attempt/MR、监控和
+10. **归档证据。** 固定 commit、Bundle/Image/Kit digest、测试结果、Host/Profile、Task/attempt/MR、监控和
     操作记录；只有全部门槛通过后才能把本文状态改为 completed。
 
 ## 6. 验收与停止条件
@@ -249,14 +286,17 @@ acceptance report path:
 
 下一个执行者开始工作前先核对：
 
-- [x] `HEAD` 与本文提交台账一致，或补充 HEAD 之后的范围明确提交。
-- [x] WP6 已以独立提交 `5b9ec15e` 落地，并保留 review 与测试证据边界。
-- [ ] 当前 `pytest` 的 passed/failed/skipped 是否逐项记录，PostgreSQL/AF_UNIX 不再静默跳过。
+- [x] 主要源码、重复实现收敛和 fixture 修复均已按责任拆分提交，最近提交已补入本文台账。
+- [x] WP6 已以独立提交 `5b9ec15e` 落地，并由 `cda8e6ee`、`abb56ae3` 补充 identity/evidence/export
+  源码边界；仍保留 L3/L4 证据限制。
+- [x] 已完成排除 migration 068 和 scheduler lifecycle 后的全套回归：2960 passed、61 skipped、2 deselected、9 warnings、96 subtests；2 个 scheduler lifecycle 用例因沙箱端口限制未执行。
+- [ ] migration 068、真实 PostgreSQL 并发、AF_UNIX/远程 Docker 证据不得静默跳过。
 - [ ] CLI payload、release manifest、image digest、Kit digest 是否均为真实非占位值。
 - [ ] operator 凭据轮换是否有外部完成记录，且任何报告均不包含秘密。
 - [ ] L3 Host/Profile 和 L4 Task/MR 是否使用同一个冻结 release lock。
 - [ ] hard cut、Pi 默认、migration 是否保持独立提交和独立维护窗口记录。
 
-本文仍是阶段 tracker，不是发布声明。当前明确结论是：**WP0–WP7 的源码工作已按责任拆分提交，WP6
-通过独立 review；但外部凭据轮换、发布制品、L3/L4、真实 Provider/Host、Task/MR、Pi benchmark 与
-hard cut 均未完成。**
+本文仍是阶段 tracker，不是发布声明。当前明确结论是：**WP0–WP7 的源码 L1/L2 工作已按责任拆分
+提交，已列明的 288 个 focused tests 与最终全量本地回归已完成；但真实 PostgreSQL 并发、远程 Docker live identity、
+Linux renameat2/fsync、四 Harness 各自已验证 Task 的 L3 导出、真实 Provider 授权/凭据轮换、不可变
+image/Kit/payload、真实 Host canary、L4 delivery/MR、Pi benchmark、v2_only hard cut 均未完成。**
