@@ -145,7 +145,13 @@ def _write_result(
         failure = {"kind": failure_kind or _failure_kind(message), "message": message}
     payload = {
         "schema": "codify.worker.result/v2",
-        "status": "completed" if success else "failed",
+        "status": (
+            "completed"
+            if success
+            else "protocol_error"
+            if failure and failure["kind"] == "protocol_error"
+            else "failed"
+        ),
         "success": success,
         "result": result,
         "harness": v2_harness_block(),

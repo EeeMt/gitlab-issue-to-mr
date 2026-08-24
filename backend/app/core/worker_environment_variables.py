@@ -81,11 +81,22 @@ RESERVED_WORKER_ENVIRONMENT_KEYS = frozenset(
     }
 )
 
-# Provider selection and credentials belong to the task's frozen Provider
-# snapshot.  Keep this prefix check in addition to the explicit reserved set:
-# it blocks newly introduced provider knobs before an administrator can inject
-# them via shared/profile custom environment variables.
-_FROZEN_PROVIDER_ENVIRONMENT_PREFIXES = ("ANTHROPIC_", "OPENAI_")
+# These namespaces carry frozen Provider, Bundle, Harness, and adapter state.
+# Profile/shared custom environment is merged into the container environment,
+# so admitting even a newly introduced key in one of these namespaces would
+# let configuration redirect a frozen runner, CLI, transport, or credential.
+# Keep the list namespace-based rather than an ever-growing enumeration of
+# individual knobs.  Ordinary integration variables (for example CUSTOM_*)
+# remain supported.
+_FROZEN_RUNTIME_ENVIRONMENT_PREFIXES = (
+    "ANTHROPIC_",
+    "CLAUDE_",
+    "CODEX_",
+    "CODIFY_",
+    "OPENAI_",
+    "OPENCODE_",
+    "PI_",
+)
 
 
 def validate_worker_environment_variable_key(key: str) -> str:
@@ -93,7 +104,7 @@ def validate_worker_environment_variable_key(key: str) -> str:
     if not WORKER_ENVIRONMENT_VARIABLE_KEY_PATTERN.fullmatch(key):
         raise ValueError("Worker environment variable keys must match ^[A-Z_][A-Z0-9_]*$")
     if key in RESERVED_WORKER_ENVIRONMENT_KEYS or key.startswith(
-        _FROZEN_PROVIDER_ENVIRONMENT_PREFIXES
+        _FROZEN_RUNTIME_ENVIRONMENT_PREFIXES
     ):
         raise ValueError(f"Worker environment variable key {key} is reserved")
     return key

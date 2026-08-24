@@ -70,6 +70,9 @@ class WorkerEnvironmentVariableHelperTests(unittest.TestCase):
             "CODIFY_HARNESS_CONTROL_TRANSPORT_KIND",
             "CODIFY_HARNESS_CONTROL_TRANSPORT_PROTOCOL",
             "ANTHROPIC_FUTURE_PROVIDER_OPTION",
+            "CLAUDE_FUTURE_OPTION",
+            "CODEX_FUTURE_OPTION",
+            "CODIFY_FUTURE_OPTION",
             "OPENAI_FUTURE_PROVIDER_OPTION",
         ):
             with self.subTest(key=key), self.assertRaisesRegex(ValueError, "reserved"):

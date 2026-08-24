@@ -284,6 +284,7 @@ def test_pi_rejects_incomplete_terminal_lifecycles_as_protocol_errors(tmp_path):
         # Canonical audit references remain tied to the raw stream line.
         assert terminal["raw_ref"]["stream"] == "harness-events/pi.jsonl"
         result = json.loads((runtime_dir / "harness-result.json").read_text(encoding="utf-8"))
+        assert result["status"] == "protocol_error"
         assert result["failure"]["kind"] == "protocol_error"
 
 

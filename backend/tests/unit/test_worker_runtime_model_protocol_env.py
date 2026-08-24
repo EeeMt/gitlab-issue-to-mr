@@ -87,6 +87,20 @@ def test_openai_snapshot_emits_no_anthropic_credentials():
         ("anthropic_messages", "CODIFY_EVENT_SCHEMA"),
         ("anthropic_messages", "CODIFY_ADAPTER_VERSION"),
         ("anthropic_messages", "CODIFY_ATTEMPT_ID"),
+        # The profile/shared environment overlay is merged after the frozen
+        # Provider values.  It must also be unable to redirect the selected
+        # adapter runner or substitute a CLI/bundle transport input.
+        ("anthropic_messages", "CODIFY_HARNESS_COMMAND"),
+        ("anthropic_messages", "CODIFY_HARNESS_CLI_BIN"),
+        ("anthropic_messages", "CODIFY_HARNESS_MODEL_PROTOCOL"),
+        ("anthropic_messages", "CODIFY_CLI_VERSION"),
+        ("anthropic_messages", "CODIFY_RUNTIME_PATH"),
+        ("anthropic_messages", "CODIFY_PI_BIN"),
+        ("anthropic_messages", "CODIFY_OPENCODE_BIN"),
+        ("anthropic_messages", "OPENCODE_PROVIDER_NPM"),
+        ("anthropic_messages", "PI_HOME"),
+        ("anthropic_messages", "CODEX_HOME"),
+        ("anthropic_messages", "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"),
     ],
 )
 def test_custom_environment_cannot_override_or_mix_frozen_provider_values(protocol, custom_key):
