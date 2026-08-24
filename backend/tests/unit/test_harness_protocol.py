@@ -9,11 +9,13 @@ from app.core.harness_protocol import (
     CANONICAL_EVENT_SCHEMA_V2,
     CANONICAL_RESULT_SCHEMA,
     COMMAND_SCHEMA_V2,
+    MAX_COMMAND_TEXT_UTF16_CODE_UNITS,
     RUNTIME_MANIFEST_SCHEMA_V2,
     CanonicalEventReplay,
     HarnessProtocolError,
     build_event,
     command_payload_digest,
+    command_text_utf16_code_units,
     deterministic_event_id,
     normalize_usage,
     replay_events,
@@ -465,10 +467,19 @@ def test_command_payload_digest_is_canonical_and_stable():
     assert d1 != command_payload_digest(7, "v2-attempt-1", "steer", {"text": "go2"})
 
 
+def test_command_payload_digest_preserves_valid_unicode_text_exactly():
+    composed = "\u00e9😀"
+    decomposed = "e\u0301😀"
+    assert composed != decomposed
+    assert command_payload_digest(7, "v2-attempt-1", "steer", {"text": composed}) != (
+        command_payload_digest(7, "v2-attempt-1", "steer", {"text": decomposed})
+    )
+
+
 def _valid_command() -> dict:
     return {
         "schema": COMMAND_SCHEMA_V2,
-        "command_id": "01Kxyz",
+        "command_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
         "task_id": 123,
         "attempt_id": "task-123-attempt-1",
         "sequence_no": 7,
@@ -493,6 +504,37 @@ def test_validate_command_rejects_invalid_type_and_oversized_text():
     cmd = _valid_command()
     cmd["payload"] = {"text": "x" * 4001}
     with pytest.raises(HarnessProtocolError, match="payload_too_large"):
+        validate_command(cmd)
+
+
+def test_validate_command_uses_frozen_ids_and_utf16_unicode_scalar_rules():
+    assert MAX_COMMAND_TEXT_UTF16_CODE_UNITS == 4000
+    cmd = _valid_command()
+    cmd["command_id"] = "01Kxyz"
+    with pytest.raises(HarnessProtocolError, match="ULID or UUID"):
+        validate_command(cmd)
+
+    cmd = _valid_command()
+    cmd["command_id"] = "550E8400-E29B-41D4-A716-446655440000"
+    assert validate_command(cmd)["command_id"] == "550e8400-e29b-41d4-a716-446655440000"
+
+    cmd = _valid_command()
+    cmd["command_id"] = "01arz3ndektsv4rrffq69g5fav"
+    assert validate_command(cmd)["command_id"] == "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+
+    cmd = _valid_command()
+    cmd["payload"] = {"text": "😀" * 2000}
+    assert command_text_utf16_code_units(cmd["payload"]["text"]) == 4000
+    assert validate_command(cmd)["payload"] == cmd["payload"]
+
+    cmd = _valid_command()
+    cmd["payload"] = {"text": "😀" * 2000 + "a"}
+    with pytest.raises(HarnessProtocolError, match="payload_too_large"):
+        validate_command(cmd)
+
+    cmd = _valid_command()
+    cmd["payload"] = {"text": "\ud800"}
+    with pytest.raises(HarnessProtocolError, match="invalid Unicode scalar"):
         validate_command(cmd)
 
 

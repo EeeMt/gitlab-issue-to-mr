@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -617,9 +618,47 @@ HARNESS_PROTOCOL_MATRIX = {
 HARNESS_CAPABILITY_KEYS = frozenset(
     {"resume", "task_skills", "usage_tokens", "steering", "follow_up"}
 )
-# Maximum payload.text length in UTF-16 code units (schemas.md §4.3).
-MAX_COMMAND_TEXT_LENGTH = 4000
+# Command IDs and payload.text are part of the frozen command envelope.  Keep
+# their validation here so the REST endpoint, DB writer, and Worker-side
+# envelope validator cannot drift.
+_UUID_COMMAND_ID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+_ULID_COMMAND_ID_RE = re.compile(r"^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$")
+MAX_COMMAND_TEXT_UTF16_CODE_UNITS = 4_000
 VALID_COMMAND_TYPES = frozenset({"steer", "follow_up"})
+
+
+def is_valid_command_id(command_id: object) -> bool:
+    """Return whether an ID uses one of the frozen client ID formats."""
+    return normalize_command_id(command_id) is not None
+
+
+def normalize_command_id(command_id: object) -> str | None:
+    """Return the only persisted representation for a frozen command ID."""
+    if not isinstance(command_id, str):
+        return None
+    if _UUID_COMMAND_ID_RE.fullmatch(command_id):
+        return command_id.lower()
+    if _ULID_COMMAND_ID_RE.fullmatch(command_id):
+        return command_id.upper()
+    return None
+
+
+def command_text_utf16_code_units(text: str) -> int:
+    """Count UTF-16 code units without normalizing the text used for its digest."""
+    return len(text.encode("utf-16-le")) // 2
+
+
+def is_valid_command_text(text: object) -> bool:
+    """Validate Unicode scalar text against the frozen UTF-16 size limit."""
+    if not isinstance(text, str):
+        return False
+    # JSON may represent a lone surrogate as ``\\ud800``.  It is not a Unicode
+    # scalar value and cannot be canonically UTF-8 encoded for payload_digest.
+    if any(0xD800 <= ord(character) <= 0xDFFF for character in text):
+        return False
+    return command_text_utf16_code_units(text) <= MAX_COMMAND_TEXT_UTF16_CODE_UNITS
 
 
 def command_payload_digest(
@@ -652,9 +691,9 @@ def validate_command(command: Mapping[str, Any]) -> dict[str, Any]:
         raise HarnessProtocolError(f"missing command fields: {', '.join(missing)}")
     if command.get("schema") != COMMAND_SCHEMA_V2:
         raise HarnessProtocolError(f"unsupported command schema: {command.get('schema')!r}")
-    command_id = command.get("command_id")
-    if not isinstance(command_id, str) or not command_id.strip():
-        raise HarnessProtocolError("command_id must be a non-empty string")
+    command_id = normalize_command_id(command.get("command_id"))
+    if command_id is None:
+        raise HarnessProtocolError("command_id must be a ULID or UUID")
     task_id = command.get("task_id")
     if not isinstance(task_id, int) or isinstance(task_id, bool) or task_id < 1:
         raise HarnessProtocolError("task_id must be a positive integer")
@@ -673,13 +712,16 @@ def validate_command(command: Mapping[str, Any]) -> dict[str, Any]:
     text = payload.get("text")
     if not isinstance(text, str):
         raise HarnessProtocolError("command.payload.text must be a string")
-    if len(text) > MAX_COMMAND_TEXT_LENGTH:
+    if not is_valid_command_text(text):
         raise HarnessProtocolError(
-            f"command.payload.text exceeds {MAX_COMMAND_TEXT_LENGTH} chars, "
+            f"command.payload.text exceeds {MAX_COMMAND_TEXT_UTF16_CODE_UNITS} UTF-16 code units "
+            "or contains an invalid Unicode scalar, "
             "code=payload_too_large"
         )
     _parse_timestamp(command.get("created_at"))
-    return dict(command)
+    normalized = dict(command)
+    normalized["command_id"] = command_id
+    return normalized
 
 
 def validate_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:

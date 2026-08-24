@@ -20,6 +20,8 @@ from sqlalchemy.orm import selectinload
 from app.core.harness_protocol import (
     CANONICAL_EVENT_SCHEMA_V2,
     HARNESS_CONTRACT_VERSION_V2,
+    is_valid_command_text,
+    normalize_command_id,
 )
 from app.core.harness_protocol import (
     command_payload_digest as canonical_digest,
@@ -112,6 +114,16 @@ async def create_command(
     Only new IDs proceed to eligibility checks (RUNNING, exact V2 attempt,
     harness capability, ``control_state=accepting``).
     """
+    command_id = normalize_command_id(command_id)
+    if command_id is None:
+        return CommandCreateResult(
+            command_id="",
+            sequence_no=0,
+            created=False,
+            outcome="invalid_command_id",
+            rejection_code="invalid_command_id",
+            rejection_message="command_id must be a ULID or UUID",
+        )
     if command_type not in {"steer", "follow_up"}:
         return CommandCreateResult(
             command_id=command_id,
@@ -131,14 +143,14 @@ async def create_command(
             rejection_code="invalid_command_type",
             rejection_message="payload.text must be a string",
         )
-    if len(text) > 4000:
+    if not is_valid_command_text(text):
         return CommandCreateResult(
             command_id=command_id,
             sequence_no=0,
             created=False,
             outcome="payload_too_large",
             rejection_code="payload_too_large",
-            rejection_message="payload.text exceeds the 4000-char limit",
+            rejection_message="payload.text exceeds the 4000 UTF-16 code unit limit",
         )
 
     existing = await db.get(TaskHarnessCommand, command_id)
@@ -275,6 +287,9 @@ async def write_command_delivery(
     db: AsyncSession, *, command_id: str, delivered_at: datetime
 ) -> bool:
     """CAS ``queued -> delivered`` (pump only). Ignores non-queued rows."""
+    command_id = normalize_command_id(command_id)
+    if command_id is None:
+        return False
     command = (
         await db.execute(
             select(TaskHarnessCommand)
@@ -301,6 +316,9 @@ async def write_command_rejection(
     rejected_at: datetime,
 ) -> bool:
     """CAS an unsent command to rejected during pump/gate terminalization."""
+    command_id = normalize_command_id(command_id)
+    if command_id is None:
+        return False
     command = (
         await db.execute(
             select(TaskHarnessCommand)
@@ -330,6 +348,9 @@ async def begin_command_dispatch(
     after that point is intentionally recovered as ``outcome_unknown`` rather
     than replayed: the native write may already have happened.
     """
+    command_id = normalize_command_id(command_id)
+    if command_id is None:
+        return None
     command = (
         await db.execute(
             select(TaskHarnessCommand)
@@ -355,6 +376,9 @@ async def mark_command_native_sent(
     sent_at: datetime,
 ) -> bool:
     """Record owner evidence that the native frame was handed to Pi."""
+    command_id = normalize_command_id(command_id)
+    if command_id is None:
+        return False
     command = await db.get(TaskHarnessCommand, command_id, with_for_update=True)
     if command is None or command.status != "dispatching":
         return False
@@ -366,6 +390,9 @@ async def mark_command_native_sent(
 
 async def requeue_pre_send_failure(db: AsyncSession, *, command_id: str) -> bool:
     """Return a command to the head only when the bridge proved no native send."""
+    command_id = normalize_command_id(command_id)
+    if command_id is None:
+        return False
     command = await db.get(TaskHarnessCommand, command_id, with_for_update=True)
     if command is None or command.status != "dispatching" or command.native_sent_at is not None:
         return False
@@ -383,6 +410,9 @@ async def write_command_outcome_unknown(
     occurred_at: datetime,
 ) -> bool:
     """Terminalize an ambiguous native outcome without ever replaying it."""
+    command_id = normalize_command_id(command_id)
+    if command_id is None:
+        return False
     command = await db.get(TaskHarnessCommand, command_id, with_for_update=True)
     if command is None or command.status != "dispatching":
         return False

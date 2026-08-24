@@ -14,11 +14,12 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.task_operations import get_task_with_access_check
+from app.core.harness_protocol import normalize_command_id
 from app.core.task_harness_commands import (
     CommandCreateResult,
     create_command,
@@ -50,6 +51,7 @@ PUBLIC_REJECTION_MESSAGES = {
     "unsupported_harness": "The current runtime does not support this command.",
     "control_gate_closed": "The command channel is not accepting commands.",
     "payload_too_large": "The command content exceeds the allowed length.",
+    "invalid_command_id": "The command ID format is invalid.",
     "invalid_command_type": "The command type is invalid.",
     "not_authorized": "You are not authorized to send this command.",
     "wrong_attempt": "The command does not belong to the active attempt.",
@@ -72,8 +74,12 @@ class ProjectionError(Exception):
 
 
 class CreateCommandRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     type: str = Field(..., pattern="^(steer|follow_up)$")
-    text: str = Field(..., max_length=4000)
+    # UTF-16 code units, rather than Python code points, are the frozen limit.
+    # It is checked through the shared core helper before any DB access below.
+    text: str
 
 
 def _created_by(current_user: User | None) -> str:
@@ -140,6 +146,7 @@ def _reject_http(result: CommandCreateResult, *, command_id: str) -> HTTPExcepti
         "unsupported_harness": status.HTTP_409_CONFLICT,
         "control_gate_closed": status.HTTP_409_CONFLICT,
         "payload_too_large": status.HTTP_422_UNPROCESSABLE_CONTENT,
+        "invalid_command_id": status.HTTP_422_UNPROCESSABLE_CONTENT,
         "invalid_command_type": status.HTTP_422_UNPROCESSABLE_CONTENT,
         "not_authorized": status.HTTP_403_FORBIDDEN,
     }
@@ -176,6 +183,17 @@ async def put_command(
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Idempotently create a queued command (201 created / 200 existing)."""
+    command_id = normalize_command_id(command_id)
+    if command_id is None:
+        # The outer preflight rejects this before any auth/DB work.  Retain a
+        # fail-closed guard for direct invocation and future router changes.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "invalid_command_id",
+                "message": "The command ID format is invalid.",
+            },
+        )
     # Access check before mutating; loading the task also anchors task_id.
     await get_task_with_access_check(task_id, db, access_scope, current_user)
     result = await create_command(
@@ -240,6 +258,15 @@ async def get_command(
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Fetch a single command by id (scoped to the task)."""
+    command_id = normalize_command_id(command_id)
+    if command_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "invalid_command_id",
+                "message": "The command ID format is invalid.",
+            },
+        )
     await get_task_with_access_check(task_id, db, access_scope, current_user)
     cmd = await _load_command(db, task_id=task_id, command_id=command_id)
     if cmd is None:

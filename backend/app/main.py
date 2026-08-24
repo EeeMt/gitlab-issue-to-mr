@@ -1,17 +1,24 @@
 """FastAPI application entry point."""
 
 import asyncio
+import re
 import time
 from contextlib import asynccontextmanager
+from email.message import Message
+from json import JSONDecodeError, loads
 from typing import AsyncGenerator
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
+from starlette.requests import ClientDisconnect
 
+from app.api.task_command_routes import CreateCommandRequest
 from app.config import get_settings
 from app.core.docker_client import close_docker_clients
 from app.core.harness_execution_policy import require_explicit_harness_execution_mode
+from app.core.harness_protocol import is_valid_command_text, normalize_command_id
 from app.core.logging import get_logger, setup_logging
 from app.database import AsyncSessionLocal, close_db, get_db, init_db
 from app.dependencies.auth import require_admin_user, require_authenticated_user
@@ -87,6 +94,78 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+_TASK_COMMAND_ITEM_PATH_RE = re.compile(
+    r"^/api/tasks/(?P<task_id>[^/]+)/commands/(?P<command_id>[^/]+)$"
+)
+# A valid request with a fully escaped 4,000 UTF-16-unit text needs at most
+# roughly 24 KiB for ``text`` plus its small JSON envelope.  Keep the ingress
+# bound comfortably above that, while refusing arbitrary unauthenticated JSON
+# before it is buffered or decoded.
+_MAX_TASK_COMMAND_REQUEST_BYTES = 32 * 1024
+_TASK_ID_PATH_RE = re.compile(r"^[0-9]{1,10}$")
+_MAX_TASK_ID = 2_147_483_647
+
+
+def _command_preflight_error(*, code: str, message: str) -> JSONResponse:
+    """Return a non-reflecting public response before auth or DB access."""
+    return JSONResponse(
+        status_code=422,
+        content={"detail": {"code": code, "message": message}},
+    )
+
+
+def _is_json_content_type(request: Request) -> bool:
+    """Match FastAPI's JSON media type boundary without reading other bodies."""
+    content_type = request.headers.get("content-type")
+    if not content_type:
+        return True
+    message = Message()
+    message["content-type"] = content_type
+    return (
+        message.get_content_maintype() == "application"
+        and (
+            message.get_content_subtype() == "json"
+            or message.get_content_subtype().endswith("+json")
+        )
+    )
+
+
+def _is_valid_task_id_path_segment(task_id: str) -> bool:
+    """Validate the integer route parameter before auth/config dependencies."""
+    if _TASK_ID_PATH_RE.fullmatch(task_id) is None:
+        return False
+    return 1 <= int(task_id) <= _MAX_TASK_ID
+
+
+async def _read_bounded_task_command_body(request: Request) -> bytes | None:
+    """Buffer a small command body once and make the exact bytes replayable.
+
+    ``Request.json()``/``Request.body()`` have no application-level bound and
+    cache the complete input.  Command preflight intentionally precedes auth,
+    so it must bound both declared and chunked bodies itself.  Assigning the
+    bounded bytes to Starlette's body cache preserves normal downstream body
+    parsing without a second receive consumption.
+    """
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > _MAX_TASK_COMMAND_REQUEST_BYTES:
+                return None
+        except ValueError:
+            return None
+
+    buffered = bytearray()
+    try:
+        async for chunk in request.stream():
+            if len(buffered) + len(chunk) > _MAX_TASK_COMMAND_REQUEST_BYTES:
+                return None
+            buffered.extend(chunk)
+    except (ClientDisconnect, RuntimeError):
+        return None
+    body = bytes(buffered)
+    request._body = body  # type: ignore[attr-defined]  # Starlette replay cache.
+    return body
+
 # Register Trace middleware
 app.add_middleware(TraceMiddleware)
 
@@ -136,6 +215,68 @@ async def log_slow_requests(request: Request, call_next):
             f"total={elapsed:.3f}s status={response.status_code}"
         )
     return response
+
+
+@app.middleware("http")
+async def preflight_task_command_input(request: Request, call_next):
+    """Reject unsafe command inputs before config sync, auth, and router deps.
+
+    The task-command router is included with a router-level auth dependency and
+    every API request otherwise triggers runtime-config DB synchronization.
+    This outer middleware is therefore the only layer that can provide the
+    frozen fail-fast 422 contract without performing either operation first.
+    """
+    match = _TASK_COMMAND_ITEM_PATH_RE.fullmatch(request.scope.get("path", ""))
+    if match is not None and request.method in {"GET", "PUT"}:
+        task_id = match.group("task_id")
+        if not _is_valid_task_id_path_segment(task_id):
+            return _command_preflight_error(
+                code="invalid_task_id",
+                message="The task ID format is invalid.",
+            )
+        command_id = normalize_command_id(match.group("command_id"))
+        if command_id is None:
+            return _command_preflight_error(
+                code="invalid_command_id",
+                message="The command ID format is invalid.",
+            )
+        # Router matching needs the canonical ID, but raw_path/query_string
+        # are transport facts.  In particular, do not erase a caller's exact
+        # task segment or percent-encoding while canonicalizing command_id.
+        canonical_path = f"/api/tasks/{task_id}/commands/{command_id}"
+        request.scope["path"] = canonical_path
+        if request.method == "PUT":
+            if not _is_json_content_type(request):
+                return _command_preflight_error(
+                    code="invalid_command_payload",
+                    message="The command payload is invalid.",
+                )
+            body = await _read_bounded_task_command_body(request)
+            if body is None:
+                return _command_preflight_error(
+                    code="payload_too_large",
+                    message="The command content exceeds the allowed length.",
+                )
+            try:
+                payload = loads(body)
+            except (JSONDecodeError, UnicodeDecodeError):
+                return _command_preflight_error(
+                    code="invalid_command_payload",
+                    message="The command payload is invalid.",
+                )
+            try:
+                validated = CreateCommandRequest.model_validate(payload)
+            except ValidationError:
+                return _command_preflight_error(
+                    code="invalid_command_payload",
+                    message="The command payload is invalid.",
+                )
+            if not is_valid_command_text(validated.text):
+                return _command_preflight_error(
+                    code="payload_too_large",
+                    message="The command content exceeds the allowed length.",
+                )
+    return await call_next(request)
 
 
 # Unified exception handler

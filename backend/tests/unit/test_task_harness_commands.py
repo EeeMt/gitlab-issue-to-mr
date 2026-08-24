@@ -28,7 +28,15 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from alembic import command
-from app.core.harness_protocol import CANONICAL_EVENT_SCHEMA_V2, HARNESS_CONTRACT_VERSION_V2
+from app.core.harness_protocol import (
+    CANONICAL_EVENT_SCHEMA_V2,
+    HARNESS_CONTRACT_VERSION_V2,
+    MAX_COMMAND_TEXT_UTF16_CODE_UNITS,
+    command_text_utf16_code_units,
+    is_valid_command_id,
+    is_valid_command_text,
+    normalize_command_id,
+)
 from app.core.task_harness_commands import (
     CommandError,
     create_command,
@@ -260,7 +268,36 @@ async def _command_count(db, task_id):
 def _cid(label: str) -> str:
     # command_id is globally unique; the module-scoped DB is shared across
     # tests, so each call must yield a distinct id.
-    return f"{label}-{uuid.uuid4().hex[:16]}"
+    return str(uuid.uuid4())
+
+
+def test_command_id_validation_accepts_uuid_and_case_insensitive_ulid():
+    assert is_valid_command_id("550e8400-e29b-41d4-a716-446655440000")
+    assert is_valid_command_id("550E8400-E29B-41D4-A716-446655440000")
+    assert is_valid_command_id("01ARZ3NDEKTSV4RRFFQ69G5FAV")
+    assert is_valid_command_id("01arz3ndektsv4rrffq69g5fav")
+    assert not is_valid_command_id("x" * 64)
+    assert not is_valid_command_id("01ARZ3NDEKTSV4RRFFQ69G5FAI")
+    assert normalize_command_id("550E8400-E29B-41D4-A716-446655440000") == (
+        "550e8400-e29b-41d4-a716-446655440000"
+    )
+    assert normalize_command_id("01arz3ndektsv4rrffq69g5fav") == "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+
+
+def test_command_text_limit_uses_utf16_code_units_without_normalizing():
+    assert MAX_COMMAND_TEXT_UTF16_CODE_UNITS == 4000
+    assert command_text_utf16_code_units("a" * 4000) == 4000
+    assert is_valid_command_text("a" * 4000)
+    assert not is_valid_command_text("a" * 4001)
+    assert command_text_utf16_code_units("😀" * 2000) == 4000
+    assert is_valid_command_text("😀" * 2000)
+    assert not is_valid_command_text("😀" * 2000 + "a")
+    mixed = "a" * 3998 + "😀"
+    assert is_valid_command_text(mixed)
+    assert not is_valid_command_text(mixed + "a")
+    # Combining marks remain distinct code units; no normalization is applied.
+    assert is_valid_command_text("e\u0301" * 2000)
+    assert not is_valid_command_text("e\u0301" * 2000 + "e")
 
 
 # ── create_command ──────────────────────────────────────────────────────────
@@ -320,6 +357,30 @@ async def test_create_command_conflict_on_different_payload(maker):
         assert not r2.created
         assert r2.outcome == "existing_conflict"
         assert r2.rejection_code == "existing_conflict"
+        assert await _command_count(db, task_id) == 1
+
+
+async def test_create_command_canonicalizes_id_case_for_idempotency_and_conflict(maker):
+    task_id, _ = await _seed_running_pi(maker)
+    upper_uuid = "550E8400-E29B-41D4-A716-446655440000"
+    canonical_uuid = upper_uuid.lower()
+    async with maker() as db:
+        first = await create_command(
+            db, task_id=task_id, command_id=upper_uuid, command_type="steer",
+            payload={"text": "go"}, created_by="alice",
+        )
+        await db.commit()
+        replay = await create_command(
+            db, task_id=task_id, command_id=canonical_uuid, command_type="steer",
+            payload={"text": "go"}, created_by="alice",
+        )
+        conflict = await create_command(
+            db, task_id=task_id, command_id=canonical_uuid, command_type="steer",
+            payload={"text": "different"}, created_by="alice",
+        )
+        assert first.command_id == canonical_uuid
+        assert not replay.created and replay.outcome == "existing_same"
+        assert conflict.outcome == "existing_conflict"
         assert await _command_count(db, task_id) == 1
 
 
@@ -525,14 +586,14 @@ async def test_terminal_states_are_immutable(maker):
 # ── unique-key race recovery (schemas.md §4) ────────────────────────────────
 
 
-def _mock_db_for_flush_race(*, existing_digest: str, flush_raises: bool):
+def _mock_db_for_flush_race(*, existing_digest: str, flush_raises: bool, command_id: str):
     """Drive ``create_command`` past its existence check and force the flush
     path, then re-read a committed row on the unique-key race."""
     db = MagicMock()
     # Existence check returns None first, then the re-read returns the row a
     # concurrent caller committed between our check and flush.
     existing = MagicMock()
-    existing.command_id = "race-cmd"
+    existing.command_id = command_id
     existing.sequence_no = 1
     existing.payload_digest = existing_digest
     db.get = AsyncMock(side_effect=[None, existing])
@@ -581,11 +642,15 @@ def _mock_db_for_flush_race(*, existing_digest: str, flush_raises: bool):
 
 @patch("app.core.task_harness_commands.canonical_digest", return_value="dd" * 32)
 async def test_create_command_recovers_unique_key_race_to_existing_same(_digest):
-    db = _mock_db_for_flush_race(existing_digest="dd" * 32, flush_raises=True)
-    result = await create_command(
-        db, task_id=1, command_id="race-cmd", command_type="steer",
-        payload={"text": "go"}, created_by="alice",
+    command_id = "550e8400-e29b-41d4-a716-446655440000"
+    db = _mock_db_for_flush_race(
+        existing_digest="dd" * 32, flush_raises=True, command_id=command_id
     )
+    with patch("app.core.task_harness_commands.bundle_supports_command", return_value=True):
+        result = await create_command(
+            db, task_id=1, command_id=command_id, command_type="steer",
+            payload={"text": "go"}, created_by="alice",
+        )
     assert db.rollback.called
     assert not result.created
     assert result.outcome == "existing_same"
@@ -594,11 +659,15 @@ async def test_create_command_recovers_unique_key_race_to_existing_same(_digest)
 
 @patch("app.core.task_harness_commands.canonical_digest", return_value="ee" * 32)
 async def test_create_command_recovers_unique_key_race_to_conflict(_digest):
-    db = _mock_db_for_flush_race(existing_digest="ff" * 32, flush_raises=True)
-    result = await create_command(
-        db, task_id=1, command_id="race-cmd", command_type="steer",
-        payload={"text": "different"}, created_by="alice",
+    command_id = "550e8400-e29b-41d4-a716-446655440001"
+    db = _mock_db_for_flush_race(
+        existing_digest="ff" * 32, flush_raises=True, command_id=command_id
     )
+    with patch("app.core.task_harness_commands.bundle_supports_command", return_value=True):
+        result = await create_command(
+            db, task_id=1, command_id=command_id, command_type="steer",
+            payload={"text": "different"}, created_by="alice",
+        )
     assert db.rollback.called
     assert not result.created
     assert result.outcome == "existing_conflict"

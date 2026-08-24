@@ -7,20 +7,30 @@ existing API test convention, to assert the HTTP layer: PUT idempotent create
 
 from __future__ import annotations
 
+import asyncio
 import unittest
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 from app.core.task_harness_commands import CommandCreateResult
 from app.database import get_db
 from app.dependencies.auth import require_authenticated_user
 from app.dependencies.project_access import require_project_access_scope
-from app.main import app
+from app.main import (
+    _MAX_TASK_COMMAND_REQUEST_BYTES,
+    _read_bounded_task_command_body,
+    app,
+    preflight_task_command_input,
+)
+
+VALID_ULID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+VALID_UUID = "550e8400-e29b-41d4-a716-446655440000"
 
 
-def _command(cmd_id="01Kxyz", status="queued", sequence_no=1, cmd_type="steer"):
+def _command(cmd_id=VALID_ULID, status="queued", sequence_no=1, cmd_type="steer"):
     cmd = MagicMock()
     cmd.command_id = cmd_id
     cmd.task_id = 7
@@ -65,7 +75,7 @@ class TaskCommandRoutesTest(unittest.TestCase):
 
     def test_put_command_created_returns_201_body(self):
         result = CommandCreateResult(
-            command_id="01Kxyz", sequence_no=1, created=True, outcome="created"
+            command_id=VALID_ULID, sequence_no=1, created=True, outcome="created"
         )
         with (
             patch(
@@ -82,13 +92,13 @@ class TaskCommandRoutesTest(unittest.TestCase):
             ),
         ):
             resp = self.client.put(
-                "/api/tasks/7/commands/01Kxyz",
+                f"/api/tasks/7/commands/{VALID_ULID}",
                 json={"type": "steer", "text": "先修复并发问题"},
             )
         self.assertEqual(resp.status_code, 201)
         body = resp.json()
         self.assertTrue(body["created"])
-        self.assertEqual(body["command"]["command_id"], "01Kxyz")
+        self.assertEqual(body["command"]["command_id"], VALID_ULID)
         self.assertEqual(body["command"]["sequence_no"], 1)
         self.assert_public_command_projection(body["command"])
         # create_command called with the canonical payload envelope.
@@ -98,7 +108,7 @@ class TaskCommandRoutesTest(unittest.TestCase):
 
     def test_put_command_replay_returns_200(self):
         result = CommandCreateResult(
-            command_id="01Kxyz", sequence_no=1, created=False, outcome="existing_same"
+            command_id=VALID_ULID, sequence_no=1, created=False, outcome="existing_same"
         )
         with (
             patch(
@@ -115,7 +125,7 @@ class TaskCommandRoutesTest(unittest.TestCase):
             ),
         ):
             resp = self.client.put(
-                "/api/tasks/7/commands/01Kxyz",
+                f"/api/tasks/7/commands/{VALID_ULID}",
                 json={"type": "steer", "text": "先修复并发问题"},
             )
         self.assertEqual(resp.status_code, 200)
@@ -126,7 +136,7 @@ class TaskCommandRoutesTest(unittest.TestCase):
 
     def test_put_command_conflict_returns_409(self):
         result = CommandCreateResult(
-            command_id="01Kxyz",
+            command_id=VALID_ULID,
             sequence_no=0,
             created=False,
             outcome="existing_conflict",
@@ -144,7 +154,7 @@ class TaskCommandRoutesTest(unittest.TestCase):
             ),
         ):
             resp = self.client.put(
-                "/api/tasks/7/commands/01Kxyz",
+                f"/api/tasks/7/commands/{VALID_ULID}",
                 json={"type": "steer", "text": "different"},
             )
         self.assertEqual(resp.status_code, 409)
@@ -152,7 +162,7 @@ class TaskCommandRoutesTest(unittest.TestCase):
 
     def test_put_command_control_gate_closed_returns_409(self):
         result = CommandCreateResult(
-            command_id="01Kxyz",
+            command_id=VALID_ULID,
             sequence_no=0,
             created=False,
             outcome="control_gate_closed",
@@ -170,7 +180,7 @@ class TaskCommandRoutesTest(unittest.TestCase):
             ),
         ):
             resp = self.client.put(
-                "/api/tasks/7/commands/01Kxyz",
+                f"/api/tasks/7/commands/{VALID_ULID}",
                 json={"type": "steer", "text": "x"},
             )
         self.assertEqual(resp.status_code, 409)
@@ -182,7 +192,7 @@ class TaskCommandRoutesTest(unittest.TestCase):
 
     def test_rejection_never_exposes_persisted_diagnostics(self):
         result = CommandCreateResult(
-            command_id="01Kxyz",
+            command_id=VALID_ULID,
             sequence_no=0,
             created=False,
             outcome="control_gate_closed",
@@ -200,7 +210,7 @@ class TaskCommandRoutesTest(unittest.TestCase):
             ),
         ):
             resp = self.client.put(
-                "/api/tasks/7/commands/01Kxyz",
+                f"/api/tasks/7/commands/{VALID_ULID}",
                 json={"type": "steer", "text": "x"},
             )
         self.assertEqual(resp.status_code, 409)
@@ -222,7 +232,7 @@ class TaskCommandRoutesTest(unittest.TestCase):
                 new=AsyncMock(return_value=command),
             ),
         ):
-            resp = self.client.get("/api/tasks/7/commands/c-unsafe")
+            resp = self.client.get(f"/api/tasks/7/commands/{VALID_ULID}")
         self.assertEqual(resp.status_code, 200)
         projected = resp.json()
         self.assertEqual(projected["rejection_code"], "command_rejected")
@@ -243,7 +253,7 @@ class TaskCommandRoutesTest(unittest.TestCase):
                 new=AsyncMock(return_value=command),
             ),
         ):
-            resp = self.client.get("/api/tasks/7/commands/c-unsafe")
+            resp = self.client.get(f"/api/tasks/7/commands/{VALID_ULID}")
         self.assertEqual(resp.status_code, 500)
         self.assertEqual(
             resp.json()["detail"],
@@ -266,7 +276,7 @@ class TaskCommandRoutesTest(unittest.TestCase):
                 new=AsyncMock(return_value=command),
             ),
         ):
-            resp = self.client.get("/api/tasks/7/commands/c-unsafe")
+            resp = self.client.get(f"/api/tasks/7/commands/{VALID_ULID}")
         self.assertEqual(resp.status_code, 500)
         self.assertNotIn("persisted-status-secret", resp.text)
 
@@ -318,7 +328,7 @@ class TaskCommandRoutesTest(unittest.TestCase):
                 new=AsyncMock(return_value=command),
             ),
         ):
-            resp = self.client.get("/api/tasks/7/commands/c-dispatching")
+            resp = self.client.get(f"/api/tasks/7/commands/{VALID_ULID}")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["status"], "dispatching")
         self.assertEqual(resp.json()["dispatch_started_at"], "2026-08-21T01:02:03+00:00")
@@ -339,7 +349,7 @@ class TaskCommandRoutesTest(unittest.TestCase):
                 new=AsyncMock(return_value=command),
             ),
         ):
-            resp = self.client.get("/api/tasks/7/commands/c-unknown")
+            resp = self.client.get(f"/api/tasks/7/commands/{VALID_ULID}")
         self.assertEqual(resp.status_code, 200)
         projected = resp.json()
         self.assertEqual(projected["rejection_code"], "delivery_outcome_unknown")
@@ -351,10 +361,275 @@ class TaskCommandRoutesTest(unittest.TestCase):
 
     def test_put_command_invalid_type_returns_422(self):
         resp = self.client.put(
-            "/api/tasks/7/commands/01Kxyz",
+            f"/api/tasks/7/commands/{VALID_ULID}",
             json={"type": "explode", "text": "x"},
         )
         self.assertEqual(resp.status_code, 422)
+
+    def test_invalid_command_id_is_rejected_before_access_or_database_work(self):
+        malicious_id = "not-a-command-id-private-secret"
+        with patch(
+            "app.api.task_command_routes.get_task_with_access_check", new=AsyncMock()
+        ) as access_check:
+            put = self.client.put(
+                f"/api/tasks/7/commands/{malicious_id}",
+                json={"type": "steer", "text": "x"},
+            )
+            get = self.client.get(f"/api/tasks/7/commands/{malicious_id}")
+        self.assertEqual(put.status_code, 422)
+        self.assertEqual(get.status_code, 422)
+        self.assertEqual(
+            put.json()["detail"],
+            {"code": "invalid_command_id", "message": "The command ID format is invalid."},
+        )
+        self.assertEqual(get.json()["detail"], put.json()["detail"])
+        self.assertNotIn(malicious_id, put.text)
+        self.assertNotIn(malicious_id, get.text)
+        access_check.assert_not_awaited()
+
+    def test_preflight_rejects_id_and_utf16_text_before_real_auth_dependencies(self):
+        """A 422 here proves FastAPI did not enter the normal 401 auth path."""
+        app.dependency_overrides.clear()
+        client = TestClient(app, raise_server_exceptions=False)
+        malicious_id = "not-a-command-id-private-secret"
+        signed_task_gets = [client.get(f"/api/tasks/7/commands/{malicious_id}")]
+        put = client.put(
+            f"/api/tasks/7/commands/{VALID_ULID}",
+            json={"type": "steer", "text": "😀" * 2000 + "a"},
+        )
+        surrogate_put = client.put(
+            f"/api/tasks/7/commands/{VALID_ULID}",
+            content=b'{"type":"steer","text":"\\ud800"}',
+            headers={"content-type": "application/json"},
+        )
+        for response in signed_task_gets:
+            self.assertEqual(response.status_code, 422)
+            self.assertEqual(response.json()["detail"]["code"], "invalid_command_id")
+            self.assertNotIn(malicious_id, response.text)
+        self.assertEqual(put.status_code, 422)
+        self.assertEqual(surrogate_put.status_code, 422)
+        self.assertEqual(put.json()["detail"]["code"], "payload_too_large")
+        self.assertEqual(surrogate_put.json()["detail"]["code"], "payload_too_large")
+
+    def test_invalid_task_id_is_nonreflecting_before_real_auth_dependencies(self):
+        app.dependency_overrides.clear()
+        client = TestClient(app, raise_server_exceptions=False)
+        marker = "private-task-path-marker"
+        responses = (
+            client.get(f"/api/tasks/{marker}/commands/{VALID_ULID}"),
+            client.put(
+                f"/api/tasks/%2B1/commands/{VALID_ULID}",
+                json={"type": "steer", "text": "x"},
+            ),
+            client.get(f"/api/tasks/0/commands/{VALID_ULID}"),
+            client.get(f"/api/tasks/2147483648/commands/{VALID_ULID}"),
+        )
+        for response in responses:
+            self.assertEqual(response.status_code, 422)
+            self.assertEqual(
+                response.json()["detail"],
+                {"code": "invalid_task_id", "message": "The task ID format is invalid."},
+            )
+            self.assertNotIn(marker, response.text)
+
+    def test_non_application_plus_json_is_rejected_without_body_reflection(self):
+        app.dependency_overrides.clear()
+        client = TestClient(app, raise_server_exceptions=False)
+        marker = "private-command-body-marker"
+        response = client.put(
+            f"/api/tasks/7/commands/{VALID_ULID}",
+            content=(f'{{"type":"steer","text":"{marker}"}}').encode(),
+            headers={"content-type": "text/example+json"},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["detail"]["code"], "invalid_command_payload")
+        self.assertNotIn(marker, response.text)
+
+    def test_bounded_preflight_reader_limits_chunked_body_and_replays_valid_bytes(self):
+        def receive_chunks(chunks):
+            chunks = list(chunks)
+            index = 0
+
+            async def receive():
+                nonlocal index
+                if index == len(chunks):
+                    return {"type": "http.disconnect"}
+                chunk = chunks[index]
+                index += 1
+                return {
+                    "type": "http.request",
+                    "body": chunk,
+                    "more_body": index < len(chunks),
+                }
+
+            return receive
+
+        async def read(chunks):
+            request = Request(
+                {
+                    "type": "http",
+                    "method": "PUT",
+                    "path": f"/api/tasks/7/commands/{VALID_ULID}",
+                    "headers": [],
+                },
+                receive=receive_chunks(chunks),
+            )
+            result = await _read_bounded_task_command_body(request)
+            return result, await request.body() if result is not None else None
+
+        valid = b'{"type":"steer","text":"x"}'
+        result, replayed = asyncio.run(read((valid[:8], valid[8:])))
+        self.assertEqual(result, valid)
+        self.assertEqual(replayed, valid)
+        oversized = b"x" * (_MAX_TASK_COMMAND_REQUEST_BYTES + 1)
+        result, replayed = asyncio.run(read((oversized[:1], oversized[1:])))
+        self.assertIsNone(result)
+        self.assertIsNone(replayed)
+
+    def test_preflight_only_rewrites_scope_path_command_id(self):
+        original_path = f"/api/tasks/0007/commands/{VALID_UUID.upper()}"
+        original_raw_path = original_path.encode()
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": original_path,
+            "raw_path": original_raw_path,
+            "query_string": b"view=history",
+            "headers": [],
+        }
+        request = Request(scope)
+        observed = {}
+
+        async def call_next(passed_request):
+            observed["path"] = passed_request.scope["path"]
+            observed["raw_path"] = passed_request.scope["raw_path"]
+            observed["query_string"] = passed_request.scope["query_string"]
+            return MagicMock()
+
+        asyncio.run(preflight_task_command_input(request, call_next))
+        self.assertEqual(observed["path"], f"/api/tasks/0007/commands/{VALID_UUID}")
+        self.assertEqual(observed["raw_path"], original_raw_path)
+        self.assertEqual(observed["query_string"], b"view=history")
+
+    def test_command_item_payload_validation_is_nonreflecting_before_real_auth(self):
+        app.dependency_overrides.clear()
+        client = TestClient(app, raise_server_exceptions=False)
+        marker = "private-command-body-marker"
+        responses = (
+            client.put(
+                f"/api/tasks/7/commands/{VALID_ULID}",
+                json={"type": "steer", "text": {"marker": marker}},
+            ),
+            client.put(
+                f"/api/tasks/7/commands/{VALID_ULID}",
+                content=(f'{{"type":"steer","text":"{marker}"').encode(),
+                headers={"content-type": "application/json"},
+            ),
+            client.put(
+                f"/api/tasks/7/commands/{VALID_ULID}",
+                content=marker.encode(),
+                headers={"content-type": "text/plain"},
+            ),
+        )
+        for response in responses:
+            self.assertEqual(response.status_code, 422)
+            self.assertEqual(response.json()["detail"]["code"], "invalid_command_payload")
+            self.assertNotIn(marker, response.text)
+
+    def test_uuid_and_case_insensitive_ulid_paths_are_canonical_before_create(self):
+        for command_id, canonical_id in (
+            (VALID_UUID.upper(), VALID_UUID),
+            (VALID_ULID.lower(), VALID_ULID),
+        ):
+            with (
+                self.subTest(command_id=command_id, canonical_id=canonical_id),
+                patch(
+                    "app.api.task_command_routes.get_task_with_access_check",
+                    new=AsyncMock(return_value=MagicMock()),
+                ),
+                patch(
+                    "app.api.task_command_routes.create_command",
+                    new=AsyncMock(
+                        return_value=CommandCreateResult(
+                            command_id=canonical_id,
+                            sequence_no=1,
+                            created=True,
+                            outcome="created",
+                        )
+                    ),
+                ) as create_mock,
+                patch(
+                    "app.api.task_command_routes._load_command",
+                    new=AsyncMock(return_value=_command(canonical_id)),
+                ),
+            ):
+                response = self.client.put(
+                    f"/api/tasks/7/commands/{command_id}",
+                    json={"type": "steer", "text": "x"},
+                )
+            self.assertEqual(response.status_code, 201)
+            self.assertEqual(create_mock.call_args.kwargs["command_id"], canonical_id)
+            self.assertEqual(response.json()["command"]["command_id"], canonical_id)
+
+    def test_case_variants_are_canonical_before_single_command_load(self):
+        for command_id, canonical_id in (
+            (VALID_UUID.upper(), VALID_UUID),
+            (VALID_ULID.lower(), VALID_ULID),
+        ):
+            with (
+                self.subTest(command_id=command_id, canonical_id=canonical_id),
+                patch(
+                    "app.api.task_command_routes.get_task_with_access_check",
+                    new=AsyncMock(return_value=MagicMock()),
+                ),
+                patch(
+                    "app.api.task_command_routes._load_command",
+                    new=AsyncMock(return_value=_command(canonical_id)),
+                ) as load_command,
+            ):
+                response = self.client.get(f"/api/tasks/7/commands/{command_id}")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(load_command.call_args.kwargs["command_id"], canonical_id)
+            self.assertEqual(response.json()["command_id"], canonical_id)
+
+    def test_utf16_boundaries_are_enforced_before_access_check(self):
+        cases = (
+            ("a" * 4000, 201),
+            ("a" * 4001, 422),
+            ("😀" * 2000, 201),
+            ("😀" * 2000 + "a", 422),
+            ("a" * 3998 + "😀", 201),
+            ("a" * 3998 + "😀" + "a", 422),
+        )
+        for text, expected_status in cases:
+            with (
+                self.subTest(units=len(text), expected_status=expected_status),
+                patch(
+                    "app.api.task_command_routes.get_task_with_access_check",
+                    new=AsyncMock(return_value=MagicMock()),
+                ) as access_check,
+                patch(
+                    "app.api.task_command_routes.create_command",
+                    new=AsyncMock(
+                        return_value=CommandCreateResult(
+                            command_id=VALID_ULID,
+                            sequence_no=1,
+                            created=True,
+                            outcome="created",
+                        )
+                    ),
+                ),
+                patch(
+                    "app.api.task_command_routes._load_command",
+                    new=AsyncMock(return_value=_command()),
+                ),
+            ):
+                response = self.client.put(
+                    f"/api/tasks/7/commands/{VALID_ULID}",
+                    json={"type": "steer", "text": text},
+                )
+            self.assertEqual(response.status_code, expected_status)
+            self.assertEqual(access_check.await_count, 1 if expected_status == 201 else 0)
 
     def test_get_commands_returns_ordered_list(self):
         cmds = [_command("c-1", sequence_no=1), _command("c-2", sequence_no=2)]
@@ -386,7 +661,7 @@ class TaskCommandRoutesTest(unittest.TestCase):
                 new=AsyncMock(return_value=None),
             ),
         ):
-            resp = self.client.get("/api/tasks/7/commands/01Kxyz")
+            resp = self.client.get(f"/api/tasks/7/commands/{VALID_ULID}")
         self.assertEqual(resp.status_code, 404)
 
     def assert_public_command_projection(self, command):
