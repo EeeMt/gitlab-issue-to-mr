@@ -117,8 +117,19 @@ const hintText = computed(() => {
   return ''
 })
 
-function commandStatusLabel(status: HarnessCommand['status']): string {
-  return t(`taskView.steeringStatus${status.replace(/(^|_)([a-z])/g, (_, prefix, char) => `${prefix}${char.toUpperCase()}`)}`)
+const COMMAND_STATUS_I18N_KEYS: Record<HarnessCommand['status'], string> = {
+  queued: 'taskView.steeringStatusQueued',
+  dispatching: 'taskView.steeringStatusDispatching',
+  delivered: 'taskView.steeringStatusDelivered',
+  rejected: 'taskView.steeringStatusRejected',
+  outcome_unknown: 'taskView.steeringStatusOutcomeUnknown',
+}
+
+function commandStatusLabel(status: string): string {
+  const key = COMMAND_STATUS_I18N_KEYS[status as HarnessCommand['status']]
+  // The server should only return the frozen lifecycle above.  Do not turn a
+  // future/bad value into a missing i18n key in the operator control plane.
+  return key ? t(key) : 'Unknown'
 }
 
 function commandTime(command: HarnessCommand): string {

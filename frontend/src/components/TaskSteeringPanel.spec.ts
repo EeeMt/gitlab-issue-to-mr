@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-
-vi.mock('vue-i18n', () => ({
-  useI18n: () => ({ t: vi.fn((key: string) => key) }),
-}))
+import { createI18n } from 'vue-i18n'
+import enMessages from '../i18n/messages/en'
+import zhCNMessages from '../i18n/messages/zh-CN'
 
 vi.mock('naive-ui', async (importOriginal) => {
   const actual = await importOriginal<typeof import('naive-ui')>()
@@ -27,7 +26,13 @@ const globalStubs = {
   'n-button': true,
 }
 
-function mountPanel(props: Record<string, unknown>) {
+function mountPanel(props: Record<string, unknown>, locale: 'en' | 'zh-CN' = 'en') {
+  const i18n = createI18n({
+    legacy: false,
+    locale,
+    fallbackLocale: 'en',
+    messages: { en: enMessages, 'zh-CN': zhCNMessages },
+  })
   return mount(TaskSteeringPanel, {
     props: {
       taskId: 1,
@@ -36,7 +41,7 @@ function mountPanel(props: Record<string, unknown>) {
       capabilities: { steering: true, follow_up: true },
       ...props,
     },
-    global: { stubs: globalStubs },
+    global: { plugins: [i18n], stubs: globalStubs },
   })
 }
 
@@ -111,6 +116,41 @@ describe('TaskSteeringPanel', () => {
       expect(w.find(`[data-testid="steering-command-${status}"]`).exists()).toBe(true)
     }
     expect(w.text()).not.toContain('command secret')
+  })
+
+  it.each([
+    ['en', 'Outcome unknown'],
+    ['zh-CN', '结果未知'],
+  ] as const)('renders outcome_unknown with the %s translation', async (locale, expected) => {
+    vi.mocked(listHarnessCommands).mockResolvedValueOnce([
+      {
+        command_id: 'unknown', sequence_no: 1, type: 'steer', status: 'outcome_unknown',
+        created_at: '2026-08-23T00:00:00Z', dispatch_started_at: null, native_ack_at: null,
+        outcome_unknown_at: '2026-08-23T00:00:04Z', delivered_at: null, rejected_at: null,
+        rejection_code: 'delivery_outcome_unknown', rejection_message: 'The command delivery outcome is unknown.',
+      },
+    ])
+    const w = mountPanel({}, locale)
+    await flushPromises()
+    const status = w.find('[data-testid="steering-command-outcome_unknown"]')
+    expect(status.text()).toBe(expected)
+    expect(status.text()).not.toContain('steeringStatusOutcome_Unknown')
+  })
+
+  it('uses a non-i18n fallback for an unknown server status', async () => {
+    vi.mocked(listHarnessCommands).mockResolvedValueOnce([
+      {
+        command_id: 'future', sequence_no: 1, type: 'steer', status: 'future_status',
+        created_at: '2026-08-23T00:00:00Z', dispatch_started_at: null, native_ack_at: null,
+        outcome_unknown_at: null, delivered_at: null, rejected_at: null,
+        rejection_code: null, rejection_message: null,
+      } as any,
+    ])
+    const w = mountPanel({})
+    await flushPromises()
+    const status = w.find('[data-testid="steering-command-future_status"]')
+    expect(status.text()).toBe('Unknown')
+    expect(status.text()).not.toContain('taskView.')
   })
 
   it('loads history only after a delayed catalog capability makes the panel visible', async () => {
