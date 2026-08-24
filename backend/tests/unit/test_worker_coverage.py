@@ -24,6 +24,7 @@ Covers functionality NOT tested by test_worker_new_patterns.py or test_mr_stats.
 """
 
 import asyncio
+import hashlib
 import io
 import os
 import re
@@ -41,35 +42,95 @@ from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 import pytest
 
 from app.core.worker import WorkerExecutor
+from app.core.worker_runtime_bundle import (
+    bundle_manifest_digest_from_files,
+    v2_launcher_manifest_bytes,
+)
 from app.models import Task, TaskLog, TaskStatus
+
+
+def _make_v2_runtime_bundle():
+    """Build a minimal persisted V2 bundle that passes production verification."""
+    entrypoint = b"#!/bin/sh\nexit 0\n"
+    files = [
+        {
+            "path": "entrypoint.sh",
+            "size": len(entrypoint),
+            "sha256": hashlib.sha256(entrypoint).hexdigest(),
+        }
+    ]
+    digest = bundle_manifest_digest_from_files(files)
+    manifest = {
+        "schema": "codify.worker.runtime-manifest/v2",
+        "contract_version": "codify.worker.harness/v2",
+        "event_schema": "codify.worker.event/v2",
+        "orchestration_version": "1.0.0",
+        "bundle_digest": digest,
+        "files": files,
+        "adapters": {
+            "claude": {
+                "adapter": {"version": "1.0.0", "digest": digest},
+                "capabilities": {"steering": False},
+            }
+        },
+    }
+    launcher_manifest = v2_launcher_manifest_bytes(SimpleNamespace(manifest=manifest))
+    archive_buffer = io.BytesIO()
+    with tarfile.open(fileobj=archive_buffer, mode="w", format=tarfile.PAX_FORMAT) as archive:
+        for name, payload, mode in (
+            ("codify-runtime/orchestration/manifest.json", launcher_manifest, 0o644),
+            ("codify-runtime/orchestration/entrypoint.sh", entrypoint, 0o755),
+        ):
+            member = tarfile.TarInfo(name=name)
+            member.size = len(payload)
+            member.mode = mode
+            member.mtime = 0
+            archive.addfile(member, io.BytesIO(payload))
+    archive_bytes = archive_buffer.getvalue()
+    stored_manifest = {
+        **manifest,
+        "archive_sha256": hashlib.sha256(archive_bytes).hexdigest(),
+    }
+    return SimpleNamespace(
+        id=81,
+        digest=digest,
+        contract_version="codify.worker.harness/v2",
+        orchestration_version="1.0.0",
+        manifest=stored_manifest,
+        bundle_bytes=archive_bytes,
+        size_bytes=len(archive_bytes),
+    )
+
+
+_V2_RUNTIME_BUNDLE = _make_v2_runtime_bundle()
+_V2_BUNDLE_DIGEST = _V2_RUNTIME_BUNDLE.digest
 
 
 @pytest.fixture(autouse=True)
 def _stub_runtime_bundle_and_attempt():
-    bundle = SimpleNamespace(
-        id=81,
-        digest="d" * 64,
-        contract_version="codify.worker.harness/v1",
-        manifest={"adapters": {"claude": {"version": "1.0.0"}}},
-        bundle_bytes=b"runtime-bundle",
-    )
-
-    async def attempt(_db, *, task, harness_key, adapter_version, **_kwargs):
+    async def attempt(
+        _db,
+        *,
+        task,
+        harness_key,
+        adapter_version,
+        event_schema,
+        control_state,
+        control_supported,
+        **_kwargs,
+    ):
         return SimpleNamespace(
             attempt_id=f"task-{task.id}-attempt-1",
             harness_key=harness_key,
             adapter_version=adapter_version,
+            event_schema=event_schema,
+            control_state=control_state,
+            control_supported=control_supported,
         )
 
-    with (
-        patch(
-            "app.core.worker_task_lifecycle.load_bound_runtime_bundle",
-            new=AsyncMock(return_value=bundle),
-        ),
-        patch(
-            "app.core.worker_task_lifecycle.create_task_attempt",
-            new=AsyncMock(side_effect=attempt),
-        ),
+    with patch(
+        "app.core.worker_task_lifecycle.create_task_attempt",
+        new=AsyncMock(side_effect=attempt),
     ):
         yield
 
@@ -126,6 +187,7 @@ def _make_settings(**overrides):
     s.alert_on_failure = False
     s.alert_webhook_url = None
     s.claude_max_turns = 20
+    s.harness_execution_mode = "dual_canary"
     for k, v in overrides.items():
         setattr(s, k, v)
     return s
@@ -163,6 +225,7 @@ def _make_task(**kwargs):
         rendered_prompt="Persisted task prompt",
         priority=0, status=TaskStatus.PENDING,
         is_retry=False, retry_source_task_id=None,
+        runtime_bundle_id=_V2_RUNTIME_BUNDLE.id,
         additions=0, deletions=0, total_changes=0,
         # Ordered-turn projected lineage defaults: the scheduler backfills these
         # before a task is claimed, so worker tests exercise the projected-lineage
@@ -190,6 +253,15 @@ def _make_task(**kwargs):
         default_execute_run_instruction_template="Execute {{user_prompt}}",
         default_plan_run_instruction_template="Plan {{user_prompt}}",
         ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+        harness_key="claude",
+        harness_config_snapshot={
+            "requested_runtime_contract_version": "codify.worker.harness/v2"
+        },
+        harness_adapter_version="1.0.0",
+        harness_adapter_digest=_V2_BUNDLE_DIGEST,
+        runtime_contract_version="codify.worker.harness/v2",
+        orchestration_version="1.0.0",
+        runtime_bundle_digest=_V2_BUNDLE_DIGEST,
     )
 
     if provider is None:
@@ -244,9 +316,17 @@ def _make_db(task=None):
         elif 'FROM worker_environment_variables' in statement_str:
             mock_result.scalar_one_or_none.return_value = None
             mock_result.scalars.return_value.all.return_value = []
+        elif 'FROM worker_runtime_bundles' in statement_str:
+            mock_result.scalar_one_or_none.return_value = _V2_RUNTIME_BUNDLE
+            mock_result.scalars.return_value.all.return_value = [_V2_RUNTIME_BUNDLE]
         elif 'FROM issue_session_lineages' in statement_str:
             # The worker resolves resume sessions through the projected-lineage
             # table; by default there is no generation row yet (fresh_no_match).
+            mock_result.scalar_one_or_none.return_value = None
+            mock_result.scalars.return_value.all.return_value = []
+        elif 'FROM task_harness_attempts' in statement_str:
+            # The V2 fixture freezes a non-steerable Claude adapter, so no open
+            # control gate exists for terminal cleanup.
             mock_result.scalar_one_or_none.return_value = None
             mock_result.scalars.return_value.all.return_value = []
         else:
