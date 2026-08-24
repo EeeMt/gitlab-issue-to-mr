@@ -33,6 +33,12 @@ def _settings():
     )
 
 
+def _no_active_control_attempts_result():
+    result = MagicMock()
+    result.scalars.return_value = []
+    return result
+
+
 def test_worker_executor_defers_docker_client_until_runtime_is_loaded():
     connection = DockerConnectionConfig(host="tcp://arm-worker:2376")
     runtime = SimpleNamespace(docker_connection=MagicMock(return_value=connection))
@@ -961,6 +967,7 @@ async def test_worker_finalization_honors_persisted_cancellation_intent():
     worker._parse_task_result = AsyncMock()
     worker.docker.remove_container = MagicMock()
     db = MagicMock()
+    db.execute = AsyncMock(return_value=_no_active_control_attempts_result())
     db.refresh = AsyncMock()
     db.commit = AsyncMock()
     settings = SimpleNamespace(task_timeout=1800)
@@ -1030,6 +1037,7 @@ async def test_worker_finalization_keeps_completed_when_cancel_arrives_late():
 
     worker._parse_task_result = AsyncMock(side_effect=_parse_success)
     db = MagicMock()
+    db.execute = AsyncMock(return_value=_no_active_control_attempts_result())
     db.refresh = AsyncMock()
     db.commit = AsyncMock()
     settings = SimpleNamespace(task_timeout=1800)
@@ -1101,6 +1109,7 @@ async def test_worker_finalization_gracefully_stops_container_on_timeout():
 
     worker._parse_task_result = AsyncMock(side_effect=_parse_failed)
     db = MagicMock()
+    db.execute = AsyncMock(return_value=_no_active_control_attempts_result())
     db.refresh = AsyncMock()
     db.commit = AsyncMock()
     settings = SimpleNamespace(task_timeout=1800)
