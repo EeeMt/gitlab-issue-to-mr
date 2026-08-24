@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
+import time
 from pathlib import Path
 
 from app.core.harness_protocol import CANONICAL_EVENT_SCHEMA_V2, replay_events, validate_event_v2
@@ -21,6 +23,7 @@ HARNESS_DIR = REPO_ROOT / "deploy/worker-entrypoint/harness"
 TRANSLATOR = HARNESS_DIR / "adapters/opencode_events.py"
 EVENT_WRITER = HARNESS_DIR / "events.py"
 ADAPTER = HARNESS_DIR / "adapters/opencode.sh"
+LEGACY_RUNNER = REPO_ROOT / "deploy/worker-entrypoint/legacy/opencode-run.sh"
 PROBE_ROOT = REPO_ROOT / "docs/harness-probes/v2/opencode"
 
 V2_ENV = {
@@ -205,12 +208,12 @@ def test_opencode_translator_sanitizes_raw_archive(tmp_path):
     _translate(
         runtime_dir,
         [
-            _record("message.part.delta", {"delta": "use sk-ant-secret1234567890 please"}),
+            _record("message.part.delta", {"delta": "use API_KEY=sample1 please"}),
             _record("session.idle", {"sessionID": "ses-oc-1"}),
         ],
     )
     raw = (runtime_dir / "harness-events/opencode.jsonl").read_text(encoding="utf-8")
-    assert "sk-ant-secret1234567890" not in raw
+    assert "API_KEY=sample1" not in raw
 
 
 # ── opencode_bridge: deterministic reject + negotiation + SSE parse ─────────
@@ -723,3 +726,135 @@ def test_opencode_prepare_config_exports_transport_env_defaults(tmp_path):
     assert result.stdout.strip() == (
         "server_http|opencode-server|anthropic_messages"
     )
+
+
+# ── legacy/opencode-run.sh: isolated server process group cleanup ───────────
+
+def _write_runner_process_group_fixtures(tmp_path: Path) -> Path:
+    """Create a fake setsid/server/curl/bridge without opening a TCP port."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fixtures = {
+        "setsid": """#!/usr/bin/env python3
+import os
+import sys
+os.setsid()
+os.execvp(sys.argv[1], sys.argv[1:])
+""",
+        "curl": "#!/bin/sh\nprintf '200'\n",
+        "ps": """#!/usr/bin/env python3
+import os
+import sys
+pid = int(sys.argv[-1])
+print(os.getpgid(pid))
+""",
+        "opencode": """#!/bin/bash
+(
+    trap '' TERM
+    while :; do sleep 1; done
+) &
+child=$!
+printf '%s %s\\n' "$$" "$child" > "${OPENCODE_TEST_PIDS}"
+while :; do sleep 1; done
+""",
+        "bridge": """#!/usr/bin/env python3
+import os
+import sys
+import time
+time.sleep(float(os.environ.get("OPENCODE_TEST_BRIDGE_SLEEP", "0")))
+sys.exit(int(os.environ.get("OPENCODE_TEST_BRIDGE_RC", "0")))
+""",
+    }
+    for name, contents in fixtures.items():
+        path = bin_dir / name
+        path.write_text(contents, encoding="utf-8")
+        path.chmod(0o755)
+    return bin_dir
+
+
+def _proc_start_time(pid: int) -> str | None:
+    """Linux start-time token prevents a recycled PID being mistaken for a child."""
+    stat = Path(f"/proc/{pid}/stat")
+    if not stat.exists():
+        return None
+    return stat.read_text(encoding="utf-8").split()[21]
+
+
+def _wait_for_file(path: Path, process: subprocess.Popen[str]) -> None:
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if path.exists():
+            return
+        if process.poll() is not None:
+            raise AssertionError(process.stderr.read())
+        time.sleep(0.05)
+    raise AssertionError("fake OpenCode server did not publish parent/child PIDs")
+
+
+def _assert_process_gone(pid: int, start_time: str | None) -> None:
+    current = _proc_start_time(pid)
+    if current is not None:
+        assert current != start_time, f"process {pid} survived cleanup"
+
+
+def _start_legacy_runner(tmp_path: Path, *, bridge_sleep: str = "0") -> tuple[subprocess.Popen[str], tuple[int, int], tuple[str | None, str | None]]:
+    bin_dir = _write_runner_process_group_fixtures(tmp_path)
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("test", encoding="utf-8")
+    pid_file = tmp_path / "server-pids"
+    environment = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "CODIFY_OPENCODE_BIN": str(bin_dir / "opencode"),
+        "CODIFY_OPENCODE_BRIDGE": str(bin_dir / "bridge"),
+        "CODIFY_RUNTIME_DIR": str(tmp_path / "runtime"),
+        "CODIFY_ORCHESTRATION_DIR": str(REPO_ROOT / "deploy"),
+        "CODIFY_OPENCODE_RAW_EVENT_JSONL": str(tmp_path / "raw.jsonl"),
+        "CODIFY_OPENCODE_EVENT_TRANSLATOR": str(TRANSLATOR),
+        "OPENCODE_PORT": "12345",
+        "OPENCODE_SERVER_PASSWORD": "pw",
+        "OPENCODE_TEST_PIDS": str(pid_file),
+        "OPENCODE_TEST_BRIDGE_SLEEP": bridge_sleep,
+        "OPENCODE_SERVER_STOP_GRACE_SECONDS": "1",
+        "PROMPT_FILE": str(prompt),
+    }
+    process = subprocess.Popen(
+        ["bash", str(LEGACY_RUNNER)],
+        env=environment,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        # The real container runner is not its own background job. Make the
+        # same topology explicit so the test setsid shim is never a PG leader
+        # before it calls os.setsid().
+        start_new_session=True,
+    )
+    _wait_for_file(pid_file, process)
+    parent, child = (int(value) for value in pid_file.read_text(encoding="utf-8").split())
+    assert os.getpgid(parent) == parent  # setsid established an isolated group
+    return process, (parent, child), (_proc_start_time(parent), _proc_start_time(child))
+
+
+def test_opencode_legacy_runner_reaps_server_process_group_after_success(tmp_path):
+    process, pids, starts = _start_legacy_runner(tmp_path)
+    assert process.wait(timeout=8) == 0, process.stderr.read()
+    for pid, start in zip(pids, starts):
+        _assert_process_gone(pid, start)
+
+
+def test_opencode_legacy_runner_reaps_ignoring_child_after_cancel(tmp_path):
+    process, pids, starts = _start_legacy_runner(tmp_path, bridge_sleep="30")
+    process.send_signal(signal.SIGTERM)
+    assert process.wait(timeout=8) == 143
+    for pid, start in zip(pids, starts):
+        _assert_process_gone(pid, start)
+
+
+def test_opencode_legacy_runner_timeout_signal_reaps_ignoring_child(tmp_path):
+    process, pids, starts = _start_legacy_runner(tmp_path, bridge_sleep="30")
+    # GNU timeout delivers TERM to its child; deliver the same timeout signal
+    # directly to keep the regression portable on macOS CI hosts.
+    process.send_signal(signal.SIGTERM)
+    assert process.wait(timeout=8) == 143
+    for pid, start in zip(pids, starts):
+        _assert_process_gone(pid, start)

@@ -12,9 +12,9 @@ set -u
 # the Server. The command plane is ``disabled`` for first release, so there is
 # nothing to drain for steering — the bridge's ``dispatch`` rejects.
 #
-# Privilege model mirrors pi-run.sh: the Server subprocess is left in the
-# current (orchestration) context; the translator and audit stream stay in the
-# root orchestration context.
+# The Server is deliberately placed in its own session/process group. OpenCode
+# may fork SDK/plugin helpers; cleanup must converge that entire group without
+# ever signalling the runner's own process group.
 
 CODIFY_OPENCODE_BIN="${CODIFY_OPENCODE_BIN:-/usr/local/bin/opencode}"
 CODIFY_OPENCODE_RAW_EVENT_JSONL="${CODIFY_OPENCODE_RAW_EVENT_JSONL:-${CODIFY_RUNTIME_DIR}/harness-events/opencode.jsonl}"
@@ -38,8 +38,11 @@ fi
 RUN_DIR=$(mktemp -d)
 SERVER_PID_FILE="${RUN_DIR}/opencode-server.pid"
 trap 'cleanup' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 cleanup() {
+    stop_server || true
     rm -rf "${RUN_DIR}"
 }
 
@@ -51,43 +54,83 @@ stop_server() {
     local pid
     pid="$(opencode_server_pid)"
     [ -n "${pid}" ] || return 0
-    # TERM the process group so any child (SDK/plugin process) converges too.
+    # ``start_server`` verifies pid == PGID before publishing this file. Never
+    # fall back to the runner's group: an unexpected PID/PGID is unsafe.
+    local pgid
+    pgid="$(ps -o pgid= -p "${pid}" 2>/dev/null | tr -d '[:space:]')"
+    if [ -n "${pgid}" ] && [ "${pgid}" != "${pid}" ]; then
+        echo "OpenCode Server PID/PGID mismatch; refusing group signal" >&2
+        kill -TERM "${pid}" 2>/dev/null || true
+        wait "${pid}" 2>/dev/null || true
+        rm -f "${SERVER_PID_FILE}"
+        return 1
+    fi
+    # TERM the independently verified process group so SDK/plugin children
+    # converge with the server parent.
     if kill -0 "${pid}" 2>/dev/null; then
-        kill -TERM "-${pid}" 2>/dev/null || kill -TERM "${pid}" 2>/dev/null || true
+        kill -TERM "-${pid}" 2>/dev/null || true
     fi
     # Poll for disappearance (no-daemon guarantee), then KILL after grace.
-    local deadline=$(( $(date +%s) + 10 ))
-    while [ "$(date +%s)" -lt "${deadline}" ] && kill -0 "${pid}" 2>/dev/null; do
+    local deadline=$(( $(date +%s) + ${OPENCODE_SERVER_STOP_GRACE_SECONDS:-10} ))
+    # The server leader may exit promptly while a plugin child ignores TERM;
+    # test the group, not only its leader, before deciding convergence.
+    while [ "$(date +%s)" -lt "${deadline}" ] && kill -0 "-${pid}" 2>/dev/null; do
         sleep 0.5
     done
-    if kill -0 "${pid}" 2>/dev/null; then
-        kill -KILL "-${pid}" 2>/dev/null || kill -KILL "${pid}" 2>/dev/null || true
+    if kill -0 "-${pid}" 2>/dev/null; then
+        kill -KILL "-${pid}" 2>/dev/null || true
     fi
+    # Reap the server leader before deleting identity state. This keeps the
+    # cleanup idempotent and avoids a stale PID being reused by a later task.
+    wait "${pid}" 2>/dev/null || true
+    rm -f "${SERVER_PID_FILE}"
 }
 
 stop_server_force() {
-    local pid
-    pid="$(opencode_server_pid)"
-    [ -n "${pid}" ] || return 0
-    kill -KILL "${pid}" 2>/dev/null || true
+    stop_server
 }
 
 start_server() {
     # The Server interpolates opencode.json's {env:OPENCODE_SNAPSHOT_KEY} and is
     # protected by OPENCODE_SERVER_PASSWORD; both are passed only into the Server
     # process env, and OPENCODE_CONFIG_DIR points at the Task-scoped config dir.
+    if ! command -v setsid >/dev/null 2>&1; then
+        echo "OpenCode Server requires setsid for safe process-group cleanup" >&2
+        return 1
+    fi
     OPENCODE_SERVER_PASSWORD="${OPENCODE_SERVER_PASSWORD}" \
     OPENCODE_SNAPSHOT_KEY="${OPENCODE_SNAPSHOT_KEY}" \
     OPENCODE_CONFIG_DIR="${OPENCODE_CONFIG_DIR}" \
-    "${CODIFY_OPENCODE_BIN}" serve \
+    setsid "${CODIFY_OPENCODE_BIN}" serve \
         --hostname 127.0.0.1 \
         --port "${OPENCODE_PORT}" \
         > "${RUN_DIR}/server.log" 2>&1 &
-    echo $! > "${SERVER_PID_FILE}"
+    local pid=$!
+    if ! kill -0 "${pid}" 2>/dev/null; then
+        echo "OpenCode Server exited before process-group verification" >&2
+        return 1
+    fi
+    local pgid deadline
+    deadline=$(( $(date +%s) + ${OPENCODE_SERVER_PROCESS_GROUP_TIMEOUT:-5} ))
+    while kill -0 "${pid}" 2>/dev/null; do
+        pgid="$(ps -o pgid= -p "${pid}" 2>/dev/null | tr -d '[:space:]')"
+        [ "${pgid}" = "${pid}" ] && break
+        [ "$(date +%s)" -lt "${deadline}" ] || break
+        sleep 0.05
+    done
+    if [ "${pgid:-}" != "${pid}" ]; then
+        echo "OpenCode Server did not become its own process-group leader" >&2
+        kill -TERM "${pid}" 2>/dev/null || true
+        wait "${pid}" 2>/dev/null || true
+        return 1
+    fi
+    echo "${pid}" > "${SERVER_PID_FILE}"
 }
 
 # 1. Start the Task-scoped Server.
-start_server
+if ! start_server; then
+    exit 1
+fi
 SERVER_PID="$(opencode_server_pid)"
 if [ -z "${SERVER_PID}" ] || ! kill -0 "${SERVER_PID}" 2>/dev/null; then
     echo "OpenCode Server failed to start" >&2
