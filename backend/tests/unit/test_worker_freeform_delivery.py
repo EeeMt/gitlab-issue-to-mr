@@ -5,6 +5,9 @@ started without an ``MR_IID``, and after a canonical finalization the MR is only
 created/reused when the task completed with a persisted ``commit_sha``.
 """
 
+import hashlib
+import io
+import tarfile
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -12,11 +15,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.core.worker_profiles import TaskWorkerRuntime
+from app.core.worker_runtime_bundle import (
+    bundle_manifest_digest_from_files,
+    v2_launcher_manifest_bytes,
+)
 from app.core.worker_task_lifecycle import (
     create_execute_container,
     monitor_container_run,
 )
-from app.models import Issue, Task, TaskStatus
+from app.models import Issue, Task, TaskStatus, TaskWorkerProfileSnapshot
 
 
 def _runtime():
@@ -34,19 +41,64 @@ def _runtime():
 
 
 def _bundle_and_attempt():
-    bundle = SimpleNamespace(
-        digest="d" * 64,
-        contract_version="codify.worker.harness/v1",
-        manifest={
-            "archive_manifest_digest": "m" * 64,
-            "adapters": {"claude": {"version": "1.0.0", "digest": "a" * 64}},
+    """Build matching persisted V2 bundle and attempt execution identities."""
+    entrypoint = b"#!/bin/sh\nexit 0\n"
+    files = [
+        {
+            "path": "entrypoint.sh",
+            "size": len(entrypoint),
+            "sha256": hashlib.sha256(entrypoint).hexdigest(),
+        }
+    ]
+    digest = bundle_manifest_digest_from_files(files)
+    manifest = {
+        "schema": "codify.worker.runtime-manifest/v2",
+        "contract_version": "codify.worker.harness/v2",
+        "event_schema": "codify.worker.event/v2",
+        "orchestration_version": "1.0.0",
+        "runtime_platform": "linux/amd64",
+        "bundle_digest": digest,
+        "files": files,
+        "adapters": {
+            "claude": {
+                "adapter": {"version": "1.0.0", "digest": digest},
+                "capabilities": {"steering": False},
+            }
         },
-        bundle_bytes=b"runtime-bundle",
+    }
+    bundle = SimpleNamespace(manifest=manifest)
+    launcher_manifest = v2_launcher_manifest_bytes(bundle)
+    archive_buffer = io.BytesIO()
+    with tarfile.open(fileobj=archive_buffer, mode="w", format=tarfile.PAX_FORMAT) as archive:
+        for name, payload, mode in (
+            ("codify-runtime/orchestration/manifest.json", launcher_manifest, 0o644),
+            ("codify-runtime/orchestration/entrypoint.sh", entrypoint, 0o755),
+        ):
+            member = tarfile.TarInfo(name=name)
+            member.size = len(payload)
+            member.mode = mode
+            member.mtime = 0
+            archive.addfile(member, io.BytesIO(payload))
+    archive_bytes = archive_buffer.getvalue()
+    bundle = SimpleNamespace(
+        id=81,
+        digest=digest,
+        contract_version="codify.worker.harness/v2",
+        orchestration_version="1.0.0",
+        manifest={
+            **manifest,
+            "archive_sha256": hashlib.sha256(archive_bytes).hexdigest(),
+        },
+        bundle_bytes=archive_bytes,
+        size_bytes=len(archive_bytes),
     )
     attempt = SimpleNamespace(
         attempt_id="task-12-attempt-1",
         harness_key="claude",
         adapter_version="1.0.0",
+        event_schema="codify.worker.event/v2",
+        control_state="disabled",
+        control_supported=False,
     )
     return bundle, attempt
 
@@ -63,16 +115,48 @@ def _execute_fixtures(
     mr_create_return=(None, None),
     target_branch="main",
 ):
-    task = MagicMock()
-    task.id = 12
-    task.project_id = 100
-    task.ci_failure_run_id = None
-    task.trigger_source = "manual"
-    task.rendered_prompt = "Prompt"
-    task.status = TaskStatus.RUNNING
-    task.cancel_requested_at = None
-    task.task_mode = task_mode
-    task.require_changes = task_mode != "freeform"
+    bundle, attempt = _bundle_and_attempt()
+    task = Task(
+        id=12,
+        project_id=100,
+        issue_id=1,
+        user_prompt="Prompt",
+        rendered_prompt="Prompt",
+        status=TaskStatus.RUNNING,
+        task_mode=task_mode,
+        require_changes=task_mode != "freeform",
+        runtime_bundle_id=bundle.id,
+        worker_profile_id=1,
+        projected_harness_key="claude",
+        projected_session_namespace="claude-0000000000000000",
+        projected_lineage_generation=0,
+        projected_reset_task_id=None,
+        lineage_projection_reason="initial",
+        session_mode="continue",
+        trigger_source="manual",
+    )
+    task.worker_profile_snapshot = TaskWorkerProfileSnapshot(
+        task_id=task.id,
+        worker_profile_id=task.worker_profile_id,
+        profile_name="Default Worker",
+        image="custom-worker:latest",
+        volume_mounts=[],
+        environment_variables=[],
+        pre_script="",
+        post_script="",
+        default_execute_run_instruction_template="Execute {{user_prompt}}",
+        default_plan_run_instruction_template="Plan {{user_prompt}}",
+        ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+        harness_key="claude",
+        harness_config_snapshot={
+            "requested_runtime_contract_version": "codify.worker.harness/v2"
+        },
+        harness_adapter_version="1.0.0",
+        harness_adapter_digest=bundle.digest,
+        runtime_contract_version="codify.worker.harness/v2",
+        orchestration_version="1.0.0",
+        runtime_bundle_digest=bundle.digest,
+    )
 
     issue = MagicMock()
     issue.id = 1
@@ -96,6 +180,7 @@ def _execute_fixtures(
         worker_image="old-worker:latest",
         worker_skip_image_pull=False,
         worker_network="bridge",
+        harness_execution_mode="dual_canary",
     )
     db = MagicMock()
     db.commit = AsyncMock()
@@ -105,12 +190,14 @@ def _execute_fixtures(
 
     async def _mock_execute(statement, *args, **kwargs):
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-        mock_result.scalars.return_value.all.return_value = []
+        if "FROM worker_runtime_bundles" in str(statement):
+            mock_result.scalar_one_or_none.return_value = bundle
+        else:
+            mock_result.scalar_one_or_none.return_value = None
+            mock_result.scalars.return_value.all.return_value = []
         return mock_result
 
     db.execute = AsyncMock(side_effect=_mock_execute)
-    bundle, attempt = _bundle_and_attempt()
     return worker, db, task, issue, settings, bundle, attempt
 
 
@@ -123,10 +210,6 @@ async def _run_create_execute_container(worker, db, task, issue, settings, bundl
         patch(
             "app.core.worker_task_lifecycle.build_issue_workspace_paths",
             return_value=SimpleNamespace(issue_root="/tmp/issue-root"),
-        ),
-        patch(
-            "app.core.worker_task_lifecycle.load_bound_runtime_bundle",
-            new=AsyncMock(return_value=bundle),
         ),
         patch(
             "app.core.worker_task_lifecycle.create_task_attempt",
@@ -234,6 +317,14 @@ def _monitor_fixtures(*, task_mode="execute", issue_mr_iid=None, target_branch="
     db.refresh = AsyncMock()
     db.commit = AsyncMock()
     db.add = MagicMock()
+
+    async def _mock_execute(statement, *args, **kwargs):
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_result.scalars.return_value = []
+        return mock_result
+
+    db.execute = AsyncMock(side_effect=_mock_execute)
     container = MagicMock()
     return worker, db, task, issue, container
 
