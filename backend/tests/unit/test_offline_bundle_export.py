@@ -295,6 +295,13 @@ def test_extracted_offline_bundle_runs_portable_v2_verifier_without_checkout():
 
         def run(document=None, *, actual_sha="a" * 64, extra=None):
             runtime = root / "runtime.json"
+            image_identity = bundle.get("worker_image_identity") or {}
+            image_inspect = {
+                "RepoDigests": [image_identity.get("image_reference", "")],
+                "Id": image_identity.get("image_id", ""),
+                "Os": "linux",
+                "Architecture": "amd64",
+            }
             args = [str(wrapper), "--kit", str(kit), "--image", "fake:image"]
             if document is not None:
                 runtime.write_text(json.dumps(document), encoding="utf-8")
@@ -308,6 +315,7 @@ def test_extracted_offline_bundle_runs_portable_v2_verifier_without_checkout():
                     "PATH": f"{fake_docker.parent}{os.pathsep}{os.environ['PATH']}",
                     "ARTIFACT_PATH": str(artifact),
                     "ACTUAL_CLI_SHA": actual_sha,
+                    "IMAGE_INSPECT": json.dumps(image_inspect),
                 },
                 capture_output=True,
                 text=True,
@@ -417,7 +425,20 @@ def test_package_bundle_script_creates_archive_under_deploy_directory():
         run_result = subprocess.run(
             [str(wrapper), "--kit", str(kit), "--image", "fake:image", "--runtime-manifest", str(runtime_path), "--all-harnesses"],
             cwd=extracted,
-            env={**os.environ, "PATH": f"{fake_docker.parent}{os.pathsep}{os.environ['PATH']}", "ARTIFACT_PATH": str(artifact), "ACTUAL_CLI_SHA": "a" * 64},
+            env={
+                **os.environ,
+                "PATH": f"{fake_docker.parent}{os.pathsep}{os.environ['PATH']}",
+                "ARTIFACT_PATH": str(artifact),
+                "ACTUAL_CLI_SHA": "a" * 64,
+                "IMAGE_INSPECT": json.dumps(
+                    {
+                        "RepoDigests": [fixture_manifest["worker_image_identity"]["image_reference"]],
+                        "Id": fixture_manifest["worker_image_identity"]["image_id"],
+                        "Os": "linux",
+                        "Architecture": "amd64",
+                    }
+                ),
+            },
             capture_output=True,
             text=True,
             check=False,
