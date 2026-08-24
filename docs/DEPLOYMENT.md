@@ -27,7 +27,7 @@
 
 - 已安装 Docker 和 Docker Compose
 - 可访问目标 GitLab 实例
-- 可访问 Harness 兼容模型服务（Claude/Codex）
+- 可访问四个 Harness 的兼容模型服务（Pi/OpenCode/Claude/Codex）
 - Docker Engine 允许当前部署方式所需的 Worker 容器启动能力
 
 ### 2.2 关键配置项
@@ -246,13 +246,30 @@ make worker-cli-artifact-export \
   CLI_ARTIFACT_MANIFEST=/srv/codify/releases/<release>/worker-cli-linux-amd64.json
 ```
 
-将这个**只读**文件以相同内容提供给 Backend 和 Scheduler，并显式设置：
+V2 release 使用单独 Compose overlay 将这个**只读、非 secret**文件以相同固定容器路径提供给
+Backend 和 Scheduler；基础 `docker-compose.yml` 保留 dual-canary 的 legacy V1 execution path，
+不会为它创建空的 V2 release-lock bind mount：
 
 ```bash
-CODIFY_WORKER_CLI_ARTIFACT_MANIFEST=/srv/codify/releases/<release>/worker-cli-linux-amd64.json
+export CODIFY_WORKER_CLI_ARTIFACT_MANIFEST_HOST_PATH=/srv/codify/releases/<release>/worker-cli-linux-amd64.json
+export CODIFY_V2_RELEASE_WORKER_IMAGE=codify-worker/java21-maven:<release>
+deploy/scripts/preflight-v2-release.sh
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.v2-release.yml config --quiet
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.v2-release.yml up -d backend scheduler
 ```
 
-新 V2 Runtime Bundle bind 会从该 lock 写入每个 Adapter 的 artifact SHA；源 Runtime manifest 中的
+overlay sets `CODIFY_WORKER_CLI_ARTIFACT_MANIFEST=/run/codify/worker-cli-artifacts.json` for
+both services and mounts the host file there read-only. Do not put this manifest in a secret store:
+it contains release identity/version/SHA metadata, not credentials.
+`CODIFY_WORKER_CLI_ARTIFACT_MANIFEST_HOST_PATH` must be an absolute path on the selected Docker
+**daemon Host**. With remote Docker, first copy the reviewed lock to that Host and then give the
+same daemon-visible path to the Compose control host; a file only on the control host is not a bind
+source. `CODIFY_V2_RELEASE_WORKER_IMAGE` must name the reviewed Worker image on that same daemon.
+`preflight-v2-release.sh` runs one-shot Backend and Scheduler containers through the selected
+Compose context and validates the actual read-only daemon bind and the lock/image platform match.
+`docker compose ... config` checks only interpolation and cannot prove the daemon can see the path.
+
+新 V2 Runtime Bundle bind 会从该 lock 写入每个 Adapter 的 artifact SHA 与目标平台；源 Runtime manifest 中的
 占位符不能替代它。一个 Bundle 对应一个发布的 image/platform identity，因此多架构部署应分别构建、
 导出、审查并为相应调度域使用正确 lock，不能混用 amd64 与 arm64 文档。
 
@@ -268,8 +285,9 @@ make worker-kit-verify \
 ```
 
 `RUNTIME_MANIFEST` 必须是 release lock 已写入 artifact SHA 的冻结
-`codify.worker.runtime-manifest/v2` 文档，或数据库绑定时持久化的
-`codify.worker.runtime-bundle/v2` 文档（必须保留嵌套的 `adapter.version/digest` identity）；不能传入 Kit manifest、仅供容器 Launcher 使用的扁平化 projection，或仓库中带 `<computed at freeze>` 占位符的 source template。此命令只是 L1/L2 source/image/Kit verification；随后仍需按 Profile 调用 API verify-runtime，并在真实
+`codify.worker.runtime-manifest/v2` 文档，或数据库持久化且保留嵌套 Adapter identity 的
+`codify.worker.runtime-bundle/v2` 文档；不能传入 Kit manifest、placeholder source template 或容器 Launcher 的
+flat projection。此命令只是 L1/L2 source/image/Kit verification；随后仍需按 Profile 调用 API verify-runtime，并在真实
 Docker Host 上完成最小 Task/MR smoke 后才有 L3/L4 证据。若 `WORKER_IMAGE` 使用其他 tag/digest，
 必须同步更新 Profile 并重新验证。
 
@@ -369,6 +387,23 @@ docker exec codify-postgres psql -U codify -d codify -c \
 - 未备份就重置 PostgreSQL volume
 - 未记录密钥就轮换 `SECRET_KEY` / `CONFIG_ENCRYPTION_KEY`
 - 在未验证 Worker 镜像的情况下直接替换正式环境
+
+### 10.1 导出 DB 绑定的 V2 Runtime Bundle（L3 证据）
+
+只可从一个已验证的 V2 Task 或一个已知 bundle digest 导出；命令不读取当前 checkout、不会重新构建
+Bundle，也不会通过 HTTP 获取内容。基础 Compose 将宿主机 `/opt/codify-archives` bind 到 backend
+容器的同一路径，因此 `BUNDLE_EXPORT_DIR` 必须使用容器内的持久目录
+`/opt/codify-archives/runtime-bundles`，不能写入容器层或使用控制机路径：
+
+```bash
+make worker-runtime-bundle-export TASK_ID=123 BUNDLE_EXPORT_DIR=/opt/codify-archives/runtime-bundles
+```
+
+导出结果固定为 `/opt/codify-archives/runtime-bundles/runtime-bundle-v2-<bundle-digest>/`，包含数据库中原始 tar 字节、规范化的
+数据库 manifest 和各自 SHA-256 sidecar。目标已经存在、manifest/归档出现 secret 形态、或 Bundle 与
+冻结的 V2 identity/evidence/platform 不一致时都会拒绝，不能覆盖或“清洗后继续”。一个 Bundle 仅证明
+该 Task 选中的 Harness；四个 Harness 的 L3 证据必须来自四个分别验证通过的 Task。L3 是制品/绑定证据，
+不是 Host 上的完整执行与 MR 验收（L4）。
 
 ## 11. 相关文档
 

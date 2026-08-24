@@ -1,12 +1,15 @@
-# Multi-Harness 直接切换与生产验收 Runbook
+# Multi-Harness V2 dual-canary 与生产验收 Runbook
 
 > 配套证据模板：[multi-harness-rollout-evidence.md](multi-harness-rollout-evidence.md)
 > 上级计划：[2026-08-01-multi-harness-engine-roadmap.md](../superpowers/plans/2026-08-01-multi-harness-engine-roadmap.md)
-> 修订（2026-08-05）：取消 canary/灰度，全部目标 Host 验证完成后直接切换。
+> 当前范围（2026-08-24）：V2 dual-canary；仅在显式 release overlay、冻结 identity/evidence 和
+> L3/L4 门禁满足后推进。2026-08-05 的 Claude/Codex V1 直接切换演练仅保留为历史参考，不代表当前发布策略。
 
 ## 1. 适用范围与行为边界
 
-本 Runbook 只覆盖 Claude + Codex 双引擎生产切换。操作过程中：
+本 Runbook 覆盖 V2 dual-canary 下的四个 Harness：Pi、OpenCode、Claude、Codex，以及从源码/制品校验
+到 Docker Host 验收的推进流程。基础 Compose 保留 legacy V1 execution path；只有显式 V2 release
+overlay 提供 V2 release lock 并允许 V2 execution。`v2_only` 才会拒绝 V1 contract。操作过程中：
 
 - 不新增协议能力、不升级 CLI、不修改 Adapter 映射、不引入新的沙箱模式。
 - 发现任何缺陷立即停止切换，回到 Phase 2 修复并重新生成完整制品，再重新走 3.1–3.5。
@@ -15,24 +18,22 @@
 
 ## 2. 发布冻结清单
 
-进入安装前，逐项记录并冻结。以下数值是 2026-08-05 在 dev 目标 Host 完成演练时的 release candidate
-证据，生产切换必须以实际发布批次重新冻结并填入证据模板。
+进入安装前，逐项记录并冻结。以下字段是当前 V2 release candidate 的必填证据模板；不得把历史演练
+的 tag、digest 或 Harness 列表当作当前冻结值。每个启用 Harness 都必须有独立的 exact identity
+与 verification evidence。
 
-| 冻结项 | 冻结值（2026-08-05 dev 演练） | 生产切换时 |
+| 冻结项 | 当前 V2 dual-canary 必填值 | 生产切换时 |
 |---|---|---|
-| Backend image | `codify-backend:latest`，content digest `sha256:00e992eb8f99d0c6756e8aa8cc20bffdf17cfad1962647264064df447d5fa669`，repo `127.0.0.1:5000/codify-backend@sha256:37671703a81492c0f578c753ce8599bdf670d54c1cd5ba0c97b793d2edd5ec90` | 重新记录 repo digest |
-| Frontend/Nginx image | `codify-nginx:latest`，content digest `sha256:74324ed288483b8003224abd8b71670af8c86228a3bc00421be232af863949e2`，repo `127.0.0.1:5000/codify-nginx@sha256:bf65cf01c9886b97a448af1b476696039272a75e2014e82673238acb336bafe7` | 重新记录 repo digest |
-| Database migration head | `065_worker_profile_verification` | 以发布时实际 head 为准 |
-| Worker Kit | `0.3.10`；amd64 archive `48880f314d0c380333b932771b7c0f09628d2093a6396167925ea94bbc1b96b1`；manifest `97b316b509f5b2608684fe505cf88f5a9a121680210727b08d4f83c463af011e` | 重新记录 archive/manifest SHA-256 |
-| arm64 Kit | 当前 Host 矩阵无 arm64 Host，标记 not required；新增 arm64 Host 前必须导出并校验，禁止跨架构复用 | 按矩阵标记 |
-| Runtime image | `codify-worker/java21-maven:2026.07`，content digest `sha256:9e2981c4835156bc05b451730091de6389cd4f3688345c9b331ccf2012f20a11`，repo `127.0.0.1:5000/codify-worker/java21-maven@sha256:a9d046b1382eaf0574d88754bef916199317a7b5becba9b10be75440508461e3` | 重新记录 repo digest |
-| Claude CLI | `2.1.153`，binary `sha256:214f603f31942162dac9a65f18d43b3ac646ae215240fad481c4aad6c60f2e38`，source `image`/host mount `/usr/local/bin/claude` | 重新校验 |
-| Codex CLI | `0.146.0`，binary `sha256:2e863156ed35ecc5253b1e2f907a9143077b9f7cb51942070c61996471ff6e04`，source `host_mount` `/opt/codify-codex/bin/codex` | 重新校验 |
-| Runtime Bundle | Task Snapshot `runtime_bundle_digest=00addfc6f57be75f70f3ce1eb9591e60c15e7e32dfcece75d2e32884248c5a59`；Claude Adapter `1.0.1`，Codex Adapter `1.0.0`，Adapter digest `80dc16c0dd0092514758ac998652420abee96ac9da358530037b5dce736bb595` | 以发布批次 manifest 为准 |
-| 协议 | Runtime contract `codify.worker.harness/v1`，Canonical Event `codify.worker.event/v1`，orchestration `1.0.0` | 不变量 |
-| Profile payload | Profile 11 `worker kit`：`runtime_mode=mounted_kit`、Kit `0.3.10`、`enabled_harnesses=["claude","codex"]`、`default_harness_key=claude`、image digest 固定为上述 repo digest、sandbox `container-boundary`、`approval_policy=never`、codex execpolicy 禁 git 写操作 | 以生产 Profile 为准 |
-| 凭据交付 | 受限 legacy 容器密钥 + `docs/security/credential-delivery-risk-acceptance.md`；`credential_ref` 运行时接线延后 | 书面风险接受已签署 |
-| 回滚坐标 | Profile 1 `Default Worker`（legacy baked，保留）；Kit `0.3.9-linux-amd64` 保留在 Host；切换前 Profile 11 的 image tag 坐标已记录 | 保留旧目录/旧镜像 |
+| Backend/Frontend image | 发布批次 tag、repo digest、image ID、Linux platform | 重新记录并与 Profile/Task Snapshot 比对 |
+| Database migration head | 发布批次的唯一 migration owner 与已审 revision | 以实际发布批次为准 |
+| Worker Kit | 版本、platform、archive SHA-256、manifest SHA-256 | 重新记录并逐 Host 校验 |
+| Runtime image identity | daemon、repo@digest、image ID、Linux platform、CLI lock SHA-256 | 四项必须与 Profile、Bundle、Host 实际值一致 |
+| Harness CLI lock | `pi`、`opencode`、`claude`、`codex` 四个 CLI 的 exact version、source、executable SHA-256 | 逐 Harness 重新校验 |
+| Runtime Bundle/evidence | 每个 Harness 独立 Task snapshot、bundle digest、adapter version+digest、identity/evidence/platform | 以 DB-bound Bundle 与 verification evidence 为准 |
+| 协议 | Runtime contract `codify.worker.harness/v2`、Canonical Event `codify.worker.event/v1`、orchestration `1.0.0` | 不变量 |
+| Profile payload | `HARNESS_EXECUTION_MODE=dual_canary`；`enabled_harnesses=["pi","opencode","claude","codex"]`；V2 identity/evidence 完整 | 以生产 Profile snapshot 为准 |
+| 凭据交付 | 每个 Harness/Provider 的 `credential_ref`、权限边界、轮换记录与风险接受文档 | 逐 Profile/Provider 复核 |
+| 回滚坐标 | 当前稳定 legacy V1 Profile、Kit、runtime image 和 migration compatibility window | 发布前记录并保留 |
 
 冻结后任何一项改变都必须产生新的 release candidate 和证据批次。
 
@@ -95,10 +96,10 @@ the Kit contract/event compatibility, image platform, exact CLI version/SHA and 
 first-class self-checks. It does not treat the Kit manifest as a Runtime Bundle manifest. A normal
 Profile/API verification remains one `default_harness_key` at a time and may omit
 `RUNTIME_MANIFEST`; that preserves the historical installation-preflight boundary.
-The path must be a release-stamped `codify.worker.runtime-manifest/v2` document, or the
-persisted `codify.worker.runtime-bundle/v2` document containing exported CLI identity SHA values
-and nested `adapter.version/digest` identities. Do not pass a Kit manifest, the container-only
-flattened Launcher projection, or the repository template with placeholder SHA values.
+The path may be a release-stamped `codify.worker.runtime-manifest/v2` document or a DB-persisted
+`codify.worker.runtime-bundle/v2` document that retains each nested Adapter identity. Do not pass a
+Kit manifest, a container-only Launcher flat projection, or the repository template with placeholder
+SHA values.
 
 For an explicit one-Harness host-mount override, use the same command with `HARNESS_KEY`,
 `HARNESS_HOST_PATH`, and `HARNESS_CONTAINER_PATH`:
@@ -118,8 +119,24 @@ digest、CA、PATH、工作区写权限、UID/GID、sandbox、Skills、Mermaid �
 daemon 侧访问。任一 Host/Harness 失败即标记不可路由，不能靠其他 Host 成功放行。
 
 在 Build 后先以 `make worker-cli-artifact-export` 导出 image `/etc/codify-worker-cli-artifacts.json`，
-审查其 SHA 后以 `CODIFY_WORKER_CLI_ARTIFACT_MANIFEST` 同时注入 Backend/Scheduler。Runtime Bundle
-bind 会冻结该 identity；逐 Harness 验收仍必须同时包含离线 verify-runtime 与一个真实 smoke Task。
+审查其 SHA 后通过 V2 release overlay 注入 Backend/Scheduler：
+
+```bash
+export CODIFY_WORKER_CLI_ARTIFACT_MANIFEST_HOST_PATH=/srv/codify/releases/<release>/worker-cli-linux-amd64.json
+export CODIFY_V2_RELEASE_WORKER_IMAGE=codify-worker/java21-maven:<release>
+deploy/scripts/preflight-v2-release.sh
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.v2-release.yml config --quiet
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.v2-release.yml up -d backend scheduler
+```
+
+overlay 会为两个服务设置同一固定容器路径
+`CODIFY_WORKER_CLI_ARTIFACT_MANIFEST=/run/codify/worker-cli-artifacts.json` 并只读挂载 lock；基础 compose
+不会在 dual-canary 时创建空挂载。`*_HOST_PATH` 必须是选中 Docker **daemon Host** 上的绝对路径；remote Docker
+时先把审查后的 lock 复制到 daemon Host，再将相同路径传给控制 Host 上的 Compose。
+`CODIFY_V2_RELEASE_WORKER_IMAGE` 是同一 daemon 上已审查的 Worker image。`preflight-v2-release.sh`
+会通过选中 Compose context 启动一次性 Backend 与 Scheduler 校验容器，验证实际 readonly bind 和 lock/image platform；仅运行 `compose config` 不能证明
+daemon 可见。Runtime Bundle bind 会冻结该 identity 与平台；逐 Harness 验收仍必须同时包含离线 verify-runtime 与一个真实
+smoke Task。
 
 ### 4.4 Codify API verify-runtime
 
@@ -138,6 +155,20 @@ Harness allowlist 后 `verified_at` 会被清空，必须重新验证。
 
 ## 5. 真实验收矩阵
 
+### 5.1 DB-bound Runtime Bundle 归档（L3）
+
+每个已验证 V2 Task 都在 backend 所在 Host 导出其冻结 Bundle；`BUNDLE_EXPORT_DIR` 必须是 backend 容器的
+归档 bind mount，而不是笔记本上的路径。导出不会从 checkout 重建、不会下载，并以
+`runtime-bundle-v2-<digest>` 目录原子发布：
+
+```bash
+make worker-runtime-bundle-export TASK_ID=<verified-task-id> BUNDLE_EXPORT_DIR=/opt/codify-archives/runtime-bundles
+```
+
+一个导出只证明该 Task snapshot 选择的 Harness/key；Pi、OpenCode、Claude、Codex 必须各有一个经过验证的
+Task 和独立导出。目标目录已存在或任一身份、证据、platform、archive/manifest 校验失败即停止。该 L3
+归档不能替代同一 Host 上完整 Git/MR、session、取消和回放的 L4 验收。
+
 每个进入生产支持范围的 Harness 至少在一个目标 Host 完成，关键 Host 全部覆盖。证据模板逐行记录
 Task ID、Harness、attempt ID、Host、Profile snapshot、MR/commit、archive digest、结果和人工结论。
 
@@ -154,7 +185,7 @@ Task ID、Harness、attempt ID、Host、Profile snapshot、MR/commit、archive d
 - Canonical Event、raw event、console、result、artifacts 可下载、清洗并离线回放。
 - Git/MR、commit message fallback、delivery summary、Mermaid 和 Claude-only CodeGraph 行为正确。
 
-## 6. 直接切换
+## 6. Dual-canary 推进
 
 ### 6.1 前置检查
 
@@ -165,25 +196,26 @@ Task ID、Harness、attempt ID、Host、Profile snapshot、MR/commit、archive d
 ### 6.2 发版硬边界
 
 1. 关闭/处理历史 Issue；PENDING/QUEUED/RUNNING 旧任务 drain 或取消，切换窗口内无旧 Kit/旧镜像任务在途。
-2. 无 Runtime Bundle 的 Task 只读，不允许执行或 retry。
+2. 没有 V2 Runtime Bundle 的 V2 Task 不允许执行或 retry；legacy V1 Task 继续遵循 legacy execution path。
 3. 每个可调度 Host 安装并验证新 Kit；每个启用 Profile 切到冻结版本后才能恢复调度。
 
-### 6.3 一次性直接切换
+### 6.3 Canary 推进边界
 
-- 把所有启用 Worker Profile 切到冻结 Kit、image digest、harness allowlist/约束和凭据策略；
-  任一 Host 未通过 verify-runtime 不得恢复调度。
+- 仅将已完成 exact identity/evidence 和 verify-runtime 的 Harness 加入 V2 canary；其余 Harness
+  继续使用 legacy V1 execution path 或保持未启用。任一 Host 未通过 verify-runtime 不得恢复 V2 调度。
 - 镜像引用使用 `repo@sha256:...` 或等价不可变 ID，不依赖可变 tag 作为验收依据。
 - 新 Task 在创建时冻结 Task Snapshot；运行中和已创建 Task 均不做热切换。
-- 任一阻断阈值触发立即停止新 Task 创建，保留运行证据并按第 8 节回滚。
+- 任一阻断阈值触发立即停止 V2 canary 的新 Task 创建，保留运行证据并按第 8 节回滚；不得直接
+  将未完成 L3/L4 的全量 Harness 切换为 V2。
 
 ### 6.4 切换后 smoke
 
-切换后立即创建 Claude + Codex smoke Task，验证完整 Git/MR、session、cancel/timeout 和归档回放链路；
-每个 smoke 必须落在 digest 固定后的 Profile 上。
+dual-canary 阶段为 Pi、OpenCode、Claude、Codex 分别创建 smoke Task，验证完整 Git/MR、session、
+cancel/timeout 和归档回放链路；每个 smoke 必须落在 digest 与 evidence 固定后的 Profile 上。
 
 ## 7. 指标、阈值与告警
 
-切换前记录旧 Claude 基线；切换后按 Harness/Adapter/CLI/Profile/Host 观察，避免聚合掩盖单 Host 问题。
+推进前记录 legacy V1 execution baseline；dual-canary 中按 Harness/Adapter/CLI/Profile/Host 观察，避免聚合掩盖单 Host 问题。
 现有入口：
 
 - `GET /api/analytics?days=30`：响应 `harnesses[]` 已按 harness_key/adapter_version 聚合成功率、失败率、
@@ -227,7 +259,7 @@ Provider 响应直接发送到外部通知。
 4. 验证旧 Backend/Frontend 与新增数据库字段的兼容窗口；数据库 downgrade 不是默认回滚手段。
 5. 演练新 Kit 验证失败、Codex Provider 不可达、单 Host 故障和 canonical protocol error 上升四种场景。
 6. 确认旧 Kit path、runtime image、Profile 和 Provider credential 仍可用。
-7. 回滚后新建一个使用旧稳定 Profile 的 Issue，再创建 Claude smoke Task，验证 Issue 分配与完整执行路径恢复。
+7. 回滚后新建一个使用旧稳定 Profile 的 Issue，再创建 legacy V1 smoke Task，验证 Issue 分配与完整执行路径恢复。
 
 ## 9. 生产签署
 
@@ -238,5 +270,12 @@ Provider 响应直接发送到外部通知。
 - 证据能区分源码测试、制品安装、真实 smoke 和切换结果。
 - 运维 runbook、Host 清单、告警和责任人已完成交接。
 
-达到以上条件后，Claude + Codex 才标记为生产基线。OpenCode 保持未启动，至少等待一个稳定 Worker Kit
-发布周期后再评估 Phase 4 准入。
+达到以上条件后，四个 Harness 才可分别标记为生产基线；未满足某 Harness 的 L3/L4 门禁时，继续保持
+该 Harness 的 legacy V1 execution path 或未启用状态，不得宣称已完成全量切换。
+
+### 9.1 历史参考：2026-08-05 Claude/Codex V1 演练
+
+旧演练中的 Claude/Codex 版本、digest、Profile payload 与“全部目标 Host 验证后直接切换”文字，
+只用于解释历史证据格式，不是当前冻结值、当前 Harness 范围或当前发布策略。当前仍需遵守基础 Compose
+保留 legacy V1 execution path、显式 V2 overlay、逐 Harness exact identity/evidence，以及 L3（制品绑定）和 L4（真实
+Docker Host 执行）分层门禁。
