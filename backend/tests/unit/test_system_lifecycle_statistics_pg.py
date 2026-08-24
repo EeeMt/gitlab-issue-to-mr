@@ -42,6 +42,9 @@ from app.models import (
     WorkerProfile,
 )
 
+BUNDLE_DIGEST = "b" * 64
+
+
 TEST_DATABASE_URL = os.environ.get(
     "CODIFY_TEST_DATABASE_URL",
     "postgresql+asyncpg://codify:codify_password@192.168.50.129:5432/codify_test",
@@ -398,18 +401,38 @@ def _create_services(
     """
     from app.api.task_creation_service import TaskCreationServices
 
-    async def prepare_snapshot(*_args, **_kwargs):
+    async def prepare_snapshot(_db, task, _issue, _profile, *_args, **_kwargs):
         # Runs after the Issue row lock and the new Task insert (flush), so it
         # is the earliest point the test can observe that the create holds the
         # lock and has a live Task in its transaction. When ``release`` is given
         # the create stays in-flight (holding the lock) until the test lets it
-        # finish, which makes the lock-blocking deterministic. Returns None so
-        # the ORM does not try to persist the stubbed snapshot on commit.
+        # finish, which makes the lock-blocking deterministic. Returns a real
+        # snapshot so the creation-time execution-policy check sees a complete
+        # frozen Task/Snapshot/Bundle identity.
         if lock_acquired is not None:
             lock_acquired.set()
         if release is not None:
             await release.wait()
-        return None
+        return TaskWorkerProfileSnapshot(
+            task_id=task.id,
+            worker_profile_id=_profile.id,
+            profile_name=_profile.name,
+            image=_profile.image,
+            runtime_mode="baked_image",
+            default_execute_run_instruction_template="",
+            default_plan_run_instruction_template="",
+            ci_auto_repair_run_instruction_template="",
+            harness_key="claude",
+            runtime_contract_version="codify.worker.harness/v1",
+            orchestration_version="1.0.0",
+            runtime_bundle_digest=BUNDLE_DIGEST,
+        )
+
+    bundle = MagicMock()
+    bundle.contract_version = "codify.worker.harness/v1"
+    bundle.orchestration_version = "1.0.0"
+    bundle.digest = BUNDLE_DIGEST
+    bundle.manifest = {"adapters": {"claude": {}}}
 
     return TaskCreationServices(
         require_issue_operator=MagicMock(),
@@ -423,7 +446,7 @@ def _create_services(
         prepare_task_runtime_snapshot=prepare_snapshot,
         replace_task_worker_snapshot=MagicMock(),
         clone_task_worker_snapshot=AsyncMock(),
-        bind_runtime_bundle=AsyncMock(return_value=MagicMock()),
+        bind_runtime_bundle=AsyncMock(return_value=bundle),
         select_snapshot_run_instruction_template=MagicMock(return_value=None),
         render_and_store_task_prompt=AsyncMock(return_value="rendered prompt"),
         notify_task_retried=AsyncMock(),

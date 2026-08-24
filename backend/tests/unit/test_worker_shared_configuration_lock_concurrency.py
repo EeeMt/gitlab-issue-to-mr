@@ -200,11 +200,19 @@ async def _seed(maker) -> tuple[int, int, int, int]:
         issue = Issue(title="shared-lock-concurrency", project_id=1, worker_profile_id=profile.id)
         db.add(issue)
         await db.flush()
+        # Full lineage projection: the issue-order integrity gate treats an
+        # ACTIVE task without a frozen projection as a manual-repair condition,
+        # which would block create_task_record during this lock-order test.
+        # The task stays PENDING so update flows (F6) can still edit it.
         task = Task(
             user_prompt="prompt",
             issue_id=issue.id,
             project_id=1,
             worker_profile_id=profile.id,
+            projected_harness_key="claude",
+            projected_session_namespace="legacy",
+            projected_lineage_generation=0,
+            lineage_projection_reason="initial",
         )
         db.add(task)
         await db.commit()
@@ -419,7 +427,7 @@ async def test_duplicate_route_serializes_shared_patch_before_source_profile(
     await duplicate_db.close()
     await patch_db.close()
 
-    assert response["name"].endswith("(copy)")
+    assert response["name"].endswith(" Copy")
     async with maker() as db:
         shared = await db.get(WorkerSharedConfiguration, 1)
         assert shared is not None and shared.revision == 2
@@ -430,16 +438,21 @@ async def test_task_create_service_serializes_patch_and_snapshots_locked_revisio
 ):
     """Task create passes its Shared-locked revision through to snapshotting."""
     _, profile_id, issue_id, _ = await _seed(maker)
-    provider = AIProvider(
-        id=991,
-        name="lock-order-provider",
-        base_url="https://provider.example.test",
-        model="test-model",
-        provider_kind="anthropic_compatible",
-        model_protocol="anthropic_messages",
-        is_default=True,
-        is_disabled=False,
-    )
+    # Persist the provider: create_task_record freezes provider.id onto the
+    # new Task row and PostgreSQL enforces fk_tasks_provider_id.
+    async with maker() as db:
+        provider = AIProvider(
+            id=991,
+            name="lock-order-provider",
+            base_url="https://provider.example.test",
+            model="test-model",
+            provider_kind="anthropic_compatible",
+            model_protocol="anthropic_messages",
+            is_default=True,
+            is_disabled=False,
+        )
+        db.add(provider)
+        await db.commit()
     profile_locked = asyncio.Event()
     release_profile = asyncio.Event()
     captured_revisions: list[int] = []

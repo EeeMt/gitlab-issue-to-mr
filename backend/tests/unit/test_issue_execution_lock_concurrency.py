@@ -14,6 +14,7 @@ only the tables these tests touch.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import uuid
 from unittest.mock import AsyncMock, patch
@@ -109,7 +110,27 @@ async def _seed_task(
     cancel_requested_at=None,
     scheduled_at=None,
 ) -> int:
+    """Insert a Task whose frozen identity satisfies the execution policy.
+
+    The scheduler claim gate requires a bound Runtime Bundle plus a Worker
+    snapshot whose contract, digest and harness_key match that Bundle, so the
+    fixture freezes a consistent legacy-V1 identity (dual_canary executable).
+    """
     async with maker() as db:
+        bundle_digest = uuid.uuid4().hex + uuid.uuid4().hex
+        bundle_row = await db.execute(
+            sa.text(
+                "INSERT INTO worker_runtime_bundles "
+                "(digest, bundle_bytes, contract_version, orchestration_version, manifest, size_bytes, created_at) "
+                "VALUES (:digest, 'x', 'codify.worker.harness/v1', '1.0.0', CAST(:manifest AS json), 1, now()) "
+                "RETURNING id"
+            ),
+            {
+                "digest": bundle_digest,
+                "manifest": json.dumps({"adapters": {"claude": {}}}),
+            },
+        )
+        bundle_id = bundle_row.scalar_one()
         task = Task(
             user_prompt="prompt",
             issue_id=issue_id,
@@ -119,8 +140,23 @@ async def _seed_task(
             container_id=container_id,
             cancel_requested_at=cancel_requested_at,
             scheduled_at=scheduled_at,
+            runtime_bundle_id=bundle_id,
         )
         db.add(task)
+        await db.flush()
+        await db.execute(
+            sa.text(
+                "INSERT INTO task_worker_profile_snapshots "
+                "(task_id, profile_name, image, runtime_mode, harness_key, "
+                "default_execute_run_instruction_template, default_plan_run_instruction_template, "
+                "ci_auto_repair_run_instruction_template, "
+                "runtime_contract_version, orchestration_version, runtime_bundle_digest) "
+                "VALUES (:t, 'concurrency-test', 'test-image', 'baked_image', 'claude', "
+                "'', '', '', "
+                "'codify.worker.harness/v1', '1.0.0', :digest)"
+            ),
+            {"t": task.id, "digest": bundle_digest},
+        )
         await db.commit()
         return task.id
 
