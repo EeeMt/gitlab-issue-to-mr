@@ -15,6 +15,7 @@ import uuid
 import pytest
 import sqlalchemy as sa
 from alembic.config import Config
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -93,6 +94,14 @@ async def maker(pump_db):
     try:
         yield async_sessionmaker(engine, expire_on_commit=False)
     finally:
+        async with engine.begin() as conn:
+            await conn.execute(
+                sa.text(
+                    "TRUNCATE task_harness_commands, task_harness_attempts, tasks, "
+                    "issues, worker_profiles, worker_runtime_bundles "
+                    "RESTART IDENTITY CASCADE"
+                )
+            )
         await engine.dispose()
 
 
@@ -153,7 +162,7 @@ async def _insert_v2_bundle(db):
             "pi": {
                 "support_tier": "default",
                 "adapter": {"version": "2.0.0", "digest": "a" * 64},
-                "control_transport": {"kind": "rpc_stdio"},
+                "control_transport": {"kind": "rpc_stdio", "protocol": "pi-rpc"},
                 "model_protocols": ["anthropic_messages"],
                 "capabilities": {
                     "resume": True, "task_skills": True, "usage_tokens": True,
@@ -187,32 +196,36 @@ async def _insert_v2_attempt(db, *, task_id, control_state="accepting"):
             sa.text(
                 "INSERT INTO task_harness_attempts (attempt_id, task_id, attempt_no, "
                 "event_schema, harness_key, adapter_version, cli_version, last_seq, "
-                "control_state, next_command_sequence, created_at, updated_at) "
-                "VALUES (:a, :t, 1, :es, 'pi', '2.0.0', '0.84.2', 0, :cs, 1, now(), now()) "
+                "control_state, next_command_sequence, awaiting_follow_up_turn, "
+                "force_close_requested, created_at, updated_at) "
+                "VALUES (:a, :t, 1, :es, 'pi', '2.0.0', '0.84.2', 0, :cs, 1, false, false, now(), now()) "
                 "RETURNING attempt_id"
             ),
             {"a": aid, "t": task_id, "es": CANONICAL_EVENT_SCHEMA_V2, "cs": control_state},
         )
     ).scalar_one()
 
-
-async def _seed_task_with_commands(maker, *, control_state="accepting", count=2):
+async def _seed_task_with_commands(
+    maker, *, control_state="accepting", count=2, create_commands=True
+):
     async with maker() as db:
         issue_id = await _insert_issue(db)
         task_id = await _insert_task(db, issue_id=issue_id, status="running")
         attempt_id = await _insert_v2_attempt(db, task_id=task_id, control_state=control_state)
         command_ids = []
-        for i in range(count):
-            cid = f"cmd-{uuid.uuid4().hex[:16]}"
-            await create_command(
-                db,
-                task_id=task_id,
-                command_id=cid,
-                command_type="steer",
-                payload={"text": f"msg-{i}"},
-                created_by="pump-test",
-            )
-            command_ids.append(cid)
+        if create_commands:
+            for i in range(count):
+                cid = str(uuid.uuid4())
+                seeded = await create_command(
+                    db,
+                    task_id=task_id,
+                    command_id=cid,
+                    command_type="steer",
+                    payload={"text": f"msg-{i}"},
+                    created_by="pump-test",
+                )
+                assert seeded.created, f"seed failed: {seeded.outcome}"
+                command_ids.append(cid)
         await db.commit()
         return task_id, attempt_id, command_ids
 
@@ -256,6 +269,45 @@ async def test_pump_delivers_head_command(maker):
         )
         assert result.commands_processed == 1
         await db.commit()
+        assert await _row_status(db, command_ids[0]) == "delivered"
+
+
+async def test_idle_accepting_attempt_does_not_starve_newer_queued_work(maker):
+    """An accepting attempt with no queue item must not win the claim."""
+    await _seed_task_with_commands(maker, create_commands=False)
+    _, _, command_ids = await _seed_task_with_commands(maker, count=1)
+
+    async with maker() as db:
+        result = await run_pump_cycle(db, owner=_owner(), transport=_ack_transport)
+        await db.commit()
+
+        assert result.attempts_seen == 1
+        assert result.commands_processed == 1
+        assert await _row_status(db, command_ids[0]) == "delivered"
+
+
+async def test_waiting_closing_attempt_does_not_starve_newer_queued_work(maker):
+    """A drained closing attempt awaiting native follow-up must stay idle."""
+    _, waiting_attempt_id, _ = await _seed_task_with_commands(
+        maker, control_state="closing", create_commands=False
+    )
+    async with maker() as db:
+        await db.execute(
+            sa.text(
+                "UPDATE task_harness_attempts SET awaiting_follow_up_turn = true "
+                "WHERE attempt_id = :a"
+            ),
+            {"a": waiting_attempt_id},
+        )
+        await db.commit()
+    _, _, command_ids = await _seed_task_with_commands(maker, count=1)
+
+    async with maker() as db:
+        result = await run_pump_cycle(db, owner=_owner(), transport=_ack_transport)
+        await db.commit()
+
+        assert result.attempts_seen == 1
+        assert result.commands_processed == 1
         assert await _row_status(db, command_ids[0]) == "delivered"
 
 
@@ -358,9 +410,10 @@ async def test_pump_transport_error_fails_closed(maker):
         assert row.status == "outcome_unknown"
         assert row.rejection_code == "delivery_outcome_unknown"
 
-
 async def test_pump_does_not_claim_closed_control_gate(maker):
-    await _seed_task_with_commands(maker, control_state="closed", count=1)
+    await _seed_task_with_commands(
+        maker, control_state="closed", count=1, create_commands=False
+    )
     async with maker() as db:
         result = await run_pump_cycle(
             db, owner=_owner(), transport=_ack_transport
@@ -368,6 +421,35 @@ async def test_pump_does_not_claim_closed_control_gate(maker):
         await db.commit()
         assert result.attempts_seen == 0
         assert result.commands_processed == 0
+
+
+async def test_pre_drained_closing_attempt_is_claimed_and_closed(maker):
+    _, attempt_id, _ = await _seed_task_with_commands(
+        maker, control_state="closing", create_commands=False
+    )
+    seen = []
+
+    async def transport(frame, **_kwargs):
+        seen.append(frame["type"])
+        return {"status": "ack"}
+
+    async with maker() as db:
+        result = await run_pump_cycle(db, owner=_owner(), transport=transport)
+        await db.commit()
+
+        assert result.attempts_seen == 1
+        assert result.commands_processed == 0
+        assert seen == ["close"]
+        state = (
+            await db.execute(
+                sa.text(
+                    "SELECT control_state FROM task_harness_attempts "
+                    "WHERE attempt_id = :a"
+                ),
+                {"a": attempt_id},
+            )
+        ).scalar_one()
+        assert state == "closed"
 
 
 async def test_closing_queue_drains_then_owner_ack_closes_gate(maker):
@@ -438,7 +520,11 @@ async def test_force_close_cas_does_nothing_when_terminal_wins(maker):
             ),
             {"a": attempt_id, "c": command_ids[0]},
         )
-        attempt = await db.get(TaskHarnessAttempt, attempt_id)
+        attempt = (
+            await db.execute(
+                select(TaskHarnessAttempt).where(TaskHarnessAttempt.attempt_id == attempt_id)
+            )
+        ).scalar_one()
         assert attempt is not None
         assert not await request_force_close_after_unknown_follow_up(
             db, attempt=attempt, command_id=command_ids[0], native_id="1000001", reason="test"
@@ -464,7 +550,11 @@ async def test_force_close_cas_arms_closing_attempt_for_owner_reap(maker):
             ),
             {"a": attempt_id, "c": command_ids[0]},
         )
-        attempt = await db.get(TaskHarnessAttempt, attempt_id)
+        attempt = (
+            await db.execute(
+                select(TaskHarnessAttempt).where(TaskHarnessAttempt.attempt_id == attempt_id)
+            )
+        ).scalar_one()
         assert attempt is not None
         assert await request_force_close_after_unknown_follow_up(
             db, attempt=attempt, command_id=command_ids[0], native_id="1000001", reason="test"

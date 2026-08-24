@@ -39,6 +39,7 @@ from app.core.harness_protocol import (
 )
 from app.core.task_harness_commands import (
     CommandError,
+    begin_command_dispatch,
     create_command,
     write_command_delivery,
     write_command_rejection,
@@ -97,7 +98,7 @@ def commands_db():
     original_url = os.environ.get("DATABASE_URL")
     os.environ["DATABASE_URL"] = url
     try:
-        command.upgrade(cfg, "074_open_harness_v2")
+        command.upgrade(cfg, "075_pi_command_dispatch_journal")
         yield {"url": url, "cfg": cfg, "dbname": dbname}
     finally:
         asyncio.run(_drop_database(dbname))
@@ -173,7 +174,7 @@ async def _insert_v2_bundle(db, *, pi_steering=True, pi_follow_up=True):
             "pi": {
                 "support_tier": "default",
                 "adapter": {"version": "2.0.0", "digest": "a" * 64},
-                "control_transport": {"kind": "rpc_stdio"},
+                "control_transport": {"kind": "rpc_stdio", "protocol": "pi-rpc"},
                 "model_protocols": ["anthropic_messages"],
                 "capabilities": {
                     "resume": True,
@@ -186,7 +187,7 @@ async def _insert_v2_bundle(db, *, pi_steering=True, pi_follow_up=True):
             "claude": {
                 "support_tier": "default",
                 "adapter": {"version": "1.0.0", "digest": "b" * 64},
-                "control_transport": {"kind": "cli_stream_json"},
+                "control_transport": {"kind": "cli_stream_json", "protocol": "claude-json"},
                 "model_protocols": ["anthropic_messages"],
                 "capabilities": {
                     "resume": True,
@@ -229,8 +230,9 @@ async def _insert_v2_attempt(
             sa.text(
                 "INSERT INTO task_harness_attempts (attempt_id, task_id, attempt_no, "
                 "event_schema, harness_key, adapter_version, cli_version, last_seq, "
-                "control_state, next_command_sequence, created_at, updated_at) "
-                "VALUES (:a, :t, 1, :es, :hk, '2.0.0', '0.84.2', 0, :cs, 1, now(), now()) "
+                "control_state, next_command_sequence, awaiting_follow_up_turn, "
+                "force_close_requested, created_at, updated_at) "
+                "VALUES (:a, :t, 1, :es, :hk, '2.0.0', '0.84.2', 0, :cs, 1, false, false, now(), now()) "
                 "RETURNING attempt_id"
             ),
             {
@@ -438,7 +440,7 @@ async def test_create_command_reads_capability_from_frozen_bundle(maker):
                             "pi": {
                                 "support_tier": "default",
                                 "adapter": {"version": "2.0.0", "digest": "a" * 64},
-                                "control_transport": {"kind": "rpc_stdio"},
+                                "control_transport": {"kind": "rpc_stdio", "protocol": "pi-rpc"},
                                 "model_protocols": ["anthropic_messages"],
                                 "capabilities": {"steering": False, "follow_up": True},
                             }
@@ -497,7 +499,7 @@ async def test_create_command_unknown_task_raises(maker):
 # ── CAS delivery / rejection (pump only) ────────────────────────────────────
 
 
-async def test_write_delivery_transitions_queued_to_delivered(maker):
+async def test_write_delivery_transitions_dispatching_to_delivered(maker):
     task_id, _ = await _seed_running_pi(maker)
     cid = _cid("cmd")
     async with maker() as db:
@@ -505,6 +507,13 @@ async def test_write_delivery_transitions_queued_to_delivered(maker):
             db, task_id=task_id, command_id=cid, command_type="steer",
             payload={"text": "go"}, created_by="alice",
         )
+        await db.commit()
+        # Commit-before-send: the pump must durably claim the head as
+        # ``dispatching`` before a native ACK can be recorded.
+        claimed = await begin_command_dispatch(
+            db, command_id=cid, started_at=utcnow()
+        )
+        assert claimed is not None
         await db.commit()
         ok = await write_command_delivery(
             db, command_id=cid, delivered_at=utcnow()
@@ -534,6 +543,7 @@ async def test_write_rejection_transitions_to_rejected(maker):
             payload={"text": "go"}, created_by="alice",
         )
         await db.commit()
+        # Rejection terminalizes an unsent command from queued or dispatching.
         ok = await write_command_rejection(
             db, command_id=cid, rejection_code="delivery_outcome_unknown",
             rejection_message="boom", rejected_at=utcnow(),
@@ -562,6 +572,10 @@ async def test_terminal_states_are_immutable(maker):
             db, task_id=task_id, command_id=cid, command_type="steer",
             payload={"text": "go"}, created_by="alice",
         )
+        claimed = await begin_command_dispatch(
+            db, command_id=cid, started_at=utcnow()
+        )
+        assert claimed is not None
         await db.commit()
         await write_command_delivery(db, command_id=cid, delivered_at=utcnow())
         await db.commit()
@@ -614,7 +628,7 @@ def _mock_db_for_flush_race(*, existing_digest: str, flush_raises: bool, command
                 "pi": {
                     "support_tier": "default",
                     "adapter": {"version": "2.0.0", "digest": "a" * 64},
-                    "control_transport": {"kind": "rpc_stdio"},
+                    "control_transport": {"kind": "rpc_stdio", "protocol": "pi-rpc"},
                     "model_protocols": ["anthropic_messages"],
                     "capabilities": {"steering": True, "follow_up": True},
                 }

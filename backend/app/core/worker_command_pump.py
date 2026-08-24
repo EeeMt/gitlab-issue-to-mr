@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Awaitable, Callable
 
-from sqlalchemy import select, update
+from sqlalchemy import exists, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.task_harness_commands import (
@@ -154,12 +154,18 @@ def _future(seconds: int) -> datetime:
 async def _claim_next_attempt(
     db: AsyncSession, *, owner: str, lease_ttl: int
 ) -> TaskHarnessAttempt | None:
-    """Atomically lease one V2 attempt that still accepts commands.
+    """Atomically lease one V2 attempt that needs a pump pass.
 
     Uses ``SKIP LOCKED`` so concurrent dispatchers each claim a different
     attempt; an attempt is claimable when it has no unexpired lease or its
     lease expired (crash recovery). Only attempts whose control gate is
-    ``accepting`` and whose task is RUNNING are eligible.
+    ``accepting``/``closing`` and whose task is RUNNING are eligible. An
+    accepting attempt must have queued work; a drained closing attempt is
+    claimable only when it is not waiting for the native follow-up turn, so
+    the pump can complete its owner close handshake. A closing attempt with
+    queued work remains claimable regardless of that handshake state. This
+    keeps idle attempts from starving newer work while still allowing a
+    pre-drained closing attempt to converge to ``closed``.
     """
     now = utcnow()
     stmt = (
@@ -168,6 +174,16 @@ async def _claim_next_attempt(
         .where(
             Task.status == TaskStatus.RUNNING,
             TaskHarnessAttempt.control_state.in_(("accepting", "closing")),
+            exists(
+                select(1).where(
+                    TaskHarnessCommand.attempt_id == TaskHarnessAttempt.attempt_id,
+                    TaskHarnessCommand.status.in_(("queued", "dispatching")),
+                )
+            )
+            | (
+                (TaskHarnessAttempt.control_state == "closing")
+                & TaskHarnessAttempt.awaiting_follow_up_turn.is_(False)
+            ),
         )
         .where(
             (TaskHarnessAttempt.command_dispatch_expires_at.is_(None))
