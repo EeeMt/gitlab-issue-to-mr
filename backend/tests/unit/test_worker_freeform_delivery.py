@@ -7,6 +7,7 @@ created/reused when the task completed with a persisted ``commit_sha``.
 
 import hashlib
 import io
+import json
 import tarfile
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -19,6 +20,28 @@ from app.core.worker_runtime_bundle import (
     bundle_manifest_digest_from_files,
     v2_launcher_manifest_bytes,
 )
+
+_V2_WORKER_IMAGE_IDENTITY = {
+    "schema": "codify.worker-image-identity/v1",
+    "daemon_key": "freeform-delivery-tests",
+    "image_reference": "registry.example.com/codify-worker@sha256:" + "1" * 64,
+    "image_id": "sha256:" + "2" * 64,
+    "runtime_platform": "linux/amd64",
+    "cli_artifact_lock_sha256": "3" * 64,
+}
+
+
+def _v2_harness_evidence() -> dict[str, object]:
+    return {
+        "schema": "codify.worker-harness-verification/v1",
+        "harness_key": "claude",
+        "contract_version": "codify.worker.harness/v2",
+        "adapter": {"version": "1.0.0", "digest": "4" * 64},
+        "verification_input_digest": "5" * 64,
+        "image_identity": dict(_V2_WORKER_IMAGE_IDENTITY),
+        "generation": 1,
+        "verified_at": "2026-08-24T00:00:00+00:00",
+    }
 from app.core.worker_task_lifecycle import (
     create_execute_container,
     monitor_container_run,
@@ -50,7 +73,19 @@ def _bundle_and_attempt():
             "sha256": hashlib.sha256(entrypoint).hexdigest(),
         }
     ]
-    digest = bundle_manifest_digest_from_files(files)
+    files_digest = bundle_manifest_digest_from_files(files)
+    evidence = _v2_harness_evidence()
+    digest = hashlib.sha256(
+        json.dumps(
+            {
+                "files_digest": files_digest,
+                "worker_image_identity": _V2_WORKER_IMAGE_IDENTITY,
+                "harness_verification_evidence": evidence,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
     manifest = {
         "schema": "codify.worker.runtime-manifest/v2",
         "contract_version": "codify.worker.harness/v2",
@@ -58,10 +93,12 @@ def _bundle_and_attempt():
         "orchestration_version": "1.0.0",
         "runtime_platform": "linux/amd64",
         "bundle_digest": digest,
+        "worker_image_identity": dict(_V2_WORKER_IMAGE_IDENTITY),
+        "harness_verification_evidence": evidence,
         "files": files,
         "adapters": {
             "claude": {
-                "adapter": {"version": "1.0.0", "digest": digest},
+                "adapter": {"version": "1.0.0", "digest": evidence["adapter"]["digest"]},
                 "capabilities": {"steering": False},
             }
         },
@@ -149,7 +186,9 @@ def _execute_fixtures(
         ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
         harness_key="claude",
         harness_config_snapshot={
-            "requested_runtime_contract_version": "codify.worker.harness/v2"
+            "requested_runtime_contract_version": "codify.worker.harness/v2",
+            "v2_worker_image_identity": dict(_V2_WORKER_IMAGE_IDENTITY),
+            "v2_harness_verification_evidence": _v2_harness_evidence(),
         },
         harness_adapter_version="1.0.0",
         harness_adapter_digest=bundle.digest,
@@ -180,6 +219,7 @@ def _execute_fixtures(
         worker_image="old-worker:latest",
         worker_skip_image_pull=False,
         worker_network="bridge",
+        docker_host="tcp://docker.example:2376",
         harness_execution_mode="dual_canary",
     )
     db = MagicMock()
@@ -214,6 +254,10 @@ async def _run_create_execute_container(worker, db, task, issue, settings, bundl
         patch(
             "app.core.worker_task_lifecycle.create_task_attempt",
             new=AsyncMock(return_value=attempt),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.inspect_v2_worker_image_identity",
+            return_value=_V2_WORKER_IMAGE_IDENTITY,
         ),
     ):
         return await create_execute_container(
