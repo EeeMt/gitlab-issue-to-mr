@@ -27,7 +27,6 @@ import pytest
 import sqlalchemy as sa
 from alembic.config import Config
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.orm import selectinload
 from sqlalchemy.pool import NullPool
 
 from alembic import command
@@ -36,7 +35,6 @@ from app.core.worker_shared_configuration import (
     load_shared_configuration,
     resolve_effective_configuration,
 )
-from app.models import WorkerProfile
 
 ADMIN_URL = os.environ.get(
     "CODIFY_TEST_DATABASE_URL",
@@ -355,11 +353,60 @@ async def test_072_fully_explicit_profile_is_zero_drift_after_upgrade(
     )
 
     async with seeded_071() as db:
-        profile = await db.get(
-            WorkerProfile,
-            ids["fully_explicit"],
-            options=[selectinload(WorkerProfile.environment_variables)],
+        # Column-scoped load: the ORM model now carries v2 identity columns
+        # (076) that this throwaway 074-schema database intentionally lacks,
+        # so a full-entity ``db.get`` would SELECT columns that do not exist
+        # here. The resolver only reads these fields plus the env/mask rows.
+        row = (
+            await db.execute(
+                sa.text(
+                    "SELECT id, name, runtime_mode, worker_kit_version, pre_script, "
+                    "post_script, default_execute_run_instruction_template, "
+                    "default_plan_run_instruction_template, "
+                    "ci_auto_repair_run_instruction_template, worker_kit_source, "
+                    "image, volume_mounts, volume_mount_masks "
+                    "FROM worker_profiles WHERE id = :pid"
+                ),
+                {"pid": ids["fully_explicit"]},
+            )
+        ).one()
+        env_rows = [
+            {"key": k, "operation": op, "value": v, "is_secret": sec}
+            for k, op, v, sec in (
+                await db.execute(
+                    sa.text(
+                        "SELECT key, operation, value, is_secret "
+                        "FROM worker_profile_environment_variables "
+                        "WHERE worker_profile_id = :pid ORDER BY key"
+                    ),
+                    {"pid": ids["fully_explicit"]},
+                )
+            ).all()
+        ]
+        import json as _json
+        from types import SimpleNamespace as _NS
+
+        row_map = dict(row._mapping)
+        row_map.pop("volume_mounts", None)
+        row_map.pop("volume_mount_masks", None)
+        profile = _NS(
+            **row_map,
+            environment_variables=[
+                _NS(**{k: (v if k != "is_secret" else bool(v)) for k, v in r.items()})
+                for r in env_rows
+            ],
+            volume_mount_masks=(
+                row.volume_mount_masks
+                if isinstance(row.volume_mount_masks, list)
+                else _json.loads(row.volume_mount_masks or "[]")
+            ),
+            volume_mounts=(
+                row.volume_mounts
+                if isinstance(row.volume_mounts, list)
+                else _json.loads(row.volume_mounts or "[]")
+            ),
         )
+
         shared = await load_shared_configuration(db)
         # Pre-F1 the whole-Profile gate resolved this Profile without the shared
         # baseline; the compensation masks it now carries are no-ops against an
