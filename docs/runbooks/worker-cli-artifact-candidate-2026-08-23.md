@@ -1,4 +1,20 @@
-# Worker CLI artifact candidate — 2026-08-23
+> **RETIRED — 2026-08-25.** This report describes the retired image-owned CLI era.
+> Harness CLIs are now owned by the content-addressed Worker Kit (0.4.0+); the
+> `make worker-cli-artifact-export` target and `CODIFY_WORKER_CLI_ARTIFACT_MANIFEST`
+> binding no longer exist, and this inventory is **not** Kit-owned release evidence
+> (see the Open-Harness V2 tracker §4). Kept as historical/audit reference only.
+> The image digest below may still be reused as a Project Runtime Image identity
+> (toolchain-only) after independent verification, under the new
+> `image_identity + kit_identity + bundle_digest` combination.
+
+This is a read-only inventory of the already-present remote-Docker image
+`codify-worker/java21-maven:2026.08`. It records no credentials or endpoint
+configuration.
+
+It is a **build-input candidate only**, not a release lock and not L3/L4
+evidence: this older image does not contain
+`/etc/codify-worker-cli-artifacts.json`, predates the current Kit/Runtime
+verification implementation, and was not used to run a new Profile or Task.
 
 This is a read-only inventory of the already-present remote-Docker image
 `codify-worker/java21-maven:2026.08`. It records no credentials or endpoint
