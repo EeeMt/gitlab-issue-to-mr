@@ -253,6 +253,15 @@ def test_snapshot_explicitly_freezes_requested_v2_contract_from_harness_runtime(
         id=9,
         name="V2 Worker",
         image="worker:latest",
+        runtime_mode=MOUNTED_KIT_MODE,
+        worker_kit_version="0.4.0",
+        worker_kit_path="/opt/codify/worker-kits/0.4.0-linux-amd64",
+        worker_kit_identity={
+            "schema": "codify.worker.kit-identity/v1",
+            "kit_version": "0.4.0",
+            "platform": "linux/amd64",
+            "manifest_sha256": "c" * 64,
+        },
         volume_mounts=[],
         environment_variables=[],
         pre_script="",
@@ -264,7 +273,7 @@ def test_snapshot_explicitly_freezes_requested_v2_contract_from_harness_runtime(
         harness_constraints={},
         harness_options={},
         harness_runtimes={
-            "pi": {"source": "image", "contract_version": "codify.worker.harness/v2"}
+            "pi": {"source": "worker_kit", "contract_version": "codify.worker.harness/v2"}
         },
         v2_worker_image_identity={
             "schema": "codify.worker-image-identity/v1",
@@ -272,7 +281,6 @@ def test_snapshot_explicitly_freezes_requested_v2_contract_from_harness_runtime(
             "image_reference": "registry.example/worker@sha256:" + "a" * 64,
             "image_id": "sha256:" + "b" * 64,
             "runtime_platform": "linux/amd64",
-            "cli_artifact_lock_sha256": "c" * 64,
         },
         verified_runtime_configuration_digest="verified",
         v2_worker_image_identity_generation=0,
@@ -289,7 +297,6 @@ def test_snapshot_explicitly_freezes_requested_v2_contract_from_harness_runtime(
                     "image_reference": "registry.example/worker@sha256:" + "a" * 64,
                     "image_id": "sha256:" + "b" * 64,
                     "runtime_platform": "linux/amd64",
-                    "cli_artifact_lock_sha256": "c" * 64,
                 },
                 "generation": 0,
                 "verified_at": "2026-08-24T00:00:00+00:00",
@@ -298,6 +305,7 @@ def test_snapshot_explicitly_freezes_requested_v2_contract_from_harness_runtime(
     )
     monkeypatch.setattr(
         "app.core.worker_profiles.current_runtime_verification_digest", lambda *_args, **_kwargs: "verified"
+
     )
 
     snapshot = snapshot_from_profile(SimpleNamespace(id=44), profile)
@@ -308,6 +316,10 @@ def test_snapshot_explicitly_freezes_requested_v2_contract_from_harness_runtime(
     assert snapshot.harness_config_snapshot["v2_worker_image_identity"]["image_reference"].endswith(
         "a" * 64
     )
+    # The mounted-kit V2 snapshot freezes the content-addressed Worker Kit
+    # identity next to the image identity (execution identity = image_identity
+    # + kit_identity + bundle_digest).
+    assert snapshot.harness_config_snapshot["worker_kit_identity"] == profile.worker_kit_identity
     assert snapshot.harness_config_snapshot["v2_harness_verification_evidence"]["harness_key"] == "pi"
 
     profile.v2_harness_verification_evidence = {}
@@ -322,6 +334,31 @@ def test_snapshot_explicitly_freezes_requested_v2_contract_from_harness_runtime(
     }
     with pytest.raises(WorkerProfileValidationError, match="generation is stale"):
         snapshot_from_profile(SimpleNamespace(id=46), profile)
+
+    # A mounted-kit V2 target without a frozen Worker Kit identity is rejected
+    # fail-closed: the Kit bytes are part of the execution identity.
+    profile.worker_kit_identity = None
+    with pytest.raises(WorkerProfileValidationError, match="no verified Worker Kit identity"):
+        snapshot_from_profile(SimpleNamespace(id=47), profile)
+
+    # Baked-image V2 targets have no Kit to freeze, so the snapshot omits it.
+    profile.worker_kit_identity = {
+        "schema": "codify.worker.kit-identity/v1",
+        "kit_version": "0.4.0",
+        "platform": "linux/amd64",
+        "manifest_sha256": "c" * 64,
+    }
+    profile.v2_harness_verification_evidence = {
+        "pi": {
+            **snapshot.harness_config_snapshot["v2_harness_verification_evidence"],
+            "generation": 0,
+        }
+    }
+    profile.runtime_mode = BAKED_IMAGE_MODE
+    profile.worker_kit_version = None
+    profile.worker_kit_path = None
+    baked_snapshot = snapshot_from_profile(SimpleNamespace(id=48), profile)
+    assert "worker_kit_identity" not in baked_snapshot.harness_config_snapshot
 
 
 def test_v2_image_identity_rejects_ambiguous_repo_digests_and_never_uses_tag():

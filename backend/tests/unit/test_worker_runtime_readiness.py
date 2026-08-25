@@ -5,8 +5,8 @@ Covers the generation/CAS protocol, TTL-only ready caching, never-expiring
 unavailable, and the side-effect-free strict-Mount probe that reads Kit
 contents through the archive API from a stopped container.
 """
-
 import asyncio
+import hashlib
 import io
 import json
 import tarfile
@@ -47,11 +47,12 @@ from app.models import Base, WorkerRuntimeReadiness
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 
-def _tar_bytes(name: str, payload: bytes) -> bytes:
+def _tar_bytes(name: str, payload: bytes, *, mode: int = 0o644) -> bytes:
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w") as archive:
         info = tarfile.TarInfo(name)
         info.size = len(payload)
+        info.mode = mode
         archive.addfile(info, io.BytesIO(payload))
     return buffer.getvalue()
 
@@ -71,7 +72,7 @@ def _make_probe_client(*, manifest: bytes | None = None):
         if path.endswith("nix/store"):
             return (iter([_tar_bytes("store", b"")]), {})
         name = path.rsplit("/", 1)[-1]
-        return (iter([_tar_bytes(name, b"#!/bin/sh")]), {})
+        return (iter([_tar_bytes(name, b"#!/bin/sh", mode=0o755)]), {})
 
     container.get_archive = fake_get_archive
     client = MagicMock()
@@ -81,12 +82,25 @@ def _make_probe_client(*, manifest: bytes | None = None):
 
 
 def _valid_manifest(version: str = "0.3.5") -> bytes:
+    payload = b"#!/bin/sh"
     return json.dumps(
         {
             "schema_version": 2,
             "manifest_kind": "codify.worker.kit-manifest/v1",
             "kit_version": version,
-            "harness": "claude",
+            "platform": "linux/amd64",
+            "harness_inventory": {
+                "pi": {
+                    "availability": "present",
+                    "path": "/opt/codify-kit/harness/pi/bin/pi",
+                    "version": "0.84.2",
+                    "sha256": hashlib.sha256(payload).hexdigest(),
+                    "size": len(payload),
+                },
+                "opencode": {"availability": "absent", "reason_code": "not_selected"},
+                "claude": {"availability": "absent", "reason_code": "not_selected"},
+                "codex": {"availability": "absent", "reason_code": "not_selected"},
+            },
         }
     ).encode()
 

@@ -27,7 +27,6 @@ _V2_WORKER_IMAGE_IDENTITY = {
     "image_reference": "registry.example.com/codify-worker@sha256:" + "1" * 64,
     "image_id": "sha256:" + "2" * 64,
     "runtime_platform": "linux/amd64",
-    "cli_artifact_lock_sha256": "3" * 64,
 }
 
 
@@ -81,6 +80,7 @@ def _bundle_and_attempt():
                 "files_digest": files_digest,
                 "worker_image_identity": _V2_WORKER_IMAGE_IDENTITY,
                 "harness_verification_evidence": evidence,
+                "worker_kit_identity": None,
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -185,6 +185,10 @@ def _execute_fixtures(
         default_plan_run_instruction_template="Plan {{user_prompt}}",
         ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
         harness_key="claude",
+        cli_source="host_mount",
+        cli_executable_path="/usr/local/bin/claude",
+        cli_version="2.1.200",
+        cli_binary_digest="b" * 64,
         harness_config_snapshot={
             "requested_runtime_contract_version": "codify.worker.harness/v2",
             "v2_worker_image_identity": dict(_V2_WORKER_IMAGE_IDENTITY),

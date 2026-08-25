@@ -583,6 +583,7 @@ def test_opencode_verify_runtime_enforces_pinned_version(tmp_path):
     env = {
         "CODIFY_ORCHESTRATION_DIR": str(REPO_ROOT / "deploy"),
         "CODIFY_OPENCODE_BIN": str(cli),
+        "CODIFY_HARNESS_CLI_BIN": str(cli),
         "ENTRYPOINT_LIB_DIR": str(REPO_ROOT / "deploy/worker-entrypoint"),
         "CODIFY_RUNTIME_DIR": str(tmp_path),
         "CODIFY_RUN_UID": "1000",
@@ -590,14 +591,16 @@ def test_opencode_verify_runtime_enforces_pinned_version(tmp_path):
     }
     ok = _source_adapter("opencode_adapter_verify_runtime", env)
     assert ok.returncode == 0, ok.stderr
-    # Out-of-pin version must fail closed (manifest pins 1.18.19).
+    # Out-of-baseline version is advisory: a sanitized warning, execution
+    # continues (§11.2 Compatibility policy).
     cli2 = tmp_path / "opencode-bad"
     cli2.write_text("#!/bin/sh\necho opencode 9.9.9\n", encoding="utf-8")
     cli2.chmod(0o755)
-    env2 = {**env, "CODIFY_OPENCODE_BIN": str(cli2)}
+    env2 = {**env, "CODIFY_OPENCODE_BIN": str(cli2), "CODIFY_HARNESS_CLI_BIN": str(cli2)}
     bad = _source_adapter("opencode_adapter_verify_runtime", env2)
-    assert bad.returncode != 0
-    assert "version mismatch" in bad.stderr
+    assert bad.returncode == 0, bad.stderr
+    assert "WARNING" in bad.stderr
+    assert "advisory" in bad.stderr
 
 
 def test_opencode_prepare_config_writes_snapshot_endpoint(tmp_path):

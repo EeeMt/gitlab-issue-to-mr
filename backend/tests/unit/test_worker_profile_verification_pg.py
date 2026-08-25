@@ -37,7 +37,16 @@ async def pg_engine():
                 sa.text("ALTER TABLE worker_profiles ADD COLUMN IF NOT EXISTS v2_worker_image_identity JSON")
             )
             await connection.execute(
-                sa.text("ALTER TABLE worker_profiles ADD COLUMN IF NOT EXISTS v2_worker_image_identity_generation INTEGER NOT NULL DEFAULT 0")
+                sa.text("ALTER TABLE worker_profiles ADD COLUMN IF NOT EXISTS worker_kit_identity JSON")
+            )
+            await connection.execute(
+                sa.text("ALTER TABLE worker_profiles ADD COLUMN IF NOT EXISTS worker_kit_identity_generation INTEGER NOT NULL DEFAULT 0")
+            )
+            await connection.execute(
+                sa.text("ALTER TABLE worker_runtime_readiness ADD COLUMN IF NOT EXISTS harness_inventory JSON")
+            )
+            await connection.execute(
+                sa.text("ALTER TABLE worker_runtime_readiness ADD COLUMN IF NOT EXISTS kit_identity JSON")
             )
     except Exception as exc:  # noqa: BLE001
         await engine.dispose()

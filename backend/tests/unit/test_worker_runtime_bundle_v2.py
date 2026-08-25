@@ -70,7 +70,6 @@ def _frozen_v2_manifest(files=None, **adapter_overrides):
         "image_reference": "registry.example/worker@sha256:" + "d" * 64,
         "image_id": "sha256:" + "e" * 64,
         "runtime_platform": "linux/amd64",
-        "cli_artifact_lock_sha256": "f" * 64,
     }
     adapters = {
         "pi": _adapter(key="pi", directory="harness/adapters/pi"),

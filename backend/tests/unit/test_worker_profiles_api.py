@@ -179,7 +179,7 @@ def test_worker_profile_request_accepts_valid_harness_fields():
         harness_constraints={"max_turns": 20},
         harness_runtimes={
             "claude": {
-                "source": "image",
+                "source": "host_mount",
                 "executable_path": "/usr/local/bin/claude",
             }
         },
@@ -1088,6 +1088,33 @@ async def test_verify_mounted_worker_profile_runs_preflight_on_profile_target():
         "team/java21-maven@sha256:abc123def456"
     )
 
+    readiness = RuntimeReadiness(
+        status="ready",
+        docker_daemon_key="daemon-key-12",
+        runtime_mode="mounted_kit",
+        worker_kit_version="0.3.5",
+        worker_kit_path="/opt/codify/worker-kits/0.3.5-linux-amd64",
+        checked_at=datetime(2026, 1, 1),
+        ready_until=datetime(2026, 1, 2),
+        harness_inventory={
+            "claude": {
+                "availability": "present",
+                "path": "/opt/codify-kit/harness/claude/bin/claude",
+                "version": "1.0.0",
+                "sha256": "d" * 64,
+                "size": 1024,
+            },
+            "pi": {"availability": "absent", "reason_code": "not_selected"},
+            "opencode": {"availability": "absent", "reason_code": "not_selected"},
+            "codex": {"availability": "absent", "reason_code": "not_selected"},
+        },
+        kit_identity={
+            "schema": "codify.worker.kit-identity/v1",
+            "kit_version": "0.3.5",
+            "platform": "linux/amd64",
+            "manifest_sha256": "e" * 64,
+        },
+    )
     with (
         patch("app.api.worker_profiles.DockerClientWrapper", return_value=client),
         patch(
@@ -1098,24 +1125,12 @@ async def test_verify_mounted_worker_profile_runs_preflight_on_profile_target():
                 "image_reference": "team/java21-maven@sha256:abc123def456",
                 "image_id": "sha256:" + "a" * 64,
                 "runtime_platform": "linux/amd64",
-                "cli_artifact_lock_sha256": "b" * 64,
             },
         ),
         patch(
             "app.api.worker_profiles.run_deterministic_kit_probe",
             new=AsyncMock(
-                return_value=RuntimeProbeOutcome(
-                    readiness=RuntimeReadiness(
-                        status="ready",
-                        docker_daemon_key="daemon-key-12",
-                        runtime_mode="mounted_kit",
-                        worker_kit_version="0.3.5",
-                        worker_kit_path="/opt/codify/worker-kits/0.3.5-linux-amd64",
-                        checked_at=datetime(2026, 1, 1),
-                        ready_until=datetime(2026, 1, 2),
-                    ),
-                    committed=True,
-                )
+                return_value=RuntimeProbeOutcome(readiness=readiness, committed=True)
             ),
         ),
     ):
@@ -1142,6 +1157,10 @@ async def test_verify_mounted_worker_profile_runs_preflight_on_profile_target():
     assert create_kwargs["user"] == "0:0"
     assert create_kwargs["tmpfs"] == {"/workspace": "rw,exec,mode=1777"}
     assert create_kwargs["environment"]["CODIFY_HARNESS_KEY"] == "claude"
+    assert (
+        create_kwargs["environment"]["CODIFY_HARNESS_CLI_BIN"]
+        == "/opt/codify-kit/harness/claude/bin/claude"
+    )
     assert create_kwargs["environment"]["CUSTOM_CLAUDE_BIN"] == "/usr/local/bin/claude"
     assert "RUNTIME_SECRET" not in create_kwargs["environment"]
     assert response["omitted_secret_environment_keys"] == ["RUNTIME_SECRET"]
@@ -1162,6 +1181,68 @@ async def test_verify_mounted_worker_profile_runs_preflight_on_profile_target():
 
 
 @pytest.mark.asyncio
+async def test_verify_rejects_harness_absent_from_kit_inventory_with_422():
+    """A Harness absent from the frozen Kit inventory is a deterministic
+    harness_cli_unavailable rejection, never an image/PATH fallback."""
+    profile = _make_profile(
+        id=42,
+        name="Degraded Kit",
+    )
+    profile.image = "team/java21-maven:2026.07"
+    profile.runtime_mode = "mounted_kit"
+    profile.worker_kit_version = "0.3.5"
+    profile.worker_kit_path = "/opt/codify/worker-kits/0.3.5-linux-amd64"
+    profile.default_harness_key = "claude"
+    profile.volume_mounts = []
+    db = MagicMock()
+    db.get = AsyncMock(
+        side_effect=lambda model, pk, **kwargs: profile if model is WorkerProfile else None
+    )
+    db.commit = AsyncMock()
+    db.execute = AsyncMock(return_value=SimpleNamespace(rowcount=1))
+
+    client = MagicMock()
+    client.create_container.return_value = MagicMock()
+
+    readiness = RuntimeReadiness(
+        status="ready",
+        worker_kit_version="0.3.5",
+        harness_inventory={
+            "claude": {"availability": "absent", "reason_code": "not_selected"},
+            "pi": {"availability": "absent", "reason_code": "not_selected"},
+            "opencode": {"availability": "absent", "reason_code": "not_selected"},
+            "codex": {"availability": "absent", "reason_code": "not_selected"},
+        },
+        kit_identity={
+            "schema": "codify.worker.kit-identity/v1",
+            "kit_version": "0.3.5",
+            "platform": "linux/amd64",
+            "manifest_sha256": "e" * 64,
+        },
+    )
+    with (
+        patch("app.api.worker_profiles.DockerClientWrapper", return_value=client),
+        patch(
+            "app.api.worker_profiles.run_deterministic_kit_probe",
+            new=AsyncMock(
+                return_value=RuntimeProbeOutcome(readiness=readiness, committed=True)
+            ),
+        ),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            await verify_worker_profile_runtime(
+                42,
+                WorkerRuntimeVerificationRequest(),
+                db=db,
+            )
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail["code"] == "harness_cli_unavailable"
+    assert exc.value.detail["reason_code"] == "not_selected"
+    client.create_container.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_verify_v2_profile_checks_each_enabled_v2_harness_and_records_separate_evidence():
     """A default V1 Claude probe must not stand in for Pi/OpenCode V2."""
     profile = _make_profile(id=31, name="Mixed V2")
@@ -1173,9 +1254,9 @@ async def test_verify_v2_profile_checks_each_enabled_v2_harness_and_records_sepa
     profile.default_harness_key = "claude"
     profile.harness_constraints = {}
     profile.harness_runtimes = {
-        "claude": {"source": "image", "contract_version": "codify.worker.harness/v1"},
-        "pi": {"source": "image", "contract_version": "codify.worker.harness/v2", "version": "0.1"},
-        "opencode": {"source": "image", "contract_version": "codify.worker.harness/v2", "version": "1.2"},
+        "claude": {"source": "worker_kit", "contract_version": "codify.worker.harness/v1"},
+        "pi": {"source": "worker_kit", "contract_version": "codify.worker.harness/v2"},
+        "opencode": {"source": "worker_kit", "contract_version": "codify.worker.harness/v2"},
     }
     profile.v2_worker_image_identity_generation = 0
     db = MagicMock()
@@ -1190,8 +1271,34 @@ async def test_verify_v2_profile_checks_each_enabled_v2_harness_and_records_sepa
         "schema": "codify.worker-image-identity/v1", "daemon_key": "daemon-key-31",
         "image_reference": "team/java21-maven@sha256:" + "a" * 64,
         "image_id": "sha256:" + "b" * 64, "runtime_platform": "linux/amd64",
-        "cli_artifact_lock_sha256": "c" * 64,
     }
+    kit_identity = {
+        "schema": "codify.worker.kit-identity/v1", "kit_version": "0.3.5",
+        "platform": "linux/amd64", "manifest_sha256": "d" * 64,
+    }
+    readiness = RuntimeReadiness(
+        status="ready",
+        worker_kit_version="0.3.5",
+        harness_inventory={
+            "pi": {
+                "availability": "present",
+                "path": "/opt/codify-kit/harness/pi/bin/pi",
+                "version": "0.1",
+                "sha256": "e" * 64,
+                "size": 1024,
+            },
+            "opencode": {
+                "availability": "present",
+                "path": "/opt/codify-kit/harness/opencode/bin/opencode",
+                "version": "1.2",
+                "sha256": "f" * 64,
+                "size": 1024,
+            },
+            "claude": {"availability": "absent", "reason_code": "not_selected"},
+            "codex": {"availability": "absent", "reason_code": "not_selected"},
+        },
+        kit_identity=kit_identity,
+    )
     with (
         patch("app.api.worker_profiles.DockerClientWrapper", return_value=client),
         patch("app.api.worker_profiles.inspect_v2_worker_image_identity", return_value=identity),
@@ -1204,21 +1311,28 @@ async def test_verify_v2_profile_checks_each_enabled_v2_harness_and_records_sepa
             return_value=({}, _candidate_archive(b'{"candidate":"pi"}')),
         ),
         patch("app.api.worker_profiles.run_deterministic_kit_probe", new=AsyncMock(
-            return_value=RuntimeProbeOutcome(readiness=RuntimeReadiness(status="ready"), committed=True)
+            return_value=RuntimeProbeOutcome(readiness=readiness, committed=True)
         )),
     ):
         response = await verify_worker_profile_runtime(31, WorkerRuntimeVerificationRequest(), db=db)
 
     assert response["v2_harnesses_verified"] == ["pi", "opencode"]
     assert [call.kwargs["environment"]["CODIFY_HARNESS_KEY"] for call in client.create_container.call_args_list] == ["pi", "opencode"]
-    expected_manifest = "/tmp/codify-verify-runtime/codify-runtime/orchestration/manifest.json"
+    assert [
+        call.kwargs["environment"]["CODIFY_HARNESS_CLI_BIN"]
+        for call in client.create_container.call_args_list
+    ] == [
+        "/opt/codify-kit/harness/pi/bin/pi",
+        "/opt/codify-kit/harness/opencode/bin/opencode",
+    ]
+    expected_manifest = "/tmp/codify-runtime/orchestration/manifest.json"
     assert all(
         call.kwargs["environment"]["CODIFY_RUNTIME_VERIFICATION_MANIFEST"] == expected_manifest
         for call in client.create_container.call_args_list
     )
     assert all(
         call.kwargs["environment"]["CODIFY_ORCHESTRATION_DIR"]
-        == "/tmp/codify-verify-runtime/codify-runtime/orchestration"
+        == "/tmp/codify-runtime/orchestration"
         for call in client.create_container.call_args_list
     )
     evidence = profile.v2_harness_verification_evidence
@@ -1235,9 +1349,11 @@ async def test_verify_v2_profile_checks_each_enabled_v2_harness_and_records_sepa
             assert manifest.read() == b'{"candidate":"pi"}'
     assert client.start_container.call_count == 2
     method_names = [call[0] for call in client.method_calls]
-    assert method_names.index("put_archive") < method_names.index("start_container")
-    first.remove.assert_called_once_with(force=True, v=True)
-    second.remove.assert_called_once_with(force=True, v=True)
+    # The strict probe's content-addressed Worker Kit identity is frozen onto
+    # the Profile alongside the image identity (execution identity = image
+    # identity + kit identity + bundle digest).
+    assert profile.worker_kit_identity == kit_identity
+    assert profile.worker_kit_identity_generation == 1
 
 
 @pytest.mark.asyncio

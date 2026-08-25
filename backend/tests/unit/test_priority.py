@@ -53,7 +53,6 @@ _V2_WORKER_IMAGE_IDENTITY = {
     "image_reference": f"registry.example.com/codify-worker@sha256:{'1' * 64}",
     "image_id": f"sha256:{'2' * 64}",
     "runtime_platform": "linux/amd64",
-    "cli_artifact_lock_sha256": "3" * 64,
 }
 _V2_HARNESS_EVIDENCE = {
     "schema": "codify.worker-harness-verification/v1",
@@ -84,6 +83,7 @@ def _make_v2_runtime_bundle():
                 "files_digest": files_digest,
                 "worker_image_identity": _V2_WORKER_IMAGE_IDENTITY,
                 "harness_verification_evidence": _V2_HARNESS_EVIDENCE,
+                "worker_kit_identity": None,
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -188,6 +188,10 @@ def create_mock_db(task, issue=None):
         default_plan_run_instruction_template="Plan {{user_prompt}}",
         ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
         harness_key="claude",
+        cli_source="host_mount",
+        cli_executable_path="/usr/local/bin/claude",
+        cli_version="2.1.200",
+        cli_binary_digest="b" * 64,
         harness_config_snapshot={
             "requested_runtime_contract_version": "codify.worker.harness/v2",
             "v2_worker_image_identity": _V2_WORKER_IMAGE_IDENTITY,

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
@@ -55,37 +54,39 @@ def _source(tmp_path: Path) -> Path:
     return target
 
 
-def _lock(tmp_path: Path, source: Path) -> tuple[Path, dict[str, str]]:
-    manifest = json.loads((source / "deploy/worker-entrypoint/harness/manifest.json").read_text())
-    document = {
-        "schema": "codify.worker.cli-artifacts/v1", "platform": "linux/amd64",
-        "artifacts": {key: {"path": f"/opt/{key}", "version": item["source"]["artifact_version"], "sha256": "a" * 64}
-                      for key, item in manifest["adapters"].items()},
-    }
-    path = tmp_path / "lock.json"
-    path.write_text(json.dumps(document))
-    identity = {
+def _worker_image_identity() -> dict[str, str]:
+    return {
         "schema": "codify.worker-image-identity/v1", "daemon_key": "daemon",
         "image_reference": "registry.example/worker@sha256:" + "b" * 64,
         "image_id": "sha256:" + "c" * 64, "runtime_platform": "linux/amd64",
-        "cli_artifact_lock_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
     }
-    return path, identity
+
+
+def _kit_identity() -> dict[str, str]:
+    return {
+        "schema": "codify.worker.kit-identity/v1", "kit_version": "0.4.0",
+        "platform": "linux/amd64", "manifest_sha256": "a" * 64,
+    }
 
 
 async def _bound(session_factory, tmp_path: Path, key: str = "pi"):
     source = _source(tmp_path)
-    lock, identity = _lock(tmp_path, source)
+    identity = _worker_image_identity()
+    kit_identity = _kit_identity()
     evidence = {
         "schema": "codify.worker-harness-verification/v1", "harness_key": key,
         "contract_version": HARNESS_CONTRACT_VERSION_V2,
-        "adapter": frozen_v2_adapter_identity(key, source_dir=source, cli_artifact_manifest_path=lock, worker_image_identity=identity),
+        "adapter": frozen_v2_adapter_identity(
+            key, source_dir=source, worker_image_identity=identity, worker_kit_identity=kit_identity
+        ),
         "verification_input_digest": "d" * 64, "image_identity": identity, "generation": 1,
         "verified_at": "2026-08-24T00:00:00+00:00",
     }
     async with session_factory() as db:
-        bundle = await get_or_create_runtime_bundle_v2(db, source_dir=source, cli_artifact_manifest_path=lock,
-                                                        worker_image_identity=identity, harness_verification_evidence=evidence)
+        bundle = await get_or_create_runtime_bundle_v2(
+            db, source_dir=source, worker_image_identity=identity,
+            worker_kit_identity=kit_identity, harness_verification_evidence=evidence
+        )
         task = Task(id=1, issue_id=1, project_id=1, user_prompt="export")
         db.add(task)
         await db.flush()
@@ -95,10 +96,12 @@ async def _bound(session_factory, tmp_path: Path, key: str = "pi"):
             default_execute_run_instruction_template="x", default_plan_run_instruction_template="x",
             ci_auto_repair_run_instruction_template="x",
             harness_config_snapshot={"requested_runtime_contract_version": HARNESS_CONTRACT_VERSION_V2,
-                                     "v2_harness_verification_evidence": evidence},
+                                     "v2_harness_verification_evidence": evidence,
+                                     "worker_kit_identity": kit_identity},
         )
         await db.commit()
     return bundle.digest
+
 
 
 @pytest.mark.asyncio

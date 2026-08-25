@@ -1,6 +1,14 @@
 """Static contracts for the one-shot migration owner Compose topology."""
 
-from __future__ import annotations
+import hashlib
+import json
+import os
+import re
+import sqlite3
+import subprocess
+import sys
+import tarfile
+from pathlib import Path
 
 import json
 import os
@@ -184,116 +192,171 @@ def test_migration_owner_allows_a_merge_target_for_multiple_current_heads(tmp_pa
     assert result.returncode == 0
 
 
-def test_v2_release_lock_validator_and_remote_daemon_preflight(tmp_path: Path):
+def _worker_kit_manifest() -> dict:
+    return {
+        "schema_version": 2,
+        "manifest_kind": "codify.worker.kit-manifest/v1",
+        "kit_version": "0.3.15",
+        "platform": "linux/amd64",
+        "runtime_bin": "/bin",
+        "bash": "/bin/bash",
+        "entrypoint": "/opt/codify-kit/entrypoint.sh",
+        "runtime_compatibility": {
+            "harness_contracts": ["codify.worker.harness/v2"],
+            "event_schemas": ["codify.worker.event/v2"],
+        },
+        "harness_inventory": {
+            key: {
+                "availability": "present",
+                "path": f"/opt/codify-kit/harness/{key}/bin/{key}",
+                "version": "1.0.0",
+                "sha256": "a" * 64,
+                "size": 7,
+            }
+            for key in ("claude", "codex", "opencode", "pi")
+        },
+    }
+
+
+def _content_addressed_kit_archive(tmp_path: Path, manifest: dict) -> tuple[Path, str]:
+    """Create a valid content-addressed kit archive plus its .sha256 sidecar."""
+    manifest_bytes = json.dumps(manifest).encode()
+    manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
+    kit_name = f"codify-worker-kit-0.3.15-linux-amd64-{manifest_sha256[:12]}"
+    kit_dir = tmp_path / "kit-root" / kit_name
+    kit_dir.mkdir(parents=True, exist_ok=True)
+    (kit_dir / "manifest.json").write_bytes(manifest_bytes)
+    archive = tmp_path / "kits" / f"{kit_name}.tar.gz"
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(archive, "w:gz") as output:
+        output.add(kit_dir, arcname=kit_name)
+    (tmp_path / "kits" / f"{archive.name}.sha256").write_text(
+        f"{hashlib.sha256(archive.read_bytes()).hexdigest()}  {archive.name}\n"
+    )
+    return archive, manifest_sha256
+
+
+def test_v2_release_preflight_validates_kit_archive_and_worker_image(tmp_path: Path):
     script = REPO_ROOT / "deploy" / "scripts" / "preflight-v2-release.sh"
-    validator = REPO_ROOT / "deploy" / "scripts" / "validate-worker-cli-artifact-lock.py"
     env = os.environ.copy()
-    env.pop("CODIFY_WORKER_CLI_ARTIFACT_MANIFEST_HOST_PATH", None)
-    env.pop("CODIFY_V2_RELEASE_WORKER_IMAGE", None)
+    env.pop("WORKER_KIT_ARCHIVE", None)
+    env.pop("V2_RELEASE_WORKER_IMAGE", None)
 
     missing_result = subprocess.run([str(script)], env=env, capture_output=True, text=True, check=False)
-
     assert missing_result.returncode == 2
-    assert "Docker-daemon-visible regular file" in missing_result.stderr
+    assert "WORKER_KIT_ARCHIVE" in missing_result.stderr
 
     missing_image_result = subprocess.run(
         [str(script)],
         env={
             **env,
-            "CODIFY_WORKER_CLI_ARTIFACT_MANIFEST_HOST_PATH": "/daemon/release-lock.json",
+            "WORKER_KIT_ARCHIVE": "/daemon/codify-worker-kit-0.3.15-linux-amd64-0123456789ab.tar.gz",
         },
         capture_output=True,
         text=True,
         check=False,
     )
     assert missing_image_result.returncode == 2
-    assert "CODIFY_V2_RELEASE_WORKER_IMAGE" in missing_image_result.stderr
-
-    lock = tmp_path / "worker-cli-artifacts.json"
-    lock.write_text(
-        json.dumps(
-            {
-                "schema": "codify.worker.cli-artifacts/v1",
-                "platform": "linux/amd64",
-                "artifacts": {
-                    key: {"version": "1.2.3", "sha256": "a" * 64}
-                    for key in ("claude", "codex", "pi", "opencode")
-                },
-            }
-        )
-    )
-    valid_result = subprocess.run(
-        [sys.executable, str(validator), str(lock)], capture_output=True, text=True, check=False
-    )
-    assert valid_result.returncode == 0
-
-    wrong_platform_result = subprocess.run(
-        [
-            sys.executable,
-            str(validator),
-            "--expected-platform",
-            "linux/arm64",
-            str(lock),
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert wrong_platform_result.returncode == 2
-    assert "does not match the selected Docker daemon image platform" in wrong_platform_result.stderr
-
-    wrong_image_lock_result = subprocess.run(
-        [
-            sys.executable,
-            str(validator),
-            "--expected-sha256",
-            "0" * 64,
-            str(lock),
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert wrong_image_lock_result.returncode == 2
-    assert "do not match the selected Worker image" in wrong_image_lock_result.stderr
-
-    writable_result = subprocess.run(
-        [sys.executable, str(validator), "--require-readonly", str(lock)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert writable_result.returncode == 2
-    assert "not mounted read-only" in writable_result.stderr
+    assert "V2_RELEASE_WORKER_IMAGE" in missing_image_result.stderr
 
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
-    invocation = tmp_path / "docker-invocation.txt"
     fake_docker = fake_bin / "docker"
     fake_docker.write_text(
         "#!/bin/sh\n"
-        f"printf '%s\\n' \"$*\" >> {invocation}\n"
-        "if [ \"$1\" = \"image\" ]; then printf '%s\\n' linux/amd64; fi\n"
-        f"if [ \"$1\" = \"run\" ]; then printf '%s  /etc/codify-worker-cli-artifacts.json\\n' '{__import__('hashlib').sha256(lock.read_bytes()).hexdigest()}'; fi\n"
+        "if [ \"$1\" = image ] && [ \"$2\" = inspect ]; then\n"
+        "  printf '%s\\n' \"$IMAGE_IDENTITY\"\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 2\n"
     )
     fake_docker.chmod(0o755)
     daemon_env = {
         **env,
-        "CODIFY_WORKER_CLI_ARTIFACT_MANIFEST_HOST_PATH": str(lock),
-        "CODIFY_V2_RELEASE_WORKER_IMAGE": "codify-worker/reviewed@sha256:deadbeef",
+        "V2_RELEASE_WORKER_IMAGE": "codify-worker/reviewed@sha256:deadbeef",
         "PATH": f"{fake_bin}{os.pathsep}{env['PATH']}",
+        "IMAGE_IDENTITY": "sha256:" + "a" * 64 + " linux/amd64",
     }
-    daemon_result = subprocess.run(
-        [str(script)], env=daemon_env, capture_output=True, text=True, check=False
-    )
 
-    assert daemon_result.returncode == 0
-    command = invocation.read_text()
-    assert "compose -f" in command
-    assert "docker-compose.v2-release.yml run --rm --no-deps --entrypoint python3 backend" in command
-    assert "docker-compose.v2-release.yml run --rm --no-deps --entrypoint python3 scheduler" in command
-    assert "--require-readonly --expected-platform linux/amd64 --expected-sha256" in command
-    assert "/run/codify/worker-cli-artifacts.json" in command
+    archive, manifest_sha256 = _content_addressed_kit_archive(tmp_path, _worker_kit_manifest())
+    valid_result = subprocess.run(
+        [str(script)],
+        env={**daemon_env, "WORKER_KIT_ARCHIVE": str(archive)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert valid_result.returncode == 0, valid_result.stderr
+    assert "V2 release preflight OK: 0.3.15 linux/amd64" in valid_result.stdout
+    assert manifest_sha256 in valid_result.stdout
+
+    missing_archive_result = subprocess.run(
+        [str(script)],
+        env={**daemon_env, "WORKER_KIT_ARCHIVE": str(tmp_path / "missing.tar.gz")},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert missing_archive_result.returncode == 2
+    assert "Worker Kit archive not found" in missing_archive_result.stderr
+
+    bad_manifest = _worker_kit_manifest()
+    bad_manifest["harness_inventory"] = {"pi": bad_manifest["harness_inventory"]["pi"]}
+    bad_archive, _ = _content_addressed_kit_archive(tmp_path, bad_manifest)
+    bad_manifest_result = subprocess.run(
+        [str(script)],
+        env={**daemon_env, "WORKER_KIT_ARCHIVE": str(bad_archive)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert bad_manifest_result.returncode == 2
+    assert "harness_inventory must contain exactly the four keys" in bad_manifest_result.stderr
+
+    renamed = tmp_path / "kits" / "codify-worker-kit-0.3.15-linux-amd64-renamed.tar.gz"
+    archive.rename(renamed)
+    (tmp_path / "kits" / f"{renamed.name}.sha256").write_text(
+        f"{hashlib.sha256(renamed.read_bytes()).hexdigest()}  {renamed.name}\n"
+    )
+    name_result = subprocess.run(
+        [str(script)],
+        env={**daemon_env, "WORKER_KIT_ARCHIVE": str(renamed)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert name_result.returncode == 2
+    assert "archive name is not content-addressed" in name_result.stderr
+
+    wrong_prefix = tmp_path / "kits" / f"codify-worker-kit-0.3.15-linux-amd64-{'0' * 12}.tar.gz"
+    renamed.rename(wrong_prefix)
+    (tmp_path / "kits" / f"{wrong_prefix.name}.sha256").write_text(
+        f"{hashlib.sha256(wrong_prefix.read_bytes()).hexdigest()}  {wrong_prefix.name}\n"
+    )
+    prefix_result = subprocess.run(
+        [str(script)],
+        env={**daemon_env, "WORKER_KIT_ARCHIVE": str(wrong_prefix)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert prefix_result.returncode == 2
+    assert "does not embed the manifest SHA-256 prefix" in prefix_result.stderr
+
+    platform_archive, _ = _content_addressed_kit_archive(tmp_path / "platform", _worker_kit_manifest())
+    platform_result = subprocess.run(
+        [str(script)],
+        env={
+            **daemon_env,
+            "WORKER_KIT_ARCHIVE": str(platform_archive),
+            "IMAGE_IDENTITY": "sha256:" + "a" * 64 + " linux/arm64",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert platform_result.returncode == 2
+    assert "does not match the selected Worker image platform" in platform_result.stderr
 
 
 def test_e2e_runs_migrate_once_before_backend_and_never_enables_service_auto_migrate():

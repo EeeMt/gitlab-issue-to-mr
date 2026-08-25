@@ -191,12 +191,25 @@ def test_harness_options_codex_only_profile_is_unselectable():
 
 def test_harness_runtimes_schema_is_restricted():
     assert validate_harness_runtimes(
-        {"claude": {"source": "image", "executable_path": "/usr/local/bin/claude"}}
-    ) == {"claude": {"source": "image", "executable_path": "/usr/local/bin/claude"}}
+        {"claude": {"source": "worker_kit"}}
+    ) == {"claude": {"source": "worker_kit"}}
+    assert validate_harness_runtimes(
+        {"claude": {"source": "host_mount", "executable_path": "/usr/local/bin/claude"}}
+    ) == {"claude": {"source": "host_mount", "executable_path": "/usr/local/bin/claude"}}
+    # worker_kit declares no CLI path: the executable comes from the frozen
+    # Kit manifest inventory; image/PATH sources no longer exist.
+    with pytest.raises(HarnessRegistryError):
+        validate_harness_runtimes(
+            {"claude": {"source": "worker_kit", "executable_path": "/usr/local/bin/claude"}}
+        )
+    with pytest.raises(HarnessRegistryError):
+        validate_harness_runtimes({"claude": {"source": "image"}})
+    with pytest.raises(HarnessRegistryError):
+        validate_harness_runtimes({"claude": {"source": "host_mount", "executable_path": "relative"}})
     with pytest.raises(HarnessRegistryError):
         validate_harness_runtimes({"claude": {"source": "docker exec rm -rf"}})
     with pytest.raises(HarnessRegistryError):
-        validate_harness_runtimes({"unknown": {"source": "image"}})
+        validate_harness_runtimes({"unknown": {"source": "worker_kit"}})
 
 
 # ── V2 manifest catalog ──────────────────────────────────────────────────────

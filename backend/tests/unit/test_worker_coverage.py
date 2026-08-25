@@ -55,7 +55,6 @@ _V2_WORKER_IMAGE_IDENTITY = {
     "image_reference": f"registry.example.com/codify-worker@sha256:{'1' * 64}",
     "image_id": f"sha256:{'2' * 64}",
     "runtime_platform": "linux/amd64",
-    "cli_artifact_lock_sha256": "3" * 64,
 }
 _V2_HARNESS_EVIDENCE = {
     "schema": "codify.worker-harness-verification/v1",
@@ -86,6 +85,7 @@ def _make_v2_runtime_bundle():
                 "files_digest": files_digest,
                 "worker_image_identity": _V2_WORKER_IMAGE_IDENTITY,
                 "harness_verification_evidence": _V2_HARNESS_EVIDENCE,
+                "worker_kit_identity": None,
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -290,6 +290,10 @@ def _make_task(**kwargs):
         default_execute_run_instruction_template="Execute {{user_prompt}}",
         default_plan_run_instruction_template="Plan {{user_prompt}}",
         ci_auto_repair_run_instruction_template="Repair {{issue_title}}",
+        cli_source="host_mount",
+        cli_executable_path="/usr/local/bin/claude",
+        cli_version="2.1.200",
+        cli_binary_digest="b" * 64,
         harness_key="claude",
         harness_config_snapshot={
             "requested_runtime_contract_version": "codify.worker.harness/v2",
@@ -960,14 +964,15 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         root = Path(__file__).resolve().parents[3]
         content = (root / "deploy" / "entrypoint.worker.sh").read_text()
 
-        self.assertIn(
-            'CODIFY_CLAUDE_BIN="${CODIFY_CLAUDE_BIN:-/usr/local/bin/claude}"',
-            content,
-        )
+        # The runtime image fallback for the Claude CLI is removed: the CLI
+        # comes from the frozen Kit inventory or an authorized host_mount.
+        self.assertNotIn('CODIFY_CLAUDE_BIN="${CODIFY_CLAUDE_BIN:-/usr/local/bin/claude}"', content)
         verification = (
             root / "deploy" / "worker-entrypoint" / "verification.sh"
         ).read_text()
-        self.assertIn('CODIFY_HARNESS_CLI_BIN must be an absolute path', verification)
+        self.assertIn('Harness CLI path must be absolute', verification)
+        self.assertIn("Harness CLI is unavailable or not executable", verification)
+        self.assertIn("absent (", verification)
         self.assertIn(
             'cli_version="$(codify_run_shell \'"${CODIFY_HARNESS_CLI_BIN}" --version\')"',
             verification,

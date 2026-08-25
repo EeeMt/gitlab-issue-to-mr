@@ -186,8 +186,21 @@ def test_verify_runtime_scripts_mount_claude_without_breaking_docker_args():
         launcher = kit / "launcher"
         launcher.write_text("#!/bin/sh\n", encoding="utf-8")
         launcher.chmod(launcher.stat().st_mode | stat.S_IEXEC)
+        (kit / "bridge-selfcheck-claude").write_text("#!/bin/sh\n", encoding="utf-8")
+        (kit / "bridge-selfcheck-claude").chmod(0o755)
         (kit / "manifest.json").write_text(
-            '{"schema_version":1,"kit_version":"0.3.5"}',
+            json.dumps(
+                {
+                    "schema_version": 2,
+                    "manifest_kind": "codify.worker.kit-manifest/v1",
+                    "kit_version": "0.3.5",
+                    "platform": "linux/amd64",
+                    "harness_inventory": {
+                        key: {"availability": "absent", "reason_code": "not_selected"}
+                        for key in ("pi", "opencode", "claude", "codex")
+                    },
+                }
+            ),
             encoding="utf-8",
         )
         shutil.copy2(repo_root / "deploy/worker-kit/verify-runtime.sh", kit / "verify-runtime.sh")
@@ -263,7 +276,7 @@ def test_verify_runtime_scripts_mount_claude_without_breaking_docker_args():
                 "--env",
                 "CODIFY_HARNESS_KEY=claude",
                 "--env",
-                "CODIFY_CLAUDE_BIN=/usr/local/bin/claude",
+                                "CODIFY_HARNESS_CLI_BIN=/usr/local/bin/claude",
                 "team/runtime:1",
                 "--verify",
                 "--require-skill-support",
@@ -293,7 +306,9 @@ def test_extracted_offline_bundle_runs_portable_v2_verifier_without_checkout():
             input_archive.extractall(extracted)
         wrapper = extracted / "offline-bundle/scripts/verify-worker-runtime.sh"
 
-        def run(document=None, *, actual_sha="a" * 64, extra=None):
+        def run(document=None, *, actual_sha=None, extra=None):
+            if actual_sha is None:
+                actual_sha = hashlib.sha256(b"#!/bin/sh\n").hexdigest()
             runtime = root / "runtime.json"
             image_identity = bundle.get("worker_image_identity") or {}
             image_inspect = {
@@ -315,6 +330,8 @@ def test_extracted_offline_bundle_runs_portable_v2_verifier_without_checkout():
                     "PATH": f"{fake_docker.parent}{os.pathsep}{os.environ['PATH']}",
                     "ARTIFACT_PATH": str(artifact),
                     "ACTUAL_CLI_SHA": actual_sha,
+                    "PAYLOAD_SHA": hashlib.sha256(b"#!/bin/sh\n").hexdigest(),
+                    "PAYLOAD_SIZE": str(len(b"#!/bin/sh\n")),
                     "IMAGE_INSPECT": json.dumps(image_inspect),
                 },
                 capture_output=True,
@@ -325,9 +342,12 @@ def test_extracted_offline_bundle_runs_portable_v2_verifier_without_checkout():
         assert run(bundle).returncode == 0
         assert run(None).returncode != 0
         assert run(bundle, actual_sha="e" * 64).returncode != 0
+        # Adapter baseline differences are advisory: the verifier continues
+        # with a sanitized warning and does not fail (§11.2).
         mismatched = json.loads(json.dumps(bundle))
         mismatched["adapters"]["pi"]["source"]["artifact_sha256"] = "f" * 64
-        assert run(mismatched).returncode != 0
+        baseline_run = run(mismatched)
+        assert baseline_run.returncode == 0, baseline_run.stderr
 
 
 def test_package_bundle_script_creates_archive_under_deploy_directory():
@@ -429,7 +449,8 @@ def test_package_bundle_script_creates_archive_under_deploy_directory():
                 **os.environ,
                 "PATH": f"{fake_docker.parent}{os.pathsep}{os.environ['PATH']}",
                 "ARTIFACT_PATH": str(artifact),
-                "ACTUAL_CLI_SHA": "a" * 64,
+                "PAYLOAD_SHA": hashlib.sha256(b"#!/bin/sh\n").hexdigest(),
+                "PAYLOAD_SIZE": str(len(b"#!/bin/sh\n")),
                 "IMAGE_INSPECT": json.dumps(
                     {
                         "RepoDigests": [fixture_manifest["worker_image_identity"]["image_reference"]],

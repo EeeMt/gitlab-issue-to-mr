@@ -1,17 +1,18 @@
 import hashlib
 import io
-import json
 import tarfile
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.core.utcnow import utcnow
 from app.core.worker_docker_targets import TaskContainerLookupError
 from app.core.worker_profiles import TaskWorkerRuntime
 from app.core.worker_runtime import build_container_volumes
 from app.core.worker_runtime_bundle import (
-    bundle_manifest_digest_from_files,
+    _v2_bundle_digest,
     v2_launcher_manifest_bytes,
 )
 from app.core.worker_task_artifacts import finalize_task_raw_logs
@@ -33,7 +34,24 @@ _V2_WORKER_IMAGE_IDENTITY = {
     "image_reference": f"registry.example.com/custom-worker@sha256:{'1' * 64}",
     "image_id": f"sha256:{'2' * 64}",
     "runtime_platform": "linux/amd64",
-    "cli_artifact_lock_sha256": "3" * 64,
+}
+_V2_WORKER_KIT_IDENTITY = {
+    "schema": "codify.worker.kit-identity/v1",
+    "kit_version": "0.4.0",
+    "platform": "linux/amd64",
+    "manifest_sha256": "4" * 64,
+}
+_V2_KIT_HARNESS_INVENTORY = {
+    "pi": {"availability": "absent", "reason_code": "not_selected"},
+    "opencode": {"availability": "absent", "reason_code": "not_selected"},
+    "claude": {
+        "availability": "present",
+        "path": "/opt/codify-kit/harness/claude/bin/claude",
+        "version": "1.0.0",
+        "sha256": "f" * 64,
+        "size": 1024,
+    },
+    "codex": {"availability": "absent", "reason_code": "not_selected"},
 }
 _V2_HARNESS_EVIDENCE = {
     "schema": "codify.worker-harness-verification/v1",
@@ -57,18 +75,9 @@ def _make_v2_runtime_bundle():
             "sha256": hashlib.sha256(entrypoint).hexdigest(),
         }
     ]
-    files_digest = bundle_manifest_digest_from_files(files)
-    digest = hashlib.sha256(
-        json.dumps(
-            {
-                "files_digest": files_digest,
-                "worker_image_identity": _V2_WORKER_IMAGE_IDENTITY,
-                "harness_verification_evidence": _V2_HARNESS_EVIDENCE,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
-    ).hexdigest()
+    digest = _v2_bundle_digest(
+        files, _V2_WORKER_IMAGE_IDENTITY, _V2_HARNESS_EVIDENCE, _V2_WORKER_KIT_IDENTITY
+    )
     manifest = {
         "schema": "codify.worker.runtime-manifest/v2",
         "contract_version": "codify.worker.harness/v2",
@@ -77,6 +86,7 @@ def _make_v2_runtime_bundle():
         "bundle_digest": digest,
         "runtime_platform": "linux/amd64",
         "worker_image_identity": _V2_WORKER_IMAGE_IDENTITY,
+        "worker_kit_identity": _V2_WORKER_KIT_IDENTITY,
         "harness_verification_evidence": _V2_HARNESS_EVIDENCE,
         "files": files,
         "adapters": {
@@ -125,9 +135,11 @@ def _bind_v2_runtime(task, db):
             "requested_runtime_contract_version": "codify.worker.harness/v2",
             "v2_worker_image_identity": _V2_WORKER_IMAGE_IDENTITY,
             "v2_harness_verification_evidence": _V2_HARNESS_EVIDENCE,
+            "worker_kit_identity": _V2_WORKER_KIT_IDENTITY,
         },
         runtime_contract_version="codify.worker.harness/v2",
         runtime_bundle_digest=_V2_RUNTIME_BUNDLE.digest,
+        runtime_locator_fingerprint="profile-runtime-v2-fingerprint",
     )
 
     async def execute(statement, *args, **kwargs):
@@ -142,6 +154,28 @@ def _bind_v2_runtime(task, db):
         return result
 
     db.execute = AsyncMock(side_effect=execute)
+
+    def _readiness_row(model, pk, **kwargs):
+        if getattr(model, "__name__", None) == "WorkerRuntimeReadiness":
+            return SimpleNamespace(
+                status="ready",
+                docker_daemon_key=None,
+                runtime_mode="mounted_kit",
+                worker_kit_version="0.4.0",
+                worker_kit_path="/opt/codify/worker-kits/0.4.0-linux-amd64",
+                failure_code=None,
+                failure_message=None,
+                checked_at=None,
+                ready_until=utcnow() + timedelta(seconds=900),
+                check_generation=0,
+                check_started_at=None,
+                updated_at=None,
+                harness_inventory=_V2_KIT_HARNESS_INVENTORY,
+                kit_identity=_V2_WORKER_KIT_IDENTITY,
+            )
+        return None
+
+    db.get = AsyncMock(side_effect=_readiness_row)
     return SimpleNamespace(
         attempt_id="task-12-attempt-1",
         harness_key="claude",
@@ -352,6 +386,10 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
     assert worker.docker.create_container.call_args.kwargs["environment"][
         "CODIFY_CODEGRAPH_ENABLED"
     ] == "true"
+    assert (
+        worker.docker.create_container.call_args.kwargs["environment"]["CODIFY_HARNESS_CLI_BIN"]
+        == _V2_KIT_HARNESS_INVENTORY["claude"]["path"]
+    )
     assert worker.docker.create_container.call_args.kwargs["environment"]["CODIFY_KIT_VERSION"] == "0.1.0"
     worker._build_container_volumes.assert_called_once_with(
         settings, issue, task=task, custom_mounts=runtime.volume_mounts
@@ -383,7 +421,6 @@ async def test_v2_execution_rejects_daemon_image_identity_mismatch_before_contai
         "image_reference": "registry.example/worker@sha256:" + "a" * 64,
         "image_id": "sha256:" + "b" * 64,
         "runtime_platform": "linux/amd64",
-        "cli_artifact_lock_sha256": "c" * 64,
     }
     task = SimpleNamespace(
         id=12,
@@ -771,6 +808,129 @@ async def test_create_execute_container_non_kit_error_does_not_recheck(tmp_path)
             )
 
     recheck.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_v2_execution_rejects_kit_identity_change_between_verification_and_execution(
+    tmp_path,
+):
+    """A mounted Kit replacement between verification and execution fails
+    closed instead of silently running against different Kit bytes."""
+    from app.core.worker_runtime_readiness import HarnessCliUnavailableError
+
+    runtime, settings = _kit_runtime_and_settings()
+    worker, db, task, issue, attempt = _kit_failure_execute_fixtures(
+        runtime, settings, tmp_path
+    )
+    # The readiness probe recorded a different Kit build than the frozen one.
+    changed_kit = {**_V2_WORKER_KIT_IDENTITY, "manifest_sha256": "9" * 64}
+    db.get = AsyncMock(
+        return_value=SimpleNamespace(
+            status="ready",
+            docker_daemon_key=None,
+            runtime_mode="mounted_kit",
+            worker_kit_version="0.4.0",
+            worker_kit_path="/opt/codify/worker-kits/0.4.0-linux-amd64",
+            failure_code=None,
+            failure_message=None,
+            checked_at=None,
+            ready_until=utcnow() + timedelta(seconds=900),
+            check_generation=0,
+            check_started_at=None,
+            updated_at=None,
+            harness_inventory=_V2_KIT_HARNESS_INVENTORY,
+            kit_identity=changed_kit,
+        )
+    )
+
+    with (
+        patch(
+            "app.core.worker_task_lifecycle.load_task_worker_runtime",
+            new=AsyncMock(return_value=runtime),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.build_issue_workspace_paths",
+            return_value=SimpleNamespace(issue_root=str(tmp_path)),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.create_task_attempt",
+            new=AsyncMock(return_value=attempt),
+        ),
+    ):
+        with pytest.raises(RuntimeError, match="Worker Kit identity changed"):
+            await create_execute_container(
+                worker,
+                db,
+                settings=settings,
+                task=task,
+                issue=issue,
+                sudo_gl=None,
+            )
+
+    worker.docker.create_container.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_v2_execution_rejects_absent_harness_with_harness_cli_unavailable(tmp_path):
+    """A Task selecting a Harness absent from the frozen Kit inventory fails
+    with the stable harness_cli_unavailable rejection (§11.3)."""
+    from app.core.worker_runtime_readiness import HarnessCliUnavailableError
+
+    runtime, settings = _kit_runtime_and_settings()
+    worker, db, task, issue, attempt = _kit_failure_execute_fixtures(
+        runtime, settings, tmp_path
+    )
+    inventory = {
+        key: {"availability": "absent", "reason_code": "not_selected"}
+        for key in ("pi", "opencode", "claude", "codex")
+    }
+    db.get = AsyncMock(
+        return_value=SimpleNamespace(
+            status="ready",
+            docker_daemon_key=None,
+            runtime_mode="mounted_kit",
+            worker_kit_version="0.4.0",
+            worker_kit_path="/opt/codify/worker-kits/0.4.0-linux-amd64",
+            failure_code=None,
+            failure_message=None,
+            checked_at=None,
+            ready_until=utcnow() + timedelta(seconds=900),
+            check_generation=0,
+            check_started_at=None,
+            updated_at=None,
+            harness_inventory=inventory,
+            kit_identity=_V2_WORKER_KIT_IDENTITY,
+        )
+    )
+
+    with (
+        patch(
+            "app.core.worker_task_lifecycle.load_task_worker_runtime",
+            new=AsyncMock(return_value=runtime),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.build_issue_workspace_paths",
+            return_value=SimpleNamespace(issue_root=str(tmp_path)),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.create_task_attempt",
+            new=AsyncMock(return_value=attempt),
+        ),
+    ):
+        with pytest.raises(HarnessCliUnavailableError) as exc_info:
+            await create_execute_container(
+                worker,
+                db,
+                settings=settings,
+                task=task,
+                issue=issue,
+                sudo_gl=None,
+            )
+
+    assert exc_info.value.harness_key == "claude"
+    assert exc_info.value.reason_code == "not_selected"
+    assert exc_info.value.kit_version == "0.4.0"
+    worker.docker.create_container.assert_not_called()
 
 
 @pytest.mark.asyncio

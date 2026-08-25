@@ -19,7 +19,7 @@ def _prepare_script_copy(tmpdir_path: Path, fake_claude_content: str) -> Path:
     script_copy = tmpdir_path / "ci-claude.sh"
     script_copy.write_text(
         script_path.read_text(encoding="utf-8").replace(
-            "/usr/local/bin/claude", str(fake_claude)
+            'CLAUDE_BIN="${CODIFY_CLAUDE_BIN:-}"', f'CLAUDE_BIN="{fake_claude}"'
         ),
         encoding="utf-8",
     )
@@ -915,7 +915,6 @@ def test_ci_claude_fresh_session_ignores_every_resume_source(tmp_path):
     assert "session-from-file" not in args
     assert json.loads((tmp_path / "runtime.json").read_text(encoding="utf-8"))["resume_session"] == ""
 
-
 def run_fake_ci_claude(tmp_path, fake_stream_lines):
     script_copy = _prepare_script_copy(
         tmp_path,
@@ -923,6 +922,7 @@ def run_fake_ci_claude(tmp_path, fake_stream_lines):
     )
     env = os.environ.copy()
     env["SANDBOX_MODE"] = "1"
+    env["CODIFY_CLAUDE_BIN"] = str(script_copy)
     return subprocess.run(
         [str(script_copy), "test prompt"],
         cwd=str(tmp_path),

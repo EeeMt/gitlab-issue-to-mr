@@ -465,7 +465,7 @@ async def test_task_create_service_serializes_patch_and_snapshots_locked_revisio
         return profile
 
     async def ready(*_args, shared, **_kwargs):
-        return SimpleNamespace(is_unavailable=False)
+        return SimpleNamespace(is_unavailable=False, is_ready=True, harness_inventory=None)
 
     async def capture_snapshot(*_args, shared_configuration, **_kwargs):
         captured_revisions.append(shared_configuration.revision)
@@ -643,7 +643,7 @@ async def test_f6_switch_reloads_target_profile_after_shared_lock_barrier(
         pass
 
     async def ready(*_args, **_kwargs):
-        return SimpleNamespace(is_unavailable=False)
+        return SimpleNamespace(is_unavailable=False, is_ready=True, harness_inventory=None)
 
     async def capture_snapshot(
         _db,

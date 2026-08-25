@@ -319,6 +319,15 @@ async def _seed_task(db_session: AsyncSession, issue: Issue = None, **overrides)
         default_plan_run_instruction_template="{{user_prompt}}",
         ci_auto_repair_run_instruction_template="{{user_prompt}}",
         harness_key="claude",
+        runtime_contract_version=runtime_bundle.contract_version,
+        orchestration_version=runtime_bundle.orchestration_version,
+        runtime_bundle_digest=runtime_bundle.digest,
+        harness_adapter_version=(
+            (runtime_bundle.manifest.get("adapters") or {}).get("claude") or {}
+        ).get("version", "1.0.0"),
+        harness_adapter_digest=(
+            (runtime_bundle.manifest.get("adapters") or {}).get("claude") or {}
+        ).get("digest", ""),
     )
     await db_session.commit()
     await db_session.refresh(task)
@@ -1104,8 +1113,13 @@ class TestRetryTask:
 
         resp = await client.post(f"/api/tasks/{task.id}/retry")
 
-        assert resp.status_code == 422
-        assert "no immutable Runtime Bundle" in resp.json()["detail"]
+        # Pre-release Tasks are rejected at the execution-writer gate before any
+        # new retry is created; the rejection is deterministic and stable.
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert isinstance(detail, dict)
+        assert detail.get("code") == "missing_executable_contract"
+        assert detail.get("action") == "retry"
 
     async def test_retry_pending_task_rejected(self, client, db_session):
         """Retrying a PENDING task returns 400."""

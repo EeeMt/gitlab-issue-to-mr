@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import io
 import json
 import os
@@ -39,36 +38,46 @@ from app.models import Base, Task, TaskWorkerProfileSnapshot, WorkerRuntimeBundl
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-def _identity(lock: Path) -> dict[str, str]:
+def _identity() -> dict[str, str]:
     return {
         "schema": "codify.worker-image-identity/v1",
         "daemon_key": "tcp://worker.example:2376",
         "image_reference": "registry.example/worker@sha256:" + "a" * 64,
         "image_id": "sha256:" + "b" * 64,
         "runtime_platform": "linux/amd64",
-        "cli_artifact_lock_sha256": hashlib.sha256(lock.read_bytes()).hexdigest(),
     }
 
 
-def _evidence(lock: Path, source: Path, harness_key: str = "pi") -> dict[str, object]:
+def _kit_identity(*, platform: str = "linux/amd64") -> dict[str, str]:
+    return {
+        "schema": "codify.worker.kit-identity/v1",
+        "kit_version": "0.4.0",
+        "platform": platform,
+        "manifest_sha256": "c" * 64,
+    }
+
+
+def _evidence(
+    source: Path, harness_key: str = "pi", kit_identity: dict[str, str] | None = None,
+) -> dict[str, object]:
     return {
         "schema": "codify.worker-harness-verification/v1",
         "harness_key": harness_key,
         "contract_version": HARNESS_CONTRACT_VERSION_V2,
         "adapter": frozen_v2_adapter_identity(
-            harness_key, source_dir=source, cli_artifact_manifest_path=lock,
-            worker_image_identity=_identity(lock),
+            harness_key, source_dir=source, worker_image_identity=_identity(),
+            worker_kit_identity=kit_identity,
         ),
         "verification_input_digest": "d" * 64,
-        "image_identity": _identity(lock),
+        "image_identity": _identity(),
         "generation": 1,
         "verified_at": "2026-08-24T00:00:00+00:00",
     }
 
 
 def _snapshot(
-    task: Task, harness_key: str, contract_version: str, lock: Path | None = None,
-    source: Path | None = None,
+    task: Task, harness_key: str, contract_version: str, source: Path | None = None,
+    kit_identity: dict[str, str] | None = None,
 ) -> TaskWorkerProfileSnapshot:
     return TaskWorkerProfileSnapshot(
         task_id=task.id,
@@ -80,12 +89,17 @@ def _snapshot(
         harness_key=harness_key,
         harness_config_snapshot={
             "requested_runtime_contract_version": contract_version,
-            **({"v2_worker_image_identity": _identity(lock)} if contract_version == HARNESS_CONTRACT_VERSION_V2 and lock else {}),
+            **({"v2_worker_image_identity": _identity()} if contract_version == HARNESS_CONTRACT_VERSION_V2 else {}),
+            **(
+                {"worker_kit_identity": kit_identity}
+                if contract_version == HARNESS_CONTRACT_VERSION_V2 and kit_identity
+                else {}
+            ),
             **(
                 {
-                    "v2_harness_verification_evidence": _evidence(lock, source, harness_key)
+                    "v2_harness_verification_evidence": _evidence(source, harness_key, kit_identity)
                 }
-                if contract_version == HARNESS_CONTRACT_VERSION_V2 and lock
+                if contract_version == HARNESS_CONTRACT_VERSION_V2 and source
                 else {}
             ),
         },
@@ -210,56 +224,30 @@ def _v2_test_runtime_source(tmp_path: Path) -> Path:
     return root
 
 
-def _write_cli_artifact_manifest(path: Path, source_manifest: dict, *, pi_digest: str) -> Path:
-    document = {
-        "schema": "codify.worker.cli-artifacts/v1",
-        "platform": "linux/amd64",
-        "artifacts": {
-            key: {
-                "path": f"/opt/{key}",
-                "version": adapter["source"]["artifact_version"],
-                "sha256": pi_digest if key == "pi" else "b" * 64,
-            }
-            for key, adapter in source_manifest["adapters"].items()
-        },
-    }
-    path.write_text(json.dumps(document))
-    return path
-
-
-def _hermetic_release_lock(tmp_path: Path, source: Path, *, pi_digest: str = "b" * 64) -> Path:
-    """Create the image-owned lock required by every explicit V2 bind."""
-    manifest = json.loads(
-        (source / "deploy/worker-entrypoint/harness/manifest.json").read_text()
-    )
-    return _write_cli_artifact_manifest(
-        tmp_path / "worker-cli-artifacts.json", manifest, pi_digest=pi_digest
-    )
-
-
 @pytest.mark.asyncio
 async def test_v2_bundle_persists_frozen_payload_and_never_rescans_checkout(
-    session_factory, tmp_path, monkeypatch
+    session_factory, tmp_path
 ):
     source = _v2_test_runtime_source(tmp_path)
-    lock = _hermetic_release_lock(tmp_path, source)
-    monkeypatch.setenv("CODIFY_WORKER_CLI_ARTIFACT_MANIFEST", str(lock))
+    kit_identity = _kit_identity()
     async with session_factory() as db:
         first = await get_or_create_runtime_bundle_v2(
-            db, source_dir=source, cli_artifact_manifest_path=lock, worker_image_identity=_identity(lock),
-            harness_verification_evidence=_evidence(lock, source)
+            db, source_dir=source, worker_image_identity=_identity(),
+            worker_kit_identity=kit_identity,
+            harness_verification_evidence=_evidence(source, kit_identity=kit_identity),
         )
         assert first.bundle_bytes
         assert first.size_bytes == len(first.bundle_bytes)
         assert first.manifest["archive_sha256"]
         assert first.manifest["files"]
+        assert first.manifest["worker_kit_identity"] == kit_identity
         verify_bundle_bytes(first)
 
         bound = Task(id=1, issue_id=1, project_id=1, user_prompt="v2")
         db.add(bound)
         await db.flush()
         bound.worker_profile_snapshot = _snapshot(
-            bound, "pi", HARNESS_CONTRACT_VERSION_V2, lock, source
+            bound, "pi", HARNESS_CONTRACT_VERSION_V2, source, kit_identity
         )
         await bind_runtime_bundle(db, bound, source_dir=source, harness_key="pi")
         frozen_archive = build_v2_runtime_materialization_archive(first, source_dir=source)
@@ -278,8 +266,9 @@ async def test_v2_bundle_persists_frozen_payload_and_never_rescans_checkout(
         # A new binding observes the changed controlled source and gets a new
         # bundle/adapter digest while the old one remains executable.
         second = await get_or_create_runtime_bundle_v2(
-            db, source_dir=source, cli_artifact_manifest_path=lock, worker_image_identity=_identity(lock),
-            harness_verification_evidence=_evidence(lock, source)
+            db, source_dir=source, worker_image_identity=_identity(),
+            worker_kit_identity=kit_identity,
+            harness_verification_evidence=_evidence(source, kit_identity=kit_identity),
         )
         assert second.digest != first.digest
         assert (
@@ -304,20 +293,27 @@ async def test_dual_canary_legacy_profile_binds_v1_even_when_manifest_lists_adap
 
 
 @pytest.mark.asyncio
-async def test_explicit_v2_profile_requires_release_lock_even_with_stamped_source(
-    session_factory, tmp_path, monkeypatch
+async def test_explicit_v2_profile_requires_frozen_kit_identity_even_with_stamped_source(
+    session_factory, tmp_path
 ):
+    """The stamped source manifest cannot substitute for a frozen Worker Kit
+    identity: binding a Kit identity whose platform disagrees with the frozen
+    Worker image platform fails closed (no V1 fallback)."""
     source = _v2_test_runtime_source(tmp_path)
-    lock = _hermetic_release_lock(tmp_path, source)
-    monkeypatch.delenv("CODIFY_WORKER_CLI_ARTIFACT_MANIFEST", raising=False)
-
     async with session_factory() as db:
         task = Task(id=1, issue_id=1, project_id=1, user_prompt="v2 profile")
         db.add(task)
         await db.flush()
-        task.worker_profile_snapshot = _snapshot(task, "pi", HARNESS_CONTRACT_VERSION_V2, lock, source)
+        # Evidence is frozen against a matching Kit; only the snapshot's Kit
+        # identity disagrees with the frozen Worker image platform.
+        task.worker_profile_snapshot = _snapshot(
+            task, "pi", HARNESS_CONTRACT_VERSION_V2, source, _kit_identity()
+        )
+        task.worker_profile_snapshot.harness_config_snapshot["worker_kit_identity"] = _kit_identity(
+            platform="linux/arm64"
+        )
 
-        with pytest.raises(RuntimeError, match="V2 Runtime Bundle requires"):
+        with pytest.raises(RuntimeError, match="Worker Kit platform does not match"):
             await bind_runtime_bundle(db, task, source_dir=source, harness_key="pi")
         assert task.runtime_bundle_id is None
 
@@ -334,13 +330,14 @@ async def test_explicit_v2_profile_rejects_invalid_adapter_catalog_without_v1_fa
     session_factory, tmp_path, manifest_mutation, error
 ):
     source = _v2_test_runtime_source(tmp_path)
-    lock = _hermetic_release_lock(tmp_path, source)
     manifest_path = source / "deploy/worker-entrypoint/harness/manifest.json"
     async with session_factory() as db:
         task = Task(id=1, issue_id=1, project_id=1, user_prompt="v2 profile")
         db.add(task)
         await db.flush()
-        task.worker_profile_snapshot = _snapshot(task, "pi", HARNESS_CONTRACT_VERSION_V2, lock, source)
+        task.worker_profile_snapshot = _snapshot(
+            task, "pi", HARNESS_CONTRACT_VERSION_V2, source, _kit_identity()
+        )
         if manifest_mutation == "missing_adapter":
             manifest = json.loads(manifest_path.read_text())
             manifest["adapters"].pop("pi")
@@ -384,61 +381,46 @@ async def test_explicit_v2_profile_rejects_missing_or_mismatched_frozen_harness_
 
 
 @pytest.mark.asyncio
-async def test_explicit_v2_profile_with_valid_lock_binds_v2(session_factory, tmp_path, monkeypatch):
+async def test_explicit_v2_profile_with_valid_kit_identity_binds_v2(session_factory, tmp_path):
     source = _v2_test_runtime_source(tmp_path)
-    manifest_path = source / "deploy/worker-entrypoint/harness/manifest.json"
-    manifest = json.loads(manifest_path.read_text())
-    for adapter in manifest["adapters"].values():
-        adapter["source"]["artifact_sha256"] = "<computed at freeze>"
-    manifest_path.write_text(json.dumps(manifest))
-    lock = _write_cli_artifact_manifest(
-        tmp_path / "release-lock.json", manifest, pi_digest="c" * 64
-    )
-    monkeypatch.setenv("CODIFY_WORKER_CLI_ARTIFACT_MANIFEST", str(lock))
+    kit_identity = _kit_identity()
     async with session_factory() as db:
         task = Task(id=1, issue_id=1, project_id=1, user_prompt="v2 profile")
         db.add(task)
         await db.flush()
-        task.worker_profile_snapshot = _snapshot(task, "pi", HARNESS_CONTRACT_VERSION_V2, lock, source)
+        task.worker_profile_snapshot = _snapshot(
+            task, "pi", HARNESS_CONTRACT_VERSION_V2, source, kit_identity
+        )
 
         bundle = await bind_runtime_bundle(db, task, source_dir=source)
 
     assert bundle.contract_version == HARNESS_CONTRACT_VERSION_V2
     assert bundle.manifest["runtime_platform"] == "linux/amd64"
+    assert bundle.manifest["worker_kit_identity"] == kit_identity
 
 @pytest.mark.asyncio
-async def test_v2_bundle_stamps_release_cli_sha_into_addressed_source(session_factory, tmp_path):
+async def test_v2_bundle_binds_worker_kit_identity_into_addressed_digest(session_factory, tmp_path):
+    """The frozen Worker Kit identity is part of the content-addressed Bundle
+    digest: two Kit identities over the same source cannot alias one Bundle."""
     source = _v2_test_runtime_source(tmp_path)
-    manifest_path = source / "deploy/worker-entrypoint/harness/manifest.json"
-    template = json.loads(manifest_path.read_text())
-    template["adapters"]["pi"]["source"]["artifact_sha256"] = "<computed at freeze>"
-    manifest_path.write_text(json.dumps(template))
-    first_lock = _write_cli_artifact_manifest(
-        tmp_path / "artifacts-first.json", template, pi_digest="1" * 64
-    )
-    second_lock = _write_cli_artifact_manifest(
-        tmp_path / "artifacts-second.json", template, pi_digest="2" * 64
-    )
+    first_kit = _kit_identity()
+    second_kit = {**_kit_identity(), "manifest_sha256": "e" * 64}
 
     async with session_factory() as db:
         first = await get_or_create_runtime_bundle_v2(
-            db,
-                source_dir=source,
-                cli_artifact_manifest_path=first_lock,
-                worker_image_identity=_identity(first_lock),
-                harness_verification_evidence=_evidence(first_lock, source),
+            db, source_dir=source, worker_image_identity=_identity(),
+            worker_kit_identity=first_kit,
+            harness_verification_evidence=_evidence(source, kit_identity=first_kit),
         )
         second = await get_or_create_runtime_bundle_v2(
-            db,
-                source_dir=source,
-                cli_artifact_manifest_path=second_lock,
-                worker_image_identity=_identity(second_lock),
-                harness_verification_evidence=_evidence(second_lock, source),
+            db, source_dir=source, worker_image_identity=_identity(),
+            worker_kit_identity=second_kit,
+            harness_verification_evidence=_evidence(source, kit_identity=second_kit),
         )
 
     assert first.digest != second.digest
-    assert first.manifest["adapters"]["pi"]["source"]["artifact_sha256"] == "1" * 64
-    assert second.manifest["adapters"]["pi"]["source"]["artifact_sha256"] == "2" * 64
+    assert first.manifest["worker_kit_identity"] == first_kit
+    assert second.manifest["worker_kit_identity"] == second_kit
     assert (
         first.manifest["adapters"]["pi"]["adapter"]["digest"]
         != second.manifest["adapters"]["pi"]["adapter"]["digest"]
@@ -446,19 +428,19 @@ async def test_v2_bundle_stamps_release_cli_sha_into_addressed_source(session_fa
 
 
 @pytest.mark.asyncio
-async def test_v2_bundle_rejects_release_lock_not_owned_by_frozen_image(session_factory, tmp_path):
+async def test_v2_bundle_rejects_kit_identity_not_matching_frozen_image(session_factory, tmp_path):
+    """A Worker Kit identity whose platform disagrees with the frozen Worker
+    image platform is not owned by that image and fails the bind fail-closed."""
     source = _v2_test_runtime_source(tmp_path)
-    lock = _hermetic_release_lock(tmp_path, source)
-    identity = _identity(lock)
-    identity["cli_artifact_lock_sha256"] = "0" * 64
 
     async with session_factory() as db:
-        with pytest.raises(RuntimeError, match="do not match the frozen Worker image"):
+        with pytest.raises(RuntimeError, match="Worker Kit platform does not match"):
             await get_or_create_runtime_bundle_v2(
                 db,
                 source_dir=source,
-                cli_artifact_manifest_path=lock,
-                worker_image_identity=identity,
+                worker_image_identity=_identity(),
+                worker_kit_identity=_kit_identity(platform="linux/arm64"),
+                harness_verification_evidence=_evidence(source),
             )
 
 
@@ -475,8 +457,7 @@ async def test_v2_bundle_rejects_noncanonical_frozen_worker_image_identity(
     session_factory, tmp_path, field, value
 ):
     source = _v2_test_runtime_source(tmp_path)
-    lock = _hermetic_release_lock(tmp_path, source)
-    identity = _identity(lock)
+    identity = _identity()
     identity[field] = value
 
     async with session_factory() as db:
@@ -484,13 +465,14 @@ async def test_v2_bundle_rejects_noncanonical_frozen_worker_image_identity(
             await get_or_create_runtime_bundle_v2(
                 db,
                 source_dir=source,
-                cli_artifact_manifest_path=lock,
                 worker_image_identity=identity,
+                worker_kit_identity=_kit_identity(),
+                harness_verification_evidence=_evidence(source, kit_identity=_kit_identity()),
             )
 
 
 @pytest.mark.asyncio
-async def test_v2_bundle_rejects_unstamped_cli_artifact_identity(session_factory, tmp_path):
+async def test_v2_bundle_rejects_missing_frozen_worker_image_identity(session_factory, tmp_path):
     source = _v2_test_runtime_source(tmp_path)
     manifest_path = source / "deploy/worker-entrypoint/harness/manifest.json"
     template = json.loads(manifest_path.read_text())

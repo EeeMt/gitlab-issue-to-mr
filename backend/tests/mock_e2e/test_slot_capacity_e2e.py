@@ -262,6 +262,16 @@ async def _seed_tasks(
                 default_execute_run_instruction_template="{{user_prompt}}",
                 default_plan_run_instruction_template="{{user_prompt}}",
                 ci_auto_repair_run_instruction_template="{{user_prompt}}",
+                harness_key="claude",
+                runtime_contract_version=runtime_bundle.contract_version,
+                orchestration_version=runtime_bundle.orchestration_version,
+                runtime_bundle_digest=runtime_bundle.digest,
+                harness_adapter_version=(
+                    (runtime_bundle.manifest.get("adapters") or {}).get("claude") or {}
+                ).get("version", "1.0.0"),
+                harness_adapter_digest=(
+                    (runtime_bundle.manifest.get("adapters") or {}).get("claude") or {}
+                ).get("digest", ""),
             )
         tasks.append(task)
     await session.commit()
