@@ -1,6 +1,6 @@
 # Open-Harness V2 当前遗留项与验收计划
 
-**更新：** 2026-08-25
+**更新：** 2026-08-26
 
 **实现审计基线：** `74a1493d`
 
@@ -32,6 +32,10 @@
 
 `host_mount` 只保留为显式、逐 Harness 授权的 break-glass 来源。它可以验证执行链，不得替代
 Kit-owned present CLI 的 release evidence。
+
+协议现状必须单独标记：架构目标已经要求 Pi/OpenCode 同时支持 `anthropic_messages`、
+`openai_responses` 和 `openai_chat_completions`；当前 Runtime manifest、Backend matrix 和两个 Adapter
+仍只接入 `anthropic_messages`。这是待实现合同，不是已验收能力。
 
 ## 2. Source correction：当前必须修复
 
@@ -66,16 +70,32 @@ Kit-owned present CLI 的 release evidence。
   Bundle Adapter 能力。退出条件：新建 Task 选择器和历史 Task catalog 都能区分 enabled、disabled、
   present、unavailable，并显示稳定、脱敏的 reason；不得泄露 host path 或敏感 evidence。
 
-- [ ] **S6 / P2 — 同步剩余合同表述。**
-  修正架构摘要中“所有 Harness 随 Worker 镜像和 Runtime Bundle 发布”的旧描述，使其与 §11 的
-  Kit-owned ownership 一致；继续禁止在 Git 文档中记录真实 Host 名称、内部地址、凭据、私有仓库
-  URL 或敏感日志。
+- [ ] **S6 / P1 — 扩展中央 Harness × Model Protocol 合同。**
+  扩展编译期 `HARNESS_PROTOCOL_MATRIX` upper bound，并让 Runtime manifest、catalog、Task
+  create/retry/resume、Profile verify、Worker 启动和前端 Provider 筛选一致声明：Pi/OpenCode 支持
+  三种协议，Claude 只支持 `anthropic_messages`，Codex 只支持 `openai_responses`。Runtime Bundle
+  manifest 是唯一能力源；
+  Backend/Frontend 不得另复制会漂移的业务矩阵。AI Provider 新建/编辑 UI 必须重新开放合法的
+  `openai_chat_completions` Endpoint。未知或未声明组合稳定 fail closed。
 
-- [ ] **S7 — 补齐测试并重新建立 L2 证据。**
+- [ ] **S7 / P1 — 实现 Pi 三协议 Adapter。**
+  按冻结 Snapshot 将 `anthropic_messages`、`openai_responses`、`openai_chat_completions` 分别映射为 Pi
+  `anthropic-messages`、`openai-responses`、`openai-completions`；生成 Task-private Provider 配置，
+  使用协议对应的 model/Base URL/credential/`compat_profile`，禁止读取已有用户配置、按 URL 猜测、
+  跨协议回退或转换。三条路径都要保留 RPC Session、steering/follow-up、usage 和 terminal 语义。
+
+- [ ] **S8 / P1 — 实现 OpenCode 三协议 Adapter。**
+  Task-private `opencode.json` 分别使用 `@ai-sdk/anthropic`、`@ai-sdk/openai`、
+  `@ai-sdk/openai-compatible`；credential 仅通过 Task-private 环境变量引用，不内联到配置/日志/归档。
+  Bridge 创建和恢复 Session 时固定 Provider/model pair，三条路径都要归一化事件、tool/reasoning、usage、
+  Abort、settled 和 terminal；禁止加载用户级 auth/Provider 或仓库配置覆盖 Snapshot。
+
+- [ ] **S9 — 补齐测试并重新建立 L2 证据。**
   至少新增：present payload 生成器/真实 build、整 Kit tamper、V1 lifecycle、并发 task-scoped pump、
-  current/frozen catalog availability 测试；修复 scheduler gate 测试中的未 await `AsyncMock` warning。
-  然后重跑 backend unit、mock E2E、真实 PostgreSQL 并发/migration、frontend type-check/build/vitest，
-  记录精确命令、结果和 source commit。
+  current/frozen catalog availability，以及 Pi/OpenCode 三协议的 manifest/Backend/Adapter/Frontend 矩阵测试；
+  每条协议覆盖 config 生成、credential 不落盘、tool call、reasoning、usage、取消、错误和禁止回退。
+  修复 scheduler gate 测试中的未 await `AsyncMock` warning，然后重跑 backend unit、mock E2E、真实
+  PostgreSQL 并发/migration、frontend type-check/build/vitest，记录精确命令、结果和 source commit。
 
 ## 3. Release、L3 与 L4
 
@@ -83,8 +103,8 @@ Kit-owned present CLI 的 release evidence。
 
 | 层级 | 证明内容 | 当前状态 |
 | --- | --- | --- |
-| L1 | 架构、schema、Runbook 与安全边界一致 | 部分完成；S6 待修 |
-| L2 | 源码、单测、集成测试和并发合同 | 未通过；S1–S5 有已知缺口 |
+| L1 | 架构、schema、Runbook 与安全边界一致 | 目标合同已修订；实现和证据不得冒充完成 |
+| L2 | 源码、单测、集成测试和并发合同 | 未通过；S1–S8 有已知缺口，S9 待重跑 |
 | L3 | 同一不可变 image + Kit + Bundle 的构建、安装、DB 绑定与 digest 对账 | 未完成；现有 Kit 为 0 present |
 | L4 | 真实 Linux Host、remote Docker、Provider、仓库和真实 Task/MR | 未完成；仅有 break-glass/失败路径局部证据 |
 | L5 | 四 Harness canary、Pi 20-task 与质量/性能验收 | 未完成 |
@@ -94,24 +114,28 @@ L2 重新通过后，按顺序完成：
 
 - [ ] **R1 — 生成不可变 release composition。** 固定 Project Runtime Image digest、Kit version/platform、
   构建选择集、四 key inventory、present CLI 精确版本/SHA、Kit content identity、Adapter digest、
-  Runtime Bundle digest 和 Profile generation。迭代 Kit 可携带 0–4 个 payload，但首轮 hard-cut
-  candidate 必须让 Pi、OpenCode、Claude、Codex 全部 present/available；`host_mount` 不计入该证明。
+  Runtime Bundle digest、Profile generation 和 Harness × Model Protocol matrix。迭代 Kit 可携带 0–4 个
+  payload，但首轮 hard-cut candidate 必须让 Pi、OpenCode、Claude、Codex 全部 present/available；
+  Pi/OpenCode 的 Bundle 必须声明三种协议，`host_mount` 不计入该证明。
 - [ ] **R2 — 在目标 Linux Host 安装和验证。** 验证 root ownership、权限、atomic no-replace、重装冲突、
   崩溃恢复、platform、整 Kit integrity、逐 present Harness functionality gate 和实际挂载路径。
 - [ ] **R3 — 执行真实部署 migration。** 在维护窗口由唯一 migration owner 从实际 current revision
   升级到精确 `077_v2_worker_kit_identity`；长驻 Backend/Scheduler 使用 `AUTO_MIGRATE=false`，
   不使用漂移的 `head`。
 - [ ] **R4 — 完成 DB-bound Profile/Bundle 对账。** 每个 enabled 且 present/available Harness 都要在目标
-  Host verify，冻结同一 `image_identity + kit_identity + bundle_digest`，完成 L3 Bundle export；
-  absent Harness 只记录稳定 `harness_cli_unavailable`，不得伪造 export。
-- [ ] **R5 — 补齐外部授权与安全准备。** 提供真实 Provider 与 GitLab smart-HTTP clone/push/MR 链路，
-  修复 CA/URL 问题，轮换曾用于调试的凭据并执行 secret scan；证据只保存脱敏路径和摘要。
-- [ ] **R6 — 完成四 Harness 的真实 Task 矩阵。** 覆盖 fresh、retry、resume/continue、failure、cancel、
-  timeout、scheduler recovery、Session、Skills、usage、archive、Git commit/push/MR 和 terminal 对账；
-  每个 Task 绑定 Host/daemon、Profile generation、attempt 和全部制品 identity。
+  Host verify；Pi/OpenCode 还要逐一绑定三种协议。每个组合冻结同一
+  `image_identity + kit_identity + bundle_digest + model_protocol` 并完成 L3 Bundle export；absent Harness
+  只记录稳定 `harness_cli_unavailable`，不得伪造 export。
+- [ ] **R5 — 补齐外部授权与安全准备。** 提供真实 Anthropic Messages、OpenAI Responses、OpenAI-compatible
+  Chat Completions Endpoint，以及 GitLab smart-HTTP clone/push/MR 链路；修复 CA/URL 问题，轮换曾用于
+  调试的凭据并执行 secret scan；证据只保存脱敏路径和摘要。
+- [ ] **R6 — 完成受支持 Harness × Protocol 的真实 Task 矩阵。** 至少覆盖 Pi×三协议、OpenCode×三协议、
+  Claude×Anthropic、Codex×Responses；每个组合覆盖 fresh、retry、resume/continue、failure、cancel、
+  timeout、scheduler recovery、Session、Skills、usage、archive、Git commit/push/MR 和 terminal 对账，
+  并绑定 Host/daemon、Profile generation、attempt、Endpoint fingerprint 和全部制品 identity。
 - [ ] **R7 — 完成 Harness 专项能力。** OpenCode 覆盖 Server、Session、Agent、Command、Abort、事件和
-  usage；Pi 覆盖原生 ACK、严格顺序、steering、follow-up、close、`outcome_unknown` 不重放和
-  scheduler 恢复；Claude/Codex 证明现有核心能力无回退。
+  usage，并证明三种协议下 settled/Abort 一致；Pi 在三种协议下覆盖原生 ACK、严格顺序、steering、
+  follow-up、close、`outcome_unknown` 不重放和 scheduler 恢复；Claude/Codex 证明现有核心能力无回退。
 
 ## 3.5 本轮 dev 环境已完成证据（2026-08-26）
 
@@ -132,7 +156,8 @@ L2 重新通过后，按顺序完成：
 - [ ] Pi 完成 390×844、768px 和桌面浏览器验证，包括命令输入安全区、键盘遮挡、触摸面积、长文本、
   状态换行和恢复后的 command history。
 - [ ] Pi、OpenCode、Claude、Codex 的 Contract/Event/Result Conformance 和真实 Worker Host canary
-  全部通过；所有适用的 Linux、PostgreSQL、AF_UNIX、scheduler skip 均在可用环境重跑。
+  全部通过；Pi/OpenCode 的三种协议必须分别使用真实 Endpoint/Task 验证，不得用代理把一种协议转换为
+  另一种后冒充通过；所有适用的 Linux、PostgreSQL、AF_UNIX、scheduler skip 均在可用环境重跑。
 - [ ] 完成发布凭据轮换、secret scan、release note、旧 Kit 退役记录和证据审阅；任一首发 Harness
   仍有 P0/P1 时停止推进。
 
@@ -153,7 +178,7 @@ L2 重新通过后，按顺序完成：
 
 唯一允许的推进顺序是：
 
-1. S1–S7 清零并重新建立 L1/L2；
+1. S1–S9 清零并重新建立 L1/L2；
 2. R1–R5 生成、安装并绑定同一个 immutable release composition；
 3. R6–R7 完成 L4 真实 Task 与专项能力；
 4. 完成 L5 acceptance；
@@ -165,6 +190,7 @@ L2 重新通过后，按顺序完成：
 - image、Kit、Bundle、Adapter、Profile generation、Host/daemon 或 Task attempt 来自不同冻结组合；
 - 使用 mutable tag、placeholder digest、未核验 Kit、`host_mount` 或旧 image CLI lock 冒充 release evidence；
 - V1 dual-canary、command pump 隔离、PG/AF_UNIX/concurrency 存在失败或必要 skip 未重跑；
+- Pi/OpenCode 任一协议分支缺少确定性映射、发生协议推断/回退，或缺少真实 Endpoint Conformance；
 - 任一 enabled 且 present/available Harness 缺少真实 Task/MR/terminal/usage/archive 对账；
 - Provider/GitLab 授权、凭据轮换、secret scan 或唯一 migration owner 未完成；
 - 任一首发 Harness 存在 P0/P1。

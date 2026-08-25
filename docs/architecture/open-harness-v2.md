@@ -11,11 +11,13 @@
 Codify 将从“以 Claude/Codex 为中心的双引擎系统”演进为“以开源 Harness 为主、商业 Harness
 保持兼容的任务控制平面”。V2 首次切换必须同时交付 Pi、OpenCode、Claude 和 Codex；Pi 是新建
 Worker Profile 的唯一默认 Harness，OpenCode 是一级内置 Harness，Claude/Codex 保持现有核心能力。
-Oh My Pi（OMP）在 V2 切换后以独立的实验 Harness 交付，不阻塞 V2。
+Pi/OpenCode 都必须支持 Anthropic Messages、OpenAI Responses 和 OpenAI Chat Completions 三种
+Model Endpoint 协议。Oh My Pi（OMP）在 V2 切换后以独立的实验 Harness 交付，不阻塞 V2。
 
-V2 不是公开插件平台。所有 Harness 都由 Codify 内置、随 Worker 镜像和 Runtime Bundle 发布；
-普通用户不能安装 Adapter、配置任意启动命令或从仓库注入新的 Harness 类型。开源 Harness 的主要
-收益来自可审计、可固定版本、可 Fork 和模型中立，而不是开放任意代码安装入口。
+V2 不是公开插件平台。所有 Harness 都由 Codify 内置；Harness CLI 随 Worker Kit 发布，Adapter、
+Bridge 和编排 bytes 随 Runtime Bundle 发布，Project Runtime Image 只提供项目工具链。普通用户不能
+安装 Adapter、配置任意启动命令或从仓库注入新的 Harness 类型。开源 Harness 的主要收益来自可审计、
+可固定版本、可 Fork 和模型中立，而不是开放任意代码安装入口。
 
 V2 采用一次 Internal Preview 硬切：
 
@@ -35,8 +37,10 @@ V2 采用一次 Internal Preview 硬切：
 3. 复用现有 Scheduler、Docker 隔离、Issue 工作区、Task Snapshot、Canonical Event、Git/MR 交付、
    日志、归档、统计和 Worker Kit 基础。
 4. 用统一核心合同承载四个 Harness，同时允许 Pi/OpenCode 暴露有类型的原生能力。
-5. 将 Harness 控制协议和模型服务协议彻底分层，消除 `wire_protocol` 的概念混淆。
-6. 建立四 Harness Conformance、真实 Host canary 和 Pi 同任务质量门禁。
+5. 让 Pi/OpenCode 都支持 `anthropic_messages`、`openai_responses` 和
+   `openai_chat_completions`，且保持 Harness 与 Model Endpoint 独立。
+6. 将 Harness 控制协议和模型服务协议彻底分层，消除 `wire_protocol` 的概念混淆。
+7. 建立四 Harness Conformance、真实 Host canary 和 Pi 同任务质量门禁。
 
 ### 2.2 非目标
 
@@ -61,8 +65,8 @@ Command 或扩展声明的模型覆盖只能在与 Snapshot 一致时生效，�
 
 | Harness | V2 支持等级 | 首发要求 | 控制传输 |
 |---|---|---|---|
-| Pi | 默认、一级 | 完整核心能力、质量非劣、steering/follow-up | `rpc_stdio` |
-| OpenCode | 一级 | Server、Session、Agent、Command、Abort、事件、Git 交付 | `server_http` |
+| Pi | 默认、一级 | 完整核心能力、三种 Model Endpoint 协议、质量非劣、steering/follow-up | `rpc_stdio` |
+| OpenCode | 一级 | 三种 Model Endpoint 协议、Server、Session、Agent、Command、Abort、事件、Git 交付 | `server_http` |
 | Claude | 兼容、一级 | V1 核心能力无回退 | `cli_stream_json` |
 | Codex | 兼容、一级 | V1 核心能力无回退 | `cli_jsonl` |
 | OMP | 后续实验 | 独立 Harness、真实任务 A/B、LSP/Hashline | 后续 probe 冻结 |
@@ -78,7 +82,7 @@ V2 实际交付和验证的部分，不把上游宣传指标直接算作收益�
 | Harness | Codify 契合度 | 可兑现的主要收益 | 主要新增成本/不确定性 | V2 结论 |
 |---|---|---|---|---|
 | Pi | 高 | RPC JSONL 是稳定的进程边界；原生 steer/follow-up；模型中立；源码、制品和协议可审计/Fork | 需新增双向 command plane；三种 Endpoint 协议、Session 和 queue race 必须真实 probe | 最高即时收益，作为默认和 reference implementation |
-| OpenCode | 中高 | 开源且模型中立；原生 client/server、OpenAPI/SDK、Agent/Command 生态；未来移动端控制空间大 | 每 Task Server 生命周期、事件订阅和 settled/abort 语义比一次性 CLI 更复杂 | 收益明确，首发一级；暂不开 live command |
+| OpenCode | 中高 | 开源且模型中立；原生 client/server、OpenAPI/SDK、Agent/Command 生态；未来移动端控制空间大 | 每 Task Server 生命周期、三种 Endpoint 协议、事件订阅和 settled/abort 语义比一次性 CLI 更复杂 | 收益明确，首发一级；暂不开 live command |
 | Claude | 高（已实现） | 保留现有 Anthropic 路径、Session 和已验证交付基线，作为 Pi 质量对照 | 单一模型协议，商业公司控制上游与分发 | 保持一级兼容，不再作为架构默认 |
 | Codex | 高（已实现） | 保留 OpenAI Responses 路径、现有用户能力和第二条回归基线 | 商业公司控制上游；首版无通用运行中控制 | 保持一级兼容，不再作为架构默认 |
 | OMP | 中，待 probe | 开源 Pi fork；LSP、Hashline 和 coding-first 工具可能提升编辑成功率与效率 | 与 Pi 收益重叠；额外原生工具/Subagent 生命周期扩大事件合同；独立演进可能造成协议漂移 | V2 后独立实验，以真实 A/B 决定是否晋级 |
@@ -96,8 +100,10 @@ V2 实际交付和验证的部分，不把上游宣传指标直接算作收益�
 
 上游依据：[Pi 源码](https://github.com/earendil-works/pi)、
 [Pi RPC](https://pi.dev/docs/latest/rpc)、
+[Pi Models/Providers](https://github.com/earendil-works/pi/blob/main/packages/agent/docs/models.md)、
 [OpenCode 源码](https://github.com/anomalyco/opencode)、
 [OpenCode Server](https://dev.opencode.ai/docs/server/)、
+[OpenCode Providers](https://opencode.ai/docs/providers)、
 [OMP 源码](https://github.com/can1357/oh-my-pi)。
 
 按当前源码估算，OpenCode Server/SDK 相比只做一次性 `run --format json` Adapter 约增加 3–5 人日，
@@ -299,13 +305,28 @@ openai_chat_completions
 
 | Harness | Anthropic Messages | OpenAI Responses | OpenAI Chat Completions |
 |---|---:|---:|---:|
-| Pi | 是 | 否 | 否 |
-| OpenCode | 是 | 否 | 否 |
+| Pi | 是 | 是 | 是 |
+| OpenCode | 是 | 是 | 是 |
 | Claude | 是 | 否 | 否 |
 | Codex | 否 | 是 | 否 |
 
 矩阵由 Runtime Bundle manifest 的能力与 Endpoint 求交集，Task 创建和 verify-runtime 都要验证；
-未知组合 fail closed。Backend/Frontend 不再维护两份不同矩阵。
+未知组合 fail closed。Backend 可以保留编译期批准组合的 system upper bound 来校验 manifest，但运行时
+选择、API catalog 和 Frontend 只能消费已冻结 manifest，不得再维护另一份独立业务矩阵。
+
+Pi/OpenCode 的协议映射是冻结合同，不由 Adapter 根据 URL、Provider 名称、环境变量或上游本地配置猜测：
+
+| `model_protocol` | Pi Provider API | OpenCode Provider package | Endpoint 语义 |
+|---|---|---|---|
+| `anthropic_messages` | `anthropic-messages` | `@ai-sdk/anthropic` | Anthropic Messages |
+| `openai_responses` | `openai-responses` | `@ai-sdk/openai` | OpenAI `/v1/responses` |
+| `openai_chat_completions` | `openai-completions` | `@ai-sdk/openai-compatible` | OpenAI-compatible `/v1/chat/completions` |
+
+`openai_responses` 与 `openai_chat_completions` 不能互相回退、自动转换或共享一个模糊的 `openai` 分支。
+Task Snapshot 冻结 `model_protocol`、model、Base URL、credential reference 和 `compat_profile`；Adapter
+只把这些字段翻译为对应 Harness 的原生配置。仓库内 Pi/OpenCode 配置、用户 HOME、Provider 自动发现
+和已有认证状态都不能覆盖 Snapshot。每种映射必须独立验证 tool call、reasoning/thinking、usage、错误、
+取消和 terminal 语义；不支持的 Endpoint 变体 fail closed。
 
 ## 7. 内置 Runtime manifest
 
@@ -339,7 +360,9 @@ V2 manifest 是内置运行时事实，不是第三方插件契约。Backend 仍
         "protocol": "pi-rpc"
       },
       "model_protocols": [
-        "anthropic_messages"
+        "anthropic_messages",
+        "openai_responses",
+        "openai_chat_completions"
       ],
       "capabilities": {
         "resume": true,
@@ -373,7 +396,8 @@ timeout、日志和崩溃隔离模型。
 Bridge 负责：
 
 - 启动固定版本 Pi RPC 并保持 stdin/stdout；
-- 将 Task Snapshot 生成 Pi Provider/model/config 参数；
+- 按冻结的 `model_protocol` 将 Task Snapshot 确定性映射为 Pi Provider/model/config：
+  `anthropic-messages`、`openai-responses` 或 `openai-completions`，不读取既有用户配置且不跨协议回退；
 - 转换 Pi Agent/turn/message/tool/usage/queue/settled 事件；
 - 用 native request id 关联 `command_id`；该 ID 只用于响应关联，不能假设 Pi 会原生去重；
 - 在原生发送前持久化 `dispatching` journal，ACK/确定性拒绝后写入终态；只有能证明未 native send 的失败
@@ -390,6 +414,12 @@ Bridge 负责：
 OpenCode 从 V2 开始使用每 Task 独立的 `opencode serve`，绑定容器 loopback 和随机端口；Bridge
 通过官方 HTTP/SDK 创建或恢复 Session、选择 Agent/Command、发送 Prompt、订阅事件并执行 Abort。
 Server 不跨 Task、Issue 或容器共享。
+
+Adapter 按冻结的 `model_protocol` 生成 Task-private `opencode.json`：Anthropic Messages 使用
+`@ai-sdk/anthropic`，OpenAI Responses 使用 `@ai-sdk/openai`，OpenAI Chat Completions 使用
+`@ai-sdk/openai-compatible`。配置只引用 Task-private credential 环境变量，不内联 secret；禁止加载
+已有 OpenCode auth、用户级 Provider 或仓库配置来替换 Snapshot Endpoint。Bridge 创建/恢复 Session 时
+必须使用冻结的 Provider/model pair，并在事件、usage 和最终结果中保留实际 `model_protocol`。
 
 V2 首发不声明 OpenCode `steering`/`follow_up` capability。其 Server API 已提供异步 Prompt、事件、
 Session status 和 Abort，但上游当前对 busy/idle、队列和 abort 后续消息仍存在演进和缺陷报告；首发
@@ -419,6 +449,11 @@ content-addressed Runtime Bundle 版本交付，而不是建立第二套 Bundle 
 Provider API、前端类型、筛选、标签、Task Snapshot、fingerprint、环境变量映射和统计统一改名；新 API
 不保留 `wire_protocol` 别名。V1 Snapshot 内的旧字段保持原样；V2 控制面仅在 `dual_canary` 的 V1
 compatibility reader 和历史展示中读取，切到 `v2_only` 后不再用于执行。
+
+Backend 以 Runtime Bundle manifest 为唯一 Harness 协议能力源；Task 创建、retry/resume、Profile verify
+和 Worker 启动必须对同一冻结矩阵 fail closed。Provider kind 只约束 Endpoint 可声明的协议，不替代
+Harness 兼容性校验。运行环境可以同时提供协议中立的 Snapshot 输入和必要的兼容环境变量，但 Adapter
+只能消费当前 `model_protocol` 对应的一组值，不能因其他 Provider 的变量存在而改变协议。
 
 ### 9.2 Worker Profile 与 Task options
 
@@ -643,6 +678,8 @@ V2 硬切前必须同时满足：
 
 - Pi、OpenCode、Claude、Codex 的 Contract/Event/Result Conformance 全部通过；
 - 四 Harness 都有真实 Worker Host canary；
+- Pi/OpenCode 分别对 `anthropic_messages`、`openai_responses`、`openai_chat_completions` 完成
+  Conformance、真实 Endpoint/Task 和 usage/terminal 对账；任何协议不得通过代理转换成另一协议冒充通过；
 - OpenCode 验证 Server、Session、Agent、Command、Abort、事件、usage 和 Git 交付，而不只是 Server 启动；
 - Claude/Codex 的新任务、fresh/continue、取消、timeout、Skills、usage、archive 和 Git/MR 无回退；
 - 不少于 20 个内部代表性场景覆盖 plan、execute、freeform、修复测试、无改动、Session、失败和取消；
@@ -660,6 +697,7 @@ V2 硬切前必须同时满足：
 | 环境变量长期 API Key 可被可信仓库读取 | 接受 | Credential Broker/短期 Token 独立方案 |
 | 原生插件/MCP/项目配置可执行代码 | 内部可信模型下允许 | 外部用户前增加权限/供应链方案 |
 | OpenCode Server busy/queue 语义仍演进 | 固定版本、首发不开 command | probe 后逐能力启用 |
+| OpenAI-compatible 网关对 tool、reasoning、usage 和错误字段实现不一致 | 三协议严格分支、`compat_profile`、真实 Endpoint Conformance；禁止协议回退 | 按已验证兼容档案扩展，不为单一网关新增协议名 |
 | 开源项目 API/版本变化快 | 固定官方制品和 digest | 必要时 Fork、自建制品 |
 | V2 无跨 major retry/resume | Internal Preview 接受 | GA 前设计稳定兼容和保留策略 |
 | Pi/OMP 同源导致能力重复 | OMP 独立实验和 A/B | 以真实收益决定晋级或退出 |
@@ -674,7 +712,8 @@ V2 硬切前必须同时满足：
 3. Pi 使用 RPC stdio；OpenCode 使用 Task-scoped Server/SDK。
 4. OpenCode 首发不承诺 steering/follow-up，但控制面必须可扩展。
 5. OMP 是独立的后续实验 Harness，不是 Pi Profile。
-6. V2 只支持三种 `model_protocol`，不支持 Google 协议。
+6. V2 只支持三种 `model_protocol`，不支持 Google 协议；Pi/OpenCode 必须同时支持三种协议，
+   Claude 只支持 `anthropic_messages`，Codex 只支持 `openai_responses`。
 7. Provider/Endpoint 是 Codify 唯一事实源，Harness 和 Provider 保持分离。
 8. 新建 Profile 只启用 Pi；现有 Profile/Issue 不批量迁移。
 9. V1 只读，正式切换后不能调度、执行、retry 或 resume。
