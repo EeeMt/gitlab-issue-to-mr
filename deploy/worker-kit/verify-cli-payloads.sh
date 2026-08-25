@@ -8,6 +8,9 @@
 #   PI_CLI_VERSION OPENCODE_CLI_VERSION CLAUDE_CLI_VERSION CODEX_CLI_VERSION
 #                       optional pinned versions; when set, the payload's
 #                       --version output must contain the pinned value
+#   GLIBC_LOADER        optional path to the nix closure's ld-linux loader;
+#                       used when the payload cannot exec natively (the build
+#                       stage is Alpine/musl and glibc binaries need /lib64)
 #   /payloads/<key>/... staged payload directories (only selected keys)
 #
 # Writes /tmp/payload-evidence.json:
@@ -24,6 +27,41 @@
 #   a shipped-but-broken payload is a defect, not a degraded state.
 set -eu
 JQ="${JQ_BIN:-jq}"
+
+# Run `--version` on a payload, falling back to the glibc loader when the
+# native exec fails (musl build stage without /lib64). The loader's own lib
+# dir is put on LD_LIBRARY_PATH so libc.so.6 etc. resolve. Runtime behaviour
+# is unaffected: worker containers (glibc project-runtime images) exec the
+# payload directly.
+run_version() {
+    payload="$1"
+    payload_dir="$(dirname "${payload}")"
+    payload_base="$(basename "${payload}")"
+    # Run from the payload's own directory: some CLIs (pi) resolve their
+    # version from argv[0]-relative sidecars (package.json), so the loader
+    # fallback must keep argv[0] inside the payload dir.
+    out="$(cd "${payload_dir}" && "./${payload_base}" --version 2>/dev/null | head -n 1 || true)"
+    if [ -n "${out}" ]; then
+        printf '%s\n' "${out}"
+        return 0
+    fi
+    if [ -n "${GLIBC_LOADER:-}" ] && [ -x "${GLIBC_LOADER}" ]; then
+        loader_dir="$(dirname "${GLIBC_LOADER}")"
+        # pi resolves its version from an argv[0]-adjacent package.json; the
+        # loader claims argv[0] for itself, so mirror the sidecar next to the
+        # loader (build-stage-only, never shipped into the Kit).
+        if [ -f "${payload_dir}/package.json" ]; then
+            cp "${payload_dir}/package.json" "${loader_dir}/package.json"
+        fi
+        out="$(cd "${payload_dir}" && LD_LIBRARY_PATH="${loader_dir}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "${GLIBC_LOADER}" "${payload}" --version 2>/dev/null | head -n 1 || true)"
+        if [ -n "${out}" ]; then
+            printf '%s\n' "${out}"
+            return 0
+        fi
+    fi
+    return 1
+}
 
 SELECTION="${KIT_CLI_SELECTION:-}"
 # "none" is the explicit empty-selection sentinel (the Docker CLI drops
@@ -72,8 +110,7 @@ for key in ${KEYS}; do
         echo "ERROR: harness '${key}' payload is not executable: ${payload}" >&2
         exit 2
     fi
-    version_output="$("${payload}" --version 2>/dev/null | head -n 1 || true)"
-    if [ -z "${version_output}" ]; then
+    if ! version_output="$(run_version "${payload}")"; then
         echo "ERROR: harness '${key}' --version produced no output: ${payload}" >&2
         exit 2
     fi
@@ -88,18 +125,20 @@ for key in ${KEYS}; do
         echo "ERROR: harness '${key}' --version '${version_output}' does not contain pinned version '${pinned}'" >&2
         exit 2
     fi
-    observed="$(printf '%s\n' "${version_output}" | awk '{print $NF}')"
-    sha256="$(sha256sum "${payload}" | awk '{print $1}')"
+    # POSIX-only: no awk in the Alpine build stage. Trailing-token extraction
+    # covers both "pi 0.84.2" and bare "0.84.2" --version outputs.
+    observed="${version_output##* }"
+    sha256="$(sha256sum "${payload}")"
+    sha256="${sha256%% *}"
     size="$(wc -c < "${payload}" | tr -d ' ')"
     PRESENT_JSON="$(printf '%s' "${PRESENT_JSON}" | "${JQ}" --arg k "${key}" \
         --arg rel "${rel}" --arg v "${observed}" --arg s "${sha256}" --arg n "${size}" \
-        '. + {($k): {path: ("/opt/codify-kit/harness/" + $rel), version: $v, sha256: $s, size: ($n | tonumber)}}')"
+        '. + {($k): {path: ("/opt/codify-kit/harness/" + $k + "/" + $rel), version: $v, sha256: $s, size: ($n | tonumber)}}')"
     echo "Verified harness '${key}': ${payload} (${observed}, ${size} bytes)"
 done
 
-if [ "${missing_count}" -eq 0 ]; then
-    MISSING_JSON="[]"
-else
+MISSING_JSON="[]"
+if [ -n "${MISSING}" ]; then
     MISSING_JSON="$(printf '%s' "${MISSING}" | tr ' ' '\n' | "${JQ}" -R -s 'split("\n") | map(select(length > 0))')"
 fi
 

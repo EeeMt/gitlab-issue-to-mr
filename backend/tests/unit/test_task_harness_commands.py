@@ -686,3 +686,59 @@ async def test_create_command_recovers_unique_key_race_to_conflict(_digest):
     assert not result.created
     assert result.outcome == "existing_conflict"
     assert result.rejection_code == "existing_conflict"
+
+
+def test_bundle_supports_command_reads_harness_manifest_from_archive():
+    """A V2 bundle whose DB manifest column is the runtime-bundle envelope must
+    still resolve steering/follow_up capability from the archive's harness
+    manifest (regression: envelope shape made every command unsupported)."""
+    import io
+    import json
+    import tarfile
+
+    from app.core.task_harness_commands import bundle_supports_command
+
+    harness_manifest = {
+        "schema": "codify.worker.runtime-manifest/v2",
+        "maturity": "internal_preview",
+        "contract_version": "codify.worker.harness/v2",
+        "event_schema": "codify.worker.event/v2",
+        "command_schema": "codify.worker.command/v2",
+        "result_schema": "codify.worker.result/v2",
+        "files": [],
+        "adapters": {
+            "pi": {
+                "support_tier": "default",
+                "control_transport": {"kind": "rpc_stdio", "protocol": "pi-rpc"},
+                "model_protocols": ["anthropic_messages"],
+                "options_schema": "codify.worker.options/pi-v1",
+                "capabilities": {
+                    "resume": True,
+                    "task_skills": True,
+                    "usage_tokens": True,
+                    "steering": True,
+                    "follow_up": True,
+                },
+            }
+        },
+    }
+    payload = io.BytesIO()
+    with tarfile.open(fileobj=payload, mode="w") as archive:
+        member = tarfile.TarInfo(
+            "codify-runtime/orchestration/worker-entrypoint/harness/manifest.json"
+        )
+        data = json.dumps(harness_manifest).encode()
+        member.size = len(data)
+        archive.addfile(member, io.BytesIO(data))
+
+    bundle = MagicMock()
+    bundle.contract_version = "codify.worker.harness/v2"
+    # DB column holds the runtime-bundle envelope, NOT the harness shape.
+    bundle.manifest = {"schema": "codify.worker.runtime-bundle/v2", "adapters": {}}
+    bundle.bundle_bytes = payload.getvalue()
+
+    assert bundle_supports_command(bundle, "pi", "steer") is True
+    assert bundle_supports_command(bundle, "pi", "follow_up") is True
+    # A harness-shaped manifest attribute still wins (existing mock contract).
+    bundle.manifest = harness_manifest
+    assert bundle_supports_command(bundle, "pi", "steer") is True

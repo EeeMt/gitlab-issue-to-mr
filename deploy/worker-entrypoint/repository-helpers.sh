@@ -10,8 +10,15 @@ repo_work_branch_ahead_of_base() {
     # pushed them. The baseline is the work-branch head observed during repo
     # preparation, NOT the base branch, so a pre-existing commit from an
     # earlier task on the same branch is not mistaken for this task's work.
-    local count
-    count=$(codify_run_shell "cd /workspace && git rev-list --count '${REPO_REMOTE_WORK_SHA:-HEAD}'..HEAD 2>/dev/null" 2>/dev/null || echo 0)
+    # When the work branch did not exist on the remote at preparation time
+    # (REPO_REMOTE_WORK_SHA unset), fall back to the base branch: any local
+    # commit ahead of the base is this task's own delivery.
+    local count baseline
+    baseline="${REPO_REMOTE_WORK_SHA:-}"
+    if [ -z "${baseline}" ]; then
+        baseline="refs/remotes/origin/${BASE_BRANCH:-main}"
+    fi
+    count=$(codify_run_shell "cd /workspace && git rev-list --count '${baseline}'..HEAD 2>/dev/null" 2>/dev/null || echo 0)
     [ -n "${count}" ] && [ "${count}" -gt 0 ] 2>/dev/null
 }
 

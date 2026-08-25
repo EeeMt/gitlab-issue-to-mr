@@ -826,7 +826,9 @@ def test_worker_kit_release_records_all_four_harness_entries_and_selfchecks():
 
     for harness in ("claude", "codex", "pi", "opencode"):
         assert f"bridge-selfcheck-{harness}" in kit_dockerfile
-    assert "/worker-kit/harness/${key}/" in kit_dockerfile
+    # The manifest path is the single source of truth for present payloads
+    # (the artifact self-check resolves it directly under /worker-kit).
+    assert 'test -x "/worker-kit$(jq -r --arg k "${key}"' in kit_dockerfile
     assert "harness_inventory" in kit_dockerfile
     assert "KIT_CLI_SELECTION" in kit_dockerfile
     assert "not_selected" in kit_dockerfile

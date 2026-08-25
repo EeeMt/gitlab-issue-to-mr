@@ -22,6 +22,7 @@ turn-terminal (agent_settled after the final turn) is authoritative.
 """
 
 from __future__ import annotations
+import re
 
 import argparse
 import json
@@ -38,6 +39,102 @@ SCHEMA = "codify.worker.event/v2"
 # Native Pi command names that map to Codify control events.
 _NATIVE_STEER = "steer"
 _NATIVE_FOLLOW_UP = "follow_up"
+
+
+def _lenient_loads(text: str) -> object | None:
+    """Parse Pi 0.84.2 JSONL with string-aware repair.
+
+    Probe fact: Pi sometimes emits unescaped quotes and raw control characters
+    inside JSON string values (e.g. tool args containing ``"``), which strict
+    ``json.loads`` rejects and would drop the whole record (including the
+    authoritative ``agent_end``). Scan the text tracking in-string/escaped
+    state: a quote that is not followed by a JSON structural character is an
+    embedded literal quote (repair to ``\"``); raw control characters are
+    escaped as ``\\uXXXX``. Return None when nothing was repaired or the
+    repaired text still does not parse (caller keeps the strict skip path).
+    """
+    out: list[str] = []
+    in_string = False
+    escaped = False
+    repaired = False
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if escaped:
+            out.append(ch)
+            escaped = False
+            i += 1
+            continue
+        if in_string:
+            if ch == "\\":
+                out.append(ch)
+                escaped = True
+                i += 1
+                continue
+            if ch == '"':
+                j = i + 1
+                while j < n and text[j] in " \t":
+                    j += 1
+                if j < n and text[j] in ",}]:":
+                    in_string = False
+                    out.append(ch)
+                else:
+                    out.append('\\"')
+                    repaired = True
+                i += 1
+                continue
+            if ord(ch) < 0x20:
+                out.append("\\u%04x" % ord(ch))
+                repaired = True
+                i += 1
+                continue
+            out.append(ch)
+            i += 1
+            continue
+        if ch == '"':
+            in_string = True
+            out.append(ch)
+            i += 1
+            continue
+        out.append(ch)
+        i += 1
+    if not repaired:
+        return _lenient_agent_end(text)
+    try:
+        return json.loads("".join(out))
+    except json.JSONDecodeError:
+        return _lenient_agent_end(text)
+
+
+_AGENT_END_WILL_RETRY_RE = re.compile(r'"willRetry"\s*:\s*(true|false)')
+_AGENT_END_FAILURE_RE = re.compile(r'"failureMessage"\s*:\s*"((?:[^"\\]|\\.)*)"')
+
+
+def _lenient_agent_end(text: str) -> object | None:
+    """Extract an authoritative ``agent_end`` record from an unparseable line.
+
+    Pi 0.84.2 can emit deeply nested unescaped quotes inside tool-result
+    payloads (e.g. GitLab URLs containing ``"``), which no character scan can
+    repair reliably. The translator only needs ``willRetry``/``failureMessage``
+    from ``agent_end`` to decide the terminal, so degrade to a targeted
+    extraction instead of dropping the record (which would turn a successful
+    run into ``successful_agent_end missing`` at EOF).
+    """
+    if '"type":"agent_end"' not in text and '"type": "agent_end"' not in text:
+        return None
+    will_retry_match = _AGENT_END_WILL_RETRY_RE.search(text)
+    if will_retry_match is None:
+        return None
+    record: dict[str, object] = {
+        "type": "agent_end",
+        "willRetry": will_retry_match.group(1) == "true",
+    }
+    failure_match = _AGENT_END_FAILURE_RE.search(text)
+    if failure_match is not None:
+        record["failureMessage"] = failure_match.group(1)
+    return record
+
 
 # Per-stream in-memory state. The terminal is decided at EOF.
 _STATE: dict = {
@@ -486,8 +583,17 @@ def main() -> int:
             try:
                 record = json.loads(input_text)
             except json.JSONDecodeError:
-                record = None
-                raw_text = input_text
+                record = _lenient_loads(input_text)
+                if record is None:
+                    raw_text = input_text
+                else:
+                    if isinstance(record, dict):
+                        archive_record = dict(record)
+                        archive_record.pop("__command_ack", None)
+                        archive_record.pop("__pi_reopen_after", None)
+                    else:
+                        archive_record = record
+                    raw_text = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
             else:
                 # Owner-only correlation drives canonical ACK/reopen events;
                 # it is not part of Pi's raw archive and must not be persisted

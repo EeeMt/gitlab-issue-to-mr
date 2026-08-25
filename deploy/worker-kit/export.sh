@@ -135,9 +135,19 @@ stage_selected_payloads() {
             echo "WARNING: harness '${key}' selected but payload deploy/worker-cli/${src} is missing; manifest will record missing_payload" >&2
             continue
         fi
-        mkdir -p "$(dirname "${staged}/${rel}")"
-        cp -a "${PROJECT_ROOT}/deploy/worker-cli/${src}" "${staged}/${rel}"
-        echo "Staged harness '${key}' payload -> worker-cli/kit-staging/${key}/${rel}"
+        if [ -d "${PROJECT_ROOT}/deploy/worker-cli/${src}" ]; then
+            # Directory payload: copy its contents under the staged rel dir so
+            # sidecar files (e.g. package.json for pi's version lookup) ship
+            # next to the executable. The rel basename must exist inside.
+            rel_dir="$(dirname "${rel}")"
+            mkdir -p "${staged}/${rel_dir}"
+            cp -a "${PROJECT_ROOT}/deploy/worker-cli/${src}/." "${staged}/${rel_dir}/"
+            echo "Staged harness '${key}' payload dir -> worker-cli/kit-staging/${key}/${rel_dir}/"
+        else
+            mkdir -p "$(dirname "${staged}/${rel}")"
+            cp -a "${PROJECT_ROOT}/deploy/worker-cli/${src}" "${staged}/${rel}"
+            echo "Staged harness '${key}' payload -> worker-cli/kit-staging/${key}/${rel}"
+        fi
     done
 }
 

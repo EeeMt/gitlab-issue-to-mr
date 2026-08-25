@@ -22,6 +22,7 @@ FROM ${NIX_IMAGE} AS closure-builder
 # runs inside BuildKit's container sandbox, so disable only Nix's filter.
 ENV NIX_CONFIG="filter-syscalls = false"
 ARG KIT_CLI_SELECTION
+ARG TARGETARCH
 ARG PI_CLI_VERSION
 ARG OPENCODE_CLI_VERSION
 ARG CLAUDE_CLI_VERSION
@@ -44,7 +45,16 @@ RUN nix-build default.nix -o /tmp/codify-worker-kit-runtime \
       | tr -d '"' > /tmp/nixpkgs-revision \
     && mkdir -p /out/nix/store \
     && cp -a --parents $(nix-store -qR /tmp/codify-worker-kit-runtime) /out \
+    && GLIBC_LOADER="$(nix-store -qR /tmp/codify-worker-kit-runtime \
+         | while read -r p; do \
+             case "${TARGETARCH}" in \
+               arm64) l="${p}/lib/ld-linux-aarch64.so.1" ;; \
+               *) l="${p}/lib/ld-linux-x86-64.so.2" ;; \
+             esac; \
+             [ -f "${l}" ] && { printf '%s\n' "${l}"; break; }; \
+           done)" \
     && JQ_BIN="$(readlink -f /tmp/codify-worker-kit-runtime)/bin/jq" \
+       GLIBC_LOADER="${GLIBC_LOADER}" \
        KIT_CLI_SELECTION="${KIT_CLI_SELECTION}" \
        PI_CLI_VERSION="${PI_CLI_VERSION}" \
        OPENCODE_CLI_VERSION="${OPENCODE_CLI_VERSION}" \
@@ -87,7 +97,7 @@ RUN runtime_store="$(cat /tmp/runtime-store-path)" \
       '{schema_version: 2, manifest_kind:"codify.worker.kit-manifest/v1", kit_version: $version, platform: $platform, runtime_bin: $runtime_bin, bash: $bash, entrypoint: "/opt/codify-kit/entrypoint.sh", runtime_compatibility: {harness_contracts:["codify.worker.harness/v2","codify.worker.harness/v1"], event_schemas:["codify.worker.event/v2","codify.worker.event/v1"], bootstrap_version:"1.0.0"}, harness_inventory: $harness_inventory, components: {nixpkgs: $nixpkgs_version, nixpkgs_revision: $nixpkgs_revision}}' \
       > /worker-kit/manifest.json \
     && test "$(jq -r '.harness_inventory | keys | length' /worker-kit/manifest.json)" = 4 \
-    && for key in pi opencode claude codex; do availability="$(jq -r --arg k "${key}" '.harness_inventory[$k].availability' /worker-kit/manifest.json)"; if [ "${availability}" = "present" ]; then test -x "/worker-kit/harness/${key}/$(jq -r --arg k "${key}" '.harness_inventory[$k].path | sub("^/opt/codify-kit/"; "")' /worker-kit/manifest.json)"; fi; done \
+    && for key in pi opencode claude codex; do availability="$(jq -r --arg k "${key}" '.harness_inventory[$k].availability' /worker-kit/manifest.json)"; if [ "${availability}" = "present" ]; then test -x "/worker-kit$(jq -r --arg k "${key}" '.harness_inventory[$k].path | sub("^/opt/codify-kit/"; "")' /worker-kit/manifest.json)"; fi; done \
     && chmod 755 /worker-kit/launcher /worker-kit/bin/codify-run-as /worker-kit/entrypoint.sh \
       /worker-kit/ci-claude.sh \
       /worker-kit/verify-runtime.sh \
@@ -116,13 +126,26 @@ RUN runtime_store="$(cat /tmp/runtime-store-path)" \
 
 FROM alpine:3.21 AS smoke
 ARG WORKER_KIT_VERSION
+ARG TARGETARCH
 COPY --from=artifact /worker-kit /opt/codify-kit
 COPY --from=artifact /worker-kit/nix/store /nix/store
 # Every present inventory entry must pass its functionality gate inside the
 # Kit's own runtime; absent entries are recorded with their reason code.
 # `pi --version` may need a writable home, so give the smoke container one.
+# Alpine is musl and cannot exec glibc payloads directly, so install the nix
+# closure's glibc as an ABI shim at the standard loader/lib paths first.
 RUN mkdir -p /workspace /root \
     && chmod 0777 /workspace \
+    && GLIBC_LIB="$(ls -d /nix/store/*-glibc-*/lib | head -1)" \
+    && if [ "${TARGETARCH}" = "arm64" ]; then \
+         mkdir -p /lib/aarch64-linux-gnu; \
+         cp "${GLIBC_LIB}/ld-linux-aarch64.so.1" /lib/; \
+         cp "${GLIBC_LIB}/libc.so.6" "${GLIBC_LIB}/libpthread.so.0" "${GLIBC_LIB}/libdl.so.2" "${GLIBC_LIB}/libm.so.6" /lib/aarch64-linux-gnu/; \
+       else \
+         mkdir -p /lib64 /lib/x86_64-linux-gnu; \
+         cp "${GLIBC_LIB}/ld-linux-x86-64.so.2" /lib64/; \
+         cp "${GLIBC_LIB}/libc.so.6" "${GLIBC_LIB}/libpthread.so.0" "${GLIBC_LIB}/libdl.so.2" "${GLIBC_LIB}/libm.so.6" /lib/x86_64-linux-gnu/; \
+       fi \
     && CODIFY_KIT_VERSION="${WORKER_KIT_VERSION}" /opt/codify-kit/launcher --verify \
       --require-skill-support \
       --smoke 'test "$(command -v sh)" = /bin/sh' \
