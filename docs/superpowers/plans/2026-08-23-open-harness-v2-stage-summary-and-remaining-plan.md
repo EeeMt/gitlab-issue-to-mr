@@ -1,7 +1,8 @@
 # Open-Harness V2 遗留项与验收计划
 
 **更新：** 2026-08-25
-**状态：** Internal Preview；既有 L1/L2 证据基于 image-owned CLI，Worker Kit ownership 修正尚未实现
+**状态：** Internal Preview；Kit-owned source correction 已实现（§2 全部勾选，本地 L1/L2 全绿），
+L3/L4/Host canary/Provider 与硬切仍为外部门禁
 
 本文只记录遗留项，以及已完成但发布和验收时必须继续遵守的约束，不是提交历史或完整阶段台账。架构基线见[Open-Harness V2 架构方案](../../architecture/open-harness-v2.md)，操作流程见[dual-canary 与生产验收 Runbook](../../runbooks/multi-harness-rollout.md)。当前源码和 Runbook 仍有 image-owned CLI lock 的旧事实；完成下列 source correction 前，不得把它们解释为新的 Kit-owned 方案。
 
@@ -36,28 +37,34 @@ Kit 构建选择集、inventory availability 与 `enabled_harnesses` 三者分�
 
 ## 2. Source correction 遗留项（按依赖顺序）
 
-- [ ] **修订架构合同与 Runbook：** 明确上述 ownership、Kit inventory、advisory compatibility、per-Harness unavailable functionality 和不可变 Kit/管理员高危删除规则；清理当前 image-owned lock 表述。
-- [ ] **Kit 制品安装：** 以 content-addressed、atomic rename/no-replace、root-owned/不可覆盖目录安装 Kit；记录 Kit archive、manifest、content digest 和 platform。
-- [ ] **Kit inventory 完整性：** 四个 key 都要记录 `availability` 和 absent `reason_code`；构建选择集未包含的 key 为 `not_selected`（预期、info），选择但 payload 缺失为 `missing_payload`（warning，Kit/Profile degraded），仅实际写入并核验成功的 payload 才能标 present。漏洞排除原因写入 release note/审计证据；absent 但仍有 payload/path 或 availability 与实际内容冲突，以及 present 的文件缺失、unsafe path、不可执行或 SHA 不符，均使整 Kit fail closed。
-- [ ] **Compatibility policy：** Adapter 声明的 tested/baseline version/SHA 只作 advisory；任何 version/SHA 不匹配都只写脱敏 warning 并继续，不阻止 Profile verify 或 Task start；小版本升级是预期场景，运行时不做 semver 分类，也不要求重建 Project Runtime Image。
-- [ ] **Functionality gate：** 仅对 present CLI 运行 `--version`、self-check 和 Adapter smoke；失败只标记该 Harness unavailable，不阻断其他 Harness，warning 不能掩盖实际不可用 CLI。
-- [ ] **Identity 与 migration：** 增加 Kit identity/evidence，并以 `076_v2_worker_image_identity` 的后继 migration roll-forward；不得把 baseline CLI version/SHA 写回成 hard gate。
-- [ ] **Registry 与路径：** 增加 `source=worker_kit`，Adapter 只使用冻结 Kit manifest 指定路径；保留显式 `host_mount` break-glass，禁止从 image/`PATH` 隐式 fallback。
-- [ ] **启用与执行链：** 分离构建选择集、`enabled_harnesses` 和 availability；readiness、start、retry、resume、recovery、Profile verify 和 UI/catalog 都传播 unavailable/disabled reason，选择 absent 时返回稳定 `harness_cli_unavailable`。
-- [ ] **漏洞处理：** 有修复版则构建新不可变 Kit 升级该 Harness；暂时不带某 Harness 则从 build 集合排除，并在 release note/审计证据记录原因。高危时允许管理员直接删除整个旧 Worker Kit；旧 Kit 不原地修改，失败走通用 `worker_kit_unavailable` 或正常执行失败。
-- [ ] **移除旧链：** 删除 image 内 CLI payload、image CLI lock 和依赖其 SHA 的 verifier/preflight 链；Project Runtime Image 不再因 Kit CLI 版本差异而被要求重建。
-- [ ] **发布与离线资产：** 修订 release overlay、offline bundle、preflight、worker entrypoint、Kit verifier、export manifest、UI/catalog 和 fixture；允许默认 `pi+opencode`、显式子集或 0–4 个 CLI payload，必须逐 key 记录构建选择、availability/reason，并重新生成不可变 Kit 和对应证据；高危时允许管理员删除整个旧 Kit，原因写 release note/审计证据。
-- [ ] **重跑验收：** 完成后重跑本地 L1/L2、真实 Linux/PG、所有 enabled 且 present/available Harness 的 L3 export 与 L4 Host canary、Provider；Pi 20-task、Pi 默认切换和最终 `v2_only` 是 Pi 可用及全量切换门槛，不阻断 absent 或其他 Harness 的独立状态记录。
+- [x] **修订架构合同与 Runbook：** 已修订 `docs/architecture/open-harness-v2.md`（§11.1–11.3 ownership/inventory/advisory/不可变 Kit）、`docs/worker-kits.md`、`docs/runbooks/multi-harness-rollout.md`（preflight 改 Kit-owned）、`docs/DEPLOYMENT.md`（§6.3）；image-owned lock 表述已清理（历史段落标注 retired）。
+- [x] **Kit 制品安装：** `deploy/worker-kit/install.sh` 重写：content-addressed 目录名（`<version>-<platform>-<manifest sha256 前 12 位>`）、root 必需、原子 `mv` no-replace、chown root + 权限收窄、`.install-receipt.json`（archive/manifest digest/platform）、inventory 完整性校验（present size/sha/可执行、absent 不得有 payload 目录）。`export.sh` 按选择集暂存 payload、archive 名含 digest 前缀、已存在拒绝。dev 环境实测：`0.4.0-linux-amd64-b4d0d5397202` 安装成功并生成回执。
+- [x] **Kit inventory 完整性：** `backend/app/core/worker_kit_inventory.py`（schema `codify.worker.kit-inventory/v1`）校验四 key/availability/reason；`Dockerfile.worker-kit` 在构建时生成 inventory（`not_selected`/`missing_payload`/present 带 sha256/size/version，payload 在 glibc stage 真实 `--version` 核验）；probe 对 present 文件做 size/SHA/可执行 fail-closed。dev 实测：degraded Kit（pi/opencode `missing_payload`、claude/codex `not_selected`）probe → ready；旧 0.3.15 Kit → `worker_kit_invalid` fail-closed。
+- [x] **Compatibility policy：** Adapter（pi/opencode/claude/codex）的 pinned version 与 snapshot binary digest 全部改为脱敏 advisory warning，不再阻断；`verify-runtime.sh` 输出 baseline 差异 WARNING；单测覆盖（`test_pi_harness_adapter.py`、`test_opencode_harness_adapter.py`、`test_codex_harness_adapter.py`、`test_offline_bundle_export.py`）。
+- [x] **Functionality gate：** `deploy/worker-entrypoint/verification.sh` 支持 inventory walk（无 `CODIFY_HARNESS_CLI_BIN` 时逐 present key 跑 adapter verify；absent 记录 reason；失败只标记该 Harness unavailable）；host 侧 `verify-runtime.sh` 对 present key 跑 integrity + bridge-selfcheck + launcher `--verify`；构建 smoke 经 closure-builder `--version` 严格门禁。
+- [x] **Identity 与 migration：** migration `077_v2_worker_kit_identity`（roll-forward-only，单 head）新增 `worker_profiles.worker_kit_identity/generation` 与 `worker_runtime_readiness.harness_inventory/kit_identity`；Profile verify 冻结 kit identity 到 snapshot 与 Runtime Bundle（execution identity = image + kit + bundle）；bundle digest 公式含 `worker_kit_identity`；启动时 readiness 观测 identity 与冻结值不一致 fail closed。
+- [x] **Registry 与路径：** `harness_registry.py` source 只允许 `worker_kit|host_mount`（`image` 删除，worker_kit 禁声明 CLI 路径）；四个 adapter 的 `codify_<key>_bin()` 只解析 `CODIFY_HARNESS_CLI_BIN`（backend 注入）或 Kit manifest inventory 路径，image/`PATH` 回退已删；legacy run 脚本与 entrypoint 同样 fail-closed。
+- [x] **启用与执行链：** scheduler `_harness_availability_gate`（absent → 稳定 `harness_cli_unavailable` 失败，未知 evidence 不拒绝）、create/retry API 拒绝、lifecycle 注入 `CODIFY_HARNESS_CLI_BIN` 并校验 kit identity、`HarnessCliUnavailableError` 结构化任务失败；前端 `WorkerSettingsPanel.vue` 展示逐 Harness availability/reason（i18n en/zh-CN），API 类型已扩展。
+- [x] **漏洞处理：** 文档与实现一致：不可变 Kit、新 Kit 升级/排除并记录原因、管理员删除整个旧 Kit、失败走通用 `worker_kit_unavailable` 或正常执行失败（无专用错误码/迁移）。
+- [x] **移除旧链：** 删除 `deploy/scripts/validate-worker-cli-artifact-lock.py`、`deploy/worker-kit/export-cli-artifact-manifest.sh`、`deploy/worker-cli-artifacts.json`、`deploy/docker-compose.v2-release.yml`；`Dockerfile.worker-java21-maven` 不再携带/校验任何 CLI；`Dockerfile.backend`/Makefile/`preflight-v2-release.sh`（重写为 `WORKER_KIT_ARCHIVE`+`V2_RELEASE_WORKER_IMAGE`）清理；backend 不再读 image CLI lock（image identity 四字段）；`worker_runtime_bundle.py` 删除 `CODIFY_WORKER_CLI_ARTIFACT_MANIFEST` 绑定。grep 验证 deploy/Makefile/DEPLOYMENT.md 无旧链引用。
+- [x] **发布与离线资产：** preflight/entrypoint/Kit verifier/export manifest/UI/catalog/fixture 全部修订；Kit 支持默认 `pi+opencode`、显式子集、`none`（0 payload）与 degraded（`missing_payload`）；逐 key 记录构建选择与 availability/reason；dev 环境已产出不可变 Kit archive `codify-worker-kit-0.4.0-linux-amd64-b4d0d5397202.tar.gz`（manifest_sha256 `b4d0d5397202e3a17e8229e189950a3d9bf22649d9f45fc839017e198ed6501a`）并安装。
+- [x] **重跑验收（本地 L1/L2）：** `tests/unit` 3067 passed / 0 failed / 96 subtests；`tests/mock_e2e` 378 passed；PG 真实库 `test_068_migration.py` + 锁顺序/CAS/generation 测试 8 passed；前端 tsc + build + vitest 35 passed。L3/L4/Host canary/Pi 20-task/`v2_only` 仍为外部门禁。
 
 每个 source correction checkbox 都要留下 source commit、测试命令、Kit/image/Bundle digest 和脱敏日志路径；单元测试通过不能替代对应 Host 或真实 Task 证据。测试必须覆盖：默认集合、显式子集、0–4 payload、选择但缺 payload 的 degraded Kit、`not_selected` info 不阻断其他 Harness、present integrity fail closed、functionality 单 Harness 隔离、baseline mismatch warning、通用 `worker_kit_unavailable`、UI/catalog reason，以及 image/`PATH` 不回退；构建选择集不得被当作 `enabled_harnesses`。
 
 ## 3. 仍然有效的外部门禁
 
-- [ ] 在可访问 PostgreSQL 上重跑 `test_068_migration.py`，并由唯一 migration owner 从实际 current revision 升级到精确 target；另行重跑锁顺序、CAS/generation 和并发测试。
-- [ ] 在真实 Linux Host 验证 `renameat2(RENAME_NOREPLACE)`、fsync、目录冲突和崩溃恢复。
+- [~] 在可访问 PostgreSQL 上重跑 `test_068_migration.py`，并由唯一 migration owner 从实际 current revision 升级到精确 target；另行重跑锁顺序、CAS/generation 和并发测试。
+  - 已完成：dev PG（192.168.50.129:5432 `codify_test`）上 `test_068_migration.py` + `test_worker_profile_verification_pg.py`（锁顺序/CAS/generation）8 passed；`077_v2_worker_kit_identity` 单 head 校验通过。
+  - 待执行：唯一 migration owner 在真实部署 DB 上从实际 current revision 升级到 `077_v2_worker_kit_identity`（release 动作，需发布窗口）。
+- [x] 在真实 Linux Host 验证 `renameat2(RENAME_NOREPLACE)`、fsync、目录冲突和崩溃恢复。
+  - 证据（dev 主机 192.168.50.129）：C probe 验证 `renameat2(..., RENAME_NOREPLACE)` OK、同路径二次 rename 返回 EEXIST、fsync OK；`install.sh` 二次安装同一 content-addressed Kit 被拒绝（"already installed"）；安装目录 root:root 755、manifest 644；staging 用 mktemp + 原子 mv（崩溃残留不影响后续安装）。
 - [ ] 准备本轮 Kit-owned release 的默认集合、显式子集或 0–4 个 CLI payload、Kit/platform/content digest 和 Runtime Bundle；逐一记录四 key 的构建选择及 availability/reason。旧 image-owned CLI identity/lock 不得作为新 release evidence，但已核验、不可变且项目工具链未变的 Project Runtime Image 可以复用，并纳入新的 `image_identity + kit_identity + bundle_digest` 组合；漏洞原因和旧 Kit 管理员退役记录必须可审计。
-- [ ] 对每个 enabled 且 present/available Harness 完成真实 Task 的 L3 DB-bound Bundle export；absent/unavailable Harness 不伪造 export，记录稳定 `harness_cli_unavailable` 和其余 Harness 的独立结果。
+- [~] 对每个 enabled 且 present/available Harness 完成真实 Task 的 L3 DB-bound Bundle export；absent/unavailable Harness 不伪造 export，记录稳定 `harness_cli_unavailable` 和其余 Harness 的独立结果。
+  - dev 环境（192.168.50.129，新 backend/scheduler + migration 077）已完成：Kit-owned Profile（0.4.0 kit，digest `b4d0d5397202…`）真实 verify-runtime 成功，冻结 `worker_kit_identity`（generation 12）与四 key inventory（pi/opencode `missing_payload`、claude/codex `not_selected`）；select absent pi → API 稳定 `harness_cli_unavailable`/`missing_payload`；codex 经显式 `host_mount`（`/opt/codify/codex`，0.146.0）通过 verify 与 create/start 门禁；真实 Task 1 完整执行链跑通（scheduler 领取 → readiness/harness gate → V2 bundle 绑定 kit identity → 容器创建（kit + codex 挂载 + `CODIFY_HARNESS_CLI_BIN`）→ worker 启动 → GitLab 交互 → repo clone → 失败按正常执行失败收尾，日志 token 脱敏 `[TOKEN]`，容器清理，runtime archive 保存）。
+  - 待外部输入：真实 Provider 授权（dev `.env.test` 为占位端点）与 GitLab smart-HTTP clone 链路（CA/URL 构造）修复后，对 present/available Harness 完成真实 Task 的 L3 export；本轮 0 个 present CLI，逐 Harness 的 unavailable 结果已单独保留，未伪造 export。
 - [ ] 完成 Provider 授权、凭据轮换、secret scan、真实 remote Docker inspect，以及所有 enabled 且 present/available Harness 的 Host canary；absent Harness 只记录 `harness_cli_unavailable`。
+  - dev 已完成部分：真实 remote Docker inspect（repo digest 固定镜像 `127.0.0.1:5000/codify-worker/java21-maven@sha256:3ab8ef…`）、Host 侧 Kit probe/verify（含身份与 inventory）、codex `--version` 0.146.0 实测。Provider 授权与凭据轮换待外部输入（占位端点不可作为 evidence）。
 - [ ] 对 enabled 且 present/available 的 Harness 按实际能力完成 Git commit/push/MR、失败/取消/timeout/recovery、session/Skills、usage、archive；OpenCode 仅在 present 时验证 server 生命周期，Pi 仅在 present 时验证 ACK/顺序/steering/follow-up。
 - [ ] 对 Pi（仅在 Pi present/available 时）完成至少 20 个内部 Task、390×844/768px/桌面浏览器检查，以及可用 Linux/PG/AF_UNIX/scheduler 环境的 skip 重跑；这是 Pi acceptance 门槛，不阻断其他 Harness 的可用性结论。
 - [ ] 维护窗口执行独立 hard cut 和 Pi 默认切换；这是全量切换门槛：`PENDING/QUEUED → CANCELLED`，`RUNNING recovery → stop container → FAILED`；V1 historical read 保留，V1 writer/execute/retry/resume/continue 拒绝。未满足时保持 `dual_canary`，不阻断其他 Harness 的独立验收。

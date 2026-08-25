@@ -114,7 +114,8 @@ steering/follow-up 已是明确后续需求，先做 run 再换 Server 会产生
 - 公共 Runner 与 Claude/Codex Adapter；
 - `codify.worker.event/v1` 的有序、幂等、唯一终态和 raw archive 语义；
 - `TaskHarnessAttempt`、event receipt、ingest cursor 和 Backend projector；
-- Task 创建时冻结 Harness、Model Endpoint、CLI、Worker、镜像和 Runtime Bundle；
+- Task 创建时冻结 Harness、Model Endpoint、CLI 来源（Worker Kit inventory 或显式 host_mount）、
+  Worker 镜像 identity 和 Runtime Bundle；
 - `issue_id + harness_key + session_namespace` 的会话兼容域；
 - Worker Kit、Runtime Bundle 注入、远程 Docker Host 和 verify-runtime；
 - Task 级 Harness 选择、Profile allowlist、Provider 兼容性和前端展示；
@@ -173,8 +174,10 @@ flowchart LR
 - V1 历史读取和 V2 硬切门禁。
 
 ### 5.2 Adapter/Bridge 职责
-
-- 验证官方制品版本和摘要；
+- 使用冻结 Worker Kit manifest 或显式 host_mount 声明的 CLI 路径启动 Harness；Kit inventory
+  与 Adapter baseline 的 version/SHA 差异只产生脱敏 warning（advisory），不阻断执行；
+- 校验 Kit inventory 中 `present` CLI 的实际 bytes/SHA 与 Kit manifest 一致；不一致时整 Kit
+  fail closed，不做静默回退；
 - 根据 Snapshot 生成 Harness 原生配置；
 - 启动并管理 CLI/RPC/Server；
 - 把原始事件映射为 Canonical Event；
@@ -354,6 +357,10 @@ V2 manifest 是内置运行时事实，不是第三方插件契约。Backend 仍
 
 每个 Adapter digest 只覆盖该 Adapter 声明的文件和共享依赖，不再由一个硬编码文件列表为全部
 Adapter 生成相同 digest。manifest 的所有文件仍需记录 path、size 和 SHA-256。
+
+`adapters.<key>.source.artifact_version/artifact_sha256` 是 Adapter 声明的 tested/baseline，
+不是运行时硬门禁：它与 Worker Kit harness inventory 观测到的 version/SHA 的任何差异都只产生
+脱敏 compatibility warning 并继续 verify/start，不要求重建 Project Runtime Image。
 
 ## 8. Harness 实现选择
 
@@ -555,11 +562,49 @@ V2 保留统一 Task 流程，同时按 capability 展示原生选项：
 
 ## 11. 制品与升级
 
-- 使用各项目官方发布包/二进制，固定精确版本与 SHA-256；
-- 制品在 Worker 镜像构建时安装，Task 运行时不联网下载或自动升级；
-- manifest 记录源码仓库、许可证、上游版本、制品摘要、Adapter 版本和文件摘要；
+### 11.1 Ownership
+
+- Project Runtime Image 只提供 Java、Node、Playwright 等项目工具链，不携带任何 Harness CLI。
+- Worker Kit 提供 launcher、Nix 工具链和四个内置 Harness（pi/opencode/claude/codex）的完整
+  inventory。Kit 构建时可指定携带的 CLI 集合（默认 `pi+opencode`，也允许显式子集或 0–4 个），
+  但 manifest 始终记录全部四个 key。
+- Runtime Bundle 提供 Task 冻结的 Adapter、Bridge 和编排 bytes。
+- execution identity 绑定 `image_identity + kit_identity + bundle_digest`；baseline CLI
+  version/SHA 不作为 image 或 Task 的 hard gate。
+
+### 11.2 Kit harness inventory
+
+每个 key 记录 `availability=present|absent`；`absent` 必须带稳定 `reason_code`：
+
+- 构建选择集未包含 → `not_selected`（预期，info 级）；
+- 选择集包含但 payload 缺失 → `missing_payload`（warning 级，Kit/Profile degraded）；
+- 只有实际写入并在安装/启动核验成功的 payload 才能标 `present`；
+- `absent` 不要求存在 payload、path、version 或 SHA；`absent` 但仍携带对应 payload/path，或
+  availability 与实际内容冲突 → 整 Kit fail closed；
+- `present` 的文件缺失、unsafe path、不可执行或 self-integrity SHA 不符 → 整 Kit fail closed。
+
+兼容性判定分三层且不可互相替代：Kit 制品完整性（fail closed）、Compatibility policy（任意
+tested/baseline version/SHA 差异只输出脱敏 warning 并继续）、Functionality gate（仅对
+`present` CLI 执行 `--version`、self-check 与 Adapter smoke；失败只使该 Harness unavailable，
+不阻断其他 Harness）。
+
+### 11.3 不可变 Kit 与升级
+
+- 使用各项目官方发布包/二进制，固定精确版本与 SHA-256；Task 运行时不联网下载或自动升级；
+- Kit 安装是 content-addressed、atomic rename/no-replace、root-owned 且不可覆盖的目录；
+  构建选择集、实际 payload、manifest 或 archive 的任何变化都产生新的 content-addressed
+  Kit identity，禁止覆盖既有 Kit；
+- Adapter 只使用冻结 Kit manifest 指定的路径；显式 `host_mount` 是逐 Harness 授权的
+  break-glass 单一来源；禁止同一 Harness 在 image、`PATH` 与 Kit 之间隐式回退或混装；
+- 构建选择集、inventory availability 与 Profile `enabled_harnesses` 三者分离：选择 absent
+  Harness 的 create/start/retry/resume/recovery 稳定拒绝 `harness_cli_unavailable`；UI/catalog
+  必须展示 unavailable/disabled 及脱敏 reason；
+- 有修复版漏洞时构建新的不可变 Kit 并升级该 CLI；暂时不带某 Harness 时从构建集合排除并写入
+  release note/审计证据；高危时管理员可直接删除整个旧 Worker Kit，删除后的 retry/resume 失败
+  走通用 `worker_kit_unavailable`，不新增任务迁移或专用错误码；
+- 升级必须创建新镜像/Kit/Runtime Bundle 组合，并重新运行 probe、Conformance 和 canary；
+  已核验、不可变且项目工具链未变的 Project Runtime Image 可复用为新组合的 `image_identity`；
 - 首版不要求 Codify 从源码可复现构建，也不维护 Fork；
-- 升级必须创建新镜像/Kit/Runtime Bundle，并重新运行 probe、Conformance 和 canary；
 - V2 Internal Preview 不保留跨 V3/V4 的旧运行制品；切换时排空，旧 Task 变为只读。
 
 ## 12. V1 硬切与 Canary

@@ -333,6 +333,21 @@ export interface WorkerRuntimeReadiness {
   failure_message?: string | null
   checked_at: string | null
   ready_until: string | null
+  harness_inventory?: Record<
+    string,
+    {
+      availability: 'present' | 'absent'
+      path?: string
+      version?: string
+      reason_code?: 'not_selected' | 'missing_payload' | null
+    }
+  > | null
+  kit_identity?: {
+    schema: string
+    kit_version: string
+    platform: string
+    manifest_sha256: string
+  } | null
 }
 
 export interface WorkerSharedConfiguration {

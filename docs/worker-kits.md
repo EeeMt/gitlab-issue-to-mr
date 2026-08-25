@@ -31,26 +31,40 @@ therefore run inside glibc and musl-based images without borrowing libraries fro
 image. The target host does not need Nix installed.
 
 The kit includes Bash, Git, curl, jq, Python, Node.js, SSH, ripgrep, CodeGraph, and the
-Mermaid validator. Harness CLIs are intentionally outside the kit. The V2 Java/Maven runtime
-image supplies Pi, OpenCode, Claude, and Codex at fixed image paths; a profile may still use an
-explicit read-only host mount for a one-Harness override.
+Mermaid validator, plus the Harness CLIs selected at build time. The Project Runtime Image
+supplies only project toolchains (Java, Maven, Node, Playwright, ...) and never Harness CLIs.
+The build selection set defaults to `pi+opencode`; explicit subsets or an empty set are allowed,
+but the kit manifest always records all four keys (`pi`, `opencode`, `claude`, `codex`) with
+`availability=present|absent` and a stable absent `reason_code` (`not_selected` for keys excluded
+from the build selection, `missing_payload` when a selected payload failed to be embedded).
+A profile may still use an explicit read-only host mount as a per-Harness break-glass override;
+implicit fallback to the image or `PATH` is prohibited.
 
-`deploy/Dockerfile.worker-java21-maven` builds the mounted-kit Java/Maven runtime image. It
-contains the project-side Java 21/Maven toolchain, workspace, UID 1000 write setup, and the four
-release-pinned Harness CLIs, but no Python runtime, Codify entrypoint, CodeGraph, Mermaid npm
-bundle, or ci-claude script.
+## Kit harness inventory and content-addressed identity
 
-## V2 Worker CLI artifact identity
+The kit manifest (`codify.worker.kit-manifest/v1`) carries a `harness_inventory` object that
+always lists all four keys. A `present` entry records the payload `path` (inside the kit),
+`version`, `sha256`, and `size`; an `absent` entry records only a stable `reason_code`.
+Install-time and start-time verification enforce the integrity rules: an absent key must not
+ship a payload or declared path, and a present key's file must exist, be executable, and match
+its recorded SHA-256 — any conflict fails the whole kit closed.
 
-The ignored `deploy/worker-cli/` directory is a local release input, not a source of truth. A
-release passes the four executable SHA-256 values to `make worker-runtime-image-build`; the
-Dockerfile verifies each executable/version/platform and writes the image-owned
-`/etc/codify-worker-cli-artifacts.json`. Export that document once with
-`make worker-cli-artifact-export`, preserve it immutably, and mount it read-only for both Backend
-and Scheduler as `CODIFY_WORKER_CLI_ARTIFACT_MANIFEST`. Runtime Bundle binding freezes its
-identities; the repository manifest placeholders are never a valid release lock. See
-[`DEPLOYMENT.md`](DEPLOYMENT.md#63-worker-镜像更新) for the reproducible commands and the required
-four-Harness Kit verification.
+The manifest is the kit identity: its canonical SHA-256 (`kit_identity.manifest_sha256`)
+content-addresses the build. Changing the selection set, any payload, the manifest, or the
+nix closure produces a different identity, and installers refuse to overwrite an existing
+identity directory. Profiles pin the installed kit by path/version and freeze the verified
+identity into each Task snapshot; Runtime Bundle binding records the same identity, so
+execution identity is always `image_identity + kit_identity + bundle_digest`. Adapter-declared
+baseline versions/SHAs are advisory: observed differences produce sanitized warnings only.
+
+The former image-owned `/etc/codify-worker-cli-artifacts.json` lock, its export target, and
+the Backend/Scheduler read-only mount are removed; the Project Runtime Image no longer ships
+or locks any Harness CLI.
+Version `0.4.0` moves Harness CLI ownership into the Worker Kit: the Project Runtime Image
+ships project toolchains only, `harness_runtimes` sources become `worker_kit|host_mount`
+(`image` is removed), and the release overlay no longer mounts any CLI artifact lock.
+Versions `0.3.x` notes below describe the retired image-owned CLI era and are kept as
+historical reference only.
 
 ## Build and export
 
@@ -134,14 +148,33 @@ The nixpkgs source is locked by revision and Nix content hash in
 `deploy/worker-kit/nixpkgs.json`; builds do not follow a mutable Nix channel. Update both values
 deliberately when upgrading nixpkgs, then publish a new worker-kit version. The manifest records
 the locked revision for release auditing.
-The installer rejects an existing version directory; build a new version instead of replacing
-an installed directory in place.
+The installer is content-addressed: the archive name embeds the manifest SHA-256 prefix, the
+installed directory is `<version>-<platform>-<digest-prefix>`, the receipt
+(`.install-receipt.json`) records archive/manifest digest/platform, and the installer refuses
+any existing identity directory. Build a new version (or selection set) instead of replacing an
+installed directory in place; the directory is root-owned and not writable by others.
 
-## Supplying Claude CLI
+## Supplying Harness CLIs
 
-Mounted worker kits default to `/usr/local/bin/claude`. The executable can come from the
-runtime image, or an administrator can add a read-only file mount from the Docker host. For
-example, add this profile mount:
+Harness CLIs marked `present` in the kit's `harness_inventory` are delivered by the Worker Kit
+itself; the Adapter uses the path frozen in the kit manifest, and no profile-level CLI wiring is
+needed. The runtime image never provides a fallback.
+
+For a one-Harness break-glass override, an administrator can add an explicit read-only host
+mount and declare it in `harness_runtimes` with `source: "host_mount"`. For example:
+
+```json
+{
+  "claude": {
+    "source": "host_mount",
+    "executable_path": "/usr/local/bin/claude",
+    "version": "2.1.200",
+    "binary_digest": "<sha256>"
+  }
+}
+```
+
+paired with the profile mount:
 
 ```json
 {
@@ -205,19 +238,23 @@ images are then included explicitly. This also applies to the reference
 
 ## Runtime verification
 
-Verify the kit and one project runtime image before creating a profile:
+Verify the kit inventory and one project runtime image before creating a profile. Without
+`--harness-*` overrides the verifier walks the kit's `harness_inventory`: every `present` key
+gets integrity checks plus a functionality gate (`--version`, self-check, Adapter smoke), and
+every `absent` key is recorded with its reason code:
 
 ```bash
 ./scripts/verify-worker-runtime.sh \
-  --kit /opt/codify/worker-kits/0.3.10-linux-amd64 \
+  --kit /opt/codify/worker-kits/0.4.0-linux-amd64 \
   --image codify-worker/java21-maven:2026.07 \
-  --harness-key claude \
-  --harness-host-path /usr/bin/claude \
-  --harness-container-path /usr/local/bin/claude \
   --smoke 'java -version && mvn -version'
+```
 
+A per-Harness host_mount break-glass override keeps the explicit form:
+
+```bash
 ./scripts/verify-worker-runtime.sh \
-  --kit /opt/codify/worker-kits/0.3.10-linux-amd64 \
+  --kit /opt/codify/worker-kits/0.4.0-linux-amd64 \
   --image codify-worker/java21-maven:2026.07 \
   --harness-key codex \
   --harness-host-path /opt/codify/codex/bin/codex \
@@ -225,11 +262,12 @@ Verify the kit and one project runtime image before creating a profile:
   --smoke 'test -x /opt/codify-codex/bin/codex && /opt/codify-codex/bin/codex --version'
 ```
 
-The verifier checks the manifest, kit mounts, the effective harness executable (Claude or Codex),
-Codify tools, Mermaid, CodeGraph, numeric UID/GID downgrade, workspace writes, and the optional
-project command. The legacy `--claude-host-path` form is still accepted and is equivalent to
-`--harness-key claude --harness-host-path <path>`. On a production profile, use the same container
-paths declared in `harness_runtimes`.
+The verifier checks the manifest and kit identity, kit mounts, harness inventory integrity,
+the effective harness executable (from the kit or an authorized host mount), Codify tools,
+Mermaid, CodeGraph, numeric UID/GID downgrade, workspace writes, and the optional project
+command. A single present Harness failing its functionality gate marks only that Harness
+unavailable; it does not fail the whole verification. On a production profile, use the same
+sources declared in `harness_runtimes` (`worker_kit` or explicitly authorized `host_mount`).
 
 Note: the Kit does not ship the executable Adapters (they live only in each Task's immutable Runtime
 Bundle), so a Kit-only `--verify` checks the Kit bootstrap, the default CLI, and the requested
@@ -262,34 +300,35 @@ No UI is required. Create or update a Worker Profile through the existing admin 
   "name": "Java 21 and Maven",
   "image": "<registry>/codify-worker/java21-maven@sha256:<repo-digest>",
   "runtime_mode": "mounted_kit",
-  "worker_kit_version": "0.3.10",
-  "worker_kit_path": "/opt/codify/worker-kits/0.3.10-linux-amd64",
-  "enabled_harnesses": ["claude", "codex"],
-  "default_harness_key": "claude",
+  "worker_kit_version": "0.4.0",
+  "worker_kit_path": "/opt/codify/worker-kits/0.4.0-linux-amd64",
+  "enabled_harnesses": ["pi", "opencode", "claude"],
+  "default_harness_key": "pi",
   "harness_runtimes": {
-    "codex": {
+    "claude": {
       "source": "host_mount",
-      "executable_path": "/opt/codify-codex/bin/codex",
-      "version": "0.146.0",
+      "executable_path": "/usr/local/bin/claude",
+      "version": "2.1.200",
       "binary_digest": "<sha256>"
     }
   },
   "codegraph_enabled": true,
   "volume_mounts": [
     {
-      "host_path": "/usr/bin/claude",
+      "host_path": "/opt/codify/overrides/claude-2.1.200",
       "container_path": "/usr/local/bin/claude",
-      "mode": "ro"
-    },
-    {
-      "host_path": "/opt/codify/codex",
-      "container_path": "/opt/codify-codex",
       "mode": "ro"
     }
   ],
   "environment_variables": []
 }
 ```
+
+Keys absent from `harness_runtimes` use `source: "worker_kit"` implicitly: the Adapter resolves
+the executable from the kit manifest's `harness_inventory`, and selecting a key whose
+availability is not `present` is rejected with a stable `harness_cli_unavailable` error. The
+`image` source no longer exists; an explicit `host_mount` entry is the only break-glass path and
+must be authorized per Harness.
 
 Profiles remain editable configuration. Each task stores `runtime_mode`, image, kit version,
 kit path, Docker target, mounts, environment, harness key, Adapter version/digest, CLI

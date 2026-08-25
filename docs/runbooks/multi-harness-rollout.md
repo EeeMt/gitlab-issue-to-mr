@@ -26,9 +26,9 @@ overlay 提供 V2 release lock 并允许 V2 execution。`v2_only` 才会拒绝 V
 |---|---|---|
 | Backend/Frontend image | 发布批次 tag、repo digest、image ID、Linux platform | 重新记录并与 Profile/Task Snapshot 比对 |
 | Database migration head | 发布批次的唯一 migration owner 与已审 revision | 以实际发布批次为准 |
-| Worker Kit | 版本、platform、archive SHA-256、manifest SHA-256 | 重新记录并逐 Host 校验 |
-| Runtime image identity | daemon、repo@digest、image ID、Linux platform、CLI lock SHA-256 | 四项必须与 Profile、Bundle、Host 实际值一致 |
-| Harness CLI lock | `pi`、`opencode`、`claude`、`codex` 四个 CLI 的 exact version、source、executable SHA-256 | 逐 Harness 重新校验 |
+| Worker Kit | kit version、platform、kit identity（manifest SHA-256）、archive SHA-256、构建选择集与四 key availability/reason_code | 重新记录并逐 Host 校验 kit identity |
+| Runtime image identity | daemon、repo@digest、image ID、Linux platform（不含任何 CLI lock） | 三项必须与 Profile、Bundle、Host 实际值一致 |
+| Kit harness inventory | `pi`、`opencode`、`claude`、`codex` 逐 key：availability 与 absent reason_code；present CLI 的 exact path/version/SHA-256 | 仅对 present key 逐 Harness 重新校验；absent 记录 reason，不伪造证据 |
 | Runtime Bundle/evidence | 每个 Harness 独立 Task snapshot、bundle digest、adapter version+digest、identity/evidence/platform | 以 DB-bound Bundle 与 verification evidence 为准 |
 | 协议 | Runtime contract `codify.worker.harness/v2`、Canonical Event `codify.worker.event/v1`、orchestration `1.0.0` | 不变量 |
 | Profile payload | `HARNESS_EXECUTION_MODE=dual_canary`；`enabled_harnesses=["pi","opencode","claude","codex"]`；V2 identity/evidence 完整 | 以生产 Profile snapshot 为准 |
@@ -59,13 +59,17 @@ Kit 安装根、runtime images、私有 CA、网络出口类别、旧稳定 Prof
 ### 4.1 制品校验
 
 ```bash
-make worker-kit-export WORKER_KIT_VERSION=<release-version> WORKER_KIT_PLATFORM=linux/amd64
-make worker-kit-export WORKER_KIT_VERSION=<release-version> WORKER_KIT_PLATFORM=linux/arm64
+make worker-kit-export WORKER_KIT_VERSION=<release-version> WORKER_KIT_PLATFORM=linux/amd64 \
+  WORKER_KIT_HARNESSES='<pi opencode>'      # 默认集合；显式子集或空集合亦可
+make worker-kit-export WORKER_KIT_VERSION=<release-version> WORKER_KIT_PLATFORM=linux/arm64 \
+  WORKER_KIT_HARNESSES='<pi opencode>'
 make offline-bundle-export WORKER_KIT_VERSION=<release-version>
 ```
 
-导出后必须校验 archive SHA-256、manifest SHA-256、Runtime Bundle Adapter 文件/digest、golden fixture
-smoke，并在隔离临时目录做一次全新安装演练，确认安装器拒绝覆盖已有版本目录。
+导出后必须校验 archive SHA-256、kit identity（manifest SHA-256）、构建选择集与 manifest 四 key
+availability/reason 的一致性（未选择 → `not_selected`；选中但缺 payload → `missing_payload` 且
+Kit degraded）、Runtime Bundle Adapter 文件/digest、golden fixture smoke，并在隔离临时目录做一次
+全新安装演练，确认安装器拒绝覆盖既有 kit identity 目录。
 
 ### 4.2 安装
 
@@ -90,19 +94,24 @@ make worker-kit-verify \
   VERIFY_ALL_HARNESSES=1 \
   SMOKE='java -version && mvn -version'
 ```
+`VERIFY_ALL_HARNESSES=1` is the release gate: it iterates the Runtime Bundle adapters, checks the
+Kit contract/event compatibility and image platform, verifies Kit inventory integrity for every
+key (absent key 不得残留 payload/path；present key 校验 path/权限/可执行性/self-integrity SHA)，
+runs the functionality gate（`--version`、self-check、Adapter smoke）仅对 present key，并把
+observed vs Adapter baseline 的 version/SHA 差异记录为脱敏 advisory warning——差异不阻断。
+It does not treat the Kit manifest as a Runtime Bundle manifest. A normal Profile/API
+verification remains one `default_harness_key` at a time and may omit `RUNTIME_MANIFEST`; that
+preserves the historical installation-preflight boundary. The path may be a release-stamped
+`codify.worker.runtime-manifest/v2` document or a DB-persisted `codify.worker.runtime-bundle/v2`
+document that retains each nested Adapter identity. Do not pass a Kit manifest, a container-only
+Launcher flat projection, or the repository template with placeholder SHA values.
+单个 present Harness functionality 失败只把该 Harness 标记 unavailable 并记录脱敏原因；其余
+Harness 继续验证。选择 absent Harness 的 Profile/Task 在 API 侧得到稳定 `harness_cli_unavailable`，
+不伪造验收。
 
-`VERIFY_ALL_HARNESSES=1` is the release gate: it iterates the Runtime Bundle adapters, cross-checks
-the Kit contract/event compatibility, image platform, exact CLI version/SHA and mandatory
-first-class self-checks. It does not treat the Kit manifest as a Runtime Bundle manifest. A normal
-Profile/API verification remains one `default_harness_key` at a time and may omit
-`RUNTIME_MANIFEST`; that preserves the historical installation-preflight boundary.
-The path may be a release-stamped `codify.worker.runtime-manifest/v2` document or a DB-persisted
-`codify.worker.runtime-bundle/v2` document that retains each nested Adapter identity. Do not pass a
-Kit manifest, a container-only Launcher flat projection, or the repository template with placeholder
-SHA values.
-
-For an explicit one-Harness host-mount override, use the same command with `HARNESS_KEY`,
-`HARNESS_HOST_PATH`, and `HARNESS_CONTAINER_PATH`:
+For an explicit one-Harness host-mount break-glass override, use the same command with
+`HARNESS_KEY`, `HARNESS_HOST_PATH`, and `HARNESS_CONTAINER_PATH`; host_mount 必须逐 Harness 显式
+授权并记录来源：
 
 ```bash
 make worker-kit-verify \
@@ -113,35 +122,32 @@ make worker-kit-verify \
   HARNESS_CONTAINER_PATH=/opt/codify-codex/bin/codex
 ```
 
-检查 Kit compatibility manifest、Runtime Bundle Adapter version/digest、CLI source/path/version/binary
-digest、CA、PATH、工作区写权限、UID/GID、sandbox、Skills、Mermaid 和项目 toolchain smoke。
+检查 Kit harness inventory 与 integrity、kit identity、Runtime Bundle Adapter version/digest、
+CLI source/path/version/binary digest（worker_kit 或已授权 host_mount）、CA、PATH、工作区写权限、
+UID/GID、sandbox、Skills、Mermaid 和项目 toolchain smoke。禁止任何从 image/`PATH` 的隐式 CLI 回退。
 对 remote Docker 特别验证 Host bind path、agent-state、Kit/Nix store 和 runtime bundle 均能在
-daemon 侧访问。任一 Host/Harness 失败即标记不可路由，不能靠其他 Host 成功放行。
+daemon 侧访问。任一 Host/Harness 失败即标记不可路由，不能靠其他 Host 成功放行；absent Harness
+只记录 `harness_cli_unavailable` 及 reason，不算 Host 失败。
 
-在 Build 后先以 `make worker-cli-artifact-export` 导出 image `/etc/codify-worker-cli-artifacts.json`，
-审查其 SHA 后通过 V2 release overlay 注入 Backend/Scheduler：
+V2 release overlay 不再注入任何 image CLI lock（`docker-compose.v2-release.yml` 已随旧链删除）。
+发布只需冻结的 Kit archive（content-addressed）、Runtime Bundle 与 image identity 组合：
 
 ```bash
-export CODIFY_WORKER_CLI_ARTIFACT_MANIFEST_HOST_PATH=/srv/codify/releases/<release>/worker-cli-linux-amd64.json
-export CODIFY_V2_RELEASE_WORKER_IMAGE=codify-worker/java21-maven:<release>
+export WORKER_KIT_ARCHIVE=/srv/codify/releases/<release>/codify-worker-kit-<version>-linux-amd64-<sha12>.tar.gz
+export V2_RELEASE_WORKER_IMAGE=codify-worker/java21-maven:<release>
 deploy/scripts/preflight-v2-release.sh
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.v2-release.yml config --quiet
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.v2-release.yml up -d backend scheduler
 ```
 
-overlay 会为两个服务设置同一固定容器路径
-`CODIFY_WORKER_CLI_ARTIFACT_MANIFEST=/run/codify/worker-cli-artifacts.json` 并只读挂载 lock；基础 compose
-不会在 dual-canary 时创建空挂载。`*_HOST_PATH` 必须是选中 Docker **daemon Host** 上的绝对路径；remote Docker
-时先把审查后的 lock 复制到 daemon Host，再将相同路径传给控制 Host 上的 Compose。
-`CODIFY_V2_RELEASE_WORKER_IMAGE` 是同一 daemon 上已审查的 Worker image。`preflight-v2-release.sh`
-会通过选中 Compose context 启动一次性 Backend 与 Scheduler 校验容器，验证实际 readonly bind 和 lock/image platform；仅运行 `compose config` 不能证明
-daemon 可见。Runtime Bundle bind 会冻结该 identity 与平台；逐 Harness 验收仍必须同时包含离线 verify-runtime 与一个真实
-smoke Task。
+`preflight-v2-release.sh` 通过选中 Docker daemon 校验 Kit archive 的 manifest（四 key
+`harness_inventory`、availability/reason）、content digest 命名与 image identity/platform；
+仅运行 `docker image inspect` 不能证明 archive 在 daemon 侧可读。Runtime Bundle bind 会冻结
+`image_identity + kit_identity + bundle_digest`；逐 Harness 验收仍必须同时包含离线 verify-runtime
+与一个真实 smoke Task。
 
 ### 4.4 Codify API verify-runtime
 
-Profile 保存后，通过 Codify 路径再验证一次，确认 API 使用 Profile 固定 daemon 并持久化
-`image_digest` / `verified_at`：
+Profile 保存后，通过 Codify 路径再验证一次，确认 API 使用 Profile 固定 daemon、核对冻结的
+kit identity 并持久化 `image_digest` / `verified_at`：
 
 ```http
 POST /api/worker-profiles/<profile-id>/verify-runtime

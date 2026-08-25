@@ -524,6 +524,29 @@
                 >
                   {{ workerFormValue.runtime_readiness.failure_message || t('config.runtimeFailureDetailsUnavailable') }}
                 </span>
+                <div
+                  v-if="workerFormValue.runtime_readiness.harness_inventory"
+                  class="worker-runtime-status__inventory"
+                >
+                  <span
+                    v-for="(entry, harnessKey) in workerFormValue.runtime_readiness.harness_inventory"
+                    :key="harnessKey"
+                    class="worker-runtime-status__harness"
+                    :class="{
+                      'worker-runtime-status__harness--unavailable': entry.availability !== 'present',
+                    }"
+                  >
+                    {{ harnessKey }}:
+                    {{
+                      entry.availability === 'present'
+                        ? t('config.harnessAvailable')
+                        : t('config.harnessUnavailable')
+                    }}
+                    <template v-if="entry.availability === 'absent' && entry.reason_code">
+                      ({{ harnessReasonLabel(entry.reason_code) }})
+                    </template>
+                  </span>
+                </div>
               </div>
               <n-button
                 v-if="effectiveRuntimeMode === 'mounted_kit'"
@@ -1966,6 +1989,14 @@ function readinessLabel(status?: WorkerRuntimeReadiness['status']): string {
   return t('config.runtimeUnknown')
 }
 
+function harnessReasonLabel(
+  reason: 'not_selected' | 'missing_payload' | null | undefined,
+): string {
+  if (reason === 'not_selected') return t('config.harnessReasonNotSelected')
+  if (reason === 'missing_payload') return t('config.harnessReasonMissingPayload')
+  return t('config.harnessReasonUnknown')
+}
+
 function readinessTagType(
   status?: WorkerRuntimeReadiness['status']
 ): 'success' | 'warning' | 'error' {
@@ -2675,6 +2706,25 @@ watch(
   min-width: 0;
   color: rgba(15, 23, 42, 0.56);
   font-size: 12px;
+}
+.worker-runtime-status__inventory {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  width: 100%;
+}
+.worker-runtime-status__harness {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+}
+.worker-runtime-status__harness--unavailable {
+  color: rgba(185, 28, 28, 0.8);
+}
+.worker-runtime-status__harness--unavailable::before {
+  content: '●';
+  font-size: 8px;
+  margin-right: 2px;
 }
 
 .worker-runtime-status__details code,

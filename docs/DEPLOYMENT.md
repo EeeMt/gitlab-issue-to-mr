@@ -207,84 +207,87 @@ cd frontend && npm run build
 cd ../deploy && docker-compose build nginx && docker-compose up -d nginx
 ```
 
-### 6.3 Worker 镜像更新
+### 6.3 Worker 镜像与 Worker Kit 更新
 
 当 Worker 执行环境变更时，例如：
 
-- `deploy/Dockerfile.worker-java21-maven`
+- `deploy/Dockerfile.worker-java21-maven`（Project Runtime Image 工具链）
 - Worker 内依赖工具
-- Claude 执行环境
+- Harness CLI 版本或选择集（Worker Kit）
 
-V2 Worker image 必须把四个 CLI 的**精确版本和 executable SHA-256**写入镜像内
-`/etc/codify-worker-cli-artifacts.json`。`deploy/worker-cli/` 是本机构建输入，已被 Git
-ignore；只放二进制及其运行所需资源，绝不放 Provider token、`.env` 或凭据。
+**Kit-owned 模型**：Project Runtime Image 只提供 Java 21 / Maven / Git 等项目工具链，不再携带或锁定任何 Harness CLI。
+四个 Harness CLI（pi/opencode/claude/codex）由 **Worker Kit** 提供：Kit 是 content-addressed 归档，其身份是
+归档内 `manifest.json` 字节的 SHA-256，归档名嵌入该前缀（前 12 位）。
+Kit manifest 的 `harness_inventory` 记录四个 key（`pi/opencode/claude/codex`）的 `availability=present|absent`；
+absent 时带 `reason_code`（`not_selected` 或 `missing_payload`）。
 
-先在受控构建机对已审核 payload 计算 digest（这些值不是秘密）：
-
-```bash
-sha256sum deploy/worker-cli/pi/bin/pi deploy/worker-cli/opencode/opencode \
-  deploy/worker-cli/claude deploy/worker-cli/codex/bin/codex
-```
-
-再显式传入四个 digest 构建。任何一个缺失、可执行文件不匹配、版本不匹配或目标平台不一致都会让构建失败：
+#### 构建 Project Runtime Image（仅工具链）
 
 ```bash
 make worker-runtime-image-build \
   WORKER_KIT_PLATFORM=linux/amd64 \
-  RUNTIME_IMAGE=codify-worker/java21-maven:<release> \
-  PI_CLI_SHA256=<64-hex> \
-  OPENCODE_CLI_SHA256=<64-hex> \
-  CLAUDE_CLI_SHA256=<64-hex> \
-  CODEX_CLI_SHA256=<64-hex>
+  RUNTIME_IMAGE=codify-worker/java21-maven:<release>
 ```
 
-导出镜像实际写入的不可变 CLI identity 文档到受控发布目录（拒绝覆盖既有 lock）：
+#### 导出 Worker Kit（含 CLI 选择集）
+
+Kit 构建入口是 `deploy/worker-kit/export.sh`（`make worker-kit-export`），通过环境变量指定选择集与版本：
 
 ```bash
-make worker-cli-artifact-export \
-  RUNTIME_IMAGE=codify-worker/java21-maven:<release> \
-  CLI_ARTIFACT_MANIFEST=/srv/codify/releases/<release>/worker-cli-linux-amd64.json
+make worker-kit-export \
+  WORKER_KIT_VERSION=<kit-version> \
+  WORKER_KIT_PLATFORM=linux/amd64 \
+  WORKER_KIT_CLI_SELECTION=pi,opencode \
+  WORKER_KIT_PI_CLI_VERSION=0.84.2 \
+  WORKER_KIT_OPENCODE_CLI_VERSION=1.18.19
 ```
 
-V2 release 使用单独 Compose overlay 将这个**只读、非 secret**文件以相同固定容器路径提供给
-Backend 和 Scheduler；基础 `docker-compose.yml` 保留 dual-canary 的 legacy V1 execution path，
-不会为它创建空的 V2 release-lock bind mount：
+- `WORKER_KIT_CLI_SELECTION`：逗号/加号分隔的 `pi,opencode,claude,codex` 子集，默认 `pi,opencode`；
+  未选中的 key 在 manifest 中记录为 `availability=absent, reason_code=not_selected`。
+- `WORKER_KIT_<KEY>_CLI_VERSION`（可选）：每个 Harness 的精确版本构建参数（`<KEY>` 为 `PI/OPENCODE/CLAUDE/CODEX`）。
+- 产物为 content-addressed 归档 `codify-worker-kit-<version>-linux-<arch>-<12位manifest sha256前缀>.tar.gz`
+  及其 `.sha256` sidecar，写入 `WORKER_KIT_OUTPUT_DIR`（默认 `deploy/offline-bundle/kits/`）。
+
+#### 安装 Worker Kit
+
+在目标 Docker Host 上安装（`deploy/offline-bundle/scripts/install-worker-kit.sh`），安装到 `/opt/codify/worker-kits/`：
 
 ```bash
-export CODIFY_WORKER_CLI_ARTIFACT_MANIFEST_HOST_PATH=/srv/codify/releases/<release>/worker-cli-linux-amd64.json
-export CODIFY_V2_RELEASE_WORKER_IMAGE=codify-worker/java21-maven:<release>
+./scripts/install-worker-kit.sh kits/codify-worker-kit-<version>-linux-<arch>-<manifest-prefix>.tar.gz
+```
+
+安装先校验归档 `.sha256` 与归档内路径，再放置 Kit，并拒绝覆盖已存在的 content-addressed 身份目录。
+
+#### V2 release 预检
+
+`deploy/scripts/preflight-v2-release.sh` 校验 Kit 归档与 Worker image 身份（不读取任何镜像内 CLI lock）：
+
+```bash
+export WORKER_KIT_ARCHIVE=/srv/codify/releases/<release>/codify-worker-kit-<version>-linux-<arch>-<manifest-prefix>.tar.gz
+export V2_RELEASE_WORKER_IMAGE=codify-worker/java21-maven:<release>
 deploy/scripts/preflight-v2-release.sh
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.v2-release.yml config --quiet
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.v2-release.yml up -d backend scheduler
 ```
 
-overlay sets `CODIFY_WORKER_CLI_ARTIFACT_MANIFEST=/run/codify/worker-cli-artifacts.json` for
-both services and mounts the host file there read-only. Do not put this manifest in a secret store:
-it contains release identity/version/SHA metadata, not credentials.
-`CODIFY_WORKER_CLI_ARTIFACT_MANIFEST_HOST_PATH` must be an absolute path on the selected Docker
-**daemon Host**. With remote Docker, first copy the reviewed lock to that Host and then give the
-same daemon-visible path to the Compose control host; a file only on the control host is not a bind
-source. `CODIFY_V2_RELEASE_WORKER_IMAGE` must name the reviewed Worker image on that same daemon.
-`preflight-v2-release.sh` runs one-shot Backend and Scheduler containers through the selected
-Compose context and validates the actual read-only daemon bind and the lock/image platform match.
-`docker compose ... config` checks only interpolation and cannot prove the daemon can see the path.
-
-新 V2 Runtime Bundle bind 会从该 lock 写入每个 Adapter 的 artifact SHA 与目标平台；源 Runtime manifest 中的
-占位符不能替代它。一个 Bundle 对应一个发布的 image/platform identity，因此多架构部署应分别构建、
-导出、审查并为相应调度域使用正确 lock，不能混用 amd64 与 arm64 文档。
+预检验证：归档与其 `.sha256` 校验通过；`manifest.json` 的 `manifest_kind`（`codify.worker.kit-manifest/v1`）、
+`kit_version`、`platform`（`linux/<arch>`）、`harness_inventory`（恰好四个 key；present 含以 `/opt/codify-kit/`
+开头的 `path`/`version`/`sha256`/`size`，absent 含 `not_selected|missing_payload`）；归档名与 manifest SHA-256
+前缀一致；`V2_RELEASE_WORKER_IMAGE` 在所选 Docker daemon 上存在，且其 image ID/Os/Architecture 与 manifest
+platform 一致。通过时输出一行 `V2 release preflight OK: <kit version> <platform> <manifest sha256>`，失败退出码 2
+并说明原因。`WORKER_KIT_ARCHIVE` 由本脚本在控制机读取；`V2_RELEASE_WORKER_IMAGE` 必须在所选 Docker daemon
+上。远程 Docker 时，归档及其 sidecar 也必须存在于 daemon Host，供安装脚本使用。
 
 完成 Kit 安装后，使用显式 Runtime manifest 验证四个 Harness：
 
 ```bash
 make worker-kit-verify \
-  KIT_PATH=/opt/codify/worker-kits/<kit-release>-linux-amd64 \
+  KIT_PATH=/opt/codify/worker-kits/<version>-linux-<arch>-<manifest-prefix> \
   RUNTIME_IMAGE=codify-worker/java21-maven:<release> \
   RUNTIME_MANIFEST=/srv/codify/releases/<release>/frozen-runtime-manifest.v2.json \
   VERIFY_ALL_HARNESSES=1 \
   SMOKE='java -version && mvn -version'
 ```
 
-`RUNTIME_MANIFEST` 必须是 release lock 已写入 artifact SHA 的冻结
+`RUNTIME_MANIFEST` 必须是已写入 Adapter artifact SHA 的冻结
 `codify.worker.runtime-manifest/v2` 文档，或数据库持久化且保留嵌套 Adapter identity 的
 `codify.worker.runtime-bundle/v2` 文档；不能传入 Kit manifest、placeholder source template 或容器 Launcher 的
 flat projection。此命令只是 L1/L2 source/image/Kit verification；随后仍需按 Profile 调用 API verify-runtime，并在真实
