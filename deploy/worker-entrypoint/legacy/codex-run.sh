@@ -11,7 +11,7 @@ set -u
 # dropped-privilege codex process merely inherits the fd and never needs
 # write permission on the FIFO itself.
 
-CODIFY_CODEX_BIN="${CODIFY_CODEX_BIN:-/usr/local/bin/codex}"
+CODIFY_CODEX_BIN="${CODIFY_CODEX_BIN:?CODIFY_CODEX_BIN is required (resolved by the codex adapter from the Kit inventory or an authorized host_mount)}"
 CODIFY_CODEX_RAW_EVENT_JSONL="${CODIFY_CODEX_RAW_EVENT_JSONL:-${CODIFY_RUNTIME_DIR}/harness-events/codex.jsonl}"
 CODIFY_CODEX_EVENT_TRANSLATOR="${CODIFY_CODEX_EVENT_TRANSLATOR:-${CODIFY_ORCHESTRATION_DIR}/worker-entrypoint/harness/adapters/codex_events.py}"
 PROMPT_FILE="${PROMPT_FILE:-${CODIFY_HARNESS_PROMPT_FILE:-}}"

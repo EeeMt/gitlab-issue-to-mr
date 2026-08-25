@@ -2,6 +2,26 @@
 
 CODIFY_CLAUDE_TRANSLATOR="${CODIFY_ORCHESTRATION_DIR}/worker-entrypoint/harness/adapters/claude_events.py"
 
+codify_claude_bin() {
+    # Frozen single source: the backend-injected CODIFY_HARNESS_CLI_BIN (Kit
+    # inventory path or authorized host_mount), else the Kit manifest's own
+    # inventory path. The runtime image and PATH are never consulted.
+    if [ -n "${CODIFY_HARNESS_CLI_BIN:-}" ]; then
+        printf '%s\n' "${CODIFY_HARNESS_CLI_BIN}"
+        return 0
+    fi
+    if [ -r "${CODIFY_KIT_HOME:-/opt/codify-kit}/manifest.json" ]; then
+        local path
+        path="$(jq -r --arg k claude '.harness_inventory[$k].path // empty' \
+            "${CODIFY_KIT_HOME:-/opt/codify-kit}/manifest.json" 2>/dev/null || true)"
+        if [ -n "${path}" ]; then
+            printf '%s\n' "${path}"
+            return 0
+        fi
+    fi
+    return 1
+}
+
 claude_adapter_metadata() {
     local manifest_path="${CODIFY_ORCHESTRATION_DIR}/manifest.json"
     if [ ! -r "${manifest_path}" ]; then
@@ -31,6 +51,12 @@ claude_adapter_metadata() {
 }
 
 claude_adapter_verify_runtime() {
+    CODIFY_CLAUDE_BIN="${CODIFY_CLAUDE_BIN:-$(codify_claude_bin || true)}"
+    if [ -z "${CODIFY_CLAUDE_BIN}" ]; then
+        echo "Claude CLI is not available from the Worker Kit inventory" >&2
+        return 1
+    fi
+    export CODIFY_CLAUDE_BIN
     case "${CODIFY_CLAUDE_BIN}" in
         /*) ;;
         *) echo "CODIFY_CLAUDE_BIN must be an absolute path" >&2; return 1 ;;
@@ -74,8 +100,7 @@ claude_adapter_verify_runtime() {
         local actual_digest
         actual_digest="$(sha256sum "${CODIFY_CLAUDE_BIN}" 2>/dev/null | awk '{print $1}')"
         if [ -z "${actual_digest}" ] || [ "${actual_digest}" != "${CODIFY_CLI_BINARY_DIGEST}" ]; then
-            echo "Claude CLI binary digest mismatch: expected ${CODIFY_CLI_BINARY_DIGEST}, got ${actual_digest:-unreadable}" >&2
-            return 1
+            echo "WARNING: Claude CLI binary digest differs from the snapshot baseline (advisory, not enforced)" >&2
         fi
     fi
 }

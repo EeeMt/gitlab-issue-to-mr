@@ -177,8 +177,12 @@ def validate_enabled_harnesses(
 def validate_harness_runtimes(runtimes: dict[str, Any]) -> dict[str, Any]:
     """Validate the per-harness CLI runtime declarations on a Profile.
 
-    Only the built-in schema is accepted: ``source`` in image|host_mount plus
-    executable path/version/binary digest. Arbitrary commands are rejected.
+    Only the built-in schema is accepted: ``source`` in worker_kit|host_mount.
+    ``worker_kit`` resolves the executable from the frozen Kit manifest's
+    harness inventory, so it declares nothing else. ``host_mount`` is the
+    explicit per-Harness break-glass: it must declare its executable path and
+    may pin version/digest evidence. Arbitrary commands are rejected and an
+    image/PATH fallback does not exist.
     """
     if not isinstance(runtimes, dict):
         raise HarnessRegistryError("harness_runtimes must be an object")
@@ -188,23 +192,37 @@ def validate_harness_runtimes(runtimes: dict[str, Any]) -> dict[str, Any]:
             raise HarnessRegistryError(
                 f"harness_runtimes[{key!r}] must be an object"
             )
-        allowed = {
-            "source",
-            "executable_path",
-            "version",
-            "binary_digest",
-            "contract_version",
-        }
-        unknown = set(runtime) - allowed
-        if unknown:
-            raise HarnessRegistryError(
-                f"harness_runtimes[{key!r}] has unknown keys: {sorted(unknown)}"
-            )
         source = runtime.get("source")
-        if source not in {"image", "host_mount"}:
+        if source not in {"worker_kit", "host_mount"}:
             raise HarnessRegistryError(
-                f"harness_runtimes[{key!r}].source must be image|host_mount"
+                f"harness_runtimes[{key!r}].source must be worker_kit|host_mount"
             )
+        if source == "worker_kit":
+            unknown = set(runtime) - {"source", "contract_version"}
+            if unknown:
+                raise HarnessRegistryError(
+                    f"harness_runtimes[{key!r}] (worker_kit) has forbidden keys: "
+                    f"{sorted(unknown)}; the executable path comes from the "
+                    "frozen Worker Kit manifest"
+                )
+        else:
+            unknown = set(runtime) - {
+                "source",
+                "executable_path",
+                "version",
+                "binary_digest",
+                "contract_version",
+            }
+            if unknown:
+                raise HarnessRegistryError(
+                    f"harness_runtimes[{key!r}] has unknown keys: {sorted(unknown)}"
+                )
+            executable_path = runtime.get("executable_path")
+            if not isinstance(executable_path, str) or not executable_path.startswith("/"):
+                raise HarnessRegistryError(
+                    f"harness_runtimes[{key!r}].executable_path must be an "
+                    "absolute container path"
+                )
         contract_version = runtime.get("contract_version")
         if contract_version is not None and contract_version not in {
             HARNESS_CONTRACT_VERSION,

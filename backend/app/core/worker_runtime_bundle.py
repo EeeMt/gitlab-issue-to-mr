@@ -33,7 +33,6 @@ from app.models import Task, WorkerRuntimeBundle
 
 ORCHESTRATION_VERSION = "1.0.0"
 RUNTIME_SOURCE_ENV = "CODIFY_RUNTIME_SOURCE_DIR"
-CLI_ARTIFACT_MANIFEST_ENV = "CODIFY_WORKER_CLI_ARTIFACT_MANIFEST"
 RUNTIME_ARCHIVE_ROOT = PurePosixPath("codify-runtime/orchestration")
 
 _CONTROLLED_FILES = (
@@ -55,7 +54,7 @@ def _is_linux_platform(value: object) -> bool:
 def _validated_v2_worker_image_identity(identity: object) -> dict[str, str]:
     if not isinstance(identity, Mapping) or identity.get("schema") != "codify.worker-image-identity/v1":
         raise RuntimeError("explicit V2 Task has no verified Worker image identity")
-    required = ("daemon_key", "image_reference", "image_id", "runtime_platform", "cli_artifact_lock_sha256")
+    required = ("daemon_key", "image_reference", "image_id", "runtime_platform")
     normalized = {key: identity.get(key) for key in required}
     if not all(isinstance(value, str) and value for value in normalized.values()):
         raise RuntimeError("explicit V2 Task has an incomplete Worker image identity")
@@ -67,10 +66,21 @@ def _validated_v2_worker_image_identity(identity: object) -> dict[str, str]:
         raise RuntimeError("explicit V2 Task has an invalid Worker image identity")
     if not _is_linux_platform(normalized["runtime_platform"]):
         raise RuntimeError("explicit V2 Task has an invalid Worker image identity")
-    lock_digest = normalized["cli_artifact_lock_sha256"]
-    if _SHA256_RE.fullmatch(lock_digest) is None:
-        raise RuntimeError("explicit V2 Task has an invalid Worker image CLI lock digest")
     return {"schema": "codify.worker-image-identity/v1", **normalized}
+
+
+def _validated_worker_kit_identity(identity: object) -> dict[str, str]:
+    if not isinstance(identity, Mapping) or identity.get("schema") != "codify.worker.kit-identity/v1":
+        raise RuntimeError("explicit V2 Task has no verified Worker Kit identity")
+    required = ("kit_version", "platform", "manifest_sha256")
+    normalized = {key: identity.get(key) for key in required}
+    if not all(isinstance(value, str) and value for value in normalized.values()):
+        raise RuntimeError("explicit V2 Task has an incomplete Worker Kit identity")
+    if _SHA256_RE.fullmatch(normalized["manifest_sha256"]) is None:
+        raise RuntimeError("explicit V2 Task has an invalid Worker Kit manifest SHA-256")
+    if not _is_linux_platform(normalized["platform"]):
+        raise RuntimeError("explicit V2 Task has an invalid Worker Kit platform")
+    return {"schema": "codify.worker.kit-identity/v1", **normalized}
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,8 +151,9 @@ def bundle_manifest_digest_from_files(
 
 
 def _v2_bundle_digest(
-    files: Iterable[Mapping[str, Any]], worker_image_identity: object,
+        files: Iterable[Mapping[str, Any]], worker_image_identity: object,
     harness_verification_evidence: object | None = None,
+    worker_kit_identity: object | None = None,
 ) -> str:
     file_digest = bundle_manifest_digest_from_files(files)
     if worker_image_identity is None:
@@ -152,7 +163,8 @@ def _v2_bundle_digest(
     payload = {
         "files_digest": file_digest,
         "worker_image_identity": worker_image_identity,
-        "harness_verification_evidence": harness_verification_evidence,
+                "harness_verification_evidence": harness_verification_evidence,
+        "worker_kit_identity": worker_kit_identity,
     }
     return _sha256(
         json.dumps(
@@ -249,13 +261,20 @@ def build_runtime_bundle_v2(manifest: Mapping[str, Any]) -> BuiltRuntimeBundleV2
     worker_image_identity = _validated_v2_worker_image_identity(
         validated.get("worker_image_identity")
     )
+    worker_kit_identity = None
+    if validated.get("worker_kit_identity") is not None:
+        worker_kit_identity = _validated_worker_kit_identity(
+            validated.get("worker_kit_identity")
+        )
     # A V2 payload is executable only with the image identity frozen at bind
     # time. Include it in the row address so identical orchestration files from
     # two reviewed image releases cannot alias one database Bundle.
     harness_evidence = validated.get("harness_verification_evidence")
     if not isinstance(harness_evidence, Mapping):
         raise RuntimeError("V2 Runtime Bundle requires frozen Harness verification evidence")
-    bundle_digest = _v2_bundle_digest(files, worker_image_identity, harness_evidence)
+    bundle_digest = _v2_bundle_digest(
+        files, worker_image_identity, harness_evidence, worker_kit_identity
+    )
 
     # Resolve each adapter's declared source directory so shared files (those
     # not under ANY adapter directory) can be attributed to every adapter.
@@ -321,6 +340,8 @@ def build_runtime_bundle_v2(manifest: Mapping[str, Any]) -> BuiltRuntimeBundleV2
     v2_manifest["runtime_platform"] = runtime_platform
     v2_manifest["worker_image_identity"] = worker_image_identity
     v2_manifest["harness_verification_evidence"] = dict(harness_evidence)
+    if worker_kit_identity is not None:
+        v2_manifest["worker_kit_identity"] = worker_kit_identity
     return BuiltRuntimeBundleV2(
         digest=bundle_digest,
         schema="codify.worker.runtime-bundle/v2",
@@ -546,8 +567,8 @@ async def get_or_create_runtime_bundle_v2(
     db: AsyncSession,
     *,
     source_dir: Path | None = None,
-    cli_artifact_manifest_path: Path | None = None,
-    worker_image_identity: Mapping[str, Any] | None = None,
+        worker_image_identity: Mapping[str, Any] | None = None,
+    worker_kit_identity: Mapping[str, Any] | None = None,
     harness_verification_evidence: Mapping[str, Any] | None = None,
 ) -> WorkerRuntimeBundle:
     """Build and persist an immutable V2 runtime payload during Task binding.
@@ -562,15 +583,11 @@ async def get_or_create_runtime_bundle_v2(
     source_by_name = dict(source_files)
     manifest_source_name = "deploy/worker-entrypoint/harness/manifest.json"
     harness_manifest = json.loads(source_by_name[manifest_source_name])
-    artifact_path = cli_artifact_manifest_path
-    if artifact_path is None:
-        configured_artifact_path = os.getenv(CLI_ARTIFACT_MANIFEST_ENV)
-        artifact_path = Path(configured_artifact_path) if configured_artifact_path else None
     image_identity = _validated_v2_worker_image_identity(worker_image_identity)
-    frozen_manifest = _freeze_cli_artifact_identities(
+    frozen_manifest = _freeze_worker_kit_identity(
         harness_manifest,
-        cli_artifact_manifest_path=artifact_path,
         worker_image_identity=image_identity,
+        worker_kit_identity=worker_kit_identity,
     )
     if not isinstance(harness_verification_evidence, Mapping):
         raise RuntimeError("explicit V2 Task has no frozen Harness verification evidence")
@@ -634,85 +651,40 @@ async def get_or_create_runtime_bundle_v2(
         ).scalar_one()
 
 
-def _freeze_cli_artifact_identities(
-    manifest: Mapping[str, Any], *, cli_artifact_manifest_path: Path | None,
+def _freeze_worker_kit_identity(
+    manifest: Mapping[str, Any],
+    *,
     worker_image_identity: Mapping[str, str],
+    worker_kit_identity: Mapping[str, str] | None,
 ) -> dict[str, Any]:
-    """Stamp and validate the four release CLI identities before Bundle bind.
+    """Stamp the frozen identity set into the V2 manifest before Bundle bind.
 
-    ``deploy/worker-entrypoint/harness/manifest.json`` is a source template and
-    deliberately carries placeholders.  A release exports the immutable
-    ``codify.worker.cli-artifacts/v1`` document from its Worker image and points
-    ``CODIFY_WORKER_CLI_ARTIFACT_MANIFEST`` at that file.  The lock is required
-    for every V2 bind: source-embedded SHA values do not establish the Worker
-    image or platform identity and therefore are never a production shortcut.
-    Placeholder, missing, mismatched, or malformed identities fail closed.
+    Execution identity is ``image_identity + kit_identity + bundle_digest``.
+    The Worker Kit identity is the content-addressed manifest digest recorded
+    by the verified Kit installation; the Worker image identity is read from
+    the same daemon image.  ``adapters.<key>.source.artifact_version /
+    artifact_sha256`` stay as the Adapter-declared tested/baseline: any
+    difference from the Kit harness_inventory observed at start is advisory
+    (sanitized warning), never a hard gate, so no release CLI lock is
+    required or consulted here.
     """
     frozen = deepcopy(dict(manifest))
     adapters = frozen.get("adapters")
     if not isinstance(adapters, dict) or not adapters:
         raise RuntimeError("Runtime source has no Adapter declarations")
 
-    if cli_artifact_manifest_path is None:
-        raise RuntimeError(
-            f"V2 Runtime Bundle requires {CLI_ARTIFACT_MANIFEST_ENV} "
-            "from the reviewed Worker image"
-        )
-    try:
-        artifact_document = json.loads(cli_artifact_manifest_path.read_bytes())
-    except (OSError, json.JSONDecodeError) as exc:
-        raise RuntimeError("Worker CLI artifact manifest is unreadable") from exc
-    if artifact_document.get("schema") != "codify.worker.cli-artifacts/v1":
-        raise RuntimeError("Worker CLI artifact manifest has an unsupported schema")
-    raw_artifact_bytes = cli_artifact_manifest_path.read_bytes()
-    if _sha256(raw_artifact_bytes) != worker_image_identity["cli_artifact_lock_sha256"]:
-        raise RuntimeError("Worker CLI artifact lock bytes do not match the frozen Worker image")
-    platform = artifact_document.get("platform")
+    platform = worker_image_identity["runtime_platform"]
     if not _is_linux_platform(platform):
-        raise RuntimeError("Worker CLI artifact manifest has an invalid platform")
-    if platform != worker_image_identity["runtime_platform"]:
-        raise RuntimeError("Worker CLI artifact lock platform does not match the frozen Worker image")
+        raise RuntimeError("Runtime source requires a frozen linux/* platform")
     frozen["runtime_platform"] = platform
     frozen["worker_image_identity"] = dict(worker_image_identity)
-    release_artifacts = artifact_document.get("artifacts")
-    if not isinstance(release_artifacts, Mapping):
-        raise RuntimeError("Worker CLI artifact manifest has no artifacts")
-
-    expected_keys = set(adapters)
-    if set(release_artifacts) != expected_keys:
-        raise RuntimeError("Worker CLI artifact manifest must identify every Runtime Adapter")
-
-    for key, adapter in adapters.items():
-        if not isinstance(adapter, dict):
-            raise RuntimeError(f"Runtime source Adapter {key!r} is not an object")
-        source = adapter.get("source")
-        if not isinstance(source, dict):
-            raise RuntimeError(f"Runtime source Adapter {key!r} has no source identity")
-        pinned_version = source.get("artifact_version")
-        if not isinstance(pinned_version, str) or not pinned_version:
-            raise RuntimeError(f"Runtime source Adapter {key!r} has no artifact version")
-        released = release_artifacts.get(key)
-        if not isinstance(released, Mapping):
-            raise RuntimeError(f"Worker CLI artifact identity is missing for {key!r}")
-        if released.get("version") != pinned_version:
+    if worker_kit_identity is not None:
+        validated_kit = _validated_worker_kit_identity(worker_kit_identity)
+        if validated_kit["platform"] != platform:
             raise RuntimeError(
-                f"Worker CLI artifact version mismatch for {key!r}: "
-                f"Runtime={pinned_version!r}, image={released.get('version')!r}"
+                "Worker Kit platform does not match the frozen Worker image platform"
             )
-        source["artifact_sha256"] = released.get("sha256")
-        digest = source.get("artifact_sha256")
-        if (
-            not isinstance(digest, str)
-            or len(digest) != 64
-            or any(character not in "0123456789abcdef" for character in digest)
-        ):
-            raise RuntimeError(
-                f"Runtime source Adapter {key!r} has no frozen artifact SHA-256; "
-                f"set {CLI_ARTIFACT_MANIFEST_ENV} to the release image manifest"
-            )
-    runtime_platform = frozen.get("runtime_platform")
-    if not _is_linux_platform(runtime_platform):
-        raise RuntimeError("Runtime source requires a frozen linux/* platform")
+        frozen["worker_kit_identity"] = validated_kit
     return frozen
 
 
@@ -873,11 +845,15 @@ async def bind_runtime_bundle(
             _require_v2_manifest_adapter(source_dir, frozen_harness_key)
             config = getattr(snapshot, "harness_config_snapshot", None)
             identity = config.get("v2_worker_image_identity") if isinstance(config, dict) else None
+            kit_identity = config.get("worker_kit_identity") if isinstance(config, dict) else None
             evidence = config.get("v2_harness_verification_evidence") if isinstance(config, dict) else None
             if not isinstance(evidence, Mapping):
                 raise RuntimeError("explicit V2 Profile has no frozen Harness verification evidence")
             bundle = await get_or_create_runtime_bundle_v2(
-                db, source_dir=source_dir, worker_image_identity=identity,
+                db,
+                source_dir=source_dir,
+                worker_image_identity=identity,
+                worker_kit_identity=kit_identity,
                 harness_verification_evidence=evidence,
             )
         else:
@@ -888,17 +864,21 @@ async def bind_runtime_bundle(
 
 
 def build_v2_verification_candidate(
-    *, source_dir: Path | None, cli_artifact_manifest_path: Path | None,
-    worker_image_identity: Mapping[str, Any], harness_verification_evidence: Mapping[str, Any],
+    *,
+    source_dir: Path | None,
+    worker_image_identity: Mapping[str, Any],
+    worker_kit_identity: Mapping[str, Any] | None,
+    harness_verification_evidence: Mapping[str, Any],
 ) -> tuple[dict[str, Any], bytes]:
     """Freeze the exact V2 payload injected into a pre-start verifier container."""
     root = (source_dir or default_runtime_source_dir()).resolve()
     source_files = _controlled_source_files(root)
     source_by_name = dict(source_files)
     source_name = "deploy/worker-entrypoint/harness/manifest.json"
-    frozen = _freeze_cli_artifact_identities(
-        json.loads(source_by_name[source_name]), cli_artifact_manifest_path=cli_artifact_manifest_path,
+    frozen = _freeze_worker_kit_identity(
+        json.loads(source_by_name[source_name]),
         worker_image_identity=_validated_v2_worker_image_identity(worker_image_identity),
+        worker_kit_identity=worker_kit_identity,
     )
     if harness_verification_evidence.get("image_identity") != frozen["worker_image_identity"]:
         raise RuntimeError("V2 verification evidence does not match frozen Worker image")
@@ -917,8 +897,8 @@ def frozen_v2_adapter_identity(
     harness_key: str,
     *,
     source_dir: Path | None = None,
-    cli_artifact_manifest_path: Path | None = None,
-    worker_image_identity: Mapping[str, Any] | None = None,
+        worker_image_identity: Mapping[str, Any] | None = None,
+    worker_kit_identity: Mapping[str, Any] | None = None,
 ) -> dict[str, str]:
     """Resolve the selected Adapter identity from the exact bind source bytes.
 
@@ -932,13 +912,9 @@ def frozen_v2_adapter_identity(
     source_by_name = dict(source_files)
     manifest_source_name = "deploy/worker-entrypoint/harness/manifest.json"
     manifest = json.loads(source_by_name[manifest_source_name])
-    artifact_path = cli_artifact_manifest_path
-    if artifact_path is None:
-        configured = os.getenv(CLI_ARTIFACT_MANIFEST_ENV)
-        artifact_path = Path(configured) if configured else None
     image_identity = _validated_v2_worker_image_identity(worker_image_identity)
-    frozen = _freeze_cli_artifact_identities(
-        manifest, cli_artifact_manifest_path=artifact_path, worker_image_identity=image_identity
+    frozen = _freeze_worker_kit_identity(
+        manifest, worker_image_identity=image_identity, worker_kit_identity=worker_kit_identity
     )
     stamped_manifest = json.dumps(frozen, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     source_files = [
@@ -1116,8 +1092,16 @@ def _verify_v2_bundle_bytes(bundle: WorkerRuntimeBundle) -> None:
     evidence = bundle.manifest.get("harness_verification_evidence")
     if not isinstance(evidence, Mapping):
         raise RuntimeError("V2 Runtime Bundle has no frozen Harness verification evidence")
+    kit_identity = None
+    if bundle.manifest.get("worker_kit_identity") is not None:
+        kit_identity = _validated_worker_kit_identity(bundle.manifest.get("worker_kit_identity"))
+        if kit_identity["platform"] != runtime_platform:
+            raise RuntimeError("V2 Runtime Bundle Worker Kit platform does not match manifest")
     expected_digest = _v2_bundle_digest(
-        files, bundle.manifest.get("worker_image_identity"), bundle.manifest.get("harness_verification_evidence")
+        files,
+        bundle.manifest.get("worker_image_identity"),
+        bundle.manifest.get("harness_verification_evidence"),
+        kit_identity,
     )
     if bundle.digest != expected_digest or bundle.manifest.get("bundle_digest") != bundle.digest:
         raise RuntimeError("V2 Runtime Bundle manifest digest does not match the database binding")

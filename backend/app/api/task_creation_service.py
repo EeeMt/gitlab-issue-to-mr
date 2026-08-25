@@ -52,6 +52,8 @@ from app.core.usage_limits import UsageLimitExceeded, usage_limit_exceeded_detai
 from app.core.utcnow import utcnow
 from app.core.worker_profiles import WorkerProfileValidationError
 from app.core.worker_runtime_readiness import (
+    harness_cli_unavailable_detail,
+    is_harness_available,
     read_runtime_readiness,
     readiness_for_profile,
     runtime_unavailable_http_detail,
@@ -169,6 +171,16 @@ async def retry_task_record(
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=runtime_unavailable_http_detail(readiness),
+            )
+        retry_harness_key = getattr(source_snapshot, "harness_key", None) or ""
+        if (
+            getattr(readiness, "is_ready", False)
+            and getattr(source_snapshot, "cli_source", None) != "host_mount"
+            and is_harness_available(readiness, retry_harness_key) is False
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=harness_cli_unavailable_detail(readiness, retry_harness_key),
             )
 
     original_session_mode = getattr(original_task, "session_mode", "continue")
@@ -498,6 +510,23 @@ async def create_task_record(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=runtime_unavailable_http_detail(readiness),
+        )
+    # §11.3: a Kit that is ready but does not carry the selected Harness
+    # rejects create/start/retry/resume/recovery with the stable
+    # harness_cli_unavailable error; unknown evidence never blocks here (the
+    # scheduler probes before claiming).
+    # An explicitly authorized host_mount break-glass provides the CLI
+    # outside the Kit inventory; only worker_kit-sourced Harnesses are gated
+    # on inventory availability.
+    runtime = (getattr(worker_profile, "harness_runtimes", None) or {}).get(harness_key)
+    if (
+        getattr(readiness, "is_ready", False)
+        and not (isinstance(runtime, dict) and runtime.get("source") == "host_mount")
+        and is_harness_available(readiness, harness_key) is False
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=harness_cli_unavailable_detail(readiness, harness_key),
         )
 
     scheduled_at = resolve_scheduled_at(

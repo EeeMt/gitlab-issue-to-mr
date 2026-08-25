@@ -6,15 +6,13 @@ CODIFY_KIT_HOME="${CODIFY_KIT_HOME:-}"
 if [ -n "${CODIFY_KIT_HOME}" ]; then
     ENTRYPOINT_LIB_DIR="${CODIFY_KIT_HOME}/worker-entrypoint"
     CODIFY_BASH="${CODIFY_BASH:?mounted worker kit did not provide CODIFY_BASH}"
-    CODIFY_CLAUDE_BIN="${CODIFY_CLAUDE_BIN:-/usr/local/bin/claude}"
-    CODIFY_CI_CLAUDE="${CODIFY_KIT_HOME}/ci-claude.sh"
+     CODIFY_CI_CLAUDE="/usr/local/bin/ci-claude.sh"
     CODIFY_MERMAID_VALIDATOR="${CODIFY_KIT_BIN}/codify-validate-mermaid"
     CODIFY_RUN_AS="${CODIFY_KIT_HOME}/bin/codify-run-as"
 else
     ENTRYPOINT_LIB_DIR="/opt/codify/worker-entrypoint"
     CODIFY_BASH="/bin/bash"
-    CODIFY_CLAUDE_BIN="${CODIFY_CLAUDE_BIN:-/usr/local/bin/claude}"
-    CODIFY_CI_CLAUDE="/usr/local/bin/ci-claude.sh"
+     CODIFY_CI_CLAUDE="${CODIFY_KIT_HOME}/ci-claude.sh"
     CODIFY_MERMAID_VALIDATOR="/opt/codify-mermaid/validate_mermaid_summary.mjs"
     CODIFY_RUN_AS=""
 fi
@@ -81,7 +79,6 @@ CODIFY_RUN_UID="${CODIFY_RUN_UID:-1000}"
 CODIFY_RUN_GID="${CODIFY_RUN_GID:-1000}"
 CODIFY_RUNTIME_PATH="${CODIFY_RUNTIME_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
 export CODIFY_BASH CODIFY_CLAUDE_BIN CODIFY_CI_CLAUDE CODIFY_ORCHESTRATION_DIR
-CODIFY_HARNESS_CLI_BIN="${CODIFY_HARNESS_CLI_BIN:-${CODIFY_CLAUDE_BIN}}"
 export CODIFY_HARNESS_CLI_BIN
 export CODIFY_MERMAID_VALIDATOR
 export CODIFY_RUN_UID CODIFY_RUN_GID CODIFY_RUNTIME_PATH

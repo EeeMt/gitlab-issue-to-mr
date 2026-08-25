@@ -66,6 +66,8 @@ from app.core.worker_runtime_readiness import (
     READINESS_UNAVAILABLE,
     RuntimeProbeTransientError,
     RuntimeReadiness,
+    harness_cli_unavailable_detail,
+    is_harness_available,
     read_runtime_readiness,
     run_deterministic_kit_probe,
 )
@@ -1568,7 +1570,7 @@ class Scheduler:
             return False
         readiness = await read_runtime_readiness(db, fingerprint)
         if readiness.is_ready:
-            return False
+            return await self._harness_availability_gate(db, task, snapshot, readiness)
         if readiness.is_unavailable:
             await self._park_tasks_for_unavailable_runtime(db, task, fingerprint, readiness)
             return True
@@ -1597,7 +1599,9 @@ class Scheduler:
             )
             return True
         if outcome.is_ready:
-            return False
+            return await self._harness_availability_gate(
+                db, task, snapshot, outcome.readiness
+            )
         if outcome.is_unavailable:
             if outcome.committed:
                 # Deterministic unavailable conclusion from a live probe that
@@ -1619,6 +1623,101 @@ class Scheduler:
         # conclusion is stored yet (§13.3/§19). A late/superseded generation
         # must never change readiness or Task state, so leave the Task QUEUED
         # and re-evaluate next cycle instead of failing it.
+        return True
+
+    async def _harness_availability_gate(
+        self,
+        db: AsyncSession,
+        task: Task,
+        snapshot: TaskWorkerProfileSnapshot | None,
+        readiness: RuntimeReadiness,
+    ) -> bool:
+        """Gate one V2 Task on its frozen Harness availability (§11.3).
+
+        The Kit is ready but the Task's selected Harness may still be absent
+        from the inventory: the Task then fails deterministically with the
+        stable ``harness_cli_unavailable`` error instead of starting a worker
+        container. Unknown inventory evidence never rejects — a stale ready
+        row predating inventory re-probes through the readiness service.
+        Returns True when the task must not be claimed this cycle.
+        """
+        config = (
+            getattr(snapshot, "harness_config_snapshot", None)
+            if snapshot is not None
+            else None
+        )
+        requested_contract = (
+            config.get("requested_runtime_contract_version")
+            if isinstance(config, dict)
+            else None
+        )
+        if requested_contract != "codify.worker.harness/v2":
+            return False
+        harness_key = getattr(snapshot, "harness_key", None) or ""
+        # An explicitly authorized host_mount break-glass provides the CLI
+        # outside the Kit inventory: the availability gate only applies to
+        # worker_kit-sourced Harnesses (no image/PATH fallback exists).
+        if getattr(snapshot, "cli_source", None) == "host_mount":
+            return False
+        available = is_harness_available(readiness, harness_key)
+        if available is True:
+            return False
+        if available is False:
+            detail = harness_cli_unavailable_detail(readiness, harness_key)
+            task.status = TaskStatus.FAILED
+            task.error_message = json.dumps(detail, ensure_ascii=False)[:1000]
+            if task.completed_at is None:
+                task.completed_at = utcnow()
+            await db.commit()
+            self._emit_event(
+                "harness_cli_unavailable",
+                reason="harness_cli_unavailable",
+                issue_id=task.issue_id,
+                task_id=task.id,
+                message=detail["message"],
+            )
+            await maybe_update_issue_status(db, task.issue_id)
+            return True
+        # available is None: the committed probe predates Kit inventory
+        # evidence. Re-probe through the readiness service and evaluate the
+        # fresh conclusion.
+        settings = get_settings()
+        connection = connection_from_snapshot(snapshot, settings)
+        try:
+            outcome = await run_deterministic_kit_probe(
+                db,
+                connection=connection,
+                image=snapshot.image,
+                runtime_mode=snapshot.runtime_mode,
+                worker_kit_version=snapshot.worker_kit_version or "",
+                worker_kit_path=snapshot.worker_kit_path or "",
+                ttl_seconds=settings.worker_runtime_readiness_ttl_seconds,
+            )
+        except RuntimeProbeTransientError:
+            return True
+        if outcome.is_ready:
+            fresh_available = is_harness_available(outcome.readiness, harness_key)
+            if fresh_available is True:
+                return False
+            if fresh_available is False:
+                detail = harness_cli_unavailable_detail(outcome.readiness, harness_key)
+                task.status = TaskStatus.FAILED
+                task.error_message = json.dumps(detail, ensure_ascii=False)[:1000]
+                if task.completed_at is None:
+                    task.completed_at = utcnow()
+                await db.commit()
+                self._emit_event(
+                    "harness_cli_unavailable",
+                    reason="harness_cli_unavailable",
+                    issue_id=task.issue_id,
+                    task_id=task.id,
+                    message=detail["message"],
+                )
+                await maybe_update_issue_status(db, task.issue_id)
+                return True
+            return True
+        if outcome.is_unavailable and outcome.committed:
+            await self._fail_task_for_runtime_check(db, task, outcome.readiness)
         return True
 
     async def _load_task_snapshot(

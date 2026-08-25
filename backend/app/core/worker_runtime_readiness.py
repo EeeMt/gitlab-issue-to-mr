@@ -26,6 +26,7 @@ import json
 import logging
 import tarfile
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -44,6 +45,13 @@ from app.core.docker_client import (
 )
 from app.core.utcnow import utcnow
 from app.core.worker_kit import BAKED_IMAGE_MODE, MOUNTED_KIT_MODE
+from app.core.worker_kit_inventory import (
+    AVAILABILITY_PRESENT,
+    HarnessInventoryError,
+    kit_identity_from_manifest_bytes,
+    kit_relative_path,
+    validate_harness_inventory,
+)
 from app.models import WorkerRuntimeReadiness
 
 logger = logging.getLogger(__name__)
@@ -51,9 +59,7 @@ logger = logging.getLogger(__name__)
 READINESS_UNKNOWN = "unknown"
 READINESS_READY = "ready"
 READINESS_UNAVAILABLE = "unavailable"
-READINESS_STATUSES = frozenset(
-    {READINESS_UNKNOWN, READINESS_READY, READINESS_UNAVAILABLE}
-)
+READINESS_STATUSES = frozenset({READINESS_UNKNOWN, READINESS_READY, READINESS_UNAVAILABLE})
 
 FAILURE_WORKER_KIT_NOT_FOUND = "worker_kit_not_found"
 FAILURE_WORKER_KIT_INVALID = "worker_kit_invalid"
@@ -81,6 +87,8 @@ class RuntimeCheckResult:
     status: str
     failure_code: str | None = None
     failure_message: str | None = None
+    harness_inventory: dict[str, Any] | None = None
+    kit_identity: dict[str, Any] | None = None
 
     @property
     def is_unavailable(self) -> bool:
@@ -107,6 +115,9 @@ class RuntimeReadiness:
     check_generation: int = 0
     check_started_at: datetime | None = None
     updated_at: datetime | None = None
+
+    harness_inventory: dict[str, Any] | None = None
+    kit_identity: dict[str, Any] | None = None
 
     @property
     def is_ready(self) -> bool:
@@ -148,6 +159,8 @@ def serialize_runtime_readiness(readiness: RuntimeReadiness) -> dict[str, Any]:
         "failure_message": readiness.failure_message,
         "checked_at": readiness.checked_at.isoformat() if readiness.checked_at else None,
         "ready_until": readiness.ready_until.isoformat() if readiness.ready_until else None,
+        "harness_inventory": readiness.harness_inventory,
+        "kit_identity": readiness.kit_identity,
     }
 
 
@@ -350,6 +363,8 @@ async def read_runtime_readiness(
         check_generation=row.check_generation,
         check_started_at=row.check_started_at,
         updated_at=row.updated_at,
+        harness_inventory=row.harness_inventory,
+        kit_identity=row.kit_identity,
     )
 
 
@@ -479,6 +494,8 @@ async def finish_runtime_check(
     failure_code: str | None = None,
     failure_message: str | None = None,
     ready_until: datetime | None = None,
+    harness_inventory: dict[str, Any] | None = None,
+    kit_identity: dict[str, Any] | None = None,
 ) -> bool:
     """Write a check result only while the generation is still current (CAS).
 
@@ -502,13 +519,11 @@ async def finish_runtime_check(
             failure_code=failure_code,
             failure_message=failure_message,
             ready_until=ready_until if status == READINESS_READY else None,
+            harness_inventory=harness_inventory,
+            kit_identity=kit_identity,
         )
     )
     return result.rowcount == 1
-
-
-def _missing_bind_source(exc: Exception) -> bool:
-    return _MISSING_BIND_SOURCE_HINT in str(exc).lower()
 
 
 def _ensure_probe_image(client: DockerClientWrapper, image: str) -> None:
@@ -602,6 +617,50 @@ def _archive_has_member(container: Any, path: str) -> bool:
         return False
 
 
+def _stat_and_hash_archive_file(
+    client: DockerClientWrapper,
+    container: Any,
+    path: str,
+) -> tuple[int, int, str] | None:
+    """Return ``(mode, size, sha256)`` for one file via the archive API.
+
+    Streams the tar member in chunks so multi-hundred-MB CLI payloads are
+    never buffered whole. ``None`` means deterministic absence; anything else
+    that prevents a conclusion raises ``RuntimeProbeTransientError``.
+    """
+    try:
+        bits, _stat = container.get_archive(path)
+    except docker.errors.NotFound:
+        return None
+    except Exception as exc:  # noqa: BLE001 - connection/API incompatibility
+        raise RuntimeProbeTransientError(
+            f"Could not read {path!r} from probe container: {exc}"
+        ) from exc
+    digest = hashlib.sha256()
+    mode: int | None = None
+    total = 0
+    try:
+        with tarfile.open(fileobj=_ChunkedReader(bits), mode="r|") as tar:
+            member = tar.next()
+            if member is None:
+                return None
+            extracted = tar.extractfile(member)
+            if extracted is None:
+                return None
+            mode = member.mode
+            while True:
+                chunk = extracted.read(1024 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+                total += len(chunk)
+    except tarfile.TarError as exc:
+        raise RuntimeProbeTransientError(
+            f"Could not parse archive for {path!r} from probe container: {exc}"
+        ) from exc
+    return mode, total, digest.hexdigest()
+
+
 def _inspect_kit_contents(
     client: DockerClientWrapper,
     container: Any,
@@ -616,17 +675,13 @@ def _inspect_kit_contents(
         return RuntimeCheckResult(
             status=READINESS_UNAVAILABLE,
             failure_code=FAILURE_WORKER_KIT_INVALID,
-            failure_message=(
-                f"Worker Kit manifest.json is missing under {worker_kit_path!r}"
-            ),
+            failure_message=(f"Worker Kit manifest.json is missing under {worker_kit_path!r}"),
         )
     if not manifest_bytes:
         return RuntimeCheckResult(
             status=READINESS_UNAVAILABLE,
             failure_code=FAILURE_WORKER_KIT_INVALID,
-            failure_message=(
-                f"Worker Kit manifest.json is empty under {worker_kit_path!r}"
-            ),
+            failure_message=(f"Worker Kit manifest.json is empty under {worker_kit_path!r}"),
         )
     try:
         manifest = json.loads(manifest_bytes.decode("utf-8"))
@@ -668,8 +723,7 @@ def _inspect_kit_contents(
                 status=READINESS_UNAVAILABLE,
                 failure_code=FAILURE_WORKER_KIT_INVALID,
                 failure_message=(
-                    f"Worker Kit required file {relative!r} is missing "
-                    f"under {worker_kit_path!r}"
+                    f"Worker Kit required file {relative!r} is missing under {worker_kit_path!r}"
                 ),
             )
     if not _archive_has_member(container, f"{root}/nix/store"):
@@ -680,7 +734,63 @@ def _inspect_kit_contents(
                 f"Worker Kit nix/store directory is missing under {worker_kit_path!r}"
             ),
         )
-    return RuntimeCheckResult(status=READINESS_READY)
+    try:
+        kit_identity = kit_identity_from_manifest_bytes(manifest_bytes)
+        inventory = validate_harness_inventory(manifest.get("harness_inventory"))
+    except HarnessInventoryError as exc:
+        return RuntimeCheckResult(
+            status=READINESS_UNAVAILABLE,
+            failure_code=FAILURE_WORKER_KIT_INVALID,
+            failure_message=(
+                "Worker Kit harness inventory or identity is invalid under "
+                f"{worker_kit_path!r}: {exc}"
+            ),
+        )
+    # Fail closed on every present entry's actual bytes: missing, non-
+    # executable, truncated or tampered payloads invalidate the whole Kit.
+    for key, entry in inventory.items():
+        if entry.get("availability") != AVAILABILITY_PRESENT:
+            continue
+        relative = kit_relative_path(str(entry["path"]))
+        observed = _stat_and_hash_archive_file(client, container, f"{root}/{relative}")
+        if observed is None:
+            return RuntimeCheckResult(
+                status=READINESS_UNAVAILABLE,
+                failure_code=FAILURE_WORKER_KIT_INVALID,
+                failure_message=(
+                    f"Worker Kit inventory marks {key!r} present but its file "
+                    f"{relative!r} is missing under {worker_kit_path!r}"
+                ),
+            )
+        mode, size, sha256 = observed
+        if not mode & 0o111:
+            return RuntimeCheckResult(
+                status=READINESS_UNAVAILABLE,
+                failure_code=FAILURE_WORKER_KIT_INVALID,
+                failure_message=(
+                    f"Worker Kit inventory file for {key!r} ({relative!r}) is "
+                    f"not executable under {worker_kit_path!r}"
+                ),
+            )
+        if size != int(entry["size"]) or sha256 != str(entry["sha256"]):
+            return RuntimeCheckResult(
+                status=READINESS_UNAVAILABLE,
+                failure_code=FAILURE_WORKER_KIT_INVALID,
+                failure_message=(
+                    f"Worker Kit integrity check failed for {key!r}: recorded "
+                    f"bytes do not match the installed file {relative!r} under "
+                    f"{worker_kit_path!r}"
+                ),
+            )
+    return RuntimeCheckResult(
+        status=READINESS_READY,
+        harness_inventory=inventory,
+        kit_identity=kit_identity,
+    )
+
+
+def _missing_bind_source(exc: Exception) -> bool:
+    return _MISSING_BIND_SOURCE_HINT in str(exc).lower()
 
 
 def probe_worker_kit(
@@ -743,9 +853,7 @@ def probe_worker_kit(
                         "on the Docker host"
                     ),
                 )
-            raise RuntimeProbeTransientError(
-                f"Could not create probe container: {exc}"
-            ) from exc
+            raise RuntimeProbeTransientError(f"Could not create probe container: {exc}") from exc
         return _inspect_kit_contents(
             client,
             container,
@@ -826,6 +934,8 @@ async def run_deterministic_kit_probe(
         failure_code=result.failure_code,
         failure_message=result.failure_message,
         ready_until=ready_until,
+        harness_inventory=result.harness_inventory,
+        kit_identity=result.kit_identity,
     )
     await db.commit()
     return RuntimeProbeOutcome(
@@ -861,6 +971,62 @@ async def _discard_incomplete_runtime_check(
     await db.commit()
 
 
+FAILURE_HARNESS_CLI_UNAVAILABLE = "harness_cli_unavailable"
+FAILURE_WORKER_KIT_UNAVAILABLE = "worker_kit_unavailable"
+
+
+def is_harness_available(
+    readiness: RuntimeReadiness, harness_key: str
+) -> bool | None:
+    """Return the observed availability of one Harness, or None when unknown.
+
+    ``None`` means the last committed probe predates Kit inventory evidence or
+    the locator was never probed; callers must not reject on unknown.
+    ``True`` requires an explicit ``present`` entry; every other recorded
+    state (absent for any reason, missing key) is unavailable.
+    """
+    inventory = getattr(readiness, "harness_inventory", None)
+    if not isinstance(inventory, Mapping) or not inventory:
+        return None
+    if getattr(readiness, "status", None) == READINESS_UNAVAILABLE:
+        return False
+    entry = inventory.get(harness_key)
+    if not isinstance(entry, Mapping):
+        return False
+    return entry.get("availability") == AVAILABILITY_PRESENT
+
+
+def harness_cli_unavailable_detail(
+    readiness: RuntimeReadiness,
+    harness_key: str,
+) -> dict[str, Any]:
+    """Build the stable sanitized rejection detail for an absent Harness.
+
+    Never includes tokens, environment values, payload paths outside the Kit
+    contract, or native diagnostics. The absent reason code is surfaced so
+    operators can distinguish a deliberate build exclusion from a degraded
+    payload.
+    """
+    entry = (readiness.harness_inventory or {}).get(harness_key)
+    reason_code = (
+        entry.get("reason_code")
+        if isinstance(entry, Mapping) and entry.get("availability") == "absent"
+        else None
+    )
+    return {
+        "code": FAILURE_HARNESS_CLI_UNAVAILABLE,
+        "harness_key": harness_key,
+        "message": (
+            f"Harness {harness_key!r} is not available in Worker Kit "
+            f"{readiness.worker_kit_version!r}; select a present Harness"
+        ),
+        "failure_code": FAILURE_HARNESS_CLI_UNAVAILABLE,
+        "reason_code": reason_code,
+        "kit_version": readiness.worker_kit_version,
+        "checked_at": readiness.checked_at.isoformat() if readiness.checked_at else None,
+    }
+
+
 class WorkerRuntimeUnavailableError(RuntimeError):
     """A re-check after a container create/start Kit error found the Kit gone.
 
@@ -878,6 +1044,35 @@ class WorkerRuntimeUnavailableError(RuntimeError):
         self.failure_code = failure_code
         self.failure_message = failure_message
         super().__init__(failure_message or "Worker runtime is unavailable")
+
+
+class HarnessCliUnavailableError(RuntimeError):
+    """A Task selected a Harness that the frozen Kit inventory does not provide.
+
+    Stable rejection for create/start/retry/resume/recovery choosing an absent
+    Harness (§11.3): the attempt fails with ``harness_cli_unavailable`` and the
+    sanitized absent reason; there is no image/PATH fallback and no automatic
+    migration to another Harness.
+    """
+
+    def __init__(
+        self,
+        *,
+        harness_key: str,
+        reason_code: str | None,
+        kit_version: str | None,
+        message: str | None = None,
+    ) -> None:
+        self.harness_key = harness_key
+        self.reason_code = reason_code
+        self.kit_version = kit_version
+        super().__init__(
+            message
+            or (
+                f"Harness {harness_key!r} is not available in Worker Kit "
+                f"{kit_version!r}"
+            )
+        )
 
 
 _KIT_ERROR_HINTS = (

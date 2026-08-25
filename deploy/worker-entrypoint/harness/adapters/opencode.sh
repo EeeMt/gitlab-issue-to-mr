@@ -6,11 +6,23 @@ CODIFY_OPENCODE_TRANSLATOR="${CODIFY_ORCHESTRATION_DIR}/worker-entrypoint/harnes
 CODIFY_OPENCODE_BRIDGE="${CODIFY_ORCHESTRATION_DIR}/worker-entrypoint/harness/adapters/opencode_bridge.py"
 
 codify_opencode_bin() {
-    if [ -x "/opt/codify-opencode/bin/opencode" ]; then
-        echo "/opt/codify-opencode/bin/opencode"
+    # Frozen single source: the backend-injected CODIFY_HARNESS_CLI_BIN (Kit
+    # inventory path or authorized host_mount), else the Kit manifest's own
+    # inventory path. The runtime image and PATH are never consulted.
+    if [ -n "${CODIFY_HARNESS_CLI_BIN:-}" ]; then
+        printf '%s\n' "${CODIFY_HARNESS_CLI_BIN}"
         return 0
     fi
-    echo "${CODIFY_OPENCODE_BIN:-/usr/local/bin/opencode}"
+    if [ -r "${CODIFY_KIT_HOME:-/opt/codify-kit}/manifest.json" ]; then
+        local path
+        path="$(jq -r --arg k opencode '.harness_inventory[$k].path // empty' \
+            "${CODIFY_KIT_HOME:-/opt/codify-kit}/manifest.json" 2>/dev/null || true)"
+        if [ -n "${path}" ]; then
+            printf '%s\n' "${path}"
+            return 0
+        fi
+    fi
+    return 1
 }
 
 opencode_adapter_metadata() {
@@ -28,11 +40,16 @@ opencode_adapter_metadata() {
 
 opencode_adapter_verify_runtime() {
     local bin
-    bin="$(codify_opencode_bin)"
+    bin="$(codify_opencode_bin)" || {
+        echo "OpenCode CLI is not available from the Worker Kit inventory" >&2
+        return 1
+    }
     if [ ! -x "${bin}" ]; then
         echo "OpenCode CLI is unavailable: ${bin}" >&2
         return 1
     fi
+    CODIFY_OPENCODE_BIN="${bin}"
+    export CODIFY_OPENCODE_BIN
     local version_output pinned normalized
     version_output="$("${bin}" --version 2>/dev/null | head -n 1)"
     if [ -z "${version_output}" ]; then
@@ -42,14 +59,14 @@ opencode_adapter_verify_runtime() {
     normalized="$(printf '%s\n' "${version_output}" | awk '{print $NF}')"
     CODIFY_CLI_VERSION="${normalized}"
     export CODIFY_CLI_VERSION
-    # OpenCode 1.18.19 is the frozen version (probe §1.1); refuse to run an
-    # unverified binary so manifest pinning is enforced at the container boundary.
+    # The Adapter-declared pinned version is the tested/baseline, not a hard
+    # gate: an observed difference only logs a sanitized advisory warning and
+    # execution continues (§11.2 Compatibility policy).
     local pinned
     pinned="$(jq -r '.adapters.opencode.cli_version // empty' \
         "${CODIFY_ORCHESTRATION_DIR}/worker-entrypoint/harness/manifest.json" 2>/dev/null || true)"
     if [ -n "${pinned}" ] && [ "${normalized}" != "${pinned}" ]; then
-        echo "OpenCode CLI version mismatch: expected ${pinned}, got ${normalized}" >&2
-        return 1
+        echo "WARNING: OpenCode CLI version ${normalized} differs from the Adapter baseline ${pinned} (advisory, not enforced)" >&2
     fi
     return 0
 }

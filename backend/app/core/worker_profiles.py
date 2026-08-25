@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
@@ -59,6 +58,7 @@ from app.core.worker_kit import (
     worker_kit_environment,
     worker_kit_mounts,
 )
+from app.core.worker_kit_inventory import validate_worker_kit_identity
 from app.core.worker_runtime_readiness import (
     fingerprint_from_docker_target,
     runtime_verification_input_digest,
@@ -86,6 +86,7 @@ _LEGACY_IGNORED_RUNTIME_ENVIRONMENT_KEYS = frozenset(
 )
 _V2_IMAGE_IDENTITY_KEY = "v2_worker_image_identity"
 _V2_HARNESS_EVIDENCE_KEY = "v2_harness_verification_evidence"
+_V2_KIT_IDENTITY_KEY = "worker_kit_identity"
 _V2_IMAGE_IDENTITY_SCHEMA = "codify.worker-image-identity/v1"
 _V2_HARNESS_EVIDENCE_SCHEMA = "codify.worker-harness-verification/v1"
 _LINUX_PLATFORM_RE = re.compile(r"^linux/[A-Za-z0-9][A-Za-z0-9_.-]*$")
@@ -102,7 +103,7 @@ def validate_v2_worker_image_identity(identity: object) -> dict[str, str]:
     """Validate the non-secret image identity frozen for an explicit V2 Task."""
     if not isinstance(identity, Mapping) or identity.get("schema") != _V2_IMAGE_IDENTITY_SCHEMA:
         raise WorkerProfileValidationError("explicit V2 Profile has no verified Worker image identity")
-    required = ("daemon_key", "image_reference", "image_id", "runtime_platform", "cli_artifact_lock_sha256")
+    required = ("daemon_key", "image_reference", "image_id", "runtime_platform")
     normalized = {key: identity.get(key) for key in required}
     if not all(isinstance(value, str) and value for value in normalized.values()):
         raise WorkerProfileValidationError("explicit V2 Profile has an incomplete Worker image identity")
@@ -114,9 +115,6 @@ def validate_v2_worker_image_identity(identity: object) -> dict[str, str]:
         raise WorkerProfileValidationError("explicit V2 Worker image identity has an invalid image ID")
     if not _linux_platform(normalized["runtime_platform"]):
         raise WorkerProfileValidationError("explicit V2 Worker image identity has an invalid platform")
-    digest = normalized["cli_artifact_lock_sha256"]
-    if _SHA256_RE.fullmatch(digest) is None:
-        raise WorkerProfileValidationError("explicit V2 Worker image identity has an invalid CLI lock digest")
     return {"schema": _V2_IMAGE_IDENTITY_SCHEMA, **normalized}
 
 
@@ -125,6 +123,16 @@ def _repository_name(image: str) -> str:
     last_slash = reference.rfind("/")
     last_colon = reference.rfind(":")
     return reference[:last_colon] if last_colon > last_slash else reference
+
+
+def validate_v2_worker_kit_identity(identity: object) -> dict[str, str]:
+    """Validate the frozen content-addressed Worker Kit identity fail-closed."""
+    try:
+        return validate_worker_kit_identity(identity)
+    except ValueError as exc:
+        raise WorkerProfileValidationError(
+            f"explicit V2 Profile has no verified Worker Kit identity: {exc}"
+        ) from exc
 
 
 def current_runtime_verification_digest(
@@ -201,14 +209,14 @@ def validate_v2_harness_evidence(
 
 
 def inspect_v2_worker_image_identity(connection: DockerConnectionConfig, image: str) -> dict[str, str]:
-    """Read the selected daemon image and its image-owned CLI lock fail-closed.
+    """Read the selected daemon image's immutable identity fail-closed.
 
-    This is deliberately a stopped, no-start container archive read.  It proves
-    the bytes belong to the daemon image, not merely to the backend release-lock
-    mount.  The returned record contains no Docker URL or credentials.
+    The record covers the repository digest, image ID and platform of the
+    exact daemon image — no image-owned CLI lock exists any more (Worker Kit
+    owns the Harness CLIs). The returned record contains no Docker URL or
+    credentials.
     """
     client = DockerClientWrapper(connection)
-    container = None
     try:
         image_obj = client.client.images.get(image)
         attrs = image_obj.attrs or {}
@@ -224,31 +232,15 @@ def inspect_v2_worker_image_identity(connection: DockerConnectionConfig, image: 
         platform = f"{attrs.get('Os')}/{attrs.get('Architecture')}"
         if not isinstance(image_id, str) or not image_id or not _linux_platform(platform):
             raise WorkerProfileValidationError("explicit V2 Worker image has no immutable ID or linux platform")
-        container = client.create_container(image=image_reference, command=["true"], start=False)
-        lock_bytes = client.read_file_from_container(container, "/etc/codify-worker-cli-artifacts.json")
-        if not lock_bytes:
-            raise WorkerProfileValidationError("explicit V2 Worker image has no CLI artifact lock")
-        try:
-            lock = json.loads(lock_bytes)
-        except (TypeError, ValueError) as exc:
-            raise WorkerProfileValidationError("explicit V2 Worker image CLI artifact lock is invalid") from exc
-        if lock.get("schema") != "codify.worker.cli-artifacts/v1" or lock.get("platform") != platform:
-            raise WorkerProfileValidationError("explicit V2 Worker image CLI artifact lock does not match image platform")
         identity = {
             "schema": _V2_IMAGE_IDENTITY_SCHEMA,
             "daemon_key": docker_daemon_key(connection),
             "image_reference": image_reference,
             "image_id": image_id,
             "runtime_platform": platform,
-            "cli_artifact_lock_sha256": hashlib.sha256(lock_bytes).hexdigest(),
         }
         return validate_v2_worker_image_identity(identity)
     finally:
-        if container is not None:
-            try:
-                container.remove(force=True, v=True)
-            except Exception:  # noqa: BLE001 - preserve inspection error
-                pass
         try:
             client.close()
         except Exception:  # noqa: BLE001 - preserve inspection error
@@ -832,6 +824,15 @@ def snapshot_from_profile(
         v2_image_identity = validate_v2_worker_image_identity(
             getattr(profile, "v2_worker_image_identity", None)
         )
+        # Content-addressed Worker Kit identity is part of the V2 execution
+        # identity (image_identity + kit_identity + bundle_digest). Mounted-kit
+        # targets freeze it; baked-image targets have no Kit to freeze.
+        if (effective.runtime_mode or BAKED_IMAGE_MODE) == MOUNTED_KIT_MODE:
+            v2_kit_identity = validate_v2_worker_kit_identity(
+                getattr(profile, "worker_kit_identity", None)
+            )
+        else:
+            v2_kit_identity = None
         current_digest = current_runtime_verification_digest(
             profile, effective, settings or get_effective_settings(), harness_key=resolved_harness_key
         )
@@ -846,6 +847,7 @@ def snapshot_from_profile(
         )
     else:
         v2_harness_evidence = None
+        v2_kit_identity = None
     runtime_locator_fingerprint = fingerprint_from_docker_target(
         settings or get_effective_settings(),
         docker_host=getattr(profile, "docker_host", None),
@@ -895,6 +897,7 @@ def snapshot_from_profile(
         harness_config_snapshot={
             "requested_runtime_contract_version": requested_contract,
             **({_V2_IMAGE_IDENTITY_KEY: v2_image_identity} if v2_image_identity else {}),
+            **({_V2_KIT_IDENTITY_KEY: v2_kit_identity} if v2_kit_identity else {}),
             **({_V2_HARNESS_EVIDENCE_KEY: v2_harness_evidence} if v2_harness_evidence else {}),
             "capabilities": effective_capabilities,
             "sandbox_mode": effective_capabilities.get("sandbox_mode"),

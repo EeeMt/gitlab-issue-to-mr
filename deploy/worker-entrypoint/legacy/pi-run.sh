@@ -3,7 +3,7 @@ set -u
 
 # ``pi_owner.py`` is the sole owner of Pi stdin/stdout. This wrapper constructs
 # the frozen command and feeds the owner's raw stream to the canonical adapter.
-CODIFY_PI_BIN="${CODIFY_PI_BIN:-/usr/local/bin/pi}"
+CODIFY_PI_BIN="${CODIFY_PI_BIN:?CODIFY_PI_BIN is required (resolved by the pi adapter from the Kit inventory or an authorized host_mount)}"
 CODIFY_PI_RAW_EVENT_JSONL="${CODIFY_PI_RAW_EVENT_JSONL:-${CODIFY_RUNTIME_DIR}/harness-events/pi.jsonl}"
 CODIFY_PI_EVENT_TRANSLATOR="${CODIFY_PI_EVENT_TRANSLATOR:-${CODIFY_ORCHESTRATION_DIR}/worker-entrypoint/harness/adapters/pi_events.py}"
 CODIFY_PI_BRIDGE="${CODIFY_PI_BRIDGE:-${CODIFY_ORCHESTRATION_DIR}/worker-entrypoint/harness/adapters/pi_bridge.py}"

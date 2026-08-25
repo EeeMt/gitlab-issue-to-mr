@@ -1,7 +1,11 @@
 # syntax=docker/dockerfile:1.7
 
 ARG NIX_IMAGE=nixos/nix:2.24.11
-ARG WORKER_KIT_VERSION=0.3.15
+ARG WORKER_KIT_VERSION=0.4.0
+# Build selection: comma/plus-separated subset of pi,opencode,claude,codex.
+# An empty value builds a Kit with no Harness CLI payloads. The manifest
+# always records all four keys (availability=present|absent + reason_code).
+ARG KIT_CLI_SELECTION=pi,opencode
 
 FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS launcher-builder
 ARG TARGETOS
@@ -17,11 +21,21 @@ FROM ${NIX_IMAGE} AS closure-builder
 # program, including native arm64 builds on Apple Silicon. This stage already
 # runs inside BuildKit's container sandbox, so disable only Nix's filter.
 ENV NIX_CONFIG="filter-syscalls = false"
+ARG KIT_CLI_SELECTION
+ARG PI_CLI_VERSION
+ARG OPENCODE_CLI_VERSION
+ARG CLAUDE_CLI_VERSION
+ARG CODEX_CLI_VERSION
 WORKDIR /src
 COPY deploy/worker-kit/default.nix ./default.nix
 COPY deploy/worker-kit/nixpkgs.json ./nixpkgs.json
 COPY deploy/worker-kit/npm/ ./npm/
 COPY deploy/scripts/validate_mermaid_summary.mjs ./validate_mermaid_summary.mjs
+COPY deploy/worker-kit/verify-cli-payloads.sh ./verify-cli-payloads.sh
+# Only selected payloads are staged here by the exporter (deploy/worker-cli/kit-staging).
+# Unselected payloads never enter the Kit, so the manifest's absent entries
+# cannot conflict with shipped files.
+COPY deploy/worker-cli/kit-staging/ /payloads/
 RUN nix-build default.nix -o /tmp/codify-worker-kit-runtime \
     && readlink -f /tmp/codify-worker-kit-runtime > /tmp/runtime-store-path \
     && nix-instantiate --eval --strict -E '(import ./default.nix {}).nixpkgsVersion' \
@@ -29,11 +43,19 @@ RUN nix-build default.nix -o /tmp/codify-worker-kit-runtime \
     && nix-instantiate --eval --strict -E '(import ./default.nix {}).nixpkgsRevision' \
       | tr -d '"' > /tmp/nixpkgs-revision \
     && mkdir -p /out/nix/store \
-    && cp -a --parents $(nix-store -qR /tmp/codify-worker-kit-runtime) /out
+    && cp -a --parents $(nix-store -qR /tmp/codify-worker-kit-runtime) /out \
+    && JQ_BIN="$(readlink -f /tmp/codify-worker-kit-runtime)/bin/jq" \
+       KIT_CLI_SELECTION="${KIT_CLI_SELECTION}" \
+       PI_CLI_VERSION="${PI_CLI_VERSION}" \
+       OPENCODE_CLI_VERSION="${OPENCODE_CLI_VERSION}" \
+       CLAUDE_CLI_VERSION="${CLAUDE_CLI_VERSION}" \
+       CODEX_CLI_VERSION="${CODEX_CLI_VERSION}" \
+       /src/verify-cli-payloads.sh
 
 FROM alpine:3.21 AS artifact
-ARG WORKER_KIT_VERSION=0.3.15
+ARG WORKER_KIT_VERSION=0.4.0
 ARG TARGETARCH
+ARG KIT_CLI_SELECTION
 RUN apk add --no-cache jq
 COPY --from=launcher-builder /out/launcher /worker-kit/launcher
 COPY --from=launcher-builder /out/codify-run-as /worker-kit/bin/codify-run-as
@@ -41,6 +63,8 @@ COPY --from=closure-builder /out/nix /worker-kit/nix
 COPY --from=closure-builder /tmp/runtime-store-path /tmp/runtime-store-path
 COPY --from=closure-builder /tmp/nixpkgs-version /tmp/nixpkgs-version
 COPY --from=closure-builder /tmp/nixpkgs-revision /tmp/nixpkgs-revision
+COPY --from=closure-builder /tmp/payload-evidence.json /tmp/payload-evidence.json
+COPY --from=closure-builder /payloads/ /worker-kit/harness/
 COPY deploy/entrypoint.worker.sh /worker-kit/entrypoint.sh
 COPY deploy/ci-claude.sh /worker-kit/ci-claude.sh
 COPY deploy/worker-entrypoint/ /worker-kit/worker-entrypoint/
@@ -51,6 +75,7 @@ COPY deploy/scripts/validate_mermaid_summary.mjs /worker-kit/validate_mermaid_su
 RUN runtime_store="$(cat /tmp/runtime-store-path)" \
     && nixpkgs_version="$(cat /tmp/nixpkgs-version)" \
     && nixpkgs_revision="$(cat /tmp/nixpkgs-revision)" \
+    && inventory="$(jq -n --argjson evidence "$(cat /tmp/payload-evidence.json)" --arg selection "${KIT_CLI_SELECTION:-}" 'reduce ["pi","opencode","claude","codex"][] as $key ({}; .[$key] = (if ($evidence.present | has($key)) then ({availability: "present"} + $evidence.present[$key]) elif (($selection | split(",|\\+"; null) | map(select(length > 0))) | index($key)) then {availability: "absent", reason_code: "missing_payload"} else {availability: "absent", reason_code: "not_selected"} end))')" \
     && jq -n \
       --arg version "${WORKER_KIT_VERSION}" \
       --arg platform "linux/${TARGETARCH}" \
@@ -58,8 +83,11 @@ RUN runtime_store="$(cat /tmp/runtime-store-path)" \
       --arg bash "${runtime_store}/bin/bash" \
       --arg nixpkgs_version "${nixpkgs_version}" \
       --arg nixpkgs_revision "${nixpkgs_revision}" \
-      '{schema_version: 2, manifest_kind:"codify.worker.kit-manifest/v1", kit_version: $version, platform: $platform, runtime_bin: $runtime_bin, bash: $bash, entrypoint: "/opt/codify-kit/entrypoint.sh", runtime_compatibility: {harness_contracts:["codify.worker.harness/v2","codify.worker.harness/v1"], event_schemas:["codify.worker.event/v2","codify.worker.event/v1"], bootstrap_version:"1.0.0"}, cli_requirements:{pi:{path:"/opt/codify-pi/bin/pi",version:"0.84.2"},opencode:{path:"/opt/codify-opencode/bin/opencode",version:"1.18.19"},claude:{path:"/usr/local/bin/claude",version:"2.1.153"},codex:{path:"/opt/codify-codex/bin/codex",version:"0.146.0"}}, components: {nixpkgs: $nixpkgs_version, nixpkgs_revision: $nixpkgs_revision}}' \
+      --argjson harness_inventory "${inventory}" \
+      '{schema_version: 2, manifest_kind:"codify.worker.kit-manifest/v1", kit_version: $version, platform: $platform, runtime_bin: $runtime_bin, bash: $bash, entrypoint: "/opt/codify-kit/entrypoint.sh", runtime_compatibility: {harness_contracts:["codify.worker.harness/v2","codify.worker.harness/v1"], event_schemas:["codify.worker.event/v2","codify.worker.event/v1"], bootstrap_version:"1.0.0"}, harness_inventory: $harness_inventory, components: {nixpkgs: $nixpkgs_version, nixpkgs_revision: $nixpkgs_revision}}' \
       > /worker-kit/manifest.json \
+    && test "$(jq -r '.harness_inventory | keys | length' /worker-kit/manifest.json)" = 4 \
+    && for key in pi opencode claude codex; do availability="$(jq -r --arg k "${key}" '.harness_inventory[$k].availability' /worker-kit/manifest.json)"; if [ "${availability}" = "present" ]; then test -x "/worker-kit/harness/${key}/$(jq -r --arg k "${key}" '.harness_inventory[$k].path | sub("^/opt/codify-kit/"; "")' /worker-kit/manifest.json)"; fi; done \
     && chmod 755 /worker-kit/launcher /worker-kit/bin/codify-run-as /worker-kit/entrypoint.sh \
       /worker-kit/ci-claude.sh \
       /worker-kit/verify-runtime.sh \
@@ -90,9 +118,10 @@ FROM alpine:3.21 AS smoke
 ARG WORKER_KIT_VERSION
 COPY --from=artifact /worker-kit /opt/codify-kit
 COPY --from=artifact /worker-kit/nix/store /nix/store
-RUN mkdir -p /workspace \
-    && printf '#!/bin/sh\nprintf "2.1.153 (Claude Code smoke stub)\\n"\n' > /usr/local/bin/claude \
-    && chmod 755 /usr/local/bin/claude \
+# Every present inventory entry must pass its functionality gate inside the
+# Kit's own runtime; absent entries are recorded with their reason code.
+# `pi --version` may need a writable home, so give the smoke container one.
+RUN mkdir -p /workspace /root \
     && chmod 0777 /workspace \
     && CODIFY_KIT_VERSION="${WORKER_KIT_VERSION}" /opt/codify-kit/launcher --verify \
       --require-skill-support \

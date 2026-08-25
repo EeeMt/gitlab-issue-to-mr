@@ -60,7 +60,6 @@ codify_verify_runtime() {
     local require_skill_support=0
     local smoke_command=""
     local command cli_version artifact_helper
-    local cli_version_major cli_version_minor cli_version_patch
 
     while [ "$#" -gt 0 ]; do
         case "$1" in
@@ -83,9 +82,6 @@ codify_verify_runtime() {
         esac
     done
 
-    CODIFY_HARNESS_CLI_BIN="${CODIFY_HARNESS_CLI_BIN:?Missing CODIFY_HARNESS_CLI_BIN}"
-    export CODIFY_HARNESS_CLI_BIN
-
     echo "Codify worker kit ${CODIFY_KIT_VERSION:-unknown}"
     echo "Runtime image: ${CODIFY_RUNTIME_IMAGE:-unknown}"
     for command in bash git curl head jq python3 node codegraph ssh rg tar wc; do
@@ -95,53 +91,52 @@ codify_verify_runtime() {
             return 1
         fi
     done
-    case "${CODIFY_HARNESS_CLI_BIN}" in
-        /*) ;;
-        *)
-            echo "CODIFY_HARNESS_CLI_BIN must be an absolute path: ${CODIFY_HARNESS_CLI_BIN}" >&2
-            return 1
-            ;;
-    esac
-    if [ ! -x "${CODIFY_HARNESS_CLI_BIN}" ]; then
-        echo "Harness CLI is unavailable or not executable: ${CODIFY_HARNESS_CLI_BIN}" >&2
-        return 1
-    fi
-    local adapter_path
-    adapter_path="${CODIFY_ORCHESTRATION_DIR}/worker-entrypoint/harness/adapters/${CODIFY_HARNESS_KEY:-claude}.sh"
-    codify_verify_v2_candidate_manifest || return 1
-    if [ -n "${CODIFY_RUNTIME_VERIFICATION_MANIFEST:-}" ] && [ ! -r "${adapter_path}" ]; then
-        echo "V2 candidate selected Adapter is unavailable: ${adapter_path}" >&2
-        return 1
-    fi
-    if [ -r "${adapter_path}" ]; then
-        CODIFY_RUNTIME_DIR="${CODIFY_RUNTIME_DIR:-/tmp/codify-runtime}"
-        mkdir -p "${CODIFY_RUNTIME_DIR}" "${CODIFY_RUNTIME_DIR}/harness-events"
-        # shellcheck source=/dev/null
-        source "${CODIFY_ORCHESTRATION_DIR}/worker-entrypoint/harness/common.sh"
-        # shellcheck source=/dev/null
-        source "${adapter_path}"
-        adapter_verify_runtime || return 1
-        cli_version="${CODIFY_CLI_VERSION}"
+
+    # Explicit single-Harness verification (backend profile verify, host_mount
+    # overrides) or the full Kit inventory walk (kit-only --verify). The walk
+    # gates every present key and records every absent key with its reason; a
+    # present key failing its functionality gate marks only that Harness
+    # unavailable and does not abort the other keys.
+    if [ -n "${CODIFY_HARNESS_CLI_BIN:-}" ]; then
+        verify_one_harness \
+            "${CODIFY_HARNESS_CLI_BIN}" "${CODIFY_HARNESS_KEY:-claude}" "${require_skill_support}" || return 1
     else
-        cli_version="$(codify_run_shell '"${CODIFY_HARNESS_CLI_BIN}" --version')"
-    fi
-    echo "${cli_version}"
-    if [ "${require_skill_support}" -eq 1 ]; then
-        if [[ ! "${cli_version}" =~ ([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
-            echo "Could not parse Harness CLI version required for task skills: ${cli_version}" >&2
+        local kit_manifest
+        kit_manifest="${CODIFY_KIT_HOME:?CODIFY_KIT_HOME is required for Kit verification}/manifest.json"
+        [ -r "${kit_manifest}" ] || {
+            echo "Kit manifest is unreadable: ${kit_manifest}" >&2
             return 1
-        fi
-        cli_version_major=$((10#${BASH_REMATCH[1]}))
-        cli_version_minor=$((10#${BASH_REMATCH[2]}))
-        cli_version_patch=$((10#${BASH_REMATCH[3]}))
-        if (( cli_version_major < 2 \
-            || (cli_version_major == 2 && cli_version_minor < 1) \
-            || (cli_version_major == 2 && cli_version_minor == 1 \
-                && cli_version_patch < 33) )); then
-            echo "Task skills require a compatible Harness CLI; detected: ${cli_version}" >&2
-            return 1
-        fi
+        }
+        local key availability reason path walk_result=0
+        while IFS=$'\t' read -r key availability reason; do
+            [ -n "${key}" ] || continue
+            if [ "${availability}" = "present" ]; then
+                path="$(jq -r --arg k "${key}" '.harness_inventory[$k].path' "${kit_manifest}")"
+                case "${path}" in
+                    /opt/codify-kit/*) ;;
+                    *)
+                        echo "Harness '${key}' has an unsafe inventory path: ${path}" >&2
+                        walk_result=1
+                        continue
+                        ;;
+                esac
+                if [ ! -x "${path}" ]; then
+                    echo "Harness '${key}' inventory file is missing or not executable: ${path}" >&2
+                    walk_result=1
+                    continue
+                fi
+                echo "Verifying present harness '${key}' (${path})"
+                if ! verify_one_harness "${path}" "${key}" "${require_skill_support}"; then
+                    echo "Harness '${key}' functionality gate failed; marking unavailable" >&2
+                    walk_result=1
+                fi
+            else
+                echo "Harness '${key}' absent (${reason:-unknown})"
+            fi
+        done < <(jq -r '.harness_inventory | to_entries[] | [.key, .value.availability, (.value.reason_code // "")] | @tsv' "${kit_manifest}")
+        [ "${walk_result}" -eq 0 ] || return 1
     fi
+
     node --version
     python3 --version
     artifact_helper="${ENTRYPOINT_LIB_DIR}/artifacts.py"
@@ -165,4 +160,64 @@ codify_verify_runtime() {
             "export PATH=\"${CODIFY_RUNTIME_PATH}\"; cd /workspace; ${smoke_command}"
     fi
     echo "Worker kit verification passed"
+}
+
+# Verify exactly one Harness CLI: absolute-path/executable checks, the V2
+# candidate manifest (when injected), the Adapter's own runtime verification
+# (--version, self-check, smoke) and the optional Claude skills gate.
+verify_one_harness() {
+    local cli_bin="$1" harness_key="$2" require_skill_support="$3"
+    local cli_version adapter_path
+    local cli_version_major cli_version_minor cli_version_patch
+
+    case "${cli_bin}" in
+        /*) ;;
+        *)
+            echo "Harness CLI path must be absolute: ${cli_bin}" >&2
+            return 1
+            ;;
+    esac
+    if [ ! -x "${cli_bin}" ]; then
+        echo "Harness CLI is unavailable or not executable: ${cli_bin}" >&2
+        return 1
+    fi
+    CODIFY_HARNESS_KEY="${harness_key}"
+    CODIFY_HARNESS_CLI_BIN="${cli_bin}"
+    export CODIFY_HARNESS_KEY CODIFY_HARNESS_CLI_BIN
+    adapter_path="${CODIFY_ORCHESTRATION_DIR}/worker-entrypoint/harness/adapters/${harness_key}.sh"
+    codify_verify_v2_candidate_manifest || return 1
+    if [ -n "${CODIFY_RUNTIME_VERIFICATION_MANIFEST:-}" ] && [ ! -r "${adapter_path}" ]; then
+        echo "V2 candidate selected Adapter is unavailable: ${adapter_path}" >&2
+        return 1
+    fi
+    if [ -r "${adapter_path}" ]; then
+        CODIFY_RUNTIME_DIR="${CODIFY_RUNTIME_DIR:-/tmp/codify-runtime}"
+        mkdir -p "${CODIFY_RUNTIME_DIR}" "${CODIFY_RUNTIME_DIR}/harness-events"
+        # shellcheck source=/dev/null
+        source "${CODIFY_ORCHESTRATION_DIR}/worker-entrypoint/harness/common.sh"
+        # shellcheck source=/dev/null
+        source "${adapter_path}"
+        adapter_verify_runtime || return 1
+        cli_version="${CODIFY_CLI_VERSION}"
+    else
+        cli_version="$(codify_run_shell '"${CODIFY_HARNESS_CLI_BIN}" --version')"
+    fi
+    echo "${cli_version}"
+    if [ "${require_skill_support}" -eq 1 ] && [ "${harness_key}" = "claude" ]; then
+        if [[ ! "${cli_version}" =~ ([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+            echo "Could not parse Harness CLI version required for task skills: ${cli_version}" >&2
+            return 1
+        fi
+        cli_version_major=$((10#${BASH_REMATCH[1]}))
+        cli_version_minor=$((10#${BASH_REMATCH[2]}))
+        cli_version_patch=$((10#${BASH_REMATCH[3]}))
+        if (( cli_version_major < 2 \
+            || (cli_version_major == 2 && cli_version_minor < 1) \
+            || (cli_version_major == 2 && cli_version_minor == 1 \
+                && cli_version_patch < 33) )); then
+            echo "Task skills require a compatible Harness CLI; detected: ${cli_version}" >&2
+            return 1
+        fi
+    fi
+    return 0
 }

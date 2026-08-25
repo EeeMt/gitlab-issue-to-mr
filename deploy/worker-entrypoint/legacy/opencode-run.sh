@@ -16,7 +16,7 @@ set -u
 # may fork SDK/plugin helpers; cleanup must converge that entire group without
 # ever signalling the runner's own process group.
 
-CODIFY_OPENCODE_BIN="${CODIFY_OPENCODE_BIN:-/usr/local/bin/opencode}"
+CODIFY_OPENCODE_BIN="${CODIFY_OPENCODE_BIN:?CODIFY_OPENCODE_BIN is required (resolved by the opencode adapter from the Kit inventory or an authorized host_mount)}"
 CODIFY_OPENCODE_RAW_EVENT_JSONL="${CODIFY_OPENCODE_RAW_EVENT_JSONL:-${CODIFY_RUNTIME_DIR}/harness-events/opencode.jsonl}"
 CODIFY_OPENCODE_EVENT_TRANSLATOR="${CODIFY_OPENCODE_EVENT_TRANSLATOR:-${CODIFY_ORCHESTRATION_DIR}/worker-entrypoint/harness/adapters/opencode_events.py}"
 CODIFY_OPENCODE_BRIDGE="${CODIFY_OPENCODE_BRIDGE:-${CODIFY_ORCHESTRATION_DIR}/worker-entrypoint/harness/adapters/opencode_bridge.py}"

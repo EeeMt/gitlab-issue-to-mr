@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import inspect
 import time
 import uuid
-from typing import Any
+from datetime import timezone
+from types import SimpleNamespace
+from typing import Any, Mapping
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, StrictInt, field_validator, model_validator
@@ -65,6 +68,7 @@ from app.core.worker_profiles import (
 from app.core.worker_runtime_bundle import (
     build_v2_verification_candidate,
     frozen_v2_adapter_identity,
+    v2_launcher_manifest_bytes,
 )
 from app.core.worker_runtime_readiness import (
     READINESS_UNKNOWN,
@@ -615,6 +619,8 @@ async def _clear_profile_verification(
             v2_worker_image_identity=None,
             v2_harness_verification_evidence=None,
             v2_worker_image_identity_generation=generation + 1,
+            worker_kit_identity=None,
+            worker_kit_identity_generation=generation + 1,
         )
     )
     if expected_generation is not None and result.rowcount != 1:
@@ -638,8 +644,69 @@ def _v2_harness_evidence(
         "verification_input_digest": verification_digest,
         "image_identity": dict(image_identity),
         "generation": generation,
-        "verified_at": verified_at.isoformat(),
+        # The portable validator requires an explicit UTC offset; DB columns
+        # stay naive UTC, so the evidence document carries the aware form.
+        "verified_at": (
+            verified_at.replace(tzinfo=timezone.utc).isoformat()
+            if verified_at.tzinfo is None
+            else verified_at.isoformat()
+        ),
     }
+
+
+def _verification_cli_bin(
+    readiness: Any, profile: WorkerProfile, harness_key: str,
+) -> str:
+    """Resolve the exact container CLI path for one verification container.
+
+    ``worker_kit`` (the implicit default) resolves the executable from the
+    frozen Kit manifest's harness inventory observed by the strict probe;
+    ``host_mount`` is the explicit per-Harness break-glass and uses the
+    declared executable path. An absent Kit entry is a deterministic
+    ``harness_cli_unavailable`` rejection — there is no image/PATH fallback.
+    """
+    runtime = (getattr(profile, "harness_runtimes", None) or {}).get(harness_key)
+    source = runtime.get("source") if isinstance(runtime, Mapping) else None
+    if source == "host_mount":
+        executable_path = runtime.get("executable_path")
+        if not isinstance(executable_path, str) or not executable_path.startswith("/"):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "code": "harness_cli_unavailable",
+                    "message": (
+                        f"host_mount runtime for {harness_key!r} has no absolute "
+                        "executable_path"
+                    ),
+                },
+            )
+        return executable_path
+    inventory = getattr(readiness, "harness_inventory", None) or {}
+    entry = inventory.get(harness_key)
+    path = entry.get("path") if isinstance(entry, Mapping) else None
+    if (
+        not isinstance(entry, Mapping)
+        or entry.get("availability") != "present"
+        or not isinstance(path, str)
+        or not path.startswith("/")
+    ):
+        reason = (
+            entry.get("reason_code")
+            if isinstance(entry, Mapping) and entry.get("availability") == "absent"
+            else None
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "harness_cli_unavailable",
+                "message": (
+                    f"Harness {harness_key!r} is not available in Worker Kit "
+                    f"{getattr(readiness, 'worker_kit_version', None)!r}"
+                ),
+                "reason_code": reason,
+            },
+        )
+    return path
 
 
 @router.post("/worker-profiles/{profile_id}/verify-runtime")
@@ -694,7 +761,9 @@ async def verify_worker_profile_runtime(
             verified_runtime_configuration_digest=None,
             v2_worker_image_identity=None,
             v2_harness_verification_evidence=None,
-            v2_worker_image_identity_generation=prior_generation + 1,
+                       v2_worker_image_identity_generation=prior_generation + 1,
+            worker_kit_identity=None,
+            worker_kit_identity_generation=prior_generation + 1,
         )
     )
     if result.rowcount != 1:
@@ -731,6 +800,23 @@ async def verify_worker_profile_runtime(
                 worker_profile_id=profile_id,
                 worker_profile_name=profile.name,
             ),
+        )
+    # The content-addressed Worker Kit identity observed by the strict probe is
+    # frozen into the Profile and later into every Task snapshot/Bundle binding
+    # (execution identity = image_identity + kit_identity + bundle_digest).
+    worker_kit_identity = (
+        dict(outcome.readiness.kit_identity)
+        if isinstance(outcome.readiness.kit_identity, Mapping)
+        else None
+    )
+    if requires_v2_identity and worker_kit_identity is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "worker_kit_identity_missing",
+                "message": "The strict Kit probe did not record a Worker Kit identity; "
+                "re-run the verification against a Kit-owned release",
+            },
         )
 
     # Layer 2: profile-specific verification container.
@@ -769,7 +855,9 @@ async def verify_worker_profile_runtime(
                 candidate_archive = None
                 if requires_v2_identity:
                     adapter_identity = frozen_v2_adapter_identity(
-                        harness_key, worker_image_identity=image_identity
+                        harness_key,
+                        worker_image_identity=image_identity,
+                        worker_kit_identity=worker_kit_identity,
                     )
                     candidate_evidence = _v2_harness_evidence(
                         profile, harness_key=harness_key,
@@ -780,20 +868,55 @@ async def verify_worker_profile_runtime(
                     )
                     candidate_evidence_by_key[harness_key] = candidate_evidence
                     _candidate_manifest, candidate_archive = build_v2_verification_candidate(
-                        source_dir=None, cli_artifact_manifest_path=None,
+                        source_dir=None,
                         worker_image_identity=image_identity,
+                        worker_kit_identity=worker_kit_identity,
                         harness_verification_evidence=candidate_evidence,
                     )
+                cli_bin = _verification_cli_bin(
+                    outcome.readiness, profile, harness_key
+                )
+                candidate_bindings: dict[str, str] = {}
+                if candidate_archive is not None:
+                    # The verification candidate is a real frozen Bundle: the
+                    # launcher requires the same digest/contract/Adapter
+                    # bindings a Task execution would carry.
+                    launcher_bytes = v2_launcher_manifest_bytes(
+                        SimpleNamespace(manifest=_candidate_manifest)
+                    )
+                    candidate_bindings = {
+                        "CODIFY_RUNTIME_MANIFEST_DIGEST": hashlib.sha256(
+                            launcher_bytes
+                        ).hexdigest(),
+                        "CODIFY_RUNTIME_BUNDLE_DIGEST": str(
+                            _candidate_manifest.get("bundle_digest") or ""
+                        ),
+                        "CODIFY_RUNTIME_CONTRACT_VERSION": str(
+                            _candidate_manifest.get("contract_version") or ""
+                        ),
+                        "CODIFY_ADAPTER_VERSION": str(
+                            (
+                                (
+                                    _candidate_manifest.get("adapters") or {}
+                                )
+                                .get(harness_key, {})
+                                .get("adapter", {})
+                            ).get("version")
+                            or ""
+                        ),
+                                        }
                 container = client.create_container(
                     image=(image_identity or {}).get("image_reference") or runtime.image,
                     command=list(base_command),
                     environment={
                         **runtime.environment, **overrides["environment"],
                         "CODIFY_HARNESS_KEY": harness_key, "CODIFY_RUNTIME_IMAGE": runtime.image,
+                        "CODIFY_HARNESS_CLI_BIN": cli_bin,
+                        **candidate_bindings,
                         **(
                             {
-                                "CODIFY_ORCHESTRATION_DIR": "/tmp/codify-verify-runtime/codify-runtime/orchestration",
-                                "CODIFY_RUNTIME_VERIFICATION_MANIFEST": "/tmp/codify-verify-runtime/codify-runtime/orchestration/manifest.json",
+                                "CODIFY_ORCHESTRATION_DIR": "/tmp/codify-runtime/orchestration",
+                                "CODIFY_RUNTIME_VERIFICATION_MANIFEST": "/tmp/codify-runtime/orchestration/manifest.json",
                             }
                             if candidate_archive is not None else {}
                         ),
@@ -805,7 +928,10 @@ async def verify_worker_profile_runtime(
                     labels={"codify.worker_kit_verification": "true", "codify.worker_kit_version": runtime.worker_kit_version or ""},
                 )
                 if candidate_archive is not None:
-                    client.put_archive(container, "/tmp/codify-verify-runtime", candidate_archive)
+                    # The archive's top-level directory is codify-runtime/;
+                    # extracting into the always-existing /tmp avoids the
+                    # daemon's 404 for a missing destination directory.
+                    client.put_archive(container, "/tmp", candidate_archive)
                     client.start_container(container)
                 exit_code, logs = client.wait_for_container(container, timeout=180)
                 logs_by_key[harness_key] = logs
@@ -826,6 +952,10 @@ async def verify_worker_profile_runtime(
             asyncio.to_thread(verify_runtime),
             timeout=200,
         )
+    except HTTPException:
+        # Deterministic rejection (e.g. harness_cli_unavailable for a Harness
+        # that is absent from the Kit inventory) keeps its own status code.
+        raise
     except Exception as exc:
         # Transient: keep any previously verified digest/timestamp (§15.1).
         raise HTTPException(
@@ -879,7 +1009,11 @@ async def verify_worker_profile_runtime(
             verified_runtime_configuration_digest=verification_digest,
             image_digest=repo_digest,
             v2_worker_image_identity=image_identity if requires_v2_identity else None,
-            v2_harness_verification_evidence=evidence_by_key if requires_v2_identity else None,
+                        v2_harness_verification_evidence=evidence_by_key if requires_v2_identity else None,
+            worker_kit_identity=(
+                worker_kit_identity if requires_v2_identity else None
+            ),
+            worker_kit_identity_generation=identity_generation,
         )
     )
     if result.rowcount != 1:
@@ -891,6 +1025,8 @@ async def verify_worker_profile_runtime(
     profile.image_digest = repo_digest
     profile.v2_worker_image_identity = image_identity if requires_v2_identity else None
     profile.v2_harness_verification_evidence = evidence_by_key if requires_v2_identity else None
+    profile.worker_kit_identity = worker_kit_identity if requires_v2_identity else None
+    profile.worker_kit_identity_generation = identity_generation
 
     return {
         "ok": True,
@@ -1310,6 +1446,10 @@ async def update_worker_profile(
             profile.v2_harness_verification_evidence = None
             profile.v2_worker_image_identity_generation = (
                 int(getattr(profile, "v2_worker_image_identity_generation", 0) or 0) + 1
+            )
+            profile.worker_kit_identity = None
+            profile.worker_kit_identity_generation = (
+                int(getattr(profile, "worker_kit_identity_generation", 0) or 0) + 1
             )
 
         await db.commit()

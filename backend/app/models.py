@@ -1056,6 +1056,13 @@ class WorkerProfile(Base):
     # verified for several Harnesses, but success for (say) Claude must never
     # authorize a Pi task without Pi's own strict verification.
     v2_harness_verification_evidence: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Content-addressed Worker Kit identity (codify.worker.kit-identity/v1)
+    # recorded by the last verified Kit installation; its generation
+    # invalidates stale verification evidence like the image generation does.
+    worker_kit_identity: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    worker_kit_identity_generation: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
     harness_runtimes: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
@@ -1338,6 +1345,10 @@ class WorkerRuntimeReadiness(Base):
     checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     ready_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     check_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Observed Kit harness inventory (availability/reason per key) and the
+    # manifest content identity from the last committed probe.
+    harness_inventory: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    kit_identity: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     check_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,

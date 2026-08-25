@@ -5,11 +5,23 @@ CODIFY_PI_TRANSLATOR="${CODIFY_ORCHESTRATION_DIR}/worker-entrypoint/harness/adap
 CODIFY_PI_BRIDGE="${CODIFY_ORCHESTRATION_DIR}/worker-entrypoint/harness/adapters/pi_bridge.py"
 
 codify_pi_bin() {
-    if [ -x "/opt/codify-pi/bin/pi" ]; then
-        echo "/opt/codify-pi/bin/pi"
+    # Frozen single source: the backend-injected CODIFY_HARNESS_CLI_BIN (Kit
+    # inventory path or authorized host_mount), else the Kit manifest's own
+    # inventory path. The runtime image and PATH are never consulted.
+    if [ -n "${CODIFY_HARNESS_CLI_BIN:-}" ]; then
+        printf '%s\n' "${CODIFY_HARNESS_CLI_BIN}"
         return 0
     fi
-    echo "${CODIFY_PI_BIN:-/usr/local/bin/pi}"
+    if [ -r "${CODIFY_KIT_HOME:-/opt/codify-kit}/manifest.json" ]; then
+        local path
+        path="$(jq -r --arg k pi '.harness_inventory[$k].path // empty' \
+            "${CODIFY_KIT_HOME:-/opt/codify-kit}/manifest.json" 2>/dev/null || true)"
+        if [ -n "${path}" ]; then
+            printf '%s\n' "${path}"
+            return 0
+        fi
+    fi
+    return 1
 }
 
 pi_adapter_metadata() {
@@ -27,11 +39,16 @@ pi_adapter_metadata() {
 
 pi_adapter_verify_runtime() {
     local bin
-    bin="$(codify_pi_bin)"
+    bin="$(codify_pi_bin)" || {
+        echo "Pi CLI is not available from the Worker Kit inventory" >&2
+        return 1
+    }
     if [ ! -x "${bin}" ]; then
         echo "Pi CLI is unavailable: ${bin}" >&2
         return 1
     fi
+    CODIFY_PI_BIN="${bin}"
+    export CODIFY_PI_BIN
     local version_output pinned normalized
     version_output="$("${bin}" --version 2>/dev/null | head -n 1)"
     if [ -z "${version_output}" ]; then
@@ -43,14 +60,14 @@ pi_adapter_verify_runtime() {
     normalized="$(printf '%s\n' "${version_output}" | awk '{print $NF}')"
     CODIFY_CLI_VERSION="${normalized}"
     export CODIFY_CLI_VERSION
-    # Pi 0.84.2 is the frozen version (probe §3.1); refuse to run an unverified
-    # binary so manifest pinning is enforced at the container boundary.
+    # The Adapter-declared pinned version is the tested/baseline, not a hard
+    # gate: an observed difference only logs a sanitized advisory warning and
+    # execution continues (§11.2 Compatibility policy).
     local pinned
     pinned="$(jq -r '.adapters.pi.cli_version // empty' \
         "${CODIFY_ORCHESTRATION_DIR}/worker-entrypoint/harness/manifest.json" 2>/dev/null || true)"
     if [ -n "${pinned}" ] && [ "${normalized}" != "${pinned}" ]; then
-        echo "Pi CLI version mismatch: expected ${pinned}, got ${normalized}" >&2
-        return 1
+        echo "WARNING: Pi CLI version ${normalized} differs from the Adapter baseline ${pinned} (advisory, not enforced)" >&2
     fi
     return 0
 }

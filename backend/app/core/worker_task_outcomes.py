@@ -10,7 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.utcnow import utcnow
 from app.core.worker_docker_targets import TaskContainerLookupError
-from app.core.worker_runtime_readiness import WorkerRuntimeUnavailableError
+from app.core.worker_runtime_readiness import (
+    HarnessCliUnavailableError,
+    WorkerRuntimeUnavailableError,
+)
 from app.models import Issue, Task, TaskStatus
 
 logger = logging.getLogger(__name__)
@@ -114,6 +117,17 @@ async def fail_execute_task(
                 "message": "Worker runtime is unavailable; resolve the failure and retry",
                 "failure_code": error.failure_code,
                 "failure_message": error.failure_message,
+            },
+            ensure_ascii=False,
+        )[:1000]
+    elif isinstance(error, HarnessCliUnavailableError):
+        task.error_message = json.dumps(
+            {
+                "code": "harness_cli_unavailable",
+                "message": str(error),
+                "harness_key": error.harness_key,
+                "reason_code": error.reason_code,
+                "kit_version": error.kit_version,
             },
             ensure_ascii=False,
         )[:1000]

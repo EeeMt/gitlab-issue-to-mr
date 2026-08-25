@@ -121,7 +121,11 @@ CLAUDE_MODEL="${CLAUDE_MODEL:-}"
 CLAUDE_CODE_EXIT_AFTER_STOP_DELAY="${CLAUDE_CODE_EXIT_AFTER_STOP_DELAY:-5000}"
 RESULT_EXIT_GRACE_SECONDS="${CI_CLAUDE_RESULT_EXIT_GRACE_SECONDS:-30}"
 TASK_SKILLS_DIR="${CODIFY_TASK_SKILLS_DIR:-}"
-CLAUDE_BIN="${CODIFY_CLAUDE_BIN:-/usr/local/bin/claude}"
+CLAUDE_BIN="${CODIFY_CLAUDE_BIN:-}"
+if [ -z "${CLAUDE_BIN}" ]; then
+    echo "Claude CLI is unavailable: no Kit inventory path or authorized host_mount" >&2
+    exit 1
+fi
 CLAUDE_RUN_AS="${CODIFY_CLAUDE_RUN_AS:-}"
 SESSION_ID_FILE=".claude_session_id"
 

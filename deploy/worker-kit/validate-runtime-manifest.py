@@ -47,7 +47,7 @@ def _digest_entries(entries: list[dict]) -> str:
 def _validate_worker_image_identity(identity: object, runtime_platform: str) -> dict[str, str]:
     if not isinstance(identity, dict) or identity.get("schema") != "codify.worker-image-identity/v1":
         fail("worker_image_identity schema is invalid")
-    required = ("daemon_key", "image_reference", "image_id", "runtime_platform", "cli_artifact_lock_sha256")
+    required = ("daemon_key", "image_reference", "image_id", "runtime_platform")
     if any(not isinstance(identity.get(key), str) or not identity[key] for key in required):
         fail("worker_image_identity is incomplete")
     if any(char.isspace() for char in identity["daemon_key"]):
@@ -60,13 +60,27 @@ def _validate_worker_image_identity(identity: object, runtime_platform: str) -> 
         fail("worker_image_identity runtime_platform is invalid")
     if identity["runtime_platform"] != runtime_platform:
         fail("worker_image_identity platform conflicts with runtime_platform")
-    if SHA256_RE.fullmatch(identity["cli_artifact_lock_sha256"]) is None:
-        fail("worker_image_identity CLI lock digest is invalid")
+    return {key: identity[key] for key in ("schema", *required)}
+
+
+def _validate_worker_kit_identity(identity: object, runtime_platform: str) -> dict[str, str]:
+    if not isinstance(identity, dict) or identity.get("schema") != "codify.worker.kit-identity/v1":
+        fail("worker_kit_identity schema is invalid")
+    required = ("kit_version", "platform", "manifest_sha256")
+    if any(not isinstance(identity.get(key), str) or not identity[key] for key in required):
+        fail("worker_kit_identity is incomplete")
+    if LINUX_PLATFORM_RE.fullmatch(identity["platform"]) is None:
+        fail("worker_kit_identity platform is invalid")
+    if identity["platform"] != runtime_platform:
+        fail("worker_kit_identity platform conflicts with runtime_platform")
+    if SHA256_RE.fullmatch(identity["manifest_sha256"]) is None:
+        fail("worker_kit_identity manifest_sha256 is invalid")
     return {key: identity[key] for key in ("schema", *required)}
 
 
 def _bundle_digest(
-    files: list[dict], worker_image_identity: object, harness_verification_evidence: object
+        files: list[dict], worker_image_identity: object, harness_verification_evidence: object,
+    worker_kit_identity: object,
 ) -> str:
     file_digest = _digest_entries(files)
     if worker_image_identity is None:
@@ -78,7 +92,8 @@ def _bundle_digest(
             {
                 "files_digest": file_digest,
                 "worker_image_identity": worker_image_identity,
-                "harness_verification_evidence": harness_verification_evidence,
+                                "harness_verification_evidence": harness_verification_evidence,
+                "worker_kit_identity": worker_kit_identity,
             },
             ensure_ascii=False, sort_keys=True, separators=(",", ":")
         ).encode()
@@ -189,6 +204,9 @@ def validate(document: dict) -> None:
         fail("runtime_platform is missing or invalid")
     worker_image_identity = document.get("worker_image_identity")
     normalized_worker_image_identity = _validate_worker_image_identity(worker_image_identity, platform)
+    worker_kit_identity = document.get("worker_kit_identity")
+    if worker_kit_identity is not None:
+        worker_kit_identity = _validate_worker_kit_identity(worker_kit_identity, platform)
     adapters = document["adapters"]
     if not isinstance(adapters, dict) or not adapters or set(adapters) - APPROVED:
         fail("adapters are missing or contain non-approved keys")
@@ -250,12 +268,16 @@ def validate(document: dict) -> None:
     if "entrypoint.sh" not in seen:
         fail("entrypoint.sh is not manifested")
     if schema == "codify.worker.runtime-bundle/v2":
-        if _bundle_digest(files, worker_image_identity, harness_verification_evidence) != document["bundle_digest"]:
+        if _bundle_digest(
+            files, worker_image_identity, harness_verification_evidence, worker_kit_identity
+        ) != document["bundle_digest"]:
             fail("bundle_digest does not match frozen files")
     elif isinstance(document.get("bundle_digest"), str):
         if not SHA256_RE.fullmatch(document["bundle_digest"]):
             fail("bundle_digest is missing or invalid")
-        if _bundle_digest(files, worker_image_identity, harness_verification_evidence) != document["bundle_digest"]:
+        if _bundle_digest(
+            files, worker_image_identity, harness_verification_evidence, worker_kit_identity
+        ) != document["bundle_digest"]:
             fail("bundle_digest does not match frozen files")
 
 

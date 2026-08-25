@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import time
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
@@ -53,7 +54,10 @@ from app.core.worker_runtime_bundle import (
     load_bound_runtime_bundle,
 )
 from app.core.worker_runtime_readiness import (
+    HarnessCliUnavailableError,
+    WorkerRuntimeUnavailableError,
     is_kit_mount_error,
+    read_runtime_readiness,
     recheck_runtime_on_container_error,
 )
 from app.core.worker_task_artifacts import (
@@ -324,6 +328,29 @@ async def create_execute_container(
         )
         if runtime_bundle.manifest.get("harness_verification_evidence") != snapshot_evidence:
             raise RuntimeError("V2 Runtime Bundle Harness verification evidence does not match Task Snapshot")
+        snapshot_kit_identity = (
+            frozen_config.get("worker_kit_identity") if isinstance(frozen_config, dict) else None
+        )
+        bundle_kit_identity = runtime_bundle.manifest.get("worker_kit_identity")
+        if snapshot_kit_identity is not None and bundle_kit_identity != snapshot_kit_identity:
+            raise RuntimeError("V2 Runtime Bundle Worker Kit identity does not match Task Snapshot")
+        # The mounted Kit observed by the readiness probe must match the frozen
+        # identity: a Kit replacement between verification and execution fails
+        # closed instead of silently running against different bytes.
+        kit_fingerprint = getattr(frozen_snapshot, "runtime_locator_fingerprint", None)
+        observed_readiness = None
+        if snapshot_kit_identity is not None and kit_fingerprint:
+            observed_readiness = await read_runtime_readiness(db, kit_fingerprint)
+            if not observed_readiness.is_ready:
+                raise WorkerRuntimeUnavailableError(
+                    failure_code=observed_readiness.failure_code,
+                    failure_message=observed_readiness.failure_message,
+                )
+            if observed_readiness.kit_identity != snapshot_kit_identity:
+                raise RuntimeError(
+                    "Worker Kit identity changed since the Task snapshot; "
+                    "re-verify the Profile before executing"
+                )
         worker_image = expected_identity["image_reference"]
         if not settings.worker_skip_image_pull:
             try:
@@ -388,6 +415,42 @@ async def create_execute_container(
         attempt=attempt,
         require_attempt_for_v2=True,
     )
+
+    # Resolve the exact container CLI path from the frozen Kit manifest or an
+    # explicitly authorized host_mount. There is no image/PATH fallback: a
+    # Task selecting a Harness that is absent from the Kit inventory is
+    # rejected with the stable harness_cli_unavailable error (§11.3).
+    harness_cli_bin: str | None = None
+    frozen_cli_source = getattr(frozen_snapshot, "cli_source", None)
+    frozen_cli_path = getattr(frozen_snapshot, "cli_executable_path", None)
+    if runtime_bundle.contract_version == "codify.worker.harness/v2":
+        if frozen_cli_source == "host_mount":
+            if not isinstance(frozen_cli_path, str) or not frozen_cli_path.startswith("/"):
+                raise RuntimeError(
+                    "explicit V2 Task host_mount runtime has no absolute CLI path"
+                )
+            harness_cli_bin = frozen_cli_path
+        else:
+            inventory = (getattr(observed_readiness, "harness_inventory", None) or {})
+            entry = inventory.get(harness_key)
+            inventory_path = entry.get("path") if isinstance(entry, Mapping) else None
+            if (
+                not isinstance(entry, Mapping)
+                or entry.get("availability") != "present"
+                or not isinstance(inventory_path, str)
+                or not inventory_path.startswith("/")
+            ):
+                raise HarnessCliUnavailableError(
+                    harness_key=harness_key,
+                    reason_code=(
+                        entry.get("reason_code")
+                        if isinstance(entry, Mapping)
+                        and entry.get("availability") == "absent"
+                        else None
+                    ),
+                    kit_version=getattr(observed_readiness, "worker_kit_version", None),
+                )
+            harness_cli_bin = inventory_path
 
     if worker_custom_scripts_configured(settings):
         logger.debug(
@@ -476,6 +539,7 @@ async def create_execute_container(
     environment.update(
         {
             "CODIFY_HARNESS_KEY": attempt.harness_key,
+            "CODIFY_HARNESS_CLI_BIN": harness_cli_bin or "",
             "CODIFY_ADAPTER_VERSION": attempt.adapter_version,
             "CODIFY_ATTEMPT_ID": attempt.attempt_id,
             "CODIFY_RUNTIME_BUNDLE_DIGEST": runtime_bundle.digest,

@@ -2,74 +2,27 @@
 
 # Java 21 + Maven project runtime image for mounted worker-kit profiles.
 #
-# Codify-owned tools, entrypoint scripts, CodeGraph, Mermaid validation, and ci-claude
-# are supplied by the mounted worker kit.
-#
-# Harness CLIs (V2): the four exact-version CLIs are baked in-image at the
-# adapter-preferred paths so every harness can run without host mounts:
-#   pi 0.84.2      -> /opt/codify-pi/bin/pi        (package + native layout)
-#   opencode 1.18.19 -> /opt/codify-opencode/bin/opencode
-#   codex 0.146.0  -> /opt/codify-codex/bin/codex  (bundle + resources)
-#   claude 2.1.153 -> /usr/local/bin/claude
-# The binaries are NOT committed. The deployment stages them as ./worker-cli/
-# inside the build context (see dev-env docs); this image is built on the dev
-# host where the provisioned binaries live.
+# This image provides only the project toolchain (Java 21, Maven, Git, SSH,
+# curl, CA tooling) plus the Codify workspace/UID layout. It no longer carries
+# or locks any Harness CLI: the four Harness CLIs (pi/opencode/claude/codex)
+# are supplied by the Worker Kit, which is content-addressed and installed at
+# /opt/codify/worker-kits/ (see deploy/worker-kit/export.sh and the Kit
+# manifest). The Kit records each Harness' availability in harness_inventory.
 FROM maven:3.9.9-eclipse-temurin-21
 
-# External CLI payloads are staged by the release operator, outside Git.  Their
-# digest values are deliberately required build inputs: an empty, guessed, or
-# "minimum version only" declaration must never produce a releasable image.
+# Keep this image focused on project build tools. The worker kit supplies the
+# Harness CLIs, jq, ripgrep, Node.js, Python helpers, and Codify orchestration
+# scripts. The base Maven image already provides Java 21, Maven, Git, SSH,
+# curl, and CA tooling.
 ARG TARGETARCH
-ARG PI_CLI_VERSION=0.84.2
-ARG OPENCODE_CLI_VERSION=1.18.19
-ARG CLAUDE_CLI_VERSION=2.1.153
-ARG CODEX_CLI_VERSION=0.146.0
-ARG PI_CLI_SHA256
-ARG OPENCODE_CLI_SHA256
-ARG CLAUDE_CLI_SHA256
-ARG CODEX_CLI_SHA256
 
 WORKDIR /workspace
 
-COPY worker-cli/pi/ /opt/codify-pi/
-COPY worker-cli/opencode/opencode /opt/codify-opencode/bin/opencode
-COPY worker-cli/claude /usr/local/bin/claude
-COPY worker-cli/codex/ /opt/codify-codex/
-COPY deploy/worker-cli-artifacts.json /tmp/codify-worker-cli-artifacts.json
-
-# Keep this image focused on project build tools. The worker kit supplies jq,
-# ripgrep, Node.js, Python helpers, and Codify orchestration scripts. The base
-# Maven image already provides Java 21, Maven, Git, SSH, curl, and CA tooling.
 RUN ln -sf /opt/java/openjdk/bin/java /usr/local/bin/java \
     && ln -sf /opt/java/openjdk/bin/keytool /usr/local/bin/keytool \
     && mkdir -p /workspace /home/codify/.m2/repository \
     && chown -R 1000:1000 /workspace /home/codify \
-    && chmod 755 /opt/codify-pi/bin/pi \
-      /opt/codify-opencode/bin/opencode \
-      /opt/codify-codex/bin/codex \
-      /opt/codify-codex/bin/codex-code-mode-host \
-      /usr/local/bin/claude \
     && test -n "${TARGETARCH}" \
-    && test -n "${PI_CLI_SHA256}" \
-    && test -n "${OPENCODE_CLI_SHA256}" \
-    && test -n "${CLAUDE_CLI_SHA256}" \
-    && test -n "${CODEX_CLI_SHA256}" \
-    && test "$(sha256sum /opt/codify-pi/bin/pi | awk '{print $1}')" = "${PI_CLI_SHA256}" \
-    && test "$(sha256sum /opt/codify-opencode/bin/opencode | awk '{print $1}')" = "${OPENCODE_CLI_SHA256}" \
-    && test "$(sha256sum /usr/local/bin/claude | awk '{print $1}')" = "${CLAUDE_CLI_SHA256}" \
-    && test "$(sha256sum /opt/codify-codex/bin/codex | awk '{print $1}')" = "${CODEX_CLI_SHA256}" \
-    && /opt/codify-pi/bin/pi --version | grep -F "${PI_CLI_VERSION}" \
-    && /opt/codify-opencode/bin/opencode --version | grep -F "${OPENCODE_CLI_VERSION}" \
-    && /usr/local/bin/claude --version | grep -F "${CLAUDE_CLI_VERSION}" \
-    && /opt/codify-codex/bin/codex --version | grep -F "${CODEX_CLI_VERSION}" \
-    && printf '{"schema":"codify.worker.cli-artifacts/v1","platform":"linux/%s","artifacts":{"pi":{"path":"/opt/codify-pi/bin/pi","version":"%s","sha256":"%s"},"opencode":{"path":"/opt/codify-opencode/bin/opencode","version":"%s","sha256":"%s"},"claude":{"path":"/usr/local/bin/claude","version":"%s","sha256":"%s"},"codex":{"path":"/opt/codify-codex/bin/codex","version":"%s","sha256":"%s"}}}\n' \
-      "${TARGETARCH}" "${PI_CLI_VERSION}" "${PI_CLI_SHA256}" \
-      "${OPENCODE_CLI_VERSION}" "${OPENCODE_CLI_SHA256}" \
-      "${CLAUDE_CLI_VERSION}" "${CLAUDE_CLI_SHA256}" \
-      "${CODEX_CLI_VERSION}" "${CODEX_CLI_SHA256}" \
-      > /etc/codify-worker-cli-artifacts.json \
-    && test -s /tmp/codify-worker-cli-artifacts.json \
-    && test -s /etc/codify-worker-cli-artifacts.json \
     && java -version \
     && keytool -help >/dev/null \
     && mvn -version

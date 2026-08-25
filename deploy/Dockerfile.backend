@@ -68,8 +68,8 @@ COPY --from=python-builder /venv /venv
 # Copy entrypoint script
 COPY deploy/entrypoint.backend.sh /entrypoint.sh
 COPY deploy/scripts/run-migration-owner.sh /usr/local/bin/run-migration-owner
-COPY deploy/scripts/validate-worker-cli-artifact-lock.py /usr/local/lib/codify/validate-worker-cli-artifact-lock.py
-RUN chmod +x /entrypoint.sh /usr/local/bin/run-migration-owner /usr/local/lib/codify/validate-worker-cli-artifact-lock.py
+
+RUN chmod +x /entrypoint.sh /usr/local/bin/run-migration-owner
 
 # Variable part: application source code (invalidates only these final layers)
 COPY backend/app/ ./app/
