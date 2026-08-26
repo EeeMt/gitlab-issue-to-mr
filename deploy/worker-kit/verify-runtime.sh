@@ -36,8 +36,14 @@ done
 [ -x "${KIT_PATH}/launcher" ] || { echo "Invalid worker kit: ${KIT_PATH}" >&2; exit 1; }
 [ -d "${KIT_PATH}/nix/store" ] || { echo "Worker kit Nix store is missing" >&2; exit 1; }
 [ -r "${KIT_PATH}/manifest.json" ] || { echo "Worker Kit manifest is missing" >&2; exit 1; }
+[ -f "${KIT_PATH}/verify-kit-content.py" ] || { echo "Worker Kit content verifier is missing" >&2; exit 1; }
 [ -z "${RUNTIME_MANIFEST}" ] || [ -r "${RUNTIME_MANIFEST}" ] || { echo "Runtime Bundle manifest is unreadable" >&2; exit 1; }
 [ "${VERIFY_ALL}" -eq 0 ] || [ -n "${RUNTIME_MANIFEST}" ] || { echo "--all-harnesses requires --runtime-manifest" >&2; exit 2; }
+TRUSTED_CONTENT_VERIFIER="${CODIFY_TRUSTED_KIT_CONTENT_VERIFIER:-${PROJECT_ROOT}/deploy/worker-kit/verify-kit-content.py}"
+[ -f "${TRUSTED_CONTENT_VERIFIER}" ] || {
+    echo "Trusted Worker Kit content verifier is missing: ${TRUSTED_CONTENT_VERIFIER}" >&2
+    exit 2
+}
 if [ -n "${HARNESS_HOST_PATH}" ]; then
     [ -x "${HARNESS_HOST_PATH}" ] || { echo "Harness executable is not executable" >&2; exit 1; }
     HARNESS_CONTAINER_PATH="${HARNESS_CONTAINER_PATH:-/usr/local/bin/${HARNESS_KEY}}"
@@ -76,6 +82,10 @@ for key, entry in inventory.items():
         if entry.get('reason_code') not in {'not_selected', 'missing_payload'}:
             fail('Kit inventory absent reason_code is invalid: ' + key)
 PY
+if ! python3 "${TRUSTED_CONTENT_VERIFIER}" --root "${KIT_PATH}" >/dev/null; then
+    echo "verify-runtime: Worker Kit content inventory does not match installed bytes" >&2
+    exit 1
+fi
 [ -n "${RUNTIME_MANIFEST}" ] && {
 python3 - "${RUNTIME_MANIFEST}" "${KIT_PATH}/manifest.json" "${IMAGE_INSPECT}" <<'PY'
 import hashlib, json, pathlib, re, sys
@@ -135,7 +145,11 @@ check_payload_integrity() {
     local expected_sha expected_size observed_sha observed_size
     expected_sha="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["harness_inventory"][sys.argv[2]]["sha256"])' "${KIT_PATH}/manifest.json" "${key}")"
     expected_size="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["harness_inventory"][sys.argv[2]]["size"])' "${KIT_PATH}/manifest.json" "${key}")"
-    observed="$(docker run --rm --entrypoint /bin/sh "${IMAGE}" -c 'sha256sum "$1"; wc -c < "$1"' sh "${path}" 2>/dev/null || true)"
+    observed="$(docker run --rm \
+        --volume "${KIT_PATH}:/opt/codify-kit:ro" \
+        --volume "${KIT_PATH}/nix/store:/nix/store:ro" \
+        --entrypoint /bin/sh "${IMAGE}" \
+        -c 'sha256sum "$1"; wc -c < "$1"' sh "${path}" 2>/dev/null || true)"
     observed_sha="$(printf '%s\n' "${observed}" | head -n1 | awk '{print $1}')"
     observed_size="$(printf '%s\n' "${observed}" | tail -n1 | tr -d ' ')"
     if [ "${observed_sha}" != "${expected_sha}" ] || [ "${observed_size}" != "${expected_size}" ]; then

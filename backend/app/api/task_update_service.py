@@ -204,6 +204,7 @@ async def update_task_record(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"Worker profile '{new_profile.name}' is disabled",
             )
+        harness_key = getattr(new_profile, "default_harness_key", None) or "claude"
         # Hand the same locked Shared context to both the readiness gate and the
         # frozen snapshot so a concurrent shared PATCH cannot interleave between
         # the two reads (§11.2).
@@ -212,6 +213,7 @@ async def update_task_record(
             new_profile,
             get_effective_settings(),
             shared=shared,
+            harness_key=harness_key,
         )
         if readiness.is_unavailable:
             raise HTTPException(
@@ -233,7 +235,6 @@ async def update_task_record(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=str(exc),
             ) from exc
-        harness_key = getattr(new_profile, "default_harness_key", None) or "claude"
         endpoint = normalize_endpoint(provider)
         try:
             ensure_harness_protocol_compatibility(harness_key, endpoint)

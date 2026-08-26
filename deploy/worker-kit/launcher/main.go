@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -26,6 +27,7 @@ type manifest struct {
 	Bash                 string               `json:"bash"`
 	Entrypoint           string               `json:"entrypoint"`
 	RuntimeCompatibility runtimeCompatibility `json:"runtime_compatibility"`
+	ContentInventory    json.RawMessage       `json:"content_inventory"`
 }
 
 type runtimeFile struct {
@@ -82,6 +84,23 @@ func fileDigest(path string) (string, int64, error) {
 		return "", 0, err
 	}
 	return fmt.Sprintf("%x", hash.Sum(nil)), size, nil
+}
+
+func verifyKitContent(kitHome, runtimeBin string) {
+	verifier := filepath.Join(kitHome, "verify-kit-content.py")
+	if _, err := os.Stat(verifier); err != nil {
+		fail("Worker Kit content verifier is unavailable: %v", err)
+	}
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		python = filepath.Join(runtimeBin, "python3")
+	}
+	command := exec.Command(python, verifier, "--root", kitHome)
+	command.Stdout = os.Stdout
+	command.Stderr = os.Stderr
+	if err := command.Run(); err != nil {
+		fail("Worker Kit content inventory verification failed")
+	}
 }
 
 func verifyRuntimeBundle(kit manifest, allowMissing bool) string {
@@ -192,6 +211,17 @@ func main() {
 	os.Setenv("LC_ALL", "C.UTF-8")
 	os.Setenv("LANG", "C.UTF-8")
 	os.Unsetenv("LANGUAGE")
+
+	expectedKitManifestDigest := os.Getenv("CODIFY_KIT_MANIFEST_SHA256")
+	if expectedKitManifestDigest != "" {
+		actualKitManifestDigest, _, err := fileDigest(filepath.Join(kitHome, "manifest.json"))
+		if err != nil || actualKitManifestDigest != expectedKitManifestDigest {
+			fail("Worker Kit manifest digest mismatch")
+		}
+	}
+	if len(m.ContentInventory) > 0 || expectedKitManifestDigest != "" {
+		verifyKitContent(kitHome, m.RuntimeBin)
+	}
 
 	if len(os.Args) > 1 && os.Args[1] == "--maintenance-shell" {
 		if len(os.Args) != 3 {

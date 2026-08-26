@@ -22,8 +22,9 @@ This folder contains the artifacts needed to deploy the current Codify build int
 
 Before a rollout, freeze the complete multi-harness release candidate:
 
-- Worker Kit archives for every architecture used by the Host matrix, plus archive SHA-256 and
-  `manifest.json` SHA-256. Do not reuse an archive across CPU architectures.
+- Worker Kit archives for every architecture used by the Host matrix, plus archive SHA-256,
+  `manifest.json` SHA-256, and the manifest's canonical full-content inventory digest. Do not
+  reuse an archive across CPU architectures.
 - Every runtime image used by enabled Worker Profiles, exported through `config/worker-images.txt`
   and verified by repo digest after loading, not by mutable tag.
 - Fixed host binaries (the Codex CLI) shipped in the bundle and recorded in
@@ -57,12 +58,15 @@ reference runtime must be available offline.
 3. After the checksum succeeds, extract the archive and copy `config/.env.offline.example` to `config/.env.offline`.
 4. Edit `config/.env.offline` and fill in your real values.
 5. Run `./scripts/load-images.sh`.
-6. On every Docker host, install the kit with `./scripts/install-worker-kit.sh kits/<archive>`; that command verifies the Kit archive sidecar before extraction.
+6. On every Docker host, install the kit as root with
+   `sudo ./scripts/install-worker-kit.sh kits/<archive>`; the installer verifies the Kit archive
+   sidecar before extraction and seals the installed directory as root-owned and non-writable by
+   other users.
 7. Verify each runtime image per harness on the Docker host:
 
    ```bash
    ./scripts/verify-worker-runtime.sh \
-     --kit /opt/codify/worker-kits/0.3.10-linux-amd64 \
+     --kit /opt/codify/worker-kits/0.3.10-linux-amd64-<manifest-prefix> \
      --image <runtime-image> \
      --harness-key claude \
      --harness-host-path /usr/bin/claude \
@@ -70,7 +74,7 @@ reference runtime must be available offline.
      --smoke 'java -version && mvn -version'
 
    ./scripts/verify-worker-runtime.sh \
-     --kit /opt/codify/worker-kits/0.3.10-linux-amd64 \
+     --kit /opt/codify/worker-kits/0.3.10-linux-amd64-<manifest-prefix> \
      --image <runtime-image> \
      --harness-key codex \
      --harness-host-path /opt/codify/codex/bin/codex \
@@ -84,7 +88,7 @@ reference runtime must be available offline.
 
    ```bash
    ./scripts/verify-worker-runtime.sh \
-     --kit /opt/codify/worker-kits/0.3.15-linux-amd64 \
+     --kit /opt/codify/worker-kits/0.3.15-linux-amd64-<manifest-prefix> \
      --image <runtime-image> \
      --runtime-manifest /srv/codify/releases/<release>/runtime-bundle.v2.json \
      --all-harnesses \

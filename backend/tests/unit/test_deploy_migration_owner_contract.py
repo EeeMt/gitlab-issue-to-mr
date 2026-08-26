@@ -10,14 +10,6 @@ import sys
 import tarfile
 from pathlib import Path
 
-import json
-import os
-import re
-import sqlite3
-import subprocess
-import sys
-from pathlib import Path
-
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -220,16 +212,72 @@ def _worker_kit_manifest() -> dict:
 
 def _content_addressed_kit_archive(tmp_path: Path, manifest: dict) -> tuple[Path, str]:
     """Create a valid content-addressed kit archive plus its .sha256 sidecar."""
+    content = b"kit-content\n"
+    launcher = b"#!/bin/sh\n"
+    runtime_verifier = b"#!/bin/sh\n"
+    runtime_manifest_validator = b"# runtime manifest validator\n"
+    content_verifier = b"# Worker Kit content verifier\n"
+    manifest = {
+        **manifest,
+        "harness_inventory": {
+            key: dict(entry) for key, entry in manifest.get("harness_inventory", {}).items()
+        },
+    }
+    files = {
+        "content.txt": content,
+        "launcher": launcher,
+        "verify-runtime.sh": runtime_verifier,
+        "validate-runtime-manifest.py": runtime_manifest_validator,
+        "verify-kit-content.py": content_verifier,
+    }
+    content_inventory = [
+        {
+            "kind": "file",
+            "path": relative,
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "size": len(payload),
+        }
+        for relative, payload in sorted(files.items())
+    ]
+    for key, entry in manifest["harness_inventory"].items():
+        if entry.get("availability") != "present":
+            continue
+        relative = entry["path"].removeprefix("/opt/codify-kit/")
+        payload = f"{key}-payload\n".encode()
+        files[relative] = payload
+        entry["sha256"] = hashlib.sha256(payload).hexdigest()
+        entry["size"] = len(payload)
+        content_inventory.append(
+            {
+                "kind": "file",
+                "path": relative,
+                "sha256": entry["sha256"],
+                "size": entry["size"],
+            }
+        )
+    content_inventory.sort(key=lambda item: item["path"])
+    manifest["content_inventory"] = content_inventory
+    manifest["content_inventory_sha256"] = hashlib.sha256(
+        json.dumps(content_inventory, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
     manifest_bytes = json.dumps(manifest).encode()
     manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
     kit_name = f"codify-worker-kit-0.3.15-linux-amd64-{manifest_sha256[:12]}"
-    kit_dir = tmp_path / "kit-root" / kit_name
+    archive_root = kit_name.removeprefix("codify-worker-kit-")
+    kit_dir = tmp_path / "kit-root" / archive_root
     kit_dir.mkdir(parents=True, exist_ok=True)
+    (kit_dir / "nix" / "store").mkdir(parents=True)
     (kit_dir / "manifest.json").write_bytes(manifest_bytes)
+    for relative, payload in files.items():
+        target = kit_dir / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(payload)
+        if relative in {"launcher", "verify-runtime.sh"}:
+            target.chmod(0o755)
     archive = tmp_path / "kits" / f"{kit_name}.tar.gz"
     archive.parent.mkdir(parents=True, exist_ok=True)
     with tarfile.open(archive, "w:gz") as output:
-        output.add(kit_dir, arcname=kit_name)
+        output.add(kit_dir, arcname=archive_root)
     (tmp_path / "kits" / f"{archive.name}.sha256").write_text(
         f"{hashlib.sha256(archive.read_bytes()).hexdigest()}  {archive.name}\n"
     )
@@ -341,7 +389,7 @@ def test_v2_release_preflight_validates_kit_archive_and_worker_image(tmp_path: P
         check=False,
     )
     assert prefix_result.returncode == 2
-    assert "does not embed the manifest SHA-256 prefix" in prefix_result.stderr
+    assert "archive path/link validation failed" in prefix_result.stderr
 
     platform_archive, _ = _content_addressed_kit_archive(tmp_path / "platform", _worker_kit_manifest())
     platform_result = subprocess.run(

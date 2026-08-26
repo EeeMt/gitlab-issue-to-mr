@@ -24,7 +24,10 @@ from app.api.worker_profiles import (
 )
 from app.config import get_effective_settings
 from app.core.utcnow import utcnow
-from app.core.worker_runtime_readiness import fingerprint_from_docker_target
+from app.core.worker_runtime_readiness import (
+    fingerprint_from_docker_target,
+    runtime_readiness_fingerprint,
+)
 from app.core.worker_shared_configuration import (
     WorkerSharedConfigurationContext,
     resolve_effective_configuration,
@@ -323,6 +326,48 @@ async def test_runtime_readiness_ready_for_active_row(db_factory):
                 runtime_mode=effective.runtime_mode,
                 worker_kit_version=effective.worker_kit_version,
                 worker_kit_path=effective.worker_kit_path,
+                status="ready",
+                checked_at=utcnow(),
+                ready_until=utcnow() + timedelta(minutes=10),
+            )
+        )
+        await db.commit()
+
+        payload = (await _admin_list(db))[0]
+
+    assert payload["runtime_readiness"]["status"] == "ready"
+
+
+@pytest.mark.asyncio
+async def test_runtime_readiness_summary_uses_strict_scope_when_profile_has_v2_harness(
+    db_factory,
+):
+    session_factory = await db_factory()
+    async with session_factory() as db:
+        await _seed_shared(db)
+        profile = await _seed_profile(
+            db,
+            default_harness_key="claude",
+            enabled_harnesses=["claude", "pi"],
+            harness_runtimes={
+                "claude": {"contract_version": "codify.worker.harness/v1"},
+                "pi": {"contract_version": "codify.worker.harness/v2"},
+            },
+            worker_kit_source="system",
+            runtime_mode="mounted_kit",
+            worker_kit_version="0.4.0",
+            worker_kit_path="/opt/codify/worker-kits/0.4.0",
+        )
+        effective = await _effective(db, profile)
+        settings = get_effective_settings()
+        locator = _locator_fingerprint(profile, effective, settings)
+        assert locator is not None
+        db.add(
+            WorkerRuntimeReadiness(
+                runtime_locator_fingerprint=runtime_readiness_fingerprint(
+                    locator,
+                    require_content_inventory=True,
+                ),
                 status="ready",
                 checked_at=utcnow(),
                 ready_until=utcnow() + timedelta(minutes=10),

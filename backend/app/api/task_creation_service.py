@@ -27,6 +27,7 @@ from app.core.harness_execution_policy import (
     require_creatable_bundle_v2,
     require_task_executable_contract,
 )
+from app.core.harness_protocol import HARNESS_CONTRACT_VERSION_V2
 from app.core.harness_registry import (
     HarnessRegistryError,
     validate_enabled_harnesses,
@@ -166,7 +167,14 @@ async def retry_task_record(
     # unavailable.
     source_fingerprint = getattr(source_snapshot, "runtime_locator_fingerprint", None)
     if source_fingerprint:
-        readiness = await read_runtime_readiness(db, source_fingerprint)
+        readiness = await read_runtime_readiness(
+            db,
+            source_fingerprint,
+            require_content_inventory=(
+                getattr(source_snapshot, "runtime_contract_version", None)
+                == HARNESS_CONTRACT_VERSION_V2
+            ),
+        )
         if readiness.is_unavailable:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -505,6 +513,7 @@ async def create_task_record(
         worker_profile,
         get_effective_settings(),
         shared=shared,
+        harness_key=harness_key,
     )
     if readiness.is_unavailable:
         raise HTTPException(

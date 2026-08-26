@@ -54,11 +54,14 @@ from app.core.worker_runtime_bundle import (
     load_bound_runtime_bundle,
 )
 from app.core.worker_runtime_readiness import (
+    READINESS_READY,
     HarnessCliUnavailableError,
+    RuntimeProbeTransientError,
     WorkerRuntimeUnavailableError,
+    inspect_mounted_kit_container,
     is_kit_mount_error,
-    read_runtime_readiness,
     recheck_runtime_on_container_error,
+    run_deterministic_kit_probe,
 )
 from app.core.worker_task_artifacts import (
     _stop_artifact_poller,
@@ -316,6 +319,7 @@ async def create_execute_container(
     # V1 still needs an explicit sentinel so dual-canary execution cannot
     # fall through with an unbound local.
     frozen_snapshot = None
+    snapshot_kit_identity = None
     if runtime_bundle.contract_version == "codify.worker.harness/v2":
         frozen_snapshot = task.worker_profile_snapshot
         frozen_config = getattr(frozen_snapshot, "harness_config_snapshot", None)
@@ -345,7 +349,30 @@ async def create_execute_container(
         kit_fingerprint = getattr(frozen_snapshot, "runtime_locator_fingerprint", None)
         observed_readiness = None
         if snapshot_kit_identity is not None and kit_fingerprint:
-            observed_readiness = await read_runtime_readiness(db, kit_fingerprint)
+            # The scheduler gate also performs a live probe, but the Kit can be
+            # replaced after that gate and before this container is created.
+            # Never use the TTL-cached row as the final execution check: probe
+            # the frozen locator immediately before image/container work.
+            try:
+                probe_outcome = await run_deterministic_kit_probe(
+                    db,
+                    connection=worker_runtime.docker_connection(settings),
+                    image=expected_identity["image_reference"],
+                    runtime_mode=worker_runtime.runtime_mode,
+                    worker_kit_version=worker_runtime.worker_kit_version or "",
+                    worker_kit_path=worker_runtime.worker_kit_path or "",
+                    ttl_seconds=settings.worker_runtime_readiness_ttl_seconds,
+                    require_content_inventory=True,
+                )
+            except RuntimeProbeTransientError as exc:
+                raise WorkerRuntimeUnavailableError(
+                    failure_code="worker_kit_probe_transient",
+                    failure_message=(
+                        "Worker Kit could not be verified immediately before execution; "
+                        "retry the task"
+                    ),
+                ) from exc
+            observed_readiness = probe_outcome.readiness
             if not observed_readiness.is_ready:
                 raise WorkerRuntimeUnavailableError(
                     failure_code=observed_readiness.failure_code,
@@ -588,6 +615,8 @@ async def create_execute_container(
     await db.commit()
     container_overrides = worker_runtime.container_overrides()
     environment.update(container_overrides["environment"])
+    if snapshot_kit_identity is not None:
+        environment["CODIFY_KIT_MANIFEST_SHA256"] = snapshot_kit_identity["manifest_sha256"]
     volumes = worker._build_container_volumes(
         settings,
         issue,
@@ -636,6 +665,16 @@ async def create_execute_container(
         except Exception:
             await _remove_created_container(worker, db, task, container)
             raise
+        if runtime_bundle.contract_version == "codify.worker.harness/v2" and snapshot_kit_identity:
+            await _verify_v2_kit_before_start(
+                worker,
+                db,
+                task,
+                container,
+                worker_kit_version=worker_runtime.worker_kit_version or "",
+                worker_kit_path=worker_runtime.worker_kit_path or "",
+                snapshot_kit_identity=snapshot_kit_identity,
+            )
         await _start_created_container(worker, db, task, container)
     except (DockerConnectionsUnavailableError, TaskContainerLookupError):
         # Ambiguous/inconclusive Docker view: deferred recovery owns the outcome.
@@ -655,9 +694,50 @@ async def create_execute_container(
                 worker_kit_path=worker_runtime.worker_kit_path or "",
                 ttl_seconds=settings.worker_runtime_readiness_ttl_seconds,
                 original_error=exc,
+                require_content_inventory=(
+                    runtime_bundle.contract_version == "codify.worker.harness/v2"
+                ),
             )
         raise
     return container
+
+
+async def _verify_v2_kit_before_start(
+    worker,
+    db: AsyncSession,
+    task: Task,
+    container: Any,
+    *,
+    worker_kit_version: str,
+    worker_kit_path: str,
+    snapshot_kit_identity: Mapping[str, Any],
+) -> None:
+    """Verify the actual stopped container's Kit immediately before ``start``."""
+    try:
+        final_kit_result = await asyncio.to_thread(
+            inspect_mounted_kit_container,
+            worker.docker,
+            container,
+            worker_kit_version=worker_kit_version,
+            worker_kit_path=worker_kit_path,
+        )
+    except RuntimeProbeTransientError as exc:
+        await _remove_created_container(worker, db, task, container)
+        raise WorkerRuntimeUnavailableError(
+            failure_code="worker_kit_final_probe_transient",
+            failure_message=(
+                "Worker Kit could not be verified before container start; retry the task"
+            ),
+        ) from exc
+    if final_kit_result.status != READINESS_READY:
+        await _remove_created_container(worker, db, task, container)
+        raise WorkerRuntimeUnavailableError(
+            failure_code=final_kit_result.failure_code,
+            failure_message=final_kit_result.failure_message,
+        )
+    if final_kit_result.kit_identity != snapshot_kit_identity:
+        await _remove_created_container(worker, db, task, container)
+        raise RuntimeError("Worker Kit identity changed before container start; refusing to execute")
 
 
 def _create_stopped_container(

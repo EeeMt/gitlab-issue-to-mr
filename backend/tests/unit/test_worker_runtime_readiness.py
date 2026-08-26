@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from app.core.utcnow import utcnow
+from app.core.worker_kit_inventory import content_inventory_digest
 from app.core.worker_runtime_readiness import (
     FAILURE_WORKER_KIT_INVALID,
     FAILURE_WORKER_KIT_NOT_FOUND,
@@ -32,6 +33,7 @@ from app.core.worker_runtime_readiness import (
     RuntimeCheckResult,
     RuntimeProbeTransientError,
     RuntimeReadiness,
+    _content_inventory_from_archive,
     begin_runtime_check,
     fingerprint_from_connection_and_kit,
     finish_runtime_check,
@@ -39,6 +41,7 @@ from app.core.worker_runtime_readiness import (
     read_runtime_readiness,
     run_deterministic_kit_probe,
     runtime_locator_fingerprint,
+    runtime_readiness_fingerprint,
     runtime_verification_input_digest,
     serialize_runtime_readiness,
 )
@@ -57,14 +60,63 @@ def _tar_bytes(name: str, payload: bytes, *, mode: int = 0o644) -> bytes:
     return buffer.getvalue()
 
 
-def _make_probe_client(*, manifest: bytes | None = None):
+def _tar_tree_bytes(entries: list[dict], contents: dict[str, bytes]) -> bytes:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        # Docker's directory archive may spell the root member with a
+        # trailing slash; the probe must treat it as the requested root.
+        root = tarfile.TarInfo("kit/")
+        root.type = tarfile.DIRTYPE
+        archive.addfile(root)
+        for entry in entries:
+            path = f"kit/{entry['path']}"
+            payload = contents[entry["path"]]
+            info = tarfile.TarInfo(path)
+            info.size = len(payload)
+            info.mode = 0o755
+            archive.addfile(info, io.BytesIO(payload))
+    return buffer.getvalue()
+
+
+def _tar_tree_with_hard_link_bytes(*, forward: bool = False) -> bytes:
+    buffer = io.BytesIO()
+    payload = b"#!/bin/sh\n"
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        root = tarfile.TarInfo("kit/")
+        root.type = tarfile.DIRTYPE
+        archive.addfile(root)
+        alias = tarfile.TarInfo("kit/launcher-alias")
+        alias.type = tarfile.LNKTYPE
+        alias.linkname = "kit/launcher"
+        target = tarfile.TarInfo("kit/launcher")
+        target.size = len(payload)
+        target.mode = 0o755
+        if forward:
+            archive.addfile(alias)
+            archive.addfile(target, io.BytesIO(payload))
+        else:
+            archive.addfile(target, io.BytesIO(payload))
+            archive.addfile(alias)
+    return buffer.getvalue()
+
+
+def _make_probe_client(*, manifest: bytes | None = None, content_overrides: dict[str, bytes] | None = None):
     """Return a DockerClientWrapper stand-in for probe_worker_kit.
 
     ``manifest=None`` simulates a missing manifest.json (NotFound).
     """
     container = MagicMock()
+    manifest_data = json.loads(manifest.decode()) if manifest is not None else {}
+    content_inventory = manifest_data.get("content_inventory") or []
+    content_bytes = {
+        entry["path"]: (b"store" if entry["path"] == "nix/store/runtime" else b"#!/bin/sh")
+        for entry in content_inventory
+    }
+    content_bytes.update(content_overrides or {})
 
     def fake_get_archive(path: str):
+        if path.endswith("/kit"):
+            return (iter([_tar_tree_bytes(content_inventory, content_bytes)]), {})
         if path.endswith("manifest.json"):
             if manifest is None:
                 raise docker.errors.NotFound("manifest not found")
@@ -83,6 +135,12 @@ def _make_probe_client(*, manifest: bytes | None = None):
 
 def _valid_manifest(version: str = "0.3.5") -> bytes:
     payload = b"#!/bin/sh"
+    content_inventory = [
+        {"kind": "file", "path": "entrypoint.sh", "sha256": hashlib.sha256(payload).hexdigest(), "size": len(payload)},
+        {"kind": "file", "path": "harness/pi/bin/pi", "sha256": hashlib.sha256(payload).hexdigest(), "size": len(payload)},
+        {"kind": "file", "path": "launcher", "sha256": hashlib.sha256(payload).hexdigest(), "size": len(payload)},
+        {"kind": "file", "path": "nix/store/runtime", "sha256": hashlib.sha256(b"store").hexdigest(), "size": len(b"store")},
+    ]
     return json.dumps(
         {
             "schema_version": 2,
@@ -101,6 +159,8 @@ def _valid_manifest(version: str = "0.3.5") -> bytes:
                 "claude": {"availability": "absent", "reason_code": "not_selected"},
                 "codex": {"availability": "absent", "reason_code": "not_selected"},
             },
+            "content_inventory": content_inventory,
+            "content_inventory_sha256": content_inventory_digest(content_inventory),
         }
     ).encode()
 
@@ -171,6 +231,26 @@ def test_fingerprint_changes_when_docker_host_changes():
         worker_kit_path="/opt/kit",
     )
     assert a != b
+
+
+def test_readiness_fingerprint_separates_v2_content_verification_scope():
+    locator = runtime_locator_fingerprint(
+        docker_daemon_key="daemon-a",
+        runtime_mode="mounted_kit",
+        worker_kit_version="0.3.5",
+        worker_kit_path="/opt/kit",
+    )
+    assert runtime_readiness_fingerprint(locator) == locator
+    full_content = runtime_readiness_fingerprint(
+        locator,
+        require_content_inventory=True,
+    )
+    assert full_content is not None
+    assert full_content != locator
+    assert runtime_readiness_fingerprint(
+        locator,
+        require_content_inventory=True,
+    ) == full_content
 
 
 def test_verification_digest_excludes_templates_and_scripts():
@@ -357,6 +437,78 @@ def test_probe_returns_ready_for_valid_kit():
         )
     assert result.status == READINESS_READY
     assert result.failure_code is None
+
+
+def test_probe_keeps_legacy_v1_manifest_compatible_but_v2_requires_inventory():
+    legacy = json.loads(_valid_manifest())
+    legacy.pop("content_inventory")
+    legacy.pop("content_inventory_sha256")
+    manifest = json.dumps(legacy).encode()
+    client = _make_probe_client(manifest=manifest)
+    with patch(
+        "app.core.worker_runtime_readiness.DockerClientWrapper", return_value=client
+    ):
+        legacy_result = probe_worker_kit(
+            SimpleNamespace(host="tcp://worker:2376", tls_ca=None),
+            image="worker:latest",
+            runtime_mode="mounted_kit",
+            worker_kit_version="0.3.5",
+            worker_kit_path="/opt/kit",
+            require_content_inventory=False,
+        )
+    assert legacy_result.status == READINESS_READY
+
+    client = _make_probe_client(manifest=manifest)
+    with patch(
+        "app.core.worker_runtime_readiness.DockerClientWrapper", return_value=client
+    ):
+        v2_result = probe_worker_kit(
+            SimpleNamespace(host="tcp://worker:2376", tls_ca=None),
+            image="worker:latest",
+            runtime_mode="mounted_kit",
+            worker_kit_version="0.3.5",
+            worker_kit_path="/opt/kit",
+            require_content_inventory=True,
+        )
+    assert v2_result.status == READINESS_UNAVAILABLE
+    assert v2_result.failure_code == FAILURE_WORKER_KIT_INVALID
+
+
+def test_probe_rejects_tampered_non_harness_kit_content():
+    client = _make_probe_client(
+        manifest=_valid_manifest(),
+        content_overrides={"launcher": b"tampered launcher"},
+    )
+    with patch(
+        "app.core.worker_runtime_readiness.DockerClientWrapper", return_value=client
+    ):
+        result = probe_worker_kit(
+            SimpleNamespace(host="tcp://worker:2376", tls_ca=None),
+            image="worker:latest",
+            runtime_mode="mounted_kit",
+            worker_kit_version="0.3.5",
+            worker_kit_path="/opt/kit",
+        )
+    assert result.status == READINESS_UNAVAILABLE
+    assert result.failure_code == FAILURE_WORKER_KIT_INVALID
+    assert "content inventory" in result.failure_message
+
+
+@pytest.mark.parametrize("forward", [False, True])
+def test_content_inventory_reads_hard_links_as_their_target_file(forward: bool):
+    container = MagicMock()
+    container.get_archive.return_value = (
+        iter([_tar_tree_with_hard_link_bytes(forward=forward)]),
+        {},
+    )
+
+    actual = _content_inventory_from_archive(container, "/opt/codify-probe/kit")
+
+    payload_sha = hashlib.sha256(b"#!/bin/sh\n").hexdigest()
+    assert actual == [
+        {"kind": "file", "path": "launcher", "sha256": payload_sha, "size": 10},
+        {"kind": "file", "path": "launcher-alias", "sha256": payload_sha, "size": 10},
+    ]
 
 
 def test_probe_uses_strict_readonly_mount_and_stopped_container():
@@ -615,6 +767,53 @@ async def test_run_deterministic_kit_probe_persists_ready_through_cas():
             stored = await read_runtime_readiness(db, fingerprint)
         assert stored.status == READINESS_READY
         assert stored.check_generation == 1
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_v2_unavailable_readiness_does_not_contaminate_v1_scope():
+    """A missing V2 inventory must not block a V1 dual-canary locator."""
+    engine, session_factory = _db_session_factory()
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    connection = SimpleNamespace(host="tcp://worker:2376", tls_ca=None)
+    fingerprint = fingerprint_from_connection_and_kit(
+        connection,
+        runtime_mode="mounted_kit",
+        worker_kit_version="0.3.5",
+        worker_kit_path="/opt/kit",
+    )
+    try:
+        with patch(
+            "app.core.worker_runtime_readiness.probe_worker_kit",
+            return_value=RuntimeCheckResult(
+                status=READINESS_UNAVAILABLE,
+                failure_code=FAILURE_WORKER_KIT_INVALID,
+                failure_message="V2 content inventory is missing",
+            ),
+        ):
+            async with session_factory() as db:
+                outcome = await run_deterministic_kit_probe(
+                    db,
+                    connection=connection,
+                    image="worker:latest",
+                    runtime_mode="mounted_kit",
+                    worker_kit_version="0.3.5",
+                    worker_kit_path="/opt/kit",
+                    ttl_seconds=900,
+                    require_content_inventory=True,
+                )
+        assert outcome.readiness.status == READINESS_UNAVAILABLE
+        async with session_factory() as db:
+            v1 = await read_runtime_readiness(db, fingerprint)
+            v2 = await read_runtime_readiness(
+                db,
+                fingerprint,
+                require_content_inventory=True,
+            )
+        assert v1.status == READINESS_UNKNOWN
+        assert v2.status == READINESS_UNAVAILABLE
     finally:
         await engine.dispose()
 

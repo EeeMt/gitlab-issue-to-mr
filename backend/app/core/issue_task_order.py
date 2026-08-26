@@ -17,6 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.harness_protocol import HARNESS_CONTRACT_VERSION_V2
 from app.core.utcnow import utcnow
 from app.core.worker_runtime_readiness import read_runtime_readiness
 from app.models import IssueExecutionLock, Task, TaskStatus
@@ -356,7 +357,14 @@ async def compute_queue_context(
             else None
         )
         if head_fingerprint:
-            head_readiness = await read_runtime_readiness(db, head_fingerprint)
+            head_readiness = await read_runtime_readiness(
+                db,
+                head_fingerprint,
+                require_content_inventory=(
+                    getattr(head_snapshot, "runtime_contract_version", None)
+                    == HARNESS_CONTRACT_VERSION_V2
+                ),
+            )
 
     # The head's waiting reason when a terminal owner still holds the workspace
     # lock (container not yet drained) is workspace_cleanup.

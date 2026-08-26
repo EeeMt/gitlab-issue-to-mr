@@ -4,17 +4,17 @@ from __future__ import annotations
 
 import hashlib
 import json
-import stat
 
 import pytest
 
 from app.core.worker_kit_inventory import (
     AVAILABILITY_ABSENT,
     AVAILABILITY_PRESENT,
-    HarnessInventoryError,
     KIT_IDENTITY_SCHEMA,
     REASON_MISSING_PAYLOAD,
     REASON_NOT_SELECTED,
+    HarnessInventoryError,
+    content_inventory_digest,
     kit_identity_from_manifest_bytes,
     kit_relative_path,
     local_inventory_problems,
@@ -109,7 +109,6 @@ def test_present_entry_requires_sha256_size_and_version():
     "container_path",
     [
         "/opt/codify-kit/harness/pi/bin/pi",
-        "/opt/codify-kit/harness/pi/./bin/pi",
     ],
 )
 def test_kit_relative_path_maps_safe_paths(container_path):
@@ -123,6 +122,8 @@ def test_kit_relative_path_maps_safe_paths(container_path):
         "/opt/codify-kit/",
         "/opt/codify-kit/../etc/passwd",
         "/opt/codify-kit/harness/../..",
+        "/opt/codify-kit/harness/pi/./bin/pi",
+        "/opt/codify-kit/harness/pi\\bin\\pi",
         "/etc/passwd",
         "/opt/other/harness/pi",
         "/opt/codify-kit/harness/pi/../../bin/sh",
@@ -157,8 +158,17 @@ def test_missing_payload_warnings_skip_present_and_not_selected():
 
 
 def test_kit_identity_content_addresses_the_manifest_bytes():
+    content_inventory = [
+        {"kind": "file", "path": "launcher", "sha256": _SHA, "size": 1}
+    ]
     manifest = json.dumps(
-        {"kit_version": "0.4.0", "platform": "linux/amd64", "harness_inventory": _full_inventory()},
+        {
+            "kit_version": "0.4.0",
+            "platform": "linux/amd64",
+            "harness_inventory": _full_inventory(),
+            "content_inventory": content_inventory,
+            "content_inventory_sha256": content_inventory_digest(content_inventory),
+        },
         sort_keys=True,
     ).encode()
     identity = kit_identity_from_manifest_bytes(manifest)

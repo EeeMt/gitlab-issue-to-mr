@@ -675,7 +675,16 @@ async def process_ci_failure_run(
         # a Kit locator that is known unavailable; skip (ignore) the run instead.
         # The already-locked shared baseline is handed to both the gate and the
         # frozen snapshot below (§11.2).
-        readiness = await readiness_for_profile(db, worker_profile, settings, shared=shared)
+        profile_default_key = getattr(worker_profile, "default_harness_key", None)
+        if not isinstance(profile_default_key, str) or not profile_default_key:
+            profile_default_key = "claude"
+        readiness = await readiness_for_profile(
+            db,
+            worker_profile,
+            settings,
+            shared=shared,
+            harness_key=profile_default_key,
+        )
         if readiness.is_unavailable:
             await _ignore_run(
                 db,
@@ -698,9 +707,6 @@ async def process_ci_failure_run(
         # provider's wire protocol must be able to talk to that harness. Otherwise
         # the repair task is created and fails at runtime, which is the opposite of
         # the "fail at creation" invariant.
-        profile_default_key = getattr(worker_profile, "default_harness_key", None)
-        if not isinstance(profile_default_key, str) or not profile_default_key:
-            profile_default_key = "claude"
         enabled_harnesses = getattr(worker_profile, "enabled_harnesses", None)
         if not isinstance(enabled_harnesses, list) or not enabled_harnesses:
             enabled_harnesses = ["claude"]

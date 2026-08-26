@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 # V2 release preflight for the Kit-owned model. The Project Runtime Image no
 # longer carries or locks any Harness CLI: the four Harness CLIs live in the
-# content-addressed Worker Kit archive, whose identity is the SHA-256 of its
-# manifest bytes (the archive name embeds the 12-character manifest prefix).
+# content-addressed Worker Kit archive. The manifest SHA is the frozen Kit
+# identity and its canonical content inventory commits every other Kit byte;
+# the archive name embeds the 12-character manifest prefix.
 #
 # This script validates, on the Docker daemon selected by the local Docker
 # CLI:
 #   1. the Worker Kit archive and its .sha256 sidecar (sha256sum -c),
 #   2. the archive's manifest.json (kind, kit_version, platform,
 #      harness_inventory with exactly four well-formed entries),
-#   3. the content-addressed archive name against the manifest SHA-256,
-#   4. the Worker image identity (image ID, OS/architecture) against the
+#   3. the canonical content inventory against every archive member,
+#   4. the content-addressed archive name against the manifest SHA-256,
+#   5. the Worker image identity (image ID, OS/architecture) against the
 #      manifest platform.
 #
 # Daemon-visibility note: V2_RELEASE_WORKER_IMAGE must exist on the selected
@@ -19,6 +21,7 @@
 # for installation (see install-worker-kit.sh); a path only on the control
 # host is not visible to the daemon host.
 set -euo pipefail
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 fail() {
     echo "$1" >&2
@@ -42,22 +45,43 @@ if ! (cd "$(dirname "${kit_archive}")" && sha256sum -c "$(basename "${checksum_f
     fail "Worker Kit archive checksum verification failed: ${checksum_file}"
 fi
 
-# The Kit identity is the SHA-256 of the manifest bytes. Extract manifest.json
-# from the archive and hash the raw bytes (not the shell-dequoted text) so the
-# digest matches the content-addressed name.
-manifest_path="$(tar -tzf "${kit_archive}" | awk '/\/manifest\.json$/{print; exit}')"
-if [[ -z "${manifest_path}" ]]; then
-    fail "Worker Kit archive contains no manifest.json"
-fi
-manifest="$(tar -xOzf "${kit_archive}" "${manifest_path}")"
-manifest_sha256="$(tar -xOzf "${kit_archive}" "${manifest_path}" | sha256sum | awk '{print $1}')"
-
 archive_name="$(basename "${kit_archive}")"
 if [[ ! "${archive_name}" =~ ^codify-worker-kit-.+-linux-[A-Za-z0-9_-]+-[0-9a-f]{12}\.tar\.gz$ ]]; then
     fail "Worker Kit archive name is not content-addressed (expected codify-worker-kit-<version>-linux-<arch>-<12-hex>.tar.gz): ${archive_name}"
 fi
+archive_root="${archive_name%.tar.gz}"
+archive_root="${archive_root#codify-worker-kit-}"
+archive_validator="${PROJECT_ROOT}/deploy/offline-bundle/scripts/validate-kit-archive.py"
+if ! python3 "${archive_validator}" "${kit_archive}" "${archive_root}" >/dev/null; then
+    fail "Worker Kit archive path/link validation failed: ${kit_archive}"
+fi
+kit_check_dir="$(mktemp -d "${TMPDIR:-/tmp}/codify-worker-kit-preflight.XXXXXX")"
+cleanup() { rm -rf "${kit_check_dir}"; }
+trap cleanup EXIT
+if ! tar -C "${kit_check_dir}" -xzf "${kit_archive}"; then
+    fail "Worker Kit archive extraction failed: ${kit_archive}"
+fi
+kit_root="${kit_check_dir}/${archive_root}"
+manifest_file="${kit_root}/manifest.json"
+[[ -s "${manifest_file}" ]] || fail "Worker Kit archive contains no manifest.json"
+[[ -x "${kit_root}/launcher" ]] || fail "Worker Kit archive launcher is missing or not executable"
+[[ -d "${kit_root}/nix/store" ]] || fail "Worker Kit archive Nix store is missing"
+[[ -x "${kit_root}/verify-runtime.sh" ]] || fail "Worker Kit archive verifier is missing or not executable"
+[[ -f "${kit_root}/validate-runtime-manifest.py" ]] || fail "Worker Kit archive Runtime Bundle validator is missing"
+[[ -f "${kit_root}/verify-kit-content.py" ]] || fail "Worker Kit archive content verifier is missing"
+manifest="$(<"${manifest_file}")"
+manifest_sha256="$(sha256sum "${manifest_file}" | awk '{print $1}')"
+content_inventory_sha256="$(python3 "${PROJECT_ROOT}/deploy/worker-kit/verify-kit-content.py" \
+    --archive "${kit_archive}" --root-name "${archive_root}")" \
+    || fail "Worker Kit content inventory does not match the archive bytes"
 if [[ "${archive_name}" != *-${manifest_sha256:0:12}.tar.gz ]]; then
     fail "Worker Kit archive name does not embed the manifest SHA-256 prefix (content-addressed identity): ${archive_name}"
+fi
+extracted_content_inventory_sha256="$(python3 "${PROJECT_ROOT}/deploy/worker-kit/verify-kit-content.py" \
+    --root "${kit_root}")" \
+    || fail "Worker Kit extracted content does not match its inventory"
+if [[ "${extracted_content_inventory_sha256}" != "${content_inventory_sha256}" ]]; then
+    fail "Worker Kit extracted and archive content inventories disagree"
 fi
 
 # Manifest shape checks.
@@ -103,4 +127,4 @@ if [[ "${normalized_image_platform}" != "${manifest_platform}" ]]; then
     fail "Worker Kit platform (${manifest_platform}) does not match the selected Worker image platform (${image_platform})"
 fi
 
-echo "V2 release preflight OK: ${kit_version} ${manifest_platform} ${manifest_sha256}"
+echo "V2 release preflight OK: ${kit_version} ${manifest_platform} ${manifest_sha256} content=${content_inventory_sha256}"

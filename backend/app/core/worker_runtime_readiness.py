@@ -24,6 +24,7 @@ import hashlib
 import io
 import json
 import logging
+import posixpath
 import tarfile
 import uuid
 from collections.abc import Mapping
@@ -43,13 +44,16 @@ from app.core.docker_client import (
     canonicalize_docker_host,
     resolve_docker_connection,
 )
+from app.core.harness_protocol import HARNESS_CONTRACT_VERSION_V2
 from app.core.utcnow import utcnow
-from app.core.worker_kit import BAKED_IMAGE_MODE, MOUNTED_KIT_MODE
+from app.core.worker_kit import BAKED_IMAGE_MODE, KIT_CONTAINER_PATH, MOUNTED_KIT_MODE
 from app.core.worker_kit_inventory import (
     AVAILABILITY_PRESENT,
     HarnessInventoryError,
+    content_inventory_digest,
     kit_identity_from_manifest_bytes,
     kit_relative_path,
+    validate_content_inventory,
     validate_harness_inventory,
 )
 from app.models import WorkerRuntimeReadiness
@@ -66,6 +70,7 @@ FAILURE_WORKER_KIT_INVALID = "worker_kit_invalid"
 FAILURE_WORKER_KIT_VERSION_MISMATCH = "worker_kit_version_mismatch"
 
 LOCATOR_SCHEMA = "codify.worker-runtime-locator/v1"
+READINESS_SCOPE_SCHEMA = "codify.worker-runtime-readiness/v1"
 VERIFICATION_SCHEMA = "codify.worker-runtime-verification/v1"
 KIT_PROBE_CONTAINER_PATH = "/opt/codify-probe/kit"
 
@@ -189,6 +194,42 @@ def runtime_locator_fingerprint(
     }
     normalized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def runtime_readiness_fingerprint(
+    locator_fingerprint: str | None,
+    *,
+    require_content_inventory: bool = False,
+) -> str | None:
+    """Return the readiness row key for one locator and verification level.
+
+    V1 keeps using the historical locator key so existing readiness rows remain
+    valid. V2's full content-identity probe gets a distinct key: a V2-only
+    inventory failure must never make the same mounted Kit unavailable to a V1
+    dual-canary Task (or vice versa).
+    """
+    if not locator_fingerprint:
+        return None
+    if not require_content_inventory:
+        return locator_fingerprint
+    payload = {
+        "schema": READINESS_SCOPE_SCHEMA,
+        "locator_fingerprint": locator_fingerprint,
+        "require_content_inventory": True,
+    }
+    normalized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def profile_requires_content_inventory(profile: Any, harness_key: str | None = None) -> bool:
+    """Return whether a profile's selected Harness requires V2 Kit identity."""
+    selected_key = harness_key or getattr(profile, "default_harness_key", None) or "claude"
+    runtimes = getattr(profile, "harness_runtimes", None) or {}
+    runtime = runtimes.get(selected_key) if isinstance(runtimes, Mapping) else None
+    return (
+        isinstance(runtime, Mapping)
+        and runtime.get("contract_version") == HARNESS_CONTRACT_VERSION_V2
+    )
 
 
 def runtime_verification_input_digest(
@@ -333,11 +374,17 @@ def fingerprint_from_profile(profile: Any, settings: Any) -> str | None:
 async def read_runtime_readiness(
     db: AsyncSession,
     fingerprint: str | None,
+    *,
+    require_content_inventory: bool = False,
 ) -> RuntimeReadiness:
-    """Return the effective readiness for a fingerprint (missing/expired = unknown)."""
-    if not fingerprint:
+    """Return effective readiness for a locator and verification level."""
+    readiness_fingerprint = runtime_readiness_fingerprint(
+        fingerprint,
+        require_content_inventory=require_content_inventory,
+    )
+    if not readiness_fingerprint:
         return RuntimeReadiness(status=READINESS_UNKNOWN)
-    row = await db.get(WorkerRuntimeReadiness, fingerprint)
+    row = await db.get(WorkerRuntimeReadiness, readiness_fingerprint)
     if row is None:
         return RuntimeReadiness(status=READINESS_UNKNOWN)
     now = utcnow()
@@ -374,6 +421,7 @@ async def readiness_for_profile(
     settings: Any,
     *,
     shared: Any | None = None,
+    harness_key: str | None = None,
 ) -> RuntimeReadiness:
     """Return the effective readiness for a profile's resolved Kit locator.
 
@@ -420,7 +468,11 @@ async def readiness_for_profile(
         # lazy relationship) are NOT swallowed here — they must surface so a
         # caller bug cannot silently bypass the 409 gate.
         return RuntimeReadiness(status=READINESS_UNKNOWN)
-    return await read_runtime_readiness(db, fingerprint)
+    return await read_runtime_readiness(
+        db,
+        fingerprint,
+        require_content_inventory=profile_requires_content_inventory(profile, harness_key),
+    )
 
 
 def runtime_unavailable_http_detail(readiness: RuntimeReadiness) -> dict[str, Any]:
@@ -445,6 +497,7 @@ async def begin_runtime_check(
     runtime_mode: str,
     worker_kit_version: str | None,
     worker_kit_path: str | None,
+    require_content_inventory: bool = False,
 ) -> int:
     """Atomically start a check: create/lock the row and increment the generation.
 
@@ -452,12 +505,16 @@ async def begin_runtime_check(
     I/O and pass the returned generation to ``finish_runtime_check``. Existing
     readiness conclusions are preserved until the new result is written.
     """
-    if not fingerprint:
+    readiness_fingerprint = runtime_readiness_fingerprint(
+        fingerprint,
+        require_content_inventory=require_content_inventory,
+    )
+    if not readiness_fingerprint:
         raise ValueError("begin_runtime_check requires a locator fingerprint")
-    row = await db.get(WorkerRuntimeReadiness, fingerprint, with_for_update=True)
+    row = await db.get(WorkerRuntimeReadiness, readiness_fingerprint, with_for_update=True)
     if row is None:
         row = WorkerRuntimeReadiness(
-            runtime_locator_fingerprint=fingerprint,
+            runtime_locator_fingerprint=readiness_fingerprint,
             docker_daemon_key=docker_daemon_key,
             runtime_mode=runtime_mode,
             worker_kit_version=worker_kit_version,
@@ -472,7 +529,11 @@ async def begin_runtime_check(
         except IntegrityError:
             # Another writer created the row between our SELECT and INSERT. The
             # savepoint rollback keeps the surrounding transaction usable.
-            row = await db.get(WorkerRuntimeReadiness, fingerprint, with_for_update=True)
+            row = await db.get(
+                WorkerRuntimeReadiness,
+                readiness_fingerprint,
+                with_for_update=True,
+            )
             if row is None:  # pragma: no cover - defensive
                 raise
     row.check_generation += 1
@@ -496,6 +557,7 @@ async def finish_runtime_check(
     ready_until: datetime | None = None,
     harness_inventory: dict[str, Any] | None = None,
     kit_identity: dict[str, Any] | None = None,
+    require_content_inventory: bool = False,
 ) -> bool:
     """Write a check result only while the generation is still current (CAS).
 
@@ -504,13 +566,19 @@ async def finish_runtime_check(
     """
     if status not in READINESS_STATUSES:
         raise ValueError(f"invalid readiness status: {status!r}")
+    readiness_fingerprint = runtime_readiness_fingerprint(
+        fingerprint,
+        require_content_inventory=require_content_inventory,
+    )
+    if not readiness_fingerprint:
+        raise ValueError("finish_runtime_check requires a locator fingerprint")
     # A read-then-write is not CAS across two sessions: a newer probe can bump
     # generation after the read and before flush. Put the generation predicate
     # on the SQL UPDATE itself and use rowcount as the sole success authority.
     result = await db.execute(
         update(WorkerRuntimeReadiness)
         .where(
-            WorkerRuntimeReadiness.runtime_locator_fingerprint == fingerprint,
+            WorkerRuntimeReadiness.runtime_locator_fingerprint == readiness_fingerprint,
             WorkerRuntimeReadiness.check_generation == generation,
         )
         .values(
@@ -661,14 +729,160 @@ def _stat_and_hash_archive_file(
     return mode, total, digest.hexdigest()
 
 
+def _content_inventory_from_archive(container: Any, root: str) -> list[dict[str, Any]] | None:
+    """Stream every identity-bearing Kit file from a mounted archive tree."""
+    try:
+        bits, _stat = container.get_archive(root)
+    except docker.errors.NotFound:
+        return None
+    except Exception as exc:  # noqa: BLE001 - connection/API incompatibility
+        raise RuntimeProbeTransientError(
+            f"Could not read complete Worker Kit content under {root!r}: {exc}"
+        ) from exc
+
+    root_name = posixpath.basename(root.rstrip("/"))
+    excluded = {"manifest.json", ".install-receipt.json", ".smoke-passed"}
+    entries: list[dict[str, Any]] = []
+    file_entries: dict[str, dict[str, Any]] = {}
+    hardlink_targets: dict[str, str] = {}
+    seen: set[str] = set()
+    member_paths: set[str] = set()
+    symlink_targets: list[tuple[str, str]] = []
+
+    def resolve_link_target(relative: str, target: object) -> str:
+        if not isinstance(target, str) or not target or target.startswith("/") or "\\" in target:
+            raise HarnessInventoryError(
+                f"Worker Kit archive contains an unsafe link target: {relative!r}"
+            )
+        if target == root_name or target.startswith(f"{root_name}/"):
+            candidate = target[len(root_name) :].lstrip("/")
+        else:
+            candidate = posixpath.join(posixpath.dirname(relative), target)
+        resolved = posixpath.normpath(candidate)
+        if (
+            not resolved
+            or resolved in {".", ".."}
+            or resolved.startswith("../")
+            or resolved.startswith("/")
+            or "\\" in resolved
+            or any(part in {"", ".", ".."} for part in resolved.split("/"))
+        ):
+            raise HarnessInventoryError(
+                f"Worker Kit archive contains an unsafe link target: {relative!r}"
+            )
+        return resolved
+
+    try:
+        with tarfile.open(fileobj=_ChunkedReader(bits), mode="r|") as tar:
+            for member in tar:
+                name = member.name
+                if name.rstrip("/") == root_name:
+                    continue
+                prefix = f"{root_name}/"
+                if name.startswith(prefix):
+                    relative = name[len(prefix) :]
+                else:
+                    relative = name
+                relative = posixpath.normpath(relative)
+                if relative in excluded:
+                    continue
+                if (
+                    not relative
+                    or relative in {".", ".."}
+                    or relative.startswith("../")
+                    or relative.startswith("/")
+                    or "\\" in relative
+                    or any(part in {"", ".", ".."} for part in relative.split("/"))
+                ):
+                    raise HarnessInventoryError(
+                        f"Worker Kit archive contains an unsafe content path: {name!r}"
+                    )
+                if relative in seen:
+                    raise HarnessInventoryError(
+                        f"Worker Kit archive contains duplicate content path: {relative!r}"
+                    )
+                seen.add(relative)
+                member_paths.add(relative)
+                if member.isdir():
+                    continue
+                if member.issym():
+                    resolved_target = resolve_link_target(relative, member.linkname)
+                    symlink_targets.append((name, resolved_target))
+                    entries.append({"kind": "symlink", "path": relative, "target": member.linkname})
+                    continue
+                if member.islnk():
+                    resolved_target = resolve_link_target(relative, member.linkname)
+                    hardlink_targets[relative] = resolved_target
+                    continue
+                if not member.isfile():
+                    raise HarnessInventoryError(
+                        f"Worker Kit archive contains unsupported content type: {name!r}"
+                    )
+                extracted = tar.extractfile(member)
+                if extracted is None:
+                    raise HarnessInventoryError(
+                        f"Worker Kit archive content has no bytes: {name!r}"
+                    )
+                digest = hashlib.sha256()
+                size = 0
+                while True:
+                    chunk = extracted.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+                    size += len(chunk)
+                entry = {
+                    "kind": "file",
+                    "path": relative,
+                    "sha256": digest.hexdigest(),
+                    "size": size,
+                }
+                entries.append(entry)
+                file_entries[relative] = entry
+        def resolve_hardlink(relative: str, visiting: set[str]) -> dict[str, Any]:
+            target_entry = file_entries.get(relative)
+            if target_entry is not None:
+                return target_entry
+            target = hardlink_targets.get(relative)
+            if target is None or relative in visiting:
+                raise HarnessInventoryError(
+                    "Worker Kit archive hard-link target is absent, cyclic, or not a file: "
+                    f"{relative!r}"
+                )
+            target_entry = resolve_hardlink(target, visiting | {relative})
+            entry = {
+                "kind": "file",
+                "path": relative,
+                "sha256": target_entry["sha256"],
+                "size": target_entry["size"],
+            }
+            file_entries[relative] = entry
+            entries.append(entry)
+            return entry
+
+        for relative in hardlink_targets:
+            resolve_hardlink(relative, set())
+        for name, target in symlink_targets:
+            if target not in member_paths:
+                raise HarnessInventoryError(
+                    f"Worker Kit archive symlink target is absent: {name!r}"
+                )
+    except tarfile.TarError as exc:
+        raise RuntimeProbeTransientError(
+            f"Could not parse complete Worker Kit content under {root!r}: {exc}"
+        ) from exc
+    return sorted(entries, key=lambda entry: entry["path"])
+
+
 def _inspect_kit_contents(
     client: DockerClientWrapper,
     container: Any,
     *,
     worker_kit_version: str,
     worker_kit_path: str,
+    root: str = KIT_PROBE_CONTAINER_PATH,
+    require_content_inventory: bool = False,
 ) -> RuntimeCheckResult:
-    root = KIT_PROBE_CONTAINER_PATH
     try:
         manifest_bytes = _read_archive_file(client, container, f"{root}/manifest.json")
     except docker.errors.NotFound:
@@ -693,7 +907,7 @@ def _inspect_kit_contents(
                 f"Worker Kit manifest.json is not valid JSON under {worker_kit_path!r}"
             ),
         )
-    if (
+    if not isinstance(manifest, Mapping) or (
         manifest.get("schema_version") != 2
         or manifest.get("manifest_kind") != "codify.worker.kit-manifest/v1"
     ):
@@ -735,8 +949,26 @@ def _inspect_kit_contents(
             ),
         )
     try:
-        kit_identity = kit_identity_from_manifest_bytes(manifest_bytes)
+        kit_identity = kit_identity_from_manifest_bytes(
+            manifest_bytes,
+            require_content_inventory=require_content_inventory,
+        )
         inventory = validate_harness_inventory(manifest.get("harness_inventory"))
+        if require_content_inventory or "content_inventory" in manifest:
+            content_inventory = validate_content_inventory(manifest.get("content_inventory"))
+            actual_content_inventory = _content_inventory_from_archive(container, root)
+            if actual_content_inventory is None:
+                raise HarnessInventoryError("Worker Kit content inventory archive is missing")
+            if actual_content_inventory != content_inventory:
+                raise HarnessInventoryError(
+                    "Worker Kit content inventory does not match mounted bytes"
+                )
+            if manifest.get("content_inventory_sha256") != content_inventory_digest(
+                content_inventory
+            ):
+                raise HarnessInventoryError(
+                    "Worker Kit content inventory digest does not match manifest"
+                )
     except HarnessInventoryError as exc:
         return RuntimeCheckResult(
             status=READINESS_UNAVAILABLE,
@@ -789,6 +1021,30 @@ def _inspect_kit_contents(
     )
 
 
+def inspect_mounted_kit_container(
+    client: DockerClientWrapper,
+    container: Any,
+    *,
+    worker_kit_version: str,
+    worker_kit_path: str,
+) -> RuntimeCheckResult:
+    """Verify the Kit mounted in the actual stopped Worker container.
+
+    This is the final V2 check immediately before ``start``. It reads the
+    container's own ``/opt/codify-kit`` mount rather than a separate probe
+    container, closing the probe-to-worker bind gap as far as Docker's stopped
+    container API permits.
+    """
+    return _inspect_kit_contents(
+        client,
+        container,
+        worker_kit_version=worker_kit_version,
+        worker_kit_path=worker_kit_path,
+        root=KIT_CONTAINER_PATH,
+        require_content_inventory=True,
+    )
+
+
 def _missing_bind_source(exc: Exception) -> bool:
     return _MISSING_BIND_SOURCE_HINT in str(exc).lower()
 
@@ -802,6 +1058,7 @@ def probe_worker_kit(
     worker_kit_path: str,
     connect_timeout: int = 10,
     operation_timeout: int = 120,
+    require_content_inventory: bool = False,
 ) -> RuntimeCheckResult:
     """Run the side-effect-free strict-Mount Kit probe (§13.6).
 
@@ -859,6 +1116,7 @@ def probe_worker_kit(
             container,
             worker_kit_version=worker_kit_version,
             worker_kit_path=worker_kit_path,
+            require_content_inventory=require_content_inventory,
         )
     except docker.errors.DockerException as exc:
         raise RuntimeProbeTransientError(
@@ -882,6 +1140,7 @@ async def run_deterministic_kit_probe(
     worker_kit_version: str,
     worker_kit_path: str,
     ttl_seconds: int,
+    require_content_inventory: bool = False,
 ) -> RuntimeProbeOutcome:
     """Run the full generation/CAS Kit probe and return the derived readiness.
 
@@ -910,6 +1169,7 @@ async def run_deterministic_kit_probe(
         runtime_mode=runtime_mode,
         worker_kit_version=worker_kit_version,
         worker_kit_path=worker_kit_path,
+        require_content_inventory=require_content_inventory,
     )
     await db.commit()
     try:
@@ -920,9 +1180,15 @@ async def run_deterministic_kit_probe(
             runtime_mode=runtime_mode,
             worker_kit_version=worker_kit_version,
             worker_kit_path=worker_kit_path,
+            require_content_inventory=require_content_inventory,
         )
     except RuntimeProbeTransientError:
-        await _discard_incomplete_runtime_check(db, fingerprint, generation)
+        await _discard_incomplete_runtime_check(
+            db,
+            fingerprint,
+            generation,
+            require_content_inventory=require_content_inventory,
+        )
         raise
     now = utcnow()
     ready_until = now + timedelta(seconds=ttl_seconds) if result.status == READINESS_READY else None
@@ -936,10 +1202,15 @@ async def run_deterministic_kit_probe(
         ready_until=ready_until,
         harness_inventory=result.harness_inventory,
         kit_identity=result.kit_identity,
+        require_content_inventory=require_content_inventory,
     )
     await db.commit()
     return RuntimeProbeOutcome(
-        readiness=await read_runtime_readiness(db, fingerprint),
+        readiness=await read_runtime_readiness(
+            db,
+            fingerprint,
+            require_content_inventory=require_content_inventory,
+        ),
         committed=committed,
     )
 
@@ -948,6 +1219,8 @@ async def _discard_incomplete_runtime_check(
     db: AsyncSession,
     fingerprint: str,
     generation: int,
+    *,
+    require_content_inventory: bool = False,
 ) -> None:
     """Remove a conclusion-less readiness row abandoned by a transient probe.
 
@@ -958,7 +1231,14 @@ async def _discard_incomplete_runtime_check(
     check has superseded our generation, so a concurrent conclusion or a newer
     check is never destroyed.
     """
-    row = await db.get(WorkerRuntimeReadiness, fingerprint, with_for_update=True)
+    readiness_fingerprint = runtime_readiness_fingerprint(
+        fingerprint,
+        require_content_inventory=require_content_inventory,
+    )
+    if not readiness_fingerprint:
+        await db.commit()
+        return
+    row = await db.get(WorkerRuntimeReadiness, readiness_fingerprint, with_for_update=True)
     if row is None:
         await db.commit()
         return
@@ -1112,6 +1392,7 @@ async def recheck_runtime_on_container_error(
     worker_kit_path: str,
     ttl_seconds: int,
     original_error: Exception,
+    require_content_inventory: bool = False,
 ) -> Exception:
     """Re-probe the frozen Kit after a container create/start Kit error (§13.4).
 
@@ -1131,6 +1412,7 @@ async def recheck_runtime_on_container_error(
             worker_kit_version=worker_kit_version,
             worker_kit_path=worker_kit_path,
             ttl_seconds=ttl_seconds,
+            require_content_inventory=require_content_inventory,
         )
     except RuntimeProbeTransientError:
         return original_error

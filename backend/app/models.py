@@ -1322,14 +1322,15 @@ class TaskWorkerProfileSnapshot(Base):
 
 
 class WorkerRuntimeReadiness(Base):
-    """Deterministic runtime readiness observation keyed by locator fingerprint.
+    """Deterministic runtime readiness observation keyed by locator and scope.
 
-    Keyed by ``runtime_locator_fingerprint`` (Docker daemon + runtime_mode +
-    worker_kit_version + worker_kit_path), not by worker_profile_id, so the same
-    combination can be shared by multiple Profiles and historical Task snapshots.
-    ``status=ready`` is only effective while ``ready_until > now``; a missing row,
-    ``unknown``, or an expired ``ready`` all read as ``unknown``. ``unavailable``
-    never auto-expires and requires a successful re-check to be replaced.
+    The primary key is the historical locator fingerprint for the V1 probe, or
+    a scoped derivative for V2's full content-inventory probe. This keeps
+    readiness shared by Profiles and historical Task snapshots without letting
+    a stricter V2 conclusion contaminate the V1 dual-canary path. ``status=ready``
+    is only effective while ``ready_until > now``; a missing row, ``unknown``, or
+    an expired ``ready`` all read as ``unknown``. ``unavailable`` never
+    auto-expires and requires a successful re-check to be replaced.
     """
 
     __tablename__ = "worker_runtime_readiness"

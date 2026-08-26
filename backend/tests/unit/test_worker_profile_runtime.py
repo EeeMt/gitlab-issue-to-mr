@@ -22,6 +22,7 @@ from app.core.worker_task_lifecycle import (
     _persist_created_container_reference,
     _remove_created_container,
     _start_created_container,
+    _verify_v2_kit_before_start,
     create_execute_container,
     prepare_container_inputs,
 )
@@ -187,6 +188,35 @@ def _bind_v2_runtime(task, db):
     )
 
 
+def _ready_kit_probe_outcome(*, kit_identity=None, harness_inventory=None):
+    from app.core.worker_runtime_readiness import (
+        READINESS_READY,
+        RuntimeProbeOutcome,
+        RuntimeReadiness,
+    )
+
+    return RuntimeProbeOutcome(
+        readiness=RuntimeReadiness(
+            status=READINESS_READY,
+            worker_kit_version="0.4.0",
+            worker_kit_path="/opt/codify/worker-kits/0.4.0-linux-amd64",
+            harness_inventory=harness_inventory or _V2_KIT_HARNESS_INVENTORY,
+            kit_identity=kit_identity or _V2_WORKER_KIT_IDENTITY,
+        ),
+        committed=True,
+    )
+
+
+def _ready_kit_check(*, kit_identity=None, harness_inventory=None):
+    from app.core.worker_runtime_readiness import READINESS_READY, RuntimeCheckResult
+
+    return RuntimeCheckResult(
+        status=READINESS_READY,
+        harness_inventory=harness_inventory or _V2_KIT_HARNESS_INVENTORY,
+        kit_identity=kit_identity or _V2_WORKER_KIT_IDENTITY,
+    )
+
+
 @pytest.fixture(autouse=True)
 def _stub_v2_image_inspection():
     """Keep daemon inspection external while exercising bundle verification."""
@@ -195,6 +225,24 @@ def _stub_v2_image_inspection():
         return_value=_V2_WORKER_IMAGE_IDENTITY,
     ):
         yield
+
+
+@pytest.fixture(autouse=True)
+def _stub_v2_kit_probe():
+    with patch(
+        "app.core.worker_task_lifecycle.run_deterministic_kit_probe",
+        new=AsyncMock(return_value=_ready_kit_probe_outcome()),
+    ) as probe:
+        yield probe
+
+
+@pytest.fixture(autouse=True)
+def _stub_v2_final_kit_probe():
+    with patch(
+        "app.core.worker_task_lifecycle.inspect_mounted_kit_container",
+        return_value=_ready_kit_check(),
+    ) as probe:
+        yield probe
 
 
 def test_build_container_volumes_uses_snapshot_mounts_last(tmp_path):
@@ -343,6 +391,7 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
         worker_skip_image_pull=False,
         worker_network="bridge",
         docker_host="unix:///var/run/docker.sock",
+        worker_runtime_readiness_ttl_seconds=900,
         harness_execution_mode="dual_canary",
     )
     db = MagicMock()
@@ -366,6 +415,10 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
             "app.core.worker_task_lifecycle.create_task_attempt",
             new=AsyncMock(return_value=attempt),
         ),
+        patch(
+            "app.core.worker_task_lifecycle.inspect_mounted_kit_container",
+            return_value=_ready_kit_check(),
+        ) as final_kit_probe,
     ):
         container = await create_execute_container(
             worker,
@@ -392,6 +445,12 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
         == _V2_KIT_HARNESS_INVENTORY["claude"]["path"]
     )
     assert worker.docker.create_container.call_args.kwargs["environment"]["CODIFY_KIT_VERSION"] == "0.1.0"
+    assert (
+        worker.docker.create_container.call_args.kwargs["environment"][
+            "CODIFY_KIT_MANIFEST_SHA256"
+        ]
+        == _V2_WORKER_KIT_IDENTITY["manifest_sha256"]
+    )
     worker._build_container_volumes.assert_called_once_with(
         settings, issue, task=task, custom_mounts=runtime.volume_mounts
     )
@@ -399,6 +458,7 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
     assert worker.docker.create_container.call_args.kwargs["start"] is False
     assert worker.docker.put_archive.call_count == 2
     worker.docker.start_container.assert_called_once_with(container)
+    final_kit_probe.assert_called_once()
     assert db.commit.await_count == 2
     assert (
         worker.docker.create_container.call_args.kwargs["image"]
@@ -412,6 +472,35 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
     assert worker.docker.create_container.call_args.kwargs["volumes"][
         "/opt/codify/worker-kits/0.1.0-linux-amd64/nix/store"
     ] == {"bind": "/nix/store", "mode": "ro"}
+
+
+@pytest.mark.asyncio
+async def test_v2_final_kit_check_removes_container_on_identity_change():
+    worker = MagicMock()
+    db = MagicMock()
+    db.commit = AsyncMock()
+    task = SimpleNamespace(id=12, container_id="container-1", raw_logs_finalized_at=None)
+    container = SimpleNamespace(id="container-1")
+    changed_identity = {**_V2_WORKER_KIT_IDENTITY, "manifest_sha256": "5" * 64}
+
+    with patch(
+        "app.core.worker_task_lifecycle.inspect_mounted_kit_container",
+        return_value=_ready_kit_check(kit_identity=changed_identity),
+    ):
+        with pytest.raises(RuntimeError, match="before container start"):
+            await _verify_v2_kit_before_start(
+                worker,
+                db,
+                task,
+                container,
+                worker_kit_version="0.4.0",
+                worker_kit_path="/opt/codify/worker-kits/0.4.0-linux-amd64",
+                snapshot_kit_identity=_V2_WORKER_KIT_IDENTITY,
+            )
+
+    worker.docker.remove_container.assert_called_once_with(container, force=True)
+    db.commit.assert_awaited_once()
+    assert task.container_id is None
 
 
 @pytest.mark.asyncio
@@ -680,6 +769,7 @@ async def test_create_execute_container_freeform_defers_mr_and_omits_mr_iid(tmp_
         worker_skip_image_pull=False,
         worker_network="bridge",
         docker_host="unix:///var/run/docker.sock",
+        worker_runtime_readiness_ttl_seconds=900,
         harness_execution_mode="dual_canary",
     )
     db = MagicMock()
@@ -944,7 +1034,8 @@ async def test_v2_execution_rejects_kit_identity_change_between_verification_and
     worker, db, task, issue, attempt = _kit_failure_execute_fixtures(
         runtime, settings, tmp_path
     )
-    # The readiness probe recorded a different Kit build than the frozen one.
+    # The cached readiness row still reports the frozen build, but the live
+    # execution probe observes a replacement before container creation.
     changed_kit = {**_V2_WORKER_KIT_IDENTITY, "manifest_sha256": "9" * 64}
     db.get = AsyncMock(
         return_value=SimpleNamespace(
@@ -961,7 +1052,7 @@ async def test_v2_execution_rejects_kit_identity_change_between_verification_and
             check_started_at=None,
             updated_at=None,
             harness_inventory=_V2_KIT_HARNESS_INVENTORY,
-            kit_identity=changed_kit,
+            kit_identity=_V2_WORKER_KIT_IDENTITY,
         )
     )
 
@@ -977,6 +1068,10 @@ async def test_v2_execution_rejects_kit_identity_change_between_verification_and
         patch(
             "app.core.worker_task_lifecycle.create_task_attempt",
             new=AsyncMock(return_value=attempt),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.run_deterministic_kit_probe",
+            new=AsyncMock(return_value=_ready_kit_probe_outcome(kit_identity=changed_kit)),
         ),
     ):
         with pytest.raises(RuntimeError, match="Worker Kit identity changed"):
@@ -1037,6 +1132,10 @@ async def test_v2_execution_rejects_absent_harness_with_harness_cli_unavailable(
         patch(
             "app.core.worker_task_lifecycle.create_task_attempt",
             new=AsyncMock(return_value=attempt),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.run_deterministic_kit_probe",
+            new=AsyncMock(return_value=_ready_kit_probe_outcome(harness_inventory=inventory)),
         ),
     ):
         with pytest.raises(HarnessCliUnavailableError) as exc_info:

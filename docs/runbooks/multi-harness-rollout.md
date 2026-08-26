@@ -66,9 +66,9 @@ make worker-kit-export WORKER_KIT_VERSION=<release-version> WORKER_KIT_PLATFORM=
 make offline-bundle-export WORKER_KIT_VERSION=<release-version>
 ```
 
-导出后必须校验 archive SHA-256、kit identity（manifest SHA-256）、构建选择集与 manifest 四 key
-availability/reason 的一致性（未选择 → `not_selected`；选中但缺 payload → `missing_payload` 且
-Kit degraded）、Runtime Bundle Adapter 文件/digest、golden fixture smoke，并在隔离临时目录做一次
+导出后必须校验 archive SHA-256、kit identity（manifest SHA-256 加 canonical full-content inventory）、
+构建选择集与 manifest 四 key availability/reason 的一致性（未选择 → `not_selected`；选中但缺 payload
+→ `missing_payload` 且 Kit degraded）、Runtime Bundle Adapter 文件/digest、golden fixture smoke，并在隔离临时目录做一次
 全新安装演练，确认安装器拒绝覆盖既有 kit identity 目录。
 
 ### 4.2 安装
@@ -77,7 +77,7 @@ Kit degraded）、Runtime Bundle Adapter 文件/digest、golden fixture smoke，
 
 ```bash
 sudo ./scripts/install-worker-kit.sh \
-  kits/codify-worker-kit-<release-version>-linux-amd64.tar.gz
+  kits/codify-worker-kit-<release-version>-linux-amd64-<manifest-prefix>.tar.gz
 ```
 
 加载 runtime images 并用 digest 检查实际内容；保留旧 Kit 安装目录和旧 runtime image。

@@ -24,9 +24,11 @@ Rules (architecture contract §11.2):
   paths) are rejected here; content mismatches found while probing the actual
   Kit bytes fail the whole Kit closed in ``worker_runtime_readiness``.
 
-The manifest bytes themselves are the content-addressed Kit identity: their
-SHA-256 is recorded as ``kit_identity.manifest_sha256`` and frozen into
-Profiles, Task snapshots and Runtime Bundles.
+The manifest bytes remain the content-addressed Kit identity: their SHA-256 is
+recorded as ``kit_identity.manifest_sha256`` and frozen into Profiles, Task
+snapshots and Runtime Bundles.  The manifest also carries a canonical
+``content_inventory`` for every execution-bearing file, so its identity
+commits to the complete Kit rather than only to the harness payload rows.
 """
 
 from __future__ import annotations
@@ -65,6 +67,79 @@ class HarnessInventoryError(ValueError):
 
 def _is_sha256(value: object) -> bool:
     return isinstance(value, str) and len(value) == 64 and not (set(value) - _HEX_DIGITS)
+
+
+_CONTENT_INVENTORY_EXCLUDED = frozenset({"manifest.json", ".install-receipt.json", ".smoke-passed"})
+
+
+def _content_symlink_target(path: str, target: object) -> str:
+    if not isinstance(target, str) or not target or target.startswith("/") or "\\" in target:
+        raise HarnessInventoryError(f"Kit symlink target is unsafe: {path!r}")
+    resolved = posixpath.normpath(posixpath.join(posixpath.dirname(path), target))
+    if (
+        not resolved
+        or resolved in {".", ".."}
+        or resolved.startswith("../")
+        or resolved.startswith("/")
+        or any(part in {"", ".", ".."} for part in resolved.split("/"))
+    ):
+        raise HarnessInventoryError(f"Kit symlink target escapes its root: {path!r}")
+    return resolved
+
+
+def content_inventory_digest(entries: list[dict[str, Any]]) -> str:
+    """Hash canonical content entries without including generated metadata."""
+    canonical = sorted(entries, key=lambda entry: entry["path"])
+    return hashlib.sha256(
+        json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+
+
+def validate_content_inventory(raw: object) -> list[dict[str, Any]]:
+    """Validate the full Kit content inventory committed by ``manifest.json``."""
+    if not isinstance(raw, list) or not raw:
+        raise HarnessInventoryError("Kit content_inventory must be a non-empty array")
+    normalized: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for entry in raw:
+        if not isinstance(entry, Mapping):
+            raise HarnessInventoryError("Kit content_inventory entries must be objects")
+        path = entry.get("path")
+        if not isinstance(path, str) or not path or path != posixpath.normpath(path):
+            raise HarnessInventoryError("Kit content_inventory path is invalid")
+        if (
+            path in _CONTENT_INVENTORY_EXCLUDED
+            or path.startswith("/")
+            or path.startswith("../")
+            or "\\" in path
+            or any(part in {"", ".", ".."} for part in path.split("/"))
+        ):
+            raise HarnessInventoryError(f"Kit content_inventory path is unsafe: {path!r}")
+        if path in seen:
+            raise HarnessInventoryError(f"Kit content_inventory path is duplicated: {path!r}")
+        seen.add(path)
+        kind = entry.get("kind")
+        if kind == "file":
+            if set(entry) != {"kind", "path", "sha256", "size"}:
+                raise HarnessInventoryError(f"Kit file inventory entry is malformed: {path!r}")
+            size = entry.get("size")
+            if not isinstance(size, int) or isinstance(size, bool) or size < 0:
+                raise HarnessInventoryError(f"Kit file inventory size is invalid: {path!r}")
+            sha256 = entry.get("sha256")
+            if not _is_sha256(sha256):
+                raise HarnessInventoryError(f"Kit file inventory SHA-256 is invalid: {path!r}")
+            normalized.append({"kind": "file", "path": path, "sha256": sha256, "size": size})
+        elif kind == "symlink":
+            if set(entry) != {"kind", "path", "target"} or not isinstance(entry.get("target"), str):
+                raise HarnessInventoryError(f"Kit symlink inventory entry is malformed: {path!r}")
+            _content_symlink_target(path, entry["target"])
+            normalized.append({"kind": "symlink", "path": path, "target": entry["target"]})
+        else:
+            raise HarnessInventoryError(f"Kit content inventory kind is invalid: {path!r}")
+    normalized.sort(key=lambda entry: entry["path"])
+    return normalized
 
 
 def validate_harness_inventory(raw: object) -> dict[str, dict[str, Any]]:
@@ -152,7 +227,9 @@ def kit_relative_path(container_path: str) -> str | None:
     if not container_path.startswith(prefix):
         return None
     raw_relative = container_path[len(prefix) :]
-    if not raw_relative or raw_relative != raw_relative.strip():
+    if not raw_relative or raw_relative != raw_relative.strip() or "\\" in raw_relative:
+        return None
+    if any(part in {"", "."} for part in raw_relative.split("/")):
         return None
     # Reject any ".." component in the raw path: normpath would collapse
     # "harness/pi/../../bin/sh" into the kit root, silently turning a
@@ -202,13 +279,17 @@ def missing_payload_warnings(
     return warnings
 
 
-def kit_identity_from_manifest_bytes(manifest_bytes: bytes) -> dict[str, str]:
+def kit_identity_from_manifest_bytes(
+    manifest_bytes: bytes,
+    *,
+    require_content_inventory: bool = True,
+) -> dict[str, str]:
     """Content-address one Kit build by its exact manifest bytes.
 
     Any change to the selection set, a payload, the nix closure or any other
-    manifest field changes these bytes and therefore the identity. Callers
-    must supply manifest bytes whose parsed form passed
-    :func:`validate_harness_inventory`.
+    manifest field changes these bytes and therefore the identity. V2 callers
+    require the canonical full-content inventory; the legacy V1 compatibility
+    probe may explicitly disable that requirement during dual-canary.
     """
     try:
         text = manifest_bytes.decode("utf-8")
@@ -226,6 +307,14 @@ def kit_identity_from_manifest_bytes(manifest_bytes: bytes) -> dict[str, str]:
         raise HarnessInventoryError("Kit manifest.json has no kit_version")
     if not isinstance(platform, str) or _PLATFORM_RE.fullmatch(platform) is None:
         raise HarnessInventoryError("Kit manifest.json has no linux/* platform")
+    if require_content_inventory:
+        entries = validate_content_inventory(manifest.get("content_inventory"))
+        declared_content_digest = manifest.get("content_inventory_sha256")
+        if (
+            not _is_sha256(declared_content_digest)
+            or declared_content_digest != content_inventory_digest(entries)
+        ):
+            raise HarnessInventoryError("Kit manifest.json content inventory digest is invalid")
     return {
         "schema": KIT_IDENTITY_SCHEMA,
         "kit_version": kit_version,

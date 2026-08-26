@@ -63,7 +63,6 @@ from app.core.worker_docker_targets import (
     list_known_docker_targets,
 )
 from app.core.worker_runtime_readiness import (
-    READINESS_UNAVAILABLE,
     RuntimeProbeTransientError,
     RuntimeReadiness,
     harness_cli_unavailable_detail,
@@ -85,7 +84,6 @@ from app.models import (
     TaskStatus,
     TaskWorkerProfileSnapshot,
     WorkerRuntimeBundle,
-    WorkerRuntimeReadiness,
 )
 from app.runtime_config import load_runtime_config_from_db
 
@@ -1241,18 +1239,12 @@ class Scheduler:
                     )
                 ),
                 ~exists(select(1).where(IssueExecutionLock.issue_id == Task.issue_id)),
-                # A PENDING task whose frozen Kit locator is known unavailable
-                # stays PENDING: promotion would only queue a run that must be
-                # parked again (§13.2).
-                ~exists(
-                    select(1).where(
-                        TaskWorkerProfileSnapshot.task_id == Task.id,
-                        TaskWorkerProfileSnapshot.runtime_locator_fingerprint.is_not(None),
-                        TaskWorkerProfileSnapshot.runtime_locator_fingerprint
-                        == WorkerRuntimeReadiness.runtime_locator_fingerprint,
-                        WorkerRuntimeReadiness.status == READINESS_UNAVAILABLE,
-                    )
-                ),
+                # Runtime readiness is verified by the authoritative
+                # pre-execution gate. Do not filter here: legacy V1 readiness
+                # rows and V2 full-content rows intentionally have different
+                # verification scopes, while this SQL update only carries the
+                # historical locator fingerprint and cannot safely distinguish
+                # them (§13.2).
             )
             .values(status=TaskStatus.QUEUED)
         )
@@ -1568,13 +1560,32 @@ class Scheduler:
             # baked-image target (or a pre-071 legacy snapshot): no host Kit to
             # locate, so no readiness gate applies.
             return False
-        readiness = await read_runtime_readiness(db, fingerprint)
-        if readiness.is_ready:
-            return await self._harness_availability_gate(db, task, snapshot, readiness)
+        requires_full_content_identity = (
+            getattr(snapshot, "runtime_contract_version", None) == HARNESS_CONTRACT_VERSION_V2
+        )
+        readiness = await read_runtime_readiness(
+            db,
+            fingerprint,
+            require_content_inventory=requires_full_content_identity,
+        )
         if readiness.is_unavailable:
-            await self._park_tasks_for_unavailable_runtime(db, task, fingerprint, readiness)
+            await self._park_tasks_for_unavailable_runtime(
+                db,
+                task,
+                fingerprint,
+                readiness,
+                require_content_inventory=requires_full_content_identity,
+            )
             return True
-        # unknown / expired ready → deterministic first-probe (§13.4).
+        if readiness.is_ready and not requires_full_content_identity:
+            # V1 dual-canary keeps the legacy cached-ready path. Old V1 Kits do
+            # not carry the V2 full-content inventory and must remain runnable
+            # while the migration is in progress.
+            return await self._harness_availability_gate(db, task, snapshot, readiness)
+        # A cached ready row is not sufficient for V2 execution: the locator
+        # fingerprint identifies where the Kit lives, not its current bytes.
+        # Re-probe the full content inventory so an in-place replacement cannot
+        # pass the gate during the readiness TTL (§13.4).
         settings = get_settings()
         connection = connection_from_snapshot(snapshot, settings)
         try:
@@ -1586,6 +1597,7 @@ class Scheduler:
                 worker_kit_version=snapshot.worker_kit_version or "",
                 worker_kit_path=snapshot.worker_kit_path or "",
                 ttl_seconds=settings.worker_runtime_readiness_ttl_seconds,
+                require_content_inventory=requires_full_content_identity,
             )
         except RuntimeProbeTransientError as exc:
             # No new conclusion (§13.5): leave the task QUEUED and retry next
@@ -1608,7 +1620,13 @@ class Scheduler:
                 # this probe committed: fail the probed task and park unclaimed
                 # same-fingerprint tasks (§13.4).
                 await self._fail_task_for_runtime_check(db, task, outcome.readiness)
-                await self._park_other_queued_tasks(db, task, fingerprint, outcome.readiness)
+                await self._park_other_queued_tasks(
+                    db,
+                    task,
+                    fingerprint,
+                    outcome.readiness,
+                    require_content_inventory=requires_full_content_identity,
+                )
             else:
                 # The probe was superseded by a concurrent check that concluded
                 # unavailable (§13.3 CAS). §13.3/§13.5: a late probe must not
@@ -1616,7 +1634,11 @@ class Scheduler:
                 # once the Kit becomes available instead of requiring a manual
                 # retry (§24.13).
                 await self._park_tasks_for_unavailable_runtime(
-                    db, task, fingerprint, outcome.readiness
+                    db,
+                    task,
+                    fingerprint,
+                    outcome.readiness,
+                    require_content_inventory=requires_full_content_identity,
                 )
             return True
         # unknown: the probe result was superseded by a concurrent check or no
@@ -1692,6 +1714,7 @@ class Scheduler:
                 worker_kit_version=snapshot.worker_kit_version or "",
                 worker_kit_path=snapshot.worker_kit_path or "",
                 ttl_seconds=settings.worker_runtime_readiness_ttl_seconds,
+                require_content_inventory=requested_contract == HARNESS_CONTRACT_VERSION_V2,
             )
         except RuntimeProbeTransientError:
             return True
@@ -1736,10 +1759,18 @@ class Scheduler:
         task: Task,
         fingerprint: str,
         readiness: RuntimeReadiness,
+        *,
+        require_content_inventory: bool = False,
     ) -> None:
-        """Demote the current and unclaimed same-fingerprint QUEUED Tasks to PENDING."""
+        """Demote queued Tasks in the same locator and verification scope."""
         await self._park_queued_task(db, task, readiness)
-        await self._park_other_queued_tasks(db, task, fingerprint, readiness)
+        await self._park_other_queued_tasks(
+            db,
+            task,
+            fingerprint,
+            readiness,
+            require_content_inventory=require_content_inventory,
+        )
 
     async def _park_other_queued_tasks(
         self,
@@ -1747,8 +1778,17 @@ class Scheduler:
         task: Task,
         fingerprint: str,
         readiness: RuntimeReadiness,
+        *,
+        require_content_inventory: bool = False,
     ) -> None:
-        """Return every unclaimed QUEUED Task sharing the fingerprint to PENDING."""
+        snapshot_scope = TaskWorkerProfileSnapshot.runtime_contract_version == (
+            HARNESS_CONTRACT_VERSION_V2
+        )
+        if not require_content_inventory:
+            snapshot_scope = or_(
+                TaskWorkerProfileSnapshot.runtime_contract_version != HARNESS_CONTRACT_VERSION_V2,
+                TaskWorkerProfileSnapshot.runtime_contract_version.is_(None),
+            )
         result = await db.execute(
             select(Task).where(
                 Task.status == TaskStatus.QUEUED,
@@ -1757,6 +1797,7 @@ class Scheduler:
                 Task.id.in_(
                     select(TaskWorkerProfileSnapshot.task_id).where(
                         TaskWorkerProfileSnapshot.runtime_locator_fingerprint == fingerprint,
+                        snapshot_scope,
                     )
                 ),
             )

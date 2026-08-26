@@ -1248,6 +1248,7 @@ class RuntimeReadinessGateTests(unittest.IsolatedAsyncioTestCase):
     def _snapshot_db(self, fingerprint="fp-1"):
         snapshot = MagicMock()
         snapshot.runtime_locator_fingerprint = fingerprint
+        snapshot.runtime_contract_version = "codify.worker.harness/v1"
         snapshot.image = "worker:latest"
         snapshot.runtime_mode = "mounted_kit"
         snapshot.worker_kit_version = "0.3.5"
@@ -1258,8 +1259,73 @@ class RuntimeReadinessGateTests(unittest.IsolatedAsyncioTestCase):
         empty.scalars.return_value.all.return_value = []
         return snapshot_result, empty
 
-    async def test_ready_runtime_does_not_block(self) -> None:
+    async def test_v1_cached_ready_runtime_skips_full_probe(self) -> None:
         from app.core.worker_runtime_readiness import READINESS_READY, RuntimeReadiness
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        task = _claimable_task(5, 20)
+        snapshot_result, _ = self._snapshot_db()
+        db = MagicMock()
+        db.execute = AsyncMock(side_effect=[snapshot_result])
+        db.commit = AsyncMock()
+        probe = AsyncMock()
+        readiness = AsyncMock(
+            return_value=RuntimeReadiness(status=READINESS_READY)
+        )
+
+        with patch(
+            "app.scheduler.read_runtime_readiness",
+            new=readiness,
+        ), patch("app.scheduler.run_deterministic_kit_probe", new=probe):
+            blocked = await scheduler._apply_runtime_readiness_gate(db, task)
+
+        self.assertFalse(blocked)
+        probe.assert_not_awaited()
+        readiness.assert_awaited_once_with(
+            db,
+            "fp-1",
+            require_content_inventory=False,
+        )
+
+    async def test_v2_cached_ready_runtime_requires_full_content_probe(self) -> None:
+        from app.core.worker_runtime_readiness import (
+            READINESS_READY,
+            RuntimeProbeOutcome,
+            RuntimeReadiness,
+        )
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        task = _claimable_task(5, 20)
+        snapshot_result, _ = self._snapshot_db()
+        snapshot_result.scalar_one_or_none.return_value.runtime_contract_version = (
+            "codify.worker.harness/v2"
+        )
+        db = MagicMock()
+        db.execute = AsyncMock(side_effect=[snapshot_result])
+        db.commit = AsyncMock()
+        probe = AsyncMock(
+            return_value=RuntimeProbeOutcome(
+                readiness=RuntimeReadiness(status=READINESS_READY), committed=True
+            )
+        )
+
+        with patch(
+            "app.scheduler.read_runtime_readiness",
+            new=AsyncMock(return_value=RuntimeReadiness(status=READINESS_READY)),
+        ), patch("app.scheduler.run_deterministic_kit_probe", new=probe):
+            blocked = await scheduler._apply_runtime_readiness_gate(db, task)
+
+        self.assertFalse(blocked)
+        self.assertTrue(probe.await_args.kwargs["require_content_inventory"])
+
+    async def test_ready_runtime_does_not_block(self) -> None:
+        from app.core.worker_runtime_readiness import (
+            READINESS_READY,
+            RuntimeProbeOutcome,
+            RuntimeReadiness,
+        )
         from app.scheduler import Scheduler
 
         scheduler = Scheduler()
@@ -1272,6 +1338,14 @@ class RuntimeReadinessGateTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "app.scheduler.read_runtime_readiness",
             new=AsyncMock(return_value=RuntimeReadiness(status=READINESS_READY)),
+        ), patch(
+            "app.scheduler.run_deterministic_kit_probe",
+            new=AsyncMock(
+                return_value=RuntimeProbeOutcome(
+                    readiness=RuntimeReadiness(status=READINESS_READY),
+                    committed=True,
+                )
+            ),
         ):
             blocked = await scheduler._apply_runtime_readiness_gate(db, task)
 

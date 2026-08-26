@@ -253,10 +253,12 @@ make worker-kit-export \
 在目标 Docker Host 上安装（`deploy/offline-bundle/scripts/install-worker-kit.sh`），安装到 `/opt/codify/worker-kits/`：
 
 ```bash
-./scripts/install-worker-kit.sh kits/codify-worker-kit-<version>-linux-<arch>-<manifest-prefix>.tar.gz
+sudo ./scripts/install-worker-kit.sh kits/codify-worker-kit-<version>-linux-<arch>-<manifest-prefix>.tar.gz
 ```
 
-安装先校验归档 `.sha256` 与归档内路径，再放置 Kit，并拒绝覆盖已存在的 content-addressed 身份目录。
+安装先校验归档 `.sha256`、归档内路径、manifest SHA 与 canonical full-content inventory，再放置 Kit，
+并拒绝覆盖已存在的 content-addressed 身份目录。安装器要求 root，并拒绝不具备 root 所有权
+或对 group/others 可写的安装路径；落盘后的 Kit 与 receipt 均由 root 持有且不可被其他用户写入。
 
 #### V2 release 预检
 

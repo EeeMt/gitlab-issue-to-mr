@@ -150,7 +150,7 @@ deliberately when upgrading nixpkgs, then publish a new worker-kit version. The 
 the locked revision for release auditing.
 The installer is content-addressed: the archive name embeds the manifest SHA-256 prefix, the
 installed directory is `<version>-<platform>-<digest-prefix>`, the receipt
-(`.install-receipt.json`) records archive/manifest digest/platform, and the installer refuses
+(`.install-receipt.json`) records archive/manifest/content-inventory digests and platform, and the installer refuses
 any existing identity directory. Build a new version (or selection set) instead of replacing an
 installed directory in place; the directory is root-owned and not writable by others.
 
@@ -218,13 +218,13 @@ can execute mounted-kit profiles:
 
 ```bash
 sudo ./scripts/install-worker-kit.sh \
-  kits/codify-worker-kit-0.3.10-linux-amd64.tar.gz
+  kits/codify-worker-kit-0.3.10-linux-amd64-<manifest-prefix>.tar.gz
 ```
 
 The default installation path is:
 
 ```text
-/opt/codify/worker-kits/0.3.10-linux-amd64
+/opt/codify/worker-kits/0.3.10-linux-amd64-<manifest-prefix>
 ```
 
 For remote Docker targets, this is a path on the Docker Engine host, not on the Backend or

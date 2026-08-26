@@ -8,7 +8,7 @@ import hashlib
 import inspect
 import time
 import uuid
-from datetime import timezone
+from datetime import UTC
 from types import SimpleNamespace
 from typing import Any, Mapping
 
@@ -548,7 +548,14 @@ async def _profile_api_sections(
                 worker_kit_version=effective.worker_kit_version,
                 worker_kit_path=effective.worker_kit_path,
             )
-            readiness = await read_runtime_readiness(db, fingerprint)
+            readiness = await read_runtime_readiness(
+                db,
+                fingerprint,
+                # Profile verification probes the full Kit whenever any
+                # enabled Harness opts into V2, so the admin summary must read
+                # the same readiness scope even when the default Harness is V1.
+                require_content_inventory=bool(eligible_v2_harness_keys(profile)),
+            )
         except Exception:  # noqa: BLE001 - unresolvable locator is never a known state
             readiness = RuntimeReadiness(status=READINESS_UNKNOWN)
 
@@ -647,7 +654,7 @@ def _v2_harness_evidence(
         # The portable validator requires an explicit UTC offset; DB columns
         # stay naive UTC, so the evidence document carries the aware form.
         "verified_at": (
-            verified_at.replace(tzinfo=timezone.utc).isoformat()
+            verified_at.replace(tzinfo=UTC).isoformat()
             if verified_at.tzinfo is None
             else verified_at.isoformat()
         ),
@@ -783,6 +790,7 @@ async def verify_worker_profile_runtime(
             worker_kit_version=runtime.worker_kit_version or "",
             worker_kit_path=runtime.worker_kit_path or "",
             ttl_seconds=settings.worker_runtime_readiness_ttl_seconds,
+            require_content_inventory=requires_v2_identity,
         )
     except RuntimeProbeTransientError as exc:
         raise HTTPException(

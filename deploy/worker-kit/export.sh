@@ -183,8 +183,9 @@ docker build \
     "${PROJECT_ROOT}"
 
 cid="$(docker create --platform "${PLATFORM}" "${IMAGE_TAG}" true)"
-# The manifest bytes are the content-addressed Kit identity: the archive name
-# embeds their SHA-256 prefix so installers refuse to overwrite an existing
+# The manifest bytes are the content-addressed Kit identity. Its canonical
+# content inventory commits all other Kit bytes; the archive name embeds the
+# manifest SHA-256 prefix so installers refuse to overwrite an existing
 # identity directory and two different builds never share a name.
 MANIFEST_DIGEST="$(docker run --rm --entrypoint cat "${IMAGE_TAG}" /worker-kit/manifest.json | sha256sum | awk '{print $1}')"
 KIT_NAME="${VERSION}-linux-${ARCH}-${MANIFEST_DIGEST:0:12}"

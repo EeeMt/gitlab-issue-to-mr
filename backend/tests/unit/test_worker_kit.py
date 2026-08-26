@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -105,13 +106,24 @@ def _runtime_verifier_fixture(tmp_path: Path, *, schema: str = "codify.worker.ru
         "harness_inventory": inventory,
     }
     (kit / "manifest.json").write_text(json.dumps(kit_manifest))
-    manifest_sha256 = hashlib.sha256((kit / "manifest.json").read_bytes()).hexdigest()
-    validator = Path(__file__).resolve().parents[3] / "deploy/worker-kit/validate-runtime-manifest.py"
+    repo_root = Path(__file__).resolve().parents[3]
+    validator = repo_root / "deploy/worker-kit/validate-runtime-manifest.py"
     (kit / "validate-runtime-manifest.py").write_bytes(validator.read_bytes())
+    content_verifier = repo_root / "deploy/worker-kit/verify-kit-content.py"
+    (kit / "verify-kit-content.py").write_bytes(content_verifier.read_bytes())
+    runtime_verifier = repo_root / "deploy/worker-kit/verify-runtime.sh"
+    (kit / "verify-runtime.sh").write_bytes(runtime_verifier.read_bytes())
+    (kit / "verify-runtime.sh").chmod(0o755)
     for key in inventory:
         check = kit / f"bridge-selfcheck-{key}"
         check.write_text("#!/bin/sh\n")
         check.chmod(0o755)
+    subprocess.run(
+        [sys.executable, str(content_verifier), "--root", str(kit), "--write-manifest"],
+        check=True,
+        capture_output=True,
+    )
+    manifest_sha256 = hashlib.sha256((kit / "manifest.json").read_bytes()).hexdigest()
 
     adapters = {}
     for key in inventory:
@@ -411,6 +423,8 @@ def test_worker_kit_and_runtime_bundle_manifests_have_distinct_launcher_contract
     assert 'runtime.Schema != "codify.worker.runtime-bundle/v2"' in launcher
     assert "Runtime Bundle digest does not match the Task binding" in launcher
     assert "runtime.GOOS" in launcher
+    assert "CODIFY_KIT_MANIFEST_SHA256" in launcher
+    assert "verifyKitContent" in launcher
     assert "stamped runtime-manifest/v2 or runtime-bundle/v2 document" in verifier
     assert "--all-harnesses requires --runtime-manifest" in verifier
     assert "Runtime Bundle Worker Kit identity is missing or invalid" in verifier
@@ -449,6 +463,27 @@ def test_runtime_verifier_rejects_actual_cli_tampering_for_each_harness(tmp_path
     )
     assert result.returncode != 0
     assert "Kit payload integrity mismatch" in result.stderr
+
+
+def test_kit_content_verifier_rejects_tampered_launcher_bytes(tmp_path):
+    repo_root = Path(__file__).resolve().parents[3]
+    kit, _, _, _ = _runtime_verifier_fixture(tmp_path)
+    (kit / "launcher").write_bytes(b"tampered launcher\n")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(repo_root / "deploy/worker-kit/verify-kit-content.py"),
+            "--root",
+            str(kit),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "content inventory mismatch" in result.stderr
 
 
 def test_runtime_verifier_rejects_bundle_digest_tampering(tmp_path):
@@ -828,7 +863,7 @@ def test_worker_kit_release_records_all_four_harness_entries_and_selfchecks():
         assert f"bridge-selfcheck-{harness}" in kit_dockerfile
     # The manifest path is the single source of truth for present payloads
     # (the artifact self-check resolves it directly under /worker-kit).
-    assert 'test -x "/worker-kit$(jq -r --arg k "${key}"' in kit_dockerfile
+    assert 'test -x "/worker-kit/$(jq -r --arg k "${key}"' in kit_dockerfile
     assert "harness_inventory" in kit_dockerfile
     assert "KIT_CLI_SELECTION" in kit_dockerfile
     assert "not_selected" in kit_dockerfile
@@ -844,6 +879,49 @@ def test_worker_kit_release_records_all_four_harness_entries_and_selfchecks():
     assert "cli_requirements" not in kit_dockerfile
     assert "advisory" in verifier
     assert "harness '{key}' absent" in verifier
+    assert '--volume "${KIT_PATH}:/opt/codify-kit:ro"' in verifier
+    assert '--volume "${KIT_PATH}/nix/store:/nix/store:ro"' in verifier
+
+
+def test_worker_kit_present_manifest_path_evaluates_to_kit_executable(tmp_path):
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "harness_inventory": {
+                    "pi": {
+                        "availability": "present",
+                        "path": "/opt/codify-kit/harness/pi/bin/pi",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    kit_root = tmp_path / "worker-kit"
+    executable = kit_root / "harness/pi/bin/pi"
+    executable.parent.mkdir(parents=True)
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            'relative="$(jq -r --arg k "$1" \'.harness_inventory[$k].path | sub("^/opt/codify-kit/"; "")\' "$2")"; test -x "$3/$relative"',
+            "path-check",
+            "pi",
+            str(manifest),
+            str(kit_root),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    dockerfile = (Path(__file__).resolve().parents[3] / "deploy/Dockerfile.worker-kit").read_text()
+    assert 'test -x "/worker-kit/$(jq -r --arg k "${key}"' in dockerfile
 
 
 def test_release_helpers_export_an_immutable_content_addressed_kit_archive():

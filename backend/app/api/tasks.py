@@ -76,6 +76,7 @@ from app.api.task_stats_routes import (
 from app.api.task_update_service import TaskUpdateServices, update_task_record
 from app.config import get_effective_settings
 from app.core.docker_client import resolve_docker_connection
+from app.core.harness_protocol import HARNESS_CONTRACT_VERSION_V2
 from app.core.projects import build_project_lookup, get_project_metadata
 from app.core.task_creation import prepare_task_runtime_snapshot
 from app.core.task_failure_summary import load_task_failure_summary
@@ -765,6 +766,10 @@ async def verify_task_worker_runtime(
             worker_kit_version=snapshot.worker_kit_version or "",
             worker_kit_path=snapshot.worker_kit_path or "",
             ttl_seconds=settings.worker_runtime_readiness_ttl_seconds,
+            require_content_inventory=(
+                getattr(snapshot, "runtime_contract_version", None)
+                == HARNESS_CONTRACT_VERSION_V2
+            ),
         )
     except RuntimeProbeTransientError as exc:
         raise HTTPException(
