@@ -810,21 +810,107 @@ def _reset_pi_state():
     }
 
 
-@pytest.mark.parametrize(
-    "raw_type",
-    ["tool_execution_start", "tool_execution_update", "tool_execution_end"],
-)
-def test_pi_tool_records_map_to_pi_tool_observed(raw_type):
-    """All three tool_execution_* stream records surface pi_tool_observed,
-    never unknown_raw_event (regression: tool_execution_update fell through)."""
+def test_pi_tool_start_maps_to_tool_started_with_sanitized_input():
+    """tool_execution_start -> tool.started carrying tool_id/name/input; a
+    bash command is sanitized (URLs/tokens redacted), read/write keep path."""
     import pi_events
 
     _reset_pi_state()
     writer = _FakeWriter()
     pi_events._emit = writer
-    pi_events.translate({"type": raw_type, "toolName": "bash"}, 7)
-    codes = [p.get("code") for t, p, _ in writer.events if t == "diagnostic"]
-    assert codes == ["pi_tool_observed"], codes
+    pi_events.translate(
+        {
+            "type": "tool_execution_start",
+            "toolCallId": "<TOOL_ID:abc123>",
+            "toolName": "write",
+            "args": {"path": "/workspace/docs/pi.md", "content": "x"},
+        },
+        7,
+    )
+    started = [p for t, p, _ in writer.events if t == "tool.started"]
+    assert len(started) == 1
+    assert started[0]["tool_id"] == "<TOOL_ID:abc123>"
+    assert started[0]["name"] == "write"
+    assert started[0]["input"] == {"path": "/workspace/docs/pi.md"}
+
+    _reset_pi_state()
+    writer = _FakeWriter()
+    pi_events._emit = writer
+    pi_events.translate(
+        {
+            "type": "tool_execution_start",
+            "toolCallId": "<TOOL_ID:def456>",
+            "toolName": "bash",
+            "args": {
+                "command": "curl -H 'PRIVATE-TOKEN: glpat-abcdef1234567890' http://192.168.50.129:8080/api/v4/x"
+            },
+        },
+        8,
+    )
+    started = [p for t, p, _ in writer.events if t == "tool.started"]
+    assert len(started) == 1
+    assert "glpat-abcdef1234567890" not in json.dumps(started[0])
+    assert "192.168.50.129" not in json.dumps(started[0])
+
+
+def test_pi_tool_end_maps_to_tool_completed_with_truncated_output():
+    """tool_execution_end -> tool.completed with sanitized output and error."""
+    import pi_events
+
+    _reset_pi_state()
+    writer = _FakeWriter()
+    pi_events._emit = writer
+    pi_events.translate(
+        {
+            "type": "tool_execution_end",
+            "toolCallId": "<TOOL_ID:abc123>",
+            "toolName": "write",
+            "result": {
+                "content": [{"type": "text", "text": "Successfully wrote 52 bytes to /workspace/docs/pi.md http://192.168.50.129:8080/x"}]
+            },
+            "isError": False,
+        },
+        9,
+    )
+    completed = [p for t, p, _ in writer.events if t == "tool.completed"]
+    assert len(completed) == 1
+    assert "192.168.50.129" not in json.dumps(completed[0])
+    assert completed[0]["error"] is False
+    assert completed[0]["name"] == "write"
+
+
+def test_pi_tool_update_is_explicit_noop():
+    """tool_execution_update emits nothing (progress only), never unknown."""
+    import pi_events
+
+    _reset_pi_state()
+    writer = _FakeWriter()
+    pi_events._emit = writer
+    pi_events.translate(
+        {"type": "tool_execution_update", "toolCallId": "<TOOL_ID:abc123>", "toolName": "bash"},
+        10,
+    )
+    assert writer.events == []
+
+
+def test_pi_tool_end_with_error_flags_error():
+    import pi_events
+
+    _reset_pi_state()
+    writer = _FakeWriter()
+    pi_events._emit = writer
+    pi_events.translate(
+        {
+            "type": "tool_execution_end",
+            "toolCallId": "<TOOL_ID:e1>",
+            "toolName": "bash",
+            "result": {"content": [{"type": "text", "text": "permission denied"}]},
+            "isError": True,
+        },
+        11,
+    )
+    completed = [p for t, p, _ in writer.events if t == "tool.completed"]
+    assert completed[0]["error"] is True
 
 
 @pytest.mark.parametrize("raw_type", ["compaction_start", "compaction_end"])

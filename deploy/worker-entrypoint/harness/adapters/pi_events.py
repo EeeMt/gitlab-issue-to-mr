@@ -482,14 +482,72 @@ def _handle_queue_update(record: dict, raw_line: int) -> None:
     _emit("control.queue.updated", {"queue": queue}, raw_line)
 
 
+_TOOL_OUTPUT_MAX_CHARS = 2000
+_TOOL_COMMAND_MAX_CHARS = 1000
+
+
+def _tool_input(record: dict) -> dict:
+    """Project a sanitized tool input: file paths stay verbatim (workspace
+    paths only), shell commands are sanitized (URLs/tokens redacted)."""
+    tool_name = str(record.get("toolName") or "unknown")
+    args = record.get("args") if isinstance(record.get("args"), dict) else {}
+    if tool_name in {"read", "write", "edit"}:
+        path = args.get("path")
+        return {"path": str(path)} if isinstance(path, str) else {}
+    if tool_name == "bash":
+        command = args.get("command")
+        if isinstance(command, str):
+            return {"command": sanitize(command)[:_TOOL_COMMAND_MAX_CHARS]}
+        return {}
+    return {}
+
+
+def _tool_output(record: dict) -> str:
+    result = record.get("result")
+    if isinstance(result, dict):
+        content = result.get("content")
+        if isinstance(content, list):
+            parts = [
+                c.get("text")
+                for c in content
+                if isinstance(c, dict) and c.get("type") == "text" and isinstance(c.get("text"), str)
+            ]
+            return sanitize("".join(parts))[:_TOOL_OUTPUT_MAX_CHARS]
+        if isinstance(content, str):
+            return sanitize(content)[:_TOOL_OUTPUT_MAX_CHARS]
+    return ""
+
+
 def _handle_tool(record: dict, raw_line: int) -> None:
-    # Pi tool calls surface as message content parts in this protocol version;
-    # expose a lightweight diagnostic when a tool execution is observed.
-    _emit(
-        "diagnostic",
-        {"code": "pi_tool_observed", "role": record.get("role", "assistant")},
-        raw_line,
-    )
+    """Map Pi tool_execution_* records to canonical tool.started/completed.
+
+    Pi exposes tool calls as top-level stream records with toolName/args/result;
+    read/write/edit surface their file path, bash its sanitized command, and
+    completion carries the sanitized truncated output. tool_execution_update is
+    a progress record with no additional terminal fact: explicit no-op (never
+    unknown_raw_event).
+    """
+    record_type = record.get("type")
+    tool_call_id = str(record.get("toolCallId") or "")
+    tool_name = str(record.get("toolName") or "unknown")
+    if record_type == "tool_execution_start":
+        _emit(
+            "tool.started",
+            {"tool_id": tool_call_id, "name": tool_name, "input": _tool_input(record)},
+            raw_line,
+        )
+    elif record_type == "tool_execution_end":
+        _emit(
+            "tool.completed",
+            {
+                "tool_id": tool_call_id,
+                "name": tool_name,
+                "output": _tool_output(record),
+                "error": bool(record.get("isError")),
+            },
+            raw_line,
+        )
+    # tool_execution_update: progress only, no canonical event.
 
 
 def _handle_agent_end(record: dict, raw_line: int) -> None:
