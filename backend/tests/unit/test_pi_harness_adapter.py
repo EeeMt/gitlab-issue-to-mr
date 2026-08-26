@@ -13,6 +13,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from app.core.harness_protocol import CANONICAL_EVENT_SCHEMA_V2, replay_events, validate_event_v2
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -772,3 +774,157 @@ def test_pi_runner_terminates_and_persists_result_after_settled(tmp_path):
     # The canonical audit trail surfaced the settled signal for the projector.
     by_type = [e["type"] for e in _events(runtime_dir)]
     assert "agent_settled" in by_type
+
+
+# ── Full raw-type coverage: every Pi 0.84.2 stream record maps to a
+# canonical event (or an explicit no-op), never to unknown_raw_event. ────────
+
+class _FakeWriter:
+    """Capture canonical events without a real writer subprocess."""
+
+    def __init__(self):
+        self.events = []
+
+    def __call__(self, event_type, payload, raw_line):
+        self.events.append((event_type, payload, raw_line))
+
+
+def _reset_pi_state():
+    import pi_events
+
+    pi_events._STATE = {
+        "model_resolved": False,
+        "model_id": None,
+        "session_id": None,
+        "aborted": False,
+        "usage": {},
+        "terminal": None,
+        "terminal_line": None,
+        "terminal_failure": None,
+        "assistant_final_line": None,
+        "agent_end_success_line": None,
+        "agent_settled_line": None,
+        "last_raw_line": 0,
+        "text_parts": [],
+        "thinking": [],
+    }
+
+
+@pytest.mark.parametrize(
+    "raw_type",
+    ["tool_execution_start", "tool_execution_update", "tool_execution_end"],
+)
+def test_pi_tool_records_map_to_pi_tool_observed(raw_type):
+    """All three tool_execution_* stream records surface pi_tool_observed,
+    never unknown_raw_event (regression: tool_execution_update fell through)."""
+    import pi_events
+
+    _reset_pi_state()
+    writer = _FakeWriter()
+    pi_events._emit = writer
+    pi_events.translate({"type": raw_type, "toolName": "bash"}, 7)
+    codes = [p.get("code") for t, p, _ in writer.events if t == "diagnostic"]
+    assert codes == ["pi_tool_observed"], codes
+
+
+@pytest.mark.parametrize("raw_type", ["compaction_start", "compaction_end"])
+def test_pi_compaction_records_map_to_compaction_observed(raw_type):
+    import pi_events
+
+    _reset_pi_state()
+    writer = _FakeWriter()
+    pi_events._emit = writer
+    pi_events.translate({"type": raw_type}, 9)
+    codes = [p.get("code") for t, p, _ in writer.events if t == "diagnostic"]
+    assert codes == ["compaction_observed"], codes
+
+
+def test_pi_unknown_raw_type_emits_unknown_raw_event():
+    import pi_events
+
+    _reset_pi_state()
+    writer = _FakeWriter()
+    pi_events._emit = writer
+    pi_events.translate({"type": "futuristic_new_event"}, 11)
+    codes = [p.get("code") for t, p, _ in writer.events if t == "diagnostic"]
+    assert codes == ["unknown_raw_event"], codes
+
+
+def test_pi_rejected_native_ack_maps_control_command_rejected():
+    import pi_events
+
+    _reset_pi_state()
+    writer = _FakeWriter()
+    pi_events._emit = writer
+    pi_events.translate(
+        {
+            "type": "response",
+            "command": "follow_up",
+            "success": False,
+            "__command_ack": {
+                "command_id": "cmd-rejected-1",
+                "payload_digest": "d1",
+                "sequence_no": 3,
+                "rejection_code": "delivery_outcome_unknown",
+            },
+        },
+        13,
+    )
+    delivered = [p for t, p, _ in writer.events if t == "control.command.rejected"]
+    assert len(delivered) == 1
+    assert delivered[0]["command_id"] == "cmd-rejected-1"
+    assert delivered[0]["sequence_no"] == 3
+
+
+def test_pi_native_ack_without_command_id_is_diagnostic_not_delivered():
+    import pi_events
+
+    _reset_pi_state()
+    writer = _FakeWriter()
+    pi_events._emit = writer
+    pi_events.translate(
+        {"type": "response", "command": "steer", "success": True},
+        15,
+    )
+    types = [t for t, _, _ in writer.events]
+    assert "control.command.delivered" not in types
+    assert any(
+        t == "diagnostic" and p.get("code") == "native_ack_without_command_id"
+        for t, p, _ in writer.events
+    )
+
+
+def test_pi_reopen_marker_emits_follow_up_turn_started():
+    import pi_events
+
+    _reset_pi_state()
+    writer = _FakeWriter()
+    pi_events._emit = writer
+    pi_events.translate(
+        {
+            "type": "turn_start",
+            "__pi_reopen_after": {"command_id": "cmd-9", "native_id": "n9"},
+        },
+        17,
+    )
+    codes = [p.get("code") for t, p, _ in writer.events if t == "diagnostic"]
+    assert codes == ["pi_follow_up_turn_started"], codes
+
+
+def test_pi_incomplete_terminal_emits_harness_failed(tmp_path):
+    import pi_events
+
+    os.environ["CODIFY_HARNESS_RESULT_FILE"] = str(tmp_path / "harness-result.json")
+    _reset_pi_state()
+    writer = _FakeWriter()
+    pi_events._emit = writer
+    # Stream ends with only text, no agent_end/agent_settled.
+    pi_events.translate(
+        {"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "hi"}},
+        1,
+    )
+    pi_events._emit_terminal_at_eof()
+    types = [t for t, _, _ in writer.events]
+    assert "harness.failed" in types
+    assert pi_events._STATE["terminal"] == "failed"
+    del os.environ["CODIFY_HARNESS_RESULT_FILE"]

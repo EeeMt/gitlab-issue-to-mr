@@ -548,7 +548,11 @@ def translate(record: dict, raw_line: int) -> None:
         _handle_queue_update(record, raw_line)
     elif record_type == "turn_end":
         return
-    elif record_type == "tool_execution_start" or record_type == "tool_execution_end":
+    elif record_type in (
+        "tool_execution_start",
+        "tool_execution_update",
+        "tool_execution_end",
+    ):
         _handle_tool(record, raw_line)
     elif record_type == "agent_end":
         _handle_agent_end(record, raw_line)
