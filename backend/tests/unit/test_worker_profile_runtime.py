@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.core.harness_protocol import CANONICAL_EVENT_SCHEMA, HARNESS_CONTRACT_VERSION
 from app.core.utcnow import utcnow
 from app.core.worker_docker_targets import TaskContainerLookupError
 from app.core.worker_profiles import TaskWorkerRuntime
@@ -414,6 +415,129 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_create_execute_container_v1_dual_canary_uses_legacy_cli_path(tmp_path):
+    """V1 must cross the shared CLI path without reading an unbound V2 local."""
+    bundle = SimpleNamespace(
+        contract_version=HARNESS_CONTRACT_VERSION,
+        digest="d" * 64,
+        manifest={
+            "event_schema": CANONICAL_EVENT_SCHEMA,
+            "archive_manifest_digest": "e" * 64,
+            "adapters": {"claude": {"version": "1.0.0"}},
+        },
+        bundle_bytes=b"legacy-runtime-bundle",
+    )
+    task = SimpleNamespace(
+        id=12,
+        project_id=100,
+        issue_id=1,
+        ci_failure_run_id=None,
+        trigger_source="manual",
+        rendered_prompt="Prompt",
+        status=TaskStatus.RUNNING,
+        cancel_requested_at=None,
+        task_mode="execute",
+        session_mode="continue",
+        worker_profile_snapshot=SimpleNamespace(
+            runtime_contract_version=HARNESS_CONTRACT_VERSION,
+            runtime_bundle_digest=bundle.digest,
+            harness_key="claude",
+        ),
+    )
+    issue = SimpleNamespace(
+        id=1,
+        merge_request_iid=None,
+        merge_request_url=None,
+        target_branch=None,
+    )
+    worker = MagicMock()
+    worker._build_previous_task_summaries = AsyncMock(return_value="")
+    worker._prepare_container_inputs = AsyncMock(return_value=({"TASK_ID": "12"}, "main"))
+    worker._build_container_volumes = MagicMock(return_value={})
+    worker._get_container_name = MagicMock(return_value="codify-12-issue1")
+    worker.docker.pull_image = MagicMock()
+    worker.docker.create_container = MagicMock(return_value=SimpleNamespace(id="container-1"))
+
+    runtime = TaskWorkerRuntime(
+        image="legacy-worker:latest",
+        runtime_mode="baked_image",
+        codegraph_enabled=False,
+        volume_mounts=[],
+        environment={},
+        pre_script="",
+        post_script="",
+    )
+    settings = SimpleNamespace(
+        worker_skip_image_pull=False,
+        worker_network="bridge",
+        harness_execution_mode="dual_canary",
+        worker_runtime_readiness_ttl_seconds=900,
+    )
+    db = MagicMock()
+    db.commit = AsyncMock()
+    db.flush = AsyncMock()
+    db.refresh = AsyncMock()
+    attempt = SimpleNamespace(
+        attempt_id="task-12-attempt-1",
+        harness_key="claude",
+        adapter_version="1.0.0",
+        event_schema=CANONICAL_EVENT_SCHEMA,
+        control_state="disabled",
+    )
+
+    with (
+        patch(
+            "app.core.worker_task_lifecycle.load_task_worker_runtime",
+            new=AsyncMock(return_value=runtime),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.build_issue_workspace_paths",
+            return_value=SimpleNamespace(issue_root=str(tmp_path)),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.load_bound_runtime_bundle",
+            new=AsyncMock(return_value=bundle),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.create_task_attempt",
+            new=AsyncMock(return_value=attempt),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.build_task_runtime_archive",
+            return_value=b"task-runtime-archive",
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.projection_for_task",
+            return_value={
+                "harness_key": "claude",
+                "session_namespace": "issue:1:claude",
+                "generation": 0,
+                "reset_task_id": None,
+            },
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.resolve_projected_resume_session",
+            new=AsyncMock(return_value=(None, "fresh_no_match")),
+        ),
+    ):
+        container = await create_execute_container(
+            worker,
+            db,
+            settings=settings,
+            task=task,
+            issue=issue,
+            sudo_gl=None,
+        )
+
+    assert container.id == "container-1"
+    worker.docker.pull_image.assert_called_once_with("legacy-worker:latest", force=False)
+    environment = worker.docker.create_container.call_args.kwargs["environment"]
+    assert environment["CODIFY_RUNTIME_CONTRACT_VERSION"] == HARNESS_CONTRACT_VERSION
+    assert environment["CODIFY_HARNESS_CLI_BIN"] == ""
+    assert worker.docker.create_container.call_args.kwargs["image"] == "legacy-worker:latest"
+
+
+@pytest.mark.asyncio
 async def test_v2_execution_rejects_daemon_image_identity_mismatch_before_container(tmp_path):
     identity = {
         "schema": "codify.worker-image-identity/v1",
@@ -816,8 +940,6 @@ async def test_v2_execution_rejects_kit_identity_change_between_verification_and
 ):
     """A mounted Kit replacement between verification and execution fails
     closed instead of silently running against different Kit bytes."""
-    from app.core.worker_runtime_readiness import HarnessCliUnavailableError
-
     runtime, settings = _kit_runtime_and_settings()
     worker, db, task, issue, attempt = _kit_failure_execute_fixtures(
         runtime, settings, tmp_path

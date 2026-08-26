@@ -109,7 +109,11 @@ async def run_pump_until_task_ends(
                 break
             else:
                 async def _task_scoped_transport(frame, command=None, attempt=None, **_kw):
-                    if attempt is None or attempt.task_id != task_id:
+                    if (
+                        frame.get("task_id") != task_id
+                        or attempt is None
+                        or attempt.task_id != task_id
+                    ):
                         return {
                             "status": DISPATCH_UNKNOWN,
                             "rejection_code": "wrong_attempt",
@@ -118,7 +122,12 @@ async def run_pump_until_task_ends(
                     return await docker_exec_control_transport(frame, attempt, task=task, db=db)
 
                 try:
-                    cycle = await run_pump_cycle(db, owner=owner, transport=_task_scoped_transport)
+                    cycle = await run_pump_cycle(
+                        db,
+                        task_id=task_id,
+                        owner=owner,
+                        transport=_task_scoped_transport,
+                    )
                     await db.commit()
                     processed += cycle.commands_processed
                 except Exception:  # noqa: BLE001 - one bad cycle must not kill the pump
@@ -152,7 +161,7 @@ def _future(seconds: int) -> datetime:
 
 
 async def _claim_next_attempt(
-    db: AsyncSession, *, owner: str, lease_ttl: int
+    db: AsyncSession, *, task_id: int, owner: str, lease_ttl: int
 ) -> TaskHarnessAttempt | None:
     """Atomically lease one V2 attempt that needs a pump pass.
 
@@ -172,11 +181,14 @@ async def _claim_next_attempt(
         select(TaskHarnessAttempt)
         .join(Task, Task.id == TaskHarnessAttempt.task_id)
         .where(
+            Task.id == task_id,
+            TaskHarnessAttempt.task_id == task_id,
             Task.status == TaskStatus.RUNNING,
             TaskHarnessAttempt.control_state.in_(("accepting", "closing")),
             exists(
                 select(1).where(
                     TaskHarnessCommand.attempt_id == TaskHarnessAttempt.attempt_id,
+                    TaskHarnessCommand.task_id == task_id,
                     TaskHarnessCommand.status.in_(("queued", "dispatching")),
                 )
             )
@@ -204,7 +216,7 @@ async def _claim_next_attempt(
 
 
 async def _promote_starting_attempt(
-    db: AsyncSession, *, owner: str, lease_ttl: int
+    db: AsyncSession, *, task_id: int, owner: str, lease_ttl: int
 ) -> TaskHarnessAttempt | None:
     """Promote one ``starting`` attempt whose bridge is ready to ``accepting``.
 
@@ -219,6 +231,8 @@ async def _promote_starting_attempt(
         select(TaskHarnessAttempt)
         .join(Task, Task.id == TaskHarnessAttempt.task_id)
         .where(
+            Task.id == task_id,
+            TaskHarnessAttempt.task_id == task_id,
             Task.status == TaskStatus.RUNNING,
             TaskHarnessAttempt.control_state == "starting",
         )
@@ -239,8 +253,10 @@ async def _promote_starting_attempt(
     await db.flush()
 
     try:
-        task = await db.get(Task, attempt.task_id)
+        task = await db.get(Task, task_id)
         if task is None:
+            return attempt
+        if attempt.task_id != task_id:
             return attempt
         outcome = await _probe_bridge(attempt, task, db=db)
     except Exception:  # noqa: BLE001 - transport probe must never crash the pump
@@ -400,29 +416,44 @@ async def _record_control_event(
     )
 
 
-async def _drop_lease(db: AsyncSession, attempt: TaskHarnessAttempt, *, owner: str) -> None:
-    """Clear the lease only if we still own it."""
+async def _drop_lease(
+    db: AsyncSession, *, task_id: int, attempt: TaskHarnessAttempt, owner: str
+) -> None:
+    """Clear the lease only if we still own the same Task-scoped attempt."""
     await db.execute(
         update(TaskHarnessAttempt)
         .where(
             TaskHarnessAttempt.attempt_id == attempt.attempt_id,
+            TaskHarnessAttempt.task_id == task_id,
             TaskHarnessAttempt.command_dispatch_owner == owner,
         )
         .values(command_dispatch_owner=None, command_dispatch_expires_at=None)
     )
 
 
-async def _load_head_command(db: AsyncSession, attempt_id: str) -> TaskHarnessCommand | None:
-    """Load the lowest non-terminal command for the attempt (queue front)."""
+async def _load_head_command(
+    db: AsyncSession, *, task_id: int, attempt_id: str
+) -> TaskHarnessCommand | None:
+    """Load the queue front only inside the owning Task and attempt."""
     stmt = (
         select(TaskHarnessCommand)
+        .join(
+            TaskHarnessAttempt,
+            TaskHarnessAttempt.attempt_id == TaskHarnessCommand.attempt_id,
+        )
         .where(
+            TaskHarnessCommand.task_id == task_id,
+            TaskHarnessAttempt.task_id == task_id,
+            TaskHarnessAttempt.attempt_id == attempt_id,
             TaskHarnessCommand.attempt_id == attempt_id,
             TaskHarnessCommand.status.in_(("queued", "dispatching")),
         )
         .order_by(TaskHarnessCommand.sequence_no.asc())
         .limit(1)
-        .with_for_update(skip_locked=True)
+        # The queue front is ordered state, not a work-stealing candidate.
+        # Waiting for a locked lower sequence is required; SKIP LOCKED could
+        # incorrectly expose a later command while its predecessor is in flux.
+        .with_for_update(of=TaskHarnessCommand)
     )
     return (await db.execute(stmt)).scalars().first()
 
@@ -460,7 +491,7 @@ async def _record_unknown_outcome(db: AsyncSession, command: TaskHarnessCommand)
 
 
 async def _close_drained_attempt(
-    *, db: AsyncSession, attempt: TaskHarnessAttempt, transport: CommandTransport
+    *, db: AsyncSession, task_id: int, attempt: TaskHarnessAttempt, transport: CommandTransport
 ) -> bool:
     """Ask the sole Pi owner to end only after its backend queue drained.
 
@@ -468,10 +499,12 @@ async def _close_drained_attempt(
     in ``closing`` so a later pump can retry safely instead of finalizing the
     worker while the owner is still able to accept an already-admitted command.
     """
+    if attempt.task_id != task_id:
+        raise ValueError("close transport task scope does not match attempt")
     outcome = await transport(
         {
             "frame_version": CONTROL_FRAME_VERSION,
-            "task_id": attempt.task_id,
+            "task_id": task_id,
             "attempt_id": attempt.attempt_id,
             "type": "close",
             "control_gate": "closing",
@@ -489,6 +522,7 @@ async def _close_drained_attempt(
 async def dispatch_one_command(
     db: AsyncSession,
     *,
+    task_id: int,
     command: TaskHarnessCommand,
     attempt: TaskHarnessAttempt,
     transport: CommandTransport,
@@ -501,6 +535,12 @@ async def dispatch_one_command(
     dict with ``status`` in {ack, reject, unknown} plus optional rejection fields.
     Any transport error is journaled as ``delivery_outcome_unknown``.
     """
+    if (
+        command.task_id != task_id
+        or attempt.task_id != task_id
+        or command.attempt_id != attempt.attempt_id
+    ):
+        raise ValueError("command, attempt, and pump task scope do not match")
     now = utcnow()
     native_request_id = str(1_000_000 + command.sequence_no)
     if command.command_type == "follow_up" and attempt.control_state == "closing":
@@ -533,7 +573,7 @@ async def dispatch_one_command(
     frame = {
         "frame_version": CONTROL_FRAME_VERSION,
         "command_id": command.command_id,
-        "task_id": command.task_id,
+        "task_id": task_id,
         "attempt_id": command.attempt_id,
         "sequence_no": command.sequence_no,
         "type": command.command_type,
@@ -668,31 +708,38 @@ async def _fail_pending_follow_up(db: AsyncSession, attempt: TaskHarnessAttempt,
 async def run_pump_cycle(
     db: AsyncSession,
     *,
+    task_id: int,
     owner: str,
     transport: CommandTransport,
     lease_ttl: int = DEFAULT_LEASE_TTL_SECONDS,
     max_commands_per_attempt: int = 8,
 ) -> PumpCycleResult:
-    """Run one dispatch pass across the accepting V2 attempts.
+    """Run one dispatch pass for the requested Task's accepting V2 attempt.
 
     Claims at most one attempt per cycle (SKIP LOCKED), then processes its
     queue front strictly in sequence order, up to ``max_commands_per_attempt``
     commands before releasing the lease. In-flight tasks keep their lease; the
     caller is responsible for committing the session.
     """
-    attempt = await _claim_next_attempt(db, owner=owner, lease_ttl=lease_ttl)
+    attempt = await _claim_next_attempt(
+        db, task_id=task_id, owner=owner, lease_ttl=lease_ttl
+    )
     if attempt is None:
         # Plan §4.7: command-capable attempts open in `starting`; once the
         # bridge control endpoint answers a get_state probe the pump promotes
         # the gate to `accepting` so queued commands become deliverable.
-        attempt = await _promote_starting_attempt(db, owner=owner, lease_ttl=lease_ttl)
+        attempt = await _promote_starting_attempt(
+            db, task_id=task_id, owner=owner, lease_ttl=lease_ttl
+        )
     if attempt is None:
         return PumpCycleResult(attempts_seen=0, commands_processed=0, commands_updated=0)
 
     processed = 0
     updated = 0
     for _ in range(max_commands_per_attempt):
-        head = await _load_head_command(db, attempt.attempt_id)
+        head = await _load_head_command(
+            db, task_id=task_id, attempt_id=attempt.attempt_id
+        )
         if head is None:
             break
         if head.status == "dispatching":
@@ -710,6 +757,7 @@ async def run_pump_cycle(
             break
         final_status = await dispatch_one_command(
             db,
+            task_id=task_id,
             command=head,
             attempt=attempt,
             transport=transport,
@@ -722,12 +770,16 @@ async def run_pump_cycle(
             # Pre-send retry keeps this exact head in place; do not spin it.
             break
     if attempt.control_state == "closing":
-        remaining = await _load_head_command(db, attempt.attempt_id)
+        remaining = await _load_head_command(
+            db, task_id=task_id, attempt_id=attempt.attempt_id
+        )
         if remaining is None and not attempt.awaiting_follow_up_turn:
             # All commands admitted before the settled transition drained in
             # sequence; new PUTs are rejected by the closing gate.
             try:
-                await _close_drained_attempt(db=db, attempt=attempt, transport=transport)
+                await _close_drained_attempt(
+                    db=db, task_id=task_id, attempt=attempt, transport=transport
+                )
             except Exception:  # noqa: BLE001 - leave closing for a safe retry
                 logger.warning("Pi owner close IPC failed for attempt %s", attempt.attempt_id)
     # A delivered command leaves no more work; a rejected one also consumed the

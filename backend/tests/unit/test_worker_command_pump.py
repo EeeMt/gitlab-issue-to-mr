@@ -262,10 +262,10 @@ async def _unknown_transport(frame, **kwargs):
 
 
 async def test_pump_delivers_head_command(maker):
-    _, _, command_ids = await _seed_task_with_commands(maker, count=1)
+    task_id, _, command_ids = await _seed_task_with_commands(maker, count=1)
     async with maker() as db:
         result = await run_pump_cycle(
-            db, owner=_owner(), transport=_ack_transport
+            db, task_id=task_id, owner=_owner(), transport=_ack_transport
         )
         assert result.commands_processed == 1
         await db.commit()
@@ -275,10 +275,12 @@ async def test_pump_delivers_head_command(maker):
 async def test_idle_accepting_attempt_does_not_starve_newer_queued_work(maker):
     """An accepting attempt with no queue item must not win the claim."""
     await _seed_task_with_commands(maker, create_commands=False)
-    _, _, command_ids = await _seed_task_with_commands(maker, count=1)
+    task_id, _, command_ids = await _seed_task_with_commands(maker, count=1)
 
     async with maker() as db:
-        result = await run_pump_cycle(db, owner=_owner(), transport=_ack_transport)
+        result = await run_pump_cycle(
+            db, task_id=task_id, owner=_owner(), transport=_ack_transport
+        )
         await db.commit()
 
         assert result.attempts_seen == 1
@@ -300,10 +302,12 @@ async def test_waiting_closing_attempt_does_not_starve_newer_queued_work(maker):
             {"a": waiting_attempt_id},
         )
         await db.commit()
-    _, _, command_ids = await _seed_task_with_commands(maker, count=1)
+    task_id, _, command_ids = await _seed_task_with_commands(maker, count=1)
 
     async with maker() as db:
-        result = await run_pump_cycle(db, owner=_owner(), transport=_ack_transport)
+        result = await run_pump_cycle(
+            db, task_id=task_id, owner=_owner(), transport=_ack_transport
+        )
         await db.commit()
 
         assert result.attempts_seen == 1
@@ -312,7 +316,7 @@ async def test_waiting_closing_attempt_does_not_starve_newer_queued_work(maker):
 
 
 async def test_pump_processes_queue_front_in_strict_order(maker):
-    _, attempt_id, command_ids = await _seed_task_with_commands(maker, count=3)
+    task_id, attempt_id, command_ids = await _seed_task_with_commands(maker, count=3)
     processed = []
 
     async def tracking_transport(frame, **kwargs):
@@ -323,19 +327,31 @@ async def test_pump_processes_queue_front_in_strict_order(maker):
         owner = _owner()
         # First cycle delivers only the sequence-1 head.
         await run_pump_cycle(
-            db, owner=owner, transport=tracking_transport, max_commands_per_attempt=1
+            db,
+            task_id=task_id,
+            owner=owner,
+            transport=tracking_transport,
+            max_commands_per_attempt=1,
         )
         await db.commit()
         assert processed == [1]
         # Next cycle delivers 2 (same owner renews its lease).
         await run_pump_cycle(
-            db, owner=owner, transport=tracking_transport, max_commands_per_attempt=1
+            db,
+            task_id=task_id,
+            owner=owner,
+            transport=tracking_transport,
+            max_commands_per_attempt=1,
         )
         await db.commit()
         assert processed == [1, 2]
         # And finally 3.
         await run_pump_cycle(
-            db, owner=owner, transport=tracking_transport, max_commands_per_attempt=1
+            db,
+            task_id=task_id,
+            owner=owner,
+            transport=tracking_transport,
+            max_commands_per_attempt=1,
         )
         await db.commit()
         assert processed == [1, 2, 3]
@@ -343,11 +359,252 @@ async def test_pump_processes_queue_front_in_strict_order(maker):
             assert await _row_status(db, cid) == "delivered"
 
 
+async def test_pump_waits_for_locked_queue_front_instead_of_skipping_it(maker, monkeypatch):
+    """A locked lower sequence must block the pump rather than expose a later command."""
+    from app.core import worker_command_pump as module
+
+    task_id, _, command_ids = await _seed_task_with_commands(maker, count=2)
+    head_lookup_started = asyncio.Event()
+    pump_started = asyncio.Event()
+    real_load_head = module._load_head_command
+
+    async def load_head(db, *, task_id, attempt_id):
+        head_lookup_started.set()
+        return await real_load_head(db, task_id=task_id, attempt_id=attempt_id)
+
+    monkeypatch.setattr(module, "_load_head_command", load_head)
+    processed: list[int] = []
+
+    async def tracking_transport(frame, **kwargs):
+        processed.append(frame["sequence_no"])
+        return {"status": "ack"}
+
+    async def pump_once():
+        async with maker() as db:
+            pid = await db.scalar(sa.text("SELECT pg_backend_pid()"))
+            pump_pid["value"] = pid
+            pump_started.set()
+            result = await run_pump_cycle(
+                db,
+                task_id=task_id,
+                owner=_owner(),
+                transport=tracking_transport,
+                max_commands_per_attempt=1,
+            )
+            await db.commit()
+            return result
+
+    pump_pid: dict[str, int] = {}
+    async with maker() as locker:
+        await locker.execute(
+            sa.text(
+                "SELECT command_id FROM task_harness_commands "
+                "WHERE command_id = :command_id FOR UPDATE"
+            ),
+            {"command_id": command_ids[0]},
+        )
+        pump_task = asyncio.create_task(pump_once())
+        try:
+            await asyncio.wait_for(pump_started.wait(), timeout=5)
+            await asyncio.wait_for(head_lookup_started.wait(), timeout=5)
+
+            deadline = asyncio.get_running_loop().time() + 5
+            locked_front_seen = False
+            async with maker() as observer:
+                while asyncio.get_running_loop().time() < deadline:
+                    wait_event_type = await observer.scalar(
+                        sa.text(
+                            "SELECT wait_event_type FROM pg_stat_activity "
+                            "WHERE pid = :pid"
+                        ),
+                        {"pid": pump_pid["value"]},
+                    )
+                    if wait_event_type == "Lock":
+                        locked_front_seen = True
+                        break
+                    if pump_task.done():
+                        break
+                    await asyncio.sleep(0.01)
+
+            assert locked_front_seen, "pump did not wait for the locked queue front"
+            assert not pump_task.done()
+        finally:
+            await locker.rollback()
+
+        result = await asyncio.wait_for(pump_task, timeout=5)
+
+    assert result.commands_processed == 1
+    assert processed == [1]
+    async with maker() as db:
+        assert await _row_status(db, command_ids[0]) == "delivered"
+        assert await _row_status(db, command_ids[1]) == "queued"
+
+
+async def test_pump_claim_is_task_scoped_under_concurrency(maker):
+    """Concurrent per-task pumps must never claim or send another Task's head."""
+    task_one, _, command_one = await _seed_task_with_commands(maker, count=1)
+    task_two, _, command_two = await _seed_task_with_commands(maker, count=1)
+    seen: list[tuple[int, str]] = []
+
+    async def pump_one(task_id: int):
+        async with maker() as db:
+            async def transport(frame, **_kwargs):
+                seen.append((frame["task_id"], frame["command_id"]))
+                await asyncio.sleep(0)
+                return {"status": "ack"}
+
+            result = await run_pump_cycle(
+                db, task_id=task_id, owner=_owner(), transport=transport
+            )
+            await db.commit()
+            return result
+
+    results = await asyncio.gather(pump_one(task_one), pump_one(task_two))
+
+    assert [result.commands_processed for result in results] == [1, 1]
+    assert sorted(seen) == sorted(
+        [(task_one, command_one[0]), (task_two, command_two[0])]
+    )
+    async with maker() as db:
+        assert await _row_status(db, command_one[0]) == "delivered"
+        assert await _row_status(db, command_two[0]) == "delivered"
+
+
+async def test_pump_promotion_is_task_scoped_under_concurrency(maker, monkeypatch):
+    """Starting-gate probes must use the requested Task's attempt only."""
+    from app.core import worker_command_pump as module
+
+    task_one, _, _ = await _seed_task_with_commands(
+        maker, control_state="starting", create_commands=False
+    )
+    task_two, _, _ = await _seed_task_with_commands(
+        maker, control_state="starting", create_commands=False
+    )
+    probed: list[tuple[int, int]] = []
+
+    async def probe(attempt, task, db):
+        probed.append((attempt.task_id, task.id))
+        await asyncio.sleep(0)
+        return {"status": "ack"}
+
+    monkeypatch.setattr(module, "_probe_bridge", probe)
+
+    async def promote(task_id: int):
+        async with maker() as db:
+            result = await run_pump_cycle(
+                db, task_id=task_id, owner=_owner(), transport=_ack_transport
+            )
+            await db.commit()
+            return result
+
+    results = await asyncio.gather(promote(task_one), promote(task_two))
+
+    assert [result.attempts_seen for result in results] == [1, 1]
+    assert sorted(probed) == [(task_one, task_one), (task_two, task_two)]
+
+
+async def test_pump_closing_and_recovery_are_task_scoped_under_concurrency(maker):
+    """Closing and crash recovery must retain the same Task boundary too."""
+    task_one, attempt_one, commands_one = await _seed_task_with_commands(maker, count=1)
+    task_two, attempt_two, commands_two = await _seed_task_with_commands(maker, count=1)
+    async with maker() as db:
+        await db.execute(
+            sa.text(
+                "UPDATE task_harness_attempts SET control_state = 'closing' "
+                "WHERE attempt_id IN (:a1, :a2)"
+            ),
+            {"a1": attempt_one, "a2": attempt_two},
+        )
+        await db.commit()
+
+    closing_seen: list[tuple[int, str]] = []
+
+    async def close_pump(task_id: int):
+        async with maker() as db:
+            async def transport(frame, **_kwargs):
+                closing_seen.append((frame["task_id"], frame["type"]))
+                await asyncio.sleep(0)
+                return {"status": "ack"}
+
+            result = await run_pump_cycle(
+                db, task_id=task_id, owner=_owner(), transport=transport
+            )
+            await db.commit()
+            return result
+
+    close_results = await asyncio.gather(close_pump(task_one), close_pump(task_two))
+
+    assert [result.commands_processed for result in close_results] == [1, 1]
+    assert sorted(closing_seen) == sorted(
+        [(task_one, "steer"), (task_one, "close"), (task_two, "steer"), (task_two, "close")]
+    )
+    async with maker() as db:
+        states = (
+            await db.execute(
+                sa.text(
+                    "SELECT task_id, control_state FROM task_harness_attempts "
+                    "WHERE attempt_id IN (:a1, :a2) ORDER BY task_id"
+                ),
+                {"a1": attempt_one, "a2": attempt_two},
+            )
+        ).all()
+        assert [row.control_state for row in states] == ["closed", "closed"]
+
+    recovery_one, _, recovery_commands_one = await _seed_task_with_commands(maker, count=1)
+    recovery_two, _, recovery_commands_two = await _seed_task_with_commands(maker, count=1)
+    async with maker() as db:
+        await db.execute(
+            sa.text(
+                "UPDATE task_harness_commands SET status = 'dispatching', "
+                "dispatch_started_at = now(), delivery_attempts = 1 "
+                "WHERE command_id IN (:c1, :c2)"
+            ),
+            {"c1": recovery_commands_one[0], "c2": recovery_commands_two[0]},
+        )
+        await db.commit()
+
+    recovery_transport_calls: list[int] = []
+
+    async def recover_pump(task_id: int):
+        async with maker() as db:
+            async def must_not_send(frame, **_kwargs):
+                recovery_transport_calls.append(frame["task_id"])
+                return {"status": "ack"}
+
+            result = await run_pump_cycle(
+                db, task_id=task_id, owner=_owner(), transport=must_not_send
+            )
+            await db.commit()
+            return result
+
+    recovery_results = await asyncio.gather(
+        recover_pump(recovery_one), recover_pump(recovery_two)
+    )
+
+    assert [result.commands_processed for result in recovery_results] == [1, 1]
+    assert recovery_transport_calls == []
+    async with maker() as db:
+        rows = (
+            await db.execute(
+                sa.text(
+                    "SELECT task_id, status, rejection_code FROM task_harness_commands "
+                    "WHERE command_id IN (:c1, :c2) ORDER BY task_id"
+                ),
+                {"c1": recovery_commands_one[0], "c2": recovery_commands_two[0]},
+            )
+        ).all()
+        assert [row.status for row in rows] == ["outcome_unknown", "outcome_unknown"]
+        assert [row.rejection_code for row in rows] == [
+            "delivery_outcome_unknown",
+            "delivery_outcome_unknown",
+        ]
+
+
 async def test_pump_journals_reject_to_rejected(maker):
-    _, _, command_ids = await _seed_task_with_commands(maker, count=1)
+    task_id, _, command_ids = await _seed_task_with_commands(maker, count=1)
     async with maker() as db:
         result = await run_pump_cycle(
-            db, owner=_owner(), transport=_reject_transport
+            db, task_id=task_id, owner=_owner(), transport=_reject_transport
         )
         await db.commit()
         assert result.commands_processed == 1
@@ -366,10 +623,10 @@ async def test_pump_journals_reject_to_rejected(maker):
 
 async def test_pump_journals_unknown_outcome_fail_closed(maker):
     """Uncertain post-send outcome is terminal and never left queued."""
-    _, _, command_ids = await _seed_task_with_commands(maker, count=1)
+    task_id, _, command_ids = await _seed_task_with_commands(maker, count=1)
     async with maker() as db:
         result = await run_pump_cycle(
-            db, owner=_owner(), transport=_unknown_transport
+            db, task_id=task_id, owner=_owner(), transport=_unknown_transport
         )
         await db.commit()
         assert result.commands_processed == 1
@@ -387,14 +644,14 @@ async def test_pump_journals_unknown_outcome_fail_closed(maker):
 
 
 async def test_pump_transport_error_fails_closed(maker):
-    _, _, command_ids = await _seed_task_with_commands(maker, count=1)
+    task_id, _, command_ids = await _seed_task_with_commands(maker, count=1)
 
     async def exploding_transport(frame, **kwargs):
         raise RuntimeError("daemon unreachable")
 
     async with maker() as db:
         result = await run_pump_cycle(
-            db, owner=_owner(), transport=exploding_transport
+            db, task_id=task_id, owner=_owner(), transport=exploding_transport
         )
         await db.commit()
         assert result.commands_processed == 1
@@ -411,12 +668,12 @@ async def test_pump_transport_error_fails_closed(maker):
         assert row.rejection_code == "delivery_outcome_unknown"
 
 async def test_pump_does_not_claim_closed_control_gate(maker):
-    await _seed_task_with_commands(
+    task_id, _, _ = await _seed_task_with_commands(
         maker, control_state="closed", count=1, create_commands=False
     )
     async with maker() as db:
         result = await run_pump_cycle(
-            db, owner=_owner(), transport=_ack_transport
+            db, task_id=task_id, owner=_owner(), transport=_ack_transport
         )
         await db.commit()
         assert result.attempts_seen == 0
@@ -424,7 +681,7 @@ async def test_pump_does_not_claim_closed_control_gate(maker):
 
 
 async def test_pre_drained_closing_attempt_is_claimed_and_closed(maker):
-    _, attempt_id, _ = await _seed_task_with_commands(
+    task_id, attempt_id, _ = await _seed_task_with_commands(
         maker, control_state="closing", create_commands=False
     )
     seen = []
@@ -434,7 +691,9 @@ async def test_pre_drained_closing_attempt_is_claimed_and_closed(maker):
         return {"status": "ack"}
 
     async with maker() as db:
-        result = await run_pump_cycle(db, owner=_owner(), transport=transport)
+        result = await run_pump_cycle(
+            db, task_id=task_id, owner=_owner(), transport=transport
+        )
         await db.commit()
 
         assert result.attempts_seen == 1
@@ -453,7 +712,7 @@ async def test_pre_drained_closing_attempt_is_claimed_and_closed(maker):
 
 
 async def test_closing_queue_drains_then_owner_ack_closes_gate(maker):
-    _, attempt_id, command_ids = await _seed_task_with_commands(maker, count=1)
+    task_id, attempt_id, command_ids = await _seed_task_with_commands(maker, count=1)
     seen = []
 
     async def transport(frame, **_kwargs):
@@ -466,7 +725,9 @@ async def test_closing_queue_drains_then_owner_ack_closes_gate(maker):
             sa.text("UPDATE task_harness_attempts SET control_state = 'closing' WHERE attempt_id = :a"),
             {"a": attempt_id},
         )
-        result = await run_pump_cycle(db, owner=_owner(), transport=transport)
+        result = await run_pump_cycle(
+            db, task_id=task_id, owner=_owner(), transport=transport
+        )
         await db.commit()
         assert result.commands_processed == 1
         assert seen == ["steer", "close"]
@@ -479,7 +740,7 @@ async def test_closing_queue_drains_then_owner_ack_closes_gate(maker):
 
 
 async def test_follow_up_ack_keeps_closing_until_native_turn_start(maker):
-    _, attempt_id, command_ids = await _seed_task_with_commands(maker, count=1)
+    task_id, attempt_id, command_ids = await _seed_task_with_commands(maker, count=1)
     seen = []
 
     async def transport(frame, **_kwargs):
@@ -497,7 +758,9 @@ async def test_follow_up_ack_keeps_closing_until_native_turn_start(maker):
             sa.text("UPDATE task_harness_attempts SET control_state = 'closing' WHERE attempt_id = :a"),
             {"a": attempt_id},
         )
-        await run_pump_cycle(db, owner=_owner(), transport=transport)
+        await run_pump_cycle(
+            db, task_id=task_id, owner=_owner(), transport=transport
+        )
         await db.commit()
         assert seen == ["follow_up"]
         state = (await db.execute(
@@ -577,6 +840,7 @@ async def test_pump_waits_through_queued_scheduler_handoff(monkeypatch):
 
     statuses = iter([TaskStatus.QUEUED, TaskStatus.RUNNING, TaskStatus.COMPLETED])
     cycles = []
+    cycle_kwargs = []
     closed_contexts = []
 
     class Db:
@@ -605,6 +869,7 @@ async def test_pump_waits_through_queued_scheduler_handoff(monkeypatch):
 
     async def cycle(*_args, **_kwargs):
         cycles.append(True)
+        cycle_kwargs.append(_kwargs)
         return module.PumpCycleResult(attempts_seen=0, commands_processed=0, commands_updated=0)
 
     monkeypatch.setattr(module, "run_pump_cycle", cycle)
@@ -613,13 +878,16 @@ async def test_pump_waits_through_queued_scheduler_handoff(monkeypatch):
     )
     assert processed == 0
     assert cycles == [True]
+    assert cycle_kwargs[0]["task_id"] == 1
+    assert cycle_kwargs[0]["owner"] == "test"
+    assert callable(cycle_kwargs[0]["transport"])
     # The QUEUED wait occurs after the first context exited; a backlog cannot
     # pin one DB connection per scheduler thread during startup.
     assert len(closed_contexts) == 3
 
 
 async def test_dispatch_one_command_returns_final_status(maker):
-    _, attempt_id, command_ids = await _seed_task_with_commands(maker, count=1)
+    task_id, attempt_id, command_ids = await _seed_task_with_commands(maker, count=1)
     async with maker() as db:
         from sqlalchemy import select
 
@@ -640,7 +908,12 @@ async def test_dispatch_one_command_returns_final_status(maker):
             )
         ).scalar_one()
         status = await dispatch_one_command(
-            db, command=cmd, attempt=attempt, transport=_ack_transport, owner="x"
+            db,
+            task_id=task_id,
+            command=cmd,
+            attempt=attempt,
+            transport=_ack_transport,
+            owner="x",
         )
         await db.commit()
         assert status == "delivered"
@@ -648,7 +921,7 @@ async def test_dispatch_one_command_returns_final_status(maker):
 
 async def test_pump_recovers_dispatching_as_outcome_unknown(maker):
     """Crash after durable dispatch claim never causes a second native send."""
-    _, _, command_ids = await _seed_task_with_commands(maker, count=1)
+    task_id, _, command_ids = await _seed_task_with_commands(maker, count=1)
     async with maker() as db:
         await db.execute(
             sa.text(
@@ -665,7 +938,9 @@ async def test_pump_recovers_dispatching_as_outcome_unknown(maker):
             calls += 1
             return {"status": "ack"}
 
-        await run_pump_cycle(db, owner=_owner(), transport=must_not_send)
+        await run_pump_cycle(
+            db, task_id=task_id, owner=_owner(), transport=must_not_send
+        )
         await db.commit()
         assert calls == 0
         row = (

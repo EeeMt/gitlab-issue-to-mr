@@ -311,6 +311,11 @@ async def create_execute_container(
 
     runtime_bundle = await load_bound_runtime_bundle(db, task)
     worker_image = worker_runtime.image
+    # Both V1 and V2 use the common CLI/environment path below.  V2 replaces
+    # this with the frozen snapshot while validating its image/Kit identity;
+    # V1 still needs an explicit sentinel so dual-canary execution cannot
+    # fall through with an unbound local.
+    frozen_snapshot = None
     if runtime_bundle.contract_version == "codify.worker.harness/v2":
         frozen_snapshot = task.worker_profile_snapshot
         frozen_config = getattr(frozen_snapshot, "harness_config_snapshot", None)
