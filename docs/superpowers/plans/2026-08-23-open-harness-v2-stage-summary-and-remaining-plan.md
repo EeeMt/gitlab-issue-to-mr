@@ -113,6 +113,16 @@ L2 重新通过后，按顺序完成：
   usage；Pi 覆盖原生 ACK、严格顺序、steering、follow-up、close、`outcome_unknown` 不重放和
   scheduler 恢复；Claude/Codex 证明现有核心能力无回退。
 
+## 3.5 本轮 dev 环境已完成证据（2026-08-26）
+
+> 以下为 dev 环境（192.168.50.129）真实执行证据，供 R1–R7 复核；未替代目标 Host 与发布窗口动作。
+
+- **R5（外部授权，dev 完成）：** GitLab admin/bot token 与 opencode.ai Provider key 已录入 dev 后端 DB `system_config`（加密；原始值仅存于 gitignored `deploy/dev-env-info.md`）；`/api/config/gitlab/test` 通过（18.5.5-ee，ai-bot）；bot clone/push/MR 实测全通；Provider 三端点实测（minimax-m2.7 messages / gpt-5.6-luna responses / mimo-v2.5 chat / deepseek-v4-flash messages）；secret scan 无泄漏。
+- **R6（codex，host_mount 0.146.0）：** Task 4 COMPLETED，commit `188331f29c`，MR !1，usage 76237/1252，runtime archive + 25 canonical events；失败路径（Task 2/3）正常收尾。codex 端点语义实测：`base_url` 被 codex 追加 `/responses`，provider 需配 `https://opencode.ai/zen/go/v1`。
+- **R6/R7（Pi，Kit 0.5.0 present payload 0.84.2，digest `6c68c5f5f6bf…`）：** 真实 Task 13/16/17/18/19 COMPLETED（deepseek-v4-flash），MR !2/!4/!6 等；覆盖创建（fresh+skill）、continue 追加（会话恢复 `<UUID:377a0db8…>`）、运行中 follow_up **delivered** 且内容落地（commit `4a2023d6`）、steer gate 关闭时正确拒绝、取消（Task 15）、cancel→retry 成功（Task 16）、retry 冻结快照语义（Task 14 复用旧 bundle 同因失败）、Skills（codify-marker 精确落地）、工具事件（`tool.started/completed` → `tool_call` 日志：write/read/bash 含路径/脱敏命令/output payload）；事件流全类型覆盖（0 unknown_raw_event）。
+- **源码修复链（commit `4c223d1c`/`e4361d7a`/`c5661619`）：** ① Kit 构建：目录 payload（pi 完整资源）、glibc loader 回退（Alpine 构建阶段）、smoke ABI shim、manifest path 统一（S1 对应项）；② `pi_events.py`：lenient JSON 修复 + agent_end 定向提取（pi 0.84.2 未转义引号破坏整行）；③ `task_harness_commands.py`：bundle 能力判定从 archive 解 harness manifest + undefer（S4 相关，steer/follow_up 此前全被 `unsupported_harness` 拒绝）；④ `repository-helpers.sh`：work 分支远端不存在时 ahead-of-base 回退 origin/base（Pi 自 commit/push 后误报 "No changes made"）；⑤ 单测：`test_pi_harness_adapter.py` 34、`test_task_harness_commands.py` 18、`test_worker_kit.py` 54、全量 unit 3065+1 passed。
+- **已知边界：** Kit manifest 不覆盖 payload sidecar（theme/assets/package.json）——S2 未闭环；Pi `--exclude-tools` 在 rpc 模式触发 pi 0.84.2 自身 bug（无输出退出），未采用工具禁用，依赖 delivery 修复。
+
 ## 4. L5 Acceptance
 
 - [ ] 冻结不少于 20 个内部代表性 Task，覆盖 plan、execute、freeform、修复测试、无改动、Session、
