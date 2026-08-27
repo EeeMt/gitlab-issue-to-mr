@@ -2,10 +2,10 @@
 
 **更新：** 2026-08-28
 
-**源码审计基线（本次 tracker 更新前）：** `b227630c`（本提交仅记录 S1 证据；S5/S9 实现基线仍为
+**源码审计基线（本次 tracker 更新前）：** `067859f7`（本提交修复空选择 sentinel；S5/S9 实现基线仍为
 `c0c91997`，build context 收敛提交为 `9080ce3f`，证据见下文）
 
-**文档复核基线（本次 tracker 更新前）：** `b227630c`
+**文档复核基线（本次 tracker 更新前）：** `53da6fb1`
 
 **状态：** Internal Preview；Kit-owned 基础改造、S5–S8 源码 correction 和远端 `linux/amd64` Kit
 smoke 已落地，全量 backend unit 已在远端 PostgreSQL 可用环境通过，但仍有 4 个 root-only skip 和
@@ -71,8 +71,9 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
   大小写路径、PAX 长路径和 `/nix/store` 逻辑链接校验。远端 Docker 的 `linux/amd64` 构建矩阵现已
   覆盖四项 present Kit、显式 `pi+claude` 子集、默认 `pi+opencode` 和四个单项；四项 Kit 还完成了
   远端 Host 的 Kit 与 `/nix/store` 双 bind-mount launcher smoke。此前因磁盘不足失败的四项尝试不再
-  作为证据。当前仍缺官方 archive `install.sh` 安装闭环、arm64，以及安装后的 atomic/no-replace/
-  recovery Host 验证。
+  作为证据。`067859f7` 还修复了 `WORKER_KIT_CLI_SELECTION=none` 被 shell 默认值吞掉的问题，并以
+  远端 `linux/amd64` 空 payload Kit 完成回归；当前仍缺官方 archive `install.sh` 安装闭环、arm64，
+  以及安装后的 atomic/no-replace/recovery Host 验证。
   退出条件：使用生成器真实构建并安装默认 `pi+opencode`、各单项、显式子集和四项 present Kit；
   manifest path、archive path、容器挂载 path 与实际可执行文件完全一致，并记录精确 source commit、
   Kit identity 和 Host 证据。
@@ -431,6 +432,26 @@ L2 重新通过后，按顺序完成：
 - **仍未闭环：** 本矩阵只证明 `linux/amd64` build/archive 和已有四项 Kit 的 direct Host bind smoke；
   官方 archive `install.sh`、root-owned atomic 安装/冲突/recovery、`linux/arm64` 和
   `image + Kit + Bundle` DB-bound composition 仍分别属于 S1/R2/R4 的剩余工作。
+
+### 本轮 S1 空选择回归与 arm64 探测边界（2026-08-28）
+
+- **空选择回归：** commit `067859f7` 将显式 `WORKER_KIT_CLI_SELECTION=none` 归一化为空 staging，
+  再以 `KIT_CLI_SELECTION=none` 传入 Dockerfile；未设置该变量时仍保持默认 `pi,opencode`，其他合法
+  选择集不改变。远端 Docker context `remote` 以 `WORKER_KIT_VERSION=0.6.5`、
+  `WORKER_KIT_PLATFORM=linux/amd64`、`WORKER_KIT_CLI_SELECTION=none` 真实构建并导出 archive：
+  image digest 为 `sha256:e9131823353ea1b66db41dfb9fc5a3b696d92124ce6d04515c9deb10989e168d`，
+  manifest identity 为 `3c9b376d14ff29eca6b8558944d40fb9e663d62d557417cc55513dd871e94167`，
+  content inventory 为 `b633f1075f086db1c5c707adc6506c3455a8189b51e6ccd85a40a3c588114395`，
+  archive SHA-256 为 `9acc12586d3a72678a5560a09803e0d7797dc0eb619a416c9477fb0e29f4934f`。
+  镜像内 launcher、archive 独立 `verify-kit-content.py`、`validate-kit-archive.py` 和
+  `sha256sum -c` 均通过；四个 Harness 都明确为 `absent/not_selected`，archive 中保留 `.keep`。
+  该项证明选择语义和空 payload 构建分支，不增加首轮四 Harness present release evidence。
+- **arm64 探测：** `mac_mini` 的 native Docker builder（Docker driver、BuildKit `v0.27.1`）报告支持
+  `linux/arm64`，但实际 `WORKER_KIT_PLATFORM=linux/arm64` 探测在 Dockerfile syntax frontend
+  `docker/dockerfile:1.7` resolve 阶段因 registry/connectivity 被取消，未进入 Nix 或 payload 构建，
+  因此不计为 arm64 Kit evidence。当前 checkout 的四个 CLI payload 仍为 x86-64；要完成 arm64
+  present 矩阵，还需可用的 arm64 payload 来源或经验证的 emulation/build path，并重新完成 archive、
+  content verifier、launcher smoke 和 Host 安装证据。
 
 ## 4. L5 Acceptance
 
