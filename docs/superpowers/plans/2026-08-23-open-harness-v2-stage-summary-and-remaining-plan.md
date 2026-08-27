@@ -2,10 +2,10 @@
 
 **更新：** 2026-08-28
 
-**源码审计基线（本次 tracker 更新前）：** `9080ce3f`（本提交仅收敛 Worker Kit build context；S5/S9
-实现基线仍为 `c0c91997`，证据见下文）
+**源码审计基线（本次 tracker 更新前）：** `b227630c`（本提交仅记录 S1 证据；S5/S9 实现基线仍为
+`c0c91997`，build context 收敛提交为 `9080ce3f`，证据见下文）
 
-**文档复核基线（本次 tracker 更新前）：** `9080ce3f`
+**文档复核基线（本次 tracker 更新前）：** `b227630c`
 
 **状态：** Internal Preview；Kit-owned 基础改造、S5–S8 源码 correction 和远端 `linux/amd64` Kit
 smoke 已落地，全量 backend unit 已在远端 PostgreSQL 可用环境通过，但仍有 4 个 root-only skip 和
@@ -68,11 +68,11 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
 - [ ] **S1 / P1 — 完成 present CLI Kit 路径的真实构建矩阵验收。**
   `4c223d1c` 已修复源码路径：生成的 manifest path 现在包含 Harness key，Dockerfile 也按同一
   `harness/<key>/<relative-path>` 布局复制和检查；`b54f3267` 又修复了跨主机导出时的 Linux
-  大小写路径、PAX 长路径和 `/nix/store` 逻辑链接校验。当前 checkout 已在远端 Docker 的
-  `linux/amd64` 上真实构建并通过内容/归档校验四项 present Kit，以及显式 `pi+claude` 子集；四项
-  Kit 还完成了远端 Host 的 Kit 与 `/nix/store` 双 bind-mount launcher smoke。此前因磁盘不足失败的
-  四项尝试不再作为证据。当前仍缺官方 archive `install.sh` 安装闭环、当前 provenance 下的完整
-  单项/默认矩阵复核、arm64，以及安装后的 atomic/no-replace/recovery Host 验证。
+  大小写路径、PAX 长路径和 `/nix/store` 逻辑链接校验。远端 Docker 的 `linux/amd64` 构建矩阵现已
+  覆盖四项 present Kit、显式 `pi+claude` 子集、默认 `pi+opencode` 和四个单项；四项 Kit 还完成了
+  远端 Host 的 Kit 与 `/nix/store` 双 bind-mount launcher smoke。此前因磁盘不足失败的四项尝试不再
+  作为证据。当前仍缺官方 archive `install.sh` 安装闭环、arm64，以及安装后的 atomic/no-replace/
+  recovery Host 验证。
   退出条件：使用生成器真实构建并安装默认 `pi+opencode`、各单项、显式子集和四项 present Kit；
   manifest path、archive path、容器挂载 path 与实际可执行文件完全一致，并记录精确 source commit、
   Kit identity 和 Host 证据。
@@ -150,7 +150,7 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
 | --- | --- | --- |
 | L1 | 架构、schema、Runbook 与安全边界一致 | 目标合同已修订；实现和证据不得冒充完成 |
 | L2 | 源码、单测、集成测试和并发合同 | 未通过；全量 backend unit 已通过，但仍有 4 个 root-only skip、3 个依赖弃用 warning，S1 仍待完整真实构建矩阵，S9 其余集成/真实环境证据仍未闭环 |
-| L3 | 同一不可变 image + Kit + Bundle 的构建、安装、DB 绑定与 digest 对账 | 未完成；已补充远端 `linux/amd64` 四项 Kit、显式子集及 Kit + `/nix/store` Host bind smoke，但官方 archive 安装和 DB-bound composition 仍未完成 |
+| L3 | 同一不可变 image + Kit + Bundle 的构建、安装、DB 绑定与 digest 对账 | 未完成；远端 `linux/amd64` 的默认、四单项、显式子集和四项 Kit 构建/归档已补齐，四项 Kit 有 direct Host bind smoke，但官方 archive 安装和 DB-bound composition 仍未完成 |
 | L4 | 真实 Linux Host、remote Docker、Provider、仓库和真实 Task/MR | 部分完成；新增四项 Kit 的远端 Host bind launcher 验证，但真实 Task/MR 仍仅覆盖 Pi×Anthropic 与 Codex×Responses，非完整发布矩阵 |
 | L5 | 四 Harness canary、Pi 20-task 与质量/性能验收 | 未完成 |
 | L6 | 维护窗口 hard cut、Pi 默认和 `v2_only` | 未执行 |
@@ -406,6 +406,31 @@ L2 重新通过后，按顺序完成：
   atomic no-replace、重装冲突和 crash recovery 仍未形成 Host 证据。`9080ce3f` 的 `.dockerignore`
   仅排除未被 export stage 使用的大型 `deploy/worker-cli` source payload，保留 `kit-staging` 可遍历，
   使上述远端构建可重复进行；它不改变 Kit 内容 identity。
+
+### 本轮 S1 当前 provenance 的 amd64 选择矩阵（2026-08-28）
+
+- **Provenance：** 以下五个选择集均从当前 checkout `b227630c` 运行
+  `DOCKER_CONTEXT=remote WORKER_KIT_VERSION=0.6.4 WORKER_KIT_PLATFORM=linux/amd64 make worker-kit-export`，
+  仅改变 `WORKER_KIT_CLI_SELECTION`；每个 archive 的 `.sha256` sidecar 均以 `sha256sum -c` 通过。
+  构建 image digest、manifest identity、content inventory 和 archive SHA-256 如下：
+
+  | 选择集 | 构建 image digest | manifest identity | content inventory | archive SHA-256 |
+  | --- | --- | --- | --- | --- |
+  | `pi,opencode` | `sha256:0613bd9c1760f64528e10794181c2702c2b7bce3c692c61e687886134c200184` | `29b3ee0d3ca9394ae4e7e3dfb56e6856f9bf28c9f0651b9a8c63b02beb258da7` | `66e37430c7590d2da0e806c50a62edb7b0ae7cc2a1d75cd502b8c311eb8558d3` | `a4e69968ae586ca935a55b5b36fef03ae14b982a1c2b967c1871f05f243db106` |
+  | `pi` | `sha256:24176a07e5a4363380662c9e0d248e375aa1ef5f2d8a9f1179d04bb67903b32b` | `fba475226400e60049f0a344d54bab6f68b08131c70e2ed1424da4f937e920d1` | `1bf1cea14ad1b1e15bb17598de59aa5616a7bc9b7bfdb312f9e68046f0ddd073` | `22f36829e3aca5062867106227920de0b33945e9335b40fa3bbd09a656a160e8` |
+  | `opencode` | `sha256:2830cf126b635ce487559199d0e153406ed9821e79834ad9eb2dc98bd1028db4` | `edff027a6b91645075ea544da789c72b1f97ccd098e3a1d552f57cb198e19a2a` | `5478e396f7cc65622dade264c21744be6aeb25f59ea3d6ff949b81b095d7ff7b` | `31e7364b864d174f9b8eac537f18515df5c8b9f0b4b7b918dd008e168f5185fa` |
+  | `claude` | `sha256:16365f5b49c4be07c90c7a23fa88af03d8a08947cab7a4ad4766abae9672a3b` | `b77d09f1ea5d29b5fb9dfa3f66130c142792a72e3881eb5cdcdfea9772644e30` | `2f9ea9b08cdffda2a8cc4104124012c37acd6b57627a1d96d189a7c747e2e77e` | `cd75521b1ad82e498070baa8d8ebe226182944758d362cbc9bd933d76804fc06` |
+  | `codex` | `sha256:8af1ba7cfc5b244429cc5c02e7ae4fe83435ca63ec97c4ff9d89e07492843eb1` | `a5b5d54ac9312358fc8916aea9cec2578efe2cdf0271832006fa7dbd4d0f4da3` | `7ea5b9d3eb4302dc78e111b0d5f18ac1fc1d2a343b4a855df1a497a18610ff90` | `90bc74c19df2f5726aab6b21dc265de40fa54a19ec576ae594b4fecb1e5c1357` |
+
+- **结果：** 五个 Kit 均由 `export.sh` 真实构建，构建阶段 payload verifier 与 launcher smoke 均通过；
+  每个归档又独立通过 `verify-kit-content.py --archive` 和 `validate-kit-archive.py`。默认选择集的
+  present 为 Pi `0.84.2`、OpenCode `1.18.19`；四个单项分别只报告对应 Harness 为 `present`，其余
+  Harness 均报告 `absent/not_selected`。本节与上一节的四项 Kit `0.6.2`、显式子集 `0.6.3` 证据
+  共同覆盖当前 amd64 build/archive selection matrix；它们的不同 Kit version/identity 仍不可合并
+  成一个 release composition。
+- **仍未闭环：** 本矩阵只证明 `linux/amd64` build/archive 和已有四项 Kit 的 direct Host bind smoke；
+  官方 archive `install.sh`、root-owned atomic 安装/冲突/recovery、`linux/arm64` 和
+  `image + Kit + Bundle` DB-bound composition 仍分别属于 S1/R2/R4 的剩余工作。
 
 ## 4. L5 Acceptance
 
