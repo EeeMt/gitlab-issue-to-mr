@@ -1,6 +1,7 @@
 """Static contracts for the one-shot migration owner Compose topology."""
 
 import hashlib
+import io
 import json
 import os
 import re
@@ -289,6 +290,73 @@ def _content_addressed_kit_archive(tmp_path: Path, manifest: dict) -> tuple[Path
     return archive, manifest_sha256
 
 
+def _case_distinct_content_addressed_kit_archive(tmp_path: Path) -> tuple[Path, str]:
+    """Create a Kit archive whose Linux paths cannot be materialized on macOS."""
+    manifest = _worker_kit_manifest()
+    files = {
+        "content.txt": b"kit-content\n",
+        "launcher": b"#!/bin/sh\n",
+        "verify-runtime.sh": b"#!/bin/sh\n",
+        "validate-runtime-manifest.py": b"# runtime manifest validator\n",
+        "verify-kit-content.py": b"# Worker Kit content verifier\n",
+        "nix/store/case/P/file": b"upper\n",
+        "nix/store/case/p/file": b"lower\n",
+    }
+    for key, entry in manifest["harness_inventory"].items():
+        relative = entry["path"].removeprefix("/opt/codify-kit/")
+        files[relative] = f"{key}-payload\n".encode()
+        entry["sha256"] = hashlib.sha256(files[relative]).hexdigest()
+        entry["size"] = len(files[relative])
+    content_inventory = [
+        {
+            "kind": "file",
+            "path": relative,
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "size": len(payload),
+        }
+        for relative, payload in sorted(files.items())
+    ]
+    manifest["content_inventory"] = content_inventory
+    manifest["content_inventory_sha256"] = hashlib.sha256(
+        json.dumps(content_inventory, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    manifest_bytes = json.dumps(manifest).encode()
+    manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
+    archive_root = f"0.3.15-linux-amd64-{manifest_sha256[:12]}"
+    archive = tmp_path / f"codify-worker-kit-{archive_root}.tar.gz"
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(archive, "w:gz") as output:
+        root_member = tarfile.TarInfo(archive_root)
+        root_member.type = tarfile.DIRTYPE
+        root_member.mode = 0o755
+        output.addfile(root_member)
+        directories = {
+            "nix",
+            "nix/store",
+            "nix/store/case",
+            "nix/store/case/P",
+            "nix/store/case/p",
+        }
+        for relative in sorted(directories):
+            directory_member = tarfile.TarInfo(f"{archive_root}/{relative}")
+            directory_member.type = tarfile.DIRTYPE
+            directory_member.mode = 0o755
+            output.addfile(directory_member)
+        for relative, payload in sorted(files.items()):
+            member = tarfile.TarInfo(f"{archive_root}/{relative}")
+            member.size = len(payload)
+            member.mode = 0o755 if relative in {"launcher", "verify-runtime.sh"} else 0o644
+            output.addfile(member, io.BytesIO(payload))
+        manifest_member = tarfile.TarInfo(f"{archive_root}/manifest.json")
+        manifest_member.size = len(manifest_bytes)
+        manifest_member.mode = 0o644
+        output.addfile(manifest_member, io.BytesIO(manifest_bytes))
+    (tmp_path / f"{archive.name}.sha256").write_text(
+        f"{hashlib.sha256(archive.read_bytes()).hexdigest()}  {archive.name}\n"
+    )
+    return archive, manifest_sha256
+
+
 def test_v2_release_preflight_validates_kit_archive_and_worker_image(tmp_path: Path):
     script = REPO_ROOT / "deploy" / "scripts" / "preflight-v2-release.sh"
     env = os.environ.copy()
@@ -410,6 +478,44 @@ def test_v2_release_preflight_validates_kit_archive_and_worker_image(tmp_path: P
     )
     assert platform_result.returncode == 2
     assert "does not match the selected Worker image platform" in platform_result.stderr
+
+
+def test_v2_release_preflight_reads_case_distinct_archive_without_extracting(tmp_path: Path):
+    script = REPO_ROOT / "deploy" / "scripts" / "preflight-v2-release.sh"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_docker = fake_bin / "docker"
+    fake_docker.write_text(
+        "#!/bin/sh\n"
+        "if [ \"$1\" = image ] && [ \"$2\" = inspect ]; then\n"
+        "  printf '%s\\n' \"$IMAGE_IDENTITY\"\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 2\n"
+    )
+    fake_docker.chmod(0o755)
+    fake_tar = fake_bin / "tar"
+    fake_tar.write_text("#!/bin/sh\nexit 99\n")
+    fake_tar.chmod(0o755)
+    archive, manifest_sha256 = _case_distinct_content_addressed_kit_archive(
+        tmp_path / "case-distinct"
+    )
+    result = subprocess.run(
+        [str(script)],
+        env={
+            **os.environ,
+            "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+            "WORKER_KIT_ARCHIVE": str(archive),
+            "V2_RELEASE_WORKER_IMAGE": "codify-worker/reviewed@sha256:deadbeef",
+            "IMAGE_IDENTITY": "sha256:" + "a" * 64 + " linux/amd64",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert manifest_sha256 in result.stdout
 
 
 def test_e2e_runs_migrate_once_before_backend_and_never_enables_service_auto_migrate():

@@ -58,17 +58,50 @@ fi
 kit_check_dir="$(mktemp -d "${TMPDIR:-/tmp}/codify-worker-kit-preflight.XXXXXX")"
 cleanup() { rm -rf "${kit_check_dir}"; }
 trap cleanup EXIT
-if ! tar -C "${kit_check_dir}" -xzf "${kit_archive}"; then
-    fail "Worker Kit archive extraction failed: ${kit_archive}"
+manifest_file="${kit_check_dir}/manifest.json"
+if ! python3 - "${kit_archive}" "${archive_root}" "${manifest_file}" <<'PY'
+import pathlib
+import sys
+import tarfile
+
+
+archive_path, root_name, manifest_path = sys.argv[1:]
+required = {
+    f"{root_name}/manifest.json": ("file", False),
+    f"{root_name}/launcher": ("file", True),
+    f"{root_name}/nix/store": ("directory", False),
+    f"{root_name}/verify-runtime.sh": ("file", True),
+    f"{root_name}/validate-runtime-manifest.py": ("file", False),
+    f"{root_name}/verify-kit-content.py": ("file", False),
+}
+
+try:
+    with tarfile.open(archive_path, "r:*") as bundle:
+        members = {member.name: member for member in bundle.getmembers()}
+        for name, (kind, executable) in required.items():
+            member = members.get(name)
+            if member is None:
+                raise ValueError(f"missing required archive member: {name}")
+            if kind == "directory" and not member.isdir():
+                raise ValueError(f"required archive member is not a directory: {name}")
+            if kind == "file" and not member.isfile():
+                raise ValueError(f"required archive member is not a regular file: {name}")
+            if executable and not member.mode & 0o111:
+                raise ValueError(f"required archive member is not executable: {name}")
+
+        manifest_member = members[f"{root_name}/manifest.json"]
+        stream = bundle.extractfile(manifest_member)
+        if stream is None:
+            raise ValueError("manifest.json has no readable content")
+        pathlib.Path(manifest_path).write_bytes(stream.read())
+except (OSError, tarfile.TarError, ValueError) as exc:
+    print(f"Worker Kit archive preflight member check failed: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+PY
+then
+    fail "Worker Kit archive is missing required preflight members"
 fi
-kit_root="${kit_check_dir}/${archive_root}"
-manifest_file="${kit_root}/manifest.json"
 [[ -s "${manifest_file}" ]] || fail "Worker Kit archive contains no manifest.json"
-[[ -x "${kit_root}/launcher" ]] || fail "Worker Kit archive launcher is missing or not executable"
-[[ -d "${kit_root}/nix/store" ]] || fail "Worker Kit archive Nix store is missing"
-[[ -x "${kit_root}/verify-runtime.sh" ]] || fail "Worker Kit archive verifier is missing or not executable"
-[[ -f "${kit_root}/validate-runtime-manifest.py" ]] || fail "Worker Kit archive Runtime Bundle validator is missing"
-[[ -f "${kit_root}/verify-kit-content.py" ]] || fail "Worker Kit archive content verifier is missing"
 manifest="$(<"${manifest_file}")"
 manifest_sha256="$(sha256sum "${manifest_file}" | awk '{print $1}')"
 content_inventory_sha256="$(python3 "${PROJECT_ROOT}/deploy/worker-kit/verify-kit-content.py" \
@@ -76,12 +109,6 @@ content_inventory_sha256="$(python3 "${PROJECT_ROOT}/deploy/worker-kit/verify-ki
     || fail "Worker Kit content inventory does not match the archive bytes"
 if [[ "${archive_name}" != *-${manifest_sha256:0:12}.tar.gz ]]; then
     fail "Worker Kit archive name does not embed the manifest SHA-256 prefix (content-addressed identity): ${archive_name}"
-fi
-extracted_content_inventory_sha256="$(python3 "${PROJECT_ROOT}/deploy/worker-kit/verify-kit-content.py" \
-    --root "${kit_root}")" \
-    || fail "Worker Kit extracted content does not match its inventory"
-if [[ "${extracted_content_inventory_sha256}" != "${content_inventory_sha256}" ]]; then
-    fail "Worker Kit extracted and archive content inventories disagree"
 fi
 
 # Manifest shape checks.
