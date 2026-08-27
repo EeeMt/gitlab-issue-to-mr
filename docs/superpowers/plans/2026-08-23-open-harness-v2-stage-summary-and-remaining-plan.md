@@ -131,8 +131,8 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
   每条协议覆盖 config 生成、credential 不落盘、tool call、reasoning、usage、取消、错误和禁止回退。
   本轮已新增协议矩阵、冻结 Endpoint、Provider drift、Task-private OpenCode config/Skill discovery、
   current/frozen catalog 和 fail-closed 前端测试；scheduler gate 的未 await `AsyncMock` warning 已由
-  `79bd530e` 修复。仍需在可用环境完成全量 backend unit、真实 PostgreSQL 并发/migration 的统一重跑，
-  并记录精确命令、结果和 source commit；mock E2E 与 frontend type-check/build/vitest 已在下文通过。
+  `79bd530e` 修复。仍需在可用环境完成全量 backend unit 与剩余真实 PostgreSQL 并发/migration 的统一
+  重跑，并记录精确命令、结果和 source commit；mock E2E 与 frontend type-check/build/vitest 已在下文通过。
   `a02f8929`
   又补齐了 app-mounted catalog router 的 401、missing-profile 404、跨项目 403，以及 current catalog
   乱序响应成功/reject 两条 generation-guard 回归；这些仍是源码/L2 focused evidence，不等于真实 Host
@@ -299,7 +299,7 @@ L2 重新通过后，按顺序完成：
 - **证据边界：** 全量 backend unit 尝试结果为 `3036 passed, 72 skipped, 3 failed, 25 errors`；
   失败/错误由远端 PostgreSQL 与端口权限、以及 pytest 临时目录磁盘耗尽造成，不能写成全量 L2
   green。out-of-order deferred response 与 ASGI 级认证/访问控制的 focused 回归已在 S9 补充段落记录；
-  全量 backend、真实 PostgreSQL 和真实 Docker/Kit/Host 验证仍归 S9/S1/L3–L4。
+  全量 backend、剩余真实 PostgreSQL 和真实 Docker/Kit/Host 验证仍归 S9/S1/L3–L4。
 
 ### 本轮 S9 边界测试补充（2026-08-27）
 
@@ -314,8 +314,41 @@ L2 重新通过后，按顺序完成：
   `make lint-backend` 和 `git diff --check` 均通过。独立
   subagent 最终复审为
   `P0=0, P1=0, P2=0`。
-- **未闭环项：** 全量 backend unit、真实 PostgreSQL 并发/migration 和真实 Docker/Kit/Host
+- **未闭环项：** 全量 backend unit、剩余真实 PostgreSQL 并发/migration 和真实 Docker/Kit/Host
   证据仍未完成；上述测试不能把 L2、S1 或 L3–L4 标为 green。
+
+### 本轮 S9 真实 PostgreSQL 回归补充（2026-08-27）
+
+- 在授权的远端 dev PostgreSQL（`CODIFY_TEST_DATABASE_URL` 默认指向 `192.168.50.129:5432/codify_test`）
+  上串行运行 migration、锁和 command-pump 回归，避免共享测试库并发污染。命令覆盖
+  `test_068_migration.py`、`test_069_migration.py`、`test_070_migration.py`、`test_071_migration.py`、
+  `test_072_migration.py`、`test_074_migration.py`、`test_worker_command_pump.py`、
+  `test_worker_profile_verification_pg.py`、`test_issue_execution_lock_concurrency.py` 和
+  `test_system_lifecycle_statistics_pg.py`。
+- **历史运行 provenance（修复前）：** 下述 56 项结果来自 source commit
+  `87a27b10c7b1fbce15f49952698ec9c99ec91701`；未设置 `CODIFY_TEST_DATABASE_URL` 覆盖，使用测试模块内
+  默认的远端 dev PostgreSQL（凭据不记录）；命令未启用 xdist，按单进程串行执行：
+  ```bash
+  backend/.venv/bin/python -m pytest \
+    backend/tests/unit/test_068_migration.py \
+    backend/tests/unit/test_069_migration.py \
+    backend/tests/unit/test_070_migration.py \
+    backend/tests/unit/test_071_migration.py \
+    backend/tests/unit/test_072_migration.py \
+    backend/tests/unit/test_074_migration.py \
+    backend/tests/unit/test_worker_command_pump.py \
+    backend/tests/unit/test_worker_profile_verification_pg.py \
+    backend/tests/unit/test_issue_execution_lock_concurrency.py \
+    backend/tests/unit/test_system_lifecycle_statistics_pg.py -q
+  ```
+- **历史结果：** `56 passed in 154.76s (0:02:34)`，无 skip/error。覆盖 068–072/074 migration 的
+  throwaway DB，20 条 task-scoped command pump，Profile verification lock/CAS，issue execution lock 和
+  lifecycle statistics archive 的真实 PostgreSQL 行为。该次运行的 Profile fixture 仍使用共享库，不能
+  作为下方隔离修复的验证。
+- **待固定 commit 重跑：** 当前已将 Profile verification 改为模块级 throwaway DB，并在删除前终止该
+  随机库残留连接；待该测试修复先提交后，用同一清单显式 `-n 0` 重跑并替换本段 provenance/结果。
+- **边界：** 这是一组真实 PostgreSQL focused regression，不等于全量 backend unit 或完整 L2；全量
+  backend 仍曾受远端 PG/端口权限与 pytest 临时盘耗尽影响，剩余全量/Host/Kit 证据继续保持开放。
 
 ## 4. L5 Acceptance
 
