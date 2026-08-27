@@ -8,6 +8,7 @@ import sqlite3
 import subprocess
 import sys
 import tarfile
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -68,9 +69,12 @@ def _migration_owner_environment(
 ) -> dict[str, str]:
     database = tmp_path / f"migration-owner-{label}.db"
     if current_revision is not None:
-        with sqlite3.connect(database) as connection:
-            connection.execute("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
-            connection.execute("INSERT INTO alembic_version (version_num) VALUES (?)", (current_revision,))
+        with closing(sqlite3.connect(database)) as connection:
+            with connection:
+                connection.execute("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
+                connection.execute(
+                    "INSERT INTO alembic_version (version_num) VALUES (?)", (current_revision,)
+                )
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir(exist_ok=True)
     fake_python = fake_bin / "python3"
@@ -162,12 +166,13 @@ def test_migration_owner_allows_a_merge_target_for_multiple_current_heads(tmp_pa
             "depends_on = None\n"
         )
     database = root / "merge.db"
-    with sqlite3.connect(database) as connection:
-        connection.execute("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
-        connection.executemany(
-            "INSERT INTO alembic_version (version_num) VALUES (?)",
-            [("branch_a",), ("branch_b",)],
-        )
+    with closing(sqlite3.connect(database)) as connection:
+        with connection:
+            connection.execute("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
+            connection.executemany(
+                "INSERT INTO alembic_version (version_num) VALUES (?)",
+                [("branch_a",), ("branch_b",)],
+            )
     env = _migration_owner_environment(tmp_path, "074_open_harness_v2", "merge-bin")
     env["DATABASE_URL"] = f"sqlite+aiosqlite:///{database}"
     env["MIGRATION_TARGET"] = "merge_rev"
