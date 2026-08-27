@@ -12,6 +12,7 @@ const { mockApi, resetMockApi, mockMessage, mockWindowSize } = vi.hoisted(() => 
     getTaskModelServiceSummary: vi.fn<() => Promise<any>>(),
     getTaskWorkerRuntimeSummary: vi.fn<() => Promise<any>>(),
     getTaskHarnessCatalog: vi.fn<() => Promise<any>>(),
+    getCurrentHarnessCatalog: vi.fn<() => Promise<any>>(),
     verifyTaskWorkerRuntime: vi.fn<() => Promise<any>>(),
     getTaskLogs: vi.fn<() => Promise<any[]>>(),
     getTaskContainerLogs: vi.fn<() => Promise<any>>(),
@@ -75,6 +76,7 @@ vi.mock('../api', () => ({
   getTaskModelServiceSummary: mockApi.getTaskModelServiceSummary,
   getTaskWorkerRuntimeSummary: mockApi.getTaskWorkerRuntimeSummary,
   getTaskHarnessCatalog: mockApi.getTaskHarnessCatalog,
+  getCurrentHarnessCatalog: mockApi.getCurrentHarnessCatalog,
   verifyTaskWorkerRuntime: mockApi.verifyTaskWorkerRuntime,
   getTaskLogs: mockApi.getTaskLogs,
   getTaskContainerLogs: mockApi.getTaskContainerLogs,
@@ -772,6 +774,38 @@ describe('TaskView', () => {
     await flushPromises()
     expect(wrapper.vm.task?.id).toBe(2)
     expect(wrapper.vm.attemptHarnessCapabilities).toEqual({ steering: false, follow_up: false })
+  })
+
+  it('reloads the frozen catalog when the mounted edit drawer opens', async () => {
+    const frozenCatalog = {
+      legacy: false,
+      catalog: [{
+        key: 'pi',
+        model_protocols: ['anthropic_messages'],
+        enabled: true,
+        availability: 'present',
+        selectable: true,
+      }],
+    }
+    ;(mockApi.getTaskHarnessCatalog as Mock).mockResolvedValue(frozenCatalog)
+    ;(mockApi.getCurrentHarnessCatalog as Mock).mockResolvedValue({
+      legacy: false,
+      catalog: [{ key: 'claude', model_protocols: ['anthropic_messages'] }],
+    })
+
+    await mountComponent({ harness_key: 'pi' })
+    const callsBeforeOpen = (mockApi.getTaskHarnessCatalog as Mock).mock.calls.length
+    const editDrawer = wrapper
+      .findAllComponents({ name: 'TaskFormDrawer' })
+      .find(drawer => drawer.props('mode') === 'edit')
+    expect(editDrawer).toBeTruthy()
+    expect(editDrawer!.props('task')).toMatchObject({ id: 1, harness_key: 'pi' })
+
+    await wrapper.find('button[title="taskView.editTask"]').trigger('click')
+    await flushPromises()
+
+    expect((mockApi.getTaskHarnessCatalog as Mock).mock.calls.length).toBeGreaterThan(callsBeforeOpen)
+    expect((mockApi.getTaskHarnessCatalog as Mock).mock.lastCall).toEqual([1])
   })
 
   it('loads logs when routing to another terminal task in the same view', async () => {

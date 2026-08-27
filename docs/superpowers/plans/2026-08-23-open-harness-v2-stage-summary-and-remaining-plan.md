@@ -2,13 +2,13 @@
 
 **更新：** 2026-08-27
 
-**源码审计基线：** `f01180c7`（当前本地提交）
+**源码审计基线（S5 增量前）：** `79bd530e`（本轮 S5 实现与证据见下文）
 
 **文档复核基线：** `96eb2462`（本次更新前的本地 `HEAD`）
 
-**状态：** Internal Preview；Kit-owned 基础改造、S6–S8 源码 correction 和远端 `linux/amd64` Kit
-smoke 已落地，但 L2 仍为红灯：S1 尚未完成完整真实构建矩阵，S5 availability
-catalog 和 S9 完整证据仍未闭环。补齐 S1/S5/S9、重建制品并补齐 L3–L6 证据前，保持 `dual_canary`，
+**状态：** Internal Preview；Kit-owned 基础改造、S5–S8 源码 correction 和远端 `linux/amd64` Kit
+smoke 已落地，但 L2 仍为红灯：S1 尚未完成完整真实构建矩阵，S9 完整证据仍未闭环。补齐
+S1/S9、重建制品并补齐 L3–L6 证据前，保持 `dual_canary`，
 不切 Pi 默认，不启用 `v2_only`。
 
 本文只维护当前剩余工作和退出条件。已完成且已验收的工作不再保留为待办流水账；架构约束以
@@ -43,7 +43,8 @@ V1 和 V2 双跑，也不是复制流量、影子执行或自动 A/B：
 - migration `077_v2_worker_kit_identity` 已建立 Profile/Readiness 的 Kit identity 与 inventory 字段；
   dev PostgreSQL 上的 revision、锁顺序、CAS/generation 验证已经通过。真实部署升级仍是发布动作。
 - Registry 已禁止隐式 image/`PATH` 回退；create、retry、scheduler 和 lifecycle 已具备
-  `harness_cli_unavailable` 基础门禁；Worker Settings 已展示逐 Harness availability/reason。
+  `harness_cli_unavailable` 基础门禁；Worker Settings 与 current/frozen `/harness-catalog` 已展示逐
+  Harness availability/reason。
 - Compatibility baseline 差异已改为 advisory warning；present payload 完整性和 functionality
   gate 的主体逻辑已存在。
 - 既有全量 L1/L2 回归和 Linux 原子安装原语验证可作为基础证据，但不能覆盖下文新发现的分支，
@@ -92,10 +93,13 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
   以及既有严格队列顺序、lease/recovery 语义均通过；当前工作区修复尚未形成新的部署或 release
   composition 证据。
 
-- [ ] **S5 / P2 — 补齐 availability catalog。**
-  Worker Settings 已展示 Kit inventory，但 `/harness-catalog` 与 Task frozen catalog 仍只投影 Runtime
-  Bundle Adapter 能力。退出条件：新建 Task 选择器和历史 Task catalog 都能区分 enabled、disabled、
-  present、unavailable，并显示稳定、脱敏的 reason；不得泄露 host path 或敏感 evidence。
+- [x] **S5 / P2 — 补齐 availability catalog。**
+  `/harness-catalog` 与 Task frozen catalog 现在按每个 Harness 分别投影 `enabled`、`availability`、
+  `selectable` 和稳定、脱敏的 reason；current catalog 使用所选 Worker Profile 的逐 Harness readiness，
+  frozen catalog 以不可变 Snapshot/Bundle 为权威，V1/V2 readiness scope 不交叉污染。前端新建 Task
+  在 catalog 未就绪或所选 Harness 不可用时阻止提交，历史 Task 即使 frozen runtime 当前不可用仍可
+  修改非运行时字段；不得泄露 host path 或敏感 evidence。源码和 focused/full frontend 证据见下文，
+  真实 Kit/Host 证据仍归 S1/L3–L4。
 
 - [x] **S6 / P1 — 扩展中央 Harness × Model Protocol 合同。**
   扩展编译期 `HARNESS_PROTOCOL_MATRIX` upper bound，并让 Runtime manifest、catalog、Task
@@ -126,9 +130,9 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
   current/frozen catalog availability，以及 Pi/OpenCode 三协议的 manifest/Backend/Adapter/Frontend 矩阵测试；
   每条协议覆盖 config 生成、credential 不落盘、tool call、reasoning、usage、取消、错误和禁止回退。
   本轮已新增协议矩阵、冻结 Endpoint、Provider drift、Task-private OpenCode config/Skill discovery、
-  current/frozen catalog 和 fail-closed 前端测试；仍需修复 scheduler gate 的未 await `AsyncMock` warning，
-  在可用临时目录重跑全量 backend unit、mock E2E、真实 PostgreSQL 并发/migration、frontend type-check/
-  build/vitest，记录精确命令、结果和 source commit。
+  current/frozen catalog 和 fail-closed 前端测试；scheduler gate 的未 await `AsyncMock` warning 已由
+  `79bd530e` 修复。仍需在可用环境完成全量 backend unit、mock E2E、真实 PostgreSQL 并发/migration、
+  frontend type-check/build/vitest 的统一重跑，并记录精确命令、结果和 source commit。
 
 ## 3. Release、L3 与 L4
 
@@ -137,7 +141,7 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
 | 层级 | 证明内容 | 当前状态 |
 | --- | --- | --- |
 | L1 | 架构、schema、Runbook 与安全边界一致 | 目标合同已修订；实现和证据不得冒充完成 |
-| L2 | 源码、单测、集成测试和并发合同 | 未通过；S1 待完整真实构建矩阵，S5 availability catalog 和 S9 证据待闭环 |
+| L2 | 源码、单测、集成测试和并发合同 | 未通过；S5 源码与 focused evidence 已完成，但 S1 仍待完整真实构建矩阵，S9 仍待全量/集成/真实 PostgreSQL 证据闭环 |
 | L3 | 同一不可变 image + Kit + Bundle 的构建、安装、DB 绑定与 digest 对账 | 未完成；已有远端 `linux/amd64` 单项与 `pi+opencode` Kit/archive smoke，尚未完成显式子集、四项 Kit、Host 安装和 DB-bound composition |
 | L4 | 真实 Linux Host、remote Docker、Provider、仓库和真实 Task/MR | 部分完成；仅覆盖 Pi×Anthropic 与 Codex×Responses 的 dev Task，非完整发布矩阵 |
 | L5 | 四 Harness canary、Pi 20-task 与质量/性能验收 | 未完成 |
@@ -190,9 +194,9 @@ L2 重新通过后，按顺序完成：
   `TaskView` 共 227 tests passed，`vue-tsc --noEmit` 通过。聚焦 Ruff 因
   `task_harness_commands.py` import 顺序失败。PG skip、warning 和 Ruff failure 都必须在 S9 清零，
   历史绿灯不能替代本轮重跑。
-- **再次确认的源码缺口：** S1 完整真实构建/Host 证据、S5 availability catalog 和 S9 完整重跑
-  仍未闭环；S2–S4、S6–S8 已在本轮源码 correction 中完成并通过聚焦证据。本轮未把任何一项误
-  标为 release 完成。
+- **再次确认的源码缺口（S5 增量前）：** S1 完整真实构建/Host 证据和 S9 完整重跑仍未闭环；
+  S2–S4、S6–S8 已在本轮源码 correction 中完成并通过聚焦证据。本轮未把任何一项误标为 release
+  完成；S5 的后续增量结果见下文。
 - **本轮 S3/S4 工作区证据：** `backend/.venv/bin/python -m pytest
   backend/tests/unit/test_worker_command_pump.py -q` 在 PostgreSQL 测试库中 `20 passed`，包含同一
   attempt 锁住 seq1 时不得跳过队头派发 seq2 的回归；V1 lifecycle 与既有 V2 runtime 聚焦集
@@ -267,6 +271,28 @@ L2 重新通过后，按顺序完成：
   staging，但在 Nix npm dependency 阶段因远端根分区耗尽失败，确切错误为
   `codegraph-linux-arm64: No space left on device`。该次没有 archive、manifest 或 smoke 证据，
   因此不计入 S1；显式子集、成功四项 Kit、Linux Host 安装/真实 bind-mount 和 arm64 仍开放。
+
+### 本轮 S5 availability catalog 补充（2026-08-27）
+
+- **Backend projection：** current catalog 根据 Worker Profile 的 enabled Harness 集合和逐 Harness
+  readiness scope 投影 `enabled`、`availability`、`selectable`、`disabled_reason`、
+  `availability_reason` 与稳定 `reason_code`；frozen task catalog 只使用 immutable Snapshot/Bundle
+  绑定的 Harness，不回退到可编辑 Profile。`host_mount` 仅作为显式 break-glass 来源，响应不包含
+  executable path、Kit path 或 readiness failure detail；profile/task project access 仍在加载 Bundle
+  前校验。
+- **Frontend behavior：** 新建 Task 选择器显示 disabled/unavailable/not-verified 状态和脱敏原因，
+  catalog 未就绪或所选 Harness 不可用时阻止提交；历史 Task 的 frozen Harness 即使当前不可用仍可
+  保存 prompt 等非运行时字段。Task/Issue 异步载入后按 task/profile identity 刷新 catalog，并用
+  request generation 防止旧响应覆盖新状态。
+- **验证：** `backend/.venv/bin/python -m pytest backend/tests/unit/test_harness_catalog_api.py -q`
+  为 `12 passed`；TaskFormDrawer、TaskView、IssueView 聚焦集为 `329 passed`；
+  `frontend/npx vitest run` 为 `79 files passed / 1666 tests passed`；`frontend/npm run build`、
+  targeted Ruff 和 `git diff --check` 均通过。三轮独立 subagent review 最终均无 P0/P1（本轮最终
+  `P0=0, P1=0, P2=0`）。
+- **证据边界：** 全量 backend unit 尝试结果为 `3036 passed, 72 skipped, 3 failed, 25 errors`；
+  失败/错误由远端 PostgreSQL 与端口权限、以及 pytest 临时目录磁盘耗尽造成，不能写成全量 L2
+  green。out-of-order deferred response 的专门前端测试、ASGI 级认证/访问控制测试和真实
+  Docker/Kit/Host 验证仍归 S9/S1/L3–L4。
 
 ## 4. L5 Acceptance
 

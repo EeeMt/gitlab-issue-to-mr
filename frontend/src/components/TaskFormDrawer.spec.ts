@@ -551,6 +551,23 @@ describe('TaskFormDrawer', () => {
       expect(options.every(option => option.attributes('role') === 'radio')).toBe(true)
     })
 
+    it('reloads the current catalog when the selected profile arrives after opening', async () => {
+      mockApi.getCurrentHarnessCatalog.mockImplementation(async (workerProfileId?: number) => ({
+        legacy: false,
+        catalog: [{
+          key: workerProfileId === 4 ? 'pi' : 'claude',
+          model_protocols: ['anthropic_messages'],
+        }],
+      }))
+
+      await mountDrawer({ workerProfileId: null })
+      await wrapper.setProps({ workerProfileId: 4, show: true })
+      await flushPromises()
+
+      expect(mockApi.getCurrentHarnessCatalog).toHaveBeenLastCalledWith(4)
+      expect(wrapper.vm.harnessCatalog[0].key).toBe('pi')
+    })
+
     it.each([
       ['click', 'freeform'],
       ['keydown.enter', 'execute'],
@@ -1057,6 +1074,33 @@ describe('TaskFormDrawer', () => {
       await nextTick()
       expect(harnessSelect.attributes('disabled')).toBeUndefined()
       expect(wrapper.find('[data-testid="task-harness-locked-hint"]').exists()).toBe(false)
+    })
+
+    it('shows catalog availability and profile-disabled reasons while disabling unsafe choices', async () => {
+      mockApi.getWorkerProfiles.mockResolvedValue([
+        { ...mockWorkerProfiles[0], enabled_harnesses: ['claude', 'pi'] },
+      ])
+      mockApi.getCurrentHarnessCatalog.mockResolvedValue({
+        legacy: false,
+        catalog: [
+          { key: 'claude', model_protocols: ['anthropic_messages'], enabled: true, availability: 'present', selectable: true },
+          { key: 'pi', model_protocols: ['anthropic_messages'], enabled: true, availability: 'unavailable', selectable: false, disabled_reason: 'missing_payload', availability_reason: 'missing_payload' },
+          { key: 'codex', model_protocols: ['openai_responses'], enabled: false, availability: 'present', selectable: false, disabled_reason: 'harness_disabled', reason_code: 'harness_disabled' },
+        ],
+      })
+
+      await mountDrawer()
+      await openDrawer()
+      await wrapper.get('.execution-environment__summary').trigger('click')
+      await nextTick()
+
+      const harnessSelect = wrapper.get('[data-testid="task-harness-select"]')
+      expect(harnessSelect.find('option[value="pi"]').attributes('disabled')).toBeDefined()
+      expect(harnessSelect.find('option[value="codex"]').attributes('disabled')).toBeDefined()
+      const status = wrapper.get('[data-testid="task-harness-catalog-status"]')
+      expect(status.text()).toContain('createTask.harnessUnavailable')
+      expect(status.text()).toContain('createTask.harnessReasonMissingPayload')
+      expect(status.text()).toContain('createTask.harnessDisabled')
     })
 
     it('restores the issue harness when fresh-session mode is turned off', async () => {
@@ -1887,6 +1931,83 @@ describe('TaskFormDrawer', () => {
       return wrapper
     }
 
+    it('uses the frozen task catalog state instead of editable profile harnesses', async () => {
+      mockApi.getWorkerProfiles.mockResolvedValue([
+        { ...mockWorkerProfiles[0], enabled_harnesses: ['claude'] },
+      ])
+      mockApi.getTaskHarnessCatalog.mockResolvedValue({
+        legacy: false,
+        catalog: [
+          { key: 'pi', model_protocols: ['anthropic_messages'], enabled: true, availability: 'unknown', selectable: true, availability_reason: 'runtime_not_verified' },
+          { key: 'claude', model_protocols: ['anthropic_messages'], enabled: false, availability: 'present', selectable: false, disabled_reason: 'task_harness_bound' },
+        ],
+      })
+
+      await mountEditDrawer({ harness_key: 'pi', worker_profile_id: 3, provider_id: 7 })
+      await wrapper.setProps({ show: true })
+      await flushPromises()
+
+      expect(wrapper.vm.harnessOptions.map((option: { value: string }) => option.value)).toEqual(['pi', 'claude'])
+      expect(wrapper.vm.harnessOptions.find((option: { value: string }) => option.value === 'pi').disabled).toBe(false)
+      expect(wrapper.vm.harnessOptions.find((option: { value: string }) => option.value === 'claude').disabled).toBe(true)
+    })
+
+    it('keeps prompt edits available when the frozen harness is known unavailable', async () => {
+      mockApi.getTaskHarnessCatalog.mockResolvedValue({
+        legacy: false,
+        catalog: [
+          {
+            key: 'pi',
+            model_protocols: ['anthropic_messages'],
+            enabled: true,
+            availability: 'unavailable',
+            selectable: false,
+            availability_reason: 'missing_payload',
+          },
+        ],
+      })
+
+      await mountEditDrawer({ harness_key: 'pi', provider_id: 7 })
+      await wrapper.setProps({ show: true })
+      await flushPromises()
+
+      expect(wrapper.vm.selectedHarnessUnavailable).toBe(true)
+      expect(wrapper.get('[data-testid="task-form-save-button"]').attributes('disabled')).toBeUndefined()
+
+      wrapper.vm.prompt = 'Updated prompt'
+      await wrapper.get('[data-testid="task-form-save-button"]').trigger('click')
+      await flushPromises()
+
+      expect(mockApi.updateTask).toHaveBeenCalledWith(
+        42,
+        expect.objectContaining({ user_prompt: 'Updated prompt' }),
+      )
+    })
+
+    it('reloads the frozen catalog when the task arrives after the drawer mounts', async () => {
+      mockApi.getCurrentHarnessCatalog.mockResolvedValue({
+        legacy: false,
+        catalog: [{ key: 'claude', model_protocols: ['anthropic_messages'] }],
+      })
+      mockApi.getTaskHarnessCatalog.mockResolvedValue({
+        legacy: false,
+        catalog: [{ key: 'pi', model_protocols: ['anthropic_messages'] }],
+      })
+
+      wrapper = mount(TaskFormDrawer, {
+        props: { show: false, mode: 'edit', task: undefined },
+      })
+      await flushPromises()
+      await wrapper.setProps({
+        show: true,
+        task: { ...existingTask, id: 42, harness_key: 'pi' },
+      })
+      await flushPromises()
+
+      expect(mockApi.getTaskHarnessCatalog).toHaveBeenLastCalledWith(42)
+      expect(wrapper.vm.harnessCatalog[0].key).toBe('pi')
+    })
+
     it('uses the task frozen catalog instead of widening compatibility from current providers', async () => {
       mockApi.getProviders.mockResolvedValue([
         { id: 6, name: 'legacy-pi', model: 'model-a', is_default: true, is_disabled: false, model_protocol: 'anthropic_messages', compatible_harnesses: ['pi'] },
@@ -1919,7 +2040,7 @@ describe('TaskFormDrawer', () => {
       mockApi.getWorkerProfiles.mockResolvedValue([
         { ...mockWorkerProfiles[0], enabled_harnesses: ['pi', 'opencode'], default_harness_key: 'pi' },
       ])
-      mockApi.getTaskHarnessCatalog.mockRejectedValueOnce(new Error('catalog unavailable'))
+      mockApi.getTaskHarnessCatalog.mockRejectedValue(new Error('catalog unavailable'))
 
       await mountEditDrawer({
         harness_key: 'pi',
@@ -1933,12 +2054,13 @@ describe('TaskFormDrawer', () => {
       expect(wrapper.find('[data-testid="task-harness-catalog-error"]').exists()).toBe(true)
       expect(wrapper.find('.task-provider-select').attributes('disabled')).toBeDefined()
       expect(wrapper.get('[data-testid="task-harness-select"]').attributes('disabled')).toBeDefined()
-      expect(wrapper.get('[data-testid="task-form-save-button"]').attributes('disabled')).toBeDefined()
+      expect(wrapper.get('[data-testid="task-form-save-button"]').attributes('disabled')).toBeUndefined()
 
+      wrapper.vm.prompt = 'Updated prompt'
       await wrapper.get('[data-testid="task-form-save-button"]').trigger('click')
-      expect(mockApi.updateTask).not.toHaveBeenCalled()
-      await wrapper.vm.handleEdit()
-      expect(mockMessage.warning).toHaveBeenCalledWith('createTask.harnessCatalogUnavailable')
+      await flushPromises()
+      expect(mockApi.updateTask).toHaveBeenCalledWith(42, { user_prompt: 'Updated prompt' })
+      expect(mockMessage.warning).not.toHaveBeenCalledWith('createTask.harnessCatalogUnavailable')
     })
 
     it('pre-fills form from task when drawer opens', async () => {

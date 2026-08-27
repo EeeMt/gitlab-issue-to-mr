@@ -587,6 +587,19 @@
                         >
                           {{ t('createTask.harnessProviderMismatchHint') }}
                         </div>
+                        <div
+                          v-if="harnessCatalogStatusRows.length"
+                          class="execution-environment__field-hint execution-environment__harness-status"
+                          data-testid="task-harness-catalog-status"
+                        >
+                          <div
+                            v-for="row in harnessCatalogStatusRows"
+                            :key="row.key"
+                            data-testid="task-harness-catalog-status-row"
+                          >
+                            {{ row.label }} · {{ row.status }}<span v-if="row.reason"> · {{ row.reason }}</span>
+                          </div>
+                        </div>
                       </label>
                     </div>
                     <div
@@ -722,7 +735,7 @@
           <n-button
             type="primary"
             :loading="submitLoading"
-            :disabled="harnessCatalogUnavailable"
+            :disabled="harnessCatalogSubmitBlocked"
             :data-testid="mode === 'create' ? 'issue-create-task-button' : 'task-form-save-button'"
             @click="mode === 'create' ? handleCreate() : handleEdit()"
           >
@@ -1161,9 +1174,31 @@ const resolvedHarnessKey = computed(() =>
   ?? effectiveWorkerProfile.value?.default_harness_key
   ?? 'claude',
 )
+const harnessCatalogIdentity = computed(() => {
+  const identity = props.mode === 'edit' ? props.task?.id : props.workerProfileId
+  return `${props.mode}:${identity ?? 'pending'}`
+})
 const harnessCatalogUnavailable = computed(() =>
   executionOptionsReady.value
   && harnessCatalogLoadState.value === 'unavailable',
+)
+const selectedHarnessCatalogEntry = computed(() =>
+  harnessCatalog.value?.find(entry => entry.key === resolvedHarnessKey.value) ?? null,
+)
+const selectedHarnessUnavailable = computed(() => {
+  const entry = selectedHarnessCatalogEntry.value
+  if (!entry || typeof entry.enabled !== 'boolean' || typeof entry.availability !== 'string') {
+    return false
+  }
+  return entry.enabled === false || entry.availability === 'unavailable'
+})
+const harnessCatalogSubmitBlocked = computed(() =>
+  props.mode === 'create'
+  && (
+    harnessCatalogLoadState.value !== 'ready'
+    || harnessCatalogUnavailable.value
+    || selectedHarnessUnavailable.value
+  ),
 )
 const harnessCompatibleProviders = computed(() =>
   selectableProviders.value.filter(provider =>
@@ -1195,33 +1230,94 @@ const executionEnvironmentMissing = computed(() =>
     !effectiveWorkerProfile.value
     || !effectiveProvider.value
     || harnessCatalogUnavailable.value
+    || selectedHarnessUnavailable.value
     || harnessProviderMismatch.value
   )
 )
 const harnessOptions = computed(() => {
   const enabled = effectiveWorkerProfile.value?.enabled_harnesses
-  if (!enabled || !enabled.length) return []
-  return enabled.map(key => {
+  const catalogHasState = harnessCatalog.value?.some(
+    entry => typeof entry.enabled === 'boolean' && typeof entry.availability === 'string',
+  )
+  if ((!enabled || !enabled.length) && !catalogHasState) return []
+  const keys = catalogHasState
+    ? harnessCatalog.value!.map(entry => entry.key)
+    : enabled!
+  return keys.map(key => {
     const frozenAdapter = harnessCatalog.value?.find(entry => entry.key === key)
     const compatibleProviderAvailable = selectableProviders.value.length === 0
       || selectableProviders.value.some(
         provider => !provider.is_disabled && providerCompatibleWithHarness(provider, key),
       )
+    const catalogSelectable = frozenAdapter?.selectable
+      ?? (
+        Boolean(frozenAdapter)
+        && frozenAdapter?.availability !== 'unavailable'
+      )
     const harnessAvailable = !harnessCatalogUnavailable.value
-      && (!harnessCatalog.value || Boolean(frozenAdapter))
+      && (!harnessCatalog.value || catalogSelectable)
     return {
-      label: key === 'codex'
-        ? t('createTask.harnessCodex')
-        : key === 'pi'
-          ? t('createTask.harnessPi')
-          : key === 'opencode'
-            ? t('createTask.harnessOpenCode')
-            : t('createTask.harnessClaude'),
+      label: harnessDisplayLabel(key),
       value: key,
       disabled: harnessCatalogUnavailable.value
-        || (!harnessLocked.value && (!harnessAvailable || !compatibleProviderAvailable)),
+        || !harnessAvailable
+        || (!harnessLocked.value && !compatibleProviderAvailable),
     }
   })
+})
+function harnessDisplayLabel(key: string): string {
+  return key === 'codex'
+    ? t('createTask.harnessCodex')
+    : key === 'pi'
+      ? t('createTask.harnessPi')
+      : key === 'opencode'
+        ? t('createTask.harnessOpenCode')
+        : t('createTask.harnessClaude')
+}
+
+function harnessCatalogReasonLabel(reason: string | null | undefined): string {
+  switch (reason) {
+    case 'not_selected':
+      return t('createTask.harnessReasonNotSelected')
+    case 'missing_payload':
+      return t('createTask.harnessReasonMissingPayload')
+    case 'profile_disabled':
+      return t('createTask.harnessReasonProfileDisabled')
+    case 'harness_disabled':
+      return t('createTask.harnessReasonHarnessDisabled')
+    case 'worker_profile_unavailable':
+      return t('createTask.harnessReasonWorkerProfileUnavailable')
+    case 'worker_kit_unavailable':
+      return t('createTask.harnessReasonWorkerKitUnavailable')
+    case 'runtime_not_verified':
+      return t('createTask.harnessReasonRuntimeNotVerified')
+    case 'host_mount':
+      return t('createTask.harnessReasonHostMount')
+    case 'task_harness_bound':
+      return t('createTask.harnessReasonTaskHarnessBound')
+    default:
+      return reason ? t('createTask.harnessReasonUnknown') : ''
+  }
+}
+
+const harnessCatalogStatusRows = computed(() => {
+  if (!harnessCatalog.value?.some(entry => typeof entry.enabled === 'boolean')) return []
+  return harnessCatalog.value
+    .filter(entry => entry.enabled === false || entry.availability !== 'present')
+    .map(entry => ({
+      key: entry.key,
+      label: harnessDisplayLabel(entry.key),
+      status: entry.enabled === false
+        ? t('createTask.harnessDisabled')
+        : entry.availability === 'unavailable'
+          ? t('createTask.harnessUnavailable')
+          : t('createTask.harnessNotVerified'),
+      reason: harnessCatalogReasonLabel(
+        entry.enabled === false
+          ? entry.disabled_reason ?? entry.reason_code
+          : entry.availability_reason ?? entry.reason_code,
+      ),
+    }))
 })
 const executionEnvironmentOverridden = computed(() =>
   selectedProviderId.value !== null || !inheritProfileSkills.value
@@ -1456,7 +1552,7 @@ watch(resolvedHarnessKey, (harnessKey, previous) => {
   reconcileProviderForHarness(harnessKey, shouldRestore)
 })
 
-watch([selectableProviders, effectiveProvider], () => {
+watch([selectableProviders, effectiveProvider, harnessCatalog], () => {
   reconcileProviderForHarness(resolvedHarnessKey.value)
 })
 
@@ -1859,7 +1955,7 @@ const {
   taskModeErrorVisible,
   selectedProviderId,
   harnessKey,
-  submissionBlocked: harnessCatalogUnavailable,
+  submissionBlocked: harnessCatalogSubmitBlocked,
   scheduleType,
   scheduledAt,
   runInstructionTemplate,
@@ -1882,6 +1978,15 @@ onMounted(() => {
   void loadTemplates()
   void loadRunInstructionDefaults()
 })
+
+watch(
+  [() => props.show, harnessCatalogIdentity],
+  ([show, identity], [previousShow, previousIdentity]) => {
+    if (show && (!previousShow || identity !== previousIdentity)) {
+      void loadHarnessCatalog()
+    }
+  },
+)
 
 onBeforeUnmount(() => {
   if (copiedSkillTimer) clearTimeout(copiedSkillTimer)

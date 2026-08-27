@@ -665,6 +665,14 @@ export interface HarnessCatalogEntry {
   model_protocols: string[]
   capabilities: Record<string, boolean>
   options_schema: string | null
+  // Runtime/Profile state is additive so older task-catalog fixtures remain
+  // readable while the API rolls out the availability projection.
+  enabled?: boolean
+  availability?: 'present' | 'unavailable' | 'unknown'
+  selectable?: boolean
+  disabled_reason?: string | null
+  availability_reason?: string | null
+  reason_code?: string | null
 }
 
 export interface TaskHarnessCatalog {
@@ -709,7 +717,11 @@ export async function getTaskHarnessCatalog(taskId: number): Promise<TaskHarness
   return response.data
 }
 
-export async function getCurrentHarnessCatalog(): Promise<TaskHarnessCatalog> {
-  const response = await api.get('/harness-catalog')
+export async function getCurrentHarnessCatalog(
+  workerProfileId?: number | null,
+): Promise<TaskHarnessCatalog> {
+  const response = await api.get('/harness-catalog', workerProfileId != null
+    ? { params: { worker_profile_id: workerProfileId } }
+    : undefined)
   return response.data
 }

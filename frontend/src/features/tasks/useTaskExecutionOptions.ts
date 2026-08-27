@@ -30,6 +30,7 @@ export function useTaskExecutionOptions(options: TaskExecutionOptions) {
   const skillsLoadSucceeded = ref(false)
   const harnessCatalog = ref<HarnessCatalogEntry[] | null>(null)
   const harnessCatalogLoadState = ref<'loading' | 'ready' | 'unavailable'>('loading')
+  let harnessCatalogRequestGeneration = 0
 
   const selectableProviders = computed(() =>
     providers.value.filter(provider =>
@@ -116,12 +117,14 @@ export function useTaskExecutionOptions(options: TaskExecutionOptions) {
   }
 
   async function loadHarnessCatalog() {
+    const requestGeneration = ++harnessCatalogRequestGeneration
     harnessCatalogLoadState.value = 'loading'
     harnessCatalog.value = null
     try {
       const catalog = options.mode.value === 'edit' && options.task.value?.id
         ? await getTaskHarnessCatalog(options.task.value.id)
-        : await getCurrentHarnessCatalog()
+        : await getCurrentHarnessCatalog(options.workerProfileId.value ?? undefined)
+      if (requestGeneration !== harnessCatalogRequestGeneration) return
       if (!catalog.legacy && Array.isArray(catalog.catalog)) {
         harnessCatalog.value = catalog.catalog
         harnessCatalogLoadState.value = 'ready'
@@ -129,6 +132,7 @@ export function useTaskExecutionOptions(options: TaskExecutionOptions) {
         harnessCatalogLoadState.value = 'unavailable'
       }
     } catch {
+      if (requestGeneration !== harnessCatalogRequestGeneration) return
       harnessCatalog.value = null
       harnessCatalogLoadState.value = 'unavailable'
     }

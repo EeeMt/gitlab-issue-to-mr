@@ -29,6 +29,8 @@ const { mockApi, resetMockApi, mockMessage, mockDialog } = vi.hoisted(() => {
     getProjects: vi.fn<() => Promise<any[]>>(),
     getProviders: vi.fn<() => Promise<any[]>>(),
     getWorkerProfiles: vi.fn<() => Promise<any[]>>(),
+	    getCurrentHarnessCatalog: vi.fn<() => Promise<any>>(),
+	    getTaskHarnessCatalog: vi.fn<() => Promise<any>>(),
 	    getRunInstructionTemplateDefaults: vi.fn<() => Promise<any>>(),
 	    previewRunInstructionTemplate: vi.fn<() => Promise<any>>(),
 	    getIssueCIFailures: vi.fn<() => Promise<any>>(),
@@ -85,6 +87,8 @@ vi.mock('../api', () => ({
 	  getProjects: mockApi.getProjects,
 	  getProviders: mockApi.getProviders,
 	  getWorkerProfiles: mockApi.getWorkerProfiles,
+	  getCurrentHarnessCatalog: mockApi.getCurrentHarnessCatalog,
+	  getTaskHarnessCatalog: mockApi.getTaskHarnessCatalog,
 	  getRunInstructionTemplateDefaults: mockApi.getRunInstructionTemplateDefaults,
 	  previewRunInstructionTemplate: mockApi.previewRunInstructionTemplate,
 	  getIssueCIFailures: mockApi.getIssueCIFailures,
@@ -538,6 +542,7 @@ const mockWorkerProfiles = [
     description: null,
     enabled: true,
     is_default: true,
+    enabled_harnesses: ['claude'],
     image: 'codify-worker/java21-maven:2026.07',
     codegraph_enabled: false,
     volume_mounts: [],
@@ -565,6 +570,14 @@ function setupDefaultMocks(issueOverrides: Record<string, any> = {}) {
 	  mockApi.getConfig.mockResolvedValue({ runtime: { slot_max_tasks: 5, slot_max_tasks_enforce: false } })
 	  mockApi.getProviders.mockResolvedValue(mockProviders)
 	  mockApi.getWorkerProfiles.mockResolvedValue(mockWorkerProfiles)
+	  mockApi.getCurrentHarnessCatalog.mockResolvedValue({
+	    legacy: false,
+	    catalog: [{ key: 'claude', model_protocols: ['anthropic_messages'] }],
+	  })
+	  mockApi.getTaskHarnessCatalog.mockResolvedValue({
+	    legacy: false,
+	    catalog: [{ key: 'claude', model_protocols: ['anthropic_messages'] }],
+	  })
 	  mockApi.getRunInstructionTemplateDefaults.mockResolvedValue({
 	    execute: { content: 'Execute {{user_prompt}}', available_placeholders: ['user_prompt'] },
 	    plan: { content: 'Plan {{user_prompt}}', available_placeholders: ['user_prompt'] },
