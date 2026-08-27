@@ -111,6 +111,7 @@ async def update_task_record(
 
     issue = None
     snapshot = loaded_task_relationship(task, "worker_profile_snapshot")
+    runtime_bundle = loaded_task_relationship(task, "runtime_bundle")
     if "provider_id" in updated_fields:
         issue = await db.get(Issue, task.issue_id)
         if issue is None:
@@ -132,8 +133,6 @@ async def update_task_record(
             )
         except WorkerProfileValidationError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        task.provider_id = provider.id
-        task.provider_runtime_snapshot = None
         # Keep the frozen snapshot consistent with the provider that will actually
         # execute: re-freeze the secret-free endpoint and credential ref, and
         # reject a provider whose wire protocol cannot talk to the task's frozen
@@ -141,12 +140,18 @@ async def update_task_record(
         endpoint = normalize_endpoint(provider)
         harness_key = getattr(snapshot, "harness_key", None) or "claude"
         try:
-            ensure_harness_protocol_compatibility(harness_key, endpoint)
+            ensure_harness_protocol_compatibility(
+                harness_key,
+                endpoint,
+                runtime_bundle=runtime_bundle,
+            )
         except (HarnessRegistryError, ValueError) as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=str(exc),
             ) from exc
+        task.provider_id = provider.id
+        task.provider_runtime_snapshot = None
         snapshot.model_endpoint_snapshot = endpoint.as_snapshot()
         snapshot.credential_ref = endpoint.credential_ref
 
@@ -237,7 +242,11 @@ async def update_task_record(
             ) from exc
         endpoint = normalize_endpoint(provider)
         try:
-            ensure_harness_protocol_compatibility(harness_key, endpoint)
+            ensure_harness_protocol_compatibility(
+                harness_key,
+                endpoint,
+                runtime_bundle=runtime_bundle,
+            )
         except (HarnessRegistryError, ValueError) as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,

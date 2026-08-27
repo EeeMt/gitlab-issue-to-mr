@@ -540,7 +540,7 @@ def test_runtime_verifier_rejects_empty_placeholder_and_missing_harness_inputs(t
     ("adapter", "change"),
     [
         ("pi", lambda item: item["control_transport"].update(protocol="opencode-server")),
-        ("pi", lambda item: item["model_protocols"].append("openai_responses")),
+        ("pi", lambda item: item["model_protocols"].append("vendor_proprietary")),
         ("codex", lambda item: item.update(model_protocols=["anthropic_messages"])),
     ],
 )

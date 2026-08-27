@@ -520,7 +520,7 @@ def _pi_prepare_config(tmp_path: Path) -> Path:
         "CODIFY_RUN_UID": "1000",
         "CODIFY_RUN_GID": "1000",
         "HOME": str(tmp_path / "home"),
-        "PI_MODEL": "deepseek-v4-flash",
+        "ANTHROPIC_MODEL": "deepseek-v4-flash",
         "ANTHROPIC_BASE_URL": "https://api.deepseek.com/anthropic",
         "ANTHROPIC_API_KEY": "fake-key",
     }
@@ -546,18 +546,51 @@ def test_pi_config_maps_snapshot_endpoint_to_models_json(tmp_path):
     assert provider["models"][0]["contextWindow"] == 128000
 
 
-def test_pi_config_rejects_openai_chat_completions(tmp_path):
+@pytest.mark.parametrize(
+    ("protocol", "model", "endpoint_url", "api_key", "expected_api"),
+    [
+        (
+            "openai_responses",
+            "responses-model",
+            "https://openai.example/v1",
+            "responses-key",
+            "openai-responses",
+        ),
+        (
+            "openai_chat_completions",
+            "chat-model",
+            "https://chat.example/v1",
+            "chat-key",
+            "openai-completions",
+        ),
+    ],
+)
+def test_pi_config_maps_openai_protocols_to_native_apis(
+    tmp_path, protocol, model, endpoint_url, api_key, expected_api
+):
     env = {
         "CODIFY_RUNTIME_DIR": str(tmp_path),
         "CODIFY_ORCHESTRATION_DIR": str(REPO_ROOT / "deploy"),
         "CODIFY_RUN_UID": "1000",
         "CODIFY_RUN_GID": "1000",
         "HOME": str(tmp_path / "home"),
-        "CODIFY_MODEL_PROTOCOL": "openai_chat_completions",
+        "CODIFY_MODEL_PROTOCOL": protocol,
+        "ANTHROPIC_MODEL": "wrong-anthropic-model",
+        "ANTHROPIC_BASE_URL": "https://wrong-anthropic.example",
+        "ANTHROPIC_API_KEY": "wrong-anthropic-key",
+        "OPENAI_MODEL": model,
+        "OPENAI_BASE_URL": endpoint_url,
+        "OPENAI_API_KEY": api_key,
     }
     result = _source_adapter("pi_adapter_prepare_config", env)
-    assert result.returncode != 0
-    assert "does not support model protocol" in result.stderr
+    assert result.returncode == 0, result.stderr
+    provider = json.loads(
+        (tmp_path / "home/.pi/agent/models.json").read_text(encoding="utf-8")
+    )["providers"]["codify"]
+    assert provider["api"] == expected_api
+    assert provider["baseUrl"] == endpoint_url
+    assert provider["apiKey"] == api_key
+    assert provider["models"][0]["id"] == model
 
 
 def test_pi_prepare_config_exports_transport_env_defaults(tmp_path):
@@ -581,7 +614,7 @@ def test_pi_prepare_config_exports_transport_env_defaults(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == (
-        "rpc_stdio|pi-rpc|anthropic_messages"
+        "rpc_stdio|pi-rpc|anthropic_messages,openai_responses,openai_chat_completions"
     )
 
 
@@ -679,9 +712,11 @@ def test_pi_runner_pins_codify_provider_and_snapshot_model():
     runner = (REPO_ROOT / "deploy/worker-entrypoint/legacy/pi-run.sh").read_text(encoding="utf-8")
     assert "--mode rpc --provider codify" in runner
     assert "--model \"${PI_MODEL_RPC}\"" in runner
-    # The model resolves from the same adapter env chain as pi.sh prepare_config.
-    assert 'PI_MODEL_RPC="${PI_MODEL:-${ANTHROPIC_MODEL:-}}"' in runner
-    assert "OPENAI_MODEL" not in runner
+    # The model resolves from the protocol-specific Snapshot env selected by
+    # pi.sh prepare_config; a stale harness-specific variable is ignored.
+    assert 'PI_MODEL_RPC="${ANTHROPIC_MODEL:-}"' in runner
+    assert 'openai_responses|openai_chat_completions' in runner
+    assert 'PI_MODEL_RPC="${OPENAI_MODEL:-}"' in runner
     # Provider pin lives in the base command, before the CODIFY_PI_RUN_AS wrapper.
     base = runner[: runner.index('if [ -n "${CODIFY_PI_RUN_AS:-}" ]')]
     assert "--provider codify" in base

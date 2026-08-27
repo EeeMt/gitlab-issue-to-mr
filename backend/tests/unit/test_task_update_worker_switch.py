@@ -198,7 +198,11 @@ async def _seed_old_snapshot(db, task: Task, profile: WorkerProfile) -> TaskWork
         bundle_bytes=b"fixture-runtime",
         contract_version="codify.worker.harness/v1",
         orchestration_version="fixture",
-        manifest={"adapters": {"claude": {}}},
+        manifest={
+            "adapters": {
+                "claude": {"model_protocols": ["anthropic_messages"]},
+            },
+        },
         size_bytes=len(b"fixture-runtime"),
     )
     db.add(bundle)

@@ -2,10 +2,13 @@ import { computed, ref, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import {
+  getCurrentHarnessCatalog,
   getProviders,
   getSkills,
+  getTaskHarnessCatalog,
   getWorkerProfiles,
   type AIProvider,
+  type HarnessCatalogEntry,
   type Task,
   type SkillOption,
   type WorkerProfile,
@@ -25,6 +28,8 @@ export function useTaskExecutionOptions(options: TaskExecutionOptions) {
   const workerProfiles = ref<WorkerProfile[]>([])
   const skills = ref<SkillOption[]>([])
   const skillsLoadSucceeded = ref(false)
+  const harnessCatalog = ref<HarnessCatalogEntry[] | null>(null)
+  const harnessCatalogLoadState = ref<'loading' | 'ready' | 'unavailable'>('loading')
 
   const selectableProviders = computed(() =>
     providers.value.filter(provider =>
@@ -110,9 +115,31 @@ export function useTaskExecutionOptions(options: TaskExecutionOptions) {
     }
   }
 
+  async function loadHarnessCatalog() {
+    harnessCatalogLoadState.value = 'loading'
+    harnessCatalog.value = null
+    try {
+      const catalog = options.mode.value === 'edit' && options.task.value?.id
+        ? await getTaskHarnessCatalog(options.task.value.id)
+        : await getCurrentHarnessCatalog()
+      if (!catalog.legacy && Array.isArray(catalog.catalog)) {
+        harnessCatalog.value = catalog.catalog
+        harnessCatalogLoadState.value = 'ready'
+      } else {
+        harnessCatalogLoadState.value = 'unavailable'
+      }
+    } catch {
+      harnessCatalog.value = null
+      harnessCatalogLoadState.value = 'unavailable'
+    }
+  }
+
   return {
     effectiveProvider,
     effectiveWorkerProfile,
+    harnessCatalog,
+    harnessCatalogLoadState,
+    loadHarnessCatalog,
     loadProviders,
     loadSkills,
     loadWorkerProfiles,

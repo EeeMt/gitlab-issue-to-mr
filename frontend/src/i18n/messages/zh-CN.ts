@@ -1166,6 +1166,7 @@ const zhCN = {
     executionEnvironmentCollapse: '收起',
     executionEnvironmentRestore: '恢复默认',
     executionEnvironmentMissing: '部分运行环境不可用，请检查需求固定的 Worker 和 AI 模型服务。',
+    harnessCatalogUnavailable: '无法加载本任务的执行目录，请刷新后再修改或保存任务。',
     workerProfileLockedHint: 'Worker 与 Worker Kit 由需求固定，创建任务时不可更换。',
     harness: 'Harness',
     harnessClaude: 'Claude',

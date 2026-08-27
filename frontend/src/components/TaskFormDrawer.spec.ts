@@ -18,6 +18,8 @@ const { mockApi, resetMockApi, mockMessage, clipboardWrite, mockOptionNodeClick,
     getRunInstructionTemplateDefaults: vi.fn<() => Promise<any>>(),
     previewRunInstructionTemplate: vi.fn<() => Promise<any>>(),
     getTaskScheduleConstraints: vi.fn<() => Promise<any>>(),
+    getCurrentHarnessCatalog: vi.fn<() => Promise<any>>(),
+    getTaskHarnessCatalog: vi.fn<() => Promise<any>>(),
   }
   const resetMockApi = () => {
     Object.values(mock).forEach(fn => fn.mockReset())
@@ -62,6 +64,8 @@ vi.mock('../api', () => ({
   getRunInstructionTemplateDefaults: mockApi.getRunInstructionTemplateDefaults,
   previewRunInstructionTemplate: mockApi.previewRunInstructionTemplate,
   getTaskScheduleConstraints: mockApi.getTaskScheduleConstraints,
+  getCurrentHarnessCatalog: mockApi.getCurrentHarnessCatalog,
+  getTaskHarnessCatalog: mockApi.getTaskHarnessCatalog,
 }))
 
 vi.mock('./RunInstructionTemplateEditor.vue', () => ({
@@ -386,6 +390,16 @@ const mockProviders = [
   { id: 7, name: 'Default Provider', model: 'model-a', is_default: true, is_disabled: false, compatible_harnesses: ['claude'] },
 ]
 
+const mockHarnessCatalog = {
+  legacy: false,
+  catalog: [
+    { key: 'claude', model_protocols: ['anthropic_messages'] },
+    { key: 'codex', model_protocols: ['openai_responses'] },
+    { key: 'opencode', model_protocols: ['anthropic_messages', 'openai_responses', 'openai_chat_completions'] },
+    { key: 'pi', model_protocols: ['anthropic_messages', 'openai_responses', 'openai_chat_completions'] },
+  ],
+}
+
 const mockWorkerProfiles = [
   {
     id: 3,
@@ -462,6 +476,8 @@ describe('TaskFormDrawer', () => {
       freeform: { content: '{{user_prompt}}', available_placeholders: ['user_prompt'] },
       plan: { content: 'Plan {{user_prompt}}', available_placeholders: ['user_prompt'] }
     })
+    mockApi.getCurrentHarnessCatalog.mockResolvedValue(mockHarnessCatalog)
+    mockApi.getTaskHarnessCatalog.mockResolvedValue(mockHarnessCatalog)
     mockApi.previewRunInstructionTemplate.mockResolvedValue({
       rendered_prompt: 'Rendered prompt',
       used_placeholders: ['user_prompt'],
@@ -1870,6 +1886,60 @@ describe('TaskFormDrawer', () => {
       await flushPromises()
       return wrapper
     }
+
+    it('uses the task frozen catalog instead of widening compatibility from current providers', async () => {
+      mockApi.getProviders.mockResolvedValue([
+        { id: 6, name: 'legacy-pi', model: 'model-a', is_default: true, is_disabled: false, model_protocol: 'anthropic_messages', compatible_harnesses: ['pi'] },
+        { id: 7, name: 'new-pi', model: 'model-b', is_default: false, is_disabled: false, model_protocol: 'openai_responses', compatible_harnesses: ['pi'] },
+      ])
+      mockApi.getWorkerProfiles.mockResolvedValue([
+        { ...mockWorkerProfiles[0], enabled_harnesses: ['pi'], default_harness_key: 'pi' },
+      ])
+      mockApi.getTaskHarnessCatalog.mockResolvedValue({
+        legacy: false,
+        catalog: [{ key: 'pi', model_protocols: ['anthropic_messages'] }],
+      })
+
+      await mountEditDrawer({
+        harness_key: 'pi',
+        worker_profile_id: 3,
+        provider_id: 7,
+      })
+      await wrapper.setProps({ show: true })
+      await flushPromises()
+
+      expect(wrapper.vm.providerOptions.map((option: { value: number }) => option.value)).toEqual([6])
+      expect(wrapper.vm.selectedProviderId).toBe(6)
+    })
+
+    it('fails closed when the task frozen catalog cannot be loaded', async () => {
+      mockApi.getProviders.mockResolvedValue([
+        { id: 7, name: 'current-provider', model: 'model-a', is_default: true, is_disabled: false, model_protocol: 'openai_responses', compatible_harnesses: ['pi'] },
+      ])
+      mockApi.getWorkerProfiles.mockResolvedValue([
+        { ...mockWorkerProfiles[0], enabled_harnesses: ['pi', 'opencode'], default_harness_key: 'pi' },
+      ])
+      mockApi.getTaskHarnessCatalog.mockRejectedValueOnce(new Error('catalog unavailable'))
+
+      await mountEditDrawer({
+        harness_key: 'pi',
+        worker_profile_id: 3,
+        provider_id: 7,
+      })
+      await wrapper.setProps({ show: true })
+      await flushPromises()
+
+      expect(wrapper.vm.harnessCatalogUnavailable).toBe(true)
+      expect(wrapper.find('[data-testid="task-harness-catalog-error"]').exists()).toBe(true)
+      expect(wrapper.find('.task-provider-select').attributes('disabled')).toBeDefined()
+      expect(wrapper.get('[data-testid="task-harness-select"]').attributes('disabled')).toBeDefined()
+      expect(wrapper.get('[data-testid="task-form-save-button"]').attributes('disabled')).toBeDefined()
+
+      await wrapper.get('[data-testid="task-form-save-button"]').trigger('click')
+      expect(mockApi.updateTask).not.toHaveBeenCalled()
+      await wrapper.vm.handleEdit()
+      expect(mockMessage.warning).toHaveBeenCalledWith('createTask.harnessCatalogUnavailable')
+    })
 
     it('pre-fills form from task when drawer opens', async () => {
       await mountEditDrawer()

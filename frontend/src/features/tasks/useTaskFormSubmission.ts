@@ -38,6 +38,7 @@ interface TaskFormSubmissionOptions {
   inheritProfileSkills: Ref<boolean>
   selectedSkillIds: Ref<number[]>
   skillSelectionDirty: Ref<boolean>
+  submissionBlocked?: Readonly<Ref<boolean>>
   defaultsError: Readonly<Ref<string>>
   getDefaultRunInstructionTemplate: (mode: Exclude<TaskMode, 'freeform'>) => string
   clearScheduledTasks: () => void
@@ -67,6 +68,10 @@ export function useTaskFormSubmission(options: TaskFormSubmissionOptions) {
   }
 
   async function handleCreate() {
+    if (options.submissionBlocked?.value) {
+      message.warning(t('createTask.harnessCatalogUnavailable'))
+      return
+    }
     const taskMode = options.taskMode.value
     if (taskMode === null) {
       options.taskModeErrorVisible.value = true
@@ -139,6 +144,10 @@ export function useTaskFormSubmission(options: TaskFormSubmissionOptions) {
   }
 
   async function handleEdit() {
+    if (options.submissionBlocked?.value) {
+      message.warning(t('createTask.harnessCatalogUnavailable'))
+      return
+    }
     const original = options.task.value
     if (!original) return
 

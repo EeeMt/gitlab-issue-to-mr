@@ -17,10 +17,17 @@ if [ -z "${PROMPT_FILE}" ] || [ ! -s "${PROMPT_FILE}" ]; then
     exit 1
 fi
 
-# Pi is an Anthropic-messages-only Runtime Bundle.  The adapter validates the
-# frozen protocol before this wrapper starts; do not let a stale/custom OpenAI
-# variable silently select a model on this command line.
-PI_MODEL_RPC="${PI_MODEL:-${ANTHROPIC_MODEL:-}}"
+# The adapter validates the frozen protocol before this wrapper starts. Keep
+# the runner's model source protocol-specific so a stale credential/model from
+# the other wire family can never silently select the CLI model.
+case "${CODIFY_MODEL_PROTOCOL:-anthropic_messages}" in
+    anthropic_messages) PI_MODEL_RPC="${ANTHROPIC_MODEL:-}" ;;
+    openai_responses|openai_chat_completions) PI_MODEL_RPC="${OPENAI_MODEL:-}" ;;
+    *)
+        echo "Pi does not support model protocol ${CODIFY_MODEL_PROTOCOL}" >&2
+        exit 1
+        ;;
+esac
 PI_COMMAND=("${CODIFY_PI_BIN}" --mode rpc --provider codify)
 if [ -n "${PI_MODEL_RPC}" ]; then
     PI_COMMAND+=(--model "${PI_MODEL_RPC}")

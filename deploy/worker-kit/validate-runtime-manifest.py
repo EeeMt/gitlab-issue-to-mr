@@ -16,8 +16,14 @@ SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 IMAGE_REFERENCE_RE = re.compile(r"^[^@\s]+@sha256:[0-9a-f]{64}$")
 CAPABILITIES = {"resume", "task_skills", "usage_tokens", "steering", "follow_up"}
 PROTOCOL_MATRIX = {
-    "pi": (("rpc_stdio", "pi-rpc"), {"anthropic_messages"}),
-    "opencode": (("server_http", "opencode-server"), {"anthropic_messages"}),
+    "pi": (
+        ("rpc_stdio", "pi-rpc"),
+        {"anthropic_messages", "openai_responses", "openai_chat_completions"},
+    ),
+    "opencode": (
+        ("server_http", "opencode-server"),
+        {"anthropic_messages", "openai_responses", "openai_chat_completions"},
+    ),
     "claude": (("cli_stream_json", "claude-json"), {"anthropic_messages"}),
     "codex": (("cli_jsonl", "codex-jsonl"), {"openai_responses"}),
 }

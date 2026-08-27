@@ -8,6 +8,7 @@ import shutil
 import tarfile
 import time
 from pathlib import Path, PurePosixPath
+from types import SimpleNamespace
 from typing import Any
 
 from sqlalchemy import select
@@ -21,6 +22,10 @@ from app.config import (
 )
 from app.config import (
     get_effective_settings as get_settings,
+)
+from app.core.model_credentials import CredentialError, resolve_task_credential
+from app.core.model_endpoints import (
+    ModelEndpoint,
 )
 from app.core.skills import (
     decode_skill_file_content,
@@ -67,7 +72,131 @@ def _legacy_session_storage_path(issue: Issue | None) -> str | None:
 
 
 async def resolve_provider(db: AsyncSession, task: Task) -> AIProvider:
-    """Resolve the AI provider for a task."""
+    """Resolve the AI provider from the task's frozen endpoint when available.
+
+    A Task's Worker Profile Snapshot is the execution boundary for model
+    configuration.  Looking up the editable ``AIProvider`` row here would let
+    a later protocol/model/base-url edit change a queued or retrying Task after
+    its Bundle had already been selected.  The endpoint fields therefore come
+    from the immutable snapshot; only the independently managed credential is
+    resolved at execution time.
+    """
+    snapshot = _loaded_worker_profile_snapshot(task)
+    endpoint_snapshot = getattr(snapshot, "model_endpoint_snapshot", None)
+    if endpoint_snapshot is not None:
+        if not isinstance(endpoint_snapshot, dict):
+            raise RuntimeError(f"Task {task.id} has an invalid model endpoint snapshot")
+        endpoint = _model_endpoint_from_snapshot(endpoint_snapshot, task)
+        return await _resolve_frozen_provider(
+            db,
+            task,
+            snapshot,
+            endpoint,
+            credential_ref_is_frozen="credential_ref" in endpoint_snapshot,
+        )
+    # Snapshots written before the endpoint contract was introduced do not
+    # carry model_endpoint_snapshot.  Keep their legacy lookup path for
+    # compatibility; all current snapshots take the frozen path above.
+    return await _resolve_live_provider(db, task)
+
+
+def _loaded_worker_profile_snapshot(task: Task) -> Any | None:
+    """Return a task snapshot only when the relationship is already loaded."""
+    task_state = getattr(task, "__dict__", None)
+    if not isinstance(task_state, dict):
+        return None
+    return task_state.get("worker_profile_snapshot")
+
+
+def _model_endpoint_from_snapshot(
+    raw_snapshot: dict[str, Any],
+    task: Task,
+) -> ModelEndpoint:
+    """Validate and materialize the secret-free endpoint snapshot."""
+    protocol = raw_snapshot.get("model_protocol")
+    if protocol is None:
+        protocol = raw_snapshot.get("wire_protocol")
+    if not isinstance(protocol, str) or not protocol.strip():
+        raise RuntimeError(f"Task {task.id} has an invalid frozen model protocol")
+    protocol = protocol.strip().replace("-", "_")
+
+    def required_string(name: str) -> str:
+        value = raw_snapshot.get(name)
+        if not isinstance(value, str) or not value.strip():
+            raise RuntimeError(
+                f"Task {task.id} has an invalid frozen model endpoint field: {name}"
+            )
+        return value.strip()
+
+    endpoint_id = raw_snapshot.get("id")
+    if endpoint_id is not None and (
+        not isinstance(endpoint_id, int) or isinstance(endpoint_id, bool)
+    ):
+        raise RuntimeError(f"Task {task.id} has an invalid frozen provider id")
+
+    name = raw_snapshot.get("name", "task snapshot")
+    if not isinstance(name, str) or not name.strip():
+        raise RuntimeError(f"Task {task.id} has an invalid frozen provider name")
+    provider_kind = raw_snapshot.get("provider_kind")
+    if provider_kind is None:
+        provider_kind = (
+            "openai_compatible" if protocol.startswith("openai_") else "anthropic_compatible"
+        )
+    if not isinstance(provider_kind, str) or not provider_kind.strip():
+        raise RuntimeError(f"Task {task.id} has an invalid frozen provider kind")
+
+    compat_profile = raw_snapshot.get("compat_profile")
+    if compat_profile is not None and not isinstance(compat_profile, str):
+        raise RuntimeError(f"Task {task.id} has an invalid frozen compatibility profile")
+    provider_driver = raw_snapshot.get("provider_driver")
+    if provider_driver is not None and not isinstance(provider_driver, str):
+        raise RuntimeError(f"Task {task.id} has an invalid frozen provider driver")
+    provider_options = raw_snapshot.get("provider_options", {})
+    if not isinstance(provider_options, dict):
+        raise RuntimeError(f"Task {task.id} has invalid frozen provider options")
+    credential_ref = raw_snapshot.get("credential_ref")
+    if credential_ref is not None and not isinstance(credential_ref, str):
+        raise RuntimeError(f"Task {task.id} has an invalid frozen credential reference")
+    credential_ref = credential_ref.strip() if isinstance(credential_ref, str) else None
+    credential_ref = credential_ref or None
+
+    max_turns = raw_snapshot.get("max_turns")
+    if "max_turns" in raw_snapshot and (
+        not isinstance(max_turns, int)
+        or isinstance(max_turns, bool)
+        or not 1 <= max_turns <= 1000
+    ):
+        raise RuntimeError(f"Task {task.id} has an invalid frozen max_turns")
+    system_prompt = raw_snapshot.get("system_prompt")
+    if system_prompt is not None and (
+        not isinstance(system_prompt, str) or len(system_prompt) > 10000
+    ):
+        raise RuntimeError(f"Task {task.id} has an invalid frozen system_prompt")
+
+    endpoint = ModelEndpoint(
+        id=endpoint_id,
+        name=name.strip(),
+        base_url=required_string("base_url"),
+        model=required_string("model"),
+        provider_kind=provider_kind.strip(),
+        model_protocol=protocol,
+        compat_profile=compat_profile.strip() if isinstance(compat_profile, str) else None,
+        provider_driver=provider_driver.strip() if isinstance(provider_driver, str) else None,
+        provider_options=dict(provider_options),
+        credential_ref=credential_ref,
+        max_turns=max_turns,
+        system_prompt=system_prompt,
+    )
+    fingerprint = raw_snapshot.get("fingerprint")
+    if fingerprint is not None and (
+        not isinstance(fingerprint, str) or fingerprint != endpoint.fingerprint
+    ):
+        raise RuntimeError(f"Task {task.id} has a tampered frozen model endpoint fingerprint")
+    return endpoint
+
+
+async def _resolve_live_provider(db: AsyncSession, task: Task) -> AIProvider:
+    """Keep the legacy lookup path for tasks without an endpoint snapshot."""
     if task.provider_id:
         provider = await db.get(AIProvider, task.provider_id)
         if provider:
@@ -87,6 +216,114 @@ async def resolve_provider(db: AsyncSession, task: Task) -> AIProvider:
         max_turns=settings.claude_max_turns,
         system_prompt=None,
     )
+
+
+async def _resolve_frozen_provider(
+    db: AsyncSession,
+    task: Task,
+    snapshot: Any,
+    endpoint: ModelEndpoint,
+    *,
+    credential_ref_is_frozen: bool,
+) -> Any:
+    """Build a transient provider from frozen endpoint data and live credential."""
+    source_provider = None
+    source_provider_id = endpoint.id
+    if source_provider_id is None:
+        candidate_id = getattr(task, "provider_id", None)
+        if isinstance(candidate_id, int) and not isinstance(candidate_id, bool):
+            source_provider_id = candidate_id
+    if source_provider_id is not None:
+        source_provider = await db.get(AIProvider, source_provider_id)
+
+    snapshot_credential_ref = _optional_credential_ref(
+        getattr(snapshot, "credential_ref", None), task
+    )
+    if (
+        snapshot_credential_ref is not None
+        and endpoint.credential_ref is not None
+        and snapshot_credential_ref != endpoint.credential_ref
+    ):
+        raise RuntimeError(f"Task {task.id} has conflicting frozen credential references")
+    credential_ref = snapshot_credential_ref or endpoint.credential_ref
+    api_key = ""
+    if credential_ref is not None:
+        api_key = await _resolve_frozen_credential(db, task, credential_ref)
+    elif not credential_ref_is_frozen and source_provider is not None:
+        # Providers created before the independent credential migration may
+        # still have only the legacy key.  Keep that compatibility path only
+        # for old endpoint snapshots that did not record a credential_ref key.
+        # A current snapshot explicitly recording null means "no credential";
+        # a credential added to the mutable Provider later must not be adopted.
+        legacy_ref = _optional_credential_ref(
+            getattr(source_provider, "credential_ref", None), task
+        )
+        if legacy_ref is not None:
+            api_key = await _resolve_frozen_credential(db, task, legacy_ref)
+            credential_ref = legacy_ref
+        else:
+            api_key = _decrypt_provider_api_key(source_provider)
+
+    settings = get_settings()
+    if endpoint.max_turns is not None:
+        max_turns = endpoint.max_turns
+        system_prompt = endpoint.system_prompt
+    else:
+        # Snapshots created before max_turns/system_prompt joined the endpoint
+        # contract have no frozen policy fields. Preserve their legacy lookup
+        # semantics while all newly created endpoint snapshots use the branch
+        # above.
+        max_turns = getattr(source_provider, "max_turns", None)
+        if not isinstance(max_turns, int) or isinstance(max_turns, bool):
+            max_turns = getattr(settings, "claude_max_turns", 20)
+        system_prompt = getattr(source_provider, "system_prompt", None)
+        if system_prompt is not None and not isinstance(system_prompt, str):
+            system_prompt = None
+
+    # This object is intentionally transient: it carries the frozen endpoint
+    # and resolved secret into environment construction without ever being
+    # attached to the SQLAlchemy session.
+    return SimpleNamespace(
+        id=endpoint.id,
+        name=endpoint.name,
+        base_url=endpoint.base_url,
+        api_key=api_key,
+        model=endpoint.model,
+        max_turns=max_turns,
+        system_prompt=system_prompt,
+        provider_kind=endpoint.provider_kind,
+        model_protocol=endpoint.model_protocol,
+        compat_profile=endpoint.compat_profile,
+        provider_driver=endpoint.provider_driver,
+        provider_options=dict(endpoint.provider_options),
+        credential_ref=credential_ref,
+        _codify_api_key_resolved=True,
+    )
+
+
+def _optional_credential_ref(value: Any, task: Task) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise RuntimeError(f"Task {task.id} has an invalid credential reference")
+    return value.strip() or None
+
+
+async def _resolve_frozen_credential(
+    db: AsyncSession,
+    task: Task,
+    credential_ref: str,
+) -> str:
+    try:
+        resolved = await resolve_task_credential(db, credential_ref, allow_retired=True)
+    except CredentialError as exc:
+        raise RuntimeError(
+            f"Task {task.id} credential resolution failed; execution is blocked"
+        ) from exc
+    secret = resolved.get("secret") if isinstance(resolved, dict) else None
+    if not isinstance(secret, str):
+        raise RuntimeError(f"Task {task.id} resolved credential is invalid")
+    return secret
 
 
 def capture_provider_runtime_snapshot(task: Task, provider: AIProvider) -> None:
@@ -477,7 +714,9 @@ def _resolve_provider_environment_values(
     settings: Any,
     provider: AIProvider | None,
 ) -> tuple[str, str, str, str]:
-    if provider and provider.id:
+    if provider and getattr(provider, "_codify_api_key_resolved", False):
+        api_key = provider.api_key or ""
+    elif provider and provider.id:
         api_key = _decrypt_provider_api_key(provider)
     elif provider:
         api_key = provider.api_key or ""

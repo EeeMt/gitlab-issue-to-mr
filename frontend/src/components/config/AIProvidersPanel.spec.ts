@@ -211,10 +211,10 @@ describe('AIProvidersPanel', () => {
     wrapper.vm.handleProviderKindChange('openai_compatible')
     expect(wrapper.vm.formValue.model_protocol).toBe('openai_responses')
     expect(wrapper.vm.wireProtocolOptions.map(option => option.value))
-      .toEqual(['openai_responses'])
+      .toEqual(['openai_responses', 'openai_chat_completions'])
   })
 
-  it('keeps an existing chat completions value visible while hiding it for new providers', async () => {
+  it('keeps chat completions selectable for new and existing providers', async () => {
     const wrapper = mount(AIProvidersPanel, {
       props: { isMobile: false },
       global: {

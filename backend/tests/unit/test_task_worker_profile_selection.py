@@ -85,6 +85,12 @@ def _v2_bundle(harness_key="claude", bundle_id=1) -> WorkerRuntimeBundle:
     """Build a canonical frozen V2 bundle for task-writer tests."""
     evidence = _v2_evidence(harness_key)
     bundle_digest = _v2_bundle_digest(harness_key)
+    model_protocols = {
+        "claude": ["anthropic_messages"],
+        "codex": ["openai_responses"],
+        "pi": ["anthropic_messages", "openai_responses", "openai_chat_completions"],
+        "opencode": ["anthropic_messages", "openai_responses", "openai_chat_completions"],
+    }[harness_key]
     return WorkerRuntimeBundle(
         id=bundle_id,
         digest=bundle_digest,
@@ -100,7 +106,8 @@ def _v2_bundle(harness_key="claude", bundle_id=1) -> WorkerRuntimeBundle:
             "bundle_digest": bundle_digest,
             "adapters": {
                 harness_key: {
-                    "adapter": dict(evidence["adapter"])
+                    "adapter": dict(evidence["adapter"]),
+                    "model_protocols": model_protocols,
                 }
             },
         },

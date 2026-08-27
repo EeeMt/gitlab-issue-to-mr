@@ -610,8 +610,14 @@ CONTROL_TRANSPORT_KINDS = frozenset(
     {"rpc_stdio", "server_http", "cli_stream_json", "cli_jsonl"}
 )
 HARNESS_PROTOCOL_MATRIX = {
-    "pi": (("rpc_stdio", "pi-rpc"), frozenset({"anthropic_messages"})),
-    "opencode": (("server_http", "opencode-server"), frozenset({"anthropic_messages"})),
+    "pi": (
+        ("rpc_stdio", "pi-rpc"),
+        frozenset({"anthropic_messages", "openai_responses", "openai_chat_completions"}),
+    ),
+    "opencode": (
+        ("server_http", "opencode-server"),
+        frozenset({"anthropic_messages", "openai_responses", "openai_chat_completions"}),
+    ),
     "claude": (("cli_stream_json", "claude-json"), frozenset({"anthropic_messages"})),
     "codex": (("cli_jsonl", "codex-jsonl"), frozenset({"openai_responses"})),
 }

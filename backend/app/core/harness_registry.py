@@ -23,8 +23,8 @@ from app.core.harness_protocol import (
 )
 
 # Known harness keys (compile-time allowlist). The V2 manifest catalog is
-# restricted to this set; pi/opencode are first-class keys whose adapters are
-# Phase 2-4 work, so profiles cannot yet select them (no bundled adapter).
+# restricted to this set; the frozen Runtime Bundle decides which of these
+# keys is actually available for a Profile.
 HARNESS_KEYS = frozenset({"pi", "opencode", "claude", "codex"})
 
 # Re-export the V2 model-protocol allowlist for registry/API use.
@@ -280,12 +280,75 @@ def capability_policy(
     return effective
 
 
-def validate_protocol_compatibility(harness_key: str, model_protocol: str) -> None:
+def validate_protocol_compatibility(
+    harness_key: str,
+    model_protocol: str,
+    *,
+    allowed_protocols: Iterable[str] | None = None,
+) -> None:
     validate_harness_key(harness_key)
-    if model_protocol not in HARNESS_PROVIDER_PROTOCOLS[harness_key]:
+    allowed = (
+        frozenset(allowed_protocols)
+        if allowed_protocols is not None
+        else HARNESS_PROVIDER_PROTOCOLS[harness_key]
+    )
+    if model_protocol not in allowed:
         raise HarnessRegistryError(
             f"harness {harness_key!r} cannot consume model protocol {model_protocol!r}"
         )
+
+
+def runtime_bundle_model_protocols(bundle: Any, harness_key: str) -> frozenset[str]:
+    """Return the model protocols declared by one frozen Bundle adapter.
+
+    ``HARNESS_PROTOCOL_MATRIX`` is only the code-held upper bound.  A Runtime
+    Bundle may intentionally declare a strict subset (for example, a
+    historical V2 Bundle whose Pi adapter predates OpenAI support), and that
+    frozen declaration is the execution truth for a bound Task.  Never fall
+    back to the current matrix when a Bundle is present but malformed.
+    """
+    validate_harness_key(harness_key)
+    manifest = getattr(bundle, "manifest", None)
+    if not isinstance(manifest, Mapping):
+        raise HarnessRegistryError("Runtime Bundle has no valid manifest")
+    adapters = manifest.get("adapters")
+    if not isinstance(adapters, Mapping):
+        raise HarnessRegistryError("Runtime Bundle manifest has no adapters")
+    adapter = adapters.get(harness_key)
+    if not isinstance(adapter, Mapping):
+        raise HarnessRegistryError(
+            f"Runtime Bundle manifest has no adapter for harness {harness_key!r}"
+        )
+    protocols = adapter.get("model_protocols")
+    if protocols is None:
+        # V1 Runtime Bundles used the provider_protocols spelling.  Keep the
+        # compatibility reader explicit while preserving the same fail-closed
+        # semantics for malformed historical rows.
+        protocols = adapter.get("provider_protocols")
+    if not isinstance(protocols, list) or not protocols:
+        raise HarnessRegistryError(
+            f"Runtime Bundle adapter {harness_key!r} has no model protocols"
+        )
+    normalized: set[str] = set()
+    for protocol in protocols:
+        if not isinstance(protocol, str) or not protocol.strip():
+            raise HarnessRegistryError(
+                f"Runtime Bundle adapter {harness_key!r} has an invalid model protocol"
+            )
+        protocol = protocol.replace("-", "_")
+        if protocol not in MODEL_PROTOCOLS:
+            raise HarnessRegistryError(
+                f"Runtime Bundle adapter {harness_key!r} declares unsupported "
+                f"model protocol {protocol!r}"
+            )
+        normalized.add(protocol)
+    unsupported = normalized - HARNESS_PROVIDER_PROTOCOLS[harness_key]
+    if unsupported:
+        raise HarnessRegistryError(
+            f"Runtime Bundle adapter {harness_key!r} declares model protocols "
+            f"outside the approved harness bound: {sorted(unsupported)}"
+        )
+    return frozenset(normalized)
 
 
 def compatible_harness_keys(model_protocol: str | None) -> list[str]:

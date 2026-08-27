@@ -60,7 +60,7 @@
       "cli_version": "0.84.2",
       "cli_version_range": ">=0.84.2 <0.85.0",
       "control_transport": { "kind": "rpc_stdio", "protocol": "pi-rpc" },
-      "model_protocols": ["anthropic_messages"],
+      "model_protocols": ["anthropic_messages", "openai_responses", "openai_chat_completions"],
       "capabilities": {
         "resume": true,
         "task_skills": true,
@@ -82,7 +82,7 @@
       "cli_version": "1.18.19",
       "cli_version_range": ">=1.18.19 <1.19.0",
       "control_transport": { "kind": "server_http", "protocol": "opencode-server" },
-      "model_protocols": ["anthropic_messages"],
+      "model_protocols": ["anthropic_messages", "openai_responses", "openai_chat_completions"],
       "capabilities": {
         "resume": false,
         "task_skills": true,

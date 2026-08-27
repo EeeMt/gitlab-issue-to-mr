@@ -90,26 +90,61 @@ pi_adapter_prepare_config() {
     chown -R "${CODIFY_RUN_UID:-1000}:${CODIFY_RUN_GID:-1000}" "${PI_HOME}" 2>/dev/null || true
 
     # Export the Pi transport/model identity so events.py forms the correct V2
-    # harness envelope. Only the fixed-version Anthropic-compatible mapping is
-    # currently supported; the adapter must not infer a protocol from env.
+    # harness envelope. The capability list comes from the frozen manifest;
+    # the selected protocol below only chooses the Snapshot endpoint mapping.
     export CODIFY_HARNESS_CONTROL_TRANSPORT_KIND="${CODIFY_HARNESS_CONTROL_TRANSPORT_KIND:-rpc_stdio}"
     export CODIFY_HARNESS_CONTROL_TRANSPORT_PROTOCOL="${CODIFY_HARNESS_CONTROL_TRANSPORT_PROTOCOL:-pi-rpc}"
-    export CODIFY_HARNESS_MODEL_PROTOCOLS="${CODIFY_HARNESS_MODEL_PROTOCOLS:-anthropic_messages}"
 
     # Model endpoint mapping. The Snapshot's model / base URL / credential are
-    # frozen by the backend and injected as ANTHROPIC_MODEL / BASE_URL / API_KEY.
+    # frozen by the backend and injected through the environment namespace for
+    # the selected protocol. Harness-specific variables and user config cannot
+    # override that Snapshot.
     # Pi reads custom providers from ~/.pi/agent/models.json; we
     # translate the frozen snapshot into that file so the CLI uses EXACTLY the
     # Snapshot endpoint. Pi's own native config must never override the Snapshot,
     # so we do not read any pre-existing user models.json (PI_HOME is ephemeral).
     local model_protocol="${CODIFY_MODEL_PROTOCOL:-anthropic_messages}"
-    if [ "${model_protocol}" != "anthropic_messages" ]; then
-        echo "Pi does not support model protocol ${model_protocol} in this Runtime Bundle" >&2
+    local manifest_path="${CODIFY_ORCHESTRATION_DIR}/worker-entrypoint/harness/manifest.json"
+    local declared_model_protocols
+    declared_model_protocols="$(jq -er \
+        '.adapters.pi.model_protocols | select(type == "array" and length > 0) | join(",")' \
+        "${manifest_path}" 2>/dev/null)" || {
+        echo "Pi Runtime Bundle manifest has no model protocol declaration" >&2
+        return 1
+    }
+    if ! jq -e --arg protocol "${model_protocol}" \
+        '.adapters.pi.model_protocols | index($protocol) != null' \
+        "${manifest_path}" >/dev/null 2>&1; then
+        echo "Pi Runtime Bundle does not declare model protocol ${model_protocol}" >&2
         return 1
     fi
-    local model="${PI_MODEL:-${ANTHROPIC_MODEL:-}}"
-    local base_url="${PI_BASE_URL:-${ANTHROPIC_BASE_URL:-}}"
-    local api_key="${PI_API_KEY:-${ANTHROPIC_API_KEY:-}}"
+    export CODIFY_HARNESS_MODEL_PROTOCOLS="${declared_model_protocols}"
+
+    local model base_url api_key api
+    case "${model_protocol}" in
+        anthropic_messages)
+            model="${ANTHROPIC_MODEL:-}"
+            base_url="${ANTHROPIC_BASE_URL:-}"
+            api_key="${ANTHROPIC_API_KEY:-}"
+            api="anthropic-messages"
+            ;;
+        openai_responses)
+            model="${OPENAI_MODEL:-}"
+            base_url="${OPENAI_BASE_URL:-}"
+            api_key="${OPENAI_API_KEY:-}"
+            api="openai-responses"
+            ;;
+        openai_chat_completions)
+            model="${OPENAI_MODEL:-}"
+            base_url="${OPENAI_BASE_URL:-}"
+            api_key="${OPENAI_API_KEY:-}"
+            api="openai-completions"
+            ;;
+        *)
+            echo "Pi does not support model protocol ${model_protocol} in this Runtime Bundle" >&2
+            return 1
+            ;;
+    esac
     if [ -n "${model}" ] && [ -n "${base_url}" ] && [ -n "${api_key}" ]; then
         # pi 0.84.2 reads custom providers only from ~/.pi/agent/models.json
         # (the CLI subprocess HOME); it ignores the PI_HOME env var. PI_HOME
@@ -118,7 +153,6 @@ pi_adapter_prepare_config() {
         # frozen Snapshot must be written in that shape or --list-models is
         # empty and every prompt fails with "Model not found".
         local models_file="${HOME:-/root}/.pi/agent/models.json"
-        local api="anthropic-messages"
         mkdir -p "$(dirname "${models_file}")"
         # The provider id/name are namespaced to Codify so Pi never shares state
         # with another harness; baseUrl is the frozen Snapshot endpoint.

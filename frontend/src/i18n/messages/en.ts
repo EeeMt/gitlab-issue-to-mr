@@ -1182,6 +1182,7 @@ const en = {
     executionEnvironmentCollapse: 'Collapse',
     executionEnvironmentRestore: 'Restore defaults',
     executionEnvironmentMissing: 'Part of the execution environment is unavailable. Check the issue Worker and AI Provider.',
+    harnessCatalogUnavailable: 'The task execution catalog could not be loaded. Refresh before changing or saving this task.',
     workerProfileLockedHint: 'Worker and Worker Kit are fixed by the issue and cannot be changed for this task.',
     harness: 'Harness',
     harnessClaude: 'Claude',

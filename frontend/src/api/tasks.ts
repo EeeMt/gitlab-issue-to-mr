@@ -708,3 +708,8 @@ export async function getTaskHarnessCatalog(taskId: number): Promise<TaskHarness
   const response = await api.get(`/tasks/${taskId}/harness-catalog`)
   return response.data
 }
+
+export async function getCurrentHarnessCatalog(): Promise<TaskHarnessCatalog> {
+  const response = await api.get('/harness-catalog')
+  return response.data
+}

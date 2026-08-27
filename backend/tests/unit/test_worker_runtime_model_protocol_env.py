@@ -1,10 +1,13 @@
 """Protocol-specific worker environment construction regressions."""
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
-from app.core.worker_runtime import build_container_env
+from app.core.model_credentials import CredentialError
+from app.core.model_endpoints import normalize_endpoint
+from app.core.worker_runtime import build_container_env, resolve_provider
 
 
 def _settings():
@@ -129,3 +132,142 @@ def test_custom_environment_preserves_uncontrolled_keys():
         settings=_settings(),
     )
     assert env["CUSTOM_FEATURE_FLAG"] == "enabled"
+
+
+def _endpoint_provider(**overrides):
+    values = {
+        "id": 4,
+        "name": "frozen-provider",
+        "base_url": "https://snapshot.example/v1",
+        "model": "snapshot-model",
+        "provider_kind": "openai_compatible",
+        "model_protocol": "openai_responses",
+        "compat_profile": None,
+        "provider_driver": None,
+        "provider_options": {},
+        "credential_ref": "cred-frozen",
+        "api_key": "live-key",
+        "max_turns": 32,
+        "system_prompt": "snapshot prompt",
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def _task_with_endpoint_snapshot(provider):
+    endpoint = normalize_endpoint(provider).as_snapshot()
+    return SimpleNamespace(
+        id=19,
+        provider_id=provider.id,
+        worker_profile_snapshot=SimpleNamespace(
+            runtime_contract_version="codify.worker.harness/v2",
+            model_endpoint_snapshot=endpoint,
+            credential_ref=provider.credential_ref,
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolve_provider_uses_frozen_endpoint_after_live_endpoint_drift(monkeypatch):
+    frozen_provider = _endpoint_provider()
+    live_provider = _endpoint_provider(
+        base_url="https://changed.example/v1",
+        model="changed-model",
+        model_protocol="openai_chat_completions",
+    )
+    task = _task_with_endpoint_snapshot(frozen_provider)
+    db = SimpleNamespace(get=AsyncMock(return_value=live_provider))
+    credential = AsyncMock(return_value={"secret": "frozen-key", "status": "active"})
+    monkeypatch.setattr("app.core.worker_runtime.resolve_task_credential", credential)
+
+    resolved = await resolve_provider(db, task)
+
+    assert resolved.base_url == "https://snapshot.example/v1"
+    assert resolved.model == "snapshot-model"
+    assert resolved.model_protocol == "openai_responses"
+    assert resolved.api_key == "frozen-key"
+    credential.assert_awaited_once_with(db, "cred-frozen", allow_retired=True)
+
+
+@pytest.mark.asyncio
+async def test_resolve_provider_does_not_acquire_credential_added_after_null_snapshot():
+    frozen_provider = _endpoint_provider(credential_ref=None, api_key=None)
+    live_provider = _endpoint_provider(credential_ref="cred-added-later", api_key="late-key")
+    task = _task_with_endpoint_snapshot(frozen_provider)
+    db = SimpleNamespace(get=AsyncMock(return_value=live_provider))
+
+    resolved = await resolve_provider(db, task)
+
+    assert resolved.api_key == ""
+    assert resolved.credential_ref is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_provider_uses_frozen_endpoint_and_task_credential(monkeypatch):
+    frozen_provider = _endpoint_provider(id=None)
+    task = _task_with_endpoint_snapshot(frozen_provider)
+    task.provider_id = None
+    db = SimpleNamespace(get=AsyncMock())
+    credential = AsyncMock(
+        return_value={"secret": "frozen-key", "status": "retired"}
+    )
+    monkeypatch.setattr("app.core.worker_runtime.resolve_task_credential", credential)
+    monkeypatch.setattr(
+        "app.core.worker_runtime.get_settings",
+        lambda: SimpleNamespace(claude_max_turns=20),
+    )
+
+    resolved = await resolve_provider(db, task)
+
+    assert resolved.id is None
+    assert resolved.base_url == "https://snapshot.example/v1"
+    assert resolved.model == "snapshot-model"
+    assert resolved.model_protocol == "openai_responses"
+    assert resolved.api_key == "frozen-key"
+    assert resolved.credential_ref == "cred-frozen"
+    credential.assert_awaited_once_with(db, "cred-frozen", allow_retired=True)
+
+
+@pytest.mark.asyncio
+async def test_resolve_provider_freezes_max_turns_and_system_prompt(monkeypatch):
+    frozen_provider = _endpoint_provider(max_turns=32, system_prompt="frozen prompt")
+    live_provider = _endpoint_provider(max_turns=3, system_prompt="changed prompt")
+    task, issue, _ = _task_issue_provider("openai_responses")
+    task.provider_id = frozen_provider.id
+    task.worker_profile_snapshot = _task_with_endpoint_snapshot(
+        frozen_provider
+    ).worker_profile_snapshot
+    db = SimpleNamespace(get=AsyncMock(return_value=live_provider))
+    monkeypatch.setattr(
+        "app.core.worker_runtime.resolve_task_credential",
+        AsyncMock(return_value={"secret": "frozen-key", "status": "active"}),
+    )
+    monkeypatch.setattr(
+        "app.core.worker_runtime.get_settings",
+        lambda: SimpleNamespace(claude_max_turns=20),
+    )
+
+    resolved = await resolve_provider(db, task)
+    env = build_container_env(task, issue, None, None, resolved, settings=_settings())
+
+    assert resolved.max_turns == 32
+    assert resolved.system_prompt == "frozen prompt"
+    assert env["CLAUDE_MAX_TURNS"] == "32"
+    assert env["APPEND_SYSTEM_PROMPT"] == "frozen prompt"
+
+
+@pytest.mark.asyncio
+async def test_resolve_provider_fails_closed_when_frozen_credential_is_revoked(monkeypatch):
+    frozen_provider = _endpoint_provider(id=None)
+    task = _task_with_endpoint_snapshot(frozen_provider)
+    task.provider_id = None
+    db = SimpleNamespace(get=AsyncMock())
+    monkeypatch.setattr(
+        "app.core.worker_runtime.resolve_task_credential",
+        AsyncMock(
+            side_effect=CredentialError("revoked")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="credential resolution failed"):
+        await resolve_provider(db, task)

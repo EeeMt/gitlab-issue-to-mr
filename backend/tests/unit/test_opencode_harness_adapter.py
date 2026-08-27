@@ -16,6 +16,8 @@ import subprocess
 import time
 from pathlib import Path
 
+import pytest
+
 from app.core.harness_protocol import CANONICAL_EVENT_SCHEMA_V2, replay_events, validate_event_v2
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -263,7 +265,7 @@ def test_opencode_negotiate_capabilities_disabled(tmp_path):
     assert caps == {"steering": False, "follow_up": False}
 
 
-def test_opencode_bridge_rejects_unmapped_protocol_before_session_creation(tmp_path, monkeypatch):
+def test_opencode_bridge_rejects_unknown_protocol_before_session_creation(tmp_path, monkeypatch):
     bridge = _load_bridge()
     created = False
 
@@ -275,7 +277,7 @@ def test_opencode_bridge_rejects_unmapped_protocol_before_session_creation(tmp_p
     monkeypatch.setattr(bridge, "OpenCodeServerClient", _UnexpectedClient)
     for key, value in _run_attempt_env(tmp_path).items():
         monkeypatch.setenv(key, value)
-    monkeypatch.setenv("CODIFY_MODEL_PROTOCOL", "openai_responses")
+    monkeypatch.setenv("CODIFY_MODEL_PROTOCOL", "vendor_proprietary")
 
     assert bridge._run_attempt() == 1
     assert created is False
@@ -577,7 +579,8 @@ def _source_adapter(script: str, env: dict[str, str]):
 
 
 def test_opencode_verify_runtime_enforces_pinned_version(tmp_path):
-    cli = tmp_path / "opencode"
+    cli = tmp_path / "bin" / "opencode"
+    cli.parent.mkdir()
     cli.write_text("#!/bin/sh\necho opencode 1.18.19\n", encoding="utf-8")
     cli.chmod(0o755)
     env = {
@@ -609,7 +612,7 @@ def test_opencode_prepare_config_writes_snapshot_endpoint(tmp_path):
         "CODIFY_ORCHESTRATION_DIR": str(REPO_ROOT / "deploy"),
         "CODIFY_RUN_UID": "1000",
         "CODIFY_RUN_GID": "1000",
-        "OPENCODE_MODEL": "deepseek-v4-flash",
+        "ANTHROPIC_MODEL": "deepseek-v4-flash",
         "OPENCODE_PORT": "8099",
         "ANTHROPIC_BASE_URL": "https://api.deepseek.com/anthropic",
         "ANTHROPIC_API_KEY": "fake-key",
@@ -638,15 +641,62 @@ def test_opencode_prepare_config_writes_snapshot_endpoint(tmp_path):
     assert result.stdout.strip().isdigit()
 
 
+@pytest.mark.parametrize(
+    ("protocol", "model", "endpoint_url", "api_key", "expected_npm"),
+    [
+        (
+            "openai_responses",
+            "responses-model",
+            "https://responses.example/v1",
+            "responses-key",
+            "@ai-sdk/openai",
+        ),
+        (
+            "openai_chat_completions",
+            "chat-model",
+            "https://chat.example/v1",
+            "chat-key",
+            "@ai-sdk/openai-compatible",
+        ),
+    ],
+)
+def test_opencode_prepare_config_maps_openai_protocols(
+    tmp_path, protocol, model, endpoint_url, api_key, expected_npm
+):
+    env = {
+        "CODIFY_RUNTIME_DIR": str(tmp_path),
+        "CODIFY_ORCHESTRATION_DIR": str(REPO_ROOT / "deploy"),
+        "CODIFY_RUN_UID": "1000",
+        "CODIFY_RUN_GID": "1000",
+        "CODIFY_MODEL_PROTOCOL": protocol,
+        "ANTHROPIC_MODEL": "wrong-anthropic-model",
+        "ANTHROPIC_BASE_URL": "https://wrong-anthropic.example",
+        "ANTHROPIC_API_KEY": "wrong-anthropic-key",
+        "OPENAI_MODEL": model,
+        "OPENAI_BASE_URL": endpoint_url,
+        "OPENAI_API_KEY": api_key,
+    }
+    result = _source_adapter("opencode_adapter_prepare_config", env)
+    assert result.returncode == 0, result.stderr
+    provider = json.loads(
+        (tmp_path / "opencode/opencode.json").read_text(encoding="utf-8")
+    )["provider"]["codify"]
+    assert provider["npm"] == expected_npm
+    assert provider["options"]["baseURL"] == endpoint_url
+    assert provider["options"]["apiKey"] == "{env:OPENCODE_SNAPSHOT_KEY}"
+    assert api_key not in (tmp_path / "opencode/opencode.json").read_text(encoding="utf-8")
+    assert provider["models"][model]["id"] == model
+
+
 def test_opencode_prepare_config_normalizes_relay_root_to_v1(tmp_path):
     env = {
         "CODIFY_RUNTIME_DIR": str(tmp_path),
         "CODIFY_ORCHESTRATION_DIR": str(REPO_ROOT / "deploy"),
         "CODIFY_RUN_UID": "1000",
         "CODIFY_RUN_GID": "1000",
-        "OPENCODE_MODEL": "ox-alpha-free",
-        "OPENCODE_BASE_URL": "http://192.168.50.45:15721",
-        "OPENCODE_API_KEY": "fake-key",
+        "ANTHROPIC_MODEL": "ox-alpha-free",
+        "ANTHROPIC_BASE_URL": "http://192.168.50.45:15721",
+        "ANTHROPIC_API_KEY": "fake-key",
     }
     result = _source_adapter("opencode_adapter_prepare_config", env)
     assert result.returncode == 0, result.stderr
@@ -670,9 +720,9 @@ def test_opencode_prepare_config_keeps_existing_v1_endpoint(tmp_path):
         "CODIFY_ORCHESTRATION_DIR": str(REPO_ROOT / "deploy"),
         "CODIFY_RUN_UID": "1000",
         "CODIFY_RUN_GID": "1000",
-        "OPENCODE_MODEL": "ox-alpha-free",
-        "OPENCODE_BASE_URL": "http://192.168.50.45:15721/v1",
-        "OPENCODE_API_KEY": "fake-key",
+        "ANTHROPIC_MODEL": "ox-alpha-free",
+        "ANTHROPIC_BASE_URL": "http://192.168.50.45:15721/v1",
+        "ANTHROPIC_API_KEY": "fake-key",
     }
     result = _source_adapter("opencode_adapter_prepare_config", env)
     assert result.returncode == 0, result.stderr
@@ -692,9 +742,9 @@ def test_opencode_prepare_config_normalizes_v1_trailing_slash(tmp_path):
         "CODIFY_ORCHESTRATION_DIR": str(REPO_ROOT / "deploy"),
         "CODIFY_RUN_UID": "1000",
         "CODIFY_RUN_GID": "1000",
-        "OPENCODE_MODEL": "ox-alpha-free",
-        "OPENCODE_BASE_URL": "http://192.168.50.45:15721/v1/",
-        "OPENCODE_API_KEY": "fake-key",
+        "ANTHROPIC_MODEL": "ox-alpha-free",
+        "ANTHROPIC_BASE_URL": "http://192.168.50.45:15721/v1/",
+        "ANTHROPIC_API_KEY": "fake-key",
     }
     result = _source_adapter("opencode_adapter_prepare_config", env)
     assert result.returncode == 0, result.stderr
@@ -727,8 +777,68 @@ def test_opencode_prepare_config_exports_transport_env_defaults(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == (
-        "server_http|opencode-server|anthropic_messages"
+        "server_http|opencode-server|anthropic_messages,openai_responses,openai_chat_completions"
     )
+
+
+def test_opencode_prepare_config_isolates_project_and_user_config(tmp_path):
+    env = {
+        "CODIFY_RUNTIME_DIR": str(tmp_path),
+        "CODIFY_ORCHESTRATION_DIR": str(REPO_ROOT / "deploy"),
+        "HOME": "/untrusted/user-home",
+        "XDG_CONFIG_HOME": "/untrusted/config",
+        "XDG_DATA_HOME": "/untrusted/data",
+        "XDG_CACHE_HOME": "/untrusted/cache",
+        "XDG_STATE_HOME": "/untrusted/state",
+    }
+    result = _source_adapter(
+        "opencode_adapter_prepare_config && printf '%s|%s|%s|%s|%s|%s|%s' "
+        '"$HOME" "${XDG_CONFIG_HOME}" "${XDG_DATA_HOME}" '
+        '"${XDG_CACHE_HOME}" "${XDG_STATE_HOME}" "${OPENCODE_CONFIG_DIR}" '
+        '"${OPENCODE_DISABLE_PROJECT_CONFIG}"',
+        env,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == (
+        f"{tmp_path}/opencode/home|{tmp_path}/opencode/xdg-config|"
+        f"{tmp_path}/opencode/xdg-data|{tmp_path}/opencode/xdg-cache|"
+        f"{tmp_path}/opencode/xdg-state|{tmp_path}/opencode|true"
+    )
+
+
+def test_opencode_materialize_skills_uses_task_private_discoverable_root(tmp_path):
+    skills_dir = tmp_path / "skill-scope" / ".claude" / "skills" / "codify-marker"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / "SKILL.md").write_text(
+        "---\nname: codify-marker\ndescription: isolated marker\n---\n# Marker\n",
+        encoding="utf-8",
+    )
+    cli = tmp_path / "bin" / "opencode"
+    cli.parent.mkdir()
+    cli.write_text(
+        "#!/bin/sh\n"
+        "if [ \"$1\" = debug ] && [ \"$2\" = skill ]; then\n"
+        "  printf '[{\"name\":\"codify-marker\",\"location\":\"%s/skills/codify-marker/SKILL.md\"}]\\n' \"$OPENCODE_CONFIG_DIR\"\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    cli.chmod(0o755)
+    result = _source_adapter(
+        "opencode_adapter_materialize_skills",
+        {
+            "CODIFY_RUNTIME_DIR": str(tmp_path),
+            "CODIFY_TASK_SKILLS_DIR": str(tmp_path / "skill-scope"),
+            "CODIFY_OPENCODE_BIN": str(cli),
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (
+        tmp_path / "opencode/skills/codify-marker/SKILL.md"
+    ).read_text(encoding="utf-8").startswith("---\nname: codify-marker")
+    assert not (tmp_path / "opencode/skills/.claude/skills").exists()
 
 
 # ── legacy/opencode-run.sh: isolated server process group cleanup ───────────
@@ -752,6 +862,18 @@ pid = int(sys.argv[-1])
 print(os.getpgid(pid))
 """,
         "opencode": """#!/bin/bash
+printf '%s\\n' "$@" > "${OPENCODE_TEST_ARGS}"
+{
+    printf 'HOME=%s\\n' "$HOME"
+    printf 'XDG_CONFIG_HOME=%s\\n' "$XDG_CONFIG_HOME"
+    printf 'XDG_DATA_HOME=%s\\n' "$XDG_DATA_HOME"
+    printf 'XDG_CACHE_HOME=%s\\n' "$XDG_CACHE_HOME"
+    printf 'XDG_STATE_HOME=%s\\n' "$XDG_STATE_HOME"
+    printf 'OPENCODE_CONFIG_DIR=%s\\n' "$OPENCODE_CONFIG_DIR"
+    printf 'OPENCODE_DISABLE_PROJECT_CONFIG=%s\\n' "$OPENCODE_DISABLE_PROJECT_CONFIG"
+    printf 'OPENCODE_DISABLE_EXTERNAL_SKILLS=%s\\n' "$OPENCODE_DISABLE_EXTERNAL_SKILLS"
+    printf 'OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=%s\\n' "$OPENCODE_DISABLE_CLAUDE_CODE_SKILLS"
+} > "${OPENCODE_TEST_ENV}"
 (
     trap '' TERM
     while :; do sleep 1; done
@@ -817,6 +939,8 @@ def _start_legacy_runner(tmp_path: Path, *, bridge_sleep: str = "0") -> tuple[su
         "OPENCODE_PORT": "12345",
         "OPENCODE_SERVER_PASSWORD": "pw",
         "OPENCODE_TEST_PIDS": str(pid_file),
+        "OPENCODE_TEST_ARGS": str(tmp_path / "server-args"),
+        "OPENCODE_TEST_ENV": str(tmp_path / "server-env"),
         "OPENCODE_TEST_BRIDGE_SLEEP": bridge_sleep,
         "OPENCODE_SERVER_STOP_GRACE_SECONDS": "1",
         "PROMPT_FILE": str(prompt),
@@ -840,6 +964,24 @@ def _start_legacy_runner(tmp_path: Path, *, bridge_sleep: str = "0") -> tuple[su
 
 def test_opencode_legacy_runner_reaps_server_process_group_after_success(tmp_path):
     process, pids, starts = _start_legacy_runner(tmp_path)
+    assert (tmp_path / "server-args").read_text(encoding="utf-8").splitlines() == [
+        "serve",
+        "--pure",
+        "--hostname",
+        "127.0.0.1",
+        "--port",
+        "12345",
+    ]
+    server_env = (tmp_path / "server-env").read_text(encoding="utf-8")
+    assert f"HOME={tmp_path}/runtime/opencode/home" in server_env
+    assert f"XDG_CONFIG_HOME={tmp_path}/runtime/opencode/xdg-config" in server_env
+    assert f"XDG_DATA_HOME={tmp_path}/runtime/opencode/xdg-data" in server_env
+    assert f"XDG_CACHE_HOME={tmp_path}/runtime/opencode/xdg-cache" in server_env
+    assert f"XDG_STATE_HOME={tmp_path}/runtime/opencode/xdg-state" in server_env
+    assert f"OPENCODE_CONFIG_DIR={tmp_path}/runtime/opencode" in server_env
+    assert "OPENCODE_DISABLE_PROJECT_CONFIG=true" in server_env
+    assert "OPENCODE_DISABLE_EXTERNAL_SKILLS=1" in server_env
+    assert "OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1" in server_env
     assert process.wait(timeout=8) == 0, process.stderr.read()
     for pid, start in zip(pids, starts):
         _assert_process_gone(pid, start)

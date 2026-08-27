@@ -118,7 +118,11 @@ def _attach_v2_execution_contract(task):
         id=task.runtime_bundle_id,
         contract_version=HARNESS_CONTRACT_VERSION_V2,
         digest="b" * 64,
-        manifest={"adapters": {"claude": {}}},
+        manifest={
+            "adapters": {
+                "claude": {"model_protocols": ["anthropic_messages"]},
+            },
+        },
     )
 
 
@@ -255,6 +259,39 @@ class UpdateTaskHappyPathTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(task.provider_id, 7)
         self.assertIsNone(task.provider_runtime_snapshot)
+
+    def test_update_provider_rejects_protocol_not_declared_by_frozen_bundle(self):
+        task = _make_task()
+        task.worker_profile_snapshot.harness_key = "pi"
+        task.runtime_bundle.manifest = {
+            "adapters": {
+                "pi": {"model_protocols": ["anthropic_messages"]},
+            },
+        }
+        mock_db = _mock_db_for_task(task)
+        mock_provider = MagicMock()
+        mock_provider.id = 7
+        mock_provider.is_disabled = False
+        mock_provider.provider_kind = "openai_compatible"
+        mock_provider.model_protocol = "openai_responses"
+        mock_provider.base_url = "https://api.example.test/v1"
+        mock_provider.model = "gpt-test"
+        mock_provider.provider_options = {}
+
+        client, app = _make_client(mock_db)
+        with (
+            patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
+            patch(
+                "app.api.tasks.resolve_provider_for_issue",
+                new=AsyncMock(return_value=mock_provider),
+            ),
+        ):
+            resp = client.patch("/api/tasks/1", json={"provider_id": 7})
+        app.dependency_overrides.clear()
+
+        self.assertEqual(resp.status_code, 422)
+        self.assertIn("cannot consume model protocol", resp.json()["detail"])
+        self.assertIsNone(task.provider_id)
 
     def test_queued_task_can_be_edited(self):
         task = _make_task(status=TaskStatus.QUEUED)

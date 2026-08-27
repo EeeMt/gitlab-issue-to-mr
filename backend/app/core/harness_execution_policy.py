@@ -23,6 +23,7 @@ from app.core.harness_protocol import (
     HARNESS_CONTRACT_VERSION,
     HARNESS_CONTRACT_VERSION_V2,
 )
+from app.core.harness_registry import HarnessRegistryError, runtime_bundle_model_protocols
 
 HARNESS_EXECUTION_MODES = frozenset({"dual_canary", "v2_only"})
 
@@ -171,6 +172,31 @@ def require_task_executable_contract(
             f"task {getattr(task, 'id', '?')} freezes an Adapter not present in its Bundle",
             code="execution_contract_mismatch",
         )
+
+    endpoint_snapshot = getattr(snapshot, "model_endpoint_snapshot", None)
+    if isinstance(endpoint_snapshot, dict):
+        model_protocol = endpoint_snapshot.get("model_protocol")
+        if model_protocol is None:
+            # V1 snapshots used the pre-rename field.  The Bundle declaration
+            # remains authoritative for this compatibility reader.
+            model_protocol = endpoint_snapshot.get("wire_protocol")
+        if not isinstance(model_protocol, str) or not model_protocol:
+            raise ExecutionPolicyError(
+                f"task {getattr(task, 'id', '?')} has an invalid model endpoint snapshot",
+                code="execution_contract_mismatch",
+            )
+        try:
+            declared_protocols = runtime_bundle_model_protocols(bundle, harness_key)
+        except HarnessRegistryError as exc:
+            raise ExecutionPolicyError(
+                f"task {getattr(task, 'id', '?')} has an invalid frozen Bundle protocol declaration",
+                code="execution_contract_mismatch",
+            ) from exc
+        if model_protocol.replace("-", "_") not in declared_protocols:
+            raise ExecutionPolicyError(
+                f"task {getattr(task, 'id', '?')} endpoint protocol is not declared by its frozen Bundle",
+                code="execution_contract_mismatch",
+            )
 
     if is_v2_only(mode) and bundle_contract != HARNESS_CONTRACT_VERSION_V2:
         raise ExecutionPolicyError(

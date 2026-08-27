@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from app.core.harness_registry import (
@@ -11,6 +13,7 @@ from app.core.harness_registry import (
     compatible_harness_keys,
     harness_options,
     registry_catalog_from_manifest,
+    runtime_bundle_model_protocols,
     validate_adapter_capabilities,
     validate_enabled_harnesses,
     validate_harness_constraints,
@@ -27,11 +30,10 @@ def test_registry_knows_all_four_builtin_harnesses():
 
 
 def test_compatible_harness_keys_reverse_lookup():
-    # Pi/OpenCode only expose the fixed-version Anthropic-compatible mapping.
     assert compatible_harness_keys("anthropic_messages") == ["claude", "opencode", "pi"]
-    assert compatible_harness_keys("openai_responses") == ["codex"]
+    assert compatible_harness_keys("openai_responses") == ["codex", "opencode", "pi"]
     assert compatible_harness_keys(None) == ["claude", "opencode", "pi"]
-    assert compatible_harness_keys("openai_chat_completions") == []
+    assert compatible_harness_keys("openai_chat_completions") == ["opencode", "pi"]
     assert compatible_harness_keys("") == ["claude", "opencode", "pi"]
 
 
@@ -115,6 +117,33 @@ def test_protocol_compatibility():
         validate_protocol_compatibility("claude", "openai_responses")
     with pytest.raises(HarnessRegistryError):
         validate_protocol_compatibility("codex", "anthropic_messages")
+
+
+def test_runtime_bundle_protocols_use_frozen_subset_not_current_matrix():
+    bundle = SimpleNamespace(
+        manifest={
+            "adapters": {
+                "pi": {"model_protocols": ["anthropic_messages"]},
+            },
+        },
+    )
+
+    assert runtime_bundle_model_protocols(bundle, "pi") == frozenset(
+        {"anthropic_messages"}
+    )
+    with pytest.raises(HarnessRegistryError):
+        validate_protocol_compatibility(
+            "pi",
+            "openai_responses",
+            allowed_protocols=runtime_bundle_model_protocols(bundle, "pi"),
+        )
+
+
+def test_runtime_bundle_protocols_fail_closed_when_declaration_is_missing():
+    bundle = SimpleNamespace(manifest={"adapters": {"pi": {}}})
+
+    with pytest.raises(HarnessRegistryError, match="no model protocols"):
+        runtime_bundle_model_protocols(bundle, "pi")
 
 
 def _valid_manifest():

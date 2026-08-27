@@ -259,14 +259,7 @@ const providerKindOptions = computed(() => [
 ])
 
 const wireProtocolOptions = computed(() => {
-  const protocols = (PROVIDER_KIND_PROTOCOLS[formValue.value.provider_kind] ?? [])
-    .filter(protocol => protocol !== 'openai_chat_completions')
-  if (
-    formValue.value.model_protocol === 'openai_chat_completions'
-    && !protocols.includes('openai_chat_completions')
-  ) {
-    protocols.push('openai_chat_completions')
-  }
+  const protocols = PROVIDER_KIND_PROTOCOLS[formValue.value.provider_kind] ?? []
   return protocols.map(protocol => ({
     label: protocol === 'anthropic_messages'
       ? t('config.providers.wireProtocolAnthropicMessages')

@@ -52,6 +52,9 @@ from typing import Iterator
 FRAME_VERSION = "1"
 REJECTION_CODE = "control_gate_closed"
 REJECTION_MESSAGE = "opencode: steering/follow_up not supported in first release"
+SUPPORTED_MODEL_PROTOCOLS = frozenset(
+    {"anthropic_messages", "openai_responses", "openai_chat_completions"}
+)
 
 
 def negotiate_capabilities(harness_key: str) -> dict:
@@ -353,16 +356,20 @@ def _run_attempt() -> int:
     username = os.environ.get("OPENCODE_SERVER_USERNAME", "opencode")
 
     model_protocol = os.environ.get("CODIFY_MODEL_PROTOCOL", "anthropic_messages")
-    if model_protocol != "anthropic_messages":
+    if model_protocol not in SUPPORTED_MODEL_PROTOCOLS:
         print(
             f"OpenCode protocol {model_protocol!r} is not supported by this Runtime Bundle",
             file=sys.stderr,
         )
         return 1
-    model_id = os.environ.get("OPENCODE_MODEL") or os.environ.get("ANTHROPIC_MODEL", "")
+    if model_protocol == "anthropic_messages":
+        model_id = os.environ.get("OPENCODE_MODEL") or os.environ.get("ANTHROPIC_MODEL", "")
+    else:
+        model_id = os.environ.get("OPENCODE_MODEL") or os.environ.get("OPENAI_MODEL", "")
     provider_id = os.environ.get("OPENCODE_PROVIDER") or "codify"
     if not model_id:
-        print("OpenCode model is unset (OPENCODE_MODEL/ANTHROPIC_MODEL)", file=sys.stderr)
+        model_source = "OPENCODE_MODEL/ANTHROPIC_MODEL" if model_protocol == "anthropic_messages" else "OPENCODE_MODEL/OPENAI_MODEL"
+        print(f"OpenCode model is unset ({model_source})", file=sys.stderr)
         return 1
 
     client = OpenCodeServerClient(port=port, password=password, username=username)

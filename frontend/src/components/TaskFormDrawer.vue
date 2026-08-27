@@ -553,6 +553,7 @@
                           :render-label="renderProviderLabel"
                           :menu-props="{ class: 'task-provider-select-menu' }"
                           class="task-provider-select"
+                          :disabled="harnessCatalogUnavailable"
                           @update:value="handleProviderChange"
                         />
                         <div
@@ -569,7 +570,7 @@
                           v-model:value="harnessKey"
                           :options="harnessOptions"
                           :placeholder="t('createTask.harness')"
-                          :disabled="harnessLocked"
+                          :disabled="harnessLocked || harnessCatalogUnavailable"
                           data-testid="task-harness-select"
                         />
                         <div
@@ -587,6 +588,13 @@
                           {{ t('createTask.harnessProviderMismatchHint') }}
                         </div>
                       </label>
+                    </div>
+                    <div
+                      v-if="harnessCatalogUnavailable"
+                      class="execution-environment__warning"
+                      data-testid="task-harness-catalog-error"
+                    >
+                      {{ t('createTask.harnessCatalogUnavailable') }}
                     </div>
                     <div class="execution-environment__skills" data-testid="task-skill-selection">
                       <div class="execution-environment__skills-header">
@@ -714,6 +722,7 @@
           <n-button
             type="primary"
             :loading="submitLoading"
+            :disabled="harnessCatalogUnavailable"
             :data-testid="mode === 'create' ? 'issue-create-task-button' : 'task-form-save-button'"
             @click="mode === 'create' ? handleCreate() : handleEdit()"
           >
@@ -789,6 +798,12 @@ function providerCompatibleWithHarness(
   harnessKey: string | null | undefined,
 ): boolean {
   if (!harnessKey) return true
+  if (harnessCatalogUnavailable.value) return false
+  const frozenAdapter = harnessCatalog.value?.find(entry => entry.key === harnessKey)
+  if (harnessCatalog.value) {
+    return Boolean(frozenAdapter)
+      && frozenAdapter!.model_protocols.includes(providerProtocol(provider) ?? '')
+  }
   // Harness/Endpoint compatibility is computed by the Backend
   // (harness_registry.compatible_harness_keys); the Frontend must not
   // reimplement the wire-protocol matrix.
@@ -1122,6 +1137,9 @@ const {
 const {
   effectiveProvider,
   effectiveWorkerProfile,
+  harnessCatalog,
+  harnessCatalogLoadState,
+  loadHarnessCatalog,
   loadProviders,
   loadSkills,
   loadWorkerProfiles,
@@ -1142,6 +1160,10 @@ const resolvedHarnessKey = computed(() =>
   ?? props.issueDefaultHarness
   ?? effectiveWorkerProfile.value?.default_harness_key
   ?? 'claude',
+)
+const harnessCatalogUnavailable = computed(() =>
+  executionOptionsReady.value
+  && harnessCatalogLoadState.value === 'unavailable',
 )
 const harnessCompatibleProviders = computed(() =>
   selectableProviders.value.filter(provider =>
@@ -1172,6 +1194,7 @@ const executionEnvironmentMissing = computed(() =>
   && (
     !effectiveWorkerProfile.value
     || !effectiveProvider.value
+    || harnessCatalogUnavailable.value
     || harnessProviderMismatch.value
   )
 )
@@ -1179,10 +1202,13 @@ const harnessOptions = computed(() => {
   const enabled = effectiveWorkerProfile.value?.enabled_harnesses
   if (!enabled || !enabled.length) return []
   return enabled.map(key => {
+    const frozenAdapter = harnessCatalog.value?.find(entry => entry.key === key)
     const compatibleProviderAvailable = selectableProviders.value.length === 0
       || selectableProviders.value.some(
         provider => !provider.is_disabled && providerCompatibleWithHarness(provider, key),
       )
+    const harnessAvailable = !harnessCatalogUnavailable.value
+      && (!harnessCatalog.value || Boolean(frozenAdapter))
     return {
       label: key === 'codex'
         ? t('createTask.harnessCodex')
@@ -1192,7 +1218,8 @@ const harnessOptions = computed(() => {
             ? t('createTask.harnessOpenCode')
             : t('createTask.harnessClaude'),
       value: key,
-      disabled: !harnessLocked.value && !compatibleProviderAvailable,
+      disabled: harnessCatalogUnavailable.value
+        || (!harnessLocked.value && (!harnessAvailable || !compatibleProviderAvailable)),
     }
   })
 })
@@ -1764,7 +1791,7 @@ function applyCurrentSkillSelection() {
 
 async function loadExecutionOptions() {
   executionOptionsReady.value = false
-  await Promise.all([loadProviders(), loadWorkerProfiles(), loadSkills()])
+  await Promise.all([loadProviders(), loadWorkerProfiles(), loadSkills(), loadHarnessCatalog()])
   executionOptionsReady.value = true
 }
 
@@ -1832,6 +1859,7 @@ const {
   taskModeErrorVisible,
   selectedProviderId,
   harnessKey,
+  submissionBlocked: harnessCatalogUnavailable,
   scheduleType,
   scheduledAt,
   runInstructionTemplate,
