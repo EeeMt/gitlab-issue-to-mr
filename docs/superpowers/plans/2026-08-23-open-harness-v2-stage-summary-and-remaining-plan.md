@@ -2,9 +2,9 @@
 
 **更新：** 2026-08-27
 
-**源码审计基线（S5 增量前）：** `79bd530e`（本轮 S5 实现与证据见下文）
+**源码审计基线（本次 tracker 更新前）：** `a02f8929`（S5/S9 实现与证据见下文）
 
-**文档复核基线：** `96eb2462`（本次更新前的本地 `HEAD`）
+**文档复核基线（本次 tracker 更新前）：** `a02f8929`
 
 **状态：** Internal Preview；Kit-owned 基础改造、S5–S8 源码 correction 和远端 `linux/amd64` Kit
 smoke 已落地，但 L2 仍为红灯：S1 尚未完成完整真实构建矩阵，S9 完整证据仍未闭环。补齐
@@ -132,7 +132,10 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
   本轮已新增协议矩阵、冻结 Endpoint、Provider drift、Task-private OpenCode config/Skill discovery、
   current/frozen catalog 和 fail-closed 前端测试；scheduler gate 的未 await `AsyncMock` warning 已由
   `79bd530e` 修复。仍需在可用环境完成全量 backend unit、mock E2E、真实 PostgreSQL 并发/migration、
-  frontend type-check/build/vitest 的统一重跑，并记录精确命令、结果和 source commit。
+  frontend type-check/build/vitest 的统一重跑，并记录精确命令、结果和 source commit。`a02f8929`
+  又补齐了 app-mounted catalog router 的 401、missing-profile 404、跨项目 403，以及 current catalog
+  乱序响应成功/reject 两条 generation-guard 回归；这些仍是源码/L2 focused evidence，不等于真实 Host
+  或完整环境验收。
 
 ## 3. Release、L3 与 L4
 
@@ -271,6 +274,9 @@ L2 重新通过后，按顺序完成：
   staging，但在 Nix npm dependency 阶段因远端根分区耗尽失败，确切错误为
   `codegraph-linux-arm64: No space left on device`。该次没有 archive、manifest 或 smoke 证据，
   因此不计入 S1；显式子集、成功四项 Kit、Linux Host 安装/真实 bind-mount 和 arm64 仍开放。
+- **当前容量复核：** 通过远端 Docker `remote` 只读检查，overlay 为 `60.8G`，已用 `58.4G`，可用
+  `2.4G`（96%）；`docker system df` 显示 Build Cache `6.596GB` 全部可回收。未执行广泛 cache/image
+  清理，也未在该容量下伪造新的四项构建证据；待明确的受控清理/容量恢复后再继续 S1。
 
 ### 本轮 S5 availability catalog 补充（2026-08-27）
 
@@ -285,14 +291,29 @@ L2 重新通过后，按顺序完成：
   保存 prompt 等非运行时字段。Task/Issue 异步载入后按 task/profile identity 刷新 catalog，并用
   request generation 防止旧响应覆盖新状态。
 - **验证：** `backend/.venv/bin/python -m pytest backend/tests/unit/test_harness_catalog_api.py -q`
-  为 `12 passed`；TaskFormDrawer、TaskView、IssueView 聚焦集为 `329 passed`；
-  `frontend/npx vitest run` 为 `79 files passed / 1666 tests passed`；`frontend/npm run build`、
-  targeted Ruff 和 `git diff --check` 均通过。三轮独立 subagent review 最终均无 P0/P1（本轮最终
-  `P0=0, P1=0, P2=0`）。
+  为 `15 passed`；TaskFormDrawer、TaskView、IssueView 聚焦集为 `331 passed`；
+  `cd frontend && npx vitest run` 为 `79 files passed / 1668 tests passed`；
+  `cd frontend && npm run build`、`make lint-backend` 和 `git diff --check` 均通过。三轮独立
+  subagent review 最终均无 P0/P1（本轮最终 `P0=0, P1=0, P2=0`）。
 - **证据边界：** 全量 backend unit 尝试结果为 `3036 passed, 72 skipped, 3 failed, 25 errors`；
   失败/错误由远端 PostgreSQL 与端口权限、以及 pytest 临时目录磁盘耗尽造成，不能写成全量 L2
   green。out-of-order deferred response 的专门前端测试、ASGI 级认证/访问控制测试和真实
   Docker/Kit/Host 验证仍归 S9/S1/L3–L4。
+
+### 本轮 S9 边界测试补充（2026-08-27）
+
+- `a02f8929` 新增真实 FastAPI app/router 路径的 catalog authentication、missing Profile 和
+  project-access denial 测试，并覆盖前端 catalog 请求晚到成功与晚到 reject 时 generation guard
+  保持新状态；每个后端测试后清理 app dependency overrides。本次增量同时清除了仓库级 backend
+  Ruff 的 6 个既有错误，避免 focused lint 取代标准 lint 作为唯一证据。
+- **验证：** `backend/.venv/bin/python -m pytest backend/tests/unit/test_harness_catalog_api.py -q`
+  为 `15 passed`；TaskFormDrawer、IssueView、TaskView 聚焦集为 `331 passed`；
+  `cd frontend && npx vitest run` 为 `79 files passed / 1668 tests passed`；
+  `cd frontend && npm run build`（含 `vue-tsc`）、`make lint-backend` 和 `git diff --check` 均通过。独立
+  subagent 最终复审为
+  `P0=0, P1=0, P2=0`。
+- **未闭环项：** 全量 backend unit、mock E2E、真实 PostgreSQL 并发/migration 和真实
+  Docker/Kit/Host 证据仍未完成；上述测试不能把 L2、S1 或 L3–L4 标为 green。
 
 ## 4. L5 Acceptance
 

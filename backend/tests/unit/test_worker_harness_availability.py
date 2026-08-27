@@ -9,9 +9,6 @@ identity checks that keep execution bound to the frozen
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
-
-import pytest
 
 from app.core.worker_kit_inventory import (
     KIT_IDENTITY_SCHEMA,

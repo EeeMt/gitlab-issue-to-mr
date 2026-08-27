@@ -28,7 +28,7 @@ def test_077_upgrade_adds_kit_identity_columns():
     module = _load_077()
     with mock.patch("alembic.op.add_column") as add_column, mock.patch(
         "alembic.op.alter_column"
-    ) as alter_column:
+    ):
         module.upgrade()
     tables = [call.args[0] for call in add_column.call_args_list]
     assert "worker_profiles" in tables

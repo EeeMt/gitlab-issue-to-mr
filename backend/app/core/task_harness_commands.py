@@ -16,7 +16,6 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import select
-
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload

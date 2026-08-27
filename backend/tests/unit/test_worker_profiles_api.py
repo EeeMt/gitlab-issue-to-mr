@@ -1348,7 +1348,6 @@ async def test_verify_v2_profile_checks_each_enabled_v2_harness_and_records_sepa
             assert manifest is not None
             assert manifest.read() == b'{"candidate":"pi"}'
     assert client.start_container.call_count == 2
-    method_names = [call[0] for call in client.method_calls]
     # The strict probe's content-addressed Worker Kit identity is frozen onto
     # the Profile alongside the image identity (execution identity = image
     # identity + kit identity + bundle digest).
