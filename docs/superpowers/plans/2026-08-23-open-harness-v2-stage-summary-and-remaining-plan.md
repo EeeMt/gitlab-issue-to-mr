@@ -1,14 +1,15 @@
 # Open-Harness V2 当前遗留项与验收计划
 
-**更新：** 2026-08-27
+**更新：** 2026-08-28
 
-**源码审计基线（本次 tracker 更新前）：** `a02f8929`（S5/S9 实现与证据见下文）
+**源码审计基线（本次 tracker 更新前）：** `c0c91997`（S5/S9 实现与证据见下文）
 
-**文档复核基线（本次 tracker 更新前）：** `a02f8929`
+**文档复核基线（本次 tracker 更新前）：** `c0c91997`
 
 **状态：** Internal Preview；Kit-owned 基础改造、S5–S8 源码 correction 和远端 `linux/amd64` Kit
-smoke 已落地，但 L2 仍为红灯：S1 尚未完成完整真实构建矩阵，S9 完整证据仍未闭环。补齐
-S1/S9、重建制品并补齐 L3–L6 证据前，保持 `dual_canary`，
+smoke 已落地，全量 backend unit 已在远端 PostgreSQL 可用环境通过，但仍有 4 个 root-only skip 和
+3 个第三方依赖弃用 warning；L2 仍为红灯：S1 尚未完成完整真实构建矩阵，S9 其余集成/环境证据仍未
+闭环。补齐 S1/S9、重建制品并补齐 L3–L6 证据前，保持 `dual_canary`，
 不切 Pi 默认，不启用 `v2_only`。
 
 本文只维护当前剩余工作和退出条件。已完成且已验收的工作不再保留为待办流水账；架构约束以
@@ -131,9 +132,9 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
   每条协议覆盖 config 生成、credential 不落盘、tool call、reasoning、usage、取消、错误和禁止回退。
   本轮已新增协议矩阵、冻结 Endpoint、Provider drift、Task-private OpenCode config/Skill discovery、
   current/frozen catalog 和 fail-closed 前端测试；scheduler gate 的未 await `AsyncMock` warning 已由
-  `79bd530e` 修复。仍需在可用环境完成全量 backend unit 与其余必要集成证据的统一重跑，并记录精确
-  命令、结果和 source commit；本轮真实 PostgreSQL focused 回归、mock E2E 与 frontend
-  type-check/build/vitest 已在下文通过。
+  `79bd530e` 修复。全量 backend unit 已在 `c0c91997147cfd60e997ac5b496311f387c4f75a` 上统一重跑并
+  通过，但仍需在 root Linux Host 重跑 4 个安装用例、处理依赖 warning，并完成其余必要集成证据；本轮
+  真实 PostgreSQL focused 回归、mock E2E 与 frontend type-check/build/vitest 已在下文通过。
   `a02f8929`
   又补齐了 app-mounted catalog router 的 401、missing-profile 404、跨项目 403，以及 current catalog
   乱序响应成功/reject 两条 generation-guard 回归；这些仍是源码/L2 focused evidence，不等于真实 Host
@@ -146,7 +147,7 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
 | 层级 | 证明内容 | 当前状态 |
 | --- | --- | --- |
 | L1 | 架构、schema、Runbook 与安全边界一致 | 目标合同已修订；实现和证据不得冒充完成 |
-| L2 | 源码、单测、集成测试和并发合同 | 未通过；S5 源码与 focused evidence 已完成，但 S1 仍待完整真实构建矩阵，S9 仍待全量/集成/真实 PostgreSQL 证据闭环 |
+| L2 | 源码、单测、集成测试和并发合同 | 未通过；全量 backend unit 已通过，但仍有 4 个 root-only skip、3 个依赖弃用 warning，S1 仍待完整真实构建矩阵，S9 其余集成/真实环境证据仍未闭环 |
 | L3 | 同一不可变 image + Kit + Bundle 的构建、安装、DB 绑定与 digest 对账 | 未完成；已有远端 `linux/amd64` 单项与 `pi+opencode` Kit/archive smoke，尚未完成显式子集、四项 Kit、Host 安装和 DB-bound composition |
 | L4 | 真实 Linux Host、remote Docker、Provider、仓库和真实 Task/MR | 部分完成；仅覆盖 Pi×Anthropic 与 Codex×Responses 的 dev Task，非完整发布矩阵 |
 | L5 | 四 Harness canary、Pi 20-task 与质量/性能验收 | 未完成 |
@@ -347,6 +348,28 @@ L2 重新通过后，按顺序完成：
   不会因断言失败阻塞数据库清理。
 - **边界：** 这是一组真实 PostgreSQL focused regression，不等于全量 backend unit 或完整 L2；全量
   backend 仍曾受远端 PG/端口权限与 pytest 临时盘耗尽影响，剩余全量/Host/Kit 证据继续保持开放。
+
+### 本轮 S9 全量 backend unit 收口（2026-08-28）
+
+- **可复现 provenance：** source commit 为
+  `c0c91997147cfd60e997ac5b496311f387c4f75a`；未设置 `CODIFY_TEST_DATABASE_URL` 覆盖；命令显式关闭
+  xdist、打开默认 warning 展示，并使用独立 pytest 临时目录：
+  ```bash
+  backend/.venv/bin/python -m pytest backend/tests/unit -q -n 0 -W default \
+    --basetemp=/private/tmp/open-harness-v2-unit-final-c0c91997
+  ```
+- **结果：** `3135 passed, 4 skipped, 3 warnings, 96 subtests passed in 409.21s (0:06:49)`。
+  4 个 skip 全部来自 `test_offline_bundle_export.py` 的 root-only Worker Kit 安装条件；3 个 warning
+  均为当前 Python 依赖栈的 Starlette/httpx 与 websockets 弃用提示。此前由测试 fixture、OpenCode
+  runner 管道和 migration-owner SQLite 初始化产生的资源 warning 已清零。
+- **本轮收口：** Runtime Bundle fixture 只复制受控入口脚本与 `deploy/worker-entrypoint`，避免每个
+  用例复制约 1.8 GiB 的无关 payload；Profile/worker configuration fixture 明确 dispose async
+  engine；OpenCode legacy runner 用 `communicate()` 收尾并关闭文本管道；migration-owner 测试用
+  `closing(sqlite3.connect(...))` 确保 raw SQLite connection 关闭。上述改动已分别提交并经 subagent
+  复审，最终均为 `P0=0, P1=0, P2=0`。
+- **边界：** 这证明 backend unit 在当前远端 PostgreSQL 可用环境下无业务失败，但 root-only 安装、依赖
+  升级/兼容处理、其余集成、真实 Docker/Kit/Host 与 L3–L6 证据仍未完成；不得据此把 L2、S1 或 L3–L4
+  标为 green。
 
 ## 4. L5 Acceptance
 
