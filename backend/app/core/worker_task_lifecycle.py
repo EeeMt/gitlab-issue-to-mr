@@ -605,7 +605,7 @@ async def create_execute_container(
         cli_binary_digest = None
     if sandbox_mode:
         environment["CODIFY_HARNESS_SANDBOX_MODE"] = str(sandbox_mode)
-    if resume_session and harness_key == "codex":
+    if resume_session and harness_key in {"pi", "codex", "opencode"}:
         environment["CODIFY_RESUME_SESSION"] = resume_session
     if cli_binary_digest:
         environment["CODIFY_CLI_BINARY_DIGEST"] = str(cli_binary_digest)

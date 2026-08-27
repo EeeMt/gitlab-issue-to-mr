@@ -188,6 +188,12 @@ class OpenCodeServerClient:
     def create_session(self, model_id: str, provider_id: str) -> tuple[int, dict]:
         return self._request("POST", "/session", {"model": {"id": model_id, "providerID": provider_id}})
 
+    def get_session(self, session_id: str) -> tuple[int, dict]:
+        """Return one persisted session so a continuation never creates a new one."""
+        return self._request(
+            "GET", f"/session/{urllib.parse.quote(session_id, safe='')}"
+        )
+
     def prompt_async(self, session_id: str, text: str) -> tuple[int, dict]:
         return self._request(
             "POST",
@@ -283,8 +289,12 @@ class OpenCodeBridge:
         return {"status": "reject", "rejection_code": code, "rejection_message": message}
 
 
-def _forward(record: dict, raw_handle, proc: subprocess.Popen) -> None:
-    """Write one SSE record to the raw archive and the translator's stdin.
+def _forward(record: dict, proc: subprocess.Popen) -> None:
+    """Write one SSE record to the translator's stdin.
+
+    The translator is the sole owner of the raw archive. It sanitizes the
+    record before appending it, so keeping an archive writer in the Bridge
+    would both bypass the secret scrubber and duplicate every event.
 
     After the translator has converged its terminal it exits and closes its
     stdin read end; a subsequent write from a still-draining stream (e.g. a
@@ -293,8 +303,6 @@ def _forward(record: dict, raw_handle, proc: subprocess.Popen) -> None:
     tolerated (F2).
     """
     line = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
-    raw_handle.write(line + "\n")
-    raw_handle.flush()
     try:
         proc.stdin.write(line + "\n")
         proc.stdin.flush()
@@ -305,7 +313,6 @@ def _forward(record: dict, raw_handle, proc: subprocess.Popen) -> None:
 def _recover_status(
     client: OpenCodeServerClient,
     session_id: str,
-    raw_handle,
     proc: subprocess.Popen,
 ) -> None:
     """After an SSE disconnect, poll ``GET /session/status`` to recover the state.
@@ -330,7 +337,6 @@ def _recover_status(
                 "type": "session.idle",
                 "properties": {"sessionID": session_id},
             },
-            raw_handle,
             proc,
         )
 
@@ -376,14 +382,41 @@ def _run_attempt() -> int:
     translator = Path(os.environ["CODIFY_OPENCODE_EVENT_TRANSLATOR"])
     raw_file = Path(os.environ["CODIFY_OPENCODE_RAW_EVENT_JSONL"])
 
-    status, session = client.create_session(model_id, provider_id)
-    session_id = session.get("info", {}).get("id") or session.get("id")
+    resume_session = (
+        os.environ.get("CODIFY_RESUME_SESSION") or os.environ.get("RESUME_SESSION") or ""
+    ).strip()
+    if resume_session:
+        status, session = client.get_session(resume_session)
+        session_info = session.get("info") if isinstance(session, dict) else None
+        session_id = (
+            session_info.get("id")
+            if isinstance(session_info, dict)
+            else session.get("id")
+            if isinstance(session, dict)
+            else None
+        )
+        if status != 200 or session_id != resume_session:
+            print(
+                f"OpenCode session resume failed: status={status} session={resume_session}",
+                file=sys.stderr,
+            )
+            return 1
+    else:
+        status, session = client.create_session(model_id, provider_id)
+        session_info = session.get("info") if isinstance(session, dict) else None
+        session_id = (
+            session_info.get("id")
+            if isinstance(session_info, dict)
+            else session.get("id")
+            if isinstance(session, dict)
+            else None
+        )
     if not session_id:
-        print(f"OpenCode session create failed: status={status}", file=sys.stderr)
+        operation = "resume" if resume_session else "create"
+        print(f"OpenCode session {operation} failed: status={status}", file=sys.stderr)
         return 1
 
     raw_file.parent.mkdir(parents=True, exist_ok=True)
-    raw_handle = raw_file.open("w", encoding="utf-8")
 
     proc = subprocess.Popen(
         [sys.executable, str(translator), "--raw-file", str(raw_file)],
@@ -404,7 +437,7 @@ def _run_attempt() -> int:
         subscribed = False
         try:
             for record in stream:
-                _forward(record, raw_handle, proc)
+                _forward(record, proc)
                 if record.get("type") == "server.connected":
                     subscribed = True
                     break
@@ -426,12 +459,11 @@ def _run_attempt() -> int:
         #    GET /session/status to recover a terminal state (best-effort).
         try:
             for record in stream:
-                _forward(record, raw_handle, proc)
+                _forward(record, proc)
         except ConnectionError as exc:
             print(f"OpenCode SSE stream closed: {exc}", file=sys.stderr)
-            _recover_status(client, session_id, raw_handle, proc)
+            _recover_status(client, session_id, proc)
     finally:
-        raw_handle.close()
         proc.stdin.close()
 
     rc = proc.wait()

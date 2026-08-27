@@ -148,7 +148,7 @@ def _runtime_verifier_fixture(tmp_path: Path, *, schema: str = "codify.worker.ru
                 else "openai_responses"
             ],
             "capabilities": {
-                "resume": key != "opencode",
+                "resume": True,
                 "task_skills": True,
                 "usage_tokens": True,
                 "steering": key == "pi",

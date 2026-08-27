@@ -131,7 +131,49 @@ def test_opencode_stream_maps_sse_to_v2_canonical_events(tmp_path):
     result = json.loads((runtime_dir / "harness-result.json").read_text(encoding="utf-8"))
     assert result["status"] == "completed"
     assert result["success"] is True
-    assert "Hello world" in result["result"]
+    assert result["result"] == "Hello world"
+
+
+def test_opencode_stream_keeps_user_parts_out_of_assistant_result(tmp_path):
+    runtime_dir = tmp_path / "role-aware"
+    runtime_dir.mkdir()
+    records = [
+        _record("message.updated", {"sessionID": "ses-oc-roles", "info": {"id": "u1", "role": "user"}}),
+        _record(
+            "message.part.updated",
+            {
+                "sessionID": "ses-oc-roles",
+                "part": {"type": "text", "text": "user prompt", "messageID": "u1", "id": "up1"},
+            },
+        ),
+        _record(
+            "message.part.updated",
+            {
+                "sessionID": "ses-oc-roles",
+                "part": {
+                    "type": "text",
+                    "text": "assistant answer",
+                    "messageID": "a1",
+                    "id": "ap1",
+                },
+            },
+        ),
+        # A full part snapshot may precede a repeated delta on the wire. It
+        # must not duplicate the assistant result.
+        _record(
+            "message.part.delta",
+            {"sessionID": "ses-oc-roles", "messageID": "a1", "partID": "ap1", "delta": "assistant answer"},
+        ),
+        _record("message.updated", {"sessionID": "ses-oc-roles", "info": {"id": "a1", "role": "assistant"}}),
+        _record("session.idle", {"sessionID": "ses-oc-roles"}),
+    ]
+    _emit(runtime_dir, "run.started", {"runtime_bundle_digest": "d" * 64})
+    _translate(runtime_dir, records)
+
+    result = json.loads((runtime_dir / "harness-result.json").read_text(encoding="utf-8"))
+    assert result["status"] == "completed"
+    assert result["result"] == "assistant answer"
+    assert all(event["payload"].get("content") != "user prompt" for event in _events(runtime_dir))
 
 
 def test_opencode_session_idle_without_final_message_is_protocol_failure(tmp_path):
@@ -490,6 +532,16 @@ def test_opencode_run_attempt_subscribes_before_prompt(tmp_path, monkeypatch):
     assert calls.index("stream_established") < calls.index("prompt_async")
     # No status fallback on a clean stream.
     assert "status" not in calls
+    raw_records = [
+        json.loads(line)
+        for line in (tmp_path / "harness-events/opencode.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [record["type"] for record in raw_records] == [
+        "server.connected",
+        "session.status",
+        "message.part.delta",
+        "session.idle",
+    ]
 
 
 def test_opencode_run_attempt_status_fallback_after_disconnect(tmp_path, monkeypatch):
@@ -551,20 +603,66 @@ def test_opencode_forward_tolerates_closed_stdin(tmp_path):
     os.close(read_fd)  # read end closed -> write raises BrokenPipeError (EPIPE)
     stdin = os.fdopen(write_fd, "w", encoding="utf-8")
     try:
-        raw_path = tmp_path / "raw.jsonl"
-        with raw_path.open("w", encoding="utf-8") as raw:
-            bridge._forward(
-                {"id": None, "type": "server.heartbeat", "properties": {}},
-                raw,
-                _Pipe(stdin),
-            )
-        # No exception propagated; the record still reached the raw archive.
-        assert "server.heartbeat" in raw_path.read_text(encoding="utf-8")
+        bridge._forward(
+            {"id": None, "type": "server.heartbeat", "properties": {}},
+            _Pipe(stdin),
+        )
+        # No exception propagated. The translator, not the Bridge, owns the
+        # sanitized raw archive.
     finally:
         try:
             stdin.close()
         except BrokenPipeError:
             pass
+
+
+def test_opencode_run_attempt_resumes_existing_session_without_creating_one(tmp_path, monkeypatch):
+    bridge = _load_bridge()
+    calls: list[str] = []
+
+    class _ResumeClient:
+        def get_session(self, session_id: str):
+            calls.append(f"get_session:{session_id}")
+            return 200, {"id": session_id}
+
+        def create_session(self, *args, **kwargs):
+            calls.append("create_session")
+            raise AssertionError("continuation must not create a new OpenCode session")
+
+        def event_stream(self):
+            calls.append("stream_established")
+            yield {"id": "e1", "type": "server.connected", "properties": {}}
+            yield {
+                "id": "e2",
+                "type": "message.part.updated",
+                "properties": {
+                    "sessionID": "ses-oc-resume",
+                    "part": {"type": "text", "text": "continued", "messageID": "m1"},
+                },
+            }
+            yield {
+                "id": "e3",
+                "type": "message.updated",
+                "properties": {"sessionID": "ses-oc-resume", "info": {"id": "m1", "role": "assistant"}},
+            }
+            yield {"id": "e4", "type": "session.idle", "properties": {"sessionID": "ses-oc-resume"}}
+
+        def prompt_async(self, session_id: str, text: str):
+            calls.append(f"prompt_async:{session_id}")
+            return 204, {}
+
+    monkeypatch.setattr(bridge, "OpenCodeServerClient", lambda **kw: _ResumeClient())
+    for key, value in _run_attempt_env(tmp_path).items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("RESUME_SESSION", "ses-oc-resume")
+    monkeypatch.delenv("CODIFY_RESUME_SESSION", raising=False)
+    _emit(tmp_path, "run.started", {"runtime_bundle_digest": "d" * 64})
+
+    assert bridge._run_attempt() == 0
+    assert calls[:3] == ["get_session:ses-oc-resume", "stream_established", "prompt_async:ses-oc-resume"]
+    assert "create_session" not in calls
+    result = json.loads((tmp_path / "harness-result.json").read_text(encoding="utf-8"))
+    assert result["session_id"] == "ses-oc-resume"
 
 
 # ── opencode.sh adapter shell ───────────────────────────────────────────────

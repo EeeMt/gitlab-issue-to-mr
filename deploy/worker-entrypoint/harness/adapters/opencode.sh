@@ -98,6 +98,15 @@ opencode_adapter_prepare_config() {
     local xdg_data_home="${config_dir}/xdg-data"
     local xdg_cache_home="${config_dir}/xdg-cache"
     local xdg_state_home="${config_dir}/xdg-state"
+    # OpenCode stores its session database below XDG_DATA_HOME. Keep that one
+    # harness-specific directory on the issue-shared volume so a later task can
+    # GET and continue the same session; config/cache/state remain ephemeral so
+    # provider credentials and user settings never cross task boundaries.
+    local issue_shared="/opt/codify-issue-shared"
+    if [ -d "${issue_shared}" ] && mkdir -p "${issue_shared}/opencode-data" \
+        && chown "${CODIFY_RUN_UID:-1000}:${CODIFY_RUN_GID:-1000}" "${issue_shared}/opencode-data" 2>/dev/null; then
+        xdg_data_home="${issue_shared}/opencode-data"
+    fi
     mkdir -p "${config_dir}" "${task_home}" "${xdg_config_home}" \
         "${xdg_data_home}" "${xdg_cache_home}" "${xdg_state_home}"
     chown -R "${CODIFY_RUN_UID:-1000}:${CODIFY_RUN_GID:-1000}" "${config_dir}" 2>/dev/null || true
@@ -113,6 +122,7 @@ opencode_adapter_prepare_config() {
     export XDG_CACHE_HOME="${xdg_cache_home}"
     export XDG_STATE_HOME="${xdg_state_home}"
     export OPENCODE_CONFIG_DIR="${config_dir}"
+    export CODIFY_OPENCODE_DATA_HOME="${xdg_data_home}"
     export OPENCODE_DISABLE_PROJECT_CONFIG="true"
     # Do not scan the repository or any external Claude-compatible skills.
     # Managed Skills are installed below OPENCODE_CONFIG_DIR/skills instead.
@@ -238,10 +248,11 @@ opencode_adapter_materialize_skills() {
     # runner already exported the same values during prepare_config.
     export HOME="${task_home}"
     export XDG_CONFIG_HOME="${config_dir}/xdg-config"
-    export XDG_DATA_HOME="${config_dir}/xdg-data"
+    export XDG_DATA_HOME="${CODIFY_OPENCODE_DATA_HOME:-${config_dir}/xdg-data}"
     export XDG_CACHE_HOME="${config_dir}/xdg-cache"
     export XDG_STATE_HOME="${config_dir}/xdg-state"
     export OPENCODE_CONFIG_DIR="${config_dir}"
+    export CODIFY_OPENCODE_DATA_HOME="${XDG_DATA_HOME}"
     export OPENCODE_DISABLE_PROJECT_CONFIG="true"
     export OPENCODE_DISABLE_EXTERNAL_SKILLS="1"
     export OPENCODE_DISABLE_CLAUDE_CODE_SKILLS="1"

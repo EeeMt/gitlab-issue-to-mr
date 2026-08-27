@@ -48,6 +48,9 @@ _STATE: dict = {
     "model_id": None,
     "session_id": None,
     "text_parts": [],
+    "messages": {},             # message_id -> part_id -> text state
+    "assistant_message_ids": [],
+    "user_message_ids": set(),
     "message": {},        # most recent assistant message info
     "idle_seen": False,
     "busy": False,
@@ -234,19 +237,88 @@ def _handle_message_updated(properties: dict, raw_line: int) -> None:
     if isinstance(usage, dict):
         _STATE["usage"] = _usage({"usage": usage})
     role = info.get("role")
+    message_id = info.get("id") or properties.get("messageID")
+    if not message_id and role == "assistant":
+        message_id = "__assistant__"
+    if message_id and role == "user":
+        _STATE["user_message_ids"].add(message_id)
+        _STATE["messages"].pop(message_id, None)
     if role == "assistant":
         _STATE["message"] = info
+        if message_id not in _STATE["assistant_message_ids"]:
+            _STATE["assistant_message_ids"].append(message_id)
+        _flush_pending_deltas(message_id)
+        _refresh_text()
     session_id = properties.get("sessionID") or properties.get("sessionId")
     if session_id:
         _STATE["session_id"] = _STATE["session_id"] or session_id
+
+
+def _message_id(properties: dict, part: dict | None = None) -> str:
+    part = part or {}
+    explicit = properties.get("messageID") or properties.get("messageId")
+    explicit = explicit or part.get("messageID") or part.get("messageId")
+    if explicit:
+        return explicit
+    if len(_STATE["assistant_message_ids"]) == 1:
+        return _STATE["assistant_message_ids"][0]
+    return "__unattributed__"
+
+
+def _part_id(properties: dict, part: dict | None, message_id: str) -> str:
+    part = part or {}
+    explicit = properties.get("partID") or properties.get("partId") or part.get("id")
+    if explicit:
+        return explicit
+    existing = _STATE["messages"].get(message_id, {})
+    if len(existing) == 1:
+        return next(iter(existing))
+    return "__default__"
+
+
+def _part_state(message_id: str, part_id: str) -> dict:
+    messages = _STATE["messages"]
+    message = messages.setdefault(message_id, {})
+    return message.setdefault(
+        part_id,
+        {"text": "", "pending_deltas": []},
+    )
+
+
+def _refresh_text() -> None:
+    text_parts: list[str] = []
+    for message_id in _STATE["assistant_message_ids"]:
+        for part in _STATE["messages"].get(message_id, {}).values():
+            text = part.get("text")
+            if isinstance(text, str):
+                text_parts.append(text)
+    _STATE["text_parts"] = text_parts
+
+
+def _flush_pending_deltas(message_id: str) -> None:
+    """Emit deltas buffered until OpenCode identifies their message role."""
+    for part in _STATE["messages"].get(message_id, {}).values():
+        pending = part.get("pending_deltas") or []
+        for delta, raw_line in pending:
+            _emit("message.delta", {"content": delta, "role": "assistant"}, raw_line)
+        part["pending_deltas"] = []
 
 
 def _handle_message_part_updated(properties: dict, raw_line: int) -> None:
     part = properties.get("part") if isinstance(properties.get("part"), dict) else {}
     if part.get("type") == "text":
         text = part.get("text")
-        if text:
-            _STATE["text_parts"] = [text]
+        if isinstance(text, str):
+            message_id = _message_id(properties, part)
+            if message_id in _STATE["user_message_ids"]:
+                return
+            part_id = _part_id(properties, part, message_id)
+            state = _part_state(message_id, part_id)
+            # OpenCode emits full snapshots for a part. A snapshot can arrive
+            # before or after deltas, so it replaces the accumulated text and
+            # later deltas extend it only when they are not already included.
+            state["text"] = text
+            _refresh_text()
     usage = part.get("usage") if isinstance(part.get("usage"), dict) else None
     if isinstance(usage, dict):
         _STATE["usage"] = _usage({"usage": usage})
@@ -255,8 +327,22 @@ def _handle_message_part_updated(properties: dict, raw_line: int) -> None:
 def _handle_message_part_delta(properties: dict, raw_line: int) -> None:
     delta = properties.get("delta")
     if isinstance(delta, str) and delta:
-        _STATE["text_parts"].append(delta)
-        _emit("message.delta", {"content": delta, "role": "assistant"}, raw_line)
+        message_id = _message_id(properties)
+        if message_id in _STATE["user_message_ids"]:
+            return
+        part_id = _part_id(properties, None, message_id)
+        state = _part_state(message_id, part_id)
+        current = state["text"]
+        if not current.endswith(delta):
+            state["text"] += delta
+        _refresh_text()
+        if message_id in _STATE["assistant_message_ids"]:
+            _emit("message.delta", {"content": delta, "role": "assistant"}, raw_line)
+        else:
+            # The assistant message.updated event may trail its part stream.
+            # Buffer the canonical delta until the role is known; this avoids
+            # leaking the user prompt while preserving the event once identified.
+            state["pending_deltas"].append((delta, raw_line))
 
 
 def _handle_session_idle(properties: dict, raw_line: int) -> None:
@@ -270,7 +356,11 @@ def _handle_session_idle(properties: dict, raw_line: int) -> None:
     if _STATE["terminal_failure"] is None and not _STATE["aborted"]:
         final_text = "".join(_STATE["text_parts"])
         final_message = _STATE["message"]
-        if not isinstance(final_message, dict) or not final_text:
+        if (
+            not isinstance(final_message, dict)
+            or final_message.get("role") != "assistant"
+            or not final_text
+        ):
             _STATE["terminal_failure"] = {
                 "kind": "protocol_error",
                 "message": "OpenCode protocol failure: session.idle without a final assistant message",

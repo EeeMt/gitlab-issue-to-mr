@@ -84,7 +84,7 @@
       "control_transport": { "kind": "server_http", "protocol": "opencode-server" },
       "model_protocols": ["anthropic_messages", "openai_responses", "openai_chat_completions"],
       "capabilities": {
-        "resume": false,
+        "resume": true,
         "task_skills": true,
         "usage_tokens": true,
         "steering": false,

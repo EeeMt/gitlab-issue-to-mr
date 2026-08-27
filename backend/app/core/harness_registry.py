@@ -70,7 +70,7 @@ SYSTEM_CAPABILITIES: dict[str, dict[str, Any]] = {
         "sandbox_mode": "container-boundary",
     },
     "opencode": {
-        "resume": False,
+        "resume": True,
         "task_skills": True,
         "max_turns": False,
         "usage_tokens": True,
@@ -94,7 +94,7 @@ V2_SYSTEM_CAPABILITY_UPPER_BOUND: dict[str, dict[str, bool]] = {
         "follow_up": True,
     },
     "opencode": {
-        "resume": False,
+        "resume": True,
         "task_skills": True,
         "usage_tokens": True,
         "steering": False,

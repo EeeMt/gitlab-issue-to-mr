@@ -29,7 +29,7 @@ PROTOCOL_MATRIX = {
 }
 UPPER = {
     "pi": {"resume": True, "task_skills": True, "usage_tokens": True, "steering": True, "follow_up": True},
-    "opencode": {"resume": False, "task_skills": True, "usage_tokens": True, "steering": False, "follow_up": False},
+    "opencode": {"resume": True, "task_skills": True, "usage_tokens": True, "steering": False, "follow_up": False},
     "claude": {"resume": True, "task_skills": True, "usage_tokens": True, "steering": False, "follow_up": False},
     "codex": {"resume": True, "task_skills": True, "usage_tokens": True, "steering": False, "follow_up": False},
 }
