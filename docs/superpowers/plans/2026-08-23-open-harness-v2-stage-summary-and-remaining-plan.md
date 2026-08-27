@@ -2,9 +2,10 @@
 
 **更新：** 2026-08-28
 
-**源码审计基线（本次 tracker 更新前）：** `c0c91997`（S5/S9 实现与证据见下文）
+**源码审计基线（本次 tracker 更新前）：** `9080ce3f`（本提交仅收敛 Worker Kit build context；S5/S9
+实现基线仍为 `c0c91997`，证据见下文）
 
-**文档复核基线（本次 tracker 更新前）：** `c0c91997`
+**文档复核基线（本次 tracker 更新前）：** `9080ce3f`
 
 **状态：** Internal Preview；Kit-owned 基础改造、S5–S8 源码 correction 和远端 `linux/amd64` Kit
 smoke 已落地，全量 backend unit 已在远端 PostgreSQL 可用环境通过，但仍有 4 个 root-only skip 和
@@ -67,10 +68,11 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
 - [ ] **S1 / P1 — 完成 present CLI Kit 路径的真实构建矩阵验收。**
   `4c223d1c` 已修复源码路径：生成的 manifest path 现在包含 Harness key，Dockerfile 也按同一
   `harness/<key>/<relative-path>` 布局复制和检查；`b54f3267` 又修复了跨主机导出时的 Linux
-  大小写路径、PAX 长路径和 `/nix/store` 逻辑链接校验。当前已在远端 Docker 的 `linux/amd64` 上
-  真实构建并通过内容/归档校验：四个单项和默认 `pi+opencode`；但显式子集、四项 Kit、Linux Host
-  安装/真实 bind-mount 以及 arm64 尚未形成证据。四项 Kit 已发起构建，但因远端磁盘不足失败，
-  不能计入成功矩阵。
+  大小写路径、PAX 长路径和 `/nix/store` 逻辑链接校验。当前 checkout 已在远端 Docker 的
+  `linux/amd64` 上真实构建并通过内容/归档校验四项 present Kit，以及显式 `pi+claude` 子集；四项
+  Kit 还完成了远端 Host 的 Kit 与 `/nix/store` 双 bind-mount launcher smoke。此前因磁盘不足失败的
+  四项尝试不再作为证据。当前仍缺官方 archive `install.sh` 安装闭环、当前 provenance 下的完整
+  单项/默认矩阵复核、arm64，以及安装后的 atomic/no-replace/recovery Host 验证。
   退出条件：使用生成器真实构建并安装默认 `pi+opencode`、各单项、显式子集和四项 present Kit；
   manifest path、archive path、容器挂载 path 与实际可执行文件完全一致，并记录精确 source commit、
   Kit identity 和 Host 证据。
@@ -148,8 +150,8 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
 | --- | --- | --- |
 | L1 | 架构、schema、Runbook 与安全边界一致 | 目标合同已修订；实现和证据不得冒充完成 |
 | L2 | 源码、单测、集成测试和并发合同 | 未通过；全量 backend unit 已通过，但仍有 4 个 root-only skip、3 个依赖弃用 warning，S1 仍待完整真实构建矩阵，S9 其余集成/真实环境证据仍未闭环 |
-| L3 | 同一不可变 image + Kit + Bundle 的构建、安装、DB 绑定与 digest 对账 | 未完成；已有远端 `linux/amd64` 单项与 `pi+opencode` Kit/archive smoke，尚未完成显式子集、四项 Kit、Host 安装和 DB-bound composition |
-| L4 | 真实 Linux Host、remote Docker、Provider、仓库和真实 Task/MR | 部分完成；仅覆盖 Pi×Anthropic 与 Codex×Responses 的 dev Task，非完整发布矩阵 |
+| L3 | 同一不可变 image + Kit + Bundle 的构建、安装、DB 绑定与 digest 对账 | 未完成；已补充远端 `linux/amd64` 四项 Kit、显式子集及 Kit + `/nix/store` Host bind smoke，但官方 archive 安装和 DB-bound composition 仍未完成 |
+| L4 | 真实 Linux Host、remote Docker、Provider、仓库和真实 Task/MR | 部分完成；新增四项 Kit 的远端 Host bind launcher 验证，但真实 Task/MR 仍仅覆盖 Pi×Anthropic 与 Codex×Responses，非完整发布矩阵 |
 | L5 | 四 Harness canary、Pi 20-task 与质量/性能验收 | 未完成 |
 | L6 | 维护窗口 hard cut、Pi 默认和 `v2_only` | 未执行 |
 
@@ -370,6 +372,40 @@ L2 重新通过后，按顺序完成：
 - **边界：** 这证明 backend unit 在当前远端 PostgreSQL 可用环境下无业务失败，但 root-only 安装、依赖
   升级/兼容处理、其余集成、真实 Docker/Kit/Host 与 L3–L6 证据仍未完成；不得据此把 L2、S1 或 L3–L4
   标为 green。
+
+### 本轮 S1 四项 Kit、显式子集与 Host bind 证据（2026-08-28）
+
+- **构建与归档：** 当前 checkout（`9080ce3f`）在远端 Docker context `remote`（`linux/amd64`）上，
+  以 `WORKER_KIT_VERSION=0.6.2`、`WORKER_KIT_CLI_SELECTION=pi,opencode,claude,codex` 真实导出
+  四项 present Kit。构建 image digest 为
+  `sha256:f3d5c18c9025be3ca59b16cedf1404701d90a83bfdc6f7aa4f50fa2a5e450786`，manifest identity 为
+  `1c72b484b9eaa312c236c604205251b05b1caa42640169b11cbc478adf3f8d41`，content inventory 为
+  `0ce620b614dbfa6a3d042949fd1a87de87ee148b7adefb67ca1f31a8a8171f92`。归档
+  `/private/tmp/open-harness-v2-s1-kits-0.6.2/codify-worker-kit-0.6.2-linux-amd64-1c72b484b9ea.tar.gz`
+  的 SHA-256 为 `80ac7fe1e871c8c5f35a72f79961402c12a4583ebf5c22c5f0a6a205d7c2e22c`；`export.sh`、
+  `verify-kit-content.py`、`validate-kit-archive.py` 和 launcher runtime smoke 均通过。四个 present
+  payload 分别为 Pi `0.84.2`/`104532096` bytes、OpenCode `1.18.19`/`184277120` bytes、Claude
+  `2.1.153`/`239896272` bytes、Codex `0.146.0`/`311001136` bytes。
+- **显式选择集：** 以 `WORKER_KIT_VERSION=0.6.3`、`WORKER_KIT_CLI_SELECTION=pi+claude` 重复真实
+  构建，manifest identity 为 `a9fa9d288a9752cd7cc5e833889f82e805cc895c8bd995e233b249b616a6ae23`，
+  content inventory 为 `6d766fd6275d45976ede85bec2a37118f986821bff9585fc9d1ef85750178d2d`，构建 image
+  digest 为 `sha256:fa0f0a30fd508ebd094c97389a6cebafcc84a28fae455a18a11fcbd017adbe2f`，归档 SHA-256 为
+  `b0f6623eaf47894b143c0f853847a86a3985202a12d465e0e257e02e06aed355`。launcher 明确报告 Codex 与
+  OpenCode 为 `absent/not_selected`，Pi 与 Claude 版本检查通过，验证了 absent/present 选择语义。
+- **远端 Host bind：** 使用远端镜像直接将四项 Kit materialize 到
+  `/tmp/open-harness-v2-s1-install-0.6.2/0.6.2-linux-amd64-1c72b484b9ea`，再把该目录和其
+  `nix/store` 分别只读 bind 到 runtime image `codify-worker/java21-maven:2026.08` 的
+  `/opt/codify-kit` 与 `/nix/store`。远端 daemon `remote` 的只读 inspect 记录该 runtime image
+  image ID 为 `sha256:6a90543639f6f4b2108fb416d1fe3e9e91de368d417b27ce433f5cd6bcb93bc6`、平台
+  `linux/amd64`、大小 `2323730298` bytes，`RepoDigests=[]`（因此本轮没有把 mutable tag 冒充
+  registry digest）。以 `CODIFY_RUN_UID=0`、`CODIFY_RUN_GID=0` 执行 launcher 的
+  `--verify --require-skill-support --smoke 'test -x "$(command -v sh)"'`，content identity、四个
+  Harness、Node/Python/Git/codegraph、Mermaid、权限和 workspace 检查全部通过。
+- **证据边界：** 由于敏感 Kit archive 不能直接跨边界传输，本轮 Host 路径是从远端构建 image 直接
+  materialize 的，不是官方 `install.sh` archive 安装；因此 archive installer 的 root ownership、
+  atomic no-replace、重装冲突和 crash recovery 仍未形成 Host 证据。`9080ce3f` 的 `.dockerignore`
+  仅排除未被 export stage 使用的大型 `deploy/worker-cli` source payload，保留 `kit-staging` 可遍历，
+  使上述远端构建可重复进行；它不改变 Kit 内容 identity。
 
 ## 4. L5 Acceptance
 
