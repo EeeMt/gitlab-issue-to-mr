@@ -6,9 +6,9 @@ These tests exercise the real owner-conditioned lock primitives
 against a real PostgreSQL instance named by ``CODIFY_TEST_DATABASE_URL``.
 
 They are skipped when the test database is unreachable so the mock/unit suite
-stays green in environments without the remote dev host. The database must be
-at the 068 schema (``issue_sequence`` present); the module fixture truncates
-only the tables these tests touch.
+stays green in environments without the remote dev host. The module creates a
+throwaway database from the configured PostgreSQL admin endpoint and drops it
+after the test module; the schema is migrated to the current Alembic head.
 """
 
 from __future__ import annotations
@@ -17,14 +17,18 @@ import asyncio
 import json
 import os
 import uuid
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 import sqlalchemy as sa
+from alembic.config import Config
 from sqlalchemy import delete, select, tuple_
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from alembic import command
 from app.core.issue_execution_locks import (
     acquire_issue_execution_lock,
     cleanup_inactive_issue_execution_locks,
@@ -37,26 +41,85 @@ TEST_DATABASE_URL = os.environ.get(
     "CODIFY_TEST_DATABASE_URL",
     "postgresql+asyncpg://codify:codify_password@192.168.50.129:5432/codify_test",
 )
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+ALEMBIC_INI = BACKEND_DIR / "alembic.ini"
+ALEMBIC_DIR = BACKEND_DIR / "alembic"
 
 _TERMINAL_STATUSES = {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}
 
 
+async def _create_database(dbname: str) -> None:
+    admin_engine = create_async_engine(TEST_DATABASE_URL, poolclass=NullPool)
+    try:
+        async with admin_engine.connect() as connection:
+            await connection.execution_options(isolation_level="AUTOCOMMIT")
+            await connection.execute(sa.text(f'CREATE DATABASE "{dbname}"'))
+    finally:
+        await admin_engine.dispose()
+
+
+async def _drop_database(dbname: str) -> None:
+    admin_engine = create_async_engine(TEST_DATABASE_URL, poolclass=NullPool)
+    try:
+        async with admin_engine.connect() as connection:
+            await connection.execution_options(isolation_level="AUTOCOMMIT")
+            # The deployed PostgreSQL is 16; FORCE closes leaked test sessions
+            # before dropping the module-local database.
+            await connection.execute(sa.text(f'DROP DATABASE IF EXISTS "{dbname}" WITH (FORCE)'))
+    finally:
+        await admin_engine.dispose()
+
+
+def _alembic_config(url: str) -> Config:
+    config = Config(str(ALEMBIC_INI))
+    config.config_file_name = None
+    config.set_main_option("script_location", str(ALEMBIC_DIR))
+    config.set_main_option("sqlalchemy.url", url)
+    config.print_stdout = lambda *args, **kwargs: None  # type: ignore[method-assign]
+    return config
+
+
 @pytest.fixture(scope="module")
-async def test_engine():
-    """Reachability-guarded async engine bound to the concurrency test DB."""
+def migration_db():
+    """Create and migrate a throwaway PostgreSQL database for this module."""
     # NullPool: pytest-asyncio runs a fresh event loop per test, and pooled
     # connections bound to a previous loop raise "Event loop is closed" on
     # reuse. A per-session connection (opened in the current loop, closed on
     # release) keeps every test on its own loop.
-    engine = create_async_engine(TEST_DATABASE_URL, pool_pre_ping=True, poolclass=NullPool)
+    dbname = f"codify_issue_lock_{uuid.uuid4().hex[:8]}"
+    database_url = make_url(TEST_DATABASE_URL).set(database=dbname).render_as_string(
+        hide_password=False
+    )
     try:
-        async with engine.connect() as conn:
-            await conn.execute(sa.text("SELECT 1"))
+        asyncio.run(_create_database(dbname))
     except Exception as exc:  # noqa: BLE001
-        await engine.dispose()
         pytest.skip(f"concurrency test DB unreachable: {exc!r}")
-    yield engine
-    await engine.dispose()
+
+    original_url = os.environ.get("DATABASE_URL")
+    os.environ["DATABASE_URL"] = database_url
+    try:
+        command.upgrade(_alembic_config(database_url), "head")
+        yield {"url": database_url}
+    finally:
+        try:
+            asyncio.run(_drop_database(dbname))
+        finally:
+            if original_url is None:
+                os.environ.pop("DATABASE_URL", None)
+            else:
+                os.environ["DATABASE_URL"] = original_url
+
+
+@pytest.fixture(scope="module")
+async def test_engine(migration_db):
+    """Bind a NullPool engine to the migrated throwaway database."""
+    engine = create_async_engine(migration_db["url"], pool_pre_ping=True, poolclass=NullPool)
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(sa.text("SELECT 1"))
+        yield engine
+    finally:
+        await engine.dispose()
 
 
 @pytest.fixture
@@ -76,7 +139,7 @@ async def _reset_tables(maker) -> None:
     async with maker() as db:
         await db.execute(
             sa.text(
-                "TRUNCATE issue_execution_locks, tasks, issues, worker_profiles "
+                "TRUNCATE issue_execution_locks, tasks, issues, worker_profiles, worker_runtime_bundles "
                 "RESTART IDENTITY CASCADE"
             )
         )
@@ -225,21 +288,26 @@ async def test_claim_vs_cancel_cancel_commits_first_leaves_no_lock(session_facto
         claim_db = session_factory()
         started = asyncio.Event()
         claim_task = asyncio.create_task(_run_claim(claim_db, task_id, started=started))
-        await started.wait()
-        await asyncio.sleep(0.05)  # let the claim issue (and block on) its Issue FOR UPDATE
+        try:
+            await asyncio.wait_for(started.wait(), timeout=5)
+            await asyncio.sleep(0.05)  # let the claim issue (and block on) its Issue FOR UPDATE
 
-        task = (
-            await cancel_db.execute(
-                select(Task).where(Task.id == task_id).with_for_update()
-            )
-        ).scalar_one()
-        assert task.status == TaskStatus.QUEUED
-        task.status = TaskStatus.CANCELLED
-        task.completed_at = utcnow()
-        await cancel_db.commit()
+            task = (
+                await cancel_db.execute(
+                    select(Task).where(Task.id == task_id).with_for_update()
+                )
+            ).scalar_one()
+            assert task.status == TaskStatus.QUEUED
+            task.status = TaskStatus.CANCELLED
+            task.completed_at = utcnow()
+            await cancel_db.commit()
 
-        scheduler = await claim_task
-        await claim_db.close()
+            scheduler = await asyncio.wait_for(claim_task, timeout=5)
+        finally:
+            if not claim_task.done():
+                claim_task.cancel()
+            await asyncio.gather(claim_task, return_exceptions=True)
+            await claim_db.close()
 
     # Claim CAS failed: no RUNNING state, no worker started, and no lock left
     # behind for the cancelled task (§10.2 #11: never CANCELLED + new Worker).
@@ -306,24 +374,30 @@ async def test_stale_owner_late_release_rowcount_zero_keeps_new_owner(session_fa
         )
 
     late_task = asyncio.create_task(late_finalizer())
-    await paused.wait()
+    try:
+        await asyncio.wait_for(paused.wait(), timeout=5)
 
-    # A is released by another convergence path, then B acquires the same Issue.
-    async with session_factory() as db:
-        removed = await release_issue_execution_lock(
-            db, issue_id=issue_id, owner_task_id=task_a
+        # A is released by another convergence path, then B acquires the same Issue.
+        async with session_factory() as db:
+            removed = await release_issue_execution_lock(
+                db, issue_id=issue_id, owner_task_id=task_a
+            )
+            await db.commit()
+        assert removed is True
+
+        task_b = await _seed_task(
+            session_factory, issue_id, status=TaskStatus.RUNNING, container_id="ctr-b", issue_sequence=2
         )
-        await db.commit()
-    assert removed is True
+        assert await _acquire_lock_for(session_factory, task_b)
 
-    task_b = await _seed_task(
-        session_factory, issue_id, status=TaskStatus.RUNNING, container_id="ctr-b", issue_sequence=2
-    )
-    assert await _acquire_lock_for(session_factory, task_b)
-
-    release_gate.set()
-    removed_late = await late_task
-    await late_db.close()
+        release_gate.set()
+        removed_late = await asyncio.wait_for(late_task, timeout=5)
+    finally:
+        release_gate.set()
+        if not late_task.done():
+            late_task.cancel()
+        await asyncio.gather(late_task, return_exceptions=True)
+        await late_db.close()
 
     # A's late DELETE(issue_id, A) is a no-op; B's owner row is untouched.
     assert removed_late is False
@@ -375,20 +449,26 @@ async def test_cleanup_stale_snapshot_does_not_delete_reacquired_lock(session_fa
         return stale_pairs
 
     cleanup_task = asyncio.create_task(cleanup_with_stale_snapshot())
-    await snapshot_seen.wait()
+    try:
+        await asyncio.wait_for(snapshot_seen.wait(), timeout=5)
 
-    # Meanwhile the finalizer releases A and a new task B re-acquires the Issue.
-    async with session_factory() as db:
-        await release_issue_execution_lock(db, issue_id=issue_id, owner_task_id=task_a)
-        await db.commit()
-    task_b = await _seed_task(
-        session_factory, issue_id, status=TaskStatus.RUNNING, container_id="ctr-b", issue_sequence=2
-    )
-    assert await _acquire_lock_for(session_factory, task_b)
+        # Meanwhile the finalizer releases A and a new task B re-acquires the Issue.
+        async with session_factory() as db:
+            await release_issue_execution_lock(db, issue_id=issue_id, owner_task_id=task_a)
+            await db.commit()
+        task_b = await _seed_task(
+            session_factory, issue_id, status=TaskStatus.RUNNING, container_id="ctr-b", issue_sequence=2
+        )
+        assert await _acquire_lock_for(session_factory, task_b)
 
-    release_gate.set()
-    stale_pairs = await cleanup_task
-    await cleanup_db.close()
+        release_gate.set()
+        stale_pairs = await asyncio.wait_for(cleanup_task, timeout=5)
+    finally:
+        release_gate.set()
+        if not cleanup_task.done():
+            cleanup_task.cancel()
+        await asyncio.gather(cleanup_task, return_exceptions=True)
+        await cleanup_db.close()
 
     # The stale snapshot only knew about A; its delete cannot reach B.
     assert stale_pairs == [(issue_id, task_a)]
