@@ -2,10 +2,11 @@
 
 **更新：** 2026-08-28
 
-**源码审计基线（本次 tracker 更新前）：** `067859f7`（本提交修复空选择 sentinel；S5/S9 实现基线仍为
+**源码审计基线（本次 tracker 更新前）：** `7547050a`（本提交修复 preflight 在控制机整包解压；
+空选择 sentinel 修复为 `067859f7`；S5/S9 实现基线仍为
 `c0c91997`，build context 收敛提交为 `9080ce3f`，证据见下文）
 
-**文档复核基线（本次 tracker 更新前）：** `53da6fb1`
+**文档复核基线（本次 tracker 更新前）：** `58732281`
 
 **状态：** Internal Preview；Kit-owned 基础改造、S5–S8 源码 correction 和远端 `linux/amd64` Kit
 smoke 已落地，全量 backend unit 已在远端 PostgreSQL 可用环境通过，但仍有 4 个 root-only skip 和
@@ -407,6 +408,12 @@ L2 重新通过后，按顺序完成：
   atomic no-replace、重装冲突和 crash recovery 仍未形成 Host 证据。`9080ce3f` 的 `.dockerignore`
   仅排除未被 export stage 使用的大型 `deploy/worker-cli` source payload，保留 `kit-staging` 可遍历，
   使上述远端构建可重复进行；它不改变 Kit 内容 identity。
+- **修复后的 release preflight：** commit `7547050a` 改为不在控制机 materialize 整个 Linux Kit；在
+  macOS 控制机上用四项 `0.6.2` archive 和远端 `codify-worker/java21-maven:2026.08` runtime image
+  实际执行 `deploy/scripts/preflight-v2-release.sh`，输出
+  `V2 release preflight OK: 0.6.2 linux/amd64 1c72b484b9eaa312c236c604205251b05b1caa42640169b11cbc478adf3f8d41 content=0ce620b614dbfa6a3d042949fd1a87de87ee148b7adefb67ca1f31a8a8171f92`。
+  这只证明 archive、content inventory 和 image platform/identity 的 preflight，不替代官方 archive
+  installer、目标 Host 安装或 DB-bound composition。
 
 ### 本轮 S1 当前 provenance 的 amd64 选择矩阵（2026-08-28）
 
