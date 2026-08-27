@@ -1,13 +1,13 @@
 # Open-Harness V2 当前遗留项与验收计划
 
-**更新：** 2026-08-26
+**更新：** 2026-08-27
 
-**源码审计基线：** `5dc3a312`（当前 `origin/dev`）
+**源码审计基线：** `b54f3267`（当前本地提交）
 
-**文档复核基线：** `f4be4c3f`（本次更新前的本地 `HEAD`）
+**文档复核基线：** `b54f3267`（本次更新前的本地 `HEAD`）
 
 **状态：** Internal Preview；Kit-owned 基础改造和 Pi dev 验证已落地，但 L2 仍为红灯：S1
-源码修复尚未完成真实构建矩阵验收，S2、S5–S8 仍有已确认缺口，S9 尚未重建完整证据。修复、重建制品
+源码修复尚未完成完整真实构建矩阵验收，S5–S8 仍有已确认缺口，S9 尚未重建完整证据。修复、重建制品
 并补齐 L3–L6 证据前，保持 `dual_canary`，不切 Pi 默认，不启用 `v2_only`。
 
 本文只维护当前剩余工作和退出条件。已完成且已验收的工作不再保留为待办流水账；架构约束以
@@ -61,16 +61,20 @@ Kit-owned present CLI 的 release evidence。
 
 - [ ] **S1 / P1 — 完成 present CLI Kit 路径的真实构建矩阵验收。**
   `4c223d1c` 已修复源码路径：生成的 manifest path 现在包含 Harness key，Dockerfile 也按同一
-  `harness/<key>/<relative-path>` 布局复制和检查；因此“当前源码仍缺 key/重复拼接”不再成立。现有
-  dev 证据只覆盖 Pi 单项 Kit，不能证明所有选择组合。退出条件：使用生成器真实构建并安装默认
-  `pi+opencode`、各单项、显式子集和四项 present Kit；manifest path、archive path、容器挂载 path
-  与实际可执行文件完全一致，并记录精确 source commit、Kit identity 和 Host 证据。
+  `harness/<key>/<relative-path>` 布局复制和检查；`b54f3267` 又修复了跨主机导出时的 Linux
+  大小写路径、PAX 长路径和 `/nix/store` 逻辑链接校验。当前已在远端 Docker 的 `linux/amd64` 上
+  真实构建并通过内容/归档校验：Pi 单项、OpenCode 单项、Claude 单项和默认 `pi+opencode`；但
+  Codex 单项、显式子集、四项 Kit、Linux Host 安装/真实 bind-mount 以及 arm64 尚未形成证据。
+  退出条件：使用生成器真实构建并安装默认 `pi+opencode`、各单项、显式子集和四项 present Kit；
+  manifest path、archive path、容器挂载 path 与实际可执行文件完全一致，并记录精确 source commit、
+  Kit identity 和 Host 证据。
 
-- [ ] **S2 / P1 — 让 Kit identity 覆盖整 Kit 内容。**
-  当前 identity 只绑定 `manifest.json` SHA；launcher、entrypoint、Adapter/Bridge、编排脚本和 Nix
-  closure 的 bytes 变化可能不改变 identity。退出条件：定义唯一 canonical content identity，覆盖
-  archive/manifest 及所有执行相关 bytes；安装回执、readiness、Profile snapshot 和 Runtime Bundle
-  使用同一 identity；任一文件篡改或混搭都 fail closed，并有测试证明。
+- [x] **S2 / P1 — 让 Kit identity 覆盖整 Kit 内容。**
+  `1905abda` 已将 canonical content inventory/digest 接入 manifest、安装回执、readiness、Profile
+  snapshot 和 Runtime Bundle；`b54f3267` 保证导出的 archive 不因 Host 文件系统而改变该 identity，并
+  让 archive/安装前后的 content verifier 对同一组 bytes fail closed。整 Kit tamper、链接链、PAX
+  长路径和大小写路径回归已由聚焦测试覆盖；当前只剩 S1 的真实发布矩阵与 L3 Host 证据，不再把 S2
+  记为源码缺口。
 
 - [x] **S3 / P1 — 修复 dual-canary 的 V1 lifecycle。**
   `worker_task_lifecycle.create_execute_container()` 已在进入 V1/V2 公共路径前初始化
@@ -123,7 +127,7 @@ Kit-owned present CLI 的 release evidence。
 | 层级 | 证明内容 | 当前状态 |
 | --- | --- | --- |
 | L1 | 架构、schema、Runbook 与安全边界一致 | 目标合同已修订；实现和证据不得冒充完成 |
-| L2 | 源码、单测、集成测试和并发合同 | 未通过；S1 待真实构建矩阵，S2、S5–S8 有已知缺口，S9 待重跑 |
+| L2 | 源码、单测、集成测试和并发合同 | 未通过；S1 待完整真实构建矩阵，S5–S8 有已知缺口，S9 待重跑 |
 | L3 | 同一不可变 image + Kit + Bundle 的构建、安装、DB 绑定与 digest 对账 | 未完成；dev Kit 0.5.0 只有 Pi present，且整 Kit identity 未闭环 |
 | L4 | 真实 Linux Host、remote Docker、Provider、仓库和真实 Task/MR | 部分完成；仅覆盖 Pi×Anthropic 与 Codex×Responses 的 dev Task，非完整发布矩阵 |
 | L5 | 四 Harness canary、Pi 20-task 与质量/性能验收 | 未完成 |
@@ -156,7 +160,7 @@ L2 重新通过后，按顺序完成：
   usage，并证明三种协议下 settled/Abort 一致；Pi 在三种协议下覆盖原生 ACK、严格顺序、steering、
   follow-up、close、`outcome_unknown` 不重放和 scheduler 恢复；Claude/Codex 证明现有核心能力无回退。
 
-## 3.5 本轮 dev 环境已完成证据（2026-08-26）
+## 3.5 本轮 dev 环境已完成证据（2026-08-26—2026-08-27）
 
 > 以下为 dev 环境（192.168.50.129）真实执行证据，供 R1–R7 复核；未替代目标 Host 与发布窗口动作。
 
@@ -176,9 +180,9 @@ L2 重新通过后，按顺序完成：
   `TaskView` 共 227 tests passed，`vue-tsc --noEmit` 通过。聚焦 Ruff 因
   `task_harness_commands.py` import 顺序失败。PG skip、warning 和 Ruff failure 都必须在 S9 清零，
   历史绿灯不能替代本轮重跑。
-- **再次确认的源码缺口：** S2 整 Kit identity、S5 availability catalog 以及 S6–S8 三协议
-  合同/Adapter 仍未闭环；S3/S4 已在本轮工作区修复并通过聚焦证据。本轮未把任何一项误标为
-  release 完成。
+- **再次确认的源码缺口：** S1 完整真实构建/Host 证据、S5 availability catalog 以及 S6–S8
+  三协议合同/Adapter 仍未闭环；S2–S4 已在本轮工作区修复并通过聚焦证据。本轮未把任何一项误
+  标为 release 完成。
 - **本轮 S3/S4 工作区证据：** `backend/.venv/bin/python -m pytest
   backend/tests/unit/test_worker_command_pump.py -q` 在 PostgreSQL 测试库中 `20 passed`，包含同一
   attempt 锁住 seq1 时不得跳过队头派发 seq2 的回归；V1 lifecycle 与既有 V2 runtime 聚焦集
@@ -189,7 +193,15 @@ L2 重新通过后，按顺序完成：
 - **R6（codex，host_mount 0.146.0）：** Task 4 COMPLETED，commit `188331f29c`，MR !1，usage 76237/1252，runtime archive + 25 canonical events；失败路径（Task 2/3）正常收尾。codex 端点语义实测：`base_url` 被 codex 追加 `/responses`，provider 需配 `https://opencode.ai/zen/go/v1`。
 - **R6/R7（Pi，Kit 0.5.0 present payload 0.84.2，digest `6c68c5f5f6bf…`）：** 真实 Task 13/16/17/18/19 COMPLETED（deepseek-v4-flash），MR !2/!4/!6 等；覆盖创建（fresh+skill）、continue 追加（会话恢复 `<UUID:377a0db8…>`）、运行中 follow_up **delivered** 且内容落地（commit `4a2023d6`）、steer gate 关闭时正确拒绝、取消（Task 15）、cancel→retry 成功（Task 16）、retry 冻结快照语义（Task 14 复用旧 bundle 同因失败）、Skills（codify-marker 精确落地）、工具事件（`tool.started/completed` → `tool_call` 日志：write/read/bash 含路径/脱敏命令/output payload）；事件流全类型覆盖（0 unknown_raw_event）。
 - **源码修复链（commit `4c223d1c`/`e4361d7a`/`c5661619`）：** ① Kit 构建：目录 payload（pi 完整资源）、glibc loader 回退（Alpine 构建阶段）、smoke ABI shim、manifest path 统一；这关闭了 S1 的已知源码缺陷，但未完成 S1 真实构建矩阵退出条件；② `pi_events.py`：lenient JSON 修复 + agent_end 定向提取（pi 0.84.2 未转义引号破坏整行）；③ `task_harness_commands.py`：bundle 能力判定从 archive 解 harness manifest + undefer，修复 steer/follow_up 此前被 `unsupported_harness` 拒绝的问题；此前它不关闭 S4 的跨 Task claim 缺口，该缺口已由本轮 task-scoped pump 修复并以 PostgreSQL 并发测试验证；④ `repository-helpers.sh`：work 分支远端不存在时 ahead-of-base 回退 origin/base（Pi 自 commit/push 后误报 "No changes made"）；⑤ 当时的单测证据：`test_pi_harness_adapter.py` 34、`test_task_harness_commands.py` 18、`test_worker_kit.py` 54、全量 unit 3065+1 passed。
-- **已知边界：** Kit manifest 不覆盖 payload sidecar（theme/assets/package.json）——S2 未闭环；S5
+- **S1/S2 当前工作区证据（commit `b54f3267`）：** `deploy/worker-kit/export-archive.py` 直接把
+  Docker Kit tar stream 写入最终 archive，保留 Linux case-distinct paths 和 PAX path/linkpath；
+  内容 verifier 与 offline archive validator 对 `/nix/store`、嵌套 symlink、循环和 hardlink 均做
+  逻辑解析。远端 Docker `linux/amd64` 真实构建并校验的 Kit identity 为：Pi `4448ad3d50b9…`、
+  OpenCode `8cdb0b4860ec…`、Claude `4d612d783e49…`、默认 `pi+opencode` `4a0b9981524c…`；四个
+  archive 均通过 content verifier 和 archive validator，聚焦测试为 `83 passed, 4 skipped`，Ruff、
+  `bash -n` 与 `git diff --check` 通过。Codex 单项继续构建时远端 Docker 因 `No space left on device`
+  停止；清理广泛 BuildKit cache 未获授权，因此未伪造 Codex/子集/四项或 Host 安装证据。
+- **已知边界：** S1 仍缺完整选择矩阵、Linux Host 安装及真实 Kit + `nix/store` bind-mount；S5
   availability catalog 和三协议仍缺 S6–S8；Pi `--exclude-tools` 在 rpc 模式触发 pi 0.84.2 自身 bug
   （无输出退出），未采用工具禁用，依赖 delivery 修复。
 
