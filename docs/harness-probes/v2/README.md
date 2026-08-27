@@ -17,7 +17,7 @@ enter fixtures.
 | Pi | `0.84.2`, RPC stdio | Fresh/continuation/control raw captures under `pi/` | Native ACK and real full-chain recovery remain open V2 work. |
 | OpenCode | `1.18.19`, Server/SSE | Event samples under `opencode/` | HTTP-direct was diagnostic; resume/settled/error coverage is incomplete. |
 | Codex | `0.146.0`, JSONL | `codex/success.v2.jsonl` replay fixture | Fixture replay is not target-Host execution. |
-| Claude | `2.1.152`, JSON stream | `claude/success.v2.jsonl` replay fixture | Linux Worker artifact digest remains to be fixed. |
+| Claude | `2.1.153`, JSON stream | `claude/success.v2.jsonl` replay fixture; standalone Linux Kit smoke | Four-Harness/Host release evidence remains open. |
 
 The prior top-level Phase 0 report is retained as a historical working note.
 Its version, endpoint-configuration, SDK-cost, and uncertainty findings are
@@ -59,14 +59,14 @@ the repository until manually redacted and reviewed.
 | **Pi** | `0.84.2` | `https://github.com/earendil-works/pi/releases/download/v0.84.2/pi-linux-x64.tar.gz` | MIT | `pi-linux-x64.tar.gz` → `pi`（RPC stdio） | linux-x64 | ✅ 实测 `pi --version` = `0.84.2` | `906fbe787fd225c4ac624fe7ebd5b1d55a60e0f5c7ef51795d231564f9ee1c13` |
 | **OpenCode** | `1.18.19` | `https://github.com/sst/opencode/releases/download/v1.18.19/opencode-linux-x64.tar.gz` | Apache-2.0 | `opencode-linux-x64.tar.gz` → `opencode`（Server/SDK） | linux-x64 | ✅ 实测 `opencode --version` = `1.18.19` | `7bb35487c55f9957f5d91ae60be6fa49fc8f74629c210c1719ed75fdbf7e2bd9` |
 | **Codex** | `0.146.0` | `https://github.com/openai/codex` 官方 `codex-package-x86_64-unknown-linux-musl.tar.gz` | Apache-2.0 | tarball → `bin/codex` + `codex-path/rg` + `codex-resources/bwrap`（完整打包运行时，含 docker/沙箱工具） | x86_64-unknown-linux-musl | ✅ 实测 `codex --version` = `codex-cli 0.146.0` | `3c89125af1d7c98abec8beb551292ef99daca52e204e5852a9139feae2c467e5` |
-| **Claude CLI** | `2.1.152` | 官方 `claude-code` 安装（Worker 侧经 `deploy/worker-kit` 镜像注入） | 专有（Anthropic 商业条款） | `claude`（`cli_stream_json`） | linux | V1 基线沿用；见下方说明 | 见下方说明 |
+| **Claude CLI** | `2.1.153` | 官方 `claude-code` 安装（Worker 侧经 `deploy/worker-kit` Kit 注入） | 专有（Anthropic 商业条款） | `claude`（`cli_stream_json`） | linux/amd64 | ✅ standalone Kit smoke = `2.1.153` | `214f603f31942162dac9a65f18d43b3ac646ae215240fad481c4aad6c60f2e38` |
 
 ### 核对与交叉验证细节
 
 - **Pi `0.84.2`**：官方 release 资产含 `SHA256SUMS`；其 `pi-linux-x64.tar.gz` 行 = `906fbe78…`，与本地下载 tarball 完全一致。**反向验证通过。**
 - **OpenCode `1.18.19`**：release 未单独发布 `SHA256SUMS` 文件，但 release 资产 `opencode-linux-x64.tar.gz` 的字节数 = 60,474,448，与本地下载 tarball 字节数完全一致；SHA-256 = `7bb35487…` 作为本机固定证据（来源已记录官方 release URL）。**注：官方无独立 checksum 文件可二次核对，作为待决备注。**
 - **Codex `0.146.0`**：官方 `codex-package.json` 声明 `version: 0.146.0, target: x86_64-unknown-linux-musl, entrypoint: bin/codex`。V1 基线记录为 `0.146.0-alpha.3.1`，二进制实际报告 `codex-cli 0.146.0`；两个版本号分属同一发布代际，最终以二进制报告 `0.146.0` 为准。二进制在远端 x86_64 容器内实测执行成功。
-- **Claude CLI `2.1.152`**：V1 `scripts/harness-probes/README.md` 基线已固定此版本（`deploy/worker-kit/Dockerfile.worker-kit` 记录 `minimum_version: 2.1.33`，Operator CLI `/opt/homebrew/bin/claude`）。V2 复用以该版本为准；linux Worker 侧为镜像注入路径，SHA-256 建议在 V2 实施阶段以 Worker-kit 镜像 digest 形式记录（本轮未重新计算，列为待决）。
+- **Claude CLI `2.1.153`**：V1 的 `2.1.152` raw/replay fixture 保留为历史捕获，不代表当前 Linux build baseline。当前远端 `linux/amd64` standalone Worker Kit smoke 实测输出 `2.1.153`，payload SHA-256 为 `214f603f31942162dac9a65f18d43b3ac646ae215240fad481c4aad6c60f2e38`；四-Harness Kit、Host 安装和真实 Task 仍是后续 S1/L4 证据。
 
 ### 离线运行性（§3.1 第 2 项验收）
 

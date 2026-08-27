@@ -2,12 +2,12 @@
 
 **更新：** 2026-08-27
 
-**源码审计基线：** `90a2593d`（当前本地提交）
+**源码审计基线：** `f01180c7`（当前本地提交）
 
-**文档复核基线：** `b54f3267`（本次更新前的本地 `HEAD`）
+**文档复核基线：** `96eb2462`（本次更新前的本地 `HEAD`）
 
-**状态：** Internal Preview；Kit-owned 基础改造、S6–S8 源码 correction 和 Pi/OpenCode 的
-`linux/amd64` dev Kit smoke 已落地，但 L2 仍为红灯：S1 尚未完成完整真实构建矩阵，S5 availability
+**状态：** Internal Preview；Kit-owned 基础改造、S6–S8 源码 correction 和远端 `linux/amd64` Kit
+smoke 已落地，但 L2 仍为红灯：S1 尚未完成完整真实构建矩阵，S5 availability
 catalog 和 S9 完整证据仍未闭环。补齐 S1/S5/S9、重建制品并补齐 L3–L6 证据前，保持 `dual_canary`，
 不切 Pi 默认，不启用 `v2_only`。
 
@@ -66,8 +66,9 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
   `4c223d1c` 已修复源码路径：生成的 manifest path 现在包含 Harness key，Dockerfile 也按同一
   `harness/<key>/<relative-path>` 布局复制和检查；`b54f3267` 又修复了跨主机导出时的 Linux
   大小写路径、PAX 长路径和 `/nix/store` 逻辑链接校验。当前已在远端 Docker 的 `linux/amd64` 上
-  真实构建并通过内容/归档校验：Pi 单项、OpenCode 单项、Claude 单项和默认 `pi+opencode`；但
-  Codex 单项、显式子集、四项 Kit、Linux Host 安装/真实 bind-mount 以及 arm64 尚未形成证据。
+  真实构建并通过内容/归档校验：四个单项和默认 `pi+opencode`；但显式子集、四项 Kit、Linux Host
+  安装/真实 bind-mount 以及 arm64 尚未形成证据。四项 Kit 已发起构建，但因远端磁盘不足失败，
+  不能计入成功矩阵。
   退出条件：使用生成器真实构建并安装默认 `pi+opencode`、各单项、显式子集和四项 present Kit；
   manifest path、archive path、容器挂载 path 与实际可执行文件完全一致，并记录精确 source commit、
   Kit identity 和 Host 证据。
@@ -137,7 +138,7 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
 | --- | --- | --- |
 | L1 | 架构、schema、Runbook 与安全边界一致 | 目标合同已修订；实现和证据不得冒充完成 |
 | L2 | 源码、单测、集成测试和并发合同 | 未通过；S1 待完整真实构建矩阵，S5 availability catalog 和 S9 证据待闭环 |
-| L3 | 同一不可变 image + Kit + Bundle 的构建、安装、DB 绑定与 digest 对账 | 未完成；本轮仅有远端 `linux/amd64` `pi+opencode` Kit/archive smoke，尚未完成完整矩阵、Host 安装和 DB-bound composition |
+| L3 | 同一不可变 image + Kit + Bundle 的构建、安装、DB 绑定与 digest 对账 | 未完成；已有远端 `linux/amd64` 单项与 `pi+opencode` Kit/archive smoke，尚未完成显式子集、四项 Kit、Host 安装和 DB-bound composition |
 | L4 | 真实 Linux Host、remote Docker、Provider、仓库和真实 Task/MR | 部分完成；仅覆盖 Pi×Anthropic 与 Codex×Responses 的 dev Task，非完整发布矩阵 |
 | L5 | 四 Harness canary、Pi 20-task 与质量/性能验收 | 未完成 |
 | L6 | 维护窗口 hard cut、Pi 默认和 `v2_only` | 未执行 |
@@ -228,7 +229,7 @@ L2 重新通过后，按顺序完成：
   identity `bdc3408c86f603401a42191318311107f45c59eb81a8ec411be9c6502ecb5d6e`；构建 image digest
   `sha256:772e331f68204ddf434d8aefcfa9929e4a52bdcee0be629e29e0a2b888348675`。`export.sh`、archive content
   verifier 和 runtime smoke 均通过，证明固定 Pi 0.84.2/OpenCode 1.18.19 的当前 `pi+opencode` Kit
-  payload；不证明 Codex/Claude、显式子集、四项 Kit、Host 安装或 arm64。
+  payload；不证明显式子集、四项 Kit、Host 安装或 arm64。
 - **OpenCode boundary probe：** 固定 1.18.19 对恶意 project `opencode.json`、`.opencode/plugins`、
   project/global Claude-compatible Skills 的 probe 在 `OPENCODE_DISABLE_PROJECT_CONFIG=true`、
   `OPENCODE_DISABLE_EXTERNAL_SKILLS=1`、`OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1` 和 `--pure` 下未加载
@@ -238,6 +239,34 @@ L2 重新通过后，按顺序完成：
   `20 passed`，Frontend `120 passed`，`npm run build`、Ruff、`bash -n` 和 `git diff --check` 通过。
   全量 unit 曾因 pytest 临时目录累计约 44GB 导致 12 个 setup errors，并出现 3 个受磁盘影响的失败；
   清理临时目录后 3 个失败用例分别重跑均通过，因此全量 unit 的清洁重跑仍归 S9，不能写成 L2 green。
+
+### 本轮 S1 单项构建补充（2026-08-27）
+
+- **Codex 单项：** 同一远端 Docker context 和源码 commit `90a2593d` 下，以
+  `WORKER_KIT_VERSION=0.6.1`、`WORKER_KIT_PLATFORM=linux/amd64`、
+  `WORKER_KIT_CLI_SELECTION=codex` 构建。归档
+  `/private/tmp/open-harness-v2-s6-kits/codify-worker-kit-0.6.1-linux-amd64-22d5f3dbe84e.tar.gz`；
+  archive SHA-256 `e54e33b62b38453464d078a6c85e264aaf51a62cf2da9fef8c88aa55da72277b`，manifest
+  identity `22d5f3dbe84e265431167978e66a33c28a00333f3f95f8f36b767f48d7950e58`，content inventory
+  `7ea5b9d3eb4302dc78e111b0d5f18ac1fc1d2a343b4a855df1a497a18610ff90`，构建 image digest
+  `sha256:460d3587924b81549c47bf6a07348c0a5e94b9dd1e5849b58ee12ffe8fa82716`。archive verifier、
+  launcher/runtime smoke 均通过；manifest 的 `codex` 路径为
+  `/opt/codify-kit/harness/codex/bin/codex`，版本 `0.146.0`、payload SHA-256
+  `2e863156ed35ecc5253b1e2f907a9143077b9f7cb51942070c61996471ff6e04`、大小 `311001136`。
+- **Claude 单项：** 使用同一版本/平台和 `WORKER_KIT_CLI_SELECTION=claude` 构建。归档
+  `/private/tmp/open-harness-v2-s6-kits/codify-worker-kit-0.6.1-linux-amd64-f2a455b927a6.tar.gz`；
+  archive SHA-256 `b23f4faa521284ba80abfcf1956240e4aa09f8fb901715b5ac683b62ad15c72e`，manifest
+  identity `f2a455b927a6596ae5be111b1dc9a833d2e729b9748865ec76a2e4748c07fed6`，content inventory
+  `2f9ea9b08cdffda2a8cc4104124012c37acd6b57627a1d96d189a7c747e2e77e`，构建 image digest
+  `sha256:483cec6ecd72aed1d0f0a462b60a177e76793863bf36216453089c5f90d8e50c`。archive verifier、
+  launcher/runtime smoke 均通过；payload 路径为 `/opt/codify-kit/harness/claude/claude`，runtime
+  smoke 输出 `2.1.153`、payload SHA-256 `214f603f31942162dac9a65f18d43b3ac646ae215240fad481c4aad6c60f2e38`、
+  大小 `239896272`。该归档的 manifest version 字段曾暴露后缀解析错误，已在当前工作区修正为
+  提取首个语义版本号；修复后的完整 Kit 重建仍待远端空间恢复。
+- **四项 Kit 尝试：** `WORKER_KIT_CLI_SELECTION=pi,opencode,claude,codex` 已完成完整 payload
+  staging，但在 Nix npm dependency 阶段因远端根分区耗尽失败，确切错误为
+  `codegraph-linux-arm64: No space left on device`。该次没有 archive、manifest 或 smoke 证据，
+  因此不计入 S1；显式子集、成功四项 Kit、Linux Host 安装/真实 bind-mount 和 arm64 仍开放。
 
 ## 4. L5 Acceptance
 
