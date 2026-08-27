@@ -6,8 +6,8 @@
 # linked CLI payloads execute for real. Reads:
 #   KIT_CLI_SELECTION   comma/plus-separated subset of pi,opencode,claude,codex
 #   PI_CLI_VERSION OPENCODE_CLI_VERSION CLAUDE_CLI_VERSION CODEX_CLI_VERSION
-#                       optional pinned versions; when set, the payload's
-#                       --version output must contain the pinned value
+#                       required expected versions; the payload's --version
+#                       output must resolve to an exact match
 #   GLIBC_LOADER        optional path to the nix closure's ld-linux loader;
 #                       used when the payload cannot exec natively (the build
 #                       stage is Alpine/musl and glibc binaries need /lib64)
@@ -27,6 +27,60 @@
 #   a shipped-but-broken payload is a defect, not a degraded state.
 set -eu
 JQ="${JQ_BIN:-jq}"
+SEMVER_SHAPE='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+SEMVER_CORE_RE='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+
+validate_semver() {
+    version="$1"
+    printf '%s\n' "${version}" | grep -Eq "${SEMVER_SHAPE}" || return 1
+
+    core="${version}"
+    case "${core}" in
+        *+*)
+            core="${core%%+*}"
+            ;;
+    esac
+    prerelease=""
+    case "${core}" in
+        *-*)
+            prerelease="${core#*-}"
+            core="${core%%-*}"
+            ;;
+    esac
+    printf '%s\n' "${core}" | grep -Eq "${SEMVER_CORE_RE}" || return 1
+
+    if [ -n "${prerelease}" ]; then
+        old_ifs="${IFS}"
+        IFS=.
+        set -- ${prerelease}
+        IFS="${old_ifs}"
+        for identifier in "$@"; do
+            case "${identifier}" in
+                *[!0-9]*) ;;
+                0|[1-9]*) ;;
+                *) return 1 ;;
+            esac
+        done
+    fi
+}
+
+# Extract and validate the first version-looking token. Keeping the whole
+# token before validation makes malformed values such as 1.2.3.4 or 1.2.3-01
+# fail closed instead of being truncated to a valid-looking prefix.
+extract_semver() {
+    candidate=""
+    for token in $(printf '%s\n' "$1" | grep -Eo '[0-9][0-9A-Za-z+.-]*' || true); do
+        case "${token}" in
+            *.*.*)
+                candidate="${token}"
+                validate_semver "${candidate}" || return 1
+                printf '%s\n' "${candidate}"
+                return 0
+                ;;
+        esac
+    done
+    return 1
+}
 
 # Run `--version` on a payload, falling back to the glibc loader when the
 # native exec fails (musl build stage without /lib64). The loader's own lib
@@ -114,6 +168,10 @@ for key in ${KEYS}; do
         echo "ERROR: harness '${key}' --version produced no output: ${payload}" >&2
         exit 2
     fi
+    if ! observed="$(extract_semver "${version_output}")"; then
+        echo "ERROR: harness '${key}' --version is not a valid semantic version: ${version_output}" >&2
+        exit 2
+    fi
     pinned=""
     case "${key}" in
         pi) pinned="${PI_CLI_VERSION:-}" ;;
@@ -121,13 +179,18 @@ for key in ${KEYS}; do
         claude) pinned="${CLAUDE_CLI_VERSION:-}" ;;
         codex) pinned="${CODEX_CLI_VERSION:-}" ;;
     esac
-    if [ -n "${pinned}" ] && ! printf '%s\n' "${version_output}" | grep -Fq "${pinned}"; then
-        echo "ERROR: harness '${key}' --version '${version_output}' does not contain pinned version '${pinned}'" >&2
+    if [ -z "${pinned}" ]; then
+        echo "ERROR: harness '${key}' has no pinned CLI version" >&2
         exit 2
     fi
-    # POSIX-only: no awk in the Alpine build stage. Trailing-token extraction
-    # covers both "pi 0.84.2" and bare "0.84.2" --version outputs.
-    observed="${version_output##* }"
+    if ! validate_semver "${pinned}"; then
+        echo "ERROR: harness '${key}' pinned version is not valid semantic version: ${pinned}" >&2
+        exit 2
+    fi
+    if [ "${observed}" != "${pinned}" ]; then
+        echo "ERROR: harness '${key}' observed version '${observed}' does not equal pinned version '${pinned}' (output: ${version_output})" >&2
+        exit 2
+    fi
     sha256="$(sha256sum "${payload}")"
     sha256="${sha256%% *}"
     size="$(wc -c < "${payload}" | tr -d ' ')"
