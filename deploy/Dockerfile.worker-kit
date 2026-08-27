@@ -113,8 +113,11 @@ RUN runtime_store="$(cat /tmp/runtime-store-path)" \
       /worker-kit/worker-entrypoint/harness/adapters/claude.sh \
       /worker-kit/worker-entrypoint/harness/adapters/codex.sh \
     && for harness in claude codex pi opencode; do cp /worker-kit/bridge-selfcheck.sh "/worker-kit/bridge-selfcheck-${harness}"; done \
+    && mkdir -p /nix \
+    && ln -s /worker-kit/nix/store /nix/store \
     && runtime_python="/worker-kit$(cat /tmp/runtime-store-path)/bin/python3" \
     && "${runtime_python}" /worker-kit/verify-kit-content.py --root /worker-kit --write-manifest \
+    && rm /nix/store \
     && test -d /worker-kit/nix/store \
     && test -s /worker-kit/manifest.json \
     && test -x /worker-kit/bridge-selfcheck-claude \

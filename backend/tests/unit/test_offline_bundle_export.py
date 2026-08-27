@@ -107,13 +107,14 @@ def test_offline_artifacts_are_excluded_from_docker_build_contexts():
     assert "deploy/codify-offline-bundle*.tar.gz" in root_ignore
 
 
-def test_worker_kit_export_omits_macos_appledouble_metadata():
+def test_worker_kit_export_does_not_materialize_linux_tree_on_host():
     repo_root = Path(__file__).resolve().parents[3]
     export_script = (repo_root / "deploy" / "worker-kit" / "export.sh").read_text(
         encoding="utf-8"
     )
 
-    assert 'COPYFILE_DISABLE=1 tar -C "${STAGING}" -czf "${ARCHIVE}"' in export_script
+    assert "export-archive.py" in export_script
+    assert 'tar -C "${STAGING}/build/worker-kit/" -xf -' not in export_script
 
 
 def test_export_images_script_creates_missing_output_directory():
@@ -623,6 +624,8 @@ def test_package_bundle_rejects_unsafe_kit_tar_members(
     "kind,expected",
     [
         ("safe", 0),
+        ("nix-store-absolute", 0),
+        ("nested-symlink", 0),
         ("root-relative-escape", 1),
         ("relative-escape", 1),
         ("missing", 1),
@@ -650,6 +653,33 @@ def test_validate_kit_archive_resolves_links_safely(tmp_path, kind, expected):
             symlink.type = tarfile.SYMTYPE
             symlink.linkname = "../a"
             output.addfile(symlink)
+        elif kind == "nix-store-absolute":
+            store_dir = tarfile.TarInfo(f"{root}/nix/store")
+            store_dir.type = tarfile.DIRTYPE
+            output.addfile(store_dir)
+            target = tarfile.TarInfo(f"{root}/nix/store/target")
+            target.size = 1
+            output.addfile(target, io.BytesIO(b"t"))
+            link = tarfile.TarInfo(f"{root}/nix/store/link")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "/nix/store/target"
+            output.addfile(link)
+        elif kind == "nested-symlink":
+            for name in (f"{root}/sub", f"{root}/sub/target"):
+                directory = tarfile.TarInfo(name)
+                directory.type = tarfile.DIRTYPE
+                output.addfile(directory)
+            target = tarfile.TarInfo(f"{root}/sub/target/file")
+            target.size = 1
+            output.addfile(target, io.BytesIO(b"t"))
+            directory_link = tarfile.TarInfo(f"{root}/sub/current")
+            directory_link.type = tarfile.SYMTYPE
+            directory_link.linkname = "target"
+            output.addfile(directory_link)
+            link = tarfile.TarInfo(f"{root}/sub/link")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "current/file"
+            output.addfile(link)
         elif kind == "root-relative-escape":
             link = tarfile.TarInfo(f"{root}/b")
             link.type = tarfile.LNKTYPE
@@ -679,6 +709,69 @@ def test_validate_kit_archive_resolves_links_safely(tmp_path, kind, expected):
         check=False,
     )
     assert result.returncode == expected, result.stderr
+
+
+def test_worker_kit_export_archive_stream_preserves_case_distinct_paths(tmp_path: Path):
+    repo_root = Path(__file__).resolve().parents[3]
+    exporter = repo_root / "deploy/worker-kit/export-archive.py"
+    validator = repo_root / "deploy/offline-bundle/scripts/validate-kit-archive.py"
+    source = tmp_path / "docker-copy.tar"
+    root_name = "0.6.0-linux-amd64-aaaaaaaaaaaa"
+    long_path = (
+        "./nix/store/"
+        "m6zl58rra824v4wjmy4fpr7524303d2b-codify-worker-kit-runtime/"
+        "etc/ssl/certs/ca-no-trust-rules-bundle.crt"
+    )
+    with tarfile.open(source, "w") as output:
+        for name in (
+            "nix",
+            "nix/store",
+            "nix/store/terminfo",
+            "nix/store/terminfo/P",
+            "nix/store/terminfo/p",
+            "nix/store/terminfo/w",
+        ):
+            directory = tarfile.TarInfo(name)
+            directory.type = tarfile.DIRTYPE
+            output.addfile(directory)
+        for name in ("nix/store/terminfo/P/pt100w", "nix/store/terminfo/p/pt100w"):
+            member = tarfile.TarInfo(name)
+            member.size = 1
+            output.addfile(member, io.BytesIO(b"t"))
+        long_member = tarfile.TarInfo(long_path)
+        long_member.size = 1
+        output.addfile(long_member, io.BytesIO(b"c"))
+        symlink = tarfile.TarInfo("nix/store/terminfo/w/wrenw")
+        symlink.type = tarfile.SYMTYPE
+        symlink.linkname = "../p/pt100w"
+        output.addfile(symlink)
+
+    archive = tmp_path / "kit.tar.gz"
+    with source.open("rb") as stream:
+        result = subprocess.run(
+            [sys.executable, str(exporter), str(archive), root_name],
+            stdin=stream,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    assert result.returncode == 0, result.stderr
+    with tarfile.open(archive, "r:gz") as output:
+        names = set(output.getnames())
+        assert f"{root_name}/nix/store/terminfo/P/pt100w" in names
+        assert f"{root_name}/nix/store/terminfo/p/pt100w" in names
+        assert f"{root_name}/{long_path[2:]}" in names
+        assert not any(name.startswith("./") for name in names)
+        wrenw = output.getmember(f"{root_name}/nix/store/terminfo/w/wrenw")
+        assert wrenw.linkname == "../p/pt100w"
+
+    result = subprocess.run(
+        ["python3", str(validator), str(archive), root_name],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.parametrize("forward", [False, True])

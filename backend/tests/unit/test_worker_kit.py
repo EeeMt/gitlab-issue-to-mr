@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -868,6 +869,14 @@ def test_worker_kit_release_records_all_four_harness_entries_and_selfchecks():
     assert "KIT_CLI_SELECTION" in kit_dockerfile
     assert "not_selected" in kit_dockerfile
     assert "missing_payload" in kit_dockerfile
+    # The artifact stage runs the Nix-provided Python verifier on Alpine; the
+    # closure's symlinks target /nix/store, so expose the copied closure there
+    # before invoking it.
+    assert "ln -s /worker-kit/nix/store /nix/store" in kit_dockerfile
+    # Keep the artifact-only alias out of the final runtime image.
+    assert kit_dockerfile.index("ln -s /worker-kit/nix/store /nix/store") < kit_dockerfile.index(
+        "rm /nix/store"
+    )
     for build_arg in (
         "PI_CLI_SHA256",
         "OPENCODE_CLI_SHA256",
@@ -924,6 +933,85 @@ def test_worker_kit_present_manifest_path_evaluates_to_kit_executable(tmp_path):
     assert 'test -x "/worker-kit/$(jq -r --arg k "${key}"' in dockerfile
 
 
+def test_content_verifier_accepts_nix_store_mount_symlinks_and_rejects_escape(tmp_path):
+    repo_root = Path(__file__).resolve().parents[3]
+    verifier = repo_root / "deploy/worker-kit/verify-kit-content.py"
+    kit = tmp_path / "kit"
+    store = kit / "nix/store"
+    store.mkdir(parents=True)
+    (store / "target").write_bytes(b"target\n")
+    (store / "link").symlink_to("/nix/store/target")
+    (kit / "manifest.json").write_text(
+        '{"schema_version":2,"kit_version":"0.1.0","platform":"linux/amd64"}',
+        encoding="utf-8",
+    )
+
+    written = subprocess.run(
+        [sys.executable, str(verifier), "--root", str(kit), "--write-manifest"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert written.returncode == 0, written.stderr
+    entries = json.loads((kit / "manifest.json").read_text(encoding="utf-8"))["content_inventory"]
+    assert {entry["path"]: entry for entry in entries}["nix/store/link"] == {
+        "kind": "symlink",
+        "path": "nix/store/link",
+        "target": "/nix/store/target",
+    }
+
+    verified = subprocess.run(
+        [sys.executable, str(verifier), "--root", str(kit)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert verified.returncode == 0, verified.stderr
+
+    manifest_bytes = (kit / "manifest.json").read_bytes()
+    root_name = f"0.1.0-linux-amd64-{hashlib.sha256(manifest_bytes).hexdigest()[:12]}"
+    archive = tmp_path / "kit.tar.gz"
+    with tarfile.open(archive, "w:gz") as output:
+        output.add(kit, arcname=root_name)
+    archive_verified = subprocess.run(
+        [
+            sys.executable,
+            str(verifier),
+            "--archive",
+            str(archive),
+            "--root-name",
+            root_name,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert archive_verified.returncode == 0, archive_verified.stderr
+
+    (store / "escape").symlink_to("/nix/store/../escape")
+    rejected = subprocess.run(
+        [sys.executable, str(verifier), "--root", str(kit)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert rejected.returncode != 0
+    assert "unsafe Worker Kit symlink target" in rejected.stderr
+
+    cycle_a = store / "cycle-a"
+    cycle_b = store / "cycle-b"
+    cycle_a.symlink_to("cycle-b")
+    cycle_b.symlink_to("cycle-a")
+    cycle_rejected = subprocess.run(
+        [sys.executable, str(verifier), "--root", str(kit)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert cycle_rejected.returncode != 0
+    assert "symlink cycle" in cycle_rejected.stderr
+
+
 def test_release_helpers_export_an_immutable_content_addressed_kit_archive():
     root = Path(__file__).resolve().parents[3]
     makefile = (root / "Makefile").read_text()
@@ -936,6 +1024,8 @@ def test_release_helpers_export_an_immutable_content_addressed_kit_archive():
     assert "WORKER_KIT_CLI_SELECTION" in helper
     assert "codify-worker-kit-" in helper
     assert "MANIFEST_DIGEST" in helper
+    assert "export-archive.py" in helper
+    assert 'tar -C "${STAGING}/build/worker-kit/" -xf -' not in helper
     assert "already exists" in helper
     assert "CODIFY_WORKER_CLI_ARTIFACT_MANIFEST" not in deployment
     assert "worker-kit-export" in deployment

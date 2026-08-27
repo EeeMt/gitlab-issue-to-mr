@@ -22,6 +22,7 @@ from pathlib import Path
 
 EXCLUDED_PATHS = frozenset({"manifest.json", ".install-receipt.json", ".smoke-passed"})
 KIT_CONTAINER_PREFIX = "/opt/codify-kit/"
+NIX_STORE_PREFIX = "/nix/store"
 
 
 def _canonical_json(value: object) -> bytes:
@@ -71,32 +72,80 @@ def _file_entry(root: Path, path: Path, relative: str) -> dict:
 
 
 def _symlink_target_relative(relative: str, target: object) -> str:
-    if not isinstance(target, str) or not target or target.startswith("/") or "\\" in target:
+    if not isinstance(target, str) or not target or "\\" in target:
+        raise ValueError(f"unsafe Worker Kit symlink target for {relative!r}")
+    if target == NIX_STORE_PREFIX:
+        return "nix/store"
+    if target.startswith(f"{NIX_STORE_PREFIX}/"):
+        suffix = target[len(NIX_STORE_PREFIX) + 1 :]
+        if not suffix or any(part in {"", ".", ".."} for part in suffix.split("/")):
+            raise ValueError(f"unsafe Worker Kit symlink target for {relative!r}")
+        return _relative_path(f"nix/store/{suffix}")
+    if target.startswith("/"):
         raise ValueError(f"unsafe Worker Kit symlink target for {relative!r}")
     resolved = posixpath.normpath(posixpath.join(posixpath.dirname(relative), target))
     return _relative_path(resolved)
 
 
-def _validate_directory_symlinks(root: Path, entries: list[dict]) -> None:
+def _validate_directory_symlinks(entries: list[dict], member_paths: set[str]) -> None:
+    symlink_targets = {
+        entry["path"]: entry["target"]
+        for entry in entries
+        if entry["kind"] == "symlink"
+    }
     for entry in entries:
         if entry["kind"] != "symlink":
             continue
         relative = entry["path"]
-        _symlink_target_relative(relative, entry["target"])
-        target = (root / relative).resolve(strict=True)
+        target_relative = _symlink_target_relative(relative, entry["target"])
+        # Nix closure links are absolute at runtime (/nix/store/...), while
+        # the archive stores that same closure below the Kit's nix/store
+        # directory and mounts it separately at /nix/store. Validate the
+        # logical in-Kit target without resolving through the host filesystem.
         try:
-            target.relative_to(root)
+            _resolve_archive_relative_path(target_relative, symlink_targets, member_paths)
         except ValueError as exc:
-            raise ValueError(f"Worker Kit symlink escapes its root: {relative!r}") from exc
+            raise ValueError(f"Worker Kit symlink target is invalid: {relative!r}: {exc}") from exc
+
+
+def _resolve_archive_relative_path(
+    path: str,
+    symlink_targets: dict[str, str],
+    member_paths: set[str],
+    *,
+    follow_final_symlink: bool = True,
+) -> str:
+    pending = path.split("/")
+    resolved: list[str] = []
+    visited: set[str] = set()
+    while pending:
+        resolved.append(pending.pop(0))
+        candidate = "/".join(resolved)
+        if candidate not in symlink_targets or (pending == [] and not follow_final_symlink):
+            continue
+        if candidate in visited:
+            raise ValueError(f"Worker Kit archive symlink cycle at {candidate!r}")
+        visited.add(candidate)
+        nested = _symlink_target_relative(candidate, symlink_targets[candidate])
+        resolved = []
+        pending = nested.split("/") + pending
+    candidate = "/".join(resolved)
+    if candidate not in member_paths:
+        raise ValueError(f"Worker Kit archive symlink target is absent: {path!r}")
+    return candidate
 
 
 def _validate_archive_symlinks(entries: list[dict], member_paths: set[str]) -> None:
+    symlink_targets = {
+        entry["path"]: entry["target"]
+        for entry in entries
+        if entry["kind"] == "symlink"
+    }
     for entry in entries:
         if entry["kind"] != "symlink":
             continue
         target = _symlink_target_relative(entry["path"], entry["target"])
-        if target not in member_paths:
-            raise ValueError(f"Worker Kit symlink target is absent: {entry['path']!r}")
+        _resolve_archive_relative_path(target, symlink_targets, member_paths)
 
 
 def _manifest_relative_path(path: object) -> str:
@@ -144,6 +193,7 @@ def directory_inventory(root: Path) -> list[dict]:
     """Return sorted content entries for all identity-bearing Kit files."""
     root = root.resolve()
     entries: list[dict] = []
+    member_paths: set[str] = set()
 
     def visit(directory: Path, prefix: str = "") -> None:
         with os.scandir(directory) as scan:
@@ -152,15 +202,17 @@ def directory_inventory(root: Path) -> list[dict]:
             relative = f"{prefix}/{child.name}" if prefix else child.name
             if relative in EXCLUDED_PATHS:
                 continue
+            relative = _relative_path(relative)
+            member_paths.add(relative)
             child_path = Path(child.path)
             child_stat = child_path.lstat()
             if stat.S_ISDIR(child_stat.st_mode):
                 visit(child_path, relative)
             else:
-                entries.append(_file_entry(root, child_path, _relative_path(relative)))
+                entries.append(_file_entry(root, child_path, relative))
 
     visit(root)
-    _validate_directory_symlinks(root, entries)
+    _validate_directory_symlinks(entries, member_paths)
     return sorted(entries, key=lambda item: item["path"])
 
 
@@ -178,9 +230,18 @@ def _archive_relative(name: str, root_name: str) -> str | None:
 
 
 def _archive_link_target(relative: str, target: object, root_name: str) -> str:
-    if not isinstance(target, str) or not target or target.startswith("/") or "\\" in target:
+    if not isinstance(target, str) or not target or "\\" in target:
         raise ValueError(f"unsafe Worker Kit archive link target: {relative!r}")
-    if target == root_name or target.startswith(f"{root_name}/"):
+    if target == NIX_STORE_PREFIX:
+        candidate = "nix/store"
+    elif target.startswith(f"{NIX_STORE_PREFIX}/"):
+        suffix = target[len(NIX_STORE_PREFIX) + 1 :]
+        if not suffix or any(part in {"", ".", ".."} for part in suffix.split("/")):
+            raise ValueError(f"unsafe Worker Kit archive link target: {relative!r}")
+        candidate = f"nix/store/{suffix}"
+    elif target.startswith("/"):
+        raise ValueError(f"unsafe Worker Kit archive link target: {relative!r}")
+    elif target == root_name or target.startswith(f"{root_name}/"):
         candidate = target[len(root_name) :].lstrip("/")
     else:
         candidate = posixpath.join(posixpath.dirname(relative), target)
@@ -229,6 +290,19 @@ def archive_inventory(archive_path: Path, root_name: str) -> list[dict]:
             }
             entries.append(entry)
             file_entries[relative] = entry
+    symlink_targets = {
+        entry["path"]: entry["target"]
+        for entry in entries
+        if entry["kind"] == "symlink"
+    }
+    for relative, target in list(hardlink_targets.items()):
+        hardlink_targets[relative] = _resolve_archive_relative_path(
+            target,
+            symlink_targets,
+            member_paths,
+            follow_final_symlink=False,
+        )
+
     def resolve_hardlink(relative: str, visiting: set[str]) -> dict:
         target_entry = file_entries.get(relative)
         if target_entry is not None:

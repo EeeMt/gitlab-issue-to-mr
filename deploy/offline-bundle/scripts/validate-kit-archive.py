@@ -7,6 +7,8 @@ import posixpath
 import sys
 import tarfile
 
+NIX_STORE_PREFIX = "/nix/store"
+
 
 def fail(message: str) -> int:
     print(f"Worker Kit archive is unsafe: {message}", file=sys.stderr)
@@ -26,23 +28,30 @@ def validate(archive: str, root: str) -> int:
     names = set()
     by_name = {member.name: member for member in members}
 
-    def link_target(member: tarfile.TarInfo) -> str:
-        target = member.linkname
-        if target.startswith("/") or "\\" in target:
-            raise ValueError(f"link escapes archive root: {member.name!r}")
-        if target == root or target.startswith(root + "/"):
+    def normalize_link_target(member_name: str, target: str) -> str:
+        if not target or "\\" in target:
+            raise ValueError(f"link escapes archive root: {member_name!r}")
+        if target == NIX_STORE_PREFIX:
+            resolved = f"{root}/nix/store"
+        elif target.startswith(f"{NIX_STORE_PREFIX}/"):
+            suffix = target[len(NIX_STORE_PREFIX) + 1 :]
+            if not suffix or any(part in {"", ".", ".."} for part in suffix.split("/")):
+                raise ValueError(f"link escapes archive root: {member_name!r}")
+            resolved = f"{root}/nix/store/{suffix}"
+        elif target.startswith("/"):
+            raise ValueError(f"link escapes archive root: {member_name!r}")
+        elif target == root or target.startswith(root + "/"):
             resolved = posixpath.normpath(target)
         else:
             resolved = posixpath.normpath(
-                posixpath.join(posixpath.dirname(member.name), target)
+                posixpath.join(posixpath.dirname(member_name), target)
             )
         if resolved != root and not resolved.startswith(root + "/"):
-            raise ValueError(f"link escapes archive root: {member.name!r}")
-        if resolved not in by_name:
-            raise ValueError(f"link target is absent: {member.name!r}")
+            raise ValueError(f"link escapes archive root: {member_name!r}")
         return resolved
 
-    links: dict[str, str] = {}
+    symlink_targets: dict[str, str] = {}
+    hardlink_targets: dict[str, str] = {}
     for member in members:
         name = member.name
         if name in names:
@@ -59,33 +68,59 @@ def validate(archive: str, root: str) -> int:
             return fail("expected root is not a directory")
         if member.issym() or member.islnk():
             try:
-                links[name] = link_target(member)
+                if member.issym():
+                    symlink_targets[name] = member.linkname
+                else:
+                    hardlink_targets[name] = member.linkname
+                normalize_link_target(name, member.linkname)
             except ValueError as exc:
                 return fail(str(exc))
 
-    visiting: set[str] = set()
-    checked: set[str] = set()
+    def resolve_path(
+        path: str,
+        *,
+        follow_final_symlink: bool,
+        visited: set[str] | None = None,
+    ) -> str:
+        pending = path.split("/")
+        resolved: list[str] = []
+        visited = set() if visited is None else visited
+        while pending:
+            resolved.append(pending.pop(0))
+            candidate = "/".join(resolved)
+            if candidate not in symlink_targets or (
+                not pending and not follow_final_symlink
+            ):
+                continue
+            if candidate in visited:
+                raise ValueError(f"cyclic symlink chain at {candidate!r}")
+            visited.add(candidate)
+            nested_path = normalize_link_target(candidate, symlink_targets[candidate])
+            resolved = []
+            pending = nested_path.split("/") + pending
+        candidate = "/".join(resolved)
+        if candidate not in by_name:
+            raise ValueError(f"link target is absent: {path!r}")
+        return candidate
 
-    def check_link(name: str) -> bool:
-        if name in checked:
-            return True
-        if name in visiting:
-            return False
-        visiting.add(name)
-        target = links.get(name)
-        if target is not None:
-            target_member = by_name[target]
-            if by_name[name].islnk() and not target_member.isfile():
-                return False
-            if target in links and not check_link(target):
-                return False
-        visiting.remove(name)
-        checked.add(name)
-        return True
-
-    for name in links:
-        if not check_link(name):
-            return fail(f"cyclic or invalid link chain at {name!r}")
+    for name, target in symlink_targets.items():
+        try:
+            resolve_path(
+                normalize_link_target(name, target),
+                follow_final_symlink=True,
+            )
+        except ValueError as exc:
+            return fail(str(exc))
+    for name, target in hardlink_targets.items():
+        try:
+            resolved = resolve_path(
+                normalize_link_target(name, target),
+                follow_final_symlink=False,
+            )
+        except ValueError as exc:
+            return fail(str(exc))
+        if not by_name[resolved].isfile():
+            return fail(f"hard-link target is not a regular file: {name!r}")
     return 0
 
 

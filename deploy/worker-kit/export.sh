@@ -7,7 +7,6 @@ PLATFORM="${WORKER_KIT_PLATFORM:-linux/amd64}"
 ARCH="${PLATFORM#linux/}"
 SELECTION="${WORKER_KIT_CLI_SELECTION:-pi,opencode}"
 OUTPUT_DIR="${WORKER_KIT_OUTPUT_DIR:-${PROJECT_ROOT}/deploy/offline-bundle/kits}"
-STAGING=""
 cid=""
 
 # Per-key staged payload layout: <source path under deploy/worker-cli/> ->
@@ -33,10 +32,6 @@ cli_rel_for() {
 cleanup() {
     if [[ -n "${cid}" ]]; then
         docker rm "${cid}" >/dev/null 2>&1 || true
-    fi
-    if [[ -n "${STAGING}" ]]; then
-        chmod -R u+w "${STAGING}" 2>/dev/null || true
-        rm -rf "${STAGING}"
     fi
     rm -rf "${PROJECT_ROOT}/deploy/worker-cli/kit-staging"
 }
@@ -172,8 +167,6 @@ for key in pi opencode claude codex; do
     fi
 done
 
-STAGING="$(mktemp -d "${OUTPUT_DIR}/.build-staging.XXXXXX")"
-
 IMAGE_TAG="codify-worker-kit-export:${VERSION}-${ARCH}"
 docker build \
     --platform "${PLATFORM}" \
@@ -195,16 +188,12 @@ if [ -e "${ARCHIVE}" ]; then
     exit 2
 fi
 
-mkdir -p "${STAGING}/build/worker-kit"
-# Stream through tar so read-only Nix store directory modes are applied after children exist.
-docker cp "${cid}:/worker-kit/." - | tar -C "${STAGING}/build/worker-kit/" -xf -
+# Keep the Linux Kit tree as a tar stream until it is inside the final archive.
+# Materializing it on macOS can merge case-distinct paths such as Nix's
+# terminfo/P and terminfo/p directories on a case-insensitive filesystem.
+docker cp "${cid}:/worker-kit/." - | python3 "${PROJECT_ROOT}/deploy/worker-kit/export-archive.py" "${ARCHIVE}" "${KIT_NAME}"
 docker rm "${cid}"
 cid=""
-
-mkdir -p "${STAGING}/${KIT_NAME}"
-cp -a "${STAGING}/build/worker-kit/." "${STAGING}/${KIT_NAME}/"
-# Do not encode macOS extended attributes as AppleDouble files in Linux kits.
-COPYFILE_DISABLE=1 tar -C "${STAGING}" -czf "${ARCHIVE}" "${KIT_NAME}"
 
 if command -v sha256sum >/dev/null 2>&1; then
     (cd "${OUTPUT_DIR}" && sha256sum "$(basename "${ARCHIVE}")") > "${ARCHIVE}.sha256"
