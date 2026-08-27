@@ -2,13 +2,14 @@
 
 **更新：** 2026-08-27
 
-**源码审计基线：** `b54f3267`（当前本地提交）
+**源码审计基线：** `90a2593d`（当前本地提交）
 
 **文档复核基线：** `b54f3267`（本次更新前的本地 `HEAD`）
 
-**状态：** Internal Preview；Kit-owned 基础改造和 Pi dev 验证已落地，但 L2 仍为红灯：S1
-源码修复尚未完成完整真实构建矩阵验收，S5–S8 仍有已确认缺口，S9 尚未重建完整证据。修复、重建制品
-并补齐 L3–L6 证据前，保持 `dual_canary`，不切 Pi 默认，不启用 `v2_only`。
+**状态：** Internal Preview；Kit-owned 基础改造、S6–S8 源码 correction 和 Pi/OpenCode 的
+`linux/amd64` dev Kit smoke 已落地，但 L2 仍为红灯：S1 尚未完成完整真实构建矩阵，S5 availability
+catalog 和 S9 完整证据仍未闭环。补齐 S1/S5/S9、重建制品并补齐 L3–L6 证据前，保持 `dual_canary`，
+不切 Pi 默认，不启用 `v2_only`。
 
 本文只维护当前剩余工作和退出条件。已完成且已验收的工作不再保留为待办流水账；架构约束以
 [Open-Harness V2 架构方案](../../architecture/open-harness-v2.md) 为准，发布操作以
@@ -51,9 +52,11 @@ V1 和 V2 双跑，也不是复制流量、影子执行或自动 A/B：
 `host_mount` 只保留为显式、逐 Harness 授权的 break-glass 来源。它可以验证执行链，不得替代
 Kit-owned present CLI 的 release evidence。
 
-协议现状必须单独标记：架构目标已经要求 Pi/OpenCode 同时支持 `anthropic_messages`、
-`openai_responses` 和 `openai_chat_completions`；当前 Runtime manifest、Backend matrix 和两个 Adapter
-仍只接入 `anthropic_messages`。这是待实现合同，不是已验收能力。
+协议现状必须单独标记：源码 correction 已让 Pi/OpenCode 的 Runtime manifest、Backend upper bound、
+Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一致声明并处理
+`anthropic_messages`、`openai_responses`、`openai_chat_completions`；Claude 仍只允许 Anthropic，Codex
+仍只允许 Responses。该状态只表示源码退出条件，不等于三协议真实 Endpoint/Task、完整 Kit 矩阵或发布
+验收已经完成。
 
 ## 2. Source correction：当前必须修复
 
@@ -93,32 +96,38 @@ Kit-owned present CLI 的 release evidence。
   Bundle Adapter 能力。退出条件：新建 Task 选择器和历史 Task catalog 都能区分 enabled、disabled、
   present、unavailable，并显示稳定、脱敏的 reason；不得泄露 host path 或敏感 evidence。
 
-- [ ] **S6 / P1 — 扩展中央 Harness × Model Protocol 合同。**
+- [x] **S6 / P1 — 扩展中央 Harness × Model Protocol 合同。**
   扩展编译期 `HARNESS_PROTOCOL_MATRIX` upper bound，并让 Runtime manifest、catalog、Task
   create/retry/resume、Profile verify、Worker 启动和前端 Provider 筛选一致声明：Pi/OpenCode 支持
   三种协议，Claude 只支持 `anthropic_messages`，Codex 只支持 `openai_responses`。Runtime Bundle
   manifest 是唯一能力源；
-  Backend/Frontend 不得另复制会漂移的业务矩阵。AI Provider 新建/编辑 UI 必须重新开放合法的
-  `openai_chat_completions` Endpoint。未知或未声明组合稳定 fail closed。
+  Backend/Frontend 不得另复制会漂移的业务矩阵。AI Provider 新建/编辑 UI 已重新开放合法的
+  `openai_chat_completions` Endpoint。`90a2593d` 完成源码退出条件；历史 Bundle 的协议子集、真实
+  Endpoint Conformance 和完整 L2 重跑仍归 S9/L4。
 
-- [ ] **S7 / P1 — 实现 Pi 三协议 Adapter。**
+- [x] **S7 / P1 — 实现 Pi 三协议 Adapter。**
   按冻结 Snapshot 将 `anthropic_messages`、`openai_responses`、`openai_chat_completions` 分别映射为 Pi
   `anthropic-messages`、`openai-responses`、`openai-completions`；生成 Task-private Provider 配置，
-  使用协议对应的 model/Base URL/credential/`compat_profile`，禁止读取已有用户配置、按 URL 猜测、
-  跨协议回退或转换。三条路径都要保留 RPC Session、steering/follow-up、usage 和 terminal 语义。
+  使用协议对应的 model/Base URL/credential，禁止读取已有用户配置、按 URL 猜测、跨协议回退或转换。
+  三条路径都保留 RPC Session、steering/follow-up、usage 和 terminal 语义；`90a2593d` 的源码和聚焦
+  测试满足本项源码退出条件，真实三协议 Task 仍待 R6/R7。
 
-- [ ] **S8 / P1 — 实现 OpenCode 三协议 Adapter。**
+- [x] **S8 / P1 — 实现 OpenCode 三协议 Adapter。**
   Task-private `opencode.json` 分别使用 `@ai-sdk/anthropic`、`@ai-sdk/openai`、
   `@ai-sdk/openai-compatible`；credential 仅通过 Task-private 环境变量引用，不内联到配置/日志/归档。
   Bridge 创建和恢复 Session 时固定 Provider/model pair，三条路径都要归一化事件、tool/reasoning、usage、
-  Abort、settled 和 terminal；禁止加载用户级 auth/Provider 或仓库配置覆盖 Snapshot。
+  Abort、settled 和 terminal；禁止加载用户级 auth/Provider 或仓库配置覆盖 Snapshot。源码退出条件和
+  固定 OpenCode 1.18.19 的真实隔离 smoke 已在本轮完成；真实三协议 Task、完整 Conformance 和 Host
+  证据仍待 R6/R7。
 
 - [ ] **S9 — 补齐测试并重新建立 L2 证据。**
   至少新增：present payload 生成器/真实 build、整 Kit tamper、V1 lifecycle、并发 task-scoped pump、
   current/frozen catalog availability，以及 Pi/OpenCode 三协议的 manifest/Backend/Adapter/Frontend 矩阵测试；
   每条协议覆盖 config 生成、credential 不落盘、tool call、reasoning、usage、取消、错误和禁止回退。
-  修复 scheduler gate 测试中的未 await `AsyncMock` warning，然后重跑 backend unit、mock E2E、真实
-  PostgreSQL 并发/migration、frontend type-check/build/vitest，记录精确命令、结果和 source commit。
+  本轮已新增协议矩阵、冻结 Endpoint、Provider drift、Task-private OpenCode config/Skill discovery、
+  current/frozen catalog 和 fail-closed 前端测试；仍需修复 scheduler gate 的未 await `AsyncMock` warning，
+  在可用临时目录重跑全量 backend unit、mock E2E、真实 PostgreSQL 并发/migration、frontend type-check/
+  build/vitest，记录精确命令、结果和 source commit。
 
 ## 3. Release、L3 与 L4
 
@@ -127,8 +136,8 @@ Kit-owned present CLI 的 release evidence。
 | 层级 | 证明内容 | 当前状态 |
 | --- | --- | --- |
 | L1 | 架构、schema、Runbook 与安全边界一致 | 目标合同已修订；实现和证据不得冒充完成 |
-| L2 | 源码、单测、集成测试和并发合同 | 未通过；S1 待完整真实构建矩阵，S5–S8 有已知缺口，S9 待重跑 |
-| L3 | 同一不可变 image + Kit + Bundle 的构建、安装、DB 绑定与 digest 对账 | 未完成；dev Kit 0.5.0 只有 Pi present，且整 Kit identity 未闭环 |
+| L2 | 源码、单测、集成测试和并发合同 | 未通过；S1 待完整真实构建矩阵，S5 availability catalog 和 S9 证据待闭环 |
+| L3 | 同一不可变 image + Kit + Bundle 的构建、安装、DB 绑定与 digest 对账 | 未完成；本轮仅有远端 `linux/amd64` `pi+opencode` Kit/archive smoke，尚未完成完整矩阵、Host 安装和 DB-bound composition |
 | L4 | 真实 Linux Host、remote Docker、Provider、仓库和真实 Task/MR | 部分完成；仅覆盖 Pi×Anthropic 与 Codex×Responses 的 dev Task，非完整发布矩阵 |
 | L5 | 四 Harness canary、Pi 20-task 与质量/性能验收 | 未完成 |
 | L6 | 维护窗口 hard cut、Pi 默认和 `v2_only` | 未执行 |
@@ -180,8 +189,8 @@ L2 重新通过后，按顺序完成：
   `TaskView` 共 227 tests passed，`vue-tsc --noEmit` 通过。聚焦 Ruff 因
   `task_harness_commands.py` import 顺序失败。PG skip、warning 和 Ruff failure 都必须在 S9 清零，
   历史绿灯不能替代本轮重跑。
-- **再次确认的源码缺口：** S1 完整真实构建/Host 证据、S5 availability catalog 以及 S6–S8
-  三协议合同/Adapter 仍未闭环；S2–S4 已在本轮工作区修复并通过聚焦证据。本轮未把任何一项误
+- **再次确认的源码缺口：** S1 完整真实构建/Host 证据、S5 availability catalog 和 S9 完整重跑
+  仍未闭环；S2–S4、S6–S8 已在本轮源码 correction 中完成并通过聚焦证据。本轮未把任何一项误
   标为 release 完成。
 - **本轮 S3/S4 工作区证据：** `backend/.venv/bin/python -m pytest
   backend/tests/unit/test_worker_command_pump.py -q` 在 PostgreSQL 测试库中 `20 passed`，包含同一
@@ -202,8 +211,33 @@ L2 重新通过后，按顺序完成：
   `bash -n` 与 `git diff --check` 通过。Codex 单项继续构建时远端 Docker 因 `No space left on device`
   停止；清理广泛 BuildKit cache 未获授权，因此未伪造 Codex/子集/四项或 Host 安装证据。
 - **已知边界：** S1 仍缺完整选择矩阵、Linux Host 安装及真实 Kit + `nix/store` bind-mount；S5
-  availability catalog 和三协议仍缺 S6–S8；Pi `--exclude-tools` 在 rpc 模式触发 pi 0.84.2 自身 bug
-  （无输出退出），未采用工具禁用，依赖 delivery 修复。
+  availability catalog 和 Pi/OpenCode 三协议真实 Endpoint/Task 仍未完成；Pi `--exclude-tools` 在 rpc
+  模式触发 pi 0.84.2 自身 bug（无输出退出），未采用工具禁用，依赖 delivery 修复。
+
+### 本轮 S6–S8 源码与远端 Kit 证据（2026-08-27）
+
+- **源码 correction（commit `90a2593d`）：** Bundle manifest 成为已绑定 Task 的协议能力权威；Pi/OpenCode
+  三协议映射、Claude/Codex 限制、Provider UI、current/frozen catalog、Task snapshot endpoint
+  immutability、credential 不后取和 OpenCode Task-private config/Skill discovery 均已接入。两轮独立
+  subagent review 的最终结论均为 **P0=0、P1=0**；第二轮仅保留 P2（真实 OpenAI protocol Task smoke 和
+  malformed `max_turns` 单测建议）。
+- **远端 Kit smoke：** 远端 Docker context `remote`（`192.168.50.129`，`linux/amd64`）用源码构建
+  `WORKER_KIT_VERSION=0.6.1`、`WORKER_KIT_CLI_SELECTION=pi,opencode`，归档
+  `/private/tmp/open-harness-v2-s6-kits/codify-worker-kit-0.6.1-linux-amd64-bdc3408c86f6.tar.gz`，
+  archive SHA-256 `7096c78d6f75d7dc934e94daf2783d62c5b775ae77bc2fd1bfd18a6d697a54f4`，Kit manifest
+  identity `bdc3408c86f603401a42191318311107f45c59eb81a8ec411be9c6502ecb5d6e`；构建 image digest
+  `sha256:772e331f68204ddf434d8aefcfa9929e4a52bdcee0be629e29e0a2b888348675`。`export.sh`、archive content
+  verifier 和 runtime smoke 均通过，证明固定 Pi 0.84.2/OpenCode 1.18.19 的当前 `pi+opencode` Kit
+  payload；不证明 Codex/Claude、显式子集、四项 Kit、Host 安装或 arm64。
+- **OpenCode boundary probe：** 固定 1.18.19 对恶意 project `opencode.json`、`.opencode/plugins`、
+  project/global Claude-compatible Skills 的 probe 在 `OPENCODE_DISABLE_PROJECT_CONFIG=true`、
+  `OPENCODE_DISABLE_EXTERNAL_SKILLS=1`、`OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1` 和 `--pure` 下未加载
+  attacker provider/permission/plugin；Task-managed Skill 从 `OPENCODE_CONFIG_DIR/skills/<name>/SKILL.md`
+  被 `debug skill --pure` 发现。该 probe 是隔离证据，不替代真实模型调用/Task Conformance。
+- **本轮验证：** Backend 协议/Bundle/Adapter/Runtime 聚焦集 `392 passed`，CI auto-repair
+  `20 passed`，Frontend `120 passed`，`npm run build`、Ruff、`bash -n` 和 `git diff --check` 通过。
+  全量 unit 曾因 pytest 临时目录累计约 44GB 导致 12 个 setup errors，并出现 3 个受磁盘影响的失败；
+  清理临时目录后 3 个失败用例分别重跑均通过，因此全量 unit 的清洁重跑仍归 S9，不能写成 L2 green。
 
 ## 4. L5 Acceptance
 
