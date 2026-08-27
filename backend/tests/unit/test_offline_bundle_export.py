@@ -117,6 +117,86 @@ def test_worker_kit_export_does_not_materialize_linux_tree_on_host():
     assert 'tar -C "${STAGING}/build/worker-kit/" -xf -' not in export_script
 
 
+def test_worker_kit_export_none_selection_stages_placeholder_and_passes_sentinel():
+    repo_root = Path(__file__).resolve().parents[3]
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        worker_kit_dir = root / "deploy" / "worker-kit"
+        worker_kit_dir.mkdir(parents=True)
+        shutil.copy2(repo_root / "deploy/worker-kit/export.sh", worker_kit_dir / "export.sh")
+        shutil.copy2(
+            repo_root / "deploy/worker-kit/export-archive.py",
+            worker_kit_dir / "export-archive.py",
+        )
+        (root / "deploy" / "Dockerfile.worker-kit").write_text("FROM scratch\n", encoding="utf-8")
+        (root / "deploy" / "worker-cli").mkdir()
+
+        manifest = root / "fake-manifest.json"
+        manifest.write_text('{"harness_inventory":{}}\n', encoding="utf-8")
+        fake_kit = root / "fake-kit"
+        fake_kit.mkdir()
+        shutil.copy2(manifest, fake_kit / "manifest.json")
+        (fake_kit / ".keep").write_text("", encoding="utf-8")
+
+        fake_bin = root / "bin"
+        fake_bin.mkdir()
+        docker_args_log = root / "docker-args.log"
+        docker = fake_bin / "docker"
+        docker.write_text(
+            "#!/bin/sh\n"
+            "set -eu\n"
+            "printf '%s\\n' \"$@\" >> \"$FAKE_DOCKER_ARGS_LOG\"\n"
+            "case \"${1:-}\" in\n"
+            "  buildx) exit 0 ;;\n"
+            "  build)\n"
+            "    test -f \"$FAKE_DOCKER_ROOT/deploy/worker-cli/kit-staging/.keep\"\n"
+            "    exit 0\n"
+            "    ;;\n"
+            "  create) printf '%s\\n' fake-cid ;;\n"
+            "  run) cat \"$FAKE_DOCKER_MANIFEST\" ;;\n"
+            "  cp) tar -C \"$FAKE_DOCKER_KIT\" -cf - . ;;\n"
+            "  rm) exit 0 ;;\n"
+            "  *) exit 2 ;;\n"
+            "esac\n",
+            encoding="utf-8",
+        )
+        docker.chmod(0o755)
+
+        output_dir = root / "out"
+        env = {
+            **os.environ,
+            "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+            "FAKE_DOCKER_ARGS_LOG": str(docker_args_log),
+            "FAKE_DOCKER_ROOT": str(root),
+            "FAKE_DOCKER_MANIFEST": str(manifest),
+            "FAKE_DOCKER_KIT": str(fake_kit),
+            "WORKER_KIT_VERSION": "test-none",
+            "WORKER_KIT_PLATFORM": "linux/amd64",
+            "WORKER_KIT_CLI_SELECTION": "none",
+            "WORKER_KIT_OUTPUT_DIR": str(output_dir),
+        }
+
+        result = subprocess.run(
+            [str(worker_kit_dir / "export.sh")],
+            cwd=root,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr
+        docker_args = docker_args_log.read_text(encoding="utf-8").splitlines()
+        assert "KIT_CLI_SELECTION=none" in docker_args
+        archives = list(output_dir.glob("codify-worker-kit-*.tar.gz"))
+        assert len(archives) == 1
+        with tarfile.open(archives[0], mode="r:gz") as archive:
+            names = archive.getnames()
+        assert any(name.endswith("/.keep") for name in names)
+        assert any(name.endswith("/manifest.json") for name in names)
+
+
 def test_export_images_script_creates_missing_output_directory():
     repo_root = Path(__file__).resolve().parents[3]
     script_path = repo_root / "deploy" / "offline-bundle" / "scripts" / "export-images.sh"

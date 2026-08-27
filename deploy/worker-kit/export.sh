@@ -6,6 +6,9 @@ VERSION="${WORKER_KIT_VERSION:-0.4.0}"
 PLATFORM="${WORKER_KIT_PLATFORM:-linux/amd64}"
 ARCH="${PLATFORM#linux/}"
 SELECTION="${WORKER_KIT_CLI_SELECTION:-pi,opencode}"
+if [[ "${SELECTION}" == "none" ]]; then
+    SELECTION=""
+fi
 OUTPUT_DIR="${WORKER_KIT_OUTPUT_DIR:-${PROJECT_ROOT}/deploy/offline-bundle/kits}"
 cid=""
 

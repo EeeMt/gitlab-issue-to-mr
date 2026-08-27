@@ -1022,6 +1022,8 @@ def test_release_helpers_export_an_immutable_content_addressed_kit_archive():
     assert "WORKER_KIT_CLI_SELECTION ?= pi,opencode" in makefile
     assert "kit-staging" in helper
     assert "WORKER_KIT_CLI_SELECTION" in helper
+    assert 'if [[ "${SELECTION}" == "none" ]]; then' in helper
+    assert 'SELECTION=""' in helper
     assert "codify-worker-kit-" in helper
     assert "MANIFEST_DIGEST" in helper
     assert "export-archive.py" in helper
