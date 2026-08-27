@@ -131,8 +131,9 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
   每条协议覆盖 config 生成、credential 不落盘、tool call、reasoning、usage、取消、错误和禁止回退。
   本轮已新增协议矩阵、冻结 Endpoint、Provider drift、Task-private OpenCode config/Skill discovery、
   current/frozen catalog 和 fail-closed 前端测试；scheduler gate 的未 await `AsyncMock` warning 已由
-  `79bd530e` 修复。仍需在可用环境完成全量 backend unit、mock E2E、真实 PostgreSQL 并发/migration、
-  frontend type-check/build/vitest 的统一重跑，并记录精确命令、结果和 source commit。`a02f8929`
+  `79bd530e` 修复。仍需在可用环境完成全量 backend unit、真实 PostgreSQL 并发/migration 的统一重跑，
+  并记录精确命令、结果和 source commit；mock E2E 与 frontend type-check/build/vitest 已在下文通过。
+  `a02f8929`
   又补齐了 app-mounted catalog router 的 401、missing-profile 404、跨项目 403，以及 current catalog
   乱序响应成功/reject 两条 generation-guard 回归；这些仍是源码/L2 focused evidence，不等于真实 Host
   或完整环境验收。
@@ -297,23 +298,24 @@ L2 重新通过后，按顺序完成：
   subagent review 最终均无 P0/P1（本轮最终 `P0=0, P1=0, P2=0`）。
 - **证据边界：** 全量 backend unit 尝试结果为 `3036 passed, 72 skipped, 3 failed, 25 errors`；
   失败/错误由远端 PostgreSQL 与端口权限、以及 pytest 临时目录磁盘耗尽造成，不能写成全量 L2
-  green。out-of-order deferred response 的专门前端测试、ASGI 级认证/访问控制测试和真实
-  Docker/Kit/Host 验证仍归 S9/S1/L3–L4。
+  green。out-of-order deferred response 与 ASGI 级认证/访问控制的 focused 回归已在 S9 补充段落记录；
+  全量 backend、真实 PostgreSQL 和真实 Docker/Kit/Host 验证仍归 S9/S1/L3–L4。
 
 ### 本轮 S9 边界测试补充（2026-08-27）
 
 - `a02f8929` 新增真实 FastAPI app/router 路径的 catalog authentication、missing Profile 和
   project-access denial 测试，并覆盖前端 catalog 请求晚到成功与晚到 reject 时 generation guard
-  保持新状态；每个后端测试后清理 app dependency overrides。本次增量同时清除了仓库级 backend
-  Ruff 的 6 个既有错误，避免 focused lint 取代标准 lint 作为唯一证据。
+  保持新状态；每个后端测试后清理 app dependency overrides。随后本次质量收口清除了仓库级
+  backend Ruff 的 6 个既有错误，避免 focused lint 取代标准 lint 作为唯一证据。
 - **验证：** `backend/.venv/bin/python -m pytest backend/tests/unit/test_harness_catalog_api.py -q`
   为 `15 passed`；TaskFormDrawer、IssueView、TaskView 聚焦集为 `331 passed`；
   `cd frontend && npx vitest run` 为 `79 files passed / 1668 tests passed`；
-  `cd frontend && npm run build`（含 `vue-tsc`）、`make lint-backend` 和 `git diff --check` 均通过。独立
+  `cd frontend && npm run build`（含 `vue-tsc`）、`make test-mock-e2e`（`378 passed`）、
+  `make lint-backend` 和 `git diff --check` 均通过。独立
   subagent 最终复审为
   `P0=0, P1=0, P2=0`。
-- **未闭环项：** 全量 backend unit、mock E2E、真实 PostgreSQL 并发/migration 和真实
-  Docker/Kit/Host 证据仍未完成；上述测试不能把 L2、S1 或 L3–L4 标为 green。
+- **未闭环项：** 全量 backend unit、真实 PostgreSQL 并发/migration 和真实 Docker/Kit/Host
+  证据仍未完成；上述测试不能把 L2、S1 或 L3–L4 标为 green。
 
 ## 4. L5 Acceptance
 
