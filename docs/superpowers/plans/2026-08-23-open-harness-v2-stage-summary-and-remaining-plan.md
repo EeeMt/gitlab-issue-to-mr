@@ -131,8 +131,9 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
   每条协议覆盖 config 生成、credential 不落盘、tool call、reasoning、usage、取消、错误和禁止回退。
   本轮已新增协议矩阵、冻结 Endpoint、Provider drift、Task-private OpenCode config/Skill discovery、
   current/frozen catalog 和 fail-closed 前端测试；scheduler gate 的未 await `AsyncMock` warning 已由
-  `79bd530e` 修复。仍需在可用环境完成全量 backend unit 与剩余真实 PostgreSQL 并发/migration 的统一
-  重跑，并记录精确命令、结果和 source commit；mock E2E 与 frontend type-check/build/vitest 已在下文通过。
+  `79bd530e` 修复。仍需在可用环境完成全量 backend unit 与其余必要集成证据的统一重跑，并记录精确
+  命令、结果和 source commit；本轮真实 PostgreSQL focused 回归、mock E2E 与 frontend
+  type-check/build/vitest 已在下文通过。
   `a02f8929`
   又补齐了 app-mounted catalog router 的 401、missing-profile 404、跨项目 403，以及 current catalog
   乱序响应成功/reject 两条 generation-guard 回归；这些仍是源码/L2 focused evidence，不等于真实 Host
@@ -314,22 +315,21 @@ L2 重新通过后，按顺序完成：
   `make lint-backend` 和 `git diff --check` 均通过。独立
   subagent 最终复审为
   `P0=0, P1=0, P2=0`。
-- **未闭环项：** 全量 backend unit、剩余真实 PostgreSQL 并发/migration 和真实 Docker/Kit/Host
-  证据仍未完成；上述测试不能把 L2、S1 或 L3–L4 标为 green。
+- **未闭环项：** 全量 backend unit、其余必要集成和真实 Docker/Kit/Host 证据仍未完成；上述测试不能
+  把 L2、S1 或 L3–L4 标为 green。
 
 ### 本轮 S9 真实 PostgreSQL 回归补充（2026-08-27）
 
 - 在授权的远端 dev PostgreSQL（`CODIFY_TEST_DATABASE_URL` 默认指向 `192.168.50.129:5432/codify_test`）
-  上串行运行 migration、锁和 command-pump 回归，避免共享测试库并发污染。命令覆盖
-  `test_068_migration.py`、`test_069_migration.py`、`test_070_migration.py`、`test_071_migration.py`、
-  `test_072_migration.py`、`test_074_migration.py`、`test_worker_command_pump.py`、
-  `test_worker_profile_verification_pg.py`、`test_issue_execution_lock_concurrency.py` 和
-  `test_system_lifecycle_statistics_pg.py`。
-- **历史运行 provenance（修复前）：** 下述 56 项结果来自 source commit
-  `87a27b10c7b1fbce15f49952698ec9c99ec91701`；未设置 `CODIFY_TEST_DATABASE_URL` 覆盖，使用测试模块内
-  默认的远端 dev PostgreSQL（凭据不记录）；命令未启用 xdist，按单进程串行执行：
+  上按固定 commit 串行运行 migration、锁和 command-pump 回归，避免共享测试库并发污染。migration、
+  command-pump、issue-lock 和 Profile verification 测试使用各自的 throwaway DB；issue-lock/Profile
+  verification 还在模块结束时以 PostgreSQL 16 `DROP DATABASE ... WITH (FORCE)` 清理。lifecycle 测试
+  仍直接使用共享 `codify_test`，依靠串行执行及测试前后的触及表清理。未记录凭据。
+- **可复现 provenance：** source commit 为
+  `e0ea50c158beccbbe96ac26fa24e617e30e6c712`；未设置 `CODIFY_TEST_DATABASE_URL` 覆盖；命令显式关闭
+  xdist，按单进程串行执行：
   ```bash
-  backend/.venv/bin/python -m pytest \
+  backend/.venv/bin/python -m pytest -n 0 -q \
     backend/tests/unit/test_068_migration.py \
     backend/tests/unit/test_069_migration.py \
     backend/tests/unit/test_070_migration.py \
@@ -339,14 +339,12 @@ L2 重新通过后，按顺序完成：
     backend/tests/unit/test_worker_command_pump.py \
     backend/tests/unit/test_worker_profile_verification_pg.py \
     backend/tests/unit/test_issue_execution_lock_concurrency.py \
-    backend/tests/unit/test_system_lifecycle_statistics_pg.py -q
+    backend/tests/unit/test_system_lifecycle_statistics_pg.py
   ```
-- **历史结果：** `56 passed in 154.76s (0:02:34)`，无 skip/error。覆盖 068–072/074 migration 的
-  throwaway DB，20 条 task-scoped command pump，Profile verification lock/CAS，issue execution lock 和
-  lifecycle statistics archive 的真实 PostgreSQL 行为。该次运行的 Profile fixture 仍使用共享库，不能
-  作为下方隔离修复的验证。
-- **待固定 commit 重跑：** 当前已将 Profile verification 改为模块级 throwaway DB，并在删除前终止该
-  随机库残留连接；待该测试修复先提交后，用同一清单显式 `-n 0` 重跑并替换本段 provenance/结果。
+- **结果：** `56 passed in 171.03s (0:02:51)`，无 skip/error。覆盖 068–072/074 migration 的 throwaway
+  DB，20 条 task-scoped command pump，Profile verification lock/CAS，issue execution lock 和 lifecycle
+  statistics archive 的真实 PostgreSQL 行为；Profile fixture 的并发 task 具备超时、释放和回收逻辑，
+  不会因断言失败阻塞数据库清理。
 - **边界：** 这是一组真实 PostgreSQL focused regression，不等于全量 backend unit 或完整 L2；全量
   backend 仍曾受远端 PG/端口权限与 pytest 临时盘耗尽影响，剩余全量/Host/Kit 证据继续保持开放。
 
