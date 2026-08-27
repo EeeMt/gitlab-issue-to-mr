@@ -568,6 +568,59 @@ describe('TaskFormDrawer', () => {
       expect(wrapper.vm.harnessCatalog[0].key).toBe('pi')
     })
 
+    it('keeps the newest profile catalog when an older request resolves later', async () => {
+      const deferred = new Map<number, (value: any) => void>()
+      mockApi.getCurrentHarnessCatalog.mockImplementation((workerProfileId?: number) => (
+        new Promise(resolve => deferred.set(workerProfileId ?? 0, resolve))
+      ))
+
+      await mountDrawer({ workerProfileId: 3 })
+      await wrapper.setProps({ workerProfileId: 4, show: true })
+      await flushPromises()
+
+      deferred.get(4)?.({
+        legacy: false,
+        catalog: [{ key: 'pi', model_protocols: ['anthropic_messages'] }],
+      })
+      await flushPromises()
+      expect(wrapper.vm.harnessCatalog[0].key).toBe('pi')
+
+      deferred.get(3)?.({
+        legacy: false,
+        catalog: [{ key: 'claude', model_protocols: ['anthropic_messages'] }],
+      })
+      await flushPromises()
+      expect(wrapper.vm.harnessCatalog[0].key).toBe('pi')
+    })
+
+    it('keeps the newest profile catalog when an older request rejects later', async () => {
+      const deferred = new Map<number, {
+        resolve: (value: any) => void
+        reject: (reason?: unknown) => void
+      }>()
+      mockApi.getCurrentHarnessCatalog.mockImplementation((workerProfileId?: number) => (
+        new Promise((resolve, reject) => {
+          deferred.set(workerProfileId ?? 0, { resolve, reject })
+        })
+      ))
+
+      await mountDrawer({ workerProfileId: 3 })
+      await wrapper.setProps({ workerProfileId: 4, show: true })
+      await flushPromises()
+
+      deferred.get(4)?.resolve({
+        legacy: false,
+        catalog: [{ key: 'pi', model_protocols: ['anthropic_messages'] }],
+      })
+      await flushPromises()
+      expect(wrapper.vm.harnessCatalog[0].key).toBe('pi')
+
+      deferred.get(3)?.reject(new Error('stale catalog request failed'))
+      await flushPromises()
+      expect(wrapper.vm.harnessCatalog[0].key).toBe('pi')
+      expect(wrapper.vm.harnessCatalogLoadState).toBe('ready')
+    })
+
     it.each([
       ['click', 'freeform'],
       ['keydown.enter', 'execute'],

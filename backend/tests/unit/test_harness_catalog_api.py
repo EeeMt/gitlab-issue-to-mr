@@ -1,15 +1,55 @@
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
 from app.api import harness_catalog
 from app.core.harness_protocol import HARNESS_CONTRACT_VERSION_V2
+from app.core.user_roles import PLATFORM_ROLE_USER
 from app.core.worker_runtime_readiness import (
     READINESS_READY,
     READINESS_UNAVAILABLE,
     RuntimeReadiness,
 )
+
+
+@pytest.fixture(autouse=True)
+def clear_app_dependency_overrides():
+    yield
+    from app.main import app
+
+    app.dependency_overrides.clear()
+
+
+def _catalog_app_client(
+    mock_db,
+    *,
+    authenticated: bool = True,
+    current_user: object | None = None,
+    access_scope=None,
+):
+    from app.database import get_db
+    from app.dependencies.auth import get_optional_current_user, require_authenticated_user
+    from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+    from app.main import app
+
+    async def override_db():
+        yield mock_db
+
+    def override_authentication():
+        if not authenticated:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        return current_user or SimpleNamespace(id=1, platform_role="platform_admin")
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[require_authenticated_user] = override_authentication
+    app.dependency_overrides[get_optional_current_user] = lambda: current_user
+    app.dependency_overrides[require_project_access_scope] = lambda: (
+        access_scope or ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+    )
+    return TestClient(app, raise_server_exceptions=False)
 
 
 def _manifest() -> dict:
@@ -332,6 +372,50 @@ async def test_current_catalog_projects_requested_profile_runtime_state(monkeypa
     assert entry["enabled"] is True
     assert entry["availability"] == "present"
     assert entry["selectable"] is True
+
+
+def test_current_catalog_route_requires_authentication():
+    client = _catalog_app_client(MagicMock(), authenticated=False)
+
+    response = client.get("/api/harness-catalog")
+
+    assert response.status_code == 401
+
+
+def test_current_catalog_route_returns_not_found_for_missing_profile(monkeypatch):
+    db_result = SimpleNamespace(scalar_one_or_none=lambda: None)
+    mock_db = MagicMock()
+    mock_db.execute = AsyncMock(return_value=db_result)
+    monkeypatch.setattr(harness_catalog, "_current_manifest", _manifest)
+    client = _catalog_app_client(mock_db)
+
+    response = client.get("/api/harness-catalog?worker_profile_id=999")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Worker profile 999 not found"
+
+
+def test_task_catalog_route_denies_inaccessible_project_before_bundle_projection():
+    task_result = MagicMock()
+    task_result.scalar_one_or_none.return_value = SimpleNamespace(project_id=99)
+    mock_db = MagicMock()
+    mock_db.execute = AsyncMock(return_value=task_result)
+    from app.dependencies.project_access import ProjectAccessScope
+
+    client = _catalog_app_client(
+        mock_db,
+        current_user=SimpleNamespace(id=1, platform_role=PLATFORM_ROLE_USER),
+        access_scope=ProjectAccessScope(
+            is_unrestricted=False,
+            accessible_projects=[{"id": 1, "name": "allowed"}],
+        ),
+    )
+
+    response = client.get("/api/tasks/42/harness-catalog")
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Project 99 is not accessible for the current user"
+    mock_db.execute.assert_awaited_once()
 
 
 async def _async_result(value):
