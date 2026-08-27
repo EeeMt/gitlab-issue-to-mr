@@ -916,6 +916,12 @@ def _wait_for_file(path: Path, process: subprocess.Popen[str]) -> None:
     raise AssertionError("fake OpenCode server did not publish parent/child PIDs")
 
 
+def _finish_runner(process: subprocess.Popen[str], expected_returncode: int) -> None:
+    """Wait for the runner and close its text pipes on every terminal path."""
+    _stdout, stderr = process.communicate(timeout=8)
+    assert process.returncode == expected_returncode, stderr
+
+
 def _assert_process_gone(pid: int, start_time: str | None) -> None:
     current = _proc_start_time(pid)
     if current is not None:
@@ -982,7 +988,7 @@ def test_opencode_legacy_runner_reaps_server_process_group_after_success(tmp_pat
     assert "OPENCODE_DISABLE_PROJECT_CONFIG=true" in server_env
     assert "OPENCODE_DISABLE_EXTERNAL_SKILLS=1" in server_env
     assert "OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1" in server_env
-    assert process.wait(timeout=8) == 0, process.stderr.read()
+    _finish_runner(process, 0)
     for pid, start in zip(pids, starts):
         _assert_process_gone(pid, start)
 
@@ -990,7 +996,7 @@ def test_opencode_legacy_runner_reaps_server_process_group_after_success(tmp_pat
 def test_opencode_legacy_runner_reaps_ignoring_child_after_cancel(tmp_path):
     process, pids, starts = _start_legacy_runner(tmp_path, bridge_sleep="30")
     process.send_signal(signal.SIGTERM)
-    assert process.wait(timeout=8) == 143
+    _finish_runner(process, 143)
     for pid, start in zip(pids, starts):
         _assert_process_gone(pid, start)
 
@@ -1000,6 +1006,6 @@ def test_opencode_legacy_runner_timeout_signal_reaps_ignoring_child(tmp_path):
     # GNU timeout delivers TERM to its child; deliver the same timeout signal
     # directly to keep the regression portable on macOS CI hosts.
     process.send_signal(signal.SIGTERM)
-    assert process.wait(timeout=8) == 143
+    _finish_runner(process, 143)
     for pid, start in zip(pids, starts):
         _assert_process_gone(pid, start)

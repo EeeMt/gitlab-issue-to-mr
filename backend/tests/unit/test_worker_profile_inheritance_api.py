@@ -10,6 +10,7 @@ optimistic-revision check (409) on the Profile write path.
 from __future__ import annotations
 
 import pytest
+import pytest_asyncio
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -39,7 +40,7 @@ from app.models import (
 )
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def db_factory():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool)
 
