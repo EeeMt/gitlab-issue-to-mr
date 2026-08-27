@@ -46,7 +46,11 @@ async def session_factory():
 
 def _source(tmp_path: Path) -> Path:
     target = tmp_path / "source"
-    shutil.copytree(ROOT / "deploy", target / "deploy")
+    deploy = target / "deploy"
+    deploy.mkdir(parents=True)
+    for relative in ("entrypoint.worker.sh", "ci-claude.sh"):
+        shutil.copy2(ROOT / "deploy" / relative, deploy / relative)
+    shutil.copytree(ROOT / "deploy/worker-entrypoint", deploy / "worker-entrypoint")
     manifest_path = target / "deploy/worker-entrypoint/harness/manifest.json"
     manifest = json.loads(manifest_path.read_text())
     manifest["adapters"]["opencode"]["capabilities"]["resume"] = False

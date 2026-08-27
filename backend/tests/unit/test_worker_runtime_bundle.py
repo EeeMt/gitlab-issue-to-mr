@@ -213,7 +213,11 @@ async def test_execution_rejects_historical_task_without_runtime_bundle(session_
 def _v2_test_runtime_source(tmp_path: Path) -> Path:
     """Copy controlled source and make the fixture obey current capability bounds."""
     root = tmp_path / "runtime-source"
-    shutil.copytree(REPO_ROOT / "deploy", root / "deploy")
+    deploy = root / "deploy"
+    deploy.mkdir(parents=True)
+    for relative in ("entrypoint.worker.sh", "ci-claude.sh"):
+        shutil.copy2(REPO_ROOT / "deploy" / relative, deploy / relative)
+    shutil.copytree(REPO_ROOT / "deploy/worker-entrypoint", deploy / "worker-entrypoint")
     manifest_path = root / "deploy/worker-entrypoint/harness/manifest.json"
     manifest = json.loads(manifest_path.read_text())
     # This test proves immutable bundle mechanics, not OpenCode resume support.
