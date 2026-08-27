@@ -83,6 +83,12 @@ async def test_gate_passes_for_authorized_host_mount_even_when_kit_absent():
 async def test_gate_fails_absent_worker_kit_harness_with_stable_code():
     scheduler = _make_scheduler()
     db = AsyncMock()
+    # ``AsyncSession.execute`` is async, but the returned SQLAlchemy Result's
+    # ``scalar`` method is synchronous.  Configure the result explicitly so
+    # the status-maintenance side effect does not create an un-awaited
+    # AsyncMock coroutine or hide a test contract mismatch.
+    db.execute.return_value = SimpleNamespace(scalar=lambda: 0)
+    db.get.return_value = None
     snapshot = _snapshot(cli_source="worker_kit", harness_key="codex")
     db.commit = AsyncMock()
     task = MagicMock()
