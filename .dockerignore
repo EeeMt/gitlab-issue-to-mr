@@ -42,6 +42,12 @@ docker-compose*.yml
 
 # Include deploy directory (required for worker image build)
 !deploy/
+# Worker Kit export stages only the selected Harness payloads here. Keep the
+# parent directories traversable while excluding the large source payloads.
+deploy/worker-cli/**
+!deploy/worker-cli/
+!deploy/worker-cli/kit-staging/
+!deploy/worker-cli/kit-staging/**
 # Re-apply generated-file exclusions after the deploy negation above.
 deploy/**/__pycache__/
 deploy/**/*.py[cod]
