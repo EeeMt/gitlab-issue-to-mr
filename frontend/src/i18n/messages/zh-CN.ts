@@ -2171,7 +2171,7 @@ const zhCN = {
       providerKindAnthropic: 'Anthropic 兼容',
       providerKindOpenai: 'OpenAI 兼容',
       wireProtocol: 'Wire 协议',
-      wireProtocolHint: 'Claude 使用 anthropic_messages；Codex 必须使用 openai_responses。',
+      wireProtocolHint: 'Claude 使用 anthropic_messages；Codex 使用 openai_responses；Pi 和 OpenCode 可使用 openai_chat_completions。',
       wireProtocolAnthropicMessages: 'Anthropic Messages',
       wireProtocolOpenaiResponses: 'OpenAI Responses',
       wireProtocolOpenaiChatCompletions: 'OpenAI Chat Completions',

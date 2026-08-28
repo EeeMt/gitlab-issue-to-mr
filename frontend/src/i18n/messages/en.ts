@@ -2200,7 +2200,7 @@ const en = {
       providerKindAnthropic: 'Anthropic Compatible',
       providerKindOpenai: 'OpenAI Compatible',
       wireProtocol: 'Wire Protocol',
-      wireProtocolHint: 'Claude uses anthropic_messages; Codex requires openai_responses.',
+      wireProtocolHint: 'Claude uses anthropic_messages; Codex uses openai_responses; Pi and OpenCode can use openai_chat_completions.',
       wireProtocolAnthropicMessages: 'Anthropic Messages',
       wireProtocolOpenaiResponses: 'OpenAI Responses',
       wireProtocolOpenaiChatCompletions: 'OpenAI Chat Completions',

@@ -116,6 +116,7 @@
                 v-model:value="formValue.model_protocol"
                 :options="wireProtocolOptions"
                 class="config-form__input"
+                @update:value="handleModelProtocolChange"
               />
               <template #feedback>
                 {{ t('config.providers.wireProtocolHint') }}
@@ -226,6 +227,12 @@ const PROVIDER_KIND_DEFAULT_PROTOCOL: Record<string, string> = {
   openai_compatible: 'openai_responses',
 }
 
+const MODEL_PROTOCOL_PROVIDER_KIND: Record<string, string> = {
+  anthropic_messages: 'anthropic_compatible',
+  openai_responses: 'openai_compatible',
+  openai_chat_completions: 'openai_compatible',
+}
+
 defineProps<{
   isMobile: boolean
 }>()
@@ -259,8 +266,7 @@ const providerKindOptions = computed(() => [
 ])
 
 const wireProtocolOptions = computed(() => {
-  const protocols = PROVIDER_KIND_PROTOCOLS[formValue.value.provider_kind] ?? []
-  return protocols.map(protocol => ({
+  return Object.keys(MODEL_PROTOCOL_PROVIDER_KIND).map(protocol => ({
     label: protocol === 'anthropic_messages'
       ? t('config.providers.wireProtocolAnthropicMessages')
       : protocol === 'openai_responses'
@@ -508,6 +514,14 @@ function handleProviderKindChange(kind: string) {
   if (!protocols.includes(formValue.value.model_protocol)) {
     formValue.value.model_protocol =
       PROVIDER_KIND_DEFAULT_PROTOCOL[kind] ?? protocols[0] ?? 'anthropic_messages'
+  }
+}
+
+function handleModelProtocolChange(protocol: string) {
+  formValue.value.model_protocol = protocol
+  const providerKind = MODEL_PROTOCOL_PROVIDER_KIND[protocol]
+  if (providerKind && formValue.value.provider_kind !== providerKind) {
+    formValue.value.provider_kind = providerKind
   }
 }
 

@@ -211,7 +211,24 @@ describe('AIProvidersPanel', () => {
     wrapper.vm.handleProviderKindChange('openai_compatible')
     expect(wrapper.vm.formValue.model_protocol).toBe('openai_responses')
     expect(wrapper.vm.wireProtocolOptions.map(option => option.value))
-      .toEqual(['openai_responses', 'openai_chat_completions'])
+      .toEqual(['anthropic_messages', 'openai_responses', 'openai_chat_completions'])
+  })
+
+  it('makes Chat Completions selectable from the default provider kind', async () => {
+    const wrapper = mount(AIProvidersPanel, {
+      props: { isMobile: false },
+      global: {
+        stubs: ['NCard', 'NButton', 'NDataTable', 'NModal', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSelect', 'NSpace', 'NSwitch', 'NTag']
+      }
+    })
+
+    await wrapper.vm.openCreate()
+    expect(wrapper.vm.wireProtocolOptions.map(option => option.value))
+      .toEqual(['anthropic_messages', 'openai_responses', 'openai_chat_completions'])
+
+    wrapper.vm.handleModelProtocolChange('openai_chat_completions')
+    expect(wrapper.vm.formValue.model_protocol).toBe('openai_chat_completions')
+    expect(wrapper.vm.formValue.provider_kind).toBe('openai_compatible')
   })
 
   it('keeps chat completions selectable for new and existing providers', async () => {
@@ -238,7 +255,7 @@ describe('AIProvidersPanel', () => {
     await wrapper.vm.openEdit(provider)
     expect(wrapper.vm.formValue.model_protocol).toBe('openai_chat_completions')
     expect(wrapper.vm.wireProtocolOptions.map(option => option.value))
-      .toEqual(['openai_responses', 'openai_chat_completions'])
+      .toEqual(['anthropic_messages', 'openai_responses', 'openai_chat_completions'])
   })
 
   it('creates an OpenAI-compatible provider for Codex', async () => {
