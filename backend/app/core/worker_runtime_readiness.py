@@ -747,7 +747,7 @@ def _content_inventory_from_archive(container: Any, root: str) -> list[dict[str,
     hardlink_targets: dict[str, str] = {}
     seen: set[str] = set()
     member_paths: set[str] = set()
-    symlink_targets: list[tuple[str, str]] = []
+    symlink_targets: dict[str, tuple[str, str]] = {}
 
     def resolve_link_target(relative: str, target: object) -> str:
         if not isinstance(target, str) or not target or "\\" in target:
@@ -824,7 +824,7 @@ def _content_inventory_from_archive(container: Any, root: str) -> list[dict[str,
                     continue
                 if member.issym():
                     resolved_target = resolve_link_target(relative, member.linkname)
-                    symlink_targets.append((name, resolved_target))
+                    symlink_targets[relative] = (name, resolved_target)
                     entries.append({"kind": "symlink", "path": relative, "target": member.linkname})
                     continue
                 if member.islnk():
@@ -879,11 +879,39 @@ def _content_inventory_from_archive(container: Any, root: str) -> list[dict[str,
 
         for relative in hardlink_targets:
             resolve_hardlink(relative, set())
-        for name, target in symlink_targets:
-            if target not in member_paths:
+        def resolve_symlink_target(path: str) -> str:
+            pending = path.split("/")
+            resolved: list[str] = []
+            visited: set[str] = set()
+            while pending:
+                resolved.append(pending.pop(0))
+                candidate = "/".join(resolved)
+                link = symlink_targets.get(candidate)
+                if link is None:
+                    continue
+                if candidate in visited:
+                    raise HarnessInventoryError(
+                        f"Worker Kit archive symlink cycle at {candidate!r}"
+                    )
+                visited.add(candidate)
+                nested = link[1]
+                resolved = []
+                pending = nested.split("/") + pending
+            candidate = "/".join(resolved)
+            if candidate not in member_paths:
                 raise HarnessInventoryError(
-                    f"Worker Kit archive symlink target is absent: {name!r}"
+                    f"Worker Kit archive symlink target is absent: {path!r}"
                 )
+            return candidate
+
+        for relative, (name, target) in symlink_targets.items():
+            try:
+                resolve_symlink_target(target)
+            except HarnessInventoryError as exc:
+                message = str(exc)
+                if message.endswith(repr(target)):
+                    message = message[: -len(repr(target))] + repr(name)
+                raise HarnessInventoryError(message) from exc
     except tarfile.TarError as exc:
         raise RuntimeProbeTransientError(
             f"Could not parse complete Worker Kit content under {root!r}: {exc}"

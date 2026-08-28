@@ -121,6 +121,35 @@ def _tar_tree_with_absolute_nix_symlink_bytes() -> bytes:
     return buffer.getvalue()
 
 
+def _tar_tree_with_chained_symlink_bytes() -> bytes:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        root = tarfile.TarInfo("kit/")
+        root.type = tarfile.DIRTYPE
+        archive.addfile(root)
+
+        target_dir = tarfile.TarInfo("kit/nix/store/icu-dev/lib/icu/74.2/")
+        target_dir.type = tarfile.DIRTYPE
+        archive.addfile(target_dir)
+
+        target = tarfile.TarInfo("kit/nix/store/icu-dev/lib/icu/74.2/Makefile.inc")
+        payload = b"icu makefile\n"
+        target.size = len(payload)
+        target.mode = 0o644
+        archive.addfile(target, io.BytesIO(payload))
+
+        current = tarfile.TarInfo("kit/nix/store/icu-dev/lib/icu/current")
+        current.type = tarfile.SYMTYPE
+        current.linkname = "74.2"
+        archive.addfile(current)
+
+        makefile = tarfile.TarInfo("kit/nix/store/icu-dev/lib/icu/Makefile.inc")
+        makefile.type = tarfile.SYMTYPE
+        makefile.linkname = "current/Makefile.inc"
+        archive.addfile(makefile)
+    return buffer.getvalue()
+
+
 def _make_probe_client(*, manifest: bytes | None = None, content_overrides: dict[str, bytes] | None = None):
     """Return a DockerClientWrapper stand-in for probe_worker_kit.
 
@@ -549,6 +578,36 @@ def test_content_inventory_reads_absolute_nix_store_symlinks():
             "target": "/nix/store/target",
         },
         {"kind": "file", "path": "nix/store/target", "sha256": payload_sha, "size": 8},
+    ]
+
+
+def test_content_inventory_resolves_chained_symlinks():
+    container = MagicMock()
+    container.get_archive.return_value = (
+        iter([_tar_tree_with_chained_symlink_bytes()]),
+        {},
+    )
+
+    actual = _content_inventory_from_archive(container, "/opt/codify-probe/kit")
+
+    payload_sha = hashlib.sha256(b"icu makefile\n").hexdigest()
+    assert actual == [
+        {
+            "kind": "file",
+            "path": "nix/store/icu-dev/lib/icu/74.2/Makefile.inc",
+            "sha256": payload_sha,
+            "size": len(b"icu makefile\n"),
+        },
+        {
+            "kind": "symlink",
+            "path": "nix/store/icu-dev/lib/icu/Makefile.inc",
+            "target": "current/Makefile.inc",
+        },
+        {
+            "kind": "symlink",
+            "path": "nix/store/icu-dev/lib/icu/current",
+            "target": "74.2",
+        },
     ]
 
 
