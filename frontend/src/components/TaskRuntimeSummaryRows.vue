@@ -66,6 +66,12 @@
             </div>
 
             <dl class="metadata-summary-popover__list">
+              <div v-if="providerSummary.model_protocol" class="metadata-summary-popover__item">
+                <dt>{{ t('taskView.providerModelProtocol') }}</dt>
+                <dd>
+                  <n-tag size="tiny" :bordered="false">{{ providerSummary.model_protocol }}</n-tag>
+                </dd>
+              </div>
               <div v-if="providerSummary.provider_config_available" class="metadata-summary-popover__item">
                 <dt>{{ t('taskView.providerConfiguredModel') }}</dt>
                 <dd :class="{ 'metadata-summary-popover__muted': !providerSummary.configured_model }">

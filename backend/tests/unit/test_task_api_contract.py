@@ -401,6 +401,7 @@ def test_model_service_summary_exposes_runtime_config_without_api_key() -> None:
             name="Production AI Service",
             base_url="https://ai.example.com",
             model="claude-sonnet-4-5",
+            model_protocol="anthropic_messages",
             max_turns=64,
             system_prompt="Follow the repository instructions.",
             api_key="encrypted-secret",
@@ -416,6 +417,7 @@ def test_model_service_summary_exposes_runtime_config_without_api_key() -> None:
         "provider_name": "Production AI Service",
         "base_url": "https://ai.example.com",
         "configured_model": "claude-sonnet-4-5",
+        "model_protocol": "anthropic_messages",
         "actual_model": "claude-sonnet-4-6",
         "max_turns": 64,
         "system_prompt": "Follow the repository instructions.",
@@ -433,6 +435,7 @@ def test_model_service_summary_prefers_execution_snapshot_over_mutated_provider(
         name="Production AI Service",
         base_url="https://ai.example.com",
         model="claude-sonnet-4-5",
+        model_protocol="openai_chat_completions",
         max_turns=64,
         system_prompt="Follow the repository instructions.",
         api_key="encrypted-secret",
@@ -455,11 +458,34 @@ def test_model_service_summary_prefers_execution_snapshot_over_mutated_provider(
     assert response["configuration_source"] == "execution_snapshot"
     assert response["provider_name"] == "Production AI Service"
     assert response["configured_model"] == "claude-sonnet-4-5"
+    assert response["model_protocol"] == "openai_chat_completions"
     assert response["system_prompt"] == "Follow the repository instructions."
     assert response["configuration_captured_at"] == now.isoformat()
     assert response["actual_model"] == "claude-sonnet-4-6"
     assert "api_key" not in response
     assert "encrypted-secret" not in repr(response)
+
+
+def test_model_service_summary_recovers_protocol_from_frozen_snapshot() -> None:
+    task = SimpleNamespace(
+        provider_id=7,
+        model_name="gpt-test",
+        provider_runtime_snapshot={
+            "provider_id": 7,
+            "provider_name": "Production AI Service",
+            "base_url": "https://ai.example.com/v1",
+            "configured_model": "gpt-test",
+            "api_key_configured": True,
+        },
+        worker_profile_snapshot=SimpleNamespace(
+            model_endpoint_snapshot={"model_protocol": "openai_responses"},
+        ),
+    )
+
+    response = serialize_model_service_summary(task)
+
+    assert response["configuration_source"] == "execution_snapshot"
+    assert response["model_protocol"] == "openai_responses"
 
 
 def test_worker_runtime_summary_uses_snapshot_and_never_returns_environment_values() -> None:

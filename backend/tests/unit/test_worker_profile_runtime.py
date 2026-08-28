@@ -1206,6 +1206,7 @@ async def test_prepare_container_inputs_uses_only_snapshot_custom_environment():
     }
     assert task.provider_runtime_snapshot["provider_name"] == "Test provider"
     assert task.provider_runtime_snapshot["configured_model"] == "claude-sonnet-4-6"
+    assert task.provider_runtime_snapshot["model_protocol"] == "anthropic_messages"
     assert task.provider_runtime_snapshot["api_key_configured"] is True
     assert "api_key" not in task.provider_runtime_snapshot
     legacy_env_loader.assert_not_awaited()

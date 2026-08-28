@@ -843,6 +843,7 @@ const zhCN = {
     providerSummaryLoadFailed: '模型服务运行配置加载失败',
     providerConfigUnavailable: '关联的模型服务配置已不存在，仅能展示任务保留的实际模型信息。',
     providerConfiguredModel: '配置模型',
+    providerModelProtocol: '模型协议',
     providerActualModel: '实际模型',
     providerBaseUrl: '服务地址',
     providerMaxTurns: '最大轮次',

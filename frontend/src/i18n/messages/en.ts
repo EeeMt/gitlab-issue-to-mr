@@ -857,6 +857,7 @@ const en = {
     providerSummaryLoadFailed: 'Failed to load the model service runtime configuration',
     providerConfigUnavailable: 'The linked model service no longer exists. Only the task-recorded actual model is available.',
     providerConfiguredModel: 'Configured model',
+    providerModelProtocol: 'Model protocol',
     providerActualModel: 'Actual model',
     providerBaseUrl: 'Service URL',
     providerMaxTurns: 'Max turns',

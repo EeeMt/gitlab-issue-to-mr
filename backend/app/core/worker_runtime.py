@@ -329,11 +329,15 @@ async def _resolve_frozen_credential(
 def capture_provider_runtime_snapshot(task: Task, provider: AIProvider) -> None:
     """Capture the non-secret model-service configuration passed to the worker."""
     provider_id = getattr(provider, "id", None)
+    model_protocol = getattr(provider, "model_protocol", None)
+    if not isinstance(model_protocol, str) or not model_protocol.strip():
+        model_protocol = "anthropic_messages"
     task.provider_runtime_snapshot = {
         "provider_id": provider_id if isinstance(provider_id, int) else None,
         "provider_name": provider.name,
         "base_url": provider.base_url,
         "configured_model": provider.model,
+        "model_protocol": model_protocol.strip().replace("-", "_"),
         "max_turns": provider.max_turns,
         "system_prompt": provider.system_prompt,
         "api_key_configured": bool(provider.api_key),

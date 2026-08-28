@@ -974,6 +974,7 @@ describe('TaskView', () => {
         provider_name: 'Production AI Service',
         base_url: 'https://ai.example.com/anthropic',
         configured_model: 'claude-sonnet-4-5',
+        model_protocol: 'anthropic_messages',
         actual_model: 'claude-sonnet-4-6',
         max_turns: 64,
         system_prompt: 'Follow the repository instructions and keep changes scoped.',
@@ -1029,6 +1030,7 @@ describe('TaskView', () => {
       await flushPromises()
 
       const providerPopover = wrapper.find('[data-testid="provider-summary-popover"]')
+      expect(providerPopover.text()).toContain('anthropic_messages')
       expect(mockApi.getTaskModelServiceSummary).toHaveBeenCalledOnce()
       expect(mockApi.getTaskModelServiceSummary).toHaveBeenCalledWith(1)
       expect(mockApi.getTaskWorkerRuntimeSummary).not.toHaveBeenCalled()

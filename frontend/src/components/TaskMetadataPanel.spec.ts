@@ -52,6 +52,7 @@ describe('TaskMetadataPanel', () => {
     expect(taskRuntimeSummaryRowsSource).toContain('resolveRuntimePopoverLayout(workerTriggerRef.value)')
     expect(taskRuntimeSummaryRowsSource).toContain('getTaskModelServiceSummary')
     expect(taskRuntimeSummaryRowsSource).toContain('getTaskWorkerRuntimeSummary')
+    expect(taskRuntimeSummaryRowsSource).toContain('providerSummary.model_protocol')
     expect(taskRuntimeSummaryRowsSource).toContain('providerSummary.system_prompt')
     expect(taskRuntimeSummaryRowsSource).toContain('workerSummary.environment_variables')
     expect(taskRuntimeSummaryRowsSource).toContain("configuration_source === 'execution_snapshot'")

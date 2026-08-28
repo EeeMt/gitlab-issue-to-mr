@@ -10,6 +10,7 @@ export interface TaskModelServiceSummary {
   provider_name: string | null
   base_url: string | null
   configured_model: string | null
+  model_protocol: string | null
   actual_model: string | null
   max_turns: number | null
   system_prompt: string | null

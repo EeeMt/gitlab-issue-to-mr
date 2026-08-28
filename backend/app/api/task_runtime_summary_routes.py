@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, undefer
 
 from app.api.task_responses import loaded_task_relationship
+from app.core.harness_protocol import MODEL_PROTOCOLS
 from app.core.skills import skill_snapshots_from_task_snapshot
 from app.core.worker_kit import MOUNTED_KIT_MODE, worker_kit_mounts
 from app.database import get_db
@@ -19,6 +20,28 @@ from app.dependencies.project_access import (
 from app.models import Task, TaskWorkerProfileSnapshot
 
 router = APIRouter()
+
+
+def _normalize_model_protocol(value: Any, *, default: str | None = None) -> str | None:
+    """Return a known model protocol without exposing arbitrary snapshot data."""
+    if value is None:
+        value = default
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().replace("-", "_")
+    return normalized if normalized in MODEL_PROTOCOLS else None
+
+
+def _frozen_snapshot_model_protocol(task: Task) -> str | None:
+    """Read protocol from the immutable worker snapshot for older executions."""
+    snapshot = loaded_task_relationship(task, "worker_profile_snapshot")
+    endpoint_snapshot = getattr(snapshot, "model_endpoint_snapshot", None)
+    if not isinstance(endpoint_snapshot, dict):
+        return None
+    return _normalize_model_protocol(
+        endpoint_snapshot.get("model_protocol")
+        or endpoint_snapshot.get("wire_protocol")
+    )
 
 
 async def _get_task_for_runtime_summary(
@@ -54,6 +77,10 @@ def serialize_model_service_summary(task: Task) -> dict[str, Any]:
             "provider_name": runtime_snapshot.get("provider_name"),
             "base_url": runtime_snapshot.get("base_url"),
             "configured_model": runtime_snapshot.get("configured_model"),
+            "model_protocol": (
+                _normalize_model_protocol(runtime_snapshot.get("model_protocol"))
+                or _frozen_snapshot_model_protocol(task)
+            ),
             "actual_model": getattr(task, "model_name", None),
             "max_turns": runtime_snapshot.get("max_turns"),
             "system_prompt": runtime_snapshot.get("system_prompt"),
@@ -71,6 +98,13 @@ def serialize_model_service_summary(task: Task) -> dict[str, Any]:
         "provider_name": provider.name if provider is not None else None,
         "base_url": provider.base_url if provider is not None else None,
         "configured_model": provider.model if provider is not None else None,
+        "model_protocol": (
+            _normalize_model_protocol(
+                getattr(provider, "model_protocol", None),
+                default="anthropic_messages" if provider is not None else None,
+            )
+            or _frozen_snapshot_model_protocol(task)
+        ),
         "actual_model": getattr(task, "model_name", None),
         "max_turns": provider.max_turns if provider is not None else None,
         "system_prompt": provider.system_prompt if provider is not None else None,
@@ -201,6 +235,7 @@ async def get_task_model_service_summary(
         access_scope,
         undefer(Task.provider_runtime_snapshot),
         selectinload(Task.provider),
+        selectinload(Task.worker_profile_snapshot),
     )
     return serialize_model_service_summary(task)
 
