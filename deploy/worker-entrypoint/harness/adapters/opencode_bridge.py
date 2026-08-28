@@ -467,7 +467,12 @@ def _run_attempt() -> int:
             print(f"OpenCode SSE stream closed: {exc}", file=sys.stderr)
             _recover_status(client, session_id, proc)
     finally:
-        proc.stdin.close()
+        try:
+            proc.stdin.close()
+        except BrokenPipeError:
+            # The translator may have exited after publishing a terminal
+            # failure while the bridge was still draining the SSE stream.
+            pass
 
     rc = proc.wait()
     return rc
