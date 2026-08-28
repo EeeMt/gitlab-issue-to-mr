@@ -214,8 +214,6 @@ class PiOwner:
             return await self._dispatch_locked(frame)
 
     async def _dispatch_locked(self, frame: dict) -> dict:
-        if self.closed or self.process is None or self.process.returncode is not None:
-            return {"status": "reject", "rejection_code": "control_gate_closed"}
         if self.task_id is not None and frame.get("task_id") != self.task_id:
             return {"status": "reject", "rejection_code": "invalid_command_type"}
         if self.attempt_id is not None and frame.get("attempt_id") != self.attempt_id:
@@ -237,6 +235,8 @@ class PiOwner:
                 )
             self.close_requested.set()
             return {"status": "ack", "closed": True}
+        if self.closed or self.process is None or self.process.returncode is not None:
+            return {"status": "reject", "rejection_code": "control_gate_closed"}
         if frame.get("type") not in {"steer", "follow_up", "get_state"}:
             return {"status": "reject", "rejection_code": "invalid_command_type"}
         if frame.get("type") != "get_state" and frame.get("control_gate") not in {"accepting", "closing"}:

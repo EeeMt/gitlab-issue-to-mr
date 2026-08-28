@@ -165,6 +165,37 @@ async def test_close_marker_bypasses_busy_native_dispatch_lock(pi_owner, tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_close_marker_is_allowed_after_native_process_exits(pi_owner, tmp_path):
+    """A settled provider error may exit Pi before the owner drain marker arrives."""
+    owner = pi_owner.PiOwner(
+        [sys.executable, "-c", "import json; print(json.dumps({'type': 'agent_settled'}), flush=True)"],
+        tmp_path,
+        tmp_path / "owner.sock",
+        task_id=7,
+        attempt_id="attempt-current",
+    )
+    await owner.start()
+    await asyncio.wait_for(owner.settled.wait(), timeout=1)
+    assert owner.process is not None
+    await asyncio.wait_for(owner.process.wait(), timeout=1)
+
+    outcome = await owner.dispatch(
+        {
+            "task_id": 7,
+            "attempt_id": "attempt-current",
+            "type": "close",
+            "control_gate": "closing",
+            "control_request_id": "close-after-exit",
+        }
+    )
+
+    assert outcome == {"status": "ack", "closed": True}
+    assert json.loads((tmp_path / "control-outcome.json").read_text())["control_request_id"] == (
+        "close-after-exit"
+    )
+
+
+@pytest.mark.asyncio
 async def test_owner_feeds_one_persistent_translator_before_drain_close(pi_owner, tmp_path, monkeypatch):
     fake_pi = tmp_path / "fake_pi.py"
     fake_pi.write_text(
