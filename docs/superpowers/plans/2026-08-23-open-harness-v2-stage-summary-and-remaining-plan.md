@@ -16,7 +16,8 @@ Task 44（OpenCode freeform）、Task 46（Pi fresh execute）、Task 47（Pi co
 （OpenCode execute）均进入真实 Worker；四者均完成真实终态/归档对账并有 commit/MR，Task 47 复用了
 Task 46 的 session。随后 `1cc7c764` 修复 OpenCode 1.18.19 实际 `info.tokens`/`part.tokens` 的 usage 映射并补齐
 `usage.final`，Task 52 在同一 Profile 上验证了 OpenCode usage `117/170` 的真实落库。N3 仍未闭环：三协议成功矩阵、
-四 Harness/20-task 与 N4 安全评审仍是独立门槛。
+四 Harness/20-task 与 N4 安全评审仍是独立门槛。随后 Task 53 完成了 OpenCode `continue`，复用了 Task 52
+的 session，并验证了 usage `125/172` 与跨 Task lineage 对账。
 近期仍只推进默认 `pi+opencode` 的
 `dual_canary`；`arm64` 仅在目标 Host 清单出现该架构时补证，四 Harness/20-task 继续作为未来
 `v2_only` 硬切门槛。当前不切全局 Pi 默认，不启用 `v2_only`。
@@ -181,7 +182,7 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
   attempt `closed`、archive、commit/MR，Task 46/47 另产生 usage `272/250`、`223/194`，且
   `input_session_id == Task 46.output_session_id`。两条 Pi 任务的 archive 均为 `codify.worker.result/v2`、
   Pi Adapter `2.0.0`、CLI `0.84.2`，唯一 `run.completed` 位于末尾，包含 `worker.finalization` 与 delivery；
-  两条 OpenCode 任务同样完成 V2 archive、delivery 和 MR 对账；Task 46/47/48 后活动队列均回到 0。
+  两条 OpenCode 任务同样完成 V2 archive、delivery 和 MR 对账；Task 46/47/48/52/53 后活动队列均回到 0。
   这组证据解除“尚无成功模型/commit/MR”的旧阻塞，但不等于 N3 完成：仍需按原矩阵补齐
   `openai_chat_completions` 的真实成功 Task、其余适用协议/Harness 的真实 Endpoint conformance，以及
   Session/usage/archive/Git/MR 的跨协议对账和 Pi/OpenCode 主 lifecycle 规模化验证。
@@ -192,7 +193,10 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
   Profile 3 在 generation `18` 重新 verify-runtime 后，Task 52 使用 Bundle `74` 成功完成 OpenCode
   `execute/fresh`，真实 API/DB usage 为 `117/170`，usage ledger 为 `117/170/287`，archive 为 V2，attempt
   `closed`、`last_seq=81`、唯一 Task terminal 为 `run.completed`，并有 commit/MR。Task 52 的结果说明该 usage
-  修复已跨过 Worker、archive、projector 和 ledger；这仍不替代未完成的三协议、四 Harness 与规模化门槛。
+  修复已跨过 Worker、archive、projector 和 ledger；随后 Task 53 使用同一 Bundle 完成 OpenCode
+  `execute/continue`，usage 为 `125/172`，`input_session_id == Task 52.output_session_id`，attempt `closed`、
+  `last_seq=78`，同样有 V2 archive、commit/MR。OpenCode fresh→continue 的 session lineage 现已有真实证据；
+  这仍不替代未完成的三协议、四 Harness 与规模化门槛。
 - [ ] **N4 — 评审并停在 dual-canary。** 清零本 candidate 的 P0/P1，完成 secret scan 和调试凭据轮换，
   将 candidate 仅开放给显式 V2 Profile；不改变全局 Profile 默认、不切 `v2_only`。本轮
   `secret-scan=passed findings=0`，但远端仍有 3 个历史 unsupported `system_config` key
@@ -233,17 +237,17 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
 - **真实 Task：** Task 20、23–28、30、32、35–38、41–43 均已终态且 container_id 为空；Task 20/28 为
   cancelled，其余列出的 canary 为 failed。Tasks 23–25、30、32、35–38、41–43 的 provider terminal failure
   为月度 `rate_limited`；Pi Tasks 26–27 暴露旧 close/ACK 收敛问题，Task 38 验证了最新独立 outcome
-  路径下的自动 close，Task 41–43 验证了当前 Adapter taxonomy 修复后的真实执行和清理。新增 Task 44、46–48、52
+  路径下的自动 close，Task 41–43 验证了当前 Adapter taxonomy 修复后的真实执行和清理。新增 Task 44、46–48、52、53
   均已 completed 且 container_id 为空：Task 44/48 为 OpenCode freeform/execute，Task 46/47 为 Pi fresh/continue，
-  Task 52 为 OpenCode execute/fresh；均有 commit/MR。Task 46/47 还分别产生 usage `272/250`、`223/194`，
-  Task 52 产生 usage `117/170` 与连续 V2 archive。当前代码已加上
+  Task 52 为 OpenCode execute/fresh，Task 53 为 OpenCode execute/continue；均有 commit/MR。Task 46/47 还分别产生
+  usage `272/250`、`223/194`，Task 52/53 分别产生 usage `117/170`、`125/172` 与连续 V2 archive。当前代码已加上
   30 秒 control exec/lookup 边界，且终止路径会移除容器、释放 Issue execution lock。
 - **Provider gate：** 远端只读元数据确认现有 5 个 Provider 覆盖三种协议；Provider 7 `openrouter-free` 为
   active 的 `openai_responses` 调试入口。用户已明确授权将测试项目 16 的最小 canary 上下文发送到该
-  Provider，本轮 Task 44/46/47/52 的真实成功结果已完成脱敏对账；其它 Provider 仍按各自额度与授权单独验收。
+  Provider，本轮 Task 44/46/47/52/53 的真实成功结果已完成脱敏对账；其它 Provider 仍按各自额度与授权单独验收。
 - **Bundle 对账：** Task 20、23、24/25、26、27/28、30、32、35、36、37、38、41/42、43 分别绑定 Runtime
   Bundle 58、59、60、61、62、63、64、65、66、67、68、69、70；新增 Task 44/48 绑定 Bundle 71，Task 46/47
-  绑定 Bundle 72，Task 52 绑定 Bundle 74。所有这些 Bundle 的 contract 为 `codify.worker.harness/v2`、
+  绑定 Bundle 72，Task 52/53 绑定 Bundle 74。所有这些 Bundle 的 contract 为 `codify.worker.harness/v2`、
   orchestration 为 `1.0.0`。
 - **当前源码验证：** Backend 基线提交 `65395609f70c` 的全量 unit 为 `3156 passed, 4 skipped, 96 subtests`
   且无 warning；其中控制面基线 `eea817f5` 为 `3155 passed, 4 skipped, 96 subtests`，运行时基线
