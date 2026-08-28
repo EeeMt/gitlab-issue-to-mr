@@ -11,11 +11,13 @@ Host/运行时部分的 L4 证据已闭环，Task38、Task41、Task42 与 Task43
 读取已打包 Runtime Bundle manifest 的路径，恢复 current `/harness-catalog`；这些只加强诊断/目录证据，不改变
 真实成功/MR 门槛。`14127ec4` 为 Task 详情页增加切回标签页后的即时状态刷新，降低浏览器保留旧 Task 状态的窗口；
 `94ac94fc` 将同一语义覆盖到共享轮询、Dashboard、Issue 和 Schedule 工作台。
-真实模型成功、
-Git/MR 交付仍未闭环：OpenCode Provider 当前返回账户月度额度限制，不能把 typed failure/cancel cleanup
-当作成功 canary。近期仍只推进默认
-`pi+opencode` 的 `dual_canary`；`arm64` 仅在目标 Host 清单出现该架构时补证，四 Harness/20-task
-继续作为未来 `v2_only` 硬切门槛。当前不切全局 Pi 默认，不启用 `v2_only`。
+真实模型成功与 Git/MR 交付已在用户明确授权的 `openrouter-free` 调试 Provider 上取得首组证据：
+Task 44（OpenCode freeform）、Task 46（Pi fresh execute）、Task 47（Pi continue execute）和 Task 48
+（OpenCode execute）均进入真实 Worker；四者均完成真实终态/归档对账并有 commit/MR，Task 47 复用了
+Task 46 的 session。N3 仍未闭环：三协议成功矩阵、四 Harness/20-task 与 N4 安全评审仍是独立门槛。
+近期仍只推进默认 `pi+opencode` 的
+`dual_canary`；`arm64` 仅在目标 Host 清单出现该架构时补证，四 Harness/20-task 继续作为未来
+`v2_only` 硬切门槛。当前不切全局 Pi 默认，不启用 `v2_only`。
 
 本文只维护当前剩余工作和退出条件。已完成且已验收的工作不再保留为待办流水账；架构约束以
 [Open-Harness V2 架构方案](../../architecture/open-harness-v2.md) 为准，发布操作以
@@ -114,9 +116,9 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
 | --- | --- | --- |
 | L1 | 架构、schema、Runbook 与安全边界一致 | 当前合同已对齐；未来 hard cut 的四 Harness 门槛保持不变 |
 | L2 | 源码、单测、集成测试和并发合同 | 通过；全量 backend unit 基线与当前 HEAD 变化面测试、PostgreSQL focused regression、frontend、mock E2E 和 Ruff 已通过；root-only 安装用例转入 L3 |
-| L3 | 同一不可变 image + Kit + Bundle 的构建、安装、DB 绑定与 digest 对账 | 通过；`0.6.6` Kit、Project Runtime Image、官方安装回执、Profile 3、Runtime Bundle 58–70 已完成 identity 对账 |
-| L4 | 真实 Linux Host、remote Docker、Provider、仓库和真实 Task/MR | 部分通过；当前 Host、Docker、Profile/readiness、Task lifecycle、quota failure 和自动 close/清理已验证；成功模型与 Git/MR 被 Provider 月度额度限制阻塞 |
-| L5 | 四 Harness canary、Pi 20-task 与质量/性能验收 | 未完成；尚未具备成功交付证据，不能进入 `v2_only` hard cut |
+| L3 | 同一不可变 image + Kit + Bundle 的构建、安装、DB 绑定与 digest 对账 | 通过；`0.6.6` Kit、Project Runtime Image、官方安装回执、Profile 3、Runtime Bundle 58–72 已完成 identity 对账 |
+| L4 | 真实 Linux Host、remote Docker、Provider、仓库和真实 Task/MR | 部分通过；Host、Docker、Profile/readiness、Task lifecycle、quota failure、自动 close/清理，以及 `openrouter-free` 下 Pi/OpenCode 的成功模型与 Git/MR 已验证；三协议完整矩阵、四 Harness 与规模化验收仍未完成 |
+| L5 | 四 Harness canary、Pi 20-task 与质量/性能验收 | 未完成；尚未具备完整四 Harness/20-task 证据，不能进入 `v2_only` hard cut |
 | L6 | 维护窗口 hard cut、Pi 默认和 `v2_only` | 未执行 |
 
 ### 当前最小下一步：一个 `pi+opencode` dual-canary candidate
@@ -142,7 +144,8 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
   Profile image/Kit identity generation 均为 `16`，config digest 为
   `014591ba4b6e2b79068006d088b493a147b7fe6c07469ec3824a37b72f8319f6`。Task 20–28 使用 Bundle 58–62，
   Task 30/32/35–38 使用 Bundle 63/64–68，Task 41/42 使用 Bundle 69，Task 43 使用 Bundle 70；均为
-  `codify.worker.harness/v2` / orchestration `1.0.0`。部署后脱敏 API 确认 Task 43 的
+  `codify.worker.harness/v2` / orchestration `1.0.0`。随后 Task 44/48 绑定 Bundle `71`，Task 46/47 绑定 Bundle
+  `72`，均沿用同一 Profile 3 / Kit `0.6.6` composition。部署后脱敏 API 确认 Task 43 的
   `model_protocol=openai_responses` 可从 execution/frozen snapshot 读出；Task 详情弹窗显示相同协议且只显示
   API key 状态，不显示密钥。`d0e2a07b` 部署后 current `/harness-catalog` 已返回
   `current_runtime_manifest` / `codify.worker.harness/v2`，不再是 503；Profile 3 参数化 catalog
@@ -165,9 +168,18 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
   实际输出协议化启动摘要（`openai_responses`、对应 model/endpoint），随后同样收敛为
   `failed/rate_limited`，attempt `closed`、`last_seq=58`、容器清理；这补齐了新诊断 source 的真实 Worker
   证据。`65395609f70c` 又将该冻结协议下沉到 Task runtime-summary API/UI，部署后 Task 43 API 与页面均显示
-  `openai_responses`；这属于可审计的配置诊断，不是成功模型或交付证据。但 Provider 仍处于月度额度限制，尚无
-  成功模型输出、commit/push/MR，因而不把本项记为完成。
-  额度恢复后仍需按原矩阵补三协议成功 Task、Session/usage/archive/Git/MR 及 Pi/OpenCode 主 lifecycle。
+  `openai_responses`；这属于可审计的配置诊断。
+
+  本轮在用户明确授权后启用远端 `openrouter-free`（Provider 7，`openai_responses`），同一 Profile 3 / Kit
+  `0.6.6` 上完成了四条真实成功证据：Task 44 为 OpenCode `freeform`，Task 46 为 Pi `execute/fresh`，
+  Task 47 为 Pi `execute/continue`，Task 48 为 OpenCode `execute`；四者均有 canonical `run.completed`、
+  attempt `closed`、archive、commit/MR，Task 46/47 另产生 usage `272/250`、`223/194`，且
+  `input_session_id == Task 46.output_session_id`。两条 Pi 任务的 archive 均为 `codify.worker.result/v2`、
+  Pi Adapter `2.0.0`、CLI `0.84.2`，唯一 `run.completed` 位于末尾，包含 `worker.finalization` 与 delivery；
+  两条 OpenCode 任务同样完成 V2 archive、delivery 和 MR 对账；Task 46/47/48 后活动队列均回到 0。
+  这组证据解除“尚无成功模型/commit/MR”的旧阻塞，但不等于 N3 完成：仍需按原矩阵补齐
+  `openai_chat_completions` 的真实成功 Task、其余适用协议/Harness 的真实 Endpoint conformance，以及
+  Session/usage/archive/Git/MR 的跨协议对账和 Pi/OpenCode 主 lifecycle 规模化验证。
 - [ ] **N4 — 评审并停在 dual-canary。** 清零本 candidate 的 P0/P1，完成 secret scan 和调试凭据轮换，
   将 candidate 仅开放给显式 V2 Profile；不改变全局 Profile 默认、不切 `v2_only`。本轮
   `secret-scan=passed findings=0`，但远端仍有 3 个历史 unsupported `system_config` key
@@ -206,14 +218,16 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
 - **真实 Task：** Task 20、23–28、30、32、35–38、41–43 均已终态且 container_id 为空；Task 20/28 为
   cancelled，其余列出的 canary 为 failed。Tasks 23–25、30、32、35–38、41–43 的 provider terminal failure
   为月度 `rate_limited`；Pi Tasks 26–27 暴露旧 close/ACK 收敛问题，Task 38 验证了最新独立 outcome
-  路径下的自动 close，Task 41–43 验证了当前 Adapter taxonomy 修复后的真实执行和清理。当前代码已加上
-  30 秒 control exec/lookup 边界，且终止路径会移除容器、释放 Issue execution lock；Provider 月度额度
-  限制仍阻塞成功模型输出和 MR 交付。
-- **Provider gate：** 远端只读元数据确认现有 4 个 Provider 覆盖三种协议，端点均为外部或未分类范围；本轮
-  未发起模型请求。真实成功 canary 仍需可用额度，以及明确授权将测试仓库上下文发送到对应外部 Provider。
+  路径下的自动 close，Task 41–43 验证了当前 Adapter taxonomy 修复后的真实执行和清理。新增 Task 44、46–48
+  均已 completed 且 container_id 为空：Task 44/48 为 OpenCode freeform/execute，Task 46/47 为 Pi fresh/continue，
+  四者均有 commit/MR；Task 46/47 还分别产生 usage `272/250`、`223/194` 与连续 V2 archive。当前代码已加上
+  30 秒 control exec/lookup 边界，且终止路径会移除容器、释放 Issue execution lock。
+- **Provider gate：** 远端只读元数据确认现有 5 个 Provider 覆盖三种协议；Provider 7 `openrouter-free` 为
+  active 的 `openai_responses` 调试入口。用户已明确授权将测试项目 16 的最小 canary 上下文发送到该
+  Provider，本轮 Task 44/46/47 的真实成功结果已完成脱敏对账；其它 Provider 仍按各自额度与授权单独验收。
 - **Bundle 对账：** Task 20、23、24/25、26、27/28、30、32、35、36、37、38、41/42、43 分别绑定 Runtime
-  Bundle 58、59、60、61、62、63、64、65、66、67、68、69、70；所有这些 Bundle 的 contract 为
-  `codify.worker.harness/v2`、orchestration 为 `1.0.0`。
+  Bundle 58、59、60、61、62、63、64、65、66、67、68、69、70；新增 Task 44/48 绑定 Bundle 71，Task 46/47
+  绑定 Bundle 72。所有这些 Bundle 的 contract 为 `codify.worker.harness/v2`、orchestration 为 `1.0.0`。
 - **当前源码验证：** Backend 基线提交 `65395609f70c` 的全量 unit 为 `3156 passed, 4 skipped, 96 subtests`
   且无 warning；其中控制面基线 `eea817f5` 为 `3155 passed, 4 skipped, 96 subtests`，运行时基线
   `6b4f1056` 为 `3150 passed, 4 skipped, 96 subtests`，其后
