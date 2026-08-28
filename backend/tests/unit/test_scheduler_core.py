@@ -769,7 +769,9 @@ class SchedulerRunCycleTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_context):
-            with patch("app.scheduler.refresh_runtime_config_if_stale", new=AsyncMock()):
+            with patch(
+                "app.scheduler.refresh_runtime_config_if_stale", new=AsyncMock()
+            ) as mock_refresh:
                 with patch.object(scheduler, "_maybe_cleanup_sessions", new=AsyncMock()):
                     with patch.object(scheduler, "_maybe_cleanup_workspaces", new=AsyncMock()):
                         with patch.object(scheduler, "_maybe_cleanup_issue_locks", new=AsyncMock()):
@@ -797,6 +799,7 @@ class SchedulerRunCycleTests(unittest.IsolatedAsyncioTestCase):
                                                 ) as mock_exec:
                                                     await scheduler._run_cycle()
                                                     mock_exec.assert_not_called()
+        mock_refresh.assert_awaited_once_with(mock_db)
 
     async def test_run_cycle_skips_when_issue_mutex_active(self) -> None:
         """_run_cycle should skip a task when its issue is already being processed."""
