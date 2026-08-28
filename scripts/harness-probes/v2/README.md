@@ -25,7 +25,11 @@ python3 scripts/harness-probes/v2/secret-scan.py --staged
 
 `resume.sh` verifies protocol-level continuation. `recall.sh` separately asks
 the model to recall a turn-one marker; passing the former does not establish the
-latter. `benchmark.sh` records only index and process status in `summary.tsv`.
+latter. `benchmark.sh` records redacted status, duration, failure kind, usage,
+tool-call count and explicit acceptance fields in `summary.tsv`. Because this
+helper invokes the Harness runner only, its `delivery_status` is `not_run`
+unless a future runner mode emits delivery events, and `human_acceptance`
+remains `unreviewed`; neither field is evidence of a Codify Task/MR acceptance.
 
 ## Safety and evidence rules
 
