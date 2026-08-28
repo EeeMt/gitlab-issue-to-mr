@@ -58,6 +58,9 @@ async def run_scheduler_service() -> None:
         health_app,
         host="0.0.0.0",
         port=settings.scheduler_health_port,
+        # The scheduler health endpoint is HTTP-only. Avoid loading Uvicorn's
+        # deprecated websockets implementation for a server with no WS route.
+        ws="none",
         log_level=settings.log_level.lower(),
         access_log=False,
     )
