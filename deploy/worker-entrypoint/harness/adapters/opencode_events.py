@@ -136,6 +136,8 @@ def _emit(event_type: str, payload: dict, raw_line: int) -> None:
 
 def _usage(properties: dict) -> dict:
     source = properties.get("usage") if isinstance(properties.get("usage"), dict) else {}
+    if not source and isinstance(properties.get("tokens"), dict):
+        source = properties["tokens"]
     def _first_value(*keys: str):
         for key in keys:
             value = source.get(key)
@@ -143,7 +145,14 @@ def _usage(properties: dict) -> dict:
                 return value
         return None
 
-    cost_source = source.get("cost")
+    cache = source.get("cache") if isinstance(source.get("cache"), dict) else {}
+    cached_input_tokens = _first_value("cached_input_tokens", "cacheRead")
+    if cached_input_tokens is None:
+        cached_input_tokens = cache.get("read")
+
+    cost_source = properties.get("cost")
+    if cost_source is None:
+        cost_source = source.get("cost")
     if isinstance(cost_source, dict):
         cost = cost_source.get("total")
     elif isinstance(cost_source, (int, float)) and not isinstance(cost_source, bool):
@@ -170,7 +179,7 @@ def _usage(properties: dict) -> dict:
         engine_fields["cost_breakdown"] = cost_source
     return {
         "input_tokens": _first_value("input_tokens", "input"),
-        "cached_input_tokens": _first_value("cached_input_tokens", "cacheRead"),
+        "cached_input_tokens": cached_input_tokens,
         "output_tokens": _first_value("output_tokens", "output"),
         "reasoning_tokens": _first_value("reasoning_tokens", "reasoning", "reasoningTokens"),
         "cost": cost,
@@ -327,9 +336,9 @@ def _handle_session_error(properties: dict, raw_line: int) -> None:
 
 def _handle_message_updated(properties: dict, raw_line: int) -> None:
     info = properties.get("info") if isinstance(properties.get("info"), dict) else {}
-    usage = info.get("usage") if isinstance(info.get("usage"), dict) else None
+    usage = info.get("usage") if isinstance(info.get("usage"), dict) else info.get("tokens")
     if isinstance(usage, dict):
-        _STATE["usage"] = _usage({"usage": usage})
+        _STATE["usage"] = _usage({"usage": usage, "cost": info.get("cost")})
     role = info.get("role")
     message_id = info.get("id") or properties.get("messageID")
     if not message_id and role == "assistant":
@@ -413,9 +422,9 @@ def _handle_message_part_updated(properties: dict, raw_line: int) -> None:
             # later deltas extend it only when they are not already included.
             state["text"] = text
             _refresh_text()
-    usage = part.get("usage") if isinstance(part.get("usage"), dict) else None
+    usage = part.get("usage") if isinstance(part.get("usage"), dict) else part.get("tokens")
     if isinstance(usage, dict):
-        _STATE["usage"] = _usage({"usage": usage})
+        _STATE["usage"] = _usage({"usage": usage, "cost": part.get("cost")})
 
 
 def _handle_message_part_delta(properties: dict, raw_line: int) -> None:
