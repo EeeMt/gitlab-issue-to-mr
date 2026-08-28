@@ -744,6 +744,7 @@ async def test_control_transport_detaches_and_correlates_outcome(monkeypatch):
 
         def __init__(self):
             self.client = SimpleNamespace(api=FakeApi())
+            self.outcome_paths = []
 
         def put_archive(self, _path, data):
             with tarfile.open(fileobj=io.BytesIO(data), mode="r:*") as archive:
@@ -752,6 +753,7 @@ async def test_control_transport_detaches_and_correlates_outcome(monkeypatch):
             return True
 
         def get_archive(self, _path):
+            self.outcome_paths.append(_path)
             outcome = json.dumps(
                 {
                     "status": "ack",
@@ -776,6 +778,9 @@ async def test_control_transport_detaches_and_correlates_outcome(monkeypatch):
     assert result["status"] == "ack"
     assert result["closed"] is True
     assert container.client.api.started == [("manifest", False), ("control", True)]
+    assert container.outcome_paths[0].startswith(
+        "/tmp/codify-runtime/control-outcome-"
+    )
 
 
 @pytest.mark.asyncio

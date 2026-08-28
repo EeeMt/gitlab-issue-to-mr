@@ -384,7 +384,16 @@ async def docker_exec_control_transport(
                     "rejection_code": "delivery_outcome_unknown",
                     "rejection_message": "kit runtime unavailable in container",
                 }
-            outcome_path = "/tmp/codify-runtime/control-outcome.json"
+            # The Worker entrypoint may leave the legacy outcome file owned by
+            # its harness user.  A fresh Docker exec cannot reliably replace
+            # that file on root-squashed/rootless mounts, even when the
+            # container itself is configured as root.  Use a per-request file
+            # in the world-writable runtime directory for the exec stdout;
+            # close still has the owner's fixed-file journal as a fallback.
+            outcome_path = f"/tmp/codify-runtime/control-outcome-{control_request_id}.json"
+            outcome_paths = [outcome_path]
+            if frame.get("type") == "close":
+                outcome_paths.append("/tmp/codify-runtime/control-outcome.json")
             command = [
                 bash_bin,
                 "-c",
@@ -415,17 +424,18 @@ async def docker_exec_control_transport(
 
             deadline = time.monotonic() + CONTROL_RESULT_TIMEOUT_SECONDS
             while True:
-                try:
-                    output = _read_archive(outcome_path)
-                    lines = output.decode(errors="replace").strip().splitlines()
-                    result = json.loads(lines[-1]) if lines else None
-                except Exception:  # noqa: BLE001 - file races while exec starts/exits
-                    result = None
-                if (
-                    isinstance(result, dict)
-                    and result.get("control_request_id") == control_request_id
-                ):
-                    return result
+                for candidate_path in outcome_paths:
+                    try:
+                        output = _read_archive(candidate_path)
+                        lines = output.decode(errors="replace").strip().splitlines()
+                        result = json.loads(lines[-1]) if lines else None
+                    except Exception:  # noqa: BLE001 - file races while exec starts/exits
+                        result = None
+                    if (
+                        isinstance(result, dict)
+                        and result.get("control_request_id") == control_request_id
+                    ):
+                        return result
 
                 # A detached exec that has already exited will not produce a
                 # newer result.  Inspect only after the first archive read so a
