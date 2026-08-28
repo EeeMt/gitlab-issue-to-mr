@@ -47,6 +47,11 @@ logger = logging.getLogger(__name__)
 CONTROL_FRAME_VERSION = "1"
 
 DEFAULT_LEASE_TTL_SECONDS = 120
+# A Docker exec used for a control probe/close must never pin the scheduler
+# pump indefinitely.  The in-container client has its own 16s Unix-socket
+# timeout; this outer bound also covers a remote Docker API that stops
+# returning from put_archive/exec_start.
+CONTROL_TRANSPORT_TIMEOUT_SECONDS = 30
 
 # Result outcome strings returned by the fixed control_client transport.
 CONTROL_CLIENT_PATH = (
@@ -384,7 +389,17 @@ async def docker_exec_control_transport(
                 }
 
         try:
-            return await asyncio.to_thread(_exec)
+            return await asyncio.wait_for(
+                asyncio.to_thread(_exec),
+                timeout=CONTROL_TRANSPORT_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            logger.warning("Control transport timed out for task %s", task.id)
+            return {
+                "status": DISPATCH_UNKNOWN,
+                "rejection_code": "delivery_outcome_unknown",
+                "rejection_message": "control transport timed out",
+            }
         except Exception as exc:  # noqa: BLE001 - transport errors are outcomes
             logger.warning("Control transport failed with %s", type(exc).__name__)
             return {

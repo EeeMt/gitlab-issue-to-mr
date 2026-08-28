@@ -284,10 +284,19 @@ class PiOwner:
                 outcome = await self.dispatch(frame)
             except Exception:  # fail closed at owner boundary
                 outcome = {"status": "unknown", "rejection_code": "delivery_outcome_unknown", "rejection_message": "Pi control request failed"}
-            writer.write(json.dumps(outcome, separators=(",", ":")).encode() + b"\n")
-            await writer.drain()
-            writer.close()
-            await writer.wait_closed()
+            try:
+                writer.write(json.dumps(outcome, separators=(",", ":")).encode() + b"\n")
+                await writer.drain()
+            except (BrokenPipeError, ConnectionResetError):
+                # A Docker-exec client may close immediately after receiving
+                # the newline; the owner has already recorded the outcome.
+                return
+            finally:
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
 
         try:
             server = await asyncio.start_unix_server(handler, path=str(self.socket_path))
