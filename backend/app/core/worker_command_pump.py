@@ -23,6 +23,8 @@ import io
 import json
 import logging
 import tarfile
+import time
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Awaitable, Callable
@@ -52,6 +54,8 @@ DEFAULT_LEASE_TTL_SECONDS = 120
 # timeout; this outer bound also covers a remote Docker API that stops
 # returning from put_archive/exec_start.
 CONTROL_TRANSPORT_TIMEOUT_SECONDS = 30
+CONTROL_RESULT_POLL_INTERVAL_SECONDS = 0.1
+CONTROL_RESULT_TIMEOUT_SECONDS = 20
 
 # Result outcome strings returned by the fixed control_client transport.
 CONTROL_CLIENT_PATH = (
@@ -300,7 +304,11 @@ async def docker_exec_control_transport(
     """Run the fixed in-image control client for one frame via Docker exec.
 
     Resolves the attempt's RUNNING task container, pipes the frame JSON to
-    ``control_client.py`` on stdin, and parses the outcome dict from stdout.
+    ``control_client.py`` via a detached Docker exec, then reads its
+    correlated outcome file from the container.  Detaching the client is
+    important for the close path: the owner may acknowledge the drain marker
+    and exit the container while the Docker API is still holding the exec
+    response open.
     Any failure maps to ``unknown`` — never an exception into the pump loop.
     """
     import asyncio
@@ -342,7 +350,13 @@ async def docker_exec_control_transport(
             import shlex
 
             frame_path = "/tmp/codify-runtime/control-frame.json"
-            payload = json.dumps(frame).encode()
+            # The outcome file survives between control calls.  Correlate every
+            # detached invocation so a stale probe/close result can never be
+            # mistaken for the current request.
+            control_request_id = uuid.uuid4().hex
+            control_frame = dict(frame)
+            control_frame["control_request_id"] = control_request_id
+            payload = json.dumps(control_frame).encode()
             tar_buffer = io.BytesIO()
             with tarfile.open(fileobj=tar_buffer, mode="w") as archive:
                 info = tarfile.TarInfo(name="control-frame.json")
@@ -383,23 +397,54 @@ async def docker_exec_control_transport(
                 stdout=True,
                 stderr=True,
             )
-            container.client.api.exec_start(run["Id"])
-            result = container.client.api.exec_create(
-                container.id,
-                ["cat", outcome_path],
-                stdout=True,
-            )
-            output = container.client.api.exec_start(result["Id"])
-            if not isinstance(output, bytes):
-                output = b"".join(output)
-            try:
-                return json.loads(output.decode(errors="replace").strip().splitlines()[-1])
-            except (ValueError, IndexError):
-                return {
-                    "status": DISPATCH_UNKNOWN,
-                    "rejection_code": "delivery_outcome_unknown",
-                    "rejection_message": f"unparseable control client output: {output[:200]}",
-                }
+            # Do not wait synchronously on the control client.  In particular,
+            # a close ACK sets the owner's local drain event, which can stop the
+            # Worker container before a non-detached exec response is released
+            # by a remote Docker daemon.
+            container.client.api.exec_start(run["Id"], detach=True)
+
+            def _read_archive(path: str) -> bytes:
+                bits, _stat = container.get_archive(path)
+                archive_bytes = bits if isinstance(bits, bytes) else b"".join(bits)
+                with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:*") as archive:
+                    member = next((item for item in archive.getmembers() if item.isfile()), None)
+                    if member is None:
+                        return b""
+                    stream = archive.extractfile(member)
+                    return stream.read() if stream is not None else b""
+
+            deadline = time.monotonic() + CONTROL_RESULT_TIMEOUT_SECONDS
+            while True:
+                try:
+                    output = _read_archive(outcome_path)
+                    lines = output.decode(errors="replace").strip().splitlines()
+                    result = json.loads(lines[-1]) if lines else None
+                except Exception:  # noqa: BLE001 - file races while exec starts/exits
+                    result = None
+                if (
+                    isinstance(result, dict)
+                    and result.get("control_request_id") == control_request_id
+                ):
+                    return result
+
+                # A detached exec that has already exited will not produce a
+                # newer result.  Inspect only after the first archive read so a
+                # fast close still gets one last chance to publish its outcome.
+                try:
+                    state = container.client.api.exec_inspect(run["Id"])
+                except Exception:  # noqa: BLE001 - keep polling on old daemons
+                    state = None
+                if isinstance(state, dict) and state.get("Running") is False:
+                    break
+                if time.monotonic() >= deadline:
+                    break
+                time.sleep(CONTROL_RESULT_POLL_INTERVAL_SECONDS)
+
+            return {
+                "status": DISPATCH_UNKNOWN,
+                "rejection_code": "delivery_outcome_unknown",
+                "rejection_message": "control client produced no correlated outcome",
+            }
 
         try:
             return await asyncio.wait_for(

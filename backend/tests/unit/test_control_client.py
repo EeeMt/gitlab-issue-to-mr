@@ -9,6 +9,8 @@ without a real Pi/OpenCode adapter.
 from __future__ import annotations
 
 import importlib.util
+import io
+import json
 from pathlib import Path
 
 import pytest
@@ -119,6 +121,21 @@ def test_control_client_rejects_unsupported_frame_version(control_client):
     outcome = control_client.handle(_frame(frame_version="9"))
     assert outcome["status"] == "reject"
     assert outcome["rejection_code"] == "unsupported_frame_version"
+
+
+def test_control_client_main_echoes_request_correlation(control_client, monkeypatch, capsys):
+    frame = _frame(control_request_id="request-1")
+    monkeypatch.setattr(control_client.sys, "stdin", io.StringIO(json.dumps(frame)))
+
+    assert control_client.main() == 0
+
+    output = json.loads(capsys.readouterr().out)
+    assert output == {
+        "status": "retry",
+        "rejection_code": "control_owner_unreachable",
+        "rejection_message": "Pi control owner is unavailable",
+        "control_request_id": "request-1",
+    }
 
 
 def test_bridge_negotiates_pi_command_capability(bridge):

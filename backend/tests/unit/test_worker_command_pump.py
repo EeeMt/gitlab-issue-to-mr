@@ -9,7 +9,10 @@ outcome as ``delivery_outcome_unknown`` instead of leaving it ambiguous.
 from __future__ import annotations
 
 import asyncio
+import io
+import json
 import os
+import tarfile
 import uuid
 
 import pytest
@@ -698,6 +701,81 @@ async def test_control_transport_has_a_bounded_remote_docker_wait(monkeypatch):
         "rejection_code": "delivery_outcome_unknown",
         "rejection_message": "control transport timed out",
     }
+
+
+@pytest.mark.asyncio
+async def test_control_transport_detaches_and_correlates_outcome(monkeypatch):
+    """A close exec must not wait on a container that is exiting concurrently."""
+    from types import SimpleNamespace
+
+    from app.core import worker_command_pump as module
+    from app.core import worker_docker_targets
+
+    def tar_bytes(name, payload):
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w") as archive:
+            info = tarfile.TarInfo(name=name)
+            info.size = len(payload)
+            archive.addfile(info, io.BytesIO(payload))
+        return buffer.getvalue()
+
+    class FakeApi:
+        def __init__(self):
+            self.started = []
+            self.request_id = None
+
+        def exec_create(self, _container_id, command, **_kwargs):
+            if command[:2] == ["cat", module.KIT_MANIFEST_PATH]:
+                return {"Id": "manifest"}
+            return {"Id": "control"}
+
+        def exec_start(self, exec_id, detach=False, **_kwargs):
+            self.started.append((exec_id, detach))
+            if exec_id == "manifest":
+                return json.dumps({"bash": "/bin/bash", "runtime_bin": "/runtime"}).encode()
+            assert detach is True
+            return b""
+
+        def exec_inspect(self, _exec_id):
+            return {"Running": False}
+
+    class FakeContainer:
+        id = "container-1"
+
+        def __init__(self):
+            self.client = SimpleNamespace(api=FakeApi())
+
+        def put_archive(self, _path, data):
+            with tarfile.open(fileobj=io.BytesIO(data), mode="r:*") as archive:
+                payload = archive.extractfile(archive.getmembers()[0]).read()
+            self.client.api.request_id = json.loads(payload)["control_request_id"]
+            return True
+
+        def get_archive(self, _path):
+            outcome = json.dumps(
+                {
+                    "status": "ack",
+                    "closed": True,
+                    "control_request_id": self.client.api.request_id,
+                }
+            ).encode()
+            return [tar_bytes("control-outcome.json", outcome)], {}
+
+    container = FakeContainer()
+
+    async def find_container(*_args, **_kwargs):
+        return None, container, SimpleNamespace()
+
+    monkeypatch.setattr(worker_docker_targets, "find_task_container", find_container)
+    result = await module.docker_exec_control_transport(
+        {"frame_version": "1", "task_id": 1, "attempt_id": "a", "type": "close"},
+        SimpleNamespace(),
+        task=SimpleNamespace(id=1, issue_id=1, container_id=container.id),
+    )
+
+    assert result["status"] == "ack"
+    assert result["closed"] is True
+    assert container.client.api.started == [("manifest", False), ("control", True)]
 
 
 @pytest.mark.asyncio

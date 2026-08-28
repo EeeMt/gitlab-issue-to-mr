@@ -107,7 +107,15 @@ def _forward_to_bridge(frame: dict) -> dict:
 
 
 def main() -> int:
-    outcome = handle(_read_frame())
+    frame = _read_frame()
+    outcome = handle(frame)
+    # The Docker-side pump reads a persisted outcome after a detached exec.
+    # Echo only this opaque per-invocation token so an older outcome file can
+    # never be accepted as the result of the current request.
+    request_id = frame.get("control_request_id") if isinstance(frame, dict) else None
+    if isinstance(request_id, str) and request_id:
+        outcome = dict(outcome)
+        outcome["control_request_id"] = request_id
     json.dump(outcome, sys.stdout, sort_keys=True)
     sys.stdout.write("\n")
     return 0
