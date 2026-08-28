@@ -295,6 +295,53 @@ class ProviderUpdateTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertIn("Default provider cannot be disabled", response.json()["detail"])
 
+    def test_update_protocol_validates_against_existing_provider_kind(self):
+        """A protocol-only PATCH cannot cross the provider-kind boundary."""
+        provider = _make_provider(id=1)
+        provider.provider_kind = "anthropic_compatible"
+        provider.model_protocol = "anthropic_messages"
+        self.mock_db.get = AsyncMock(return_value=provider)
+
+        response = self.client.patch(
+            "/api/providers/1", json={"model_protocol": "openai_responses"}
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("cannot consume model_protocol", response.json()["detail"])
+        self.mock_db.commit.assert_not_awaited()
+        self.assertEqual(provider.model_protocol, "anthropic_messages")
+
+    def test_update_kind_validates_against_existing_protocol(self):
+        """A kind-only PATCH cannot cross the provider-kind boundary."""
+        provider = _make_provider(id=1)
+        provider.provider_kind = "openai_compatible"
+        provider.model_protocol = "openai_responses"
+        self.mock_db.get = AsyncMock(return_value=provider)
+
+        response = self.client.patch(
+            "/api/providers/1", json={"provider_kind": "anthropic_compatible"}
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("cannot consume model_protocol", response.json()["detail"])
+        self.mock_db.commit.assert_not_awaited()
+        self.assertEqual(provider.provider_kind, "openai_compatible")
+
+    def test_update_protocol_accepts_valid_pair_against_existing_kind(self):
+        """A protocol-only PATCH can switch between OpenAI-compatible protocols."""
+        provider = _make_provider(id=1)
+        provider.provider_kind = "openai_compatible"
+        provider.model_protocol = "openai_responses"
+        self.mock_db.get = AsyncMock(return_value=provider)
+
+        response = self.client.patch(
+            "/api/providers/1", json={"model_protocol": "openai_chat_completions"}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["model_protocol"], "openai_chat_completions")
+        self.mock_db.commit.assert_awaited_once()
+
 
 # ---------------------------------------------------------------------------
 # Delete provider

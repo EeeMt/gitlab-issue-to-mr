@@ -391,6 +391,35 @@ async def update_provider(
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
 
+    # Validate the merged endpoint state before mutating the ORM object.  The
+    # PATCH schema can only validate fields supplied in one request; a
+    # protocol-only update must still be checked against the provider's
+    # existing kind (and vice versa).  Otherwise an Anthropic provider could
+    # be persisted with an OpenAI protocol, leaving a fail-open gap between
+    # Provider configuration and the frozen worker contract.
+    current_provider_kind = (
+        getattr(provider, "provider_kind", None) or "anthropic_compatible"
+    )
+    current_model_protocol = (
+        getattr(provider, "model_protocol", None) or "anthropic_messages"
+    )
+    current_provider_options = getattr(provider, "provider_options", None)
+    if not isinstance(current_provider_options, dict):
+        current_provider_options = {}
+    next_provider_kind = request.provider_kind or current_provider_kind
+    next_model_protocol = request.model_protocol or current_model_protocol
+    next_provider_options = (
+        request.provider_options
+        if request.provider_options is not None
+        else current_provider_options
+    )
+    try:
+        _validate_kind_protocol(
+            next_provider_kind, next_model_protocol, next_provider_options
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     # Check name uniqueness if changing
     if request.name is not None and request.name != provider.name:
         existing = await db.execute(
