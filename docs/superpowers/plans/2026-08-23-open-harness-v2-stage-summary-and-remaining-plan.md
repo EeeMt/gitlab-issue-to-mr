@@ -1,6 +1,6 @@
 # Open-Harness V2 当前遗留项与验收计划
 
-**更新：** 2026-08-28
+**更新：** 2026-08-29
 
 **本次复核基线：** `b137ac98`（控制面 Backend/Scheduler；Nginx 使用 `94ac94fc`）
 
@@ -202,21 +202,22 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
   当前 `openrouter-free` Provider 7 仍冻结为 `openai_responses`；本轮未在未明确授权的情况下切换该 Provider
   或调用另一套 Chat Completions 凭据，因此 `openai_chat_completions` 的真实成功 Task 仍是下一项独立证据，
   不能用本地 fixture 或现有 Responses canary 代替。
-- [ ] **N4 — 评审并停在 dual-canary。** 清零本 candidate 的 P0/P1，完成 secret scan 和调试凭据轮换，
+- [x] **N4 — 评审并停在 dual-canary。** 清零本 candidate 的 P0/P1，完成 secret scan 和调试凭据轮换，
   将 candidate 仅开放给显式 V2 Profile；不改变全局 Profile 默认、不切 `v2_only`。本轮
-  `secret-scan=passed findings=0`，但远端仍有 3 个历史 unsupported `system_config` key
-  （`gitlab_webhook_secret`、`maven_cache_host_path`、`maven_settings_host_path`）和 1 个
-  无法用当前加密密钥解密的 `oidc_client_secret`；已通过 `6b4f1056` 将重复告警降为启动时一次，
-  且源码审计确认前 3 个 key 在当前应用中已无引用，属于可清理的历史行；但未擅自删除/覆盖配置，
-  需由部署负责人确认清理，`oidc_client_secret` 则需正确加密密钥重新录入或明确清除后才可关闭该 N4 项。
-  通过后再单独决定是否进入
+  `secret-scan=passed findings=0`。2026-08-29 按部署负责人决定，从远端 `system_config` 精确清理了
+  `gitlab_webhook_secret`、`maven_cache_host_path`、`maven_settings_host_path` 3 行，删除后复核
+  `legacy_keys_remaining=0`；Webhook 功能未受影响，项目级 Secret 不在本次清理范围内。远端
+  `oidc_client_secret` 已于 2026-08-28 更新，当前 Backend 使用现行加密密钥复核为
+  `decryptable_nonempty`，未输出 Secret 内容。N4 配置/密钥项由此闭环，candidate 继续停在
+  `dual_canary`；这不改变后续四 Harness、Claude/Codex canary、20-task benchmark 与 L5/L6 门槛。
+  N4 关闭后再单独决定是否进入
   hard-cut 准备；若决定进入，才补四 Harness 同一 composition、Claude/Codex canary、20-task benchmark
   与 L5/L6。
 
 `linux/arm64` 只在目标 Host 清单出现该平台时新增 N1 分支；纯文档/证据变化不触发全量测试重跑。
 这两个条件用于控制当前范围，不修改架构文档对最终 V2 hard cut 的既定门槛。
 
-### 当前 dev/remote 快照（2026-08-28）
+### 当前 dev/remote 快照（2026-08-29）
 
 - **门禁与 schema：** 只读检查确认 remote daemon 为 `linux/x86_64`（制品平台 `linux/amd64`），
   Backend/Scheduler 都是 `dual_canary`、`AUTO_MIGRATE=false`，数据库 revision 是
