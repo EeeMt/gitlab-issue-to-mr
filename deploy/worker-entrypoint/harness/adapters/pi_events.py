@@ -446,6 +446,30 @@ def _handle_message_end(record: dict, raw_line: int) -> None:
     if isinstance(message.get("usage"), dict):
         _STATE["usage"] = _usage(message)
     stop_reason = message.get("stopReason")
+    error_message = message.get("errorMessage")
+    if stop_reason == "error" or (
+        stop_reason != "aborted"
+        and isinstance(error_message, str)
+        and error_message.strip()
+    ):
+        failure_message = clean_message(
+            str(error_message or "Pi message ended with an error")
+        )
+        failure_kind = _failure_kind(failure_message)
+        _STATE["terminal"] = "failed"
+        _STATE["terminal_line"] = raw_line
+        _STATE["terminal_failure"] = {
+            "kind": failure_kind,
+            "message": failure_message,
+        }
+        _write_result(
+            success=False,
+            result="".join(_STATE["text_parts"]),
+            usage=_STATE["usage"],
+            failure_message=failure_message,
+            failure_kind=failure_kind,
+        )
+        return
     if stop_reason == "aborted":
         _STATE["aborted"] = True
         failure = {
@@ -551,6 +575,8 @@ def _handle_tool(record: dict, raw_line: int) -> None:
 
 
 def _handle_agent_end(record: dict, raw_line: int) -> None:
+    if _STATE["terminal"] is not None:
+        return
     will_retry = bool(record.get("willRetry"))
     if _STATE["aborted"]:
         return

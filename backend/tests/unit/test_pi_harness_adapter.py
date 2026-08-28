@@ -216,6 +216,40 @@ def test_pi_message_end_does_not_duplicate_completed(tmp_path):
     )
     assert completed[0]["payload"]["text"] == "hello world"
 
+
+def test_pi_provider_error_maps_to_rate_limited_terminal(tmp_path):
+    """Pi exposes account limits on assistant message_end.errorMessage."""
+    runtime_dir = tmp_path / "rate-limit"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    _translate(
+        runtime_dir,
+        [
+            _get_state_record(),
+            {"id": 2, "type": "response", "command": "prompt", "success": True},
+            {"type": "agent_start"},
+            {"type": "turn_start"},
+            {
+                "type": "message_end",
+                "message": {
+                    "role": "assistant",
+                    "content": [],
+                    "stopReason": "error",
+                    "errorMessage": "429 Monthly usage limit reached. Resets in 6 days.",
+                },
+            },
+            {"type": "agent_end", "messages": [], "willRetry": False},
+            {"type": "agent_settled"},
+        ],
+    )
+
+    terminal = next(event for event in _events(runtime_dir) if event["type"] == "harness.failed")
+    assert terminal["payload"]["failure"]["kind"] == "rate_limited"
+    result = json.loads((runtime_dir / "harness-result.json").read_text(encoding="utf-8"))
+    assert result["status"] == "failed"
+    assert result["failure"]["kind"] == "rate_limited"
+
+
 def test_pi_delivered_is_native_ack_not_model_consumption(tmp_path):
     # A steer response with success:true followed by the turn completing emits
     # control.command.delivered; delivered == interface ACK, and the probe's
