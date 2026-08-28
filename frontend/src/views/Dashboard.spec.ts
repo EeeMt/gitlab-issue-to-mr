@@ -629,6 +629,33 @@ describe('Dashboard', () => {
 
       vi.useRealTimers()
     })
+
+    it('refreshes immediately when a hidden tab becomes visible', async () => {
+      vi.restoreAllMocks()
+      vi.useFakeTimers()
+
+      setupDefaultMocks()
+      wrapper = mount(Dashboard, { global: { plugins: [router] } })
+      await flushPromises()
+
+      const callsBefore = mockApi.getIssues.mock.calls.length
+
+      Object.defineProperty(document, 'visibilityState', {
+        value: 'hidden', writable: true, configurable: true,
+      })
+      document.dispatchEvent(new Event('visibilitychange'))
+
+      Object.defineProperty(document, 'visibilityState', {
+        value: 'visible', writable: true, configurable: true,
+      })
+      document.dispatchEvent(new Event('visibilitychange'))
+      await flushPromises()
+
+      expect(mockApi.getIssues.mock.calls.length).toBeGreaterThan(callsBefore)
+
+      wrapper.unmount()
+      vi.useRealTimers()
+    })
   })
 
   describe('loading state', () => {

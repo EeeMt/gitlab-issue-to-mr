@@ -349,6 +349,29 @@ describe('ScheduleOverview', () => {
   })
 
   // -------------------------------------------------------------------------
+  it('refreshes immediately when a hidden tab becomes visible', async () => {
+    wrapper = mountComponent()
+    await flushPromises()
+
+    ;(mockApi.getScheduledStats as Mock).mockClear()
+    ;(mockApi.getScheduledTasks as Mock).mockClear()
+
+    Object.defineProperty(document, 'visibilityState', {
+      value: 'hidden', writable: true, configurable: true,
+    })
+    document.dispatchEvent(new Event('visibilitychange'))
+
+    Object.defineProperty(document, 'visibilityState', {
+      value: 'visible', writable: true, configurable: true,
+    })
+    document.dispatchEvent(new Event('visibilitychange'))
+    await flushPromises()
+
+    expect(mockApi.getScheduledStats).toHaveBeenCalledTimes(1)
+    expect(mockApi.getScheduledTasks).toHaveBeenCalledTimes(1)
+  })
+
+  // -------------------------------------------------------------------------
   it('refresh button triggers fetchData', async () => {
     wrapper = mountComponent()
     await flushPromises()

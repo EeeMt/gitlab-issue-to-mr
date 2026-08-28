@@ -278,4 +278,47 @@ describe('usePolling', () => {
 
     wrapper.unmount()
   })
+
+  it('refreshes immediately when a hidden tab becomes visible', () => {
+    const fn = vi.fn()
+    const { result, wrapper } = withSetup(() =>
+      usePolling(fn, { interval: 5000 }),
+    )
+
+    result.start()
+    expect(fn).toHaveBeenCalledTimes(1)
+
+    Object.defineProperty(document, 'visibilityState', {
+      value: 'hidden',
+      writable: true,
+      configurable: true,
+    })
+    document.dispatchEvent(new Event('visibilitychange'))
+    expect(fn).toHaveBeenCalledTimes(1)
+
+    Object.defineProperty(document, 'visibilityState', {
+      value: 'visible',
+      writable: true,
+      configurable: true,
+    })
+    document.dispatchEvent(new Event('visibilitychange'))
+    expect(fn).toHaveBeenCalledTimes(2)
+
+    wrapper.unmount()
+  })
+
+  it('does not refresh on visibility changes after polling stops', () => {
+    const fn = vi.fn()
+    const { result, wrapper } = withSetup(() =>
+      usePolling(fn, { interval: 5000 }),
+    )
+
+    result.start()
+    result.stop()
+
+    document.dispatchEvent(new Event('visibilitychange'))
+    expect(fn).toHaveBeenCalledTimes(1)
+
+    wrapper.unmount()
+  })
 })

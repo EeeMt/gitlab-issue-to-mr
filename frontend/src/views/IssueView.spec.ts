@@ -1014,6 +1014,26 @@ describe('IssueView', () => {
 	      }
 	    })
 
+	    it('refreshes the issue immediately when a hidden tab becomes visible', async () => {
+	      setupDefaultMocks()
+	      wrapper = await mountComponent()
+
+	      mockApi.getIssue.mockClear()
+	      Object.defineProperty(document, 'visibilityState', {
+	        value: 'hidden', writable: true, configurable: true,
+	      })
+	      document.dispatchEvent(new Event('visibilitychange'))
+	      expect(mockApi.getIssue).not.toHaveBeenCalled()
+
+	      Object.defineProperty(document, 'visibilityState', {
+	        value: 'visible', writable: true, configurable: true,
+	      })
+	      document.dispatchEvent(new Event('visibilitychange'))
+	      await flushPromises()
+
+	      expect(mockApi.getIssue).toHaveBeenCalledTimes(1)
+	    })
+
 	    it('shows create task button for open issue (owner)', async () => {
 	      setupDefaultMocks()
 	      wrapper = await mountComponent()

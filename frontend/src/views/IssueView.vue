@@ -706,6 +706,7 @@ watch(issueId, () => {
 })
 
 onUnmounted(() => {
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
   if (pollTimer !== null) {
     clearInterval(pollTimer)
     pollTimer = null
@@ -897,7 +898,15 @@ async function loadExecutionDefaults() {
   }
 }
 
+function handleVisibilityChange() {
+  if (document.visibilityState !== 'visible' || loading.value) return
+  if (issue.value?.status !== 'closed') {
+    void fetchIssue()
+  }
+}
+
 onMounted(() => {
+  document.addEventListener('visibilitychange', handleVisibilityChange)
   fetchIssue()
   loadExecutionDefaults()
   getProjects().then(p => { projects.value = p }).catch((err) => {

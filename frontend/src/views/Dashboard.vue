@@ -429,7 +429,14 @@ function refreshAll() {
   fetchAnalytics()
 }
 
+function handleVisibilityChange() {
+  if (document.visibilityState === 'visible' && autoRefreshEnabled.value) {
+    refreshAll()
+  }
+}
+
 onMounted(() => {
+  document.addEventListener('visibilitychange', handleVisibilityChange)
   fetchStats()
   fetchHeatmap()
   fetchAnalytics()
@@ -441,6 +448,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
   if (refreshTimer !== null) clearInterval(refreshTimer)
   if (clockTimer !== null) clearInterval(clockTimer)
 })

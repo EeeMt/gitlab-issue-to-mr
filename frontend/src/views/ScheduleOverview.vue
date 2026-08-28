@@ -622,6 +622,12 @@ function refresh() {
   fetchData()
 }
 
+function handleVisibilityChange() {
+  if (document.visibilityState === 'visible') {
+    void fetchData()
+  }
+}
+
 async function handleTaskReschedule(task: Task) {
   const draft = scheduleDrafts.value[task.id]
 
@@ -651,6 +657,7 @@ async function handleTaskReschedule(task: Task) {
 }
 
 onMounted(() => {
+  document.addEventListener('visibilitychange', handleVisibilityChange)
   void initializeAuth()
   fetchData()
   pollTimer = window.setInterval(() => {
@@ -664,6 +671,7 @@ watch(myTasksOnly, () => {
 })
 
 onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
   if (pollTimer !== null) {
     clearInterval(pollTimer)
     pollTimer = null

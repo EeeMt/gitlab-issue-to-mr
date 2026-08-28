@@ -1,4 +1,4 @@
-import { onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 
 export interface UsePollingOptions {
   /** Polling interval in milliseconds */
@@ -49,7 +49,25 @@ export function usePolling(fn: () => void | Promise<void>, options: UsePollingOp
     isActive.value = false
   }
 
-  onUnmounted(stop)
+  function handleVisibilityChange() {
+    if (
+      options.skipWhenHidden === false ||
+      !isActive.value ||
+      document.visibilityState !== 'visible'
+    ) {
+      return
+    }
+    fn()
+  }
+
+  onMounted(() => {
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+  })
+
+  onUnmounted(() => {
+    document.removeEventListener('visibilitychange', handleVisibilityChange)
+    stop()
+  })
 
   return { start, stop, isActive }
 }
