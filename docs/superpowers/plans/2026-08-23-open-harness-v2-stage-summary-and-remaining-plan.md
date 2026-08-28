@@ -2,7 +2,7 @@
 
 **更新：** 2026-08-29
 
-**本次复核基线：** `b137ac98`（控制面 Backend/Scheduler；Nginx 使用 `94ac94fc`）
+**本次复核基线：** `b137ac98`（控制面 Backend/Scheduler；Nginx 使用 `b9df170d`）
 
 **状态：** Internal Preview。`linux/amd64` 的不可变 Kit、Project Runtime Image、官方 Host 安装、
 当前控制面、DB-bound Profile/Bundle 和 readiness 已形成一套可复核的 dual-canary candidate；L3 与
@@ -199,9 +199,10 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
   `last_seq=78`，同样有 V2 archive、commit/MR。OpenCode fresh→continue 的 session lineage 现已有真实证据；
   这仍不替代未完成的三协议、四 Harness 与规模化门槛。
 
-  当前 `openrouter-free` Provider 7 仍冻结为 `openai_responses`；本轮未在未明确授权的情况下切换该 Provider
-  或调用另一套 Chat Completions 凭据，因此 `openai_chat_completions` 的真实成功 Task 仍是下一项独立证据，
-  不能用本地 fixture 或现有 Responses canary 代替。
+  按用户明确授权，2026-08-29 已将 `openrouter-free` Provider 7 从 `openai_responses` 切换为
+  `openai_chat_completions`，并保留原有 OpenAI-compatible 类型、模型和凭据；前端 Provider 表单也已修复为可
+  直接选择该协议并自动同步 Provider 类型。但尚未创建真实 Chat Completions Task，因此真实成功 Task 仍是
+  下一项独立证据，不能用本地 fixture 或现有 Responses canary 代替。
 - [x] **N4 — 评审并停在 dual-canary。** 清零本 candidate 的 P0/P1，完成 secret scan 和调试凭据轮换，
   将 candidate 仅开放给显式 V2 Profile；不改变全局 Profile 默认、不切 `v2_only`。本轮
   `secret-scan=passed findings=0`。2026-08-29 按部署负责人决定，从远端 `system_config` 精确清理了
@@ -225,9 +226,9 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
 - **部署与身份：** backend/scheduler 当前镜像为 `2026.08-v2-b137ac98`，image ID 为
   `sha256:1d96d5d6cf71962da42470c25ba22b71236265863ff157d4afb72a989f28b201`，registry digest 为
   `sha256:268abc4c5381812b782cb75d7a5539c5c47dcbfb9a76c27ee3e803eefc5d46a3`；Nginx 为
-  `2026.08-v2-94ac94fc`，registry digest 为
-  `sha256:240b272bd4be6e3ca42cb7aca542314a93d3231dea0701f743685b16cca30dc0`；backend `/health` 报告
-  database/docker 均为 `ok` 且执行模式为 `dual_canary`。远程页面 footer 已显示 `94ac94fc`，Task 20
+  `2026.08-v2-b9df170d`，image ID 为 `sha256:48fbfcc24a184544a4d3c3fd84b29d3db3e8d738fb0de52189bf4a02c18f283b`，
+  registry digest 为 `sha256:c871de1848676239bdfb87566f7fb2c87a9ea673fdecb75764eccff57566daab`；backend `/health` 报告
+  database/docker 均为 `ok` 且执行模式为 `dual_canary`。远程页面 footer 已显示 `b9df170d`，Task 20
   详情页显示 `Cancelled`，页面布尔检查确认没有 `Queue head`、`Waiting for Worker` 或“队首 · 等待 Worker”
   文案。2026-08-28 06:49 UTC 的实时复核进一步确认 Task 20 为 `cancelled`、`container_id` 为空、
   `queue_position` 为空，且远端 `pending/queued/running` 查询为 0；本轮 Task 52 完成后再次确认远端活动队列为
@@ -248,9 +249,11 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
   Task 52 为 OpenCode execute/fresh，Task 53 为 OpenCode execute/continue；均有 commit/MR。Task 46/47 还分别产生
   usage `272/250`、`223/194`，Task 52/53 分别产生 usage `117/170`、`125/172` 与连续 V2 archive。当前代码已加上
   30 秒 control exec/lookup 边界，且终止路径会移除容器、释放 Issue execution lock。
-- **Provider gate：** 远端只读元数据确认现有 5 个 Provider 覆盖三种协议；Provider 7 `openrouter-free` 为
-  active 的 `openai_responses` 调试入口。用户已明确授权将测试项目 16 的最小 canary 上下文发送到该
-  Provider，本轮 Task 44/46/47/52/53 的真实成功结果已完成脱敏对账；其它 Provider 仍按各自额度与授权单独验收。
+- **Provider gate：** 远端只读元数据确认现有 5 个 Provider 覆盖三种协议；Provider 7 `openrouter-free` 已按
+  用户授权从 `openai_responses` 切换为 active 的 `openai_chat_completions` 调试入口，保留原有模型和凭据。
+  前端 Provider 表单已部署 `b9df170d`，可直接选择 Chat Completions 并自动同步 `openai_compatible` 类型；本轮
+  尚未创建真实 Chat Completions Task，故仍需独立补齐真实成功与 usage/archive/Git/MR 证据。其它 Provider 仍按
+  各自额度与授权单独验收。
 - **Bundle 对账：** Task 20、23、24/25、26、27/28、30、32、35、36、37、38、41/42、43 分别绑定 Runtime
   Bundle 58、59、60、61、62、63、64、65、66、67、68、69、70；新增 Task 44/48 绑定 Bundle 71，Task 46/47
   绑定 Bundle 72，Task 52/53 绑定 Bundle 74。所有这些 Bundle 的 contract 为 `codify.worker.harness/v2`、
@@ -263,7 +266,7 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
   regression 为 `45 passed`，frontend 变化面为 `122 passed`；`d0e2a07b` 修复 packaged Runtime Bundle manifest
   路径，harness catalog regression 为 `16 passed`；此前 OpenCode/event/result focused regression
   为 `56 passed`（其中 OpenCode suite `37 passed`），本轮 OpenCode usage/event/result suite 为 `39 passed`，diagnostics 为 `3 passed`；此前 command-pump/control-client/Pi owner `46 passed`、frontend
-  `94ac94fc` 后 frontend 全量 `1675 passed`、mock E2E `378 passed`，`npm run build`、Ruff、`py_compile` 与
+  `94ac94fc` 后 frontend 全量 `1675 passed`、本次 `b9df170d` 变化后 frontend 全量 `1676 passed`、mock E2E `378 passed`，`npm run build`、Ruff、`py_compile` 与
   `git diff --check` 均通过；
   `b137ac98` 的 Provider kind/protocol 合并状态回归为 `49 passed`，并已在远端容器确认源码加载与双健康端点；
   本次针对 Task 20 队列上下文的 backend issue-order/task-response/catalog 回归为 `56 passed`，frontend
