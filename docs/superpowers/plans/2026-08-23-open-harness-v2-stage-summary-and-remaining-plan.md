@@ -255,7 +255,7 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
   绑定 Bundle 72，Task 52/53 绑定 Bundle 74。所有这些 Bundle 的 contract 为 `codify.worker.harness/v2`、
   orchestration 为 `1.0.0`。
 - **当前源码验证：** Backend 基线提交 `65395609f70c` 的全量 unit 为 `3156 passed, 4 skipped, 96 subtests`
-  且无 warning；其中控制面基线 `eea817f5` 为 `3155 passed, 4 skipped, 96 subtests`，运行时基线
+  且无 warning；当前 HEAD `b137ac98` 的全量 Backend unit 为 `3162 passed, 4 skipped, 96 subtests passed`；其中控制面基线 `eea817f5` 为 `3155 passed, 4 skipped, 96 subtests`，运行时基线
   `6b4f1056` 为 `3150 passed, 4 skipped, 96 subtests`，其后
   `4dca29d6` 对齐契约文档并补充测试，`25ee198f` 修复 OpenCode quota reason taxonomy，`eea817f5`
   补充协议化 Worker 启动摘要，`65395609f70c` 补充 Task runtime-summary 的冻结协议诊断；本次受影响 backend
