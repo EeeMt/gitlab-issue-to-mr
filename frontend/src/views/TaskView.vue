@@ -967,6 +967,7 @@ const executeButtonTitle = computed(() => {
 const queueContextLabel = computed(() => {
   const taskValue = task.value
   if (!taskValue) return null
+  if (taskValue.status === 'running') return null
   const qp = taskValue.queue_position
   const blockedBy = taskValue.blocked_by_task_id
   if (taskValue.waiting_reason === 'sequence_repair_required') {

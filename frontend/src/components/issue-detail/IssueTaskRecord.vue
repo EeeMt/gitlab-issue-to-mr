@@ -164,6 +164,7 @@ function formatCompactDateTime(value?: string | null): string {
 
 const queueContextLabel = computed(() => {
   const task = props.task
+  if (task.status === 'running') return null
   const qp = task.queue_position
   const blockedBy = task.blocked_by_task_id
   if (task.waiting_reason === 'sequence_repair_required') {

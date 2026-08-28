@@ -674,6 +674,13 @@ describe('TaskView', () => {
     expect(mockMessage.success).toHaveBeenCalledWith('taskView.taskRuntimeReady')
   })
 
+  it('does not label a running head task as waiting for a Worker', async () => {
+    await mountComponent({ status: 'running', queue_position: 1 })
+
+    expect(wrapper.text()).not.toContain('taskView.queueContextHeadDue')
+    expect(wrapper.text()).not.toContain('taskView.queueContextHeadScheduled')
+  })
+
   it('shows ordinary users a safe recovery hint without administrator controls', async () => {
     ;(mockApi.getTaskWorkerRuntimeSummary as Mock).mockResolvedValue({
       snapshot_available: true,
