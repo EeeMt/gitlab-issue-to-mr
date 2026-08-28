@@ -1272,7 +1272,13 @@ function resetLogsState() {
   resetLogStreams()
 }
 
+function handleVisibilityChange() {
+  if (document.visibilityState !== 'visible') return
+  void refreshTask()
+}
+
 onMounted(async () => {
+  document.addEventListener('visibilitychange', handleVisibilityChange)
   await initializeAuth()
   await loadTaskView()
   pollTimer = window.setInterval(() => {
@@ -1319,6 +1325,7 @@ watch(
 onBeforeUnmount(() => {
   taskRequestGeneration += 1
   logRequestGeneration += 1
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
   closeLogStream()
   closeStructuredLogStream()
   if (pollTimer !== null) {

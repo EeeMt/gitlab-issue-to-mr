@@ -1766,6 +1766,30 @@ describe('TaskView', () => {
       })
     })
 
+    it('refreshes task state immediately when the tab becomes visible', async () => {
+      await mountComponent({ status: 'running' })
+
+      Object.defineProperty(document, 'visibilityState', {
+        value: 'hidden',
+        configurable: true
+      })
+      document.dispatchEvent(new Event('visibilitychange'))
+
+      const hiddenFetchCount = (mockApi.getTask as Mock).mock.calls.length
+      ;(mockApi.getTask as Mock).mockResolvedValue(createMockTaskWithStatus('cancelled'))
+
+      Object.defineProperty(document, 'visibilityState', {
+        value: 'visible',
+        configurable: true
+      })
+      document.dispatchEvent(new Event('visibilitychange'))
+
+      await vi.waitFor(() => {
+        expect((mockApi.getTask as Mock).mock.calls.length).toBe(hiddenFetchCount + 1)
+        expect(wrapper.vm.task?.status).toBe('cancelled')
+      })
+    })
+
     it('should close log stream on unmount', async () => {
       await mountComponent({ status: 'running', container_id: 'container-123' })
 
