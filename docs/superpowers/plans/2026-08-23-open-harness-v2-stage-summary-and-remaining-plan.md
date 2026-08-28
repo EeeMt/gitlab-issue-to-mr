@@ -2,7 +2,7 @@
 
 **更新：** 2026-08-28
 
-**本次复核基线：** `1cc7c764`（控制面 Backend/Scheduler；Nginx 使用 `94ac94fc`）
+**本次复核基线：** `b137ac98`（控制面 Backend/Scheduler；Nginx 使用 `94ac94fc`）
 
 **状态：** Internal Preview。`linux/amd64` 的不可变 Kit、Project Runtime Image、官方 Host 安装、
 当前控制面、DB-bound Profile/Bundle 和 readiness 已形成一套可复核的 dual-canary candidate；L3 与
@@ -18,6 +18,7 @@ Task 46 的 session。随后 `1cc7c764` 修复 OpenCode 1.18.19 实际 `info.tok
 `usage.final`，Task 52 在同一 Profile 上验证了 OpenCode usage `117/170` 的真实落库。N3 仍未闭环：三协议成功矩阵、
 四 Harness/20-task 与 N4 安全评审仍是独立门槛。随后 Task 53 完成了 OpenCode `continue`，复用了 Task 52
 的 session，并验证了 usage `125/172` 与跨 Task lineage 对账。
+随后 `b137ac98` 修复了 Provider PATCH 的合并状态校验：只更新 `model_protocol` 或 `provider_kind` 时，也会和既有字段一起做 kind/protocol 兼容性校验，避免持久化出 fail-open 的非法 Endpoint；该变化面本地回归为 `49 passed`，并已用 digest 部署到 remote Backend/Scheduler。
 近期仍只推进默认 `pi+opencode` 的
 `dual_canary`；`arm64` 仅在目标 Host 清单出现该架构时补证，四 Harness/20-task 继续作为未来
 `v2_only` 硬切门槛。当前不切全局 Pi 默认，不启用 `v2_only`。
@@ -197,6 +198,10 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
   `execute/continue`，usage 为 `125/172`，`input_session_id == Task 52.output_session_id`，attempt `closed`、
   `last_seq=78`，同样有 V2 archive、commit/MR。OpenCode fresh→continue 的 session lineage 现已有真实证据；
   这仍不替代未完成的三协议、四 Harness 与规模化门槛。
+
+  当前 `openrouter-free` Provider 7 仍冻结为 `openai_responses`；本轮未在未明确授权的情况下切换该 Provider
+  或调用另一套 Chat Completions 凭据，因此 `openai_chat_completions` 的真实成功 Task 仍是下一项独立证据，
+  不能用本地 fixture 或现有 Responses canary 代替。
 - [ ] **N4 — 评审并停在 dual-canary。** 清零本 candidate 的 P0/P1，完成 secret scan 和调试凭据轮换，
   将 candidate 仅开放给显式 V2 Profile；不改变全局 Profile 默认、不切 `v2_only`。本轮
   `secret-scan=passed findings=0`，但远端仍有 3 个历史 unsupported `system_config` key
@@ -216,9 +221,9 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
 - **门禁与 schema：** 只读检查确认 remote daemon 为 `linux/x86_64`（制品平台 `linux/amd64`），
   Backend/Scheduler 都是 `dual_canary`、`AUTO_MIGRATE=false`，数据库 revision 是
   `077_v2_worker_kit_identity`。
-- **部署与身份：** backend/scheduler 当前镜像为 `2026.08-v2-1cc7c764`，image ID 为
-  `sha256:183a9b78a9ccde3ad605772fe4c17aa17e15d3416b1853800d770cf90f29951a`，registry digest 为
-  `sha256:0291a4c3ac90258751456b01cd84e72c67e1439c2049dcddd5bf9ae1be3104bc`；Nginx 为
+- **部署与身份：** backend/scheduler 当前镜像为 `2026.08-v2-b137ac98`，image ID 为
+  `sha256:1d96d5d6cf71962da42470c25ba22b71236265863ff157d4afb72a989f28b201`，registry digest 为
+  `sha256:268abc4c5381812b782cb75d7a5539c5c47dcbfb9a76c27ee3e803eefc5d46a3`；Nginx 为
   `2026.08-v2-94ac94fc`，registry digest 为
   `sha256:240b272bd4be6e3ca42cb7aca542314a93d3231dea0701f743685b16cca30dc0`；backend `/health` 报告
   database/docker 均为 `ok` 且执行模式为 `dual_canary`。远程页面 footer 已显示 `94ac94fc`，Task 20
@@ -259,6 +264,7 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
   为 `56 passed`（其中 OpenCode suite `37 passed`），本轮 OpenCode usage/event/result suite 为 `39 passed`，diagnostics 为 `3 passed`；此前 command-pump/control-client/Pi owner `46 passed`、frontend
   `94ac94fc` 后 frontend 全量 `1675 passed`、mock E2E `378 passed`，`npm run build`、Ruff、`py_compile` 与
   `git diff --check` 均通过；
+  `b137ac98` 的 Provider kind/protocol 合并状态回归为 `49 passed`，并已在远端容器确认源码加载与双健康端点；
   本次针对 Task 20 队列上下文的 backend issue-order/task-response/catalog 回归为 `56 passed`，frontend
   `TaskView.spec.ts` 为 `112 passed`（包含标签页恢复即时刷新回归），任务工作台/共享轮询变化面为 `300 passed`；
   Scheduler/runtime-config focused regression 为 `140 passed`。本轮 secret scan 为
