@@ -1,6 +1,6 @@
 # Open-Harness V2 冻结 Schema 与合同 (Phase 0 收尾)
 
-**日期：** 2026-08-21 · **状态：** 已冻结，供实现引用 · **成熟度：** Internal Preview
+**日期：** 2026-08-21 · **最近实施对齐：** 2026-08-28 · **状态：** 已冻结，供实现引用 · **成熟度：** Internal Preview
 
 **依据：** [open-harness-v2.md](open-harness-v2.md) §6 | [2026-08-21-open-harness-v2-implementation-plan.md](../superpowers/plans/2026-08-21-open-harness-v2-implementation-plan.md) §3.5 / §4
 **证据：** [Phase 0 probe fixtures](../harness-probes/v2/README.md)（Pi `steer.raw.jsonl` / `followup.raw.jsonl` / `abort.raw.jsonl` / `success.raw.jsonl`、OpenCode `events.observed.jsonl`、Claude/Codex `success.v2.jsonl`）
@@ -69,7 +69,7 @@ run_text()?               # 可选，Claude/Codex 兼容路径
     "adapter_version": "2.0.0",
     "cli_version": "0.84.2",
     "control_transport": { "kind": "rpc_stdio", "protocol": "pi-rpc" },
-    "model_protocols": ["anthropic_messages"]
+    "model_protocols": ["anthropic_messages", "openai_responses", "openai_chat_completions"]
   },
   "payload": { … },
   "raw_ref": { "stream": "harness-events/pi/…", "line": 12 }
@@ -82,8 +82,8 @@ run_text()?               # 可选，Claude/Codex 兼容路径
 
 | Harness | `control_transport.kind` | `control_transport.protocol` | `model_protocols` |
 |---|---|---|---|
-| Pi | `rpc_stdio` | `pi-rpc` | `[anthropic_messages]` |
-| OpenCode | `server_http` | `opencode-server` | `[anthropic_messages]` |
+| Pi | `rpc_stdio` | `pi-rpc` | `[anthropic_messages, openai_responses, openai_chat_completions]` |
+| OpenCode | `server_http` | `opencode-server` | `[anthropic_messages, openai_responses, openai_chat_completions]` |
 | Claude | `cli_stream_json` | `claude-json` | `[anthropic_messages]` |
 | Codex | `cli_jsonl` | `codex-jsonl` | `[openai_responses]` |
 
@@ -232,7 +232,7 @@ dispatching --(cross-send result unknown/recovery)--> outcome_unknown
     "adapter_version": "2.0.0",
     "cli_version": "0.84.2",
     "control_transport": { "kind": "rpc_stdio", "protocol": "pi-rpc" },
-    "model_protocols": ["anthropic_messages"]
+    "model_protocols": ["anthropic_messages", "openai_responses", "openai_chat_completions"]
   },
   "session_id": "…",
   "model": "deepseek-v4-flash",
@@ -269,7 +269,7 @@ dispatching --(cross-send result unknown/recovery)--> outcome_unknown
                   "artifact_version": "0.84.2", "artifact_sha256": "906fbe78…" },
       "adapter": { "version": "2.0.0", "digest": "<sha256>" },
       "control_transport": { "kind": "rpc_stdio", "protocol": "pi-rpc" },
-      "model_protocols": ["anthropic_messages"],
+      "model_protocols": ["anthropic_messages", "openai_responses", "openai_chat_completions"],
       "capabilities": { "resume": true, "task_skills": true, "usage_tokens": true,
                         "steering": true, "follow_up": true },
       "options_schema": "pi/v1"
@@ -339,14 +339,16 @@ disabled → starting → accepting ⇄ closing → closed
 
 | Harness | Anthropic Messages | OpenAI Responses | OpenAI Chat Completions |
 |---|---:|---:|---:|
-| Pi | 是 | 否 | 否 |
-| OpenCode | 是 | 否 | 否 |
+| Pi | 是 | 是 | 是 |
+| OpenCode | 是 | 是 | 是 |
 | Claude | 是 | 否 | 否 |
 | Codex | 否 | 是 | 否 |
 
 矩阵由 Runtime Bundle manifest 能力与 Endpoint `model_protocol` 求交集，Task 创建与 verify-runtime 都要验证；未知组合 fail closed。Backend/Frontend 不再维护两份不同矩阵。
 
-> **扩展边界（冻结）**：Pi/OpenCode 当前只声明并实现 `anthropic_messages`。未来增加 `openai_responses` 或 `openai_chat_completions` 前，必须以对应协议的固定 endpoint smoke 证明配置、请求路径和结果语义；不能以 Anthropic-compatible probe 推断支持。
+> **实施与验收边界（冻结）**：Pi/OpenCode 的 V2 manifest、Backend upper bound、Task snapshot 和
+> Adapter 已声明并处理三种协议。每种协议仍必须在真实 Endpoint/Task 上分别完成 conformance；不能以
+> Anthropic-compatible probe 或源码声明替代真实成功/失败语义与 delivery 证据。
 
 ---
 
@@ -393,7 +395,7 @@ Phase 0 待决 5 项逐一裁量：可冻结的纳入 schema（本次已落地�
 | 1 | **OpenCode 无独立 SHA256SUMS**（仅字节数 60,474,448 + release URL 对齐） | 运行可用已实测；可冻结版本 `1.18.19` 与字节数。但**校验证据薄弱** | **纳入 schema 冻结**（`artifact_version`/`artifact_sha256`），并列为**后置**：实施阶段以 npm 包元数据或镜像 digest 二次固定（`verify-runtime` 增加强校验项） |
 | 2 | **Claude 2.1.152 SHA-256 未在 linux/amd64 重算**（V1 为 macOS Operator CLI） | Worker 侧为镜像注入，版本沿用 V1；**不阻塞 schema 冻结** | 后置依赖：实施阶段以 Worker-kit image digest 固定并写入 manifest `source` |
 | 3 | **未触发场景**（Pi compaction/auto_retry；OpenCode `session.error`/权限阻塞/主动 crash 注入） | 不改变已冻结信封/类型；事件词汇已预留 `context.compacted`、`provider.retry`、`diagnostic`、`failure.kind=crash` | 后置依赖：V2 集成阶段补 probe，作为 Phase 2/3 的 conformance 输入 |
-| 4 | **openai 双协议待验**（仅 anthropic-messages 端点实测） | 矩阵按上游声明冻结；行为正确性**不在此轮承诺** | 后置依赖：Phase 2/4 用对应端点 conformance 验证，作为 Pi/OpenCode 完成门槛 |
+| 4 | **openai 双协议真实 Task 待验**（源码和 Bundle 已声明三协议） | 矩阵与 fail-closed 合同已冻结；真实 Endpoint/Task 行为仍不以源码声明代替 | 后置依赖：N3/L5 对 Pi/OpenCode 分别完成对应端点 conformance、usage、terminal 与 delivery 验证 |
 | 5 | **OpenCode Node SDK 依赖**（`@opencode-ai/sdk`，新增 Node runtime） | 生产路径判定已冻结（SDK）；成本计入 | 后置依赖：Worker-kit 核算 Node bundle 体积/离线可安装性；不接受则退化 HTTP 直连（诊断路径），Phase 3 decision gate |
 
 **结论**：5 项均**不阻塞 schema 冻结**。FREEZE-ABLE 已纳入本文件（OpenCode 版本/字节数、crash 分类、3 控制事件）；需真实 V2 集成才可验的列入 Phase 2–4 依赖清单。

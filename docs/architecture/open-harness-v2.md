@@ -1,6 +1,6 @@
 # Open-Harness V2 架构方案
 
-**日期：** 2026-08-21 · **状态：** Approved for implementation planning · **成熟度：** Internal Preview
+**日期：** 2026-08-21 · **最近实施对齐：** 2026-08-28 · **状态：** Approved for implementation planning · **成熟度：** Internal Preview
 
 **取代：** [Codify 多 Harness 引擎分阶段实施总计划](../superpowers/plans/2026-08-01-multi-harness-engine-roadmap.md) 的后续方向
 
@@ -127,20 +127,27 @@ steering/follow-up 已是明确后续需求，先做 run 再换 Server 会产生
 - Task 级 Harness 选择、Profile allowlist、Provider 兼容性和前端展示；
 - 公共取消、timeout、Git commit/push/MR、Artifacts、日志和统计。
 
-### 4.2 当前阻塞点
+### 4.2 实施状态与剩余边界
 
-V2 不能只在现有常量中追加两个 key。当前实现仍有以下结构性限制：
+原方案列出的结构性缺口已大部分落地为 V2 公共边界；以下约束是有意保留的安全和发布设计，
+不是继续追加 Harness 分支的理由：
 
-- `harness_registry.py` 静态维护 Harness、能力和模型协议矩阵；
-- Runtime manifest 只声明 Claude/Codex，Adapter digest 依赖固定文件列表；
-- `verify-runtime.sh` 和环境变量映射按 Claude/Codex 分支；
-- Runner 只有一次 `adapter_run`，没有双向命令生命周期；
-- Backend 只有 SSE 日志下行和“停止整个容器”的取消操作，没有 Task command queue；
-- `wire_protocol` 同时容易被理解为模型协议和 Harness 控制协议；
-- Skills 源包仍以 `.claude/skills` 为中心，再由 Adapter 特判；
-- 新建 Profile/Issue 的 fallback 仍是 Claude。
+- `harness_registry.py` 仍静态维护四个内置 Harness、能力上限和模型协议矩阵；这是编译期 allowlist，
+  实际可用性由冻结 Runtime Bundle/Worker Kit 的 manifest 和逐 Harness verify evidence 决定；
+- Runtime manifest 已支持四 Harness inventory、`present|absent` 和 content identity。没有 image/
+  `PATH` 或“另一个 Harness 成功就代替当前 Harness”的隐式回退；
+- `verify-runtime.sh`、Profile snapshot、Task snapshot 和 Runtime Bundle 现在按 Harness key 绑定 CLI、
+  Adapter、control transport、model protocol 与 identity；
+- Runner/Bridge 已提供 V2 event lifecycle 和 Task-scoped command queue/pump。Pi 使用 `rpc_stdio`，
+  OpenCode 使用 Task-scoped `server_http`；Claude/Codex 保持兼容路径；
+- `model_protocol` 与 Harness control contract 已分层，Skills 按 Task-private package/manifest 注入，
+  不再以 `.claude/skills` 作为公共能力边界；
+- 新建 Profile/Issue 的兼容默认值当前仍是 Claude，V2 candidate 通过显式 Profile 选择
+  `pi+opencode`；切换全局 Pi 默认属于 L6 hard cut，不在 Internal Preview 提前修改。
 
-V2 的重点是升级这些公共边界，而不是重新实现 Scheduler、工作区或交付链。
+当前剩余的是发布与验收边界，而非上述架构缺口：目标 Host 上已形成 `linux/amd64` 的 Pi/OpenCode
+candidate，但四 Harness 同一 composition、真实成功模型输出与 Git/MR、Pi 20-task 质量门禁以及
+`v2_only` hard cut 仍未完成。具体状态和停止条件见[阶段验收计划](../superpowers/plans/2026-08-23-open-harness-v2-stage-summary-and-remaining-plan.md)。
 
 ## 5. 分层架构
 
