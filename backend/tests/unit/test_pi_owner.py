@@ -146,6 +146,7 @@ async def test_close_marker_bypasses_busy_native_dispatch_lock(pi_owner, tmp_pat
                     "attempt_id": "attempt-current",
                     "type": "close",
                     "control_gate": "closing",
+                    "control_request_id": "close-request-1",
                 }
             ),
             timeout=0.5,
@@ -156,6 +157,11 @@ async def test_close_marker_bypasses_busy_native_dispatch_lock(pi_owner, tmp_pat
         owner.process.terminate()
         await owner.process.wait()
     assert outcome == {"status": "ack", "closed": True}
+    assert json.loads((tmp_path / "control-outcome.json").read_text()) == {
+        "status": "ack",
+        "closed": True,
+        "control_request_id": "close-request-1",
+    }
 
 
 @pytest.mark.asyncio

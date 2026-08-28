@@ -27,6 +27,18 @@ def _append_fsync(path: Path, item: dict) -> None:
         os.fsync(stream.fileno())
 
 
+def _replace_json_fsync(path: Path, item: dict) -> None:
+    """Publish one control outcome before a close can stop the container."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    with temporary.open("w", encoding="utf-8") as stream:
+        json.dump(item, stream, sort_keys=True, separators=(",", ":"))
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, path)
+
+
 class PiOwner:
     def __init__(
         self, command: list[str], runtime_dir: Path, socket_path: Path, prompt: str | None = None,
@@ -213,6 +225,16 @@ class PiOwner:
             # is an owner-local gate marker, never bytes on Pi stdio.
             if not self.settled.is_set() or frame.get("control_gate") != "closing":
                 return {"status": "reject", "rejection_code": "control_gate_closed"}
+            control_request_id = frame.get("control_request_id")
+            if isinstance(control_request_id, str) and control_request_id:
+                _replace_json_fsync(
+                    self.runtime_dir / "control-outcome.json",
+                    {
+                        "status": "ack",
+                        "closed": True,
+                        "control_request_id": control_request_id,
+                    },
+                )
             self.close_requested.set()
             return {"status": "ack", "closed": True}
         if frame.get("type") not in {"steer", "follow_up", "get_state"}:
