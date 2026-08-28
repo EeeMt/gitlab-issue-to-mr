@@ -187,6 +187,40 @@ def test_opencode_session_idle_without_final_message_is_protocol_failure(tmp_pat
     assert "harness.failed" in [e["type"] for e in _events(runtime_dir)]
 
 
+def test_opencode_usage_limit_retry_maps_to_rate_limited_terminal(tmp_path):
+    runtime_dir = tmp_path / "rate-limit"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    _translate(
+        runtime_dir,
+        [
+            _record(
+                "session.status",
+                {
+                    "sessionID": "ses-oc-limit",
+                    "status": {
+                        "type": "retry",
+                        "attempt": 1,
+                        "message": "monthly usage limit reached",
+                        "action": {
+                            "reason": "account_rate_limit",
+                            "message": "monthly usage limit reached",
+                        },
+                    },
+                },
+            ),
+        ],
+    )
+
+    result = json.loads((runtime_dir / "harness-result.json").read_text(encoding="utf-8"))
+    assert result["status"] == "failed"
+    assert result["success"] is False
+    assert result["failure"]["kind"] == "rate_limited"
+    terminal = [event for event in _events(runtime_dir) if event["type"] == "harness.failed"]
+    assert len(terminal) == 1
+    assert terminal[0]["payload"]["failure"]["kind"] == "rate_limited"
+
+
 def test_opencode_abort_maps_to_cancelled_terminal(tmp_path):
     runtime_dir = tmp_path / "abort"
     runtime_dir.mkdir()

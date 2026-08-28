@@ -70,7 +70,14 @@ def _failure_kind(message: str) -> str:
         return "cancelled"
     if "401" in lowered or "unauthorized" in lowered or "authentication" in lowered:
         return "authentication_error"
-    if "429" in lowered or "rate limit" in lowered or "too many requests" in lowered:
+    if (
+        "429" in lowered
+        or "rate limit" in lowered
+        or "rate-limit" in lowered
+        or "usage limit" in lowered
+        or "account_rate_limit" in lowered
+        or "too many requests" in lowered
+    ):
         return "rate_limited"
     if "session_missing" in lowered or "session not found" in lowered:
         return "engine_error"
@@ -208,6 +215,36 @@ def _handle_session_status(properties: dict, raw_line: int) -> None:
     elif status_type == "idle":
         _STATE["busy"] = False
         _STATE["idle_seen"] = True
+    elif status_type == "retry":
+        # OpenCode uses retry both for short transient retries and for terminal
+        # account/provider limits. A retry with an account usage limit cannot
+        # recover within this Task, so settle it as a typed failure instead of
+        # leaving the SSE stream open until the next account reset.
+        action = status.get("action") if isinstance(status.get("action"), dict) else {}
+        message = (
+            status.get("message")
+            or action.get("message")
+            or action.get("title")
+            or "OpenCode provider retry"
+        )
+        reason = action.get("reason")
+        lowered = str(message).lower()
+        if reason == "account_rate_limit" or any(
+            marker in lowered
+            for marker in (
+                "rate limit",
+                "rate-limit",
+                "usage limit",
+                "too many requests",
+                "429",
+            )
+        ):
+            message = clean_message(str(message))
+            _STATE["terminal_failure"] = {
+                "kind": "rate_limited",
+                "message": message,
+            }
+            _finalize_terminal()
     session_id = properties.get("sessionID")
     if session_id:
         _STATE["session_id"] = _STATE["session_id"] or session_id

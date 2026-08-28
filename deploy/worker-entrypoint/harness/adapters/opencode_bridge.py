@@ -289,7 +289,7 @@ class OpenCodeBridge:
         return {"status": "reject", "rejection_code": code, "rejection_message": message}
 
 
-def _forward(record: dict, proc: subprocess.Popen) -> None:
+def _forward(record: dict, proc: subprocess.Popen) -> bool:
     """Write one SSE record to the translator's stdin.
 
     The translator is the sole owner of the raw archive. It sanitizes the
@@ -307,7 +307,8 @@ def _forward(record: dict, proc: subprocess.Popen) -> None:
         proc.stdin.write(line + "\n")
         proc.stdin.flush()
     except BrokenPipeError:
-        pass
+        return False
+    return True
 
 
 def _recover_status(
@@ -459,7 +460,9 @@ def _run_attempt() -> int:
         #    GET /session/status to recover a terminal state (best-effort).
         try:
             for record in stream:
-                _forward(record, proc)
+                if not _forward(record, proc) or proc.poll() is not None:
+                    stream.close()
+                    break
         except ConnectionError as exc:
             print(f"OpenCode SSE stream closed: {exc}", file=sys.stderr)
             _recover_status(client, session_id, proc)
