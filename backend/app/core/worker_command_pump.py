@@ -311,13 +311,26 @@ async def docker_exec_control_transport(
     settings = get_settings()
     if task is not None:
         try:
-            _db, container, _connection = await find_task_container(
-                db,
-                task,
-                settings,
-                getattr(task, "container_id", None)
-                or f"{settings.worker_container_prefix}-{task.id}-issue{task.issue_id}",
+            # ``find_task_container`` includes credential negotiation and a
+            # Docker API lookup; bound that remote operation as well as the
+            # in-container exec below.
+            _db, container, _connection = await asyncio.wait_for(
+                find_task_container(
+                    db,
+                    task,
+                    settings,
+                    getattr(task, "container_id", None)
+                    or f"{settings.worker_container_prefix}-{task.id}-issue{task.issue_id}",
+                ),
+                timeout=CONTROL_TRANSPORT_TIMEOUT_SECONDS,
             )
+        except TimeoutError:
+            logger.warning("Control container lookup timed out for task %s", task.id)
+            return {
+                "status": DISPATCH_UNKNOWN,
+                "rejection_code": "delivery_outcome_unknown",
+                "rejection_message": "control container lookup timed out",
+            }
         except Exception:  # noqa: BLE001 - unreachable/stopped container
             return {"status": DISPATCH_UNKNOWN, "rejection_code": "container_unreachable"}
         if container is None:

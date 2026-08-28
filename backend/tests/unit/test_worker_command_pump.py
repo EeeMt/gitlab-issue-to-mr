@@ -699,6 +699,38 @@ async def test_control_transport_has_a_bounded_remote_docker_wait(monkeypatch):
         "rejection_message": "control transport timed out",
     }
 
+
+@pytest.mark.asyncio
+async def test_control_container_lookup_has_a_bounded_remote_docker_wait(monkeypatch):
+    """A hung container lookup must not prevent later close retries."""
+    from types import SimpleNamespace
+
+    from app.core import worker_command_pump as module
+    from app.core import worker_docker_targets
+
+    async def slow_find_container(*_args, **_kwargs):
+        await asyncio.sleep(1)
+
+    monkeypatch.setattr(
+        worker_docker_targets,
+        "find_task_container",
+        slow_find_container,
+    )
+    monkeypatch.setattr(module, "CONTROL_TRANSPORT_TIMEOUT_SECONDS", 0.01)
+
+    result = await docker_exec_control_transport(
+        {"type": "close"},
+        SimpleNamespace(),
+        task=SimpleNamespace(id=1, issue_id=1, container_id="container-1"),
+    )
+
+    assert result == {
+        "status": "unknown",
+        "rejection_code": "delivery_outcome_unknown",
+        "rejection_message": "control container lookup timed out",
+    }
+
+
 async def test_pump_does_not_claim_closed_control_gate(maker):
     task_id, _, _ = await _seed_task_with_commands(
         maker, control_state="closed", count=1, create_commands=False
