@@ -100,6 +100,27 @@ def _tar_tree_with_hard_link_bytes(*, forward: bool = False) -> bytes:
     return buffer.getvalue()
 
 
+def _tar_tree_with_absolute_nix_symlink_bytes() -> bytes:
+    buffer = io.BytesIO()
+    payload = b"runtime\n"
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        root = tarfile.TarInfo("kit/")
+        root.type = tarfile.DIRTYPE
+        archive.addfile(root)
+        store = tarfile.TarInfo("kit/nix/store/")
+        store.type = tarfile.DIRTYPE
+        archive.addfile(store)
+        target = tarfile.TarInfo("kit/nix/store/target")
+        target.size = len(payload)
+        target.mode = 0o644
+        archive.addfile(target, io.BytesIO(payload))
+        link = tarfile.TarInfo("kit/nix/store/link")
+        link.type = tarfile.SYMTYPE
+        link.linkname = "/nix/store/target"
+        archive.addfile(link)
+    return buffer.getvalue()
+
+
 def _make_probe_client(*, manifest: bytes | None = None, content_overrides: dict[str, bytes] | None = None):
     """Return a DockerClientWrapper stand-in for probe_worker_kit.
 
@@ -508,6 +529,26 @@ def test_content_inventory_reads_hard_links_as_their_target_file(forward: bool):
     assert actual == [
         {"kind": "file", "path": "launcher", "sha256": payload_sha, "size": 10},
         {"kind": "file", "path": "launcher-alias", "sha256": payload_sha, "size": 10},
+    ]
+
+
+def test_content_inventory_reads_absolute_nix_store_symlinks():
+    container = MagicMock()
+    container.get_archive.return_value = (
+        iter([_tar_tree_with_absolute_nix_symlink_bytes()]),
+        {},
+    )
+
+    actual = _content_inventory_from_archive(container, "/opt/codify-probe/kit")
+
+    payload_sha = hashlib.sha256(b"runtime\n").hexdigest()
+    assert actual == [
+        {
+            "kind": "symlink",
+            "path": "nix/store/link",
+            "target": "/nix/store/target",
+        },
+        {"kind": "file", "path": "nix/store/target", "sha256": payload_sha, "size": 8},
     ]
 
 

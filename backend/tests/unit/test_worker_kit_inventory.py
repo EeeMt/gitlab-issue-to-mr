@@ -181,6 +181,31 @@ def test_kit_identity_content_addresses_the_manifest_bytes():
     assert other["manifest_sha256"] != identity["manifest_sha256"]
 
 
+def test_kit_identity_accepts_absolute_nix_store_symlink_targets():
+    content_inventory = [
+        {"kind": "file", "path": "nix/store/target", "sha256": _SHA, "size": 1},
+        {
+            "kind": "symlink",
+            "path": "nix/store/link",
+            "target": "/nix/store/target",
+        },
+    ]
+    manifest = json.dumps(
+        {
+            "kit_version": "0.6.6",
+            "platform": "linux/amd64",
+            "harness_inventory": _full_inventory(),
+            "content_inventory": content_inventory,
+            "content_inventory_sha256": content_inventory_digest(content_inventory),
+        },
+        sort_keys=True,
+    ).encode()
+
+    identity = kit_identity_from_manifest_bytes(manifest)
+
+    assert identity["platform"] == "linux/amd64"
+
+
 def test_kit_identity_rejects_malformed_manifests():
     with pytest.raises(HarnessInventoryError):
         kit_identity_from_manifest_bytes(b"not json")

@@ -750,11 +750,28 @@ def _content_inventory_from_archive(container: Any, root: str) -> list[dict[str,
     symlink_targets: list[tuple[str, str]] = []
 
     def resolve_link_target(relative: str, target: object) -> str:
-        if not isinstance(target, str) or not target or target.startswith("/") or "\\" in target:
+        if not isinstance(target, str) or not target or "\\" in target:
             raise HarnessInventoryError(
                 f"Worker Kit archive contains an unsafe link target: {relative!r}"
             )
-        if target == root_name or target.startswith(f"{root_name}/"):
+        # Nix closure links are absolute in the running container, but the
+        # probe archive contains their bytes below the Kit's nix/store tree.
+        # Keep this special case identical to the offline content verifier;
+        # no other absolute target is allowed to escape the mounted Kit.
+        if target == "/nix/store":
+            candidate = "nix/store"
+        elif target.startswith("/nix/store/"):
+            suffix = target[len("/nix/store/") :]
+            if not suffix or any(part in {"", ".", ".."} for part in suffix.split("/")):
+                raise HarnessInventoryError(
+                    f"Worker Kit archive contains an unsafe link target: {relative!r}"
+                )
+            candidate = posixpath.join("nix/store", suffix)
+        elif target.startswith("/"):
+            raise HarnessInventoryError(
+                f"Worker Kit archive contains an unsafe link target: {relative!r}"
+            )
+        elif target == root_name or target.startswith(f"{root_name}/"):
             candidate = target[len(root_name) :].lstrip("/")
         else:
             candidate = posixpath.join(posixpath.dirname(relative), target)

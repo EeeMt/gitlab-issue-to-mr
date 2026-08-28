@@ -73,9 +73,23 @@ _CONTENT_INVENTORY_EXCLUDED = frozenset({"manifest.json", ".install-receipt.json
 
 
 def _content_symlink_target(path: str, target: object) -> str:
-    if not isinstance(target, str) or not target or target.startswith("/") or "\\" in target:
+    if not isinstance(target, str) or not target or "\\" in target:
         raise HarnessInventoryError(f"Kit symlink target is unsafe: {path!r}")
-    resolved = posixpath.normpath(posixpath.join(posixpath.dirname(path), target))
+    # Nix closures keep their store links absolute at runtime.  The mounted
+    # Kit exposes the same closure under /nix/store, so normalize only that
+    # one absolute namespace into the Kit-relative inventory; every other
+    # absolute target remains an escape.
+    if target == "/nix/store":
+        resolved = "nix/store"
+    elif target.startswith("/nix/store/"):
+        suffix = target[len("/nix/store/") :]
+        if not suffix or any(part in {"", ".", ".."} for part in suffix.split("/")):
+            raise HarnessInventoryError(f"Kit symlink target is unsafe: {path!r}")
+        resolved = posixpath.join("nix/store", suffix)
+    elif target.startswith("/"):
+        raise HarnessInventoryError(f"Kit symlink target is unsafe: {path!r}")
+    else:
+        resolved = posixpath.normpath(posixpath.join(posixpath.dirname(path), target))
     if (
         not resolved
         or resolved in {".", ".."}
