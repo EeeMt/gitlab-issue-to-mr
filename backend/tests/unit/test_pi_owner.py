@@ -126,6 +126,39 @@ async def test_settled_keeps_owner_alive_until_backend_drain_marker(pi_owner, tm
 
 
 @pytest.mark.asyncio
+async def test_close_marker_bypasses_busy_native_dispatch_lock(pi_owner, tmp_path):
+    """A pending probe must not strand a settled owner before local close."""
+    owner = pi_owner.PiOwner(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        tmp_path,
+        tmp_path / "owner.sock",
+        task_id=7,
+        attempt_id="attempt-current",
+    )
+    await owner.start()
+    owner.settled.set()
+    await owner.dispatch_lock.acquire()
+    try:
+        outcome = await asyncio.wait_for(
+            owner.dispatch(
+                {
+                    "task_id": 7,
+                    "attempt_id": "attempt-current",
+                    "type": "close",
+                    "control_gate": "closing",
+                }
+            ),
+            timeout=0.5,
+        )
+    finally:
+        owner.dispatch_lock.release()
+        assert owner.process is not None
+        owner.process.terminate()
+        await owner.process.wait()
+    assert outcome == {"status": "ack", "closed": True}
+
+
+@pytest.mark.asyncio
 async def test_owner_feeds_one_persistent_translator_before_drain_close(pi_owner, tmp_path, monkeypatch):
     fake_pi = tmp_path / "fake_pi.py"
     fake_pi.write_text(

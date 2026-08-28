@@ -190,6 +190,14 @@ class PiOwner:
         self.pending.clear()
 
     async def dispatch(self, frame: dict) -> dict:
+        # ``close`` is an owner-local drain marker, not a native Pi command.
+        # A startup ``get_state`` probe can legitimately be waiting for a
+        # native ACK after Pi has already settled the turn.  Do not let that
+        # probe hold the serialization lock in front of the close marker: the
+        # backend only sends close after all durable command rows have drained,
+        # and the owner must remain able to terminate its process promptly.
+        if frame.get("type") == "close":
+            return await self._dispatch_locked(frame)
         async with self.dispatch_lock:
             return await self._dispatch_locked(frame)
 
