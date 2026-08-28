@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -72,6 +73,17 @@ def _manifest() -> dict:
             }
         },
     }
+
+
+def test_current_manifest_reads_controlled_runtime_source_tree(monkeypatch, tmp_path):
+    source_root = tmp_path / "runtime-source"
+    manifest_path = source_root / "deploy/worker-entrypoint/harness/manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    expected = _manifest()
+    manifest_path.write_text(json.dumps(expected), encoding="utf-8")
+    monkeypatch.setattr(harness_catalog, "default_runtime_source_dir", lambda: source_root)
+
+    assert harness_catalog._current_manifest() == expected
 
 
 def test_v2_catalog_is_safe_projection_without_source_metadata():

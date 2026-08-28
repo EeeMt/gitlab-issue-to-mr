@@ -239,7 +239,13 @@ def _legacy_catalog_response(bundle: WorkerRuntimeBundle | None) -> dict[str, An
 
 
 def _current_manifest() -> dict[str, Any]:
-    manifest_path = default_runtime_source_dir() / "harness" / "manifest.json"
+    manifest_path = (
+        default_runtime_source_dir()
+        / "deploy"
+        / "worker-entrypoint"
+        / "harness"
+        / "manifest.json"
+    )
     try:
         raw = manifest_path.read_text(encoding="utf-8")
         parsed = json.loads(raw)
