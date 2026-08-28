@@ -754,6 +754,8 @@ async def test_control_transport_detaches_and_correlates_outcome(monkeypatch):
 
         def get_archive(self, _path):
             self.outcome_paths.append(_path)
+            if _path == "/tmp/codify-runtime/control-outcome.json":
+                raise FileNotFoundError(_path)
             outcome = json.dumps(
                 {
                     "status": "ack",
