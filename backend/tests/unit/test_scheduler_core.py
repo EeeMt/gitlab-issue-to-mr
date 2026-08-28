@@ -730,7 +730,7 @@ class SchedulerRunCycleTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_context):
-            with patch("app.scheduler.load_runtime_config_from_db", new=AsyncMock()):
+            with patch("app.scheduler.refresh_runtime_config_if_stale", new=AsyncMock()):
                 with patch.object(scheduler, "_maybe_cleanup_sessions", new=AsyncMock()):
                     with patch.object(scheduler, "_maybe_cleanup_workspaces", new=AsyncMock()):
                         with patch.object(scheduler, "_maybe_cleanup_issue_locks", new=AsyncMock()):
@@ -769,7 +769,7 @@ class SchedulerRunCycleTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_context):
-            with patch("app.scheduler.load_runtime_config_from_db", new=AsyncMock()):
+            with patch("app.scheduler.refresh_runtime_config_if_stale", new=AsyncMock()):
                 with patch.object(scheduler, "_maybe_cleanup_sessions", new=AsyncMock()):
                     with patch.object(scheduler, "_maybe_cleanup_workspaces", new=AsyncMock()):
                         with patch.object(scheduler, "_maybe_cleanup_issue_locks", new=AsyncMock()):
@@ -821,7 +821,7 @@ class SchedulerRunCycleTests(unittest.IsolatedAsyncioTestCase):
         scheduler._running_issues.add(99)
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_context):
-            with patch("app.scheduler.load_runtime_config_from_db", new=AsyncMock()):
+            with patch("app.scheduler.refresh_runtime_config_if_stale", new=AsyncMock()):
                 with patch.object(scheduler, "_maybe_cleanup_sessions", new=AsyncMock()):
                     with patch.object(scheduler, "_maybe_cleanup_workspaces", new=AsyncMock()):
                         with patch.object(scheduler, "_maybe_cleanup_issue_locks", new=AsyncMock()):
@@ -870,7 +870,7 @@ class SchedulerRunCycleTests(unittest.IsolatedAsyncioTestCase):
         task.issue_id = 50
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_context):
-            with patch("app.scheduler.load_runtime_config_from_db", new=AsyncMock()):
+            with patch("app.scheduler.refresh_runtime_config_if_stale", new=AsyncMock()):
                 with patch.object(scheduler, "_maybe_cleanup_sessions", new=AsyncMock()):
                     with patch.object(scheduler, "_maybe_cleanup_workspaces", new=AsyncMock()):
                         with patch.object(scheduler, "_maybe_cleanup_issue_locks", new=AsyncMock()):

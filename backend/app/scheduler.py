@@ -85,7 +85,7 @@ from app.models import (
     TaskWorkerProfileSnapshot,
     WorkerRuntimeBundle,
 )
-from app.runtime_config import load_runtime_config_from_db
+from app.runtime_config import refresh_runtime_config_if_stale
 
 logger = logging.getLogger(__name__)
 _SESSION_CLEANUP_INTERVAL_SECONDS = 3600
@@ -454,7 +454,11 @@ class Scheduler:
     async def _run_cycle(self) -> None:
         """Run one scheduler cycle."""
         async with AsyncSessionLocal() as db:
-            await load_runtime_config_from_db(db)
+            # Poll the compact signature first.  Reloading every cycle makes
+            # stale legacy system_config rows spam the scheduler log and does
+            # not improve freshness because the loader already tracks the
+            # row-count/updated-at checkpoint.
+            await refresh_runtime_config_if_stale(db)
             if get_settings().harness_execution_mode == "v2_only":
                 # Re-apply the policy every cycle so rows inserted by an old or
                 # bypassing writer after startup can never sit in, or re-enter,

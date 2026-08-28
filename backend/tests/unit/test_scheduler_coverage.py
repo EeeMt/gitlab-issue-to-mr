@@ -165,7 +165,7 @@ class TestRunCycleManualTask(unittest.IsolatedAsyncioTestCase):
         mock_db.__aexit__ = AsyncMock(return_value=False)
         with (
             patch("app.scheduler.AsyncSessionLocal", return_value=mock_db),
-            patch("app.scheduler.load_runtime_config_from_db", new_callable=AsyncMock),
+            patch("app.scheduler.refresh_runtime_config_if_stale", new_callable=AsyncMock),
             patch.object(scheduler, "_maybe_cleanup_sessions", new_callable=AsyncMock),
             patch.object(scheduler, "_maybe_cleanup_workspaces", new_callable=AsyncMock),
             patch.object(scheduler, "_maybe_cleanup_retained_containers", new_callable=AsyncMock),
