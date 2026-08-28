@@ -47,6 +47,35 @@ ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-http://localhost:11434/v1}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-claude-sonnet-4-20250514}"
 APPEND_SYSTEM_PROMPT="${APPEND_SYSTEM_PROMPT:-}"
+
+print_model_runtime_summary() {
+    local model_protocol="${CODIFY_MODEL_PROTOCOL:-anthropic_messages}"
+    local model_endpoint=""
+    local model_name=""
+    local model_api_key=""
+    case "${model_protocol}" in
+        anthropic_messages)
+            model_endpoint="${ANTHROPIC_BASE_URL}"
+            model_name="${ANTHROPIC_MODEL}"
+            model_api_key="${ANTHROPIC_API_KEY}"
+            ;;
+        openai_responses|openai_chat_completions)
+            model_endpoint="${OPENAI_BASE_URL:-}"
+            model_name="${OPENAI_MODEL:-}"
+            model_api_key="${OPENAI_API_KEY:-}"
+            ;;
+        *)
+            # Keep diagnostics useful if a caller supplies an invalid protocol;
+            # the central runner will reject it before a model invocation.
+            ;;
+    esac
+    echo "Model Protocol: ${model_protocol}"
+    echo "Model Endpoint:  ${model_endpoint}"
+    echo "Model:          ${model_name}"
+    echo "Max Turns:      ${CLAUDE_MAX_TURNS:-20}"
+    echo "API Key set:    $([ -n "${model_api_key}" ] && echo 'yes' || echo 'no')"
+}
+
 CODIFY_RUNTIME_DIR="/tmp/codify-runtime"
 CODIFY_ARTIFACT_DIR="${CODIFY_RUNTIME_DIR}/artifacts"
 CODIFY_WORKER_PRE_SCRIPT_FILE="${CODIFY_RUNTIME_DIR}/worker-pre-script.sh"
@@ -285,10 +314,7 @@ echo "Branch:       ${BRANCH_NAME}"
 echo "Base Branch:  ${BASE_BRANCH:-${TARGET_BRANCH}}"
 echo "Target:       ${TARGET_BRANCH:-N/A (no-MR mode)}"
 echo "----------------------------------------"
-echo "Anthropic URL:  ${ANTHROPIC_BASE_URL}"
-echo "Model:          ${ANTHROPIC_MODEL}"
-echo "Max Turns:      ${CLAUDE_MAX_TURNS:-20}"
-echo "API Key set:    $([ -n "$ANTHROPIC_API_KEY" ] && echo 'yes' || echo 'no')"
+print_model_runtime_summary
 echo "System Prompt:  $([ -n "$APPEND_SYSTEM_PROMPT" ] && echo "set (${#APPEND_SYSTEM_PROMPT} chars)" || echo 'none')"
 echo "Pre Script:     $([ -s "$CODIFY_WORKER_PRE_SCRIPT_FILE" ] && echo 'set' || echo 'none')"
 echo "Post Script:    $([ -s "$CODIFY_WORKER_POST_SCRIPT_FILE" ] && echo 'set' || echo 'none')"
