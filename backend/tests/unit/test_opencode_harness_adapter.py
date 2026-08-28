@@ -134,6 +134,57 @@ def test_opencode_stream_maps_sse_to_v2_canonical_events(tmp_path):
     assert result["result"] == "Hello world"
 
 
+def test_opencode_usage_maps_native_fields_and_emits_usage_final(tmp_path):
+    runtime_dir = tmp_path / "usage"
+    runtime_dir.mkdir()
+    records = _success_records()
+    records[6] = _record(
+        "message.updated",
+        {
+            "sessionID": "ses-oc-1",
+            "info": {
+                "id": "m1",
+                "role": "assistant",
+                "usage": {
+                    "input": 20,
+                    "output": 4,
+                    "cacheRead": 1536,
+                    "cacheWrite": 32,
+                    "totalTokens": 1560,
+                    "reasoningTokens": 7,
+                    "cost": {
+                        "input": 0.01,
+                        "output": 0.02,
+                        "cacheRead": 0.0,
+                        "cacheWrite": 0.0,
+                        "total": 0.03,
+                    },
+                },
+            },
+        },
+    )
+    _emit(runtime_dir, "run.started", {"runtime_bundle_digest": "d" * 64})
+    _translate(runtime_dir, records)
+
+    translated = _events(runtime_dir)
+    for event in translated:
+        assert validate_event_v2(event)["schema"] == CANONICAL_EVENT_SCHEMA_V2
+    usage_events = [event for event in translated if event["type"] == "usage.final"]
+    assert len(usage_events) == 1
+    usage = usage_events[0]["payload"]["usage"]
+    assert usage["input_tokens"] == 20
+    assert usage["cached_input_tokens"] == 1536
+    assert usage["output_tokens"] == 4
+    assert usage["reasoning_tokens"] == 7
+    assert usage["cost"] == 0.03
+    assert usage["engine_fields"]["cacheWrite"] == 32
+    assert usage["engine_fields"]["totalTokens"] == 1560
+    assert usage["engine_fields"]["cost_breakdown"]["output"] == 0.02
+
+    result = json.loads((runtime_dir / "harness-result.json").read_text(encoding="utf-8"))
+    assert result["usage"] == usage
+
+
 def test_opencode_stream_keeps_user_parts_out_of_assistant_result(tmp_path):
     runtime_dir = tmp_path / "role-aware"
     runtime_dir.mkdir()

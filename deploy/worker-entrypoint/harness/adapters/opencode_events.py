@@ -136,26 +136,46 @@ def _emit(event_type: str, payload: dict, raw_line: int) -> None:
 
 def _usage(properties: dict) -> dict:
     source = properties.get("usage") if isinstance(properties.get("usage"), dict) else {}
+    def _first_value(*keys: str):
+        for key in keys:
+            value = source.get(key)
+            if value is not None:
+                return value
+        return None
+
+    cost_source = source.get("cost")
+    if isinstance(cost_source, dict):
+        cost = cost_source.get("total")
+    elif isinstance(cost_source, (int, float)) and not isinstance(cost_source, bool):
+        cost = cost_source
+    else:
+        cost = None
+
+    excluded = {
+        "input_tokens",
+        "input",
+        "cached_input_tokens",
+        "cacheRead",
+        "output_tokens",
+        "output",
+        "reasoning_tokens",
+        "reasoning",
+        "reasoningTokens",
+        "cost",
+    }
+    engine_fields = {
+        key: value for key, value in source.items() if key not in excluded
+    }
+    if isinstance(cost_source, dict):
+        engine_fields["cost_breakdown"] = cost_source
     return {
-        "input_tokens": source.get("input_tokens"),
-        "cached_input_tokens": source.get("cached_input_tokens"),
-        "output_tokens": source.get("output_tokens"),
-        "reasoning_tokens": source.get("reasoning_tokens", source.get("reasoning")),
-        "cost": source.get("cost"),
+        "input_tokens": _first_value("input_tokens", "input"),
+        "cached_input_tokens": _first_value("cached_input_tokens", "cacheRead"),
+        "output_tokens": _first_value("output_tokens", "output"),
+        "reasoning_tokens": _first_value("reasoning_tokens", "reasoning", "reasoningTokens"),
+        "cost": cost,
         "currency": None,
-        "engine_fields": {
-            key: value
-            for key, value in source.items()
-            if key
-            not in {
-                "input_tokens",
-                "cached_input_tokens",
-                "output_tokens",
-                "reasoning_tokens",
-                "reasoning",
-                "cost",
-            }
-        },
+        "engine_fields": engine_fields,
     }
 
 
@@ -164,6 +184,7 @@ def _write_result(
     success: bool,
     result: str,
     usage: dict,
+    terminal_line: int,
     failure_message: str | None = None,
     failure_kind: str | None = None,
 ) -> None:
@@ -192,6 +213,8 @@ def _write_result(
         encoding="utf-8",
     )
     os.replace(temp_path, result_path)
+    if usage:
+        _emit("usage.final", {"usage": usage}, terminal_line)
 
 
 def _finalize_terminal() -> None:
@@ -206,7 +229,12 @@ def _finalize_terminal() -> None:
     if _STATE["aborted"]:
         _STATE["terminal"] = "failed"
         _STATE["terminal_failure"] = {"kind": "cancelled", "message": "OpenCode run aborted"}
-        _write_result(success=False, result="".join(_STATE["text_parts"]).strip(), usage=_STATE["usage"])
+        _write_result(
+            success=False,
+            result="".join(_STATE["text_parts"]).strip(),
+            usage=_STATE["usage"],
+            terminal_line=terminal_line,
+        )
         _STATE["terminal_line"] = terminal_line
     elif _STATE["terminal_failure"] is not None:
         fail = _STATE["terminal_failure"]
@@ -214,6 +242,7 @@ def _finalize_terminal() -> None:
         _write_result(
             success=False, result="".join(_STATE["text_parts"]).strip(),
             usage=_STATE["usage"],
+            terminal_line=terminal_line,
             failure_message=str(fail["message"]),
             failure_kind=str(fail.get("kind") or "") or None,
         )
@@ -224,6 +253,7 @@ def _finalize_terminal() -> None:
             success=True,
             result="".join(_STATE["text_parts"]).strip(),
             usage=_STATE["usage"],
+            terminal_line=terminal_line,
         )
         _STATE["terminal_line"] = terminal_line
     if _STATE["terminal"] == "completed":
