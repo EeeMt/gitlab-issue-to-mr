@@ -41,6 +41,29 @@ from result_builder import v2_harness_block
 from sanitize import clean_message, sanitize
 
 SCHEMA = "codify.worker.event/v2"
+_RATE_LIMIT_REASONS = frozenset(
+    {
+        "account_rate_limit",
+        "monthly_limit",
+        "quota_exceeded",
+        "rate_limit",
+        "rate_limited",
+        "usage_limit",
+        "usage_limit_exceeded",
+    }
+)
+_RATE_LIMIT_MARKERS = (
+    "429",
+    "rate limit",
+    "rate-limit",
+    "usage limit",
+    "usage_limit",
+    "quota exceeded",
+    "quota_exceeded",
+    "account_rate_limit",
+    "too many requests",
+    "monthly limit",
+)
 
 # Per-stream in-memory state. The terminal is decided when settled is reached.
 _STATE: dict = {
@@ -71,12 +94,7 @@ def _failure_kind(message: str) -> str:
     if "401" in lowered or "unauthorized" in lowered or "authentication" in lowered:
         return "authentication_error"
     if (
-        "429" in lowered
-        or "rate limit" in lowered
-        or "rate-limit" in lowered
-        or "usage limit" in lowered
-        or "account_rate_limit" in lowered
-        or "too many requests" in lowered
+        any(marker in lowered for marker in _RATE_LIMIT_MARKERS)
     ):
         return "rate_limited"
     if "session_missing" in lowered or "session not found" in lowered:
@@ -88,6 +106,13 @@ def _failure_kind(message: str) -> str:
     if "sandbox" in lowered or "permission denied" in lowered:
         return "sandbox_error"
     return "engine_error"
+
+
+def _is_rate_limit_reason(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    normalized = value.strip().lower().replace("-", "_").replace(" ", "_")
+    return normalized in _RATE_LIMIT_REASONS
 
 
 def _emit(event_type: str, payload: dict, raw_line: int) -> None:
@@ -134,12 +159,19 @@ def _usage(properties: dict) -> dict:
     }
 
 
-def _write_result(*, success: bool, result: str, usage: dict, failure_message: str | None = None) -> None:
+def _write_result(
+    *,
+    success: bool,
+    result: str,
+    usage: dict,
+    failure_message: str | None = None,
+    failure_kind: str | None = None,
+) -> None:
     result_path = Path(os.environ["CODIFY_HARNESS_RESULT_FILE"])
     failure = None
     if not success:
         message = failure_message or result or "OpenCode execution failed"
-        failure = {"kind": _failure_kind(message), "message": message}
+        failure = {"kind": failure_kind or _failure_kind(message), "message": message}
     payload = {
         "schema": "codify.worker.result/v2",
         "status": "completed" if success else (
@@ -181,7 +213,9 @@ def _finalize_terminal() -> None:
         _STATE["terminal"] = "failed"
         _write_result(
             success=False, result="".join(_STATE["text_parts"]).strip(),
-            usage=_STATE["usage"], failure_message=str(fail["message"]),
+            usage=_STATE["usage"],
+            failure_message=str(fail["message"]),
+            failure_kind=str(fail.get("kind") or "") or None,
         )
         _STATE["terminal_line"] = terminal_line
     else:
@@ -227,17 +261,10 @@ def _handle_session_status(properties: dict, raw_line: int) -> None:
             or action.get("title")
             or "OpenCode provider retry"
         )
-        reason = action.get("reason")
+        reason = action.get("reason") or status.get("reason")
         lowered = str(message).lower()
-        if reason == "account_rate_limit" or any(
-            marker in lowered
-            for marker in (
-                "rate limit",
-                "rate-limit",
-                "usage limit",
-                "too many requests",
-                "429",
-            )
+        if _is_rate_limit_reason(reason) or any(
+            marker in lowered for marker in _RATE_LIMIT_MARKERS
         ):
             message = clean_message(str(message))
             _STATE["terminal_failure"] = {

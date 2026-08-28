@@ -187,10 +187,29 @@ def test_opencode_session_idle_without_final_message_is_protocol_failure(tmp_pat
     assert "harness.failed" in [e["type"] for e in _events(runtime_dir)]
 
 
-def test_opencode_usage_limit_retry_maps_to_rate_limited_terminal(tmp_path):
+@pytest.mark.parametrize(
+    ("reason", "reason_location"),
+    [
+        ("account_rate_limit", "action"),
+        ("quota_exceeded", "action"),
+        ("usage-limit-exceeded", "status"),
+    ],
+)
+def test_opencode_usage_limit_retry_maps_to_rate_limited_terminal(
+    tmp_path, reason, reason_location
+):
     runtime_dir = tmp_path / "rate-limit"
     runtime_dir.mkdir()
     _emit(runtime_dir, "run.started")
+    retry_status = {
+        "type": "retry",
+        "attempt": 1,
+        "message": "provider rejected request",
+    }
+    if reason_location == "action":
+        retry_status["action"] = {"reason": reason}
+    else:
+        retry_status["reason"] = reason
     _translate(
         runtime_dir,
         [
@@ -198,15 +217,7 @@ def test_opencode_usage_limit_retry_maps_to_rate_limited_terminal(tmp_path):
                 "session.status",
                 {
                     "sessionID": "ses-oc-limit",
-                    "status": {
-                        "type": "retry",
-                        "attempt": 1,
-                        "message": "monthly usage limit reached",
-                        "action": {
-                            "reason": "account_rate_limit",
-                            "message": "monthly usage limit reached",
-                        },
-                    },
+                    "status": retry_status,
                 },
             ),
         ],
