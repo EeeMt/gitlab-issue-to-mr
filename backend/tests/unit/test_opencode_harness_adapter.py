@@ -270,6 +270,165 @@ def test_opencode_stream_keeps_user_parts_out_of_assistant_result(tmp_path):
     assert all(event["payload"].get("content") != "user prompt" for event in _events(runtime_dir))
 
 
+def _tool_part_record(
+    *,
+    call_id: str,
+    tool: str,
+    status: str,
+    input_value: dict | None = None,
+    output: str | None = None,
+    error: str | None = None,
+    exit_code: int | None = None,
+) -> dict:
+    state = {"status": status, "input": input_value or {}}
+    if output is not None:
+        state["output"] = output
+    if error is not None:
+        state["error"] = error
+    if exit_code is not None:
+        state["metadata"] = {"exit": exit_code}
+    return _record(
+        "message.part.updated",
+        {
+            "sessionID": "ses-oc-tools",
+            "part": {
+                "type": "tool",
+                "id": f"part-{call_id}",
+                "messageID": "m-tools",
+                "callID": call_id,
+                "tool": tool,
+                "state": state,
+            },
+        },
+    )
+
+
+def test_opencode_tool_snapshots_map_to_one_canonical_lifecycle(tmp_path):
+    runtime_dir = tmp_path / "tools"
+    runtime_dir.mkdir()
+    records = [
+        _record("session.created", {"sessionID": "ses-oc-tools"}),
+        _record("message.updated", {"sessionID": "ses-oc-tools", "info": {"id": "m-tools", "role": "assistant"}}),
+        # The first pending snapshot has no useful input. It must not create an
+        # empty tool row that can never be amended by a later snapshot.
+        _tool_part_record(call_id="call-bash", tool="bash", status="pending"),
+        _tool_part_record(
+            call_id="call-bash",
+            tool="bash",
+            status="running",
+            input_value={"command": "printf 'ok'"},
+        ),
+        _tool_part_record(
+            call_id="call-bash",
+            tool="bash",
+            status="running",
+            input_value={"command": "printf 'ok'"},
+        ),
+        _tool_part_record(
+            call_id="call-bash",
+            tool="bash",
+            status="completed",
+            input_value={"command": "printf 'ok'"},
+            output="ok",
+            exit_code=0,
+        ),
+        _tool_part_record(
+            call_id="call-write",
+            tool="write",
+            status="running",
+            input_value={"filePath": "/workspace/result.txt", "content": "done"},
+        ),
+        _tool_part_record(
+            call_id="call-write",
+            tool="write",
+            status="error",
+            input_value={"filePath": "/workspace/result.txt", "content": "done"},
+            error="write failed",
+        ),
+        _record(
+            "message.part.updated",
+            {
+                "sessionID": "ses-oc-tools",
+                "part": {"type": "text", "text": "finished", "messageID": "m-tools", "id": "text-1"},
+            },
+        ),
+        _record("session.idle", {"sessionID": "ses-oc-tools"}),
+    ]
+    _emit(runtime_dir, "run.started", {"runtime_bundle_digest": "d" * 64})
+    _translate(runtime_dir, records)
+
+    translated = _events(runtime_dir)
+    for event in translated:
+        assert validate_event_v2(event)["schema"] == CANONICAL_EVENT_SCHEMA_V2
+    tool_started = [event for event in translated if event["type"] == "tool.started"]
+    tool_completed = [event for event in translated if event["type"] == "tool.completed"]
+    assert len(tool_started) == 2
+    assert len(tool_completed) == 2
+    assert tool_started[0]["payload"] == {
+        "tool_id": "call-bash",
+        "name": "Bash",
+        "input": {"command": "printf 'ok'"},
+    }
+    assert tool_completed[0]["payload"] == {
+        "tool_id": "call-bash",
+        "name": "Bash",
+        "output": "ok",
+        "error": False,
+        "exit_code": 0,
+    }
+    assert tool_started[1]["payload"]["name"] == "Write"
+    assert tool_started[1]["payload"]["input"] == {
+        "content": "done",
+        "file_path": "/workspace/result.txt",
+    }
+    assert tool_completed[1]["payload"]["error"] is True
+    assert [event["type"] for event in translated].count("harness.completed") == 1
+
+
+def test_opencode_known_server_events_are_archived_without_unknown_diagnostics(tmp_path):
+    runtime_dir = tmp_path / "known-events"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    _translate(
+        runtime_dir,
+        [
+            _record("catalog.updated", {"items": ["redacted"]}),
+            _record("plugin.added", {"name": "example"}),
+            _record("file.edited", {"file": "/workspace/a.txt"}),
+            _record("message.updated", {"sessionID": "ses-known", "info": {"id": "m1", "role": "assistant"}}),
+            _record("message.part.updated", {"part": {"type": "text", "text": "ok", "messageID": "m1", "id": "p1"}}),
+            _record("session.idle", {"sessionID": "ses-known"}),
+        ],
+    )
+    diagnostics = [event for event in _events(runtime_dir) if event["type"] == "diagnostic"]
+    assert all(event["payload"].get("code") != "unknown_raw_event" for event in diagnostics)
+    raw = (runtime_dir / "harness-events/opencode.jsonl").read_text(encoding="utf-8")
+    assert '"type":"catalog.updated"' in raw
+
+
+def test_opencode_idle_with_active_tool_is_protocol_failure(tmp_path):
+    runtime_dir = tmp_path / "active-tool"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    _translate(
+        runtime_dir,
+        [
+            _record("message.updated", {"sessionID": "ses-active", "info": {"id": "m1", "role": "assistant"}}),
+            _tool_part_record(
+                call_id="call-active",
+                tool="bash",
+                status="running",
+                input_value={"command": "sleep 1"},
+            ),
+            _record("message.part.updated", {"part": {"type": "text", "text": "done", "messageID": "m1", "id": "p1"}}),
+            _record("session.idle", {"sessionID": "ses-active"}),
+        ],
+    )
+    result = json.loads((runtime_dir / "harness-result.json").read_text(encoding="utf-8"))
+    assert result["status"] == "protocol_error"
+    assert result["failure"]["kind"] == "protocol_error"
+
+
 def test_opencode_session_idle_without_final_message_is_protocol_failure(tmp_path):
     runtime_dir = tmp_path / "idle"
     runtime_dir.mkdir()

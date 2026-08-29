@@ -211,6 +211,12 @@ class WorkerEventProjector:
                 "error": bool(payload.get("error", False)),
             }
         )
+        if payload.get("exit_code") is not None:
+            metadata["exit_code"] = payload["exit_code"]
+        if payload.get("error_message"):
+            metadata["error_message"] = self._sanitize_sensitive_data(
+                str(payload["error_message"])
+            )
         pending.log_metadata = _dumps(metadata)
 
     async def ingest_event_record(
@@ -280,13 +286,25 @@ class WorkerEventProjector:
         elif event_type == "tool.completed":
             await self._project_tool_completed(task_id=task_id, payload=payload, db=db)
         elif event_type == "context.compacted":
+            compact_metadata = {
+                key: payload.get(key)
+                for key in (
+                    "session_id",
+                    "reason",
+                    "aborted",
+                    "will_retry",
+                    "tokens_before",
+                    "estimated_tokens_after",
+                )
+                if payload.get(key) is not None
+            }
             db.add(
                 TaskLog(
                     task_id=task_id,
                     log_level="INFO",
                     message="",
                     log_type="context_compact",
-                    log_metadata=_dumps({"session_id": payload.get("session_id")}),
+                    log_metadata=_dumps(compact_metadata),
                 )
             )
         elif event_type in {"harness.completed", "harness.failed"}:

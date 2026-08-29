@@ -32,7 +32,7 @@ import sys
 from pathlib import Path
 
 from result_builder import v2_harness_block
-from sanitize import clean_message, sanitize
+from sanitize import clean_message, redact_hidden_reasoning, sanitize
 
 SCHEMA = "codify.worker.event/v2"
 
@@ -144,6 +144,7 @@ _STATE: dict = {
     "thinking": [],
     "text_parts": [],
     "tool_starts": {},
+    "message_completed_emitted": False,
     "usage": {},
     "terminal": None,   # "completed" | "failed"
     "terminal_line": None,
@@ -227,6 +228,73 @@ def _usage(record: dict) -> dict:
     }
 
 
+_TOOL_OUTPUT_MAX_CHARS = 2000
+_TOOL_COMMAND_MAX_CHARS = 1000
+_TOOL_VALUE_MAX_CHARS = 4000
+_TOOL_NAME_ALIASES = {
+    "bash": "Bash",
+    "shell": "Bash",
+    "write": "Write",
+    "read": "Read",
+    "edit": "Edit",
+    "patch": "Edit",
+    "multiedit": "MultiEdit",
+    "multi_edit": "MultiEdit",
+    "glob": "Glob",
+    "grep": "Grep",
+}
+
+
+def _sanitize_value(value: object, *, depth: int = 0) -> object:
+    """Keep arbitrary tool args/results bounded and safe for projection."""
+    if depth > 6:
+        return "<DEPTH_LIMIT>"
+    if isinstance(value, str):
+        return sanitize(value)[:_TOOL_VALUE_MAX_CHARS]
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, dict):
+        return {
+            str(key): _sanitize_value(child, depth=depth + 1)
+            for key, child in list(value.items())[:64]
+        }
+    if isinstance(value, list):
+        return [_sanitize_value(child, depth=depth + 1) for child in value[:64]]
+    return sanitize(str(value))[:_TOOL_VALUE_MAX_CHARS]
+
+
+def _display_tool_name(tool_name: object) -> str:
+    raw_name = str(tool_name or "unknown").strip() or "unknown"
+    return _TOOL_NAME_ALIASES.get(raw_name.lower(), raw_name)
+
+
+def _set_usage(record: dict, raw_line: int, *, emit_update: bool = False) -> None:
+    usage = record.get("usage")
+    if not isinstance(usage, dict):
+        return
+    normalized = _usage(record)
+    changed = normalized != _STATE.get("usage")
+    _STATE["usage"] = normalized
+    if emit_update and changed and any(
+        normalized.get(key) is not None
+        for key in ("input_tokens", "cached_input_tokens", "output_tokens", "cost")
+    ):
+        _emit("usage.updated", {"usage": normalized}, raw_line)
+
+
+def _message_text(message: dict) -> str:
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts = []
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str):
+            parts.append(block["text"])
+    return "".join(parts)
+
+
 def _write_result(
     *,
     success: bool,
@@ -279,7 +347,35 @@ def _emit_terminal_at_eof() -> None:
         assistant_line = _STATE["assistant_final_line"]
         agent_end_line = _STATE["agent_end_success_line"]
         settled_line = _STATE["agent_settled_line"]
-        if (
+        active_tools = [
+            tool_id
+            for tool_id, lifecycle in _STATE.get("tool_starts", {}).items()
+            if not lifecycle.get("completed")
+        ]
+        if _STATE["terminal_failure"] is not None:
+            _STATE["terminal"] = "failed"
+            _STATE["terminal_line"] = settled_line or _STATE["last_raw_line"] or 0
+            failure = _STATE["terminal_failure"]
+            _write_result(
+                success=False,
+                result="".join(_STATE["text_parts"]),
+                usage=_STATE["usage"],
+                failure_message=str(failure["message"]),
+                failure_kind=str(failure.get("kind") or "engine_error"),
+            )
+        elif active_tools:
+            message = "Pi protocol ended with active tool executions: " + ",".join(active_tools)
+            _STATE["terminal"] = "failed"
+            _STATE["terminal_line"] = settled_line or _STATE["last_raw_line"] or 0
+            _STATE["terminal_failure"] = {"kind": "protocol_error", "message": message}
+            _write_result(
+                success=False,
+                result="".join(_STATE["text_parts"]),
+                usage=_STATE["usage"],
+                failure_message=message,
+                failure_kind="protocol_error",
+            )
+        elif (
             isinstance(assistant_line, int)
             and isinstance(agent_end_line, int)
             and isinstance(settled_line, int)
@@ -406,9 +502,7 @@ def _handle_response(record: dict, raw_line: int) -> None:
 
 
 def _handle_message_update(record: dict, raw_line: int) -> None:
-    usage = record.get("usage")
-    if isinstance(usage, dict):
-        _STATE["usage"] = _usage(record)
+    _set_usage(record, raw_line, emit_update=True)
     event = record.get("assistantMessageEvent") if isinstance(record.get("assistantMessageEvent"), dict) else {}
     etype = event.get("type")
     if etype == "thinking_start":
@@ -419,12 +513,14 @@ def _handle_message_update(record: dict, raw_line: int) -> None:
         thinking = "".join(_STATE["thinking"])
         if thinking:
             _emit(
-                "reasoning_summary.delta",
+                "reasoning_summary.completed",
                 {"text": thinking, "client": "pi"},
                 raw_line,
             )
+        _STATE["thinking"] = []
     elif etype == "text_start":
         _STATE["text_parts"] = []
+        _STATE["message_completed_emitted"] = False
     elif etype == "text_delta":
         delta = event.get("delta") or ""
         _STATE["text_parts"].append(delta)
@@ -434,17 +530,37 @@ def _handle_message_update(record: dict, raw_line: int) -> None:
             raw_line,
         )
     elif etype == "text_end":
-        content = event.get("content") or ""
+        content = event.get("content")
+        if not isinstance(content, str) or not content:
+            content = "".join(_STATE["text_parts"])
         _STATE["text_parts"] = [content] if content else _STATE["text_parts"]
-        _emit("message.completed", {"message_id": None, "text": content}, raw_line)
+        if content and not _STATE.get("message_completed_emitted"):
+            _emit("message.completed", {"message_id": None, "text": content}, raw_line)
+            _STATE["message_completed_emitted"] = True
         if isinstance(content, str) and content.strip():
             _STATE["assistant_final_line"] = raw_line
+    elif etype == "toolcall_end":
+        # Pi exposes the completed model tool call inside message_update and
+        # then normally repeats it as top-level tool_execution_* events. The
+        # same tool id is deduplicated by _handle_tool; keeping this fallback
+        # prevents a provider/extension that omits the top-level start from
+        # silently losing the call.
+        tool_call = event.get("toolCall") if isinstance(event.get("toolCall"), dict) else {}
+        if tool_call.get("id"):
+            _handle_tool(
+                {
+                    "type": "tool_execution_start",
+                    "toolCallId": tool_call.get("id"),
+                    "toolName": tool_call.get("name"),
+                    "args": tool_call.get("arguments") or tool_call.get("input") or {},
+                },
+                raw_line,
+            )
 
 
 def _handle_message_end(record: dict, raw_line: int) -> None:
     message = record.get("message") if isinstance(record.get("message"), dict) else {}
-    if isinstance(message.get("usage"), dict):
-        _STATE["usage"] = _usage(message)
+    _set_usage(message, raw_line, emit_update=True)
     stop_reason = message.get("stopReason")
     error_message = message.get("errorMessage")
     if stop_reason == "error" or (
@@ -452,40 +568,31 @@ def _handle_message_end(record: dict, raw_line: int) -> None:
         and isinstance(error_message, str)
         and error_message.strip()
     ):
-        failure_message = clean_message(
-            str(error_message or "Pi message ended with an error")
-        )
+        failure_message = clean_message(sanitize(str(error_message or "Pi message ended with an error")))
         failure_kind = _failure_kind(failure_message)
-        _STATE["terminal"] = "failed"
-        _STATE["terminal_line"] = raw_line
         _STATE["terminal_failure"] = {
             "kind": failure_kind,
             "message": failure_message,
         }
-        _write_result(
-            success=False,
-            result="".join(_STATE["text_parts"]),
-            usage=_STATE["usage"],
-            failure_message=failure_message,
-            failure_kind=failure_kind,
-        )
         return
     if stop_reason == "aborted":
         _STATE["aborted"] = True
         failure = {
             "kind": "cancelled",
-            "message": message.get("errorMessage") or "Pi run aborted",
+            "message": clean_message(sanitize(str(message.get("errorMessage") or "Pi run aborted"))),
         }
-        _STATE["terminal"] = "failed"
-        _STATE["terminal_line"] = raw_line
         _STATE["terminal_failure"] = failure
-        _write_result(success=False, result="", usage=_STATE["usage"], failure_message=str(failure["message"]))
         return
     if stop_reason in ("stop", "end_turn"):
-        # message.completed is emitted exactly once from text_end. Do NOT
-        # re-emit here: message_end carries the same aggregated content and
-        # would duplicate the final assistant message (task 646 seq 34==35).
-        pass
+        # message_end.message is authoritative. Most streams already emitted
+        # message.completed from text_end; recover it here when a provider
+        # omits the text_end snapshot.
+        content = _message_text(message)
+        if content and not _STATE.get("message_completed_emitted"):
+            _STATE["text_parts"] = [content]
+            _emit("message.completed", {"message_id": message.get("id"), "text": content}, raw_line)
+            _STATE["message_completed_emitted"] = True
+            _STATE["assistant_final_line"] = raw_line
 
 
 def _handle_queue_update(record: dict, raw_line: int) -> None:
@@ -506,24 +613,26 @@ def _handle_queue_update(record: dict, raw_line: int) -> None:
     _emit("control.queue.updated", {"queue": queue}, raw_line)
 
 
-_TOOL_OUTPUT_MAX_CHARS = 2000
-_TOOL_COMMAND_MAX_CHARS = 1000
-
-
 def _tool_input(record: dict) -> dict:
     """Project a sanitized tool input: file paths stay verbatim (workspace
     paths only), shell commands are sanitized (URLs/tokens redacted)."""
-    tool_name = str(record.get("toolName") or "unknown")
+    tool_name = str(record.get("toolName") or "unknown").lower()
     args = record.get("args") if isinstance(record.get("args"), dict) else {}
-    if tool_name in {"read", "write", "edit"}:
-        path = args.get("path")
-        return {"path": str(path)} if isinstance(path, str) else {}
-    if tool_name == "bash":
-        command = args.get("command")
+    sanitized = _sanitize_value(args)
+    if not isinstance(sanitized, dict):
+        return {}
+    if tool_name in {"read", "write", "edit", "patch", "multiedit", "multi_edit"}:
+        path = args.get("path") or args.get("filePath") or args.get("file_path")
+        if isinstance(path, str) and path:
+            sanitized.pop("path", None)
+            sanitized.pop("filePath", None)
+            sanitized["file_path"] = sanitize(path)[:_TOOL_VALUE_MAX_CHARS]
+        return sanitized
+    if tool_name in {"bash", "shell"}:
+        command = args.get("command") or args.get("cmd") or args.get("script")
         if isinstance(command, str):
             return {"command": sanitize(command)[:_TOOL_COMMAND_MAX_CHARS]}
-        return {}
-    return {}
+    return sanitized
 
 
 def _tool_output(record: dict) -> str:
@@ -539,7 +648,12 @@ def _tool_output(record: dict) -> str:
             return sanitize("".join(parts))[:_TOOL_OUTPUT_MAX_CHARS]
         if isinstance(content, str):
             return sanitize(content)[:_TOOL_OUTPUT_MAX_CHARS]
-    return ""
+    sanitized = _sanitize_value(result)
+    if isinstance(sanitized, str):
+        return sanitized[:_TOOL_OUTPUT_MAX_CHARS]
+    if sanitized is None:
+        return ""
+    return json.dumps(sanitized, ensure_ascii=False, separators=(",", ":"))[:_TOOL_OUTPUT_MAX_CHARS]
 
 
 def _handle_tool(record: dict, raw_line: int) -> None:
@@ -552,15 +666,39 @@ def _handle_tool(record: dict, raw_line: int) -> None:
     unknown_raw_event).
     """
     record_type = record.get("type")
-    tool_call_id = str(record.get("toolCallId") or "")
-    tool_name = str(record.get("toolName") or "unknown")
+    tool_call_id = str(record.get("toolCallId") or "").strip()
+    tool_name = _display_tool_name(record.get("toolName"))
+    if not tool_call_id:
+        _emit("diagnostic", {"code": "tool_missing_id", "name": tool_name}, raw_line)
+        return
+    tool_states = _STATE.setdefault("tool_starts", {})
+    lifecycle = tool_states.setdefault(tool_call_id, {"started": False, "completed": False})
     if record_type == "tool_execution_start":
-        _emit(
-            "tool.started",
-            {"tool_id": tool_call_id, "name": tool_name, "input": _tool_input(record)},
-            raw_line,
-        )
+        if not lifecycle["started"]:
+            _emit(
+                "tool.started",
+                {"tool_id": tool_call_id, "name": tool_name, "input": redact_hidden_reasoning(_tool_input(record))},
+                raw_line,
+            )
+            lifecycle["started"] = True
+    elif record_type == "tool_execution_update":
+        # Progress is accumulated in Pi's result and has no corresponding
+        # canonical type. It remains available in the sanitized raw archive;
+        # do not manufacture one diagnostic per output chunk.
+        lifecycle["partial_result_seen"] = True
     elif record_type == "tool_execution_end":
+        if lifecycle["completed"]:
+            return
+        if not lifecycle["started"]:
+            # A damaged/replayed stream can begin at the completion record.
+            # Keep the canonical pair correlated instead of leaving the
+            # projector with an orphaned tool.completed.
+            _emit(
+                "tool.started",
+                {"tool_id": tool_call_id, "name": tool_name, "input": redact_hidden_reasoning(_tool_input(record))},
+                raw_line,
+            )
+            lifecycle["started"] = True
         _emit(
             "tool.completed",
             {
@@ -571,7 +709,68 @@ def _handle_tool(record: dict, raw_line: int) -> None:
             },
             raw_line,
         )
-    # tool_execution_update: progress only, no canonical event.
+        lifecycle["completed"] = True
+
+
+def _retry_payload(record: dict, *, source: str | None = None) -> dict:
+    message = record.get("errorMessage") or record.get("finalError") or record.get("error")
+    payload = {
+        "attempt": record.get("attempt"),
+        "max_attempts": record.get("maxAttempts"),
+        "failure_kind": _failure_kind(clean_message(sanitize(str(message or "Pi provider retry")))),
+        "retry_delay_ms": record.get("delayMs"),
+    }
+    if source:
+        payload["source"] = source
+    return payload
+
+
+def _handle_retry_start(record: dict, raw_line: int, *, source: str | None = None) -> None:
+    # A preceding message_end may describe the transient error that caused the
+    # retry. It is not terminal once the retry has actually started.
+    _STATE["terminal_failure"] = None
+    _emit("provider.retry", _retry_payload(record, source=source), raw_line)
+
+
+def _handle_retry_end(record: dict, raw_line: int) -> None:
+    payload = {
+        "code": "provider_retry_finished",
+        "attempt": record.get("attempt"),
+        "success": bool(record.get("success")),
+    }
+    if not record.get("success"):
+        message = clean_message(sanitize(str(record.get("finalError") or "Pi provider retry failed")))
+        _STATE["terminal_failure"] = {"kind": _failure_kind(message), "message": message}
+        payload["failure_kind"] = _STATE["terminal_failure"]["kind"]
+    _emit("diagnostic", payload, raw_line)
+
+
+def _handle_compaction(record: dict, raw_line: int) -> None:
+    record_type = record.get("type")
+    if record_type == "compaction_start":
+        _emit("diagnostic", {"code": "compaction_started", "reason": record.get("reason")}, raw_line)
+        return
+    result = record.get("result") if isinstance(record.get("result"), dict) else {}
+    if isinstance(result.get("usage"), dict):
+        _set_usage(result, raw_line, emit_update=True)
+    payload = {
+        "session_id": _STATE["session_id"],
+        "reason": record.get("reason"),
+        "aborted": bool(record.get("aborted")),
+        "will_retry": bool(record.get("willRetry")),
+    }
+    for source_key, target_key in (
+        ("tokensBefore", "tokens_before"),
+        ("estimatedTokensAfter", "estimated_tokens_after"),
+    ):
+        value = result.get(source_key)
+        if isinstance(value, int) and not isinstance(value, bool):
+            payload[target_key] = value
+    _emit("context.compacted", payload, raw_line)
+    error_message = record.get("errorMessage")
+    if error_message and not record.get("aborted") and not record.get("willRetry"):
+        message = clean_message(sanitize(str(error_message)))
+        _STATE["terminal_failure"] = {"kind": _failure_kind(message), "message": message}
 
 
 def _handle_agent_end(record: dict, raw_line: int) -> None:
@@ -583,11 +782,8 @@ def _handle_agent_end(record: dict, raw_line: int) -> None:
     failure_message = record.get("errorMessage") or record.get("terminationReason")
     if will_retry or failure_message:
         if failure_message:
-            message = clean_message(str(failure_message))
-            _STATE["terminal"] = "failed"
-            _STATE["terminal_line"] = raw_line
+            message = clean_message(sanitize(str(failure_message)))
             _STATE["terminal_failure"] = {"kind": _failure_kind(message), "message": message}
-            _write_result(success=False, result="".join(_STATE["text_parts"]), usage=_STATE["usage"], failure_message=message)
     else:
         # ``agent_end`` alone is not a terminal.  Pi emits agent_settled after
         # the final turn, and losing that event at EOF is a protocol error.
@@ -621,6 +817,7 @@ def translate(record: dict, raw_line: int) -> None:
     elif record_type == "agent_start":
         return
     elif record_type == "turn_start":
+        _STATE["message_completed_emitted"] = False
         return
     elif record_type == "message_start":
         return
@@ -642,8 +839,43 @@ def translate(record: dict, raw_line: int) -> None:
         _handle_agent_end(record, raw_line)
     elif record_type == "agent_settled":
         _handle_agent_settled(record, raw_line)
-    elif record_type == "compaction_start" or record_type == "compaction_end":
-        _emit("diagnostic", {"code": "compaction_observed"}, raw_line)
+    elif record_type in {"compaction_start", "compaction_end"}:
+        _handle_compaction(record, raw_line)
+    elif record_type == "auto_retry_start":
+        _handle_retry_start(record, raw_line)
+    elif record_type == "auto_retry_end":
+        _handle_retry_end(record, raw_line)
+    elif record_type == "summarization_retry_scheduled":
+        _handle_retry_start(record, raw_line, source="summarization")
+    elif record_type == "summarization_retry_attempt_start":
+        _emit(
+            "diagnostic",
+            {
+                "code": "summarization_retry_started",
+                "source": record.get("source"),
+                "reason": record.get("reason"),
+            },
+            raw_line,
+        )
+    elif record_type == "summarization_retry_finished":
+        _emit("diagnostic", {"code": "summarization_retry_finished"}, raw_line)
+    elif record_type == "extension_error":
+        error = record.get("error") or "Pi extension error"
+        _emit(
+            "diagnostic",
+            {
+                "code": "extension_error",
+                "event": record.get("event"),
+                "message": clean_message(sanitize(str(error)))[:_TOOL_OUTPUT_MAX_CHARS],
+            },
+            raw_line,
+        )
+    elif record_type == "bash_execution_update":
+        delta = record.get("delta")
+        payload = {"code": "bash_execution_update", "request_id": record.get("id")}
+        if isinstance(delta, str):
+            payload["output"] = sanitize(delta)[:_TOOL_OUTPUT_MAX_CHARS]
+        _emit("diagnostic", payload, raw_line)
     else:
         _emit("diagnostic", {"code": "unknown_raw_event", "type": record_type}, raw_line)
 
@@ -692,6 +924,15 @@ def main() -> int:
                     archive_record.pop("__pi_reopen_after", None)
                 else:
                     archive_record = record
+                raw_text = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+            if record is not None:
+                record = redact_hidden_reasoning(record)
+                if not args.no_archive_input:
+                    archive_record = record
+                    if isinstance(archive_record, dict):
+                        archive_record = dict(archive_record)
+                        archive_record.pop("__command_ack", None)
+                        archive_record.pop("__pi_reopen_after", None)
                 raw_text = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
             if not args.no_archive_input:
                 archive_text = (

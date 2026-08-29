@@ -876,6 +876,7 @@ def _reset_pi_state():
         "last_raw_line": 0,
         "text_parts": [],
         "thinking": [],
+        "message_completed_emitted": False,
     }
 
 
@@ -899,8 +900,8 @@ def test_pi_tool_start_maps_to_tool_started_with_sanitized_input():
     started = [p for t, p, _ in writer.events if t == "tool.started"]
     assert len(started) == 1
     assert started[0]["tool_id"] == "<TOOL_ID:abc123>"
-    assert started[0]["name"] == "write"
-    assert started[0]["input"] == {"path": "/workspace/docs/pi.md"}
+    assert started[0]["name"] == "Write"
+    assert started[0]["input"] == {"content": "x", "file_path": "/workspace/docs/pi.md"}
 
     _reset_pi_state()
     writer = _FakeWriter()
@@ -945,7 +946,7 @@ def test_pi_tool_end_maps_to_tool_completed_with_truncated_output():
     assert len(completed) == 1
     assert "192.168.50.129" not in json.dumps(completed[0])
     assert completed[0]["error"] is False
-    assert completed[0]["name"] == "write"
+    assert completed[0]["name"] == "Write"
 
 
 def test_pi_tool_update_is_explicit_noop():
@@ -960,6 +961,54 @@ def test_pi_tool_update_is_explicit_noop():
         10,
     )
     assert writer.events == []
+
+
+def test_pi_nested_toolcall_fallback_is_deduplicated_by_execution_events():
+    import pi_events
+
+    _reset_pi_state()
+    writer = _FakeWriter()
+    pi_events._emit = writer
+    pi_events.translate(
+        {
+            "type": "message_update",
+            "assistantMessageEvent": {
+                "type": "toolcall_end",
+                "toolCall": {
+                    "type": "toolCall",
+                    "id": "call-nested",
+                    "name": "bash",
+                    "arguments": {"command": "pwd"},
+                },
+            },
+        },
+        10,
+    )
+    pi_events.translate(
+        {
+            "type": "tool_execution_start",
+            "toolCallId": "call-nested",
+            "toolName": "bash",
+            "args": {"command": "pwd"},
+        },
+        11,
+    )
+    pi_events.translate(
+        {
+            "type": "tool_execution_end",
+            "toolCallId": "call-nested",
+            "toolName": "bash",
+            "result": {"content": [{"type": "text", "text": "/workspace"}]},
+            "isError": False,
+        },
+        12,
+    )
+    started = [p for t, p, _ in writer.events if t == "tool.started"]
+    completed = [p for t, p, _ in writer.events if t == "tool.completed"]
+    assert len(started) == 1
+    assert len(completed) == 1
+    assert started[0]["name"] == "Bash"
+    assert started[0]["input"] == {"command": "pwd"}
 
 
 def test_pi_tool_end_with_error_flags_error():
@@ -982,16 +1031,147 @@ def test_pi_tool_end_with_error_flags_error():
     assert completed[0]["error"] is True
 
 
-@pytest.mark.parametrize("raw_type", ["compaction_start", "compaction_end"])
-def test_pi_compaction_records_map_to_compaction_observed(raw_type):
+def test_pi_compaction_start_is_explicit_diagnostic():
     import pi_events
 
     _reset_pi_state()
     writer = _FakeWriter()
     pi_events._emit = writer
-    pi_events.translate({"type": raw_type}, 9)
+    pi_events.translate({"type": "compaction_start", "reason": "threshold"}, 9)
     codes = [p.get("code") for t, p, _ in writer.events if t == "diagnostic"]
-    assert codes == ["compaction_observed"], codes
+    assert codes == ["compaction_started"], codes
+
+
+def test_pi_compaction_end_maps_to_context_compacted():
+    import pi_events
+
+    _reset_pi_state()
+    writer = _FakeWriter()
+    pi_events._emit = writer
+    pi_events.translate(
+        {
+            "type": "compaction_end",
+            "reason": "threshold",
+            "result": {
+                "tokensBefore": 150000,
+                "estimatedTokensAfter": 32000,
+                "usage": {"input": 32000, "output": 1200, "totalTokens": 33200},
+            },
+            "aborted": False,
+            "willRetry": False,
+        },
+        10,
+    )
+    compacted = [p for t, p, _ in writer.events if t == "context.compacted"]
+    assert compacted == [
+        {
+            "session_id": None,
+            "reason": "threshold",
+            "aborted": False,
+            "will_retry": False,
+            "tokens_before": 150000,
+            "estimated_tokens_after": 32000,
+        }
+    ]
+
+
+def test_pi_retry_events_preserve_the_stream_until_the_final_settled_turn(tmp_path):
+    runtime_dir = tmp_path / "retry"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    _translate(
+        runtime_dir,
+        [
+            _get_state_record(),
+            {
+                "type": "message_end",
+                "message": {
+                    "role": "assistant",
+                    "content": [],
+                    "stopReason": "error",
+                    "errorMessage": "503 temporary overload",
+                },
+            },
+            {
+                "type": "agent_end",
+                "messages": [],
+                "willRetry": True,
+                "errorMessage": "503 temporary overload",
+            },
+            {
+                "type": "auto_retry_start",
+                "attempt": 1,
+                "maxAttempts": 3,
+                "delayMs": 2000,
+                "errorMessage": "503 temporary overload",
+            },
+            {"type": "auto_retry_end", "success": True, "attempt": 2},
+            {"type": "message_update", "assistantMessageEvent": {"type": "text_start"}},
+            {"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "recovered"}},
+            {"type": "message_update", "assistantMessageEvent": {"type": "text_end", "content": "recovered"}},
+            {"type": "message_end", "message": {"role": "assistant", "stopReason": "stop", "content": [{"type": "text", "text": "recovered"}]}},
+            {"type": "agent_end", "messages": [], "willRetry": False},
+            {"type": "agent_settled"},
+        ],
+    )
+    events = _events(runtime_dir)
+    types = [event["type"] for event in events]
+    assert types.count("provider.retry") == 1
+    assert any(
+        event["type"] == "diagnostic" and event["payload"].get("code") == "provider_retry_finished"
+        for event in events
+    )
+    assert "harness.completed" in types
+    assert "harness.failed" not in types
+    raw = (runtime_dir / "harness-events/pi.jsonl").read_text(encoding="utf-8")
+    assert '"type":"auto_retry_start"' in raw
+
+
+def test_pi_documented_special_events_do_not_become_unknown_raw_events():
+    import pi_events
+
+    _reset_pi_state()
+    writer = _FakeWriter()
+    pi_events._emit = writer
+    records = [
+        {"type": "auto_retry_start", "attempt": 1, "maxAttempts": 3, "delayMs": 100, "errorMessage": "429 retry"},
+        {"type": "auto_retry_end", "success": True, "attempt": 2},
+        {"type": "summarization_retry_scheduled", "attempt": 1, "maxAttempts": 3, "delayMs": 100, "errorMessage": "temporary"},
+        {"type": "summarization_retry_attempt_start", "source": "compaction", "reason": "threshold"},
+        {"type": "summarization_retry_finished"},
+        {"type": "extension_error", "event": "tool_call", "error": "extension failed"},
+        {"type": "bash_execution_update", "id": "req-1", "delta": "partial output"},
+    ]
+    for line, record in enumerate(records, start=1):
+        pi_events.translate(record, line)
+    unknown = [
+        payload for event_type, payload, _ in writer.events
+        if event_type == "diagnostic" and payload.get("code") == "unknown_raw_event"
+    ]
+    assert unknown == []
+    assert [event_type for event_type, _, _ in writer.events].count("provider.retry") == 2
+
+
+def test_pi_thinking_end_is_a_completed_reasoning_summary():
+    import pi_events
+
+    _reset_pi_state()
+    writer = _FakeWriter()
+    pi_events._emit = writer
+    pi_events.translate(
+        {"type": "message_update", "assistantMessageEvent": {"type": "thinking_start"}},
+        1,
+    )
+    pi_events.translate(
+        {"type": "message_update", "assistantMessageEvent": {"type": "thinking_delta", "delta": "plan"}},
+        2,
+    )
+    pi_events.translate(
+        {"type": "message_update", "assistantMessageEvent": {"type": "thinking_end"}},
+        3,
+    )
+    summaries = [p for t, p, _ in writer.events if t == "reasoning_summary.completed"]
+    assert summaries == [{"text": "plan", "client": "pi"}]
 
 
 def test_pi_unknown_raw_type_emits_unknown_raw_event():

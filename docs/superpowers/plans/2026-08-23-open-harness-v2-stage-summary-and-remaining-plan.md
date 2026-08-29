@@ -120,7 +120,7 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
 | --- | --- | --- |
 | L1 | 架构、schema、Runbook 与安全边界一致 | 当前合同已对齐；未来 hard cut 的四 Harness 门槛保持不变 |
 | L2 | 源码、单测、集成测试和并发合同 | 通过；全量 backend unit 基线与当前 HEAD 变化面测试、PostgreSQL focused regression、frontend、mock E2E 和 Ruff 已通过；root-only 安装用例转入 L3 |
-| L3 | 同一不可变 image + Kit + Bundle 的构建、安装、DB 绑定与 digest 对账 | 通过；`0.6.6` Kit、Project Runtime Image、官方安装回执、Profile 3、Runtime Bundle 58–74 已完成 identity 对账 |
+| L3 | 同一不可变 image + Kit + Bundle 的构建、安装、DB 绑定与 digest 对账 | 通过；当前 `0.6.7` Kit、Project Runtime Image、官方安装回执、Profile 3、Runtime Bundle 58–76 已完成 identity 对账 |
 | L4 | 真实 Linux Host、remote Docker、Provider、仓库和真实 Task/MR | 部分通过；Host、Docker、Profile/readiness、Task lifecycle、quota failure、自动 close/清理，以及 `openrouter-free` 下 Pi/OpenCode 的成功模型与 Git/MR 已验证；三协议完整矩阵、四 Harness 与规模化验收仍未完成 |
 | L5 | 四 Harness canary、Pi 20-task 与质量/性能验收 | 未完成；尚未具备完整四 Harness/20-task 证据，不能进入 `v2_only` hard cut |
 | L6 | 维护窗口 hard cut、Pi 默认和 `v2_only` | 未执行 |
@@ -131,32 +131,21 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
 只执行以下四步，不增加新 schema、回退状态、撤销/denylist 或额外平台机制：
 
 - [x] **N1 — 冻结并官方安装一个 candidate。** 已在 remote Docker 的 `linux/amd64` Host 构建并安装
-  `0.6.6` `pi+opencode` Kit：manifest `48f07e92…`、content inventory `f6c4e18e…`、archive
-  `a1b921f5…`，安装目录为 `/opt/codify/worker-kits/0.6.6-linux-amd64-48f07e92a994`。Pi `0.84.2`
-  与 OpenCode `1.18.19` 的 SHA、root ownership、preflight、两 Harness `--verify` 均通过；4 个
-  root-only 安装用例（成功、冲突不替换、校验失败恢复、atomic race publish）均通过。Project Runtime
-  Image 使用 registry digest `sha256:234582c6…`、image ID `sha256:b07ac48b…`。后续控制面修复未改变
-  该 Kit/image bytes；`25ee198f` 更新了 OpenCode Adapter source，因此在新 canary 前通过官方
-  verify-runtime 重新冻结了 Profile Adapter evidence；本轮 `1cc7c764` 再次更新真实 usage 映射，
-  随后以同一 Profile 重新 verify-runtime 并生成 Bundle `74`。
-- [x] **N2 — 部署当前控制面并完成 DB 绑定。** Backend/Scheduler 已部署 `1cc7c764`（image ID
-  `sha256:183a9b78a9ccde3ad605772fe4c17aa17e15d3416b1853800d770cf90f29951a`，registry digest
-  `sha256:0291a4c3ac90258751456b01cd84e72c67e1439c2049dcddd5bf9ae1be3104bc`），Nginx 已部署
-  `2026.08-v2-94ac94fc`（registry digest `sha256:240b272bd4be6e3ca42cb7aca542314a93d3231dea0701f743685b16cca30dc0`）；两服务
-  保持 `HARNESS_EXECUTION_MODE=dual_canary`、`AUTO_MIGRATE=false`，health/database/docker 均为
-  healthy，schema 为 `077_v2_worker_kit_identity`。Profile 3 `v2-canary-528ef37a` 当前为 mounted-kit、
-  Kit `0.6.6`、enabled/default `pi+opencode`；`eea817f5` 更新了 Worker 启动诊断 source，
-  本轮 `1cc7c764` 部署后于 2026-08-28 14:28:17 通过官方 verify-runtime 重新冻结两项 Adapter evidence，
-  readiness 为 `ready`。
-  Profile image/Kit identity generation 均为 `18`，config digest 为
-  `014591ba4b6e2b79068006d088b493a147b7fe6c07469ec3824a37b72f8319f6`。Task 20–28 使用 Bundle 58–62，
-  Task 30/32/35–38 使用 Bundle 63/64–68，Task 41/42 使用 Bundle 69，Task 43 使用 Bundle 70；均为
-  `codify.worker.harness/v2` / orchestration `1.0.0`。随后 Task 44/48 绑定 Bundle `71`，Task 46/47 绑定 Bundle
-  `72`；Task 52 绑定 Bundle `74`，均沿用同一 Profile 3 / Kit `0.6.6` composition。部署后脱敏 API 确认 Task 43 的
-  `model_protocol=openai_responses` 可从 execution/frozen snapshot 读出；Task 详情弹窗显示相同协议且只显示
-  API key 状态，不显示密钥。`1cc7c764` 部署后 current `/harness-catalog` 已返回
-  `current_runtime_manifest` / `codify.worker.harness/v2`，不再是 503；Profile 3 参数化 catalog
-  已确认 Pi/OpenCode 为 `present/selectable`。
+  `0.6.7` `pi+opencode` Kit，manifest 为 `6f62f08b…`、content inventory 为 `eb2751e6…`，安装目录为
+  `/opt/codify/worker-kits/0.6.7-linux-amd64-6f62f08b71ae`。Pi `0.84.2` 与 OpenCode `1.18.19` 的 SHA、root
+  ownership、preflight、两 Harness `--verify` 均通过；4 个 root-only 安装用例（成功、冲突不替换、校验失败恢复、
+  atomic race publish）均通过。Project Runtime Image 仍使用 registry digest `sha256:234582c6…`、image ID
+  `sha256:b07ac48b…`。本轮事件流 Adapter 修复已进入该 Kit，并在官方 verify-runtime 后重新冻结 Profile Adapter evidence。
+- [x] **N2 — 部署当前控制面并完成 DB 绑定。** Backend/Scheduler 已部署本轮事件流修复镜像
+  `127.0.0.1:5000/codify-backend:2026.08-v2-events-0.6.7`（image ID
+  `sha256:255fb7a2918fa9c37a76080cd145f7ba57a7c2c13f708687c5a6485c7ec9001d`），Nginx 保持当前已验证版本；两服务保持
+  `HARNESS_EXECUTION_MODE=dual_canary`、`AUTO_MIGRATE=false`，health/database/docker 均为 healthy，schema 为
+  `077_v2_worker_kit_identity`。Profile 3 `v2-canary-528ef37a` 当前为 mounted-kit、Kit `0.6.7`、enabled/default
+  `pi+opencode`；2026-08-29 01:57:03 UTC 通过官方 verify-runtime 重新冻结两项 Adapter evidence，readiness 为 `ready`。
+  Profile image/Kit identity generation 均为 `21`，Kit verification configuration digest 为 `f35ab22c…`。此前任务使用
+  Bundle 58–74；Task 56 绑定 Bundle `75`，Task 57/58 绑定 Bundle `76`，均为 `codify.worker.harness/v2` /
+  orchestration `1.0.0`。Profile 3 参数化 catalog 已确认 Pi/OpenCode 为 `present/selectable`，Task snapshot 仍只显示
+  脱敏的 Provider/协议和 Worker identity。
 - [ ] **N3 — 跑最小真实 canary（部分完成）。** 已覆盖 OpenCode 三协议和 Pi 的真实 Host lifecycle
   尝试：Task 20 的 upstream retry/额度限制已可取消并释放容器；Tasks 23–25 收敛为 typed
   `rate_limited`；Tasks 26–28、30、32、35–37 均已收敛为 terminal/取消并清理容器。期间发现并修复
@@ -210,6 +199,16 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
   MR，不能把“无 MR”误判为交付失败。Scheduler 另记录了容器自然退出后追加尾事件的 409 race warning，但已
   在退出前持久化完整 receipt 并成功生成 archive；三协议完整矩阵、其余适用协议/Harness 的真实 conformance
   与规模化门槛仍未完成，不能用本条 Task 单独关闭 N3。
+
+  针对本轮事件流缺口，已在同一 Profile 3 / Kit `0.6.7` composition 上完成真实双 Harness 验证。OpenCode
+  Task 56 使用 `openai_chat_completions` 成功完成：raw archive `170` 行，包含 `28` 个 tool part 更新，适配器
+  去重为 `6` 组 `tool.started/tool.completed`，canonical archive `57` 行，TaskLog 有 `6` 个 `tool_call`；Task
+  页面同时显示 Bash、Read、Write 工具卡片及输入。Pi Task 57 的 raw/canonical archive 也已观察到 `5` 组完整工具
+  生命周期，但因复用 Task 56 已创建的目标文件而按 `require_changes=true` 正确失败，不能把该 no-diff failure
+  误判为事件丢失。随后用全新目标文件重跑 Pi Task 58 并成功完成：raw Pi archive `92` 行、canonical archive
+  `44` 行，均含 `4` 组 tool start/end，TaskLog 有 `4` 个 `tool_call`，页面显示 AI、Bash、Read、Write 工具卡片，
+  并产生 commit `179efb76…`。这补齐了“只看到 AI、不见工具事件”的真实回归证据；仍需把三协议完整矩阵、其余
+  Harness 与规模化验收留在 N3/L5，不提前宣称全部 Conformance。
 - [x] **N4 — 评审并停在 dual-canary。** 清零本 candidate 的 P0/P1，完成 secret scan 和调试凭据轮换，
   将 candidate 仅开放给显式 V2 Profile；不改变全局 Profile 默认、不切 `v2_only`。本轮
   `secret-scan=passed findings=0`。2026-08-29 按部署负责人决定，从远端 `system_config` 精确清理了
@@ -230,9 +229,8 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
 - **门禁与 schema：** 只读检查确认 remote daemon 为 `linux/x86_64`（制品平台 `linux/amd64`），
   Backend/Scheduler 都是 `dual_canary`、`AUTO_MIGRATE=false`，数据库 revision 是
   `077_v2_worker_kit_identity`。
-- **部署与身份：** backend/scheduler 当前镜像为 `2026.08-v2-b137ac98`，image ID 为
-  `sha256:1d96d5d6cf71962da42470c25ba22b71236265863ff157d4afb72a989f28b201`，registry digest 为
-  `sha256:268abc4c5381812b782cb75d7a5539c5c47dcbfb9a76c27ee3e803eefc5d46a3`；Nginx 为
+- **部署与身份：** backend/scheduler 当前镜像为 `2026.08-v2-events-0.6.7`，image ID 为
+  `sha256:255fb7a2918fa9c37a76080cd145f7ba57a7c2c13f708687c5a6485c7ec9001d`；Nginx 为
   `2026.08-v2-b9df170d`，image ID 为 `sha256:48fbfcc24a184544a4d3c3fd84b29d3db3e8d738fb0de52189bf4a02c18f283b`，
   registry digest 为 `sha256:c871de1848676239bdfb87566f7fb2c87a9ea673fdecb75764eccff57566daab`；backend `/health` 报告
   database/docker 均为 `ok` 且执行模式为 `dual_canary`。远程页面 footer 已显示 `b9df170d`，Task 20
@@ -242,12 +240,12 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
   0、Task 20 仍为 `cancelled` 且无 container；若用户仍看到旧的 `running`/队首提示，属于浏览器未刷新后的旧状态。
   该提示的根因是 backend 对运行中的队首 Task 合法返回
   `queue_position=1`，三个前端队列上下文视图现已对 `running` 隐藏等待文案。
-- **Kit/Profile：** Profile 3 `v2-canary-528ef37a` 绑定 mounted Kit `0.6.6`，路径为
-  `/opt/codify/worker-kits/0.6.6-linux-amd64-48f07e92a994`，enabled/default 为 `pi+opencode`；
-  2026-08-28 14:28:17 的官方 verify-runtime 对 Pi/OpenCode 均成功，readiness 为 `ready`。Profile 持久化
-  image identity `sha256:234582c6…`、Kit manifest `48f07e92…`、image/Kit identity generation `18` 和
-  verification config digest `014591ba…`；本次冻结的 OpenCode Adapter digest 为 `cd9d167a…`，Pi 为
-  `9c29bad8…`。
+- **Kit/Profile：** Profile 3 `v2-canary-528ef37a` 绑定 mounted Kit `0.6.7`，路径为
+  `/opt/codify/worker-kits/0.6.7-linux-amd64-6f62f08b71ae`，enabled/default 为 `pi+opencode`；
+  2026-08-29 01:57:03 UTC 的官方 verify-runtime 对 Pi/OpenCode 均成功，readiness 为 `ready`。Profile 持久化
+  image identity `sha256:234582c6…`、Kit manifest `6f62f08b…`、image/Kit identity generation `21` 和
+  verification config digest `f35ab22c…`；本次冻结的 OpenCode Adapter digest 为 `257c211e…`，Pi 为
+  `1b2136d2…`。
 - **真实 Task：** Task 20、23–28、30、32、35–38、41–43 均已终态且 container_id 为空；Task 20/28 为
   cancelled，其余列出的 canary 为 failed。Tasks 23–25、30、32、35–38、41–43 的 provider terminal failure
   为月度 `rate_limited`；Pi Tasks 26–27 暴露旧 close/ACK 收敛问题，Task 38 验证了最新独立 outcome
@@ -257,7 +255,9 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
   OpenCode `openai_chat_completions` execute/fresh；前述有 target branch 的任务均有 commit/MR，Task 54 的
   Issue 13 按其 no-target 配置只验证 branch commit。Task 46/47 还分别产生 usage `272/250`、`223/194`，
   Task 52/53 分别产生 usage `117/170`、`125/172` 与连续 V2 archive，Task 54 产生 usage `56/2` 与
-  V2 archive。当前代码已加上
+  V2 archive；Task 56 为 OpenCode 工具事件回归并生成 `6` 组 tool start/end，Task 57 为复用目标文件导致的
+  no-diff failure，Task 58 为 Pi 工具事件回归并生成 `4` 组 tool start/end，均已完成 raw/canonical/TaskLog/UI
+  对账，Task 58 另产生 commit `179efb76…`。当前代码已加上
   30 秒 control exec/lookup 边界，且终止路径会移除容器、释放 Issue execution lock。
 - **Provider gate：** 远端只读元数据确认现有 5 个 Provider 覆盖三种协议；Provider 7 `openrouter-free` 已按
   用户授权从 `openai_responses` 切换为 active 的 `openai_chat_completions` 调试入口，保留原有模型和凭据。
@@ -266,7 +266,8 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
   没有 target branch，该证据不包含 MR；其它 Provider 仍按各自额度与授权单独验收。
 - **Bundle 对账：** Task 20、23、24/25、26、27/28、30、32、35、36、37、38、41/42、43 分别绑定 Runtime
   Bundle 58、59、60、61、62、63、64、65、66、67、68、69、70；新增 Task 44/48 绑定 Bundle 71，Task 46/47
-  绑定 Bundle 72，Task 52/53/54 绑定 Bundle 74。所有这些 Bundle 的 contract 为 `codify.worker.harness/v2`、
+  绑定 Bundle 72，Task 52/53/54 绑定 Bundle 74，Task 56 绑定 Bundle 75，Task 57/58 绑定 Bundle 76。所有这些
+  Bundle 的 contract 为 `codify.worker.harness/v2`、
   orchestration 为 `1.0.0`。
 - **当前源码验证：** Backend 基线提交 `65395609f70c` 的全量 unit 为 `3156 passed, 4 skipped, 96 subtests`
   且无 warning；当前 HEAD `b137ac98` 的全量 Backend unit 为 `3162 passed, 4 skipped, 96 subtests passed`；其中控制面基线 `eea817f5` 为 `3155 passed, 4 skipped, 96 subtests`，运行时基线
@@ -278,7 +279,10 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
   为 `56 passed`（其中 OpenCode suite `37 passed`），本轮 OpenCode usage/event/result suite 为 `39 passed`，diagnostics 为 `3 passed`；此前 command-pump/control-client/Pi owner `46 passed`、frontend
   `94ac94fc` 后 frontend 全量 `1675 passed`、本次 `b9df170d` 变化后 frontend 全量 `1676 passed`、mock E2E `378 passed`，`npm run build`、Ruff、`py_compile` 与
   `git diff --check` 均通过；
-  `b137ac98` 的 Provider kind/protocol 合并状态回归为 `49 passed`，并已在远端容器确认源码加载与双健康端点；
+  `b137ac98` 的 Provider kind/protocol 合并状态回归为 `49 passed`，并已在远端容器确认源码加载与双健康端点；本轮
+  事件流修复后的 Backend unit 全量为 `3169 passed, 4 skipped, 96 subtests passed`，Pi/OpenCode/projector
+  focused regression 为 `101 passed`；前端事件工作台变化面为 `35 passed`，deploy adapter 的 Ruff、`py_compile`
+  与 `git diff --check` 均通过；
   本次针对 Task 20 队列上下文的 backend issue-order/task-response/catalog 回归为 `56 passed`，frontend
   `TaskView.spec.ts` 为 `112 passed`（包含标签页恢复即时刷新回归），任务工作台/共享轮询变化面为 `300 passed`；
   Scheduler/runtime-config focused regression 为 `140 passed`。本轮 secret scan 为

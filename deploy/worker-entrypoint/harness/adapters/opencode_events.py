@@ -38,7 +38,7 @@ import sys
 from pathlib import Path
 
 from result_builder import v2_harness_block
-from sanitize import clean_message, sanitize
+from sanitize import clean_message, redact_hidden_reasoning, sanitize
 
 SCHEMA = "codify.worker.event/v2"
 _RATE_LIMIT_REASONS = frozenset(
@@ -64,6 +64,57 @@ _RATE_LIMIT_MARKERS = (
     "too many requests",
     "monthly limit",
 )
+_TOOL_OUTPUT_MAX_CHARS = 2000
+_TOOL_COMMAND_MAX_CHARS = 1000
+_TOOL_VALUE_MAX_CHARS = 4000
+_TOOL_NAME_ALIASES = {
+    "bash": "Bash",
+    "shell": "Bash",
+    "write": "Write",
+    "read": "Read",
+    "edit": "Edit",
+    "patch": "Edit",
+    "apply_patch": "Edit",
+    "multiedit": "MultiEdit",
+    "multi_edit": "MultiEdit",
+    "glob": "Glob",
+    "grep": "Grep",
+    "webfetch": "WebFetch",
+    "web_fetch": "WebFetch",
+    "task": "Task",
+    "todowrite": "TodoWrite",
+    "todo_write": "TodoWrite",
+}
+_TOOL_ACTIVE_STATUSES = frozenset({"pending", "running"})
+_TOOL_TERMINAL_STATUSES = frozenset({"completed", "error", "failed"})
+
+# These are OpenCode server/catalog/UI events. They are deliberately explicit
+# no-ops: the sanitized raw SSE archive remains the source of truth, while
+# catalog chatter must not become hundreds of misleading task diagnostics.
+_IGNORED_KNOWN_EVENTS = frozenset(
+    {
+        "catalog.updated",
+        "integration.updated",
+        "plugin.added",
+        "reference.updated",
+        "server.instance.disposed",
+        "installation.updated",
+        "installation.update-available",
+        "lsp.client.diagnostics",
+        "lsp.updated",
+        "file.edited",
+        "file.watcher.updated",
+        "vcs.branch.updated",
+        "session.deleted",
+        "tui.prompt.append",
+        "tui.command.execute",
+        "tui.toast.show",
+        "pty.created",
+        "pty.updated",
+        "pty.exited",
+        "pty.deleted",
+    }
+)
 
 # Per-stream in-memory state. The terminal is decided when settled is reached.
 _STATE: dict = {
@@ -72,6 +123,7 @@ _STATE: dict = {
     "session_id": None,
     "text_parts": [],
     "messages": {},             # message_id -> part_id -> text state
+    "tools": {},                # tool_id -> lifecycle state
     "assistant_message_ids": [],
     "user_message_ids": set(),
     "message": {},        # most recent assistant message info
@@ -188,6 +240,156 @@ def _usage(properties: dict) -> dict:
     }
 
 
+def _sanitize_value(value: object, *, depth: int = 0) -> object:
+    """Keep tool payloads bounded, JSON-safe, and free of sensitive strings."""
+    if depth > 6:
+        return "<DEPTH_LIMIT>"
+    if isinstance(value, str):
+        return sanitize(value)[:_TOOL_VALUE_MAX_CHARS]
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, dict):
+        return {
+            str(key): _sanitize_value(child, depth=depth + 1)
+            for key, child in list(value.items())[:64]
+        }
+    if isinstance(value, list):
+        return [_sanitize_value(child, depth=depth + 1) for child in value[:64]]
+    return sanitize(str(value))[:_TOOL_VALUE_MAX_CHARS]
+
+
+def _raw_tool_name(part: dict) -> str:
+    value = part.get("tool") or part.get("name")
+    return str(value).strip() if value is not None and str(value).strip() else "unknown"
+
+
+def _display_tool_name(part: dict) -> str:
+    raw_name = _raw_tool_name(part)
+    return _TOOL_NAME_ALIASES.get(raw_name.lower(), raw_name)
+
+
+def _tool_id(properties: dict, part: dict) -> str | None:
+    for source, keys in (
+        (part, ("callID", "callId", "toolCallID", "toolCallId", "id")),
+        (properties, ("callID", "callId", "toolCallID", "toolCallId", "partID", "partId")),
+    ):
+        for key in keys:
+            value = source.get(key)
+            if value is not None and str(value).strip():
+                return str(value).strip()
+    return None
+
+
+def _tool_input(part: dict) -> dict:
+    state = part.get("state") if isinstance(part.get("state"), dict) else {}
+    source = state.get("input") if isinstance(state.get("input"), dict) else {}
+    sanitized = _sanitize_value(source)
+    if not isinstance(sanitized, dict):
+        return {}
+    raw_name = _raw_tool_name(part).lower()
+    if raw_name in {"bash", "shell"}:
+        command = source.get("command") or source.get("cmd") or source.get("script")
+        if isinstance(command, str):
+            return {"command": sanitize(command)[:_TOOL_COMMAND_MAX_CHARS]}
+        return sanitized
+    if raw_name in {"read", "write", "edit", "patch", "apply_patch", "multiedit", "multi_edit"}:
+        path = (
+            source.get("filePath")
+            or source.get("file_path")
+            or source.get("path")
+            or source.get("filename")
+        )
+        if isinstance(path, str) and path:
+            sanitized.pop("filePath", None)
+            sanitized.pop("path", None)
+            sanitized["file_path"] = sanitize(path)[:_TOOL_VALUE_MAX_CHARS]
+        return sanitized
+    return sanitized
+
+
+def _tool_output(part: dict) -> str:
+    state = part.get("state") if isinstance(part.get("state"), dict) else {}
+    value = state.get("output")
+    if value is None:
+        value = state.get("error")
+    if value is None and isinstance(state.get("metadata"), dict):
+        value = state["metadata"].get("output") or state["metadata"].get("error")
+    sanitized = _sanitize_value(value)
+    if isinstance(sanitized, str):
+        return sanitized[:_TOOL_OUTPUT_MAX_CHARS]
+    if sanitized is None:
+        return ""
+    return json.dumps(sanitized, ensure_ascii=False, separators=(",", ":"))[:_TOOL_OUTPUT_MAX_CHARS]
+
+
+def _handle_tool_part(properties: dict, raw_line: int) -> None:
+    part = properties.get("part") if isinstance(properties.get("part"), dict) else {}
+    state = part.get("state") if isinstance(part.get("state"), dict) else {}
+    status = state.get("status")
+    tool_id = _tool_id(properties, part)
+    name = _display_tool_name(part)
+    if status not in _TOOL_ACTIVE_STATUSES | _TOOL_TERMINAL_STATUSES:
+        _emit("diagnostic", {"code": "unknown_tool_state", "name": name, "status": status}, raw_line)
+        return
+    if not tool_id:
+        _emit("diagnostic", {"code": "tool_missing_id", "name": name}, raw_line)
+        return
+
+    lifecycle = _STATE["tools"].setdefault(
+        tool_id,
+        {"name": name, "input": {}, "started": False, "completed": False},
+    )
+    lifecycle["name"] = name
+    input_value = _tool_input(part)
+    if input_value:
+        lifecycle["input"] = input_value
+
+    # OpenCode's pending snapshot commonly has an empty input object. Wait for
+    # the running snapshot so the canonical start carries the useful command or
+    # file path; terminal-first streams still get a synthetic start below.
+    if status in _TOOL_ACTIVE_STATUSES and not lifecycle["started"]:
+        if status != "pending" or lifecycle["input"]:
+            _emit(
+                "tool.started",
+                {
+                    "tool_id": tool_id,
+                    "name": name,
+                    "input": redact_hidden_reasoning(lifecycle["input"]),
+                },
+                raw_line,
+            )
+            lifecycle["started"] = True
+
+    if status in _TOOL_TERMINAL_STATUSES and not lifecycle["completed"]:
+        if not lifecycle["started"]:
+            _emit(
+                "tool.started",
+                {
+                    "tool_id": tool_id,
+                    "name": name,
+                    "input": redact_hidden_reasoning(lifecycle["input"]),
+                },
+                raw_line,
+            )
+            lifecycle["started"] = True
+        error_message = state.get("error")
+        error = status != "completed" or bool(error_message)
+        payload = {
+            "tool_id": tool_id,
+            "name": name,
+            "output": _tool_output(part),
+            "error": error,
+        }
+        if isinstance(error_message, str) and error_message.strip():
+            payload["error_message"] = clean_message(sanitize(error_message))[:_TOOL_OUTPUT_MAX_CHARS]
+        metadata = state.get("metadata") if isinstance(state.get("metadata"), dict) else {}
+        exit_code = metadata.get("exit")
+        if isinstance(exit_code, int) and not isinstance(exit_code, bool):
+            payload["exit_code"] = exit_code
+        _emit("tool.completed", payload, raw_line)
+        lifecycle["completed"] = True
+
+
 def _write_result(
     *,
     success: bool,
@@ -302,6 +504,16 @@ def _handle_session_status(properties: dict, raw_line: int) -> None:
         )
         reason = action.get("reason") or status.get("reason")
         lowered = str(message).lower()
+        retry_payload = {
+            "attempt": status.get("attempt"),
+            "max_attempts": status.get("maxAttempts"),
+            "failure_kind": _failure_kind(clean_message(str(message))),
+            "retry_delay_ms": status.get("delayMs"),
+        }
+        next_retry = status.get("next")
+        if isinstance(next_retry, (int, float)) and not isinstance(next_retry, bool):
+            retry_payload["retry_at"] = next_retry
+        _emit("provider.retry", retry_payload, raw_line)
         if _is_rate_limit_reason(reason) or any(
             marker in lowered for marker in _RATE_LIMIT_MARKERS
         ):
@@ -311,6 +523,8 @@ def _handle_session_status(properties: dict, raw_line: int) -> None:
                 "message": message,
             }
             _finalize_terminal()
+    elif status_type is not None:
+        _emit("diagnostic", {"code": "unknown_session_status", "type": status_type}, raw_line)
     session_id = properties.get("sessionID")
     if session_id:
         _STATE["session_id"] = _STATE["session_id"] or session_id
@@ -409,7 +623,10 @@ def _flush_pending_deltas(message_id: str) -> None:
 
 def _handle_message_part_updated(properties: dict, raw_line: int) -> None:
     part = properties.get("part") if isinstance(properties.get("part"), dict) else {}
-    if part.get("type") == "text":
+    part_type = part.get("type")
+    if part_type == "tool":
+        _handle_tool_part(properties, raw_line)
+    elif part_type == "text":
         text = part.get("text")
         if isinstance(text, str):
             message_id = _message_id(properties, part)
@@ -422,9 +639,42 @@ def _handle_message_part_updated(properties: dict, raw_line: int) -> None:
             # later deltas extend it only when they are not already included.
             state["text"] = text
             _refresh_text()
+    elif part_type == "reasoning":
+        # OpenCode reasoning parts are model-internal content. Preserve the
+        # fact that the part was observed without projecting hidden reasoning.
+        _emit(
+            "diagnostic",
+            {"code": "hidden_reasoning_omitted", "message": "OpenCode reasoning omitted"},
+            raw_line,
+        )
+    elif part_type == "retry":
+        message = part.get("error") or part.get("message") or "OpenCode provider retry"
+        _emit(
+            "provider.retry",
+            {
+                "attempt": part.get("attempt"),
+                "max_attempts": part.get("maxAttempts"),
+                "failure_kind": _failure_kind(clean_message(str(message))),
+                "retry_delay_ms": part.get("delayMs"),
+            },
+            raw_line,
+        )
+    elif part_type == "compaction":
+        _emit(
+            "context.compacted",
+            {
+                "session_id": properties.get("sessionID"),
+                "reason": part.get("reason"),
+            },
+            raw_line,
+        )
+    elif part_type not in {"step-start", "step-finish", "file", "patch", "snapshot", "agent", "subtask"}:
+        _emit("diagnostic", {"code": "unknown_message_part", "type": part_type}, raw_line)
     usage = part.get("usage") if isinstance(part.get("usage"), dict) else part.get("tokens")
     if isinstance(usage, dict):
         _STATE["usage"] = _usage({"usage": usage, "cost": part.get("cost")})
+        if part_type == "step-finish":
+            _emit("usage.updated", {"usage": _STATE["usage"]}, raw_line)
 
 
 def _handle_message_part_delta(properties: dict, raw_line: int) -> None:
@@ -457,6 +707,18 @@ def _handle_session_idle(properties: dict, raw_line: int) -> None:
     # message, and no error/abort. A delta is not a final message: it may be a
     # truncated SSE fragment. Never turn an idle-only status into fake success.
     if _STATE["terminal_failure"] is None and not _STATE["aborted"]:
+        active_tools = [
+            lifecycle["name"]
+            for lifecycle in _STATE["tools"].values()
+            if not lifecycle.get("completed")
+        ]
+        if active_tools:
+            _STATE["terminal_failure"] = {
+                "kind": "protocol_error",
+                "message": "OpenCode protocol failure: session.idle with active tool parts",
+            }
+            _finalize_terminal()
+            return
         final_text = "".join(_STATE["text_parts"])
         final_message = _STATE["message"]
         if (
@@ -502,11 +764,44 @@ def translate(record: dict, raw_line: int) -> None:
         _handle_session_idle(properties, raw_line)
     elif record_type == "session.error":
         _handle_session_error(properties, raw_line)
-    elif record_type in ("permission", "question"):
+    elif record_type == "session.compacted":
+        _emit(
+            "context.compacted",
+            {"session_id": properties.get("sessionID") or properties.get("sessionId")},
+            raw_line,
+        )
+    elif record_type in ("permission", "question", "permission.updated", "permission.replied", "question.updated", "question.replied"):
         # A tool/permission block would leave the run non-idle; classify (probe 待测)
         # so the pipeline can diagnose rather than hang. Live runners detect the
         # resulting long non-idle session via the readiness/timeout policy.
-        _emit("diagnostic", {"code": "permission_block", "type": record_type}, raw_line)
+        _emit(
+            "diagnostic",
+            {
+                "code": "permission_block" if not record_type.endswith("replied") else "permission_replied",
+                "type": record_type,
+                "permission_id": properties.get("permissionID") or properties.get("permissionId"),
+            },
+            raw_line,
+        )
+    elif record_type == "message.removed":
+        message_id = properties.get("messageID") or properties.get("messageId")
+        if message_id:
+            _STATE["messages"].pop(message_id, None)
+            if _STATE["message"].get("id") == message_id:
+                _STATE["message"] = {}
+            _refresh_text()
+        _emit("diagnostic", {"code": "message_removed"}, raw_line)
+    elif record_type == "message.part.removed":
+        message_id = properties.get("messageID") or properties.get("messageId")
+        part_id = properties.get("partID") or properties.get("partId")
+        if message_id and part_id:
+            _STATE["messages"].get(message_id, {}).pop(part_id, None)
+            _refresh_text()
+        _emit("diagnostic", {"code": "message_part_removed"}, raw_line)
+    elif record_type in {"todo.updated", "command.executed"}:
+        _emit("diagnostic", {"code": "opencode_event_observed", "type": record_type}, raw_line)
+    elif record_type in _IGNORED_KNOWN_EVENTS:
+        return
     else:
         _emit("diagnostic", {"code": "unknown_raw_event", "type": record_type}, raw_line)
 
@@ -532,6 +827,7 @@ def main() -> int:
                 record = None
                 raw_text = input_text
             else:
+                record = redact_hidden_reasoning(record)
                 raw_text = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
             handle.write(raw_text + "\n")
             handle.flush()
