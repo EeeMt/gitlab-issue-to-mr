@@ -201,8 +201,15 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
 
   按用户明确授权，2026-08-29 已将 `openrouter-free` Provider 7 从 `openai_responses` 切换为
   `openai_chat_completions`，并保留原有 OpenAI-compatible 类型、模型和凭据；前端 Provider 表单也已修复为可
-  直接选择该协议并自动同步 Provider 类型。但尚未创建真实 Chat Completions Task，因此真实成功 Task 仍是
-  下一项独立证据，不能用本地 fixture 或现有 Responses canary 代替。
+  直接选择该协议并自动同步 Provider 类型。随后按用户授权创建了真实 Task 54：Issue 13 的 OpenCode
+  `execute/fresh` 通过 Provider 7 实际进入 Worker 并完成，冻结快照为
+  `openai_chat_completions` / `minimax/minimax-m3:free`，Bundle `74`、Kit `0.6.6`、V2 contract；唯一
+  `run.completed` 位于 receipt 尾部（`last_seq=77`），attempt `closed`，usage API/ledger 为 `56/2`
+  （total `58`），V2 runtime archive 为 `12,553` bytes，且容器与 Issue execution lock 均已清理。Commit
+  `e4417a2d…` 已核对到 `codify/issue-13` branch；该 Issue 没有 target branch，因此本条 canary 按配置不创建
+  MR，不能把“无 MR”误判为交付失败。Scheduler 另记录了容器自然退出后追加尾事件的 409 race warning，但已
+  在退出前持久化完整 receipt 并成功生成 archive；三协议完整矩阵、其余适用协议/Harness 的真实 conformance
+  与规模化门槛仍未完成，不能用本条 Task 单独关闭 N3。
 - [x] **N4 — 评审并停在 dual-canary。** 清零本 candidate 的 P0/P1，完成 secret scan 和调试凭据轮换，
   将 candidate 仅开放给显式 V2 Profile；不改变全局 Profile 默认、不切 `v2_only`。本轮
   `secret-scan=passed findings=0`。2026-08-29 按部署负责人决定，从远端 `system_config` 精确清理了
@@ -246,17 +253,20 @@ Bundle-authoritative catalog、Task snapshot、两个 Adapter 和前端筛选一
   为月度 `rate_limited`；Pi Tasks 26–27 暴露旧 close/ACK 收敛问题，Task 38 验证了最新独立 outcome
   路径下的自动 close，Task 41–43 验证了当前 Adapter taxonomy 修复后的真实执行和清理。新增 Task 44、46–48、52、53
   均已 completed 且 container_id 为空：Task 44/48 为 OpenCode freeform/execute，Task 46/47 为 Pi fresh/continue，
-  Task 52 为 OpenCode execute/fresh，Task 53 为 OpenCode execute/continue；均有 commit/MR。Task 46/47 还分别产生
-  usage `272/250`、`223/194`，Task 52/53 分别产生 usage `117/170`、`125/172` 与连续 V2 archive。当前代码已加上
+  Task 52 为 OpenCode execute/fresh，Task 53 为 OpenCode execute/continue；Task 54 为 Provider 7 的
+  OpenCode `openai_chat_completions` execute/fresh；前述有 target branch 的任务均有 commit/MR，Task 54 的
+  Issue 13 按其 no-target 配置只验证 branch commit。Task 46/47 还分别产生 usage `272/250`、`223/194`，
+  Task 52/53 分别产生 usage `117/170`、`125/172` 与连续 V2 archive，Task 54 产生 usage `56/2` 与
+  V2 archive。当前代码已加上
   30 秒 control exec/lookup 边界，且终止路径会移除容器、释放 Issue execution lock。
 - **Provider gate：** 远端只读元数据确认现有 5 个 Provider 覆盖三种协议；Provider 7 `openrouter-free` 已按
   用户授权从 `openai_responses` 切换为 active 的 `openai_chat_completions` 调试入口，保留原有模型和凭据。
-  前端 Provider 表单已部署 `b9df170d`，可直接选择 Chat Completions 并自动同步 `openai_compatible` 类型；本轮
-  尚未创建真实 Chat Completions Task，故仍需独立补齐真实成功与 usage/archive/Git/MR 证据。其它 Provider 仍按
-  各自额度与授权单独验收。
+  前端 Provider 表单已部署 `b9df170d`，可直接选择 Chat Completions 并自动同步 `openai_compatible` 类型；
+  Task 54 已独立补齐该 Provider 的真实成功、usage、archive、terminal 和 Git branch 证据。由于 Issue 13
+  没有 target branch，该证据不包含 MR；其它 Provider 仍按各自额度与授权单独验收。
 - **Bundle 对账：** Task 20、23、24/25、26、27/28、30、32、35、36、37、38、41/42、43 分别绑定 Runtime
   Bundle 58、59、60、61、62、63、64、65、66、67、68、69、70；新增 Task 44/48 绑定 Bundle 71，Task 46/47
-  绑定 Bundle 72，Task 52/53 绑定 Bundle 74。所有这些 Bundle 的 contract 为 `codify.worker.harness/v2`、
+  绑定 Bundle 72，Task 52/53/54 绑定 Bundle 74。所有这些 Bundle 的 contract 为 `codify.worker.harness/v2`、
   orchestration 为 `1.0.0`。
 - **当前源码验证：** Backend 基线提交 `65395609f70c` 的全量 unit 为 `3156 passed, 4 skipped, 96 subtests`
   且无 warning；当前 HEAD `b137ac98` 的全量 Backend unit 为 `3162 passed, 4 skipped, 96 subtests passed`；其中控制面基线 `eea817f5` 为 `3155 passed, 4 skipped, 96 subtests`，运行时基线
