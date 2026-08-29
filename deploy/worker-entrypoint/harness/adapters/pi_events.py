@@ -163,6 +163,8 @@ _STATE: dict = {
 
 def _failure_kind(message: str) -> str:
     lowered = str(message).lower()
+    if "abort" in lowered or "interrupt" in lowered:
+        return "cancelled"
     if "401" in lowered or "unauthorized" in lowered or "authentication" in lowered:
         return "authentication_error"
     if "429" in lowered or "rate limit" in lowered or "too many requests" in lowered:
@@ -293,6 +295,21 @@ def _message_text(message: dict) -> str:
         if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str):
             parts.append(block["text"])
     return "".join(parts)
+
+
+def _tool_call_arguments(value: object) -> dict:
+    """Normalize Pi's toolCall.arguments, including JSON-string arguments."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {"raw": sanitize(value)[:_TOOL_VALUE_MAX_CHARS]}
+        if isinstance(parsed, dict):
+            return parsed
+        return {"value": _sanitize_value(parsed)}
+    return {}
 
 
 def _write_result(
@@ -501,6 +518,94 @@ def _handle_response(record: dict, raw_line: int) -> None:
         )
 
 
+def _handle_nested_toolcall(event: dict, raw_line: int) -> None:
+    """Track Pi's model-side toolcall stream without mistaking it for execution.
+
+    Pi emits ``toolcall_start/delta/end`` inside ``message_update`` and normally
+    follows it with top-level ``tool_execution_*`` records. The nested stream
+    is still archived and explicitly diagnosed, while the canonical lifecycle
+    is emitted from the execution records; ``toolcall_end`` only provides a
+    fallback start when an extension omits that top-level start.
+    """
+    event_type = event.get("type")
+    content_index = event.get("contentIndex")
+    content_key = f"content:{content_index}" if content_index is not None else "unknown"
+    key = content_key
+    pending = _STATE.setdefault("pending_tool_calls", {})
+    tool_call = event.get("toolCall") if isinstance(event.get("toolCall"), dict) else {}
+    tool_id = tool_call.get("id") or event.get("toolCallId")
+    if tool_id:
+        tool_id = str(tool_id).strip()
+        id_key = f"id:{tool_id}"
+    else:
+        id_key = None
+    entry = pending.get(content_key) or pending.get(id_key or "")
+    if entry is None:
+        # Keep the content index as the primary key whenever Pi supplies one:
+        # toolcall_delta records are keyed by contentIndex and may not repeat
+        # the id that was present on toolcall_start. Add the id as an alias so
+        # the terminal record can still correlate by tool-call id.
+        key = content_key if content_index is not None else id_key or content_key
+        entry = pending.setdefault(
+            key,
+            {"tool_id": tool_id, "name": tool_call.get("name"), "arguments": ""},
+        )
+    if content_index is not None:
+        pending[content_key] = entry
+    if id_key:
+        pending[id_key] = entry
+    if tool_id:
+        entry["tool_id"] = tool_id
+    if tool_call.get("name"):
+        entry["name"] = tool_call["name"]
+
+    if event_type == "toolcall_delta":
+        delta = event.get("delta")
+        if isinstance(delta, str):
+            entry["arguments"] += delta
+        _emit(
+            "diagnostic",
+            {"code": "toolcall_delta", "content_index": content_index},
+            raw_line,
+        )
+        return
+    if event_type == "toolcall_start":
+        _emit(
+            "diagnostic",
+            {"code": "toolcall_started", "content_index": content_index},
+            raw_line,
+        )
+        return
+    if event_type != "toolcall_end":
+        _emit("diagnostic", {"code": "unknown_message_event", "type": event_type}, raw_line)
+        return
+
+    pending.pop(content_key, None)
+    pending.pop(id_key or "", None)
+    arguments = tool_call.get("arguments")
+    if arguments is None:
+        arguments = tool_call.get("input")
+    if arguments is None:
+        arguments = entry.get("arguments")
+    tool_id = entry.get("tool_id") or tool_id
+    if not tool_id:
+        _emit(
+            "diagnostic",
+            {"code": "toolcall_missing_id", "content_index": content_index},
+            raw_line,
+        )
+        return
+    _handle_tool(
+        {
+            "type": "tool_execution_start",
+            "toolCallId": tool_id,
+            "toolName": tool_call.get("name") or entry.get("name"),
+            "args": _tool_call_arguments(arguments),
+        },
+        raw_line,
+    )
+
+
 def _handle_message_update(record: dict, raw_line: int) -> None:
     _set_usage(record, raw_line, emit_update=True)
     event = record.get("assistantMessageEvent") if isinstance(record.get("assistantMessageEvent"), dict) else {}
@@ -539,23 +644,10 @@ def _handle_message_update(record: dict, raw_line: int) -> None:
             _STATE["message_completed_emitted"] = True
         if isinstance(content, str) and content.strip():
             _STATE["assistant_final_line"] = raw_line
-    elif etype == "toolcall_end":
-        # Pi exposes the completed model tool call inside message_update and
-        # then normally repeats it as top-level tool_execution_* events. The
-        # same tool id is deduplicated by _handle_tool; keeping this fallback
-        # prevents a provider/extension that omits the top-level start from
-        # silently losing the call.
-        tool_call = event.get("toolCall") if isinstance(event.get("toolCall"), dict) else {}
-        if tool_call.get("id"):
-            _handle_tool(
-                {
-                    "type": "tool_execution_start",
-                    "toolCallId": tool_call.get("id"),
-                    "toolName": tool_call.get("name"),
-                    "args": tool_call.get("arguments") or tool_call.get("input") or {},
-                },
-                raw_line,
-            )
+    elif etype in {"toolcall_start", "toolcall_delta", "toolcall_end"}:
+        _handle_nested_toolcall(event, raw_line)
+    elif etype:
+        _emit("diagnostic", {"code": "unknown_message_event", "type": etype}, raw_line)
 
 
 def _handle_message_end(record: dict, raw_line: int) -> None:
@@ -699,16 +791,24 @@ def _handle_tool(record: dict, raw_line: int) -> None:
                 raw_line,
             )
             lifecycle["started"] = True
-        _emit(
-            "tool.completed",
-            {
-                "tool_id": tool_call_id,
-                "name": tool_name,
-                "output": _tool_output(record),
-                "error": bool(record.get("isError")),
-            },
-            raw_line,
-        )
+        completion = {
+            "tool_id": tool_call_id,
+            "name": tool_name,
+            "output": _tool_output(record),
+            "error": bool(record.get("isError")),
+        }
+        error_message = record.get("errorMessage")
+        if error_message is None and isinstance(record.get("result"), dict):
+            result = record["result"]
+            error_message = result.get("error") or result.get("message")
+        if isinstance(error_message, str) and error_message.strip():
+            completion["error_message"] = clean_message(sanitize(error_message))[:_TOOL_OUTPUT_MAX_CHARS]
+        exit_code = record.get("exitCode")
+        if exit_code is None and isinstance(record.get("result"), dict):
+            exit_code = record["result"].get("exitCode") or record["result"].get("exit_code")
+        if isinstance(exit_code, int) and not isinstance(exit_code, bool):
+            completion["exit_code"] = exit_code
+        _emit("tool.completed", completion, raw_line)
         lifecycle["completed"] = True
 
 

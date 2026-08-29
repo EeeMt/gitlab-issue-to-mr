@@ -295,6 +295,10 @@ class WorkerEventProjector:
                     "will_retry",
                     "tokens_before",
                     "estimated_tokens_after",
+                    "auto",
+                    "overflow",
+                    "tail_start_id",
+                    "summary",
                 )
                 if payload.get(key) is not None
             }

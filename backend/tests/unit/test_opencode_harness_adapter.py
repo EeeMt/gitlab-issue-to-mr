@@ -91,6 +91,10 @@ def _record(event_type: str, properties: dict | None = None) -> dict:
     return {"id": "ev-1", "type": event_type, "properties": properties or {}}
 
 
+def _durable_record(event_type: str, data: dict | None = None) -> dict:
+    return {"id": "evt-durable-1", "type": event_type, "data": data or {}}
+
+
 def _success_records() -> list[dict]:
     return [
         _record("server.connected"),
@@ -385,6 +389,159 @@ def test_opencode_tool_snapshots_map_to_one_canonical_lifecycle(tmp_path):
     assert [event["type"] for event in translated].count("harness.completed") == 1
 
 
+def test_opencode_durable_events_map_text_tool_usage_and_compaction(tmp_path):
+    runtime_dir = tmp_path / "durable"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started", {"runtime_bundle_digest": "d" * 64})
+    _translate(
+        runtime_dir,
+        [
+            _durable_record(
+                "session.next.text.started",
+                {"sessionID": "ses-next", "assistantMessageID": "msg-next", "textID": "txt-next"},
+            ),
+            _durable_record(
+                "session.next.tool.input.started",
+                {"sessionID": "ses-next", "assistantMessageID": "msg-next", "callID": "call-next", "name": "bash"},
+            ),
+            _durable_record(
+                "session.next.tool.input.delta",
+                {"sessionID": "ses-next", "assistantMessageID": "msg-next", "callID": "call-next", "delta": '{"command":"printf ok"}'},
+            ),
+            _durable_record(
+                "session.next.tool.input.ended",
+                {"sessionID": "ses-next", "assistantMessageID": "msg-next", "callID": "call-next", "text": '{"command":"printf ok"}'},
+            ),
+            _durable_record(
+                "session.next.tool.called",
+                {
+                    "sessionID": "ses-next",
+                    "assistantMessageID": "msg-next",
+                    "callID": "call-next",
+                    "tool": "bash",
+                    "input": {"command": "printf ok"},
+                },
+            ),
+            _durable_record(
+                "session.next.tool.success",
+                {
+                    "sessionID": "ses-next",
+                    "assistantMessageID": "msg-next",
+                    "callID": "call-next",
+                    "content": [{"type": "text", "text": "ok"}],
+                    "result": "ok",
+                },
+            ),
+            _durable_record(
+                "session.next.text.delta",
+                {"sessionID": "ses-next", "assistantMessageID": "msg-next", "textID": "txt-next", "delta": "done"},
+            ),
+            _durable_record(
+                "session.next.text.ended",
+                {"sessionID": "ses-next", "assistantMessageID": "msg-next", "textID": "txt-next", "text": "done"},
+            ),
+            _durable_record(
+                "session.next.step.ended",
+                {
+                    "sessionID": "ses-next",
+                    "assistantMessageID": "msg-next",
+                    "finish": "stop",
+                    "cost": 0.01,
+                    "tokens": {"input": 10, "output": 2, "reasoning": 1, "cache": {"read": 3, "write": 0}},
+                },
+            ),
+            _durable_record(
+                "session.next.compaction.ended",
+                {"sessionID": "ses-next", "reason": "threshold", "text": "summary"},
+            ),
+            _durable_record(
+                "session.next.step.started",
+                {"sessionID": "ses-next", "assistantMessageID": "msg-next", "agent": "build"},
+            ),
+            _record("session.idle", {"sessionID": "ses-next"}),
+        ],
+    )
+
+    events = _events(runtime_dir)
+    assert [event["type"] for event in events].count("tool.started") == 1
+    assert [event["type"] for event in events].count("tool.completed") == 1
+    tool_started = next(event for event in events if event["type"] == "tool.started")
+    assert tool_started["payload"] == {
+        "tool_id": "call-next",
+        "name": "Bash",
+        "input": {"command": "printf ok"},
+    }
+    tool_completed = next(event for event in events if event["type"] == "tool.completed")
+    assert tool_completed["payload"] == {
+        "tool_id": "call-next",
+        "name": "Bash",
+        "output": "ok",
+        "error": False,
+    }
+    assert any(event["type"] == "message.delta" and event["payload"]["content"] == "done" for event in events)
+    assert any(event["type"] == "usage.updated" for event in events)
+    compacted = next(event for event in events if event["type"] == "context.compacted")
+    assert compacted["payload"]["summary"] == "summary"
+    assert any(
+        event["type"] == "diagnostic"
+        and event["payload"].get("code") == "opencode_durable_event"
+        and event["payload"].get("type") == "session.next.step.started"
+        for event in events
+    )
+    assert not any(
+        event["type"] == "diagnostic" and event["payload"].get("code") == "unknown_raw_event"
+        for event in events
+    )
+    raw = (runtime_dir / "harness-events/opencode.jsonl").read_text(encoding="utf-8")
+    assert '"type":"session.next.tool.called"' in raw
+
+
+@pytest.mark.parametrize(
+    "event_type",
+    [
+        "permission.asked",
+        "permission.v2.asked",
+        "question.asked",
+        "question.v2.asked",
+    ],
+)
+def test_opencode_interactive_requests_fail_closed_with_typed_diagnostic(tmp_path, event_type):
+    runtime_dir = tmp_path / event_type.replace(".", "-")
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    _translate(
+        runtime_dir,
+        [_record(event_type, {"sessionID": "ses-interactive", "id": "req-1"})],
+    )
+    events = _events(runtime_dir)
+    diagnostic = next(event for event in events if event["type"] == "diagnostic")
+    assert diagnostic["payload"]["code"] == "interactive_request_unsupported"
+    result = json.loads((runtime_dir / "harness-result.json").read_text(encoding="utf-8"))
+    assert result["status"] == "failed"
+    assert result["failure"]["kind"] == ("sandbox_error" if "permission" in event_type else "engine_error")
+
+
+def test_opencode_structured_session_error_uses_status_code_taxonomy(tmp_path):
+    runtime_dir = tmp_path / "structured-error"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    _translate(
+        runtime_dir,
+        [
+            _record(
+                "session.error",
+                {
+                    "sessionID": "ses-error",
+                    "error": {"name": "ProviderAuthError", "message": "credentials rejected", "statusCode": 401},
+                },
+            ),
+        ],
+    )
+    result = json.loads((runtime_dir / "harness-result.json").read_text(encoding="utf-8"))
+    assert result["failure"]["kind"] == "authentication_error"
+    assert "credentials rejected" in result["failure"]["message"]
+
+
 def test_opencode_known_server_events_are_archived_without_unknown_diagnostics(tmp_path):
     runtime_dir = tmp_path / "known-events"
     runtime_dir.mkdir()
@@ -665,6 +822,62 @@ def test_opencode_parse_sse_data_frames_from_11819(tmp_path):
     assert events[1]["properties"] == {"sessionID": "ses-1"}
 
 
+def test_opencode_parse_sse_unwraps_global_payload_and_keeps_durable_data(tmp_path):
+    bridge = _load_bridge()
+    wire = (
+        'data: {"directory":"/workspace","payload":{"id":"evt-1","type":"session.next.text.delta","data":{"sessionID":"ses-1","assistantMessageID":"msg-1","textID":"txt-1","delta":"ok"}}}\n'
+        '\n'
+    )
+    events = list(bridge.parse_sse(wire))
+    assert events == [
+        {
+            "id": "evt-1",
+            "type": "session.next.text.delta",
+            "data": {
+                "sessionID": "ses-1",
+                "assistantMessageID": "msg-1",
+                "textID": "txt-1",
+                "delta": "ok",
+            },
+        }
+    ]
+
+
+def test_opencode_event_stream_preserves_durable_data(tmp_path, monkeypatch):
+    bridge = _load_bridge()
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def __init__(self):
+            self.chunks = iter(
+                [
+                    (
+                        'data: {"payload":{"id":"evt-1","type":"session.next.text.delta",'
+                        '"data":{"sessionID":"ses-1","delta":"ok"}}}\n\n'
+                    ).encode()
+                ]
+            )
+
+        def read1(self, size=-1):
+            return next(self.chunks, b"")
+
+    monkeypatch.setattr(bridge.urllib.request, "urlopen", lambda *args, **kwargs: _Response())
+    records = list(bridge.OpenCodeServerClient(port=8099).event_stream())
+    assert records == [
+        {
+            "id": "evt-1",
+            "type": "session.next.text.delta",
+            "properties": {},
+            "data": {"sessionID": "ses-1", "delta": "ok"},
+        }
+    ]
+
+
 def test_opencode_parse_sse_data_frame_split_across_chunks(tmp_path):
     """A data: event split at a chunk boundary surfaces exactly once (no dup)."""
     bridge = _load_bridge()
@@ -675,6 +888,19 @@ def test_opencode_parse_sse_data_frame_split_across_chunks(tmp_path):
     events = list(bridge.parse_sse(first_chunk + second_chunk))
     assert len(events) == 1
     assert events[0]["type"] == "server.connected"
+
+
+def test_opencode_sse_tail_handles_crlf_framing(tmp_path):
+    bridge = _load_bridge()
+    first_chunk = 'data: {"id":"ev-1","type":"server.connected","properties":{}}\r\n\r\n'
+    second_chunk = 'data: {"id":"ev-2","type":"session.idle","properties":{"sessionID":"ses-1"}}\r\n\r\n'
+    assert list(bridge.parse_sse(first_chunk)) == [
+        {"id": "ev-1", "type": "server.connected", "properties": {}}
+    ]
+    assert bridge._sse_tail(first_chunk + second_chunk) == ""
+    assert list(bridge.parse_sse(second_chunk)) == [
+        {"id": "ev-2", "type": "session.idle", "properties": {"sessionID": "ses-1"}}
+    ]
 
 
 def test_opencode_parse_sse_from_captured_11819_wire(tmp_path):
@@ -883,6 +1109,37 @@ def test_opencode_run_attempt_status_fallback_after_disconnect(tmp_path, monkeyp
     assert types.count("harness.failed") == 1
     result = json.loads((tmp_path / "harness-result.json").read_text(encoding="utf-8"))
     assert result["status"] == "protocol_error"
+
+
+def test_opencode_run_attempt_status_recovery_failure_is_typed_crash(tmp_path, monkeypatch):
+    bridge = _load_bridge()
+
+    def _disconnecting_stream():
+        yield {"id": "e1", "type": "server.connected", "properties": {}}
+        yield {"id": "e2", "type": "session.status", "properties": {"sessionID": "ses-oc-run", "status": {"type": "busy"}}}
+        raise ConnectionError("connection refused")
+
+    class _Fake:
+        def create_session(self, *a, **k):
+            return 200, {"info": {"id": "ses-oc-run"}}
+
+        def event_stream(self):
+            return _disconnecting_stream()
+
+        def prompt_async(self, *a, **k):
+            return 204, {}
+
+        def status(self, *a, **k):
+            raise ConnectionError("connection refused")
+
+    monkeypatch.setattr(bridge, "OpenCodeServerClient", lambda **kw: _Fake())
+    for key, value in _run_attempt_env(tmp_path).items():
+        monkeypatch.setenv(key, value)
+    _emit(tmp_path, "run.started", {"runtime_bundle_digest": "d" * 64})
+
+    assert bridge._run_attempt() == 0
+    result = json.loads((tmp_path / "harness-result.json").read_text(encoding="utf-8"))
+    assert result["failure"]["kind"] == "crash"
 
 
 class _Pipe:

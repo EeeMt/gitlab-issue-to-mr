@@ -97,15 +97,31 @@ def parse_sse(raw: str) -> Iterator[dict]:
             except json.JSONDecodeError:
                 record = None
             if isinstance(record, dict):
-                # The data payload is the full event record on the 1.18.19 wire;
-                # merge it so the {id,type,properties} shape is preserved.
-                if record.get("id") is not None:
+                # The classic /event wire carries the event directly. Newer
+                # OpenCode builds may wrap the same event in GlobalEvent.payload
+                # and durable events put their payload under data. Unwrap only
+                # the transport envelope; keep the event's data/properties for
+                # the translator and raw archive.
+                source = record
+                payload = record.get("payload")
+                if isinstance(payload, dict) and (
+                    payload.get("type") is not None
+                    or isinstance(payload.get("properties"), dict)
+                    or isinstance(payload.get("data"), dict)
+                ):
+                    source = payload
+                if source.get("id") is not None:
+                    event["id"] = source["id"]
+                elif record.get("id") is not None:
                     event["id"] = record["id"]
-                if record.get("type") is not None:
-                    event["type"] = record["type"]
-                properties = record.get("properties")
+                if source.get("type") is not None:
+                    event["type"] = source["type"]
+                properties = source.get("properties")
                 if isinstance(properties, dict):
                     event["properties"] = properties
+                data = source.get("data")
+                if isinstance(data, dict):
+                    event["data"] = data
                 continue
             event.setdefault("properties", {})
             continue
@@ -239,11 +255,14 @@ class OpenCodeServerClient:
                     # for our event rate and keeps sub-event framing correct.
                     events = list(parse_sse(buffer))
                     for item in events:
-                        yield {
+                        record = {
                             "id": item.get("id"),
                             "type": item.get("type"),
                             "properties": item.get("properties", {}),
                         }
+                        if isinstance(item.get("data"), dict):
+                            record["data"] = item["data"]
+                        yield record
                     buffer = _sse_tail(buffer)
         except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
             raise ConnectionError(f"OpenCode SSE event stream failed: {exc}") from exc
@@ -251,6 +270,8 @@ class OpenCodeServerClient:
 
 def _sse_tail(buffer: str) -> str:
     """Return the unterminated (no trailing blank line) tail of an SSE buffer."""
+    if "\r\n\r\n" in buffer:
+        return buffer.split("\r\n\r\n")[-1]
     if "\n\n" in buffer:
         return buffer.split("\n\n")[-1]
     return buffer
@@ -326,8 +347,46 @@ def _recover_status(
         status_code, body = client.status(session_id)
     except Exception as exc:  # noqa: BLE001 - best-effort recovery path
         print(f"OpenCode status fallback failed: {exc}", file=sys.stderr)
+        _forward(
+            {
+                "id": None,
+                "type": "session.error",
+                "properties": {
+                    "sessionID": session_id,
+                    "error": {
+                        "name": "OpenCodeServerCrash",
+                        "message": "OpenCode server crash: SSE disconnected and status recovery failed",
+                    },
+                },
+            },
+            proc,
+        )
+        return
+    if status_code == 404:
+        _forward(
+            {
+                "id": None,
+                "type": "session.error",
+                "properties": {
+                    "sessionID": session_id,
+                    "error": {"message": "session_missing: OpenCode session status returned 404"},
+                },
+            },
+            proc,
+        )
         return
     if status_code != 200:
+        _forward(
+            {
+                "id": None,
+                "type": "session.error",
+                "properties": {
+                    "sessionID": session_id,
+                    "error": {"message": f"OpenCode session status request failed: HTTP {status_code}"},
+                },
+            },
+            proc,
+        )
         return
     info = body.get("info") if isinstance(body.get("info"), dict) else body
     status = info.get("status")
@@ -340,6 +399,18 @@ def _recover_status(
             },
             proc,
         )
+        return
+    _forward(
+        {
+            "id": None,
+            "type": "session.error",
+            "properties": {
+                "sessionID": session_id,
+                "error": {"message": "OpenCode SSE disconnected before session settled"},
+            },
+        },
+        proc,
+    )
 
 
 def _run_attempt() -> int:
@@ -458,13 +529,21 @@ def _run_attempt() -> int:
 
         # 3. Drain the remainder of the stream; on disconnect, fall back to
         #    GET /session/status to recover a terminal state (best-effort).
+        saw_terminal_signal = False
+        stream_ended = False
         try:
             for record in stream:
+                if record.get("type") in {"session.idle", "session.error"}:
+                    saw_terminal_signal = True
                 if not _forward(record, proc) or proc.poll() is not None:
                     stream.close()
                     break
+            else:
+                stream_ended = True
         except ConnectionError as exc:
             print(f"OpenCode SSE stream closed: {exc}", file=sys.stderr)
+            _recover_status(client, session_id, proc)
+        if stream_ended and not saw_terminal_signal and proc.poll() is None:
             _recover_status(client, session_id, proc)
     finally:
         try:

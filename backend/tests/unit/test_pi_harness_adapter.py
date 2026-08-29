@@ -1011,6 +1011,107 @@ def test_pi_nested_toolcall_fallback_is_deduplicated_by_execution_events():
     assert started[0]["input"] == {"command": "pwd"}
 
 
+def test_pi_nested_toolcall_deltas_are_buffered_and_explicitly_diagnosed():
+    _load_bridge()
+    import pi_events
+
+    _reset_pi_state()
+    writer = _FakeWriter()
+    pi_events._emit = writer
+    pi_events.translate(
+        {
+            "type": "message_update",
+            "assistantMessageEvent": {"type": "toolcall_start", "contentIndex": 0},
+        },
+        10,
+    )
+    pi_events.translate(
+        {
+            "type": "message_update",
+            "assistantMessageEvent": {
+                "type": "toolcall_delta",
+                "contentIndex": 0,
+                "delta": '{"command":"pwd"}',
+            },
+        },
+        11,
+    )
+    pi_events.translate(
+        {
+            "type": "message_update",
+            "assistantMessageEvent": {
+                "type": "toolcall_end",
+                "contentIndex": 0,
+                "toolCall": {"id": "call-buffered", "name": "bash"},
+            },
+        },
+        12,
+    )
+    pi_events.translate(
+        {
+            "type": "tool_execution_end",
+            "toolCallId": "call-buffered",
+            "toolName": "bash",
+            "result": {"content": [{"type": "text", "text": "ok"}]},
+            "isError": False,
+        },
+        13,
+    )
+
+    started = [p for t, p, _ in writer.events if t == "tool.started"]
+    completed = [p for t, p, _ in writer.events if t == "tool.completed"]
+    assert started[0]["input"] == {"command": "pwd"}
+    assert completed[0]["error"] is False
+    codes = [p.get("code") for t, p, _ in writer.events if t == "diagnostic"]
+    assert codes[:2] == ["toolcall_started", "toolcall_delta"]
+    assert "unknown_raw_event" not in codes
+
+
+def test_pi_nested_toolcall_start_id_does_not_break_content_index_deltas():
+    _load_bridge()
+    import pi_events
+
+    _reset_pi_state()
+    writer = _FakeWriter()
+    pi_events._emit = writer
+    pi_events.translate(
+        {
+            "type": "message_update",
+            "assistantMessageEvent": {
+                "type": "toolcall_start",
+                "contentIndex": 0,
+                "toolCall": {"id": "call-indexed", "name": "bash"},
+            },
+        },
+        20,
+    )
+    pi_events.translate(
+        {
+            "type": "message_update",
+            "assistantMessageEvent": {
+                "type": "toolcall_delta",
+                "contentIndex": 0,
+                "delta": '{"command":"pwd"}',
+            },
+        },
+        21,
+    )
+    pi_events.translate(
+        {
+            "type": "message_update",
+            "assistantMessageEvent": {
+                "type": "toolcall_end",
+                "contentIndex": 0,
+                "toolCall": {"id": "call-indexed", "name": "bash"},
+            },
+        },
+        22,
+    )
+
+    started = [p for t, p, _ in writer.events if t == "tool.started"]
+    assert started[0]["input"] == {"command": "pwd"}
+
+
 def test_pi_tool_end_with_error_flags_error():
     import pi_events
 
@@ -1024,11 +1125,15 @@ def test_pi_tool_end_with_error_flags_error():
             "toolName": "bash",
             "result": {"content": [{"type": "text", "text": "permission denied"}]},
             "isError": True,
+            "errorMessage": "permission denied",
+            "exitCode": 126,
         },
         11,
     )
     completed = [p for t, p, _ in writer.events if t == "tool.completed"]
     assert completed[0]["error"] is True
+    assert completed[0]["error_message"] == "permission denied"
+    assert completed[0]["exit_code"] == 126
 
 
 def test_pi_compaction_start_is_explicit_diagnostic():

@@ -174,12 +174,28 @@ class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
                 db,
                 [
                     self._event(1, "run.started"),
-                    self._event(2, "context.compacted", {"session_id": "s"}),
+                    self._event(
+                        2,
+                        "context.compacted",
+                        {
+                            "session_id": "s",
+                            "reason": "threshold",
+                            "auto": True,
+                            "overflow": True,
+                            "tail_start_id": "msg-7",
+                            "summary": "safe summary",
+                        },
+                    ),
                     self._event(3, "diagnostic", {"code": "future_event"}),
                 ],
             )
             logs = list((await db.execute(select(TaskLog).order_by(TaskLog.id))).scalars())
         assert [log.log_type for log in logs] == ["context_compact", "diagnostic"]
+        metadata = json.loads(logs[0].log_metadata)
+        assert metadata["auto"] is True
+        assert metadata["overflow"] is True
+        assert metadata["tail_start_id"] == "msg-7"
+        assert metadata["summary"] == "safe summary"
 
     async def test_exact_replay_does_not_duplicate_projection(self):
         async with self.session_factory() as db:

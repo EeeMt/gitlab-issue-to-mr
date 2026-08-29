@@ -87,6 +87,20 @@ _TOOL_NAME_ALIASES = {
 }
 _TOOL_ACTIVE_STATUSES = frozenset({"pending", "running"})
 _TOOL_TERMINAL_STATUSES = frozenset({"completed", "error", "failed"})
+_INTERACTIVE_EVENT_TYPES = frozenset(
+    {
+        "permission.asked",
+        "permission.v2.asked",
+        "permission.replied",
+        "permission.v2.replied",
+        "question.asked",
+        "question.v2.asked",
+        "question.replied",
+        "question.v2.replied",
+        "question.rejected",
+        "question.v2.rejected",
+    }
+)
 
 # These are OpenCode server/catalog/UI events. They are deliberately explicit
 # no-ops: the sanitized raw SSE archive remains the source of truth, while
@@ -94,10 +108,13 @@ _TOOL_TERMINAL_STATUSES = frozenset({"completed", "error", "failed"})
 _IGNORED_KNOWN_EVENTS = frozenset(
     {
         "catalog.updated",
+        "models-dev.refreshed",
         "integration.updated",
+        "integration.connection.updated",
         "plugin.added",
         "reference.updated",
         "server.instance.disposed",
+        "global.disposed",
         "installation.updated",
         "installation.update-available",
         "lsp.client.diagnostics",
@@ -106,6 +123,8 @@ _IGNORED_KNOWN_EVENTS = frozenset(
         "file.watcher.updated",
         "vcs.branch.updated",
         "session.deleted",
+        "project.directories.updated",
+        "project.updated",
         "tui.prompt.append",
         "tui.command.execute",
         "tui.toast.show",
@@ -113,6 +132,8 @@ _IGNORED_KNOWN_EVENTS = frozenset(
         "pty.updated",
         "pty.exited",
         "pty.deleted",
+        "mcp.tools.changed",
+        "server.heartbeat",
     }
 )
 
@@ -133,13 +154,19 @@ _STATE: dict = {
     "terminal": None,     # "completed" | "failed"
     "terminal_failure": None,
     "aborted": False,
+    "interactive_block": None,
     "settled": False,
     "settled_line": None,
     "last_line": 1,
 }
 
 
-def _failure_kind(message: str) -> str:
+def _failure_kind(message: str, *, status_code: object = None) -> str:
+    if isinstance(status_code, (int, float)) and not isinstance(status_code, bool):
+        if int(status_code) == 401:
+            return "authentication_error"
+        if int(status_code) == 429:
+            return "rate_limited"
     lowered = str(message).lower()
     if "abort" in lowered or "interrupt" in lowered or "operation was aborted" in lowered:
         return "cancelled"
@@ -158,6 +185,50 @@ def _failure_kind(message: str) -> str:
     if "sandbox" in lowered or "permission denied" in lowered:
         return "sandbox_error"
     return "engine_error"
+
+
+def _error_message(value: object, default: str) -> tuple[str, object]:
+    """Extract a bounded message/status from OpenCode's structured errors."""
+    status_code = None
+    if isinstance(value, dict):
+        status_code = value.get("statusCode")
+        if status_code is None:
+            status_code = value.get("status_code") or value.get("status")
+        message_value = (
+            value.get("message")
+            or value.get("error")
+            or value.get("detail")
+            or value.get("name")
+            or value.get("code")
+        )
+        if isinstance(message_value, dict):
+            message_value, nested_status = _error_message(message_value, default)
+            status_code = status_code if status_code is not None else nested_status
+            return message_value, status_code
+        message = str(message_value or default)
+    else:
+        message = str(value or default)
+    return clean_message(sanitize(message))[:_TOOL_OUTPUT_MAX_CHARS], status_code
+
+
+def _remember_session(properties: dict) -> None:
+    session_id = properties.get("sessionID") or properties.get("sessionId")
+    if session_id:
+        _STATE["session_id"] = _STATE["session_id"] or session_id
+
+
+def _remember_assistant_message(message_id: object) -> str | None:
+    if message_id is None or not str(message_id).strip():
+        return None
+    normalized = str(message_id).strip()
+    if normalized not in _STATE["assistant_message_ids"]:
+        _STATE["assistant_message_ids"].append(normalized)
+    current = _STATE.get("message")
+    if not isinstance(current, dict) or current.get("id") != normalized:
+        _STATE["message"] = {"id": normalized, "role": "assistant"}
+    else:
+        current["role"] = "assistant"
+    return normalized
 
 
 def _is_rate_limit_reason(value: object) -> bool:
@@ -263,8 +334,9 @@ def _raw_tool_name(part: dict) -> str:
     return str(value).strip() if value is not None and str(value).strip() else "unknown"
 
 
-def _display_tool_name(part: dict) -> str:
-    raw_name = _raw_tool_name(part)
+def _display_tool_name(part: dict | object) -> str:
+    raw_name = _raw_tool_name(part) if isinstance(part, dict) else str(part or "unknown")
+    raw_name = raw_name.strip() or "unknown"
     return _TOOL_NAME_ALIASES.get(raw_name.lower(), raw_name)
 
 
@@ -322,6 +394,367 @@ def _tool_output(part: dict) -> str:
     return json.dumps(sanitized, ensure_ascii=False, separators=(",", ":"))[:_TOOL_OUTPUT_MAX_CHARS]
 
 
+def _durable_tool_input(data: dict, lifecycle: dict | None = None) -> dict:
+    value = data.get("input")
+    if value is None and lifecycle is not None:
+        value = lifecycle.get("input")
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {"raw": sanitize(value)[:_TOOL_VALUE_MAX_CHARS]}
+        value = parsed
+    sanitized = _sanitize_value(value)
+    if isinstance(sanitized, dict):
+        return sanitized
+    if sanitized is None:
+        return {}
+    return {"value": sanitized}
+
+
+def _durable_tool_output(data: dict) -> str:
+    value = data.get("result")
+    if value is None:
+        value = data.get("content")
+    if isinstance(value, dict) and "content" in value:
+        value = value.get("content")
+    sanitized = _sanitize_value(value)
+    if isinstance(sanitized, list):
+        text_parts = [
+            item.get("text")
+            for item in sanitized
+            if isinstance(item, dict)
+            and item.get("type") == "text"
+            and isinstance(item.get("text"), str)
+        ]
+        if text_parts:
+            return "".join(text_parts)[:_TOOL_OUTPUT_MAX_CHARS]
+    if isinstance(sanitized, str):
+        return sanitized[:_TOOL_OUTPUT_MAX_CHARS]
+    if sanitized is None:
+        return ""
+    return json.dumps(sanitized, ensure_ascii=False, separators=(",", ":"))[:_TOOL_OUTPUT_MAX_CHARS]
+
+
+def _durable_tool_lifecycle(
+    data: dict,
+    raw_line: int,
+    *,
+    name: object = None,
+    terminal: str | None = None,
+    error_value: object = None,
+    output_data: dict | None = None,
+) -> None:
+    tool_id = str(data.get("callID") or data.get("callId") or "").strip()
+    if not tool_id:
+        _emit("diagnostic", {"code": "tool_missing_id", "name": _display_tool_name(name)}, raw_line)
+        return
+    previous = _STATE.setdefault("tools", {}).get(tool_id)
+    raw_name = (
+        name
+        if name is not None
+        else data.get("tool")
+        or data.get("name")
+        or (previous or {}).get("name")
+    )
+    display_name = _display_tool_name(raw_name)
+    lifecycle = _STATE.setdefault("tools", {}).setdefault(
+        tool_id,
+        {"name": display_name, "input": {}, "started": False, "completed": False},
+    )
+    lifecycle["name"] = display_name
+    if isinstance(data.get("input"), (dict, list, str)):
+        lifecycle["input"] = _durable_tool_input(data, lifecycle)
+    elif lifecycle.get("input_text") and not lifecycle.get("input"):
+        lifecycle["input"] = _durable_tool_input(
+            {"input": lifecycle["input_text"]}, lifecycle
+        )
+
+    if not lifecycle["started"] and terminal != "progress":
+        _emit(
+            "tool.started",
+            {
+                "tool_id": tool_id,
+                "name": display_name,
+                "input": redact_hidden_reasoning(lifecycle.get("input") or {}),
+            },
+            raw_line,
+        )
+        lifecycle["started"] = True
+
+    if terminal is None or terminal == "progress" or lifecycle["completed"]:
+        return
+    error_message = None
+    if error_value is not None:
+        error_message, _ = _error_message(error_value, "OpenCode tool failed")
+    failed = terminal in {"failed", "error"} or error_value is not None
+    payload = {
+        "tool_id": tool_id,
+        "name": display_name,
+        "output": _durable_tool_output(output_data or data),
+        "error": failed,
+    }
+    if error_message:
+        payload["error_message"] = error_message
+    result_source = output_data if isinstance(output_data, dict) else data
+    result = result_source.get("result")
+    if isinstance(result, dict):
+        exit_code = result.get("exitCode")
+        if exit_code is None:
+            exit_code = result.get("exit_code")
+        if isinstance(exit_code, int) and not isinstance(exit_code, bool):
+            payload["exit_code"] = exit_code
+    _emit("tool.completed", payload, raw_line)
+    lifecycle["completed"] = True
+
+
+def _durable_data(record: dict, properties: dict) -> dict:
+    data = record.get("data")
+    return data if isinstance(data, dict) else properties
+
+
+def _handle_durable_event(record_type: str, data: dict, raw_line: int) -> None:
+    """Map OpenCode's ``session.next.*`` durable event family.
+
+    OpenCode 1.18.19 exposes this second event shape alongside the older
+    ``properties`` events. The durable payload puts execution facts under
+    ``data``; the canonical contract stays unchanged, so only facts with a
+    safe existing canonical equivalent are promoted and the rest are retained
+    as explicit diagnostics/raw evidence.
+    """
+    _remember_session(data)
+
+    if record_type == "session.next.text.started":
+        message_id = _remember_assistant_message(data.get("assistantMessageID"))
+        if message_id:
+            _part_state(message_id, str(data.get("textID") or "__default__"))
+        return
+
+    if record_type == "session.next.text.delta":
+        delta = data.get("delta")
+        message_id = _remember_assistant_message(data.get("assistantMessageID"))
+        if not isinstance(delta, str) or not message_id:
+            _emit(
+                "diagnostic",
+                {"code": "invalid_durable_text_delta", "type": record_type},
+                raw_line,
+            )
+            return
+        part_id = str(data.get("textID") or "__default__")
+        state = _part_state(message_id, part_id)
+        if delta and not state["text"].endswith(delta):
+            state["text"] += delta
+            _emit("message.delta", {"content": delta, "role": "assistant"}, raw_line)
+        _refresh_text()
+        return
+
+    if record_type == "session.next.text.ended":
+        message_id = _remember_assistant_message(data.get("assistantMessageID"))
+        text = data.get("text")
+        if not message_id or not isinstance(text, str):
+            _emit(
+                "diagnostic",
+                {"code": "invalid_durable_text_end", "type": record_type},
+                raw_line,
+            )
+            return
+        _part_state(message_id, str(data.get("textID") or "__default__"))["text"] = text
+        _refresh_text()
+        return
+
+    if record_type.startswith("session.next.reasoning."):
+        # Reasoning text is not a user-visible summary and must never enter the
+        # canonical payload. The event fact remains auditable without exposing
+        # hidden chain-of-thought content.
+        payload = {
+            "code": "hidden_reasoning_omitted",
+            "source": "opencode",
+            "type": record_type,
+            "reasoning_id": data.get("reasoningID"),
+        }
+        _emit("diagnostic", payload, raw_line)
+        return
+
+    if record_type == "session.next.tool.input.started":
+        _durable_tool_lifecycle(
+            data,
+            raw_line,
+            name=data.get("name"),
+            terminal="progress",
+        )
+        return
+
+    if record_type == "session.next.tool.input.delta":
+        tool_id = str(data.get("callID") or data.get("callId") or "").strip()
+        if tool_id:
+            lifecycle = _STATE.setdefault("tools", {}).setdefault(
+                tool_id,
+                {"name": "unknown", "input": {}, "started": False, "completed": False},
+            )
+            delta = data.get("delta")
+            if isinstance(delta, str):
+                lifecycle["input_text"] = lifecycle.get("input_text", "") + delta
+        _emit(
+            "diagnostic",
+            {"code": "tool_input_delta", "tool_id": tool_id or None},
+            raw_line,
+        )
+        return
+
+    if record_type == "session.next.tool.input.ended":
+        tool_id = str(data.get("callID") or data.get("callId") or "").strip()
+        if tool_id:
+            lifecycle = _STATE.setdefault("tools", {}).setdefault(
+                tool_id,
+                {"name": "unknown", "input": {}, "started": False, "completed": False},
+            )
+            text = data.get("text")
+            if isinstance(text, str):
+                lifecycle["input_text"] = text
+                lifecycle["input"] = _durable_tool_input({"input": text}, lifecycle)
+        _emit(
+            "diagnostic",
+            {"code": "tool_input_ended", "tool_id": tool_id or None},
+            raw_line,
+        )
+        return
+
+    if record_type == "session.next.tool.called":
+        _durable_tool_lifecycle(data, raw_line, name=data.get("tool"))
+        return
+
+    if record_type == "session.next.tool.progress":
+        _durable_tool_lifecycle(data, raw_line, name=data.get("tool"), terminal="progress")
+        _emit(
+            "diagnostic",
+            {
+                "code": "tool_progress",
+                "tool_id": data.get("callID") or data.get("callId"),
+            },
+            raw_line,
+        )
+        return
+
+    if record_type in {"session.next.tool.success", "session.next.tool.failed"}:
+        error_value = data.get("error") if record_type.endswith("failed") else None
+        _durable_tool_lifecycle(
+            data,
+            raw_line,
+            name=data.get("tool"),
+            terminal="failed" if record_type.endswith("failed") else "completed",
+            error_value=error_value,
+        )
+        return
+
+    if record_type == "session.next.shell.started":
+        _durable_tool_lifecycle(
+            {
+                **data,
+                "tool": "bash",
+                "input": {"command": data.get("command") or ""},
+            },
+            raw_line,
+            name="bash",
+        )
+        return
+
+    if record_type == "session.next.shell.ended":
+        _durable_tool_lifecycle(
+            {**data, "tool": "bash"},
+            raw_line,
+            name="bash",
+            terminal="completed",
+            output_data={"result": data.get("output")},
+        )
+        return
+
+    if record_type == "session.next.step.ended":
+        tokens = data.get("tokens")
+        if isinstance(tokens, dict):
+            _STATE["usage"] = _usage({"tokens": tokens, "cost": data.get("cost")})
+            _emit("usage.updated", {"usage": _STATE["usage"]}, raw_line)
+        _emit(
+            "diagnostic",
+            {
+                "code": "step_ended",
+                "finish": data.get("finish"),
+                "file_count": len(data.get("files") or []) if isinstance(data.get("files"), list) else None,
+            },
+            raw_line,
+        )
+        return
+
+    if record_type == "session.next.step.failed":
+        message, status_code = _error_message(data.get("error"), "OpenCode step failed")
+        _STATE["terminal_failure"] = {
+            "kind": _failure_kind(message, status_code=status_code),
+            "message": message,
+        }
+        _emit(
+            "diagnostic",
+            {
+                "code": "step_failed",
+                "message": message,
+                "failure_kind": _STATE["terminal_failure"]["kind"],
+            },
+            raw_line,
+        )
+        return
+
+    if record_type == "session.next.retried":
+        message, status_code = _error_message(data.get("error"), "OpenCode provider retry")
+        retryable = data.get("error", {}).get("isRetryable") if isinstance(data.get("error"), dict) else None
+        _emit(
+            "provider.retry",
+            {
+                "attempt": data.get("attempt"),
+                "failure_kind": _failure_kind(message, status_code=status_code),
+            },
+            raw_line,
+        )
+        if retryable is False:
+            _STATE["terminal_failure"] = {
+                "kind": _failure_kind(message, status_code=status_code),
+                "message": message,
+            }
+        else:
+            _STATE["terminal_failure"] = None
+        return
+
+    if record_type == "session.next.compaction.started":
+        _emit(
+            "diagnostic",
+            {"code": "compaction_started", "reason": data.get("reason")},
+            raw_line,
+        )
+        return
+
+    if record_type == "session.next.compaction.delta":
+        _emit("diagnostic", {"code": "compaction_delta"}, raw_line)
+        return
+
+    if record_type == "session.next.compaction.ended":
+        payload = {
+            "session_id": data.get("sessionID"),
+            "reason": data.get("reason"),
+        }
+        summary = data.get("text")
+        if isinstance(summary, str) and summary:
+            payload["summary"] = sanitize(summary)[:_TOOL_OUTPUT_MAX_CHARS]
+        _emit("context.compacted", payload, raw_line)
+        return
+
+    # Prompt, model, step-start, revert, context and agent-switch events are
+    # meaningful protocol observations but have no safe existing canonical
+    # equivalent. Keep them explicit instead of allowing a silent drop or an
+    # unexplained unknown event.
+    payload = {"code": "opencode_durable_event", "type": record_type}
+    for key in ("sessionID", "messageID", "assistantMessageID", "callID", "agent"):
+        if data.get(key) is not None:
+            payload[key] = data[key]
+    _emit("diagnostic", payload, raw_line)
+
+
 def _handle_tool_part(properties: dict, raw_line: int) -> None:
     part = properties.get("part") if isinstance(properties.get("part"), dict) else {}
     state = part.get("state") if isinstance(part.get("state"), dict) else {}
@@ -372,16 +805,19 @@ def _handle_tool_part(properties: dict, raw_line: int) -> None:
                 raw_line,
             )
             lifecycle["started"] = True
-        error_message = state.get("error")
-        error = status != "completed" or bool(error_message)
+        error_value = state.get("error")
+        error_message = None
+        if error_value:
+            error_message, _ = _error_message(error_value, "OpenCode tool failed")
+        error = status != "completed" or error_value is not None
         payload = {
             "tool_id": tool_id,
             "name": name,
             "output": _tool_output(part),
             "error": error,
         }
-        if isinstance(error_message, str) and error_message.strip():
-            payload["error_message"] = clean_message(sanitize(error_message))[:_TOOL_OUTPUT_MAX_CHARS]
+        if error_message:
+            payload["error_message"] = error_message
         metadata = state.get("metadata") if isinstance(state.get("metadata"), dict) else {}
         exit_code = metadata.get("exit")
         if isinstance(exit_code, int) and not isinstance(exit_code, bool):
@@ -531,17 +967,62 @@ def _handle_session_status(properties: dict, raw_line: int) -> None:
 
 
 def _handle_session_created(properties: dict, raw_line: int) -> None:
-    session_id = properties.get("sessionID") or properties.get("sessionId")
-    if session_id:
-        _STATE["session_id"] = _STATE["session_id"] or session_id
+    _remember_session(properties)
+
+
+def _interactive_request_id(properties: dict) -> object:
+    for key in ("id", "permissionID", "permissionId", "questionID", "questionId"):
+        if properties.get(key) is not None:
+            return properties[key]
+    return None
+
+
+def _handle_interactive_event(record_type: str, properties: dict, raw_line: int) -> None:
+    """Fail closed for permission/question prompts the first release cannot answer."""
+    _remember_session(properties)
+    request_id = _interactive_request_id(properties)
+    asked = record_type.endswith(".asked") or record_type in {
+        "permission",
+        "question",
+        "permission.updated",
+        "question.updated",
+    }
+    rejected = record_type.endswith(".rejected")
+    is_permission = "permission" in record_type
+    if asked:
+        kind = "sandbox_error" if is_permission else "engine_error"
+        message = (
+            f"OpenCode {record_type} requires an interactive response; "
+            "the Codify first-release control plane cannot answer it"
+        )
+        _STATE["interactive_block"] = request_id or record_type
+        _STATE["terminal_failure"] = {"kind": kind, "message": message}
+        _emit(
+            "diagnostic",
+            {
+                "code": "interactive_request_unsupported",
+                "type": record_type,
+                "request_id": request_id,
+                "failure_kind": kind,
+            },
+            raw_line,
+        )
+        _finalize_terminal()
+        return
+
+    code = "interactive_request_rejected" if rejected else "interactive_request_replied"
+    _emit(
+        "diagnostic",
+        {"code": code, "type": record_type, "request_id": request_id},
+        raw_line,
+    )
 
 
 def _handle_session_error(properties: dict, raw_line: int) -> None:
-    message = properties.get("error") or properties.get("message") or "OpenCode session error"
-    # session.error is an unhandled SSE path (probe 待测); classify deterministically
-    # and converge to a failed terminal so the attempt does not hang.
-    message = clean_message(str(message))
-    kind = _failure_kind(message)
+    _remember_session(properties)
+    error = properties.get("error") or properties.get("message")
+    message, status_code = _error_message(error, "OpenCode session error")
+    kind = _failure_kind(message, status_code=status_code)
     if kind == "cancelled":
         _STATE["aborted"] = True
     _STATE["terminal_failure"] = {"kind": kind, "message": message}
@@ -562,13 +1043,10 @@ def _handle_message_updated(properties: dict, raw_line: int) -> None:
         _STATE["messages"].pop(message_id, None)
     if role == "assistant":
         _STATE["message"] = info
-        if message_id not in _STATE["assistant_message_ids"]:
-            _STATE["assistant_message_ids"].append(message_id)
+        _remember_assistant_message(message_id)
         _flush_pending_deltas(message_id)
         _refresh_text()
-    session_id = properties.get("sessionID") or properties.get("sessionId")
-    if session_id:
-        _STATE["session_id"] = _STATE["session_id"] or session_id
+    _remember_session(properties)
 
 
 def _message_id(properties: dict, part: dict | None = None) -> str:
@@ -649,25 +1127,26 @@ def _handle_message_part_updated(properties: dict, raw_line: int) -> None:
         )
     elif part_type == "retry":
         message = part.get("error") or part.get("message") or "OpenCode provider retry"
+        error_message, status_code = _error_message(message, "OpenCode provider retry")
         _emit(
             "provider.retry",
             {
                 "attempt": part.get("attempt"),
                 "max_attempts": part.get("maxAttempts"),
-                "failure_kind": _failure_kind(clean_message(str(message))),
+                "failure_kind": _failure_kind(error_message, status_code=status_code),
                 "retry_delay_ms": part.get("delayMs"),
             },
             raw_line,
         )
     elif part_type == "compaction":
-        _emit(
-            "context.compacted",
-            {
-                "session_id": properties.get("sessionID"),
-                "reason": part.get("reason"),
-            },
-            raw_line,
-        )
+        payload = {
+            "session_id": properties.get("sessionID"),
+            "reason": part.get("reason"),
+            "auto": part.get("auto"),
+            "overflow": part.get("overflow"),
+            "tail_start_id": part.get("tail_start_id"),
+        }
+        _emit("context.compacted", {key: value for key, value in payload.items() if value is not None}, raw_line)
     elif part_type not in {"step-start", "step-finish", "file", "patch", "snapshot", "agent", "subtask"}:
         _emit("diagnostic", {"code": "unknown_message_part", "type": part_type}, raw_line)
     usage = part.get("usage") if isinstance(part.get("usage"), dict) else part.get("tokens")
@@ -699,10 +1178,15 @@ def _handle_message_part_delta(properties: dict, raw_line: int) -> None:
 
 
 def _handle_session_idle(properties: dict, raw_line: int) -> None:
-    session_id = properties.get("sessionID")
-    _STATE["session_id"] = _STATE["session_id"] or session_id
+    _remember_session(properties)
     _STATE["idle_seen"] = True
     _STATE["busy"] = False
+    if _STATE["terminal_failure"] is not None or _STATE["aborted"]:
+        # A failed step/compaction or an abort may be followed by the normal
+        # idle marker. It must still converge; otherwise the bridge waits for
+        # the server's heartbeat forever after the failure was already known.
+        _finalize_terminal()
+        return
     # Success requires all three observed signals: idle, a final assistant
     # message, and no error/abort. A delta is not a final message: it may be a
     # truncated SSE fragment. Never turn an idle-only status into fake success.
@@ -743,10 +1227,29 @@ def _handle_session_idle(properties: dict, raw_line: int) -> None:
         _finalize_terminal()
 
 
+def _handle_observed_failure_event(record_type: str, properties: dict, raw_line: int) -> None:
+    _remember_session(properties)
+    error = properties.get("error") or properties.get("message") or record_type
+    message, status_code = _error_message(error, f"OpenCode event {record_type}")
+    _emit(
+        "diagnostic",
+        {
+            "code": "opencode_event_failure",
+            "type": record_type,
+            "message": message,
+            "failure_kind": _failure_kind(message, status_code=status_code),
+        },
+        raw_line,
+    )
+
+
 def translate(record: dict, raw_line: int) -> None:
     record_type = record.get("type")
     properties = record.get("properties") if isinstance(record.get("properties"), dict) else {}
-    if record_type in ("server.connected", "server.heartbeat"):
+    if isinstance(record_type, str) and record_type.startswith("session.next."):
+        _handle_durable_event(record_type, _durable_data(record, properties), raw_line)
+        return
+    elif record_type in ("server.connected", "server.heartbeat"):
         return
     if record_type == "session.status":
         _handle_session_status(properties, raw_line)
@@ -770,19 +1273,13 @@ def translate(record: dict, raw_line: int) -> None:
             {"session_id": properties.get("sessionID") or properties.get("sessionId")},
             raw_line,
         )
-    elif record_type in ("permission", "question", "permission.updated", "permission.replied", "question.updated", "question.replied"):
-        # A tool/permission block would leave the run non-idle; classify (probe 待测)
-        # so the pipeline can diagnose rather than hang. Live runners detect the
-        # resulting long non-idle session via the readiness/timeout policy.
-        _emit(
-            "diagnostic",
-            {
-                "code": "permission_block" if not record_type.endswith("replied") else "permission_replied",
-                "type": record_type,
-                "permission_id": properties.get("permissionID") or properties.get("permissionId"),
-            },
-            raw_line,
-        )
+    elif record_type in _INTERACTIVE_EVENT_TYPES or record_type in {
+        "permission",
+        "question",
+        "permission.updated",
+        "question.updated",
+    }:
+        _handle_interactive_event(record_type, properties, raw_line)
     elif record_type == "message.removed":
         message_id = properties.get("messageID") or properties.get("messageId")
         if message_id:
@@ -800,6 +1297,8 @@ def translate(record: dict, raw_line: int) -> None:
         _emit("diagnostic", {"code": "message_part_removed"}, raw_line)
     elif record_type in {"todo.updated", "command.executed"}:
         _emit("diagnostic", {"code": "opencode_event_observed", "type": record_type}, raw_line)
+    elif record_type in {"mcp.browser.open.failed", "workspace.failed", "worktree.failed"}:
+        _handle_observed_failure_event(record_type, properties, raw_line)
     elif record_type in _IGNORED_KNOWN_EVENTS:
         return
     else:
