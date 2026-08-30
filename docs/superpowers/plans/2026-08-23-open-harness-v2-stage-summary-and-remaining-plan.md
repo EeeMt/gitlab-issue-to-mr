@@ -3,37 +3,32 @@
 **复核日期：** 2026-08-30
 
 **本地源码基线：** `dev` 当前已将本轮 Harness Adapter、catalog、command、sanitizer、前端 API 和
-entrypoint 测试修复冻结为一个本地提交，尚未推送。该 revision 的完整 backend/frontend/mock E2E/build、
-Ruff 和 Shell/Python 检查已通过；远端 backend/scheduler/nginx 已用当前 `HEAD` 的 revision label
-重建并核对。
+entrypoint 测试修复冻结为本地提交 `e4b9b59e`，尚未推送。该 revision 的完整 backend/frontend/mock
+E2E/build、Ruff 和 Shell/Python 检查已通过；远端 backend/scheduler/nginx 已从该 checkout 重建并核对。
+镜像没有自定义 Git revision label，因此只把容器内源码标记、前端 footer 和运行时行为作为来源交叉证据，
+不把不存在的 label 当作 provenance。
 
 **运行边界：** Backend/Scheduler 仍为 `HARNESS_EXECUTION_MODE=dual_canary`、
 `AUTO_MIGRATE=false`，数据库 revision 为 `077_v2_worker_kit_identity`。
 
 **当前 candidate：** 目标 `linux/amd64` Host 已安装 Kit `0.6.11`；Profile 4 启用 Pi、OpenCode、
-Claude、Codex，Profile 内默认 Harness 为 Pi，但该 Profile 不是系统全局默认。当前 composition 上的
-runtime verify 已重新执行并返回 `ready`；Task #103 在有效 readiness 窗口内完成。由于 readiness TTL
-较短，下一轮 canary 仍须在执行前重新 verify。
+Claude、Codex，Profile 内默认 Harness 为 Pi，但该 Profile 不是系统全局默认。Profile 4 的 runtime
+verify 已于 DB 时间 `2026-08-30 11:21:42` 返回成功，`image/Kit/Harness` evidence 与 generation `22`
+已持久化。由于 readiness TTL 较短，下一轮 canary 仍须在执行前重新 verify。
 
 **本轮推进记录（2026-08-30）：**
 
 - 远端 `192.168.50.129` 的 Profile 4 verify-runtime 已重新完成；Kit `0.6.11`、四 Harness identity
-  evidence 和 DB 绑定保持一致，Task #103 执行时 readiness 为 `ready`（check generation `83`）。
-- R1 已在当前 `HEAD` 上完成 backend/scheduler/nginx composition 重建：三项运行容器均使用带当前
-  revision label 的镜像，backend health、scheduler health 均通过并报告 `dual_canary`；数据库仍为
-  `077_v2_worker_kit_identity`，任务历史和 Profile 4 的验证字段未丢失。
-- 重启后的 backend 成功校验并导出 Task #103 的 DB-bound Runtime Bundle：Bundle
-  `4e606a31b61469ef3a2ff048edf8c05b6c8050e41e9a11020d1014f36457c016`，archive SHA-256
-  `fa9b548c2d388e0c58c7de7dcec95ca168b12d7941d8dee344a2cd5ebe81bf45`，manifest SHA-256
-  `b4b2687d6694b62b24294490cda2f4f463a7151ff2f959063d695434baf79503`。
-- nginx 首次构建曾因 Docker daemon 拉取基础层阻塞；随后通过 OCI 客户端导入明确的 `linux/amd64`
-  `nginx:alpine`/`node:22-alpine` 基础镜像完成 Vite 构建。运行中的 nginx 已核对当前 revision marker
-  和 UUID command-id 修复；本地 Node 25 与镜像 Node 22 的产物 chunk hash 不作为相同构建的证据。
-- 通过已登录 UI 显式选择 Pi 创建 fresh execute Task #103（Provider 7 / `openrouter-free`）；DB 记录为
-  `completed`、Harness `pi`、Runtime Bundle `95`。该 Task 产生 182 条规范事件（含 4 个工具调用）、
-  214 条 Pi 原始 Harness 事件、TaskLog、运行归档和 Git delivery；归档包含 `event.jsonl`、
-  `harness-result.json`、`harness-events/pi.jsonl` 等。Task #102 因首次沿用需求默认 OpenCode 而取消，
-  不计入 Pi 证据。
+  evidence 和 DB 绑定保持一致，`v2_worker_image_identity_generation`、`worker_kit_identity_generation`
+  均为 `22`。
+- R1 已在当前 `HEAD=e4b9b59e` 上完成 backend/scheduler/nginx composition 重建：backend healthy、
+  scheduler/nginx 正常运行并报告 `dual_canary`；数据库仍为 `077_v2_worker_kit_identity`，任务历史和
+  Profile 4 的验证字段未丢失。镜像 provenance 不依赖不存在的自定义 revision label。
+- 通过已登录 UI 显式选择 Pi 创建 fresh execute、无代码变更 Task #118（Provider 7 / `openrouter-free`）；
+  DB 记录为 `completed`、Harness `pi`、`require_changes=false`、Runtime Bundle `100`，提交统计为
+  `+0/-0`。attempt 以 `run.completed`、`control_state=closed` 收口，canonical cursor 为 `267`，归档
+  为 `task-118-runtime-archive.tar.gz`（26,380 bytes），包含 `event.jsonl`、`harness-result.json`、
+  `harness-events/pi.jsonl`、`delivery-summary.md` 等。
 - 为容器已创建后才落库的取消请求补上收口：Runner 在创建容器后重新读取 Task 的持久化取消意图，
   对已启动容器执行有界 graceful stop，并在 stop 失败时仅对该容器 fallback 到 kill；新增焦点单测。
   当前工作树的相关聚焦 suite 为 `109 passed`，Ruff 与 `git diff --check` 通过；backend/scheduler
@@ -44,14 +39,28 @@ runtime verify 已重新执行并返回 `ready`；Task #103 在有效 readiness 
   交付摘要验证单一 canary 文件及字节内容；Task #116 的任务详情、工具卡片、提交记录和交付摘要验证
   OpenCode 文件交付。两次正常收口都观察到停止后 canonical tail 的 Docker 409，随后 archive fallback
   保留了 `event.jsonl`、对应 Harness 原始事件和终态；该告警不作为 Harness 成功失败的替代判据。
+- Task #118 进一步完成 Pi `execute` no-change 边界：fresh、`require_changes=false`、`+0/-0`，成功收口
+  且 archive/attempt/canonical cursor 完整；Task #119 完成 OpenCode fresh 配置隔离边界，成功记录
+  task-scoped `HOME`、XDG roots、`OPENCODE_CONFIG_DIR`，并确认 project/external Skills/Claude Skills/
+  models fetch 均被禁用。#119 的原始 OpenCode 事件包含该 shell 输出，未出现受禁止的 key/token/password
+  变量；两项均没有容器残留。
+- Task #119 启动前由目标 Profile 的 readiness gate 重新完成严格 Kit inventory probe：DB row 为 `ready`、
+  Kit `0.6.11`、check generation `120`，`ready_until` 为 `2026-08-30 11:51:28`；这证明 canary 使用了
+  有效的短 TTL readiness，而不是沿用 Profile verify 的旧时间戳。
 - 远端非机密 provider 配置当前只有 Provider 3/6 的 Anthropic、Provider 4 的 Responses、Provider 5/7
   的 Chat；已知受限 provider 的真实请求仍返回额度限制，因此本轮不重复消耗它们，也不把 Provider 7
   的 Chat 成功冒充 Claude/Codex 成功。Claude/Codex 的真实成功矩阵仍待兼容额度恢复。
-- GitLab 提交 `91aab46e` 只包含目标 canary 文件（1 addition、0 deletions）；字节级内容以提交页面为准，
-  不以 AI 交付摘要中的换行描述替代。Task #103 结束后没有 `codify-103` 容器残留。
+- 当前真实协议证据边界可精确对账：Pi #115/#118 与 OpenCode #116/#119 均为 Provider 7、模型
+  `minimax/minimax-m3:free`、`openai_chat_completions`，分别绑定独立 Bundle；OpenCode #106 为
+  `openai_responses`、#107 为 `openai_chat_completions`、Pi #111 为 `anthropic_messages`，三者均在
+  真实请求前后落为额度限制且 input/output token 为 0。三协议 conformance 因 Provider 容量仍未闭合，
+  不重试这些已确认受限组合。
+- 误配置的 Task #117 曾在稳定容器 ID 发布前收到取消请求，API 返回 503 并保留 pending cancellation；
+  随后任务自动以 `cancelled` 收口，未留下容器。该 Task 不计入任何 R2 成功证据；它同时保留了“创建后取消
+  请求”边界的真实日志，不能与正常 canary 混为一谈。
 - 远端 Docker `system df` 显示磁盘未满，本轮没有清理镜像；只保留“满盘时清理已确认的 Codify 调试镜像”
   这一边界。
-- 本轮提交 revision 已完成聚焦后端 202 tests、完整后端 3,193 passed / 4 skipped / 96 subtests、完整
+- 本轮提交 revision 已完成聚焦后端 109 passed、完整后端 3,194 passed / 4 skipped / 96 subtests、完整
   mock E2E 378 tests、完整前端 1,677 tests、前端 production build、Ruff、Shell/Python 静态检查；完整
   后端服务/迁移 fixture 在受控权限下重跑通过。提交未推送，R1 的当前 composition、Bundle 导出和
   Profile verify 已完成；后续仍须满足 R2–R5 才能进入发布或 hard cut。
@@ -95,8 +104,8 @@ benchmark 以 [V2 schema](../../architecture/open-harness-v2-schemas.md) 为准�
 | --- | --- | --- | --- |
 | L1 架构/合同 | 通过 | ownership、schema、协议、identity、roll-forward-only 和 Runbook 已对齐 | 后续合同变化仍须回到共享 schema 评审 |
 | L2 源码/测试 | 已实现，release recheck 待做 | V2 公共地基、Pi/OpenCode Adapter、四 Harness fixture、command plane、catalog 和 execution policy 已落地；本轮提交 revision 与 mock E2E/build 等验证通过 | 远端 release composition 仍未绑定到该 revision；最终 release recheck 仍需在 composition 更新后完成 |
-| L3 不可变 composition | 部分通过 | `linux/amd64` Image + Kit `0.6.11` + Profile 4 已安装并完成 identity/DB 绑定；Pi/OpenCode 有 DB-bound Bundle 证据，Task #103 在有效 readiness 窗口内完成 | readiness TTL 较短且会再次过期；四 Harness 各自基于成功 Task 的独立 Bundle 导出与最终 release freeze 尚未齐全 |
-| L4 真实 Host/Task | 部分通过 | Pi/OpenCode 有真实模型、工具、Session、终态、archive 和 Git/MR；本轮新增 Pi fresh execute Task #103；取消/abort 与 live command 有代表性证据 | Claude/Codex 成功路径、三协议完整矩阵、真实 recovery/concurrency 和完整异常矩阵未完成 |
+| L3 不可变 composition | 部分通过 | `linux/amd64` Image + Kit `0.6.11` + Profile 4 已安装并完成 identity/DB 绑定；Pi/OpenCode 有 DB-bound Bundle 证据，Task #118/#119 启动前重新通过 generation `120` readiness gate | readiness TTL 较短且会再次过期；Claude/Codex 各自基于成功 Task 的独立 Bundle 导出与最终 release freeze 尚未齐全 |
+| L4 真实 Host/Task | 部分通过 | Pi/OpenCode 有真实模型、工具、Session、终态、archive 和 Git/MR；本轮新增 Pi execute-no-change #118 与 OpenCode task-private config/Skills isolation #119；取消/abort 与 live command 有代表性证据 | Claude/Codex 成功路径、三协议完整矩阵、真实 recovery/concurrency 和完整异常矩阵未完成 |
 | L5 发布验收 | 未完成 | 验收场景和统计方法已冻结 | 四 Harness 功能矩阵、20-task、Pi 非劣性、完整 UI/交互和发布评审未通过 |
 | L6 hard cut | 未执行 | `v2_only` 与 V1 只读的源码路径存在 | 未切全局 Pi 默认，未进入维护窗口，未执行 hard-cut smoke |
 
