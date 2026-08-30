@@ -4,20 +4,31 @@
 
 **本地源码基线：** `dev` 当前已将本轮 Harness Adapter、catalog、command、sanitizer、前端 API 和
 entrypoint 测试修复冻结为一个本地提交，尚未推送。该 revision 的完整 backend/frontend/mock E2E/build、
-Ruff 和 Shell/Python 检查已通过；远端不可变 composition 仍须在该 revision 上重新生成并核对。
+Ruff 和 Shell/Python 检查已通过；远端 backend/scheduler/nginx 已用当前 `HEAD` 的 revision label
+重建并核对。
 
 **运行边界：** Backend/Scheduler 仍为 `HARNESS_EXECUTION_MODE=dual_canary`、
 `AUTO_MIGRATE=false`，数据库 revision 为 `077_v2_worker_kit_identity`。
 
 **当前 candidate：** 目标 `linux/amd64` Host 已安装 Kit `0.6.11`；Profile 4 启用 Pi、OpenCode、
-Claude、Codex，Profile 内默认 Harness 为 Pi，但该 Profile 不是系统全局默认。最近一次 runtime verify
-已在本轮继续 canary 前重新执行并返回 `ready`；Task #103 在有效 readiness 窗口内完成。由于 readiness
-TTL 较短，下一轮 canary 仍须在执行前重新 verify。
+Claude、Codex，Profile 内默认 Harness 为 Pi，但该 Profile 不是系统全局默认。当前 composition 上的
+runtime verify 已重新执行并返回 `ready`；Task #103 在有效 readiness 窗口内完成。由于 readiness TTL
+较短，下一轮 canary 仍须在执行前重新 verify。
 
 **本轮推进记录（2026-08-30）：**
 
 - 远端 `192.168.50.129` 的 Profile 4 verify-runtime 已重新完成；Kit `0.6.11`、四 Harness identity
   evidence 和 DB 绑定保持一致，Task #103 执行时 readiness 为 `ready`（check generation `83`）。
+- R1 已在当前 `HEAD` 上完成 backend/scheduler/nginx composition 重建：三项运行容器均使用带当前
+  revision label 的镜像，backend health、scheduler health 均通过并报告 `dual_canary`；数据库仍为
+  `077_v2_worker_kit_identity`，任务历史和 Profile 4 的验证字段未丢失。
+- 重启后的 backend 成功校验并导出 Task #103 的 DB-bound Runtime Bundle：Bundle
+  `4e606a31b61469ef3a2ff048edf8c05b6c8050e41e9a11020d1014f36457c016`，archive SHA-256
+  `fa9b548c2d388e0c58c7de7dcec95ca168b12d7941d8dee344a2cd5ebe81bf45`，manifest SHA-256
+  `b4b2687d6694b62b24294490cda2f4f463a7151ff2f959063d695434baf79503`。
+- nginx 首次构建曾因 Docker daemon 拉取基础层阻塞；随后通过 OCI 客户端导入明确的 `linux/amd64`
+  `nginx:alpine`/`node:22-alpine` 基础镜像完成 Vite 构建。运行中的 nginx 已核对当前 revision marker
+  和 UUID command-id 修复；本地 Node 25 与镜像 Node 22 的产物 chunk hash 不作为相同构建的证据。
 - 通过已登录 UI 显式选择 Pi 创建 fresh execute Task #103（Provider 7 / `openrouter-free`）；DB 记录为
   `completed`、Harness `pi`、Runtime Bundle `95`。该 Task 产生 182 条规范事件（含 4 个工具调用）、
   214 条 Pi 原始 Harness 事件、TaskLog、运行归档和 Git delivery；归档包含 `event.jsonl`、
@@ -29,8 +40,8 @@ TTL 较短，下一轮 canary 仍须在执行前重新 verify。
   这一边界。
 - 本轮提交 revision 已完成聚焦后端 202 tests、完整后端 3,193 passed / 4 skipped / 96 subtests、完整
   mock E2E 378 tests、完整前端 1,677 tests、前端 production build、Ruff、Shell/Python 静态检查；完整
-  后端服务/迁移 fixture 在受控权限下重跑通过。提交未推送，远端 composition 仍需在该 revision 上重建
-  或重新导出后，才能完成 release freeze。
+  后端服务/迁移 fixture 在受控权限下重跑通过。提交未推送，R1 的当前 composition、Bundle 导出和
+  Profile verify 已完成；后续仍须满足 R2–R5 才能进入发布或 hard cut。
 
 ## 1. 当前结论
 
