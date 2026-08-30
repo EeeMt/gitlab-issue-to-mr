@@ -47,6 +47,13 @@ verify 已于 DB 时间 `2026-08-30 11:21:42` 返回成功，`image/Kit/Harness`
 - Task #119 启动前由目标 Profile 的 readiness gate 重新完成严格 Kit inventory probe：DB row 为 `ready`、
   Kit `0.6.11`、check generation `120`，`ready_until` 为 `2026-08-30 11:51:28`；这证明 canary 使用了
   有效的短 TTL readiness，而不是沿用 Profile verify 的旧时间戳。
+- 在同一 Issue 上显式选择 OpenCode、Provider 7、`freeform`、`continue` 创建 Task #120；Worker 启动时
+  重新通过 readiness gate（Kit `0.6.11`、check generation `122`），并将 #119 的
+  `output_session_id` 作为本代 lineage 的 `input_session_id`，`input_lineage_reason=resumed`。Task #120
+  绑定 Bundle `99`，最终 `run.completed`、`control_state=closed`、`61` 个 canonical events、usage
+  `237/162`、`+0/-0`，归档 `task-120-runtime-archive.tar.gz`（10,606 bytes，SHA-256
+  `dcbe9c44a7fb0f7fe98b1f1037f8cf607675dbc60cf0b9cd585e75c4e362ad3f`），无容器残留；这补齐了当前
+  Bundle 下 OpenCode 的真实 continue/session-resume 样本。
 - 远端非机密 provider 配置当前只有 Provider 3/6 的 Anthropic、Provider 4 的 Responses、Provider 5/7
   的 Chat；已知受限 provider 的真实请求仍返回额度限制，因此本轮不重复消耗它们，也不把 Provider 7
   的 Chat 成功冒充 Claude/Codex 成功。Claude/Codex 的真实成功矩阵仍待兼容额度恢复。
@@ -103,9 +110,9 @@ benchmark 以 [V2 schema](../../architecture/open-harness-v2-schemas.md) 为准�
 | 层级 | 当前状态 | 已证明 | 尚未证明 |
 | --- | --- | --- | --- |
 | L1 架构/合同 | 通过 | ownership、schema、协议、identity、roll-forward-only 和 Runbook 已对齐 | 后续合同变化仍须回到共享 schema 评审 |
-| L2 源码/测试 | 已实现，release recheck 待做 | V2 公共地基、Pi/OpenCode Adapter、四 Harness fixture、command plane、catalog 和 execution policy 已落地；本轮提交 revision 与 mock E2E/build 等验证通过 | 远端 release composition 仍未绑定到该 revision；最终 release recheck 仍需在 composition 更新后完成 |
-| L3 不可变 composition | 部分通过 | `linux/amd64` Image + Kit `0.6.11` + Profile 4 已安装并完成 identity/DB 绑定；Pi/OpenCode 有 DB-bound Bundle 证据，Task #118/#119 启动前重新通过 generation `120` readiness gate | readiness TTL 较短且会再次过期；Claude/Codex 各自基于成功 Task 的独立 Bundle 导出与最终 release freeze 尚未齐全 |
-| L4 真实 Host/Task | 部分通过 | Pi/OpenCode 有真实模型、工具、Session、终态、archive 和 Git/MR；本轮新增 Pi execute-no-change #118 与 OpenCode task-private config/Skills isolation #119；取消/abort 与 live command 有代表性证据 | Claude/Codex 成功路径、三协议完整矩阵、真实 recovery/concurrency 和完整异常矩阵未完成 |
+| L2 源码/测试 | 通过（当前 revision） | V2 公共地基、Pi/OpenCode Adapter、四 Harness fixture、command plane、catalog 和 execution policy 已落地；`e4b9b59e` 的完整 backend/frontend/mock E2E/build、Ruff 和 Shell/Python 检查通过，远端 composition 已重建并以容器源码标记、footer 和运行时行为交叉核对 | 后续若改变源码或 composition，必须重新生成唯一 release evidence；`v2_only` 仍属于 L6 |
+| L3 不可变 composition | 部分通过 | `linux/amd64` Image + Kit `0.6.11` + Profile 4 已安装并完成 identity/DB 绑定；Pi/OpenCode 有 DB-bound Bundle 证据，Task #118/#119 启动前通过 generation `120`、Task #120 启动前通过 generation `122` readiness gate | readiness TTL 较短且会再次过期；Claude/Codex 各自基于成功 Task 的独立 Bundle 导出与最终 release freeze 尚未齐全 |
+| L4 真实 Host/Task | 部分通过 | Pi/OpenCode 有真实模型、工具、Session、终态、archive 和 Git/MR；Pi 已有 Skills 与 execute-no-change #118，OpenCode 已有 task-private config/Skills isolation #119 和当前 Bundle continue #120；取消/abort 与 live command 有代表性证据 | Claude/Codex 成功路径、三协议完整矩阵、真实 recovery/concurrency 和完整异常矩阵未完成 |
 | L5 发布验收 | 未完成 | 验收场景和统计方法已冻结 | 四 Harness 功能矩阵、20-task、Pi 非劣性、完整 UI/交互和发布评审未通过 |
 | L6 hard cut | 未执行 | `v2_only` 与 V1 只读的源码路径存在 | 未切全局 Pi 默认，未进入维护窗口，未执行 hard-cut smoke |
 
@@ -118,9 +125,9 @@ benchmark 以 [V2 schema](../../architecture/open-harness-v2-schemas.md) 为准�
 | 原方案阶段 | 当前状态 | 剩余退出条件 |
 | --- | --- | --- |
 | Phase 0：协议探针与接口冻结 | 部分完成 | 四 Harness fixture、V2 schema 和 20-task 定义已冻结；Pi/OpenCode 三协议真实 Endpoint 的双向、异常和恢复 probe 尚未齐全 |
-| Phase 1：V2 公共地基与 command plane | 源码实现完成 | 冻结当前 revision 后重跑完整 release regression；`v2_only` 生产切换属于 L6，不能用源码测试代替 |
-| Phase 2：Pi 默认 Harness | 部分完成 | 代表性真实功能已覆盖；仍缺三协议完整 conformance、Skills、timeout/failure/execute-no-change、native terminate 边界，以及 rejected、重投、settled race、Scheduler recovery 的真实矩阵和 20-task 非劣性门槛 |
-| Phase 3：OpenCode 一级 Harness | 部分完成 | fresh/continue、Skill、usage/tool、Git delivery 和 abort 收口已有样本；仍缺三协议完整 conformance、Agent/Command/variant、crash/close、timeout/no-change，以及 fresh/continue/namespace 的跨 Task 隔离证明 |
+| Phase 1：V2 公共地基与 command plane | 已完成当前 revision recheck | 当前 revision 的完整 release regression 与远端 composition 已核对；`v2_only` 生产切换属于 L6，不能用源码测试代替 |
+| Phase 2：Pi 默认 Harness | 部分完成 | 代表性真实功能、Skills 和 execute-no-change 已有样本；仍缺三协议完整 conformance、timeout/failure、native terminate 边界，以及 rejected、重投、settled race、Scheduler recovery 的真实矩阵和 20-task 非劣性门槛 |
+| Phase 3：OpenCode 一级 Harness | 部分完成 | fresh/continue、Task-private Skills/配置、usage/tool、Git delivery 和 abort 收口已有样本；仍缺三协议完整 conformance、Agent/Command/variant、crash/close、timeout/no-change，以及不同 namespace 的跨 Task 隔离证明 |
 | Phase 4：Claude/Codex V2 | 部分完成 | Adapter、协议声明、fixture/replay 和失败收口已落地；兼容 Provider 额度恢复后仍须完成两者的真实成功、Session、Skills、取消/timeout、usage、archive 和 Git/MR 矩阵 |
 | Phase 5：产品、制品、Canary 与 hard cut | 部分完成 | Kit/Profile/catalog/readiness 和部分 UI 已落地；四 Harness L4、20-task、完整 UI、release review、Pi 默认迁移和 `v2_only` 均未完成 |
 | Phase 6：OMP | 未开始 | 仅在 V2 hard cut 后独立评估，不进入当前 release candidate |
