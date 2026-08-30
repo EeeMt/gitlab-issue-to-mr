@@ -3,8 +3,10 @@
 **复核日期：** 2026-08-30
 
 **本地源码基线：** `dev` 当前已将本轮 Harness Adapter、catalog、command、sanitizer、前端 API 和
-entrypoint 测试修复冻结为本地提交 `e4b9b59e`，尚未推送。该 revision 的完整 backend/frontend/mock
-E2E/build、Ruff 和 Shell/Python 检查已通过；远端 backend/scheduler/nginx 已从该 checkout 重建并核对。
+entrypoint 测试修复冻结为本地提交 `e4b9b59e`，并在其上追加前端 V2 lineage 会话提示修复提交
+`5ef8ddd3`，均尚未推送。backend/full mock E2E/build、Ruff 和 Shell/Python 检查在前一提交通过；当前
+revision 的完整 frontend suite/build 也已通过。远端 backend/scheduler 保持前一提交的同一源码基础，
+nginx 已从当前 checkout 重建并核对。
 镜像没有自定义 Git revision label，因此只把容器内源码标记、前端 footer 和运行时行为作为来源交叉证据，
 不把不存在的 label 当作 provenance。
 
@@ -21,9 +23,11 @@ verify 已于 DB 时间 `2026-08-30 11:21:42` 返回成功，`image/Kit/Harness`
 - 远端 `192.168.50.129` 的 Profile 4 verify-runtime 已重新完成；Kit `0.6.11`、四 Harness identity
   evidence 和 DB 绑定保持一致，`v2_worker_image_identity_generation`、`worker_kit_identity_generation`
   均为 `22`。
-- R1 已在当前 `HEAD=e4b9b59e` 上完成 backend/scheduler/nginx composition 重建：backend healthy、
+- R1 已在 `e4b9b59e` backend 基础上完成 backend/scheduler/nginx composition 重建：backend healthy、
   scheduler/nginx 正常运行并报告 `dual_canary`；数据库仍为 `077_v2_worker_kit_identity`，任务历史和
-  Profile 4 的验证字段未丢失。镜像 provenance 不依赖不存在的自定义 revision label。
+  Profile 4 的验证字段未丢失。随后 `5ef8ddd3` 的前端变更单独重建 nginx，远端镜像 digest 为
+  `sha256:46ae8679ae816d18236007023b109e1caa6c1b6a0ed1bb882a6765b62558e580`；镜像 provenance 不依赖
+  不存在的自定义 revision label，页面 footer 显示 `5ef8ddd`。
 - 通过已登录 UI 显式选择 Pi 创建 fresh execute、无代码变更 Task #118（Provider 7 / `openrouter-free`）；
   DB 记录为 `completed`、Harness `pi`、`require_changes=false`、Runtime Bundle `100`，提交统计为
   `+0/-0`。attempt 以 `run.completed`、`control_state=closed` 收口，canonical cursor 为 `267`，归档
@@ -54,6 +58,11 @@ verify 已于 DB 时间 `2026-08-30 11:21:42` 返回成功，`image/Kit/Harness`
   `237/162`、`+0/-0`，归档 `task-120-runtime-archive.tar.gz`（10,606 bytes，SHA-256
   `dcbe9c44a7fb0f7fe98b1f1037f8cf607675dbc60cf0b9cd585e75c4e362ad3f`），无容器残留；这补齐了当前
   Bundle 下 OpenCode 的真实 continue/session-resume 样本。
+- 远端 UI 实证显示 Issue #22 已有 OpenCode V2 lineage，但旧前端只读取 `claude_session_id`，曾误显示
+  “当前需求没有已记录的会话”。`5ef8ddd3` 将 TaskFormDrawer 的语义改为 `hasCurrentSession`，IssueView
+  和 TaskView 同时识别 legacy session 与 `current_harness`；相关 3 个入口测试 335 passed，完整前端
+  suite 为 79 files / 1,678 passed，production build 通过。当前远端任务表单已显示“不继承当前对话上下文；
+  保留工作区、Git 分支和旧会话记录”，且未创建额外 canary task。
 - 远端非机密 provider 配置当前只有 Provider 3/6 的 Anthropic、Provider 4 的 Responses、Provider 5/7
   的 Chat；已知受限 provider 的真实请求仍返回额度限制，因此本轮不重复消耗它们，也不把 Provider 7
   的 Chat 成功冒充 Claude/Codex 成功。Claude/Codex 的真实成功矩阵仍待兼容额度恢复。
@@ -68,7 +77,7 @@ verify 已于 DB 时间 `2026-08-30 11:21:42` 返回成功，`image/Kit/Harness`
 - 远端 Docker `system df` 显示磁盘未满，本轮没有清理镜像；只保留“满盘时清理已确认的 Codify 调试镜像”
   这一边界。
 - 本轮提交 revision 已完成聚焦后端 109 passed、完整后端 3,194 passed / 4 skipped / 96 subtests、完整
-  mock E2E 378 tests、完整前端 1,677 tests、前端 production build、Ruff、Shell/Python 静态检查；完整
+  mock E2E 378 tests、完整前端 1,678 tests、前端 production build、Ruff、Shell/Python 静态检查；完整
   后端服务/迁移 fixture 在受控权限下重跑通过。提交未推送，R1 的当前 composition、Bundle 导出和
   Profile verify 已完成；后续仍须满足 R2–R5 才能进入发布或 hard cut。
 
@@ -110,7 +119,7 @@ benchmark 以 [V2 schema](../../architecture/open-harness-v2-schemas.md) 为准�
 | 层级 | 当前状态 | 已证明 | 尚未证明 |
 | --- | --- | --- | --- |
 | L1 架构/合同 | 通过 | ownership、schema、协议、identity、roll-forward-only 和 Runbook 已对齐 | 后续合同变化仍须回到共享 schema 评审 |
-| L2 源码/测试 | 通过（当前 revision） | V2 公共地基、Pi/OpenCode Adapter、四 Harness fixture、command plane、catalog 和 execution policy 已落地；`e4b9b59e` 的完整 backend/frontend/mock E2E/build、Ruff 和 Shell/Python 检查通过，远端 composition 已重建并以容器源码标记、footer 和运行时行为交叉核对 | 后续若改变源码或 composition，必须重新生成唯一 release evidence；`v2_only` 仍属于 L6 |
+| L2 源码/测试 | 通过（当前 revision） | V2 公共地基、Pi/OpenCode Adapter、四 Harness fixture、command plane、catalog 和 execution policy 已落地；`e4b9b59e` 的完整 backend/mock E2E/build、Ruff 和 Shell/Python 检查，以及 `5ef8ddd3` 的完整 frontend suite/build 通过，远端 composition 以容器源码标记、footer 和运行时行为交叉核对 | 后续若改变源码或 composition，必须重新生成唯一 release evidence；`v2_only` 仍属于 L6 |
 | L3 不可变 composition | 部分通过 | `linux/amd64` Image + Kit `0.6.11` + Profile 4 已安装并完成 identity/DB 绑定；Pi/OpenCode 有 DB-bound Bundle 证据，Task #118/#119 启动前通过 generation `120`、Task #120 启动前通过 generation `122` readiness gate | readiness TTL 较短且会再次过期；Claude/Codex 各自基于成功 Task 的独立 Bundle 导出与最终 release freeze 尚未齐全 |
 | L4 真实 Host/Task | 部分通过 | Pi/OpenCode 有真实模型、工具、Session、终态、archive 和 Git/MR；Pi 已有 Skills 与 execute-no-change #118，OpenCode 已有 task-private config/Skills isolation #119 和当前 Bundle continue #120；取消/abort 与 live command 有代表性证据 | Claude/Codex 成功路径、三协议完整矩阵、真实 recovery/concurrency 和完整异常矩阵未完成 |
 | L5 发布验收 | 未完成 | 验收场景和统计方法已冻结 | 四 Harness 功能矩阵、20-task、Pi 非劣性、完整 UI/交互和发布评审未通过 |
@@ -142,7 +151,8 @@ identity，不从 image、`PATH`、用户配置或另一 Harness 的成功结果
 
 这是继续收集 L4/L5 证据前的第一步。
 
-- 评审并提交当前 dirty worktree 中的 Adapter、catalog、command、sanitizer 和前端修复，明确唯一源码 revision；
+- 已评审并提交 Adapter、catalog、command、sanitizer 和 entrypoint 修复为 `e4b9b59e`，再提交 V2
+  lineage 会话提示修复为 `5ef8ddd3`，明确唯一当前源码 revision；
 - 在该 revision 上运行完整 backend unit、frontend unit/build、mock E2E、Ruff、shell/Python 静态检查；
 - 由同一 revision 重新生成 Runtime Bundle，核对 Image、Kit、Bundle、Adapter、Profile generation 和
   manifest identity；
