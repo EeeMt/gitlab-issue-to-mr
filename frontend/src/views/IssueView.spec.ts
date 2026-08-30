@@ -1556,6 +1556,17 @@ describe('IssueView', () => {
       expect(drawer.props('defaultProviderId')).toBe(8)
     })
 
+    it('treats a V2 harness lineage as a current session', async () => {
+      setupDefaultMocks({ claude_session_id: null, current_harness: 'opencode' })
+      wrapper = await mountComponent()
+
+      await wrapper.find('[data-testid="issue-toggle-create-task"]').trigger('click')
+      await nextTick()
+
+      const drawer = wrapper.findComponent({ name: 'TaskFormDrawer' })
+      expect(drawer.props('hasCurrentSession')).toBe(true)
+    })
+
     it('shows error message when createTask fails', async () => {
       setupDefaultMocks()
       mockApi.createTask.mockRejectedValue(new Error('create fail'))

@@ -2690,7 +2690,7 @@ describe('TaskView', () => {
         ],
         description: 'Issue context for follow-up',
         status: 'open',
-        claude_session_id: 'legacy-session',
+        claude_session_id: null,
         current_harness: 'codex',
         default_harness_key: 'claude',
       })
@@ -2704,6 +2704,7 @@ describe('TaskView', () => {
         .findAllComponents({ name: 'TaskFormDrawer' })
         .find((drawer) => drawer.props('mode') === 'create')
       expect(createDrawer).toBeTruthy()
+      expect(createDrawer!.props('hasCurrentSession')).toBe(true)
       expect(createDrawer!.props('issueCurrentHarness')).toBe('codex')
       expect(createDrawer!.props('issueDefaultHarness')).toBe('claude')
     })

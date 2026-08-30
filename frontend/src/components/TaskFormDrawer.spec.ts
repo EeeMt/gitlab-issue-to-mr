@@ -1074,7 +1074,7 @@ describe('TaskFormDrawer', () => {
     })
 
     it('allows fresh-session mode when only a legacy workspace session may exist', async () => {
-      await mountDrawer({ hasClaudeSession: false })
+      await mountDrawer({ hasCurrentSession: false })
       await openDrawer()
 
       const switchButton = wrapper.find('[data-testid="task-session-mode-switch"]')
@@ -1094,7 +1094,7 @@ describe('TaskFormDrawer', () => {
     })
 
     it('submits fresh-session mode without changing the workspace options', async () => {
-      await mountDrawer({ hasClaudeSession: true })
+      await mountDrawer({ hasCurrentSession: true })
       await openDrawer()
 
       await wrapper.find('[data-testid="task-session-mode-switch"]').trigger('click')

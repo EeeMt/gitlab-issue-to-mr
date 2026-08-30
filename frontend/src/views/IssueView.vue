@@ -307,7 +307,7 @@
       mode="create"
       :issue-id="issueId"
       :issue-description="issue?.description ?? undefined"
-      :has-claude-session="Boolean(issue?.claude_session_id)"
+      :has-current-session="Boolean(issue?.claude_session_id || issue?.current_harness)"
       :issue-current-harness="issue?.current_harness ?? null"
       :issue-default-harness="issue?.default_harness_key ?? null"
       :worker-profile-id="issue?.worker_profile_id ?? null"

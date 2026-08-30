@@ -452,7 +452,7 @@
                 />
               </span>
               <span class="session-context-row__description">
-                {{ t(hasClaudeSession
+                {{ t(hasCurrentSession
                   ? 'createTask.startFreshSessionHint'
                   : 'createTask.startFreshSessionNoCurrent') }}
               </span>
@@ -841,7 +841,7 @@ const props = withDefaults(defineProps<{
   mode?: 'create' | 'edit'
   issueId?: number
   issueDescription?: string
-  hasClaudeSession?: boolean
+  hasCurrentSession?: boolean
   issueCurrentHarness?: string | null
   issueDefaultHarness?: string | null
   workerProfileId?: number | null
@@ -849,7 +849,7 @@ const props = withDefaults(defineProps<{
   task?: Task
 }>(), {
   mode: 'create',
-  hasClaudeSession: false,
+  hasCurrentSession: false,
   issueCurrentHarness: null,
   issueDefaultHarness: null
 })

@@ -593,7 +593,7 @@
     mode="create"
     :issue-id="task?.issue_id"
     :issue-description="issueDescription"
-    :has-claude-session="issueHasClaudeSession"
+    :has-current-session="issueHasCurrentSession"
     :issue-current-harness="issueCurrentHarness"
     :issue-default-harness="issueDefaultHarness"
     :worker-profile-id="issueWorkerProfileId"
@@ -715,7 +715,7 @@ const taskLogs = ref<TaskLog[]>([])
 const activeRetryTask = ref<Task | null>(null)
 const issueTasks = ref<Task[]>([])
 const issueDescription = ref<string | undefined>(undefined)
-const issueHasClaudeSession = ref(false)
+const issueHasCurrentSession = ref(false)
 const issueStatus = ref<Issue['status'] | null>(null)
 const issueWorkerProfileId = ref<number | null>(null)
 const issueDefaultProviderId = ref<number | null>(null)
@@ -1040,7 +1040,7 @@ async function refreshIssueTasks(requestedTaskId: number) {
   if (!issueId) {
     issueTasks.value = []
     issueDescription.value = undefined
-    issueHasClaudeSession.value = false
+    issueHasCurrentSession.value = false
     issueStatus.value = null
     issueWorkerProfileId.value = null
     issueDefaultProviderId.value = null
@@ -1053,7 +1053,7 @@ async function refreshIssueTasks(requestedTaskId: number) {
     if (requestedTaskId !== taskId.value || task.value?.issue_id !== issueId) return
     issueTasks.value = issueData.tasks ?? []
     issueDescription.value = issueData.description ?? undefined
-    issueHasClaudeSession.value = Boolean(issueData.claude_session_id)
+    issueHasCurrentSession.value = Boolean(issueData.claude_session_id || issueData.current_harness)
     issueStatus.value = issueData.status ?? null
     issueWorkerProfileId.value = issueData.worker_profile_id ?? null
     issueDefaultProviderId.value = issueData.default_provider_id ?? null
@@ -1063,7 +1063,7 @@ async function refreshIssueTasks(requestedTaskId: number) {
     if (requestedTaskId !== taskId.value || task.value?.issue_id !== issueId) return
     issueTasks.value = []
     issueDescription.value = undefined
-    issueHasClaudeSession.value = false
+    issueHasCurrentSession.value = false
     issueStatus.value = null
     issueWorkerProfileId.value = null
     issueDefaultProviderId.value = null
@@ -1308,7 +1308,7 @@ watch(
       activeRetryTask.value = null
       issueTasks.value = []
       issueDescription.value = undefined
-      issueHasClaudeSession.value = false
+      issueHasCurrentSession.value = false
       issueStatus.value = null
       issueCurrentHarness.value = null
       issueDefaultHarness.value = null
