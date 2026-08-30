@@ -841,6 +841,47 @@ async def _remove_created_container(worker, db: AsyncSession, task: Task, contai
     return True
 
 
+async def stop_container_for_persisted_cancellation(container: Any, task_id: int) -> None:
+    """Stop a just-started container after a durable cancellation request is observed."""
+    try:
+        await asyncio.to_thread(container.reload)
+    except NotFound as exc:
+        raise TaskContainerLookupError(
+            f"Could not confirm cancellation container {getattr(container, 'id', 'unknown')} "
+            f"for task {task_id}"
+        ) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise TaskContainerLookupError(
+            f"Could not inspect cancellation container for task {task_id}"
+        ) from exc
+
+    if getattr(container, "status", None) in {"created", "exited", "dead", "removing"}:
+        return
+
+    try:
+        await asyncio.to_thread(container.stop, timeout=10)
+    except NotFound as exc:
+        raise TaskContainerLookupError(
+            f"Cancellation container for task {task_id} disappeared while stopping"
+        ) from exc
+    except Exception as stop_error:  # noqa: BLE001
+        logger.warning(
+            "Graceful stop failed for task %s after persisted cancellation: %s; forcing stop",
+            task_id,
+            stop_error,
+        )
+        try:
+            await asyncio.to_thread(container.kill)
+        except NotFound as exc:
+            raise TaskContainerLookupError(
+                f"Cancellation container for task {task_id} disappeared while killing"
+            ) from exc
+        except Exception as kill_error:  # noqa: BLE001
+            raise TaskContainerLookupError(
+                f"Could not stop cancellation container for task {task_id}"
+            ) from kill_error
+
+
 async def _start_created_container(
     worker,
     db: AsyncSession,

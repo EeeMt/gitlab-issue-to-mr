@@ -1,7 +1,7 @@
 import hashlib
 import io
 import tarfile
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -1503,4 +1503,46 @@ async def test_execute_runner_propagates_unknown_container_outcome_for_scheduler
         with pytest.raises(TaskContainerLookupError, match="create outcome unknown"):
             await run_execute_task(worker, db, 12, settings=SimpleNamespace())
 
+    worker._handle_execute_task_failure.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_execute_runner_stops_started_container_for_persisted_cancellation():
+    task = SimpleNamespace(
+        id=12,
+        status=TaskStatus.RUNNING,
+        cancel_requested_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+    issue = SimpleNamespace(id=1)
+    container = MagicMock(status="running", id="container-12")
+    worker = MagicMock()
+    worker._monitor_container_run = AsyncMock(return_value=False)
+    worker._handle_execute_task_failure = AsyncMock()
+    db = MagicMock()
+    db.refresh = AsyncMock()
+    context = {
+        "handled": False,
+        "settings": SimpleNamespace(),
+        "task": task,
+        "issue": issue,
+        "had_existing_mr": False,
+        "sudo_gl": None,
+    }
+
+    with (
+        patch(
+            "app.core.worker_task_runner.prepare_execute_task_context",
+            new=AsyncMock(return_value=context),
+        ),
+        patch(
+            "app.core.worker_task_runner.create_execute_container",
+            new=AsyncMock(return_value=container),
+        ),
+    ):
+        result = await run_execute_task(worker, db, 12, settings=SimpleNamespace())
+
+    assert result is False
+    container.reload.assert_called_once_with()
+    container.stop.assert_called_once_with(timeout=10)
+    worker._monitor_container_run.assert_awaited_once()
     worker._handle_execute_task_failure.assert_not_awaited()

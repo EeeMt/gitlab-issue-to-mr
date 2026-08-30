@@ -2,6 +2,7 @@
 
 import json
 import logging
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -21,6 +22,7 @@ from app.core.worker_task_lifecycle import (
     create_execute_container,
     prepare_execute_task_context,
     prepare_resume_task_context,
+    stop_container_for_persisted_cancellation,
 )
 from app.models import Task, TaskStatus
 
@@ -59,6 +61,12 @@ async def run_execute_task(
             )
             if container is None:
                 return False
+            await db.refresh(task)
+            if task.status == TaskStatus.CANCELLED or isinstance(
+                getattr(task, "cancel_requested_at", None),
+                datetime,
+            ):
+                await stop_container_for_persisted_cancellation(container, task_id)
         except ValueError as error:
             logger.error(
                 "[Task %s] Failed while building worker environment: %s",

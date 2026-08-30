@@ -34,6 +34,19 @@ runtime verify 已重新执行并返回 `ready`；Task #103 在有效 readiness 
   214 条 Pi 原始 Harness 事件、TaskLog、运行归档和 Git delivery；归档包含 `event.jsonl`、
   `harness-result.json`、`harness-events/pi.jsonl` 等。Task #102 因首次沿用需求默认 OpenCode 而取消，
   不计入 Pi 证据。
+- 为容器已创建后才落库的取消请求补上收口：Runner 在创建容器后重新读取 Task 的持久化取消意图，
+  对已启动容器执行有界 graceful stop，并在 stop 失败时仅对该容器 fallback 到 kill；新增焦点单测。
+  当前工作树的相关聚焦 suite 为 `109 passed`，Ruff 与 `git diff --check` 通过；backend/scheduler
+  已在远端重建，运行中的 backend、scheduler 均使用新镜像并保持 `dual_canary`。
+- 修复后在 `192.168.50.129` 通过 UI 创建 Pi fresh execute Task #115（Provider 7）和 OpenCode
+  fresh freeform Task #116；两者均 `completed`、无取消意图、容器无残留，各自保存独立 runtime archive，
+  attempt 分别以 `pi`/`opencode` 的 `run.completed` 和 `control_state=closed` 收口。Task #115 的
+  交付摘要验证单一 canary 文件及字节内容；Task #116 的任务详情、工具卡片、提交记录和交付摘要验证
+  OpenCode 文件交付。两次正常收口都观察到停止后 canonical tail 的 Docker 409，随后 archive fallback
+  保留了 `event.jsonl`、对应 Harness 原始事件和终态；该告警不作为 Harness 成功失败的替代判据。
+- 远端非机密 provider 配置当前只有 Provider 3/6 的 Anthropic、Provider 4 的 Responses、Provider 5/7
+  的 Chat；已知受限 provider 的真实请求仍返回额度限制，因此本轮不重复消耗它们，也不把 Provider 7
+  的 Chat 成功冒充 Claude/Codex 成功。Claude/Codex 的真实成功矩阵仍待兼容额度恢复。
 - GitLab 提交 `91aab46e` 只包含目标 canary 文件（1 addition、0 deletions）；字节级内容以提交页面为准，
   不以 AI 交付摘要中的换行描述替代。Task #103 结束后没有 `codify-103` 容器残留。
 - 远端 Docker `system df` 显示磁盘未满，本轮没有清理镜像；只保留“满盘时清理已确认的 Codify 调试镜像”
