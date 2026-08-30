@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import http.client
 import json
 import os
 import subprocess
@@ -265,7 +266,12 @@ class OpenCodeServerClient:
                             record["data"] = item["data"]
                         yield record
                     buffer = _sse_tail(buffer)
-        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+        except (
+            http.client.IncompleteRead,
+            urllib.error.URLError,
+            TimeoutError,
+            ConnectionError,
+        ) as exc:
             raise ConnectionError(f"OpenCode SSE event stream failed: {exc}") from exc
 
 

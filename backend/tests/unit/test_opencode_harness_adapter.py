@@ -9,6 +9,7 @@ deterministically rejects every command (schemas.md §3.3 / phase3 design §5).
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import signal
@@ -945,6 +946,26 @@ def test_opencode_event_stream_preserves_durable_data(tmp_path, monkeypatch):
             "data": {"sessionID": "ses-1", "delta": "ok"},
         }
     ]
+
+
+def test_opencode_event_stream_classifies_incomplete_read_as_disconnect(monkeypatch):
+    """A killed OpenCode Server must enter the Bridge status-recovery path."""
+    bridge = _load_bridge()
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read1(self, size=-1):
+            raise http.client.IncompleteRead(b"")
+
+    monkeypatch.setattr(bridge.urllib.request, "urlopen", lambda *args, **kwargs: _Response())
+
+    with pytest.raises(ConnectionError, match="OpenCode SSE event stream failed"):
+        list(bridge.OpenCodeServerClient(port=8099).event_stream())
 
 
 def test_opencode_parse_sse_data_frame_split_across_chunks(tmp_path):
