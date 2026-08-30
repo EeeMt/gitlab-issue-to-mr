@@ -95,6 +95,35 @@ def _compact_raw_log_noise(logs: str) -> str:
     return compacted
 
 
+async def _append_archived_failure_detail(
+    task_id: int,
+    task_status: TaskStatus,
+    logs: str,
+    tail_chars: int | None,
+) -> str:
+    """Append the safe archived API error to terminal raw logs when available."""
+    if task_status not in {TaskStatus.FAILED, TaskStatus.CANCELLED}:
+        return logs
+
+    from app.core.task_failure_details import read_archived_harness_failure_detail
+    from app.core.worker import sanitize_sensitive_data
+
+    detail = await asyncio.to_thread(
+        read_archived_harness_failure_detail,
+        task_id,
+        sanitize_sensitive_data,
+    )
+    if not detail:
+        return logs
+
+    marker = f"[archived harness error] {detail}"
+    if marker not in logs:
+        logs = f"{logs.rstrip()}\n\n{marker}\n" if logs else f"{marker}\n"
+    if tail_chars is not None and len(logs) > tail_chars:
+        return logs[-tail_chars:]
+    return logs
+
+
 async def _fetch_raw_log_chunks(
     db: AsyncSession,
     *,
@@ -590,20 +619,12 @@ async def get_task_container_logs(
             task_id=task_id,
             tail_chars=tail_chars,
         )
-        if not logs and task.status in {
-            TaskStatus.FAILED,
-            TaskStatus.CANCELLED,
-        }:
-            from app.core.task_failure_details import read_archived_harness_failure_detail
-            from app.core.worker import sanitize_sensitive_data
-
-            archived_failure_detail = await asyncio.to_thread(
-                read_archived_harness_failure_detail,
-                task_id,
-                sanitize_sensitive_data,
-            )
-            if archived_failure_detail:
-                logs = f"[archived harness error] {archived_failure_detail}\n"
+        logs = await _append_archived_failure_detail(
+            task_id,
+            task.status,
+            logs,
+            tail_chars,
+        )
         return {
             "container_id": task.container_id,
             "logs": _compact_raw_log_noise(logs),
@@ -638,6 +659,12 @@ async def get_task_container_logs(
             task_id=task_id,
             tail_chars=tail_chars,
         )
+        logs = await _append_archived_failure_detail(
+            task_id,
+            task.status,
+            logs,
+            tail_chars,
+        )
         if logs:
             return {
                 "container_id": task.container_id,
@@ -648,28 +675,6 @@ async def get_task_container_logs(
                 "raw_logs_finalized": raw_logs_finalized,
                 "logs_truncated": logs_truncated,
             }
-        if task.status in {
-            TaskStatus.FAILED,
-            TaskStatus.CANCELLED,
-        }:
-            from app.core.task_failure_details import read_archived_harness_failure_detail
-            from app.core.worker import sanitize_sensitive_data
-
-            archived_failure_detail = await asyncio.to_thread(
-                read_archived_harness_failure_detail,
-                task_id,
-                sanitize_sensitive_data,
-            )
-            if archived_failure_detail:
-                return {
-                    "container_id": task.container_id,
-                    "logs": f"[archived harness error] {archived_failure_detail}\n",
-                    "status": task.status,
-                    "source": "archive",
-                    "last_sequence_no": 0,
-                    "raw_logs_finalized": raw_logs_finalized,
-                    "logs_truncated": False,
-                }
         logger.warning(f"Container gone and no DB chunks for task {task_id}: {e}")
         return {
             "container_id": task.container_id,
