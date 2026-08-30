@@ -2,14 +2,12 @@
 
 **复核日期：** 2026-08-30
 
-**本地源码基线：** `dev` 当前已将本轮 Harness Adapter、catalog、command、sanitizer、前端 API 和
-entrypoint 测试修复冻结为本地提交 `e4b9b59e`，并在其上追加前端 V2 lineage 会话提示修复提交
-`5ef8ddd3`、OpenCode SSE `IncompleteRead` 断连归类修复提交 `ab937400`，以及外层 Docker timeout
-taxonomy 修复提交 `995bb623`，均尚未推送。当前 revision 的完整 backend unit 为 `3,196 passed /
-4 skipped / 96 subtests passed`，聚焦 timeout/Worker Docker suite 为 `72 passed`，frontend suite/build、
-Ruff、Shell/Python 检查和既有 mock E2E 结果保持通过。远端 backend/scheduler 已按 `995bb623` 重建，
-nginx 保持既有当前 checkout 前端镜像。
-镜像没有自定义 Git revision label，因此只把容器内源码标记、前端 footer 和运行时行为作为来源交叉证据，
+**本地源码基线：** `dev` 当前 HEAD 为 `18bf565b`，包含 OpenRouter 三协议校验、归档 Harness 错误
+详情和 Raw Logs 回退修复；其前置的 timeout taxonomy、Pi canary 文档和 V2 lineage 修复提交仍均未推送。
+本轮增量验证为 backend 聚焦 Provider/结果详情 suite `36 passed`、Ruff 通过，frontend 聚焦任务详情/结果/
+进程 suite `158 passed`；不把这些增量结果冒充为该 revision 的完整 suite。远端 backend/scheduler 已按
+当前源码重建，nginx 也已按当前 checkout 重建；镜像没有自定义 Git revision label，因此只把容器内源码
+标记、前端 footer 和运行时行为作为来源交叉证据。
 不把不存在的 label 当作 provenance。
 
 **运行边界：** Backend/Scheduler 仍为 `HARNESS_EXECUTION_MODE=dual_canary`、
@@ -25,6 +23,22 @@ readiness TTL 较短，下一轮 canary 仍须在执行前重新 verify。
 
 **本轮推进记录（2026-08-30）：**
 
+- 当前源码 `18bf565b` 已部署到 `192.168.50.129`：backend image 为
+  `sha256:73ca488420aada8882173f881274e05343b32165a9fb5e563d1147f106a7c6eb`，nginx image 为
+  `sha256:4c5cef3be23d8ec73a2cbbc532abd8e41b90a6baba66b09f2b127d4de3f28347`；backend healthy、scheduler/nginx
+  正常运行，仍为 `dual_canary`，数据库仍为 `077_v2_worker_kit_identity`。
+- Provider 矩阵已补充为同一 OpenRouter key 的独立加密 credential：现有 `openrouter-free`（Provider 7，
+  `minimax/minimax-m3:free`）已标记 `provider_driver=openrouter`；新增 Provider 8/9/10 均为
+  `z-ai/glm-5.2:free`，分别使用 `anthropic_messages`、`openai_responses`、
+  `openai_chat_completions`。API 校验只对显式 OpenRouter driver 放开三协议，不扩大普通兼容 endpoint。
+- 通过同一 Issue #18、OpenCode、fresh freeform 和上述三个 Provider 完成真实三协议请求对账：Task #137
+  的 Anthropic Messages 命中 `/api/v1/messages`，Task #138 的 Responses 命中 `/api/v1/responses`，Task
+  #139 的 Chat Completions 命中 `/api/v1/chat/completions`；三者均以 `failed` 收口并保留单一
+  `run.failed`/closed attempt，OpenRouter 返回 HTTP 429 上游共享池限流，故不计为 conformance 成功，也不
+  发生协议转换或本地回退。Task #139 已由新逻辑落库详细错误；#137/#138 的详情由任务 API 从归档读取。
+- 修复了 V2 `session.error` 只被压缩为 `APIError` 的展示缺口：从归档提取 bounded/sanitized 的 status、
+  provider reason、retry-after 和 endpoint，明确排除 response headers、request ID 和凭据；终态任务即使
+  容器已清理，Raw Logs 也会显示归档错误段。#137 通过远端浏览器确认错误卡片和 Raw Logs 均可读。
 - 远端 `192.168.50.129` 已按 `995bb623` 重建 backend/scheduler；backend healthy、scheduler/nginx
   正常运行并报告 `dual_canary`，数据库仍为 `077_v2_worker_kit_identity`。backend 镜像 ID 为
   `sha256:d5300664a4b27edd391d1ce433646b14a1b459cf299205426ed2280eaadf43a9`；镜像没有自定义 Git revision
