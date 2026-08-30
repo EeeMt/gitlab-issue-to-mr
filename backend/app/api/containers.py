@@ -590,6 +590,20 @@ async def get_task_container_logs(
             task_id=task_id,
             tail_chars=tail_chars,
         )
+        if not logs and task.status in {
+            TaskStatus.FAILED,
+            TaskStatus.CANCELLED,
+        }:
+            from app.core.task_failure_details import read_archived_harness_failure_detail
+            from app.core.worker import sanitize_sensitive_data
+
+            archived_failure_detail = await asyncio.to_thread(
+                read_archived_harness_failure_detail,
+                task_id,
+                sanitize_sensitive_data,
+            )
+            if archived_failure_detail:
+                logs = f"[archived harness error] {archived_failure_detail}\n"
         return {
             "container_id": task.container_id,
             "logs": _compact_raw_log_noise(logs),
@@ -634,6 +648,28 @@ async def get_task_container_logs(
                 "raw_logs_finalized": raw_logs_finalized,
                 "logs_truncated": logs_truncated,
             }
+        if task.status in {
+            TaskStatus.FAILED,
+            TaskStatus.CANCELLED,
+        }:
+            from app.core.task_failure_details import read_archived_harness_failure_detail
+            from app.core.worker import sanitize_sensitive_data
+
+            archived_failure_detail = await asyncio.to_thread(
+                read_archived_harness_failure_detail,
+                task_id,
+                sanitize_sensitive_data,
+            )
+            if archived_failure_detail:
+                return {
+                    "container_id": task.container_id,
+                    "logs": f"[archived harness error] {archived_failure_detail}\n",
+                    "status": task.status,
+                    "source": "archive",
+                    "last_sequence_no": 0,
+                    "raw_logs_finalized": raw_logs_finalized,
+                    "logs_truncated": False,
+                }
         logger.warning(f"Container gone and no DB chunks for task {task_id}: {e}")
         return {
             "container_id": task.container_id,

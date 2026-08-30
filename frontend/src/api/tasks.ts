@@ -333,7 +333,7 @@ export interface TaskContainerLogsResponse {
   container_status?: string
   logs: string
   status: string
-  source?: 'db'
+  source?: 'db' | 'archive'
   last_sequence_no?: number
   raw_logs_finalized?: boolean
   logs_truncated?: boolean

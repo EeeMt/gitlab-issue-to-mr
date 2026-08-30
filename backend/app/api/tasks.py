@@ -1,5 +1,6 @@
 """Task management API endpoints."""
 
+import asyncio
 import logging
 import os
 import time
@@ -618,6 +619,17 @@ async def get_task(
     metadata = await get_project_metadata(task.project_id)
     t3 = time.time()
     result_data = _serialize_task(task, metadata, include_prompt_details=True)
+    if task.status in (TaskStatus.FAILED, TaskStatus.CANCELLED):
+        from app.core.task_failure_details import read_archived_harness_failure_detail
+        from app.core.worker import sanitize_sensitive_data
+
+        archived_failure_detail = await asyncio.to_thread(
+            read_archived_harness_failure_detail,
+            task.id,
+            sanitize_sensitive_data,
+        )
+        if archived_failure_detail:
+            result_data["error_message"] = archived_failure_detail
     queue_contexts = await compute_task_queue_contexts(db, [task])
     apply_queue_context(result_data, task.id, queue_contexts, current_user=_current_user)
     if task.status in (TaskStatus.PENDING, TaskStatus.QUEUED):

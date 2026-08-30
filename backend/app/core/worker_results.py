@@ -20,6 +20,7 @@ from app.core.harness_protocol import (
     validate_result_v2,
 )
 from app.core.task_event_archive import archive_bundle_name
+from app.core.task_failure_details import read_archived_harness_failure_detail
 from app.core.usage_limits import upsert_task_usage_ledger
 from app.core.utcnow import utcnow
 from app.models import Issue, Task, TaskLog, TaskRunArchive, TaskStatus
@@ -394,6 +395,12 @@ async def parse_task_result(
             failure_message = str(failure.get("message") or failure.get("kind") or "")
         if terminal_status == "protocol_error" or failure_kind == "protocol_error":
             failure_message = f"protocol_error: {failure_message or 'canonical attempt failed'}"
+        archived_failure_detail = read_archived_harness_failure_detail(
+            task.id,
+            sanitize_sensitive_data,
+        )
+        if archived_failure_detail and failure_kind != "protocol_error" and terminal_status != "protocol_error":
+            failure_message = archived_failure_detail
         task.error_message = sanitize_sensitive_data(
             failure_message or logs[-1000:] or "Harness task failed"
         )[-1000:]

@@ -209,7 +209,11 @@ const runtimeInfoEntry = computed(() => {
 })
 const hasStructuredContent = computed(() => processRows.value.length > 0)
 const eventStreamCount = computed(() => processRows.value.filter(r => !isCompactRow(r)).length)
-const isRawTabDisabled = computed(() => !props.terminalHtml && !props.task?.container_id)
+const isRawTabDisabled = computed(() => (
+  !props.terminalHtml
+  && !props.task?.container_id
+  && !['completed', 'failed', 'cancelled'].includes(props.taskStatus)
+))
 const elapsedDisplay = computed(() => (!props.isActive || elapsedMs.value <= 0 ? '' : formatDurationMs(elapsedMs.value)))
 const activeScrollPosition = computed(() => scrollPositions[activeTab.value])
 const autoScroll = computed(() => activeScrollPosition.value.atBottom)
