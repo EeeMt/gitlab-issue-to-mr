@@ -18,9 +18,10 @@ nginx 保持既有当前 checkout 前端镜像。
 **当前 candidate：** 目标 `linux/amd64` Host 已安装 Kit `0.6.11`；Profile 4 启用 Pi、OpenCode、
 Claude、Codex，Profile 内默认 Harness 为 Pi，但该 Profile 不是系统全局默认。Profile 4 的 runtime
 verify 已于 DB 时间 `2026-08-30 13:50:13.629843` 返回成功，`image/Kit/Harness` evidence 与 generation `24`
-已持久化；本轮 timeout canary 使用 Runtime Bundle `103`（digest
-`1bed493ceecab6084f8f224e4baa1527397e3ee0c1e0c8ce34a0f40a0215227b`）。由于 readiness TTL 较短，下一轮
-canary 仍须在执行前重新 verify。
+已持久化；OpenCode timeout canary 使用 Runtime Bundle `103`（digest
+`1bed493ceecab6084f8f224e4baa1527397e3ee0c1e0c8ce34a0f40a0215227b`），Pi timeout canary 随后使用
+Runtime Bundle `104`（digest `f3dbcb6bab4c3123d8aee9f71b39dc7c21fadf95e2274be871eee27d38cc4731`）。由于
+readiness TTL 较短，下一轮 canary 仍须在执行前重新 verify。
 
 **本轮推进记录（2026-08-30）：**
 
@@ -138,6 +139,14 @@ canary 仍须在执行前重新 verify。
   `task-135-runtime-archive.tar.gz`、5,573 bytes、SHA-256
   `2052afaaba3d0df99034cc4f1c67e6b301c1a6d19cb7e495b95439b28ec5a3bf`，无残留容器、无 active task。
   canary 后已将数据库 `task_timeout` 恢复为 `1800` 秒。
+- 在同一 Profile generation `24`、Runtime Bundle `104` 上显式选择 Pi、Provider 7、`freeform`、fresh
+  Task #136，提示只运行 `sleep 180`。任务以数据库 `failed` 和 `Task timed out after 60s` 收口；scheduler
+  记录 marker 在 container stop 前持久化，容器最终以 143 退出并被清理。归档包含 `event.jsonl`/
+  `harness-result.json`，canonical 共 16 条，唯一 Harness terminal 为 `harness.failed/timeout`，唯一
+  Task terminal 为 `run.failed/failed/timeout`，attempt 为 `last_seq=16`、`control_state=closed`；result
+  为 `failed/timeout`。archive 为 `task-136-runtime-archive.tar.gz`、4,313 bytes、SHA-256
+  `44f0300cad24d5707f14e38db18a6797ca372c3450c30d76883a3a051628c874`，无残留容器、无 active task。
+  canary 后已将数据库 `task_timeout` 恢复为 `1800` 秒。
 - 远端 UI 实证显示 Issue #22 已有 OpenCode V2 lineage，但旧前端只读取 `claude_session_id`，曾误显示
   “当前需求没有已记录的会话”。`5ef8ddd3` 将 TaskFormDrawer 的语义改为 `hasCurrentSession`，IssueView
   和 TaskView 同时识别 legacy session 与 `current_harness`；相关 3 个入口测试 335 passed，完整前端
@@ -203,8 +212,8 @@ benchmark 以 [V2 schema](../../architecture/open-harness-v2-schemas.md) 为准�
 | --- | --- | --- | --- |
 | L1 架构/合同 | 通过 | ownership、schema、协议、identity、roll-forward-only 和 Runbook 已对齐 | 后续合同变化仍须回到共享 schema 评审 |
 | L2 源码/测试 | 通过（当前 revision） | V2 公共地基、Pi/OpenCode Adapter、四 Harness fixture、command plane、catalog 和 execution policy 已落地；`995bb623` 的完整 backend unit、timeout 回归、Ruff 和 Shell/Python 检查通过，`5ef8ddd3` 的完整 frontend suite/build 通过，mock E2E 沿用已通过结果，远端 composition 以容器源码标记、footer 和运行时行为交叉核对 | 后续若改变源码或 composition，必须重新生成唯一 release evidence；`v2_only` 仍属于 L6 |
-| L3 不可变 composition | 部分通过 | `linux/amd64` Image + Kit `0.6.11` + Profile 4 已安装并完成 identity/DB 绑定；Profile generation `24` 重新 verify，OpenCode timeout Task #135 绑定 Runtime Bundle `103`，既有 crash/no-change/continue 样本仍分别绑定 Bundle `101`，Pi no-change 绑定 Bundle `102` | readiness TTL 较短且会再次过期；Claude/Codex 各自基于成功 Task 的独立 Bundle 导出与最终 release freeze 尚未齐全 |
-| L4 真实 Host/Task | 部分通过 | Pi/OpenCode 有真实模型、工具、Session、终态、archive 和 Git/MR；Pi 已有 Skills 与 execute-no-change #118、当前 Bundle no-change #128，OpenCode 已有 task-private config/Skills isolation #119、continue #120、当前 Bundle crash #125、no-change #126、server-close failure-path #127、当前 revision fresh/continue 成功对 #129/#130、fresh namespace probe #131、跨 Issue 隔离 #132 和 outer-timeout taxonomy #135；#129/#130 已观察到正常 `session.idle` 收口；取消/abort 与 live command 有代表性证据 | Claude/Codex 成功路径、Pi timeout、三协议完整矩阵、不同 endpoint/config 导致的不兼容 namespace、真实 recovery/concurrency 和完整异常矩阵未完成 |
+| L3 不可变 composition | 部分通过 | `linux/amd64` Image + Kit `0.6.11` + Profile 4 已安装并完成 identity/DB 绑定；Profile generation `24` 重新 verify，OpenCode timeout Task #135 绑定 Runtime Bundle `103`，Pi timeout Task #136 绑定 Runtime Bundle `104`，既有 crash/no-change/continue 样本仍分别绑定 Bundle `101`，Pi no-change 绑定 Bundle `102` | readiness TTL 较短且会再次过期；Claude/Codex 各自基于成功 Task 的独立 Bundle 导出与最终 release freeze 尚未齐全 |
+| L4 真实 Host/Task | 部分通过 | Pi/OpenCode 有真实模型、工具、Session、终态、archive 和 Git/MR；Pi 已有 Skills 与 execute-no-change #118、当前 Bundle no-change #128、outer-timeout taxonomy #136，OpenCode 已有 task-private config/Skills isolation #119、continue #120、当前 Bundle crash #125、no-change #126、server-close failure-path #127、当前 revision fresh/continue 成功对 #129/#130、fresh namespace probe #131、跨 Issue 隔离 #132 和 outer-timeout taxonomy #135；#129/#130 已观察到正常 `session.idle` 收口；取消/abort 与 live command 有代表性证据 | Claude/Codex 成功路径、Pi 三协议完整矩阵、不同 endpoint/config 导致的不兼容 namespace、真实 recovery/concurrency 和完整异常矩阵未完成 |
 | L5 发布验收 | 未完成 | 验收场景和统计方法已冻结 | 四 Harness 功能矩阵、20-task、Pi 非劣性、完整 UI/交互和发布评审未通过 |
 | L6 hard cut | 未执行 | `v2_only` 与 V1 只读的源码路径存在 | 未切全局 Pi 默认，未进入维护窗口，未执行 hard-cut smoke |
 
@@ -218,7 +227,7 @@ benchmark 以 [V2 schema](../../architecture/open-harness-v2-schemas.md) 为准�
 | --- | --- | --- |
 | Phase 0：协议探针与接口冻结 | 部分完成 | 四 Harness fixture、V2 schema 和 20-task 定义已冻结；Pi/OpenCode 三协议真实 Endpoint 的双向、异常和恢复 probe 尚未齐全 |
 | Phase 1：V2 公共地基与 command plane | 已完成当前 revision recheck | 当前 revision 的完整 release regression 与远端 composition 已核对；`v2_only` 生产切换属于 L6，不能用源码测试代替 |
-| Phase 2：Pi 默认 Harness | 部分完成 | 代表性真实功能、Skills 和 execute-no-change 已有样本；仍缺三协议完整 conformance、timeout/failure、native terminate 边界，以及 rejected、重投、settled race、Scheduler recovery 的真实矩阵和 20-task 非劣性门槛 |
+| Phase 2：Pi 默认 Harness | 部分完成 | 代表性真实功能、Skills、execute-no-change 和 outer-timeout taxonomy #136 已有样本；仍缺三协议完整 conformance、非 timeout failure、native terminate 边界，以及 rejected、重投、settled race、Scheduler recovery 的真实矩阵和 20-task 非劣性门槛 |
 | Phase 3：OpenCode 一级 Harness | 部分完成 | fresh/continue（当前 revision/Bundle 成功对 #129/#130）、Task-private Skills/配置、usage/tool、Git delivery、abort、当前 Bundle crash、no-change、server-close failure-path、正常 `session.idle` 收口、fresh namespace probe、跨 Issue 隔离和 outer-timeout taxonomy #135 已有样本；仍缺三协议完整 conformance、Agent/Command/variant，以及不同 endpoint/config 导致的不兼容 namespace 隔离证明 |
 | Phase 4：Claude/Codex V2 | 部分完成 | Adapter、协议声明、fixture/replay 和失败收口已落地；兼容 Provider 额度恢复后仍须完成两者的真实成功、Session、Skills、取消/timeout、usage、archive 和 Git/MR 矩阵 |
 | Phase 5：产品、制品、Canary 与 hard cut | 部分完成 | Kit/Profile/catalog/readiness 和部分 UI 已落地；四 Harness L4、20-task、完整 UI、release review、Pi 默认迁移和 `v2_only` 均未完成 |
@@ -245,13 +254,13 @@ identity，不从 image、`PATH`、用户配置或另一 Harness 的成功结果
 - 不使用 mutable tag、过期 readiness、旧 Bundle 或未提交 source rebuild 继续累计 release evidence。
 
 **退出证据：** 唯一可追溯 revision 与不可变 composition；Profile generation `24` readiness 有效；完整
-回归通过；timeout marker 的真实 failure-path 已在 Task #135 对账；无已知 P0/P1。
+回归通过；timeout marker 的真实 failure-path 已在 Task #135/#136 对账；无已知 P0/P1。
 
 ### R2 — 关闭四 Harness 功能与协议矩阵
 
 - Pi/OpenCode 分别对 `anthropic_messages`、`openai_responses`、`openai_chat_completions` 使用真实兼容
   Endpoint/Task 完成 config、model、usage、terminal 和 delivery 对账；禁止协议代理或 URL 推断冒充通过；
-- Pi 补齐 Skills、timeout/failure/execute-no-change、native terminate，以及 steering/follow-up 的
+- Pi 已有 timeout #136；仍须补齐非 timeout failure、Skills、execute-no-change、native terminate，以及 steering/follow-up 的
   rejected、幂等重投、settled race 和 Scheduler recovery；
 - OpenCode 已用当前/相关 DB-bound Bundle 证明 crash、no-change、server graceful-close failure-path、正常
   `session.idle` 收口，以及当前 revision 的 fresh/continue 成功对（#129/#130）、fresh namespace probe
