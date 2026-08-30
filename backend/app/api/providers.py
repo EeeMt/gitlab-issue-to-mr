@@ -42,16 +42,28 @@ KIND_PROTOCOLS: dict[str, frozenset[str]] = {
         {"openai_responses", "openai_chat_completions"}
     ),
 }
+PROVIDER_DRIVER_PROTOCOLS: dict[str, frozenset[str]] = {
+    # OpenRouter exposes the same model through all three supported wire
+    # protocols. Keep this exception explicit instead of widening every
+    # OpenAI-compatible endpoint to an unverified Anthropic Messages path.
+    "openrouter": frozenset(VALID_MODEL_PROTOCOLS),
+}
 
 
 def _validate_kind_protocol(
-    provider_kind: str, model_protocol: str, provider_options: dict
+    provider_kind: str,
+    model_protocol: str,
+    provider_options: dict,
+    provider_driver: str | None = None,
 ) -> None:
     if provider_kind not in VALID_PROVIDER_KINDS:
         raise ValueError(f"unknown provider_kind: {provider_kind!r}")
     if model_protocol not in VALID_MODEL_PROTOCOLS:
         raise ValueError(f"unknown model_protocol: {model_protocol!r}")
-    if model_protocol not in KIND_PROTOCOLS[provider_kind]:
+    allowed_protocols = KIND_PROTOCOLS[provider_kind]
+    if provider_driver in PROVIDER_DRIVER_PROTOCOLS:
+        allowed_protocols = PROVIDER_DRIVER_PROTOCOLS[provider_driver]
+    if model_protocol not in allowed_protocols:
         raise ValueError(
             f"provider_kind {provider_kind!r} cannot consume model_protocol "
             f"{model_protocol!r}"
@@ -100,7 +112,10 @@ class CreateProviderRequest(BaseModel):
     @model_validator(mode="after")
     def validate_kind_protocol(self) -> "CreateProviderRequest":
         _validate_kind_protocol(
-            self.provider_kind, self.model_protocol, self.provider_options
+            self.provider_kind,
+            self.model_protocol,
+            self.provider_options,
+            self.provider_driver,
         )
         return self
 
@@ -171,7 +186,10 @@ class UpdateProviderRequest(BaseModel):
     def validate_kind_protocol(self) -> "UpdateProviderRequest":
         if self.provider_kind is not None and self.model_protocol is not None:
             _validate_kind_protocol(
-                self.provider_kind, self.model_protocol, self.provider_options or {}
+                self.provider_kind,
+                self.model_protocol,
+                self.provider_options or {},
+                self.provider_driver,
             )
         elif self.provider_kind is not None and self.provider_kind not in VALID_PROVIDER_KINDS:
             raise ValueError(f"unknown provider_kind: {self.provider_kind!r}")
@@ -413,9 +431,15 @@ async def update_provider(
         if request.provider_options is not None
         else current_provider_options
     )
+    next_provider_driver = request.provider_driver or getattr(
+        provider, "provider_driver", None
+    )
     try:
         _validate_kind_protocol(
-            next_provider_kind, next_model_protocol, next_provider_options
+            next_provider_kind,
+            next_model_protocol,
+            next_provider_options,
+            next_provider_driver,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

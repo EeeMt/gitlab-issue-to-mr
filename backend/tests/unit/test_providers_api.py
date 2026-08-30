@@ -567,10 +567,22 @@ class ProviderEndpointFieldSchemaTests(unittest.TestCase):
                 model_protocol="anthropic_messages",
             )
         )
+        CreateProviderRequest(
+            **_valid_create_kwargs(
+                provider_kind="openai_compatible",
+                model_protocol="anthropic_messages",
+                provider_driver="openrouter",
+            )
+        )
 
     def test_rejects_invalid_kind_protocol_pairs(self):
         for kwargs in (
             {"provider_kind": "openai_compatible", "model_protocol": "anthropic_messages"},
+            {
+                "provider_kind": "openai_compatible",
+                "model_protocol": "anthropic_messages",
+                "provider_driver": "other-gateway",
+            },
             {"provider_kind": "anthropic_compatible", "model_protocol": "openai_responses"},
             {"provider_kind": "unknown_kind", "model_protocol": "anthropic_messages"},
             {"provider_kind": "anthropic_compatible", "model_protocol": "unknown_protocol"},
@@ -580,6 +592,11 @@ class ProviderEndpointFieldSchemaTests(unittest.TestCase):
 
     def test_update_validates_kind_protocol(self):
         UpdateProviderRequest(model_protocol="openai_responses")
+        UpdateProviderRequest(
+            provider_kind="openai_compatible",
+            model_protocol="anthropic_messages",
+            provider_driver="openrouter",
+        )
         with pytest.raises(ValidationError):
             UpdateProviderRequest(
                 provider_kind="anthropic_compatible", model_protocol="openai_responses"
