@@ -687,12 +687,14 @@ export interface TaskHarnessCatalog {
 }
 
 function generateCommandId(): string {
-  const hex = '0123456789abcdef'
-  let id = '01J'
-  for (let i = 0; i < 23; i += 1) {
-    id += hex[Math.floor(Math.random() * 16)]
-  }
-  return id + Date.now().toString(16)
+  const bytes = new Uint8Array(16)
+  crypto.getRandomValues(bytes)
+  // RFC 4122 version 4 / variant 1 UUID; the backend accepts UUIDs as the
+  // command idempotency key and this keeps the value at exactly 36 chars.
+  bytes[6] = (bytes[6] & 0x0f) | 0x40
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
 export async function sendHarnessCommand(

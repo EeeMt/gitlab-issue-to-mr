@@ -803,6 +803,34 @@ def _v2_archive_manifest_bytes(bundle: WorkerRuntimeBundle) -> bytes:
         raise RuntimeError("V2 Runtime Bundle archive is malformed") from exc
 
 
+def harness_manifest_from_bundle(bundle: object | None) -> dict | None:
+    """Resolve the harness-shaped manifest embedded in a Runtime Bundle.
+
+    The persisted ``manifest`` column is the runtime-bundle/v2 envelope,
+    while the Harness registry validates the source manifest that is frozen
+    inside the archive. Test doubles may provide the latter directly on
+    ``manifest``; real database rows are read through the undeferred bundle
+    bytes by ``load_bound_runtime_bundle`` before this helper is called.
+    """
+    manifest = getattr(bundle, "manifest", None)
+    if isinstance(manifest, dict) and "command_schema" in manifest:
+        return manifest
+    payload = getattr(bundle, "bundle_bytes", None)
+    if not payload:
+        return None
+    try:
+        with tarfile.open(fileobj=io.BytesIO(payload), mode="r:") as archive:
+            member = archive.extractfile(
+                str(RUNTIME_ARCHIVE_ROOT / "worker-entrypoint/harness/manifest.json")
+            )
+            if member is None:
+                return None
+            parsed = json.loads(member.read())
+    except (KeyError, TypeError, tarfile.TarError, json.JSONDecodeError, OSError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
 async def bind_runtime_bundle(
     db: AsyncSession,
     task: Task,

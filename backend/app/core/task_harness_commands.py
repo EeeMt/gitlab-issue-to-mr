@@ -9,9 +9,6 @@ immutable; the projector never writes back to these rows.
 
 from __future__ import annotations
 
-import io
-import json
-import tarfile
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -31,6 +28,7 @@ from app.core.harness_protocol import (
 )
 from app.core.harness_registry import HarnessRegistryError, registry_catalog_from_manifest
 from app.core.utcnow import utcnow
+from app.core.worker_runtime_bundle import harness_manifest_from_bundle
 from app.models import (
     Task,
     TaskHarnessAttempt,
@@ -60,38 +58,6 @@ class CommandCreateResult:
     rejection_message: str | None = None
 
 
-_HARNESS_MANIFEST_MEMBER = (
-    "codify-runtime/orchestration/worker-entrypoint/harness/manifest.json"
-)
-
-
-def _harness_manifest_from_bundle(bundle: object | None) -> dict | None:
-    """Resolve the harness-shaped manifest for a V2 Runtime Bundle.
-
-    The DB ``manifest`` column stores the runtime-bundle/v2 envelope (schema,
-    contract/event versions, adapter metadata), which the harness registry
-    cannot validate directly. The harness manifest (``command_schema``,
-    ``adapters.<key>.capabilities``, ...) lives inside the bundle archive, so
-    read it from ``bundle_bytes``. Unit-test mocks that attach a harness-shaped
-    ``manifest`` attribute keep working.
-    """
-    manifest = getattr(bundle, "manifest", None)
-    if isinstance(manifest, dict) and "command_schema" in manifest:
-        return manifest
-    payload = getattr(bundle, "bundle_bytes", None)
-    if not payload:
-        return None
-    try:
-        with tarfile.open(fileobj=io.BytesIO(payload), mode="r:") as archive:
-            member = archive.extractfile(_HARNESS_MANIFEST_MEMBER)
-            if member is None:
-                return None
-            parsed = json.loads(member.read())
-    except (tarfile.TarError, json.JSONDecodeError, OSError, KeyError):
-        return None
-    return parsed if isinstance(parsed, dict) else None
-
-
 def bundle_supports_command(
     bundle: object | None, harness_key: str, command_type: str
 ) -> bool:
@@ -106,7 +72,7 @@ def bundle_supports_command(
         return False
     if getattr(bundle, "contract_version", None) != HARNESS_CONTRACT_VERSION_V2:
         return False
-    manifest = _harness_manifest_from_bundle(bundle)
+    manifest = harness_manifest_from_bundle(bundle)
     if manifest is None:
         return False
     try:

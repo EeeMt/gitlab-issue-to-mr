@@ -1,4 +1,6 @@
+import io
 import json
+import tarfile
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -152,6 +154,51 @@ async def test_task_catalog_uses_frozen_bundle_not_current_source(monkeypatch):
     assert result["source"] == "task_runtime_bundle"
     assert result["catalog"][0]["key"] == "pi"
     assert result["catalog"][0]["enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_task_catalog_reads_harness_manifest_from_runtime_bundle_archive(monkeypatch):
+    harness_manifest = _manifest()
+    payload = io.BytesIO()
+    with tarfile.open(fileobj=payload, mode="w") as archive:
+        member = tarfile.TarInfo(
+            "codify-runtime/orchestration/worker-entrypoint/harness/manifest.json"
+        )
+        data = json.dumps(harness_manifest).encode()
+        member.size = len(data)
+        archive.addfile(member, io.BytesIO(data))
+
+    bundle = SimpleNamespace(
+        contract_version=HARNESS_CONTRACT_VERSION_V2,
+        digest="b" * 64,
+        manifest={
+            "schema": "codify.worker.runtime-bundle/v2",
+            "contract_version": HARNESS_CONTRACT_VERSION_V2,
+            "event_schema": "codify.worker.event/v2",
+            "adapters": {},
+        },
+        bundle_bytes=payload.getvalue(),
+    )
+    task = SimpleNamespace(runtime_bundle=bundle)
+    monkeypatch.setattr(
+        harness_catalog,
+        "get_task_with_access_check",
+        lambda *args, **kwargs: _async_result(task),
+    )
+    monkeypatch.setattr(
+        harness_catalog,
+        "load_bound_runtime_bundle",
+        lambda *args, **kwargs: _async_result(bundle),
+    )
+
+    result = await harness_catalog.get_task_harness_catalog(
+        12, SimpleNamespace(), None, SimpleNamespace()
+    )
+
+    entry = result["catalog"][0]
+    assert entry["key"] == "pi"
+    assert entry["capabilities"]["steering"] is True
+    assert entry["capabilities"]["follow_up"] is True
 
 
 def _catalog_entries() -> list[dict]:

@@ -16,6 +16,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.task_operations import get_task_with_access_check
@@ -63,6 +64,7 @@ PUBLIC_FALLBACK_REJECTION_CODE = "command_rejected"
 PUBLIC_FALLBACK_REJECTION_MESSAGE = "The command was rejected."
 PUBLIC_PROJECTION_ERROR_CODE = "command_projection_unavailable"
 PUBLIC_PROJECTION_ERROR_MESSAGE = "Command history is temporarily unavailable."
+MAX_COMMAND_DEADLOCK_RETRIES = 1
 
 
 class ProjectionError(Exception):
@@ -172,6 +174,15 @@ def _projection_http_error() -> HTTPException:
     )
 
 
+def _is_postgres_deadlock(error: DBAPIError) -> bool:
+    """Recognize PostgreSQL's retryable transaction-abort SQLSTATE."""
+    original = error.orig
+    return (
+        getattr(original, "sqlstate", None) == "40P01"
+        or getattr(original, "pgcode", None) == "40P01"
+    )
+
+
 @router.put("/tasks/{task_id}/commands/{command_id}")
 async def put_command(
     task_id: int,
@@ -194,29 +205,49 @@ async def put_command(
                 "message": "The command ID format is invalid.",
             },
         )
-    # Access check before mutating; loading the task also anchors task_id.
-    await get_task_with_access_check(task_id, db, access_scope, current_user)
-    result = await create_command(
-        db,
-        task_id=task_id,
-        command_id=command_id,
-        command_type=request.type,
-        payload={"text": request.text},
-        created_by=_created_by(current_user),
-    )
-    if result.outcome == "existing_conflict":
-        rejection_code, rejection_message = _public_rejection(result.rejection_code)
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "code": rejection_code,
-                "message": rejection_message,
-                "command_id": command_id,
-            },
-        )
-    if result.rejection_code is not None and not result.created:
-        raise _reject_http(result, command_id=command_id)
-    await db.commit()
+    # Access check and command creation share task/attempt locks with the
+    # worker projector.  A task can finish in the same instant as this PUT;
+    # retry one PostgreSQL deadlock after rolling back the aborted transaction
+    # so the second pass re-judges the now-authoritative gate state.
+    result: CommandCreateResult | None = None
+    for retry_no in range(MAX_COMMAND_DEADLOCK_RETRIES + 1):
+        try:
+            # Access check before mutating; loading the task also anchors task_id.
+            await get_task_with_access_check(task_id, db, access_scope, current_user)
+            result = await create_command(
+                db,
+                task_id=task_id,
+                command_id=command_id,
+                command_type=request.type,
+                payload={"text": request.text},
+                created_by=_created_by(current_user),
+            )
+            if result.outcome == "existing_conflict":
+                rejection_code, rejection_message = _public_rejection(result.rejection_code)
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": rejection_code,
+                        "message": rejection_message,
+                        "command_id": command_id,
+                    },
+                )
+            if result.rejection_code is not None and not result.created:
+                raise _reject_http(result, command_id=command_id)
+            await db.commit()
+            break
+        except DBAPIError as error:
+            if not _is_postgres_deadlock(error) or retry_no >= MAX_COMMAND_DEADLOCK_RETRIES:
+                raise
+            logger.warning(
+                "retrying task command after PostgreSQL deadlock task_id=%s command_id=%s",
+                task_id,
+                command_id,
+            )
+            await db.rollback()
+
+    if result is None:
+        raise RuntimeError("command creation completed without a result")
     cmd = await _load_command(db, task_id=task_id, command_id=command_id)
     if cmd is None:
         raise HTTPException(

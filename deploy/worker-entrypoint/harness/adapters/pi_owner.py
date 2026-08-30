@@ -68,6 +68,7 @@ class PiOwner:
         self.failed = asyncio.Event()
         self.command_metadata: dict[str, dict] = {}
         self.reopen_after: dict | None = None
+        self.server: asyncio.AbstractServer | None = None
 
     def _fail(self, exc: Exception) -> None:
         if self.failure is None:
@@ -109,7 +110,41 @@ class PiOwner:
                 continue
         return False
 
-    async def start(self) -> None:
+    async def _handle_client(self, reader, writer):
+        try:
+            frame = json.loads((await reader.readline()).decode() or "{}")
+            outcome = await self.dispatch(frame)
+        except Exception:  # fail closed at owner boundary
+            outcome = {
+                "status": "unknown",
+                "rejection_code": "delivery_outcome_unknown",
+                "rejection_message": "Pi control request failed",
+            }
+        try:
+            writer.write(json.dumps(outcome, separators=(",", ":")).encode() + b"\n")
+            await writer.drain()
+        except (BrokenPipeError, ConnectionResetError):
+            # A Docker-exec client may close immediately after receiving
+            # the newline; the owner has already recorded the outcome.
+            return
+        finally:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
+    async def _start_server(self) -> None:
+        if self.server is not None:
+            return
+        try:
+            self.server = await asyncio.start_unix_server(
+                self._handle_client, path=str(self.socket_path)
+            )
+        except OSError as exc:
+            raise RuntimeError(f"cannot bind Pi control socket {self.socket_path}: {exc}") from exc
+
+    async def start(self, *, start_control_server: bool = False) -> None:
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
         self.socket_path.unlink(missing_ok=True)
         self.process = await asyncio.create_subprocess_exec(
@@ -131,6 +166,11 @@ class PiOwner:
             )
             asyncio.create_task(self._watch_translator())
         asyncio.create_task(self._read_loop())
+        # Bind before the initial prompt handshake. Pi may keep the prompt RPC
+        # open until the turn settles; the backend must still be able to probe
+        # and deliver a command during that first turn.
+        if start_control_server:
+            await self._start_server()
         if self.prompt is not None:
             for command, message, extra in (
                 ("new_session", None, {"parentSessionId": self.parent_session} if self.parent_session else {}),
@@ -308,32 +348,10 @@ class PiOwner:
         return native_id, asyncio.wait_for(waiter, timeout=15)
 
     async def serve(self) -> None:
-        async def handler(reader, writer):
-            try:
-                frame = json.loads((await reader.readline()).decode() or "{}")
-                outcome = await self.dispatch(frame)
-            except Exception:  # fail closed at owner boundary
-                outcome = {"status": "unknown", "rejection_code": "delivery_outcome_unknown", "rejection_message": "Pi control request failed"}
-            try:
-                writer.write(json.dumps(outcome, separators=(",", ":")).encode() + b"\n")
-                await writer.drain()
-            except (BrokenPipeError, ConnectionResetError):
-                # A Docker-exec client may close immediately after receiving
-                # the newline; the owner has already recorded the outcome.
-                return
-            finally:
-                writer.close()
-                try:
-                    await writer.wait_closed()
-                except (BrokenPipeError, ConnectionResetError):
-                    pass
-
-        try:
-            server = await asyncio.start_unix_server(handler, path=str(self.socket_path))
-        except OSError as exc:
-            raise RuntimeError(f"cannot bind Pi control socket {self.socket_path}: {exc}") from exc
+        await self._start_server()
+        assert self.server is not None
         os.chmod(self.socket_path, 0o600)
-        async with server:
+        async with self.server:
             await self.close_requested.wait()
 
     async def finish(self) -> None:
@@ -362,7 +380,7 @@ async def _main(args) -> None:
     )
     server: asyncio.Task | None = None
     try:
-        await owner.start()
+        await owner.start(start_control_server=not args.no_socket)
         server = None if args.no_socket else asyncio.create_task(owner.serve())
         if server is not None:
             await asyncio.sleep(0)
@@ -407,6 +425,9 @@ async def _main(args) -> None:
                 await server
             except asyncio.CancelledError:
                 pass
+        if owner.server is not None and owner.server.is_serving():
+            owner.server.close()
+            await owner.server.wait_closed()
         if owner.process and owner.process.returncode is None:
             owner.process.terminate()
             await owner.process.wait()

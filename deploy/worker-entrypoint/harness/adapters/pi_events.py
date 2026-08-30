@@ -159,6 +159,36 @@ _STATE: dict = {
     "agent_settled_line": None,
     "last_raw_line": 0,
 }
+_REAL_SESSION_ID: str = ""
+
+
+def _capture_real_session_id(raw_text: str) -> None:
+    """Keep Pi's unmasked session id before sanitization so resume stays possible."""
+    global _REAL_SESSION_ID
+    if _REAL_SESSION_ID:
+        return
+    try:
+        record = json.loads(raw_text)
+    except json.JSONDecodeError:
+        return
+    data = record.get("data") if isinstance(record, dict) else None
+    session_id = (
+        data.get("sessionId")
+        if isinstance(data, dict)
+        else record.get("sessionId")
+        if isinstance(record, dict)
+        else None
+    )
+    if isinstance(session_id, str) and session_id and "<" not in session_id:
+        _REAL_SESSION_ID = session_id
+
+
+def _session_id(value: object = None) -> str | None:
+    """Return the real session id when captured, else the sanitized fallback."""
+    if _REAL_SESSION_ID:
+        return _REAL_SESSION_ID
+    fallback = value if value is not None else _STATE.get("session_id")
+    return fallback if isinstance(fallback, str) and fallback else None
 
 
 def _failure_kind(message: str) -> str:
@@ -337,7 +367,7 @@ def _write_result(
         "success": success,
         "result": result,
         "harness": v2_harness_block(),
-        "session_id": _STATE["session_id"],
+        "session_id": _session_id(),
         "model": _STATE["model_id"],
         "usage": usage,
         "failure": failure,
@@ -432,7 +462,7 @@ def _emit_terminal_at_eof() -> None:
             "harness.completed",
             {
                 "result": "".join(_STATE["text_parts"]).strip(),
-                "session_id": _STATE["session_id"],
+                "session_id": _session_id(),
             },
             _STATE["terminal_line"],
         )
@@ -452,18 +482,18 @@ def _handle_response(record: dict, raw_line: int) -> None:
         data = record.get("data") if isinstance(record.get("data"), dict) else {}
         model = data.get("model") if isinstance(data.get("model"), dict) else {}
         _STATE["model_id"] = model.get("id") or _STATE["model_id"]
-        _STATE["session_id"] = data.get("sessionId") or _STATE["session_id"]
+        _STATE["session_id"] = _session_id(data.get("sessionId") or _STATE["session_id"])
         if not _STATE["model_resolved"]:
             _STATE["model_resolved"] = True
             _emit(
                 "model.resolved",
-                {"model": _STATE["model_id"], "session_id": _STATE["session_id"]},
+                {"model": _STATE["model_id"], "session_id": _session_id()},
                 raw_line,
             )
         else:
             _emit(
                 "diagnostic",
-                {"code": "session_resumed", "session_id": _STATE["session_id"]},
+                {"code": "session_resumed", "session_id": _session_id()},
                 raw_line,
             )
         return
@@ -854,7 +884,7 @@ def _handle_compaction(record: dict, raw_line: int) -> None:
     if isinstance(result.get("usage"), dict):
         _set_usage(result, raw_line, emit_update=True)
     payload = {
-        "session_id": _STATE["session_id"],
+        "session_id": _session_id(),
         "reason": record.get("reason"),
         "aborted": bool(record.get("aborted")),
         "will_retry": bool(record.get("willRetry")),
@@ -997,6 +1027,7 @@ def main() -> int:
             raw_input = raw_input.rstrip("\n")
             if not raw_input.strip():
                 continue
+            _capture_real_session_id(raw_input)
             input_text = sanitize(raw_input)
             if not input_text:
                 continue

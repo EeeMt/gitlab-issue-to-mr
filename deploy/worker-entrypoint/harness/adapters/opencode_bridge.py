@@ -55,6 +55,7 @@ REJECTION_MESSAGE = "opencode: steering/follow_up not supported in first release
 SUPPORTED_MODEL_PROTOCOLS = frozenset(
     {"anthropic_messages", "openai_responses", "openai_chat_completions"}
 )
+SESSION_FILE_ENV = "CODIFY_OPENCODE_SESSION_FILE"
 
 
 def negotiate_capabilities(harness_key: str) -> dict:
@@ -266,6 +267,51 @@ class OpenCodeServerClient:
                     buffer = _sse_tail(buffer)
         except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
             raise ConnectionError(f"OpenCode SSE event stream failed: {exc}") from exc
+
+
+def _persist_session_id(session_id: str) -> None:
+    """Publish the active session to the Task-local cancellation path."""
+    session_file = os.environ.get(SESSION_FILE_ENV, "").strip()
+    if not session_file:
+        return
+    path = Path(session_file)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(session_id + "\n", encoding="utf-8")
+        os.chmod(path, 0o600)
+    except OSError as exc:
+        # Native abort is best-effort during process cancellation. The normal
+        # canonical cancellation path remains authoritative if this marker
+        # cannot be written.
+        print(f"OpenCode session marker unavailable: {exc}", file=sys.stderr)
+
+
+def _abort_session(session_id: str | None = None) -> int:
+    """Request native OpenCode abort for one Task-local session."""
+    session_id = (session_id or "").strip()
+    if not session_id:
+        print("OpenCode abort skipped: session id is unavailable", file=sys.stderr)
+        return 0
+    try:
+        port = int(os.environ["OPENCODE_PORT"])
+        client = OpenCodeServerClient(
+            port=port,
+            password=os.environ.get("OPENCODE_SERVER_PASSWORD", ""),
+            username=os.environ.get("OPENCODE_SERVER_USERNAME", "opencode"),
+            timeout=float(os.environ.get("OPENCODE_ABORT_TIMEOUT", "2")),
+        )
+        status, _ = client.abort(session_id)
+    except (KeyError, ValueError, OSError, ConnectionError) as exc:
+        print(f"OpenCode native abort failed: {exc}", file=sys.stderr)
+        return 1
+    if status not in (200, 202, 204, 404):
+        print(f"OpenCode native abort failed: HTTP {status}", file=sys.stderr)
+        return 1
+    if status == 404:
+        print("OpenCode native abort: session already closed (HTTP 404)", file=sys.stderr)
+    else:
+        print(f"OpenCode native abort acknowledged: HTTP {status}", file=sys.stderr)
+    return 0
 
 
 def _sse_tail(buffer: str) -> str:
@@ -487,6 +533,7 @@ def _run_attempt() -> int:
         operation = "resume" if resume_session else "create"
         print(f"OpenCode session {operation} failed: status={status}", file=sys.stderr)
         return 1
+    _persist_session_id(session_id)
 
     raw_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -560,7 +607,7 @@ def _run_attempt() -> int:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", nargs="?", default="dispatch")
-    parser.add_argument("harness_key", nargs="?")
+    parser.add_argument("argument", nargs="?")
     args = parser.parse_args()
     if args.mode == "dispatch":
         try:
@@ -572,11 +619,21 @@ def main() -> int:
         sys.stdout.write("\n")
         return 0
     if args.mode == "negotiate":
-        json.dump(negotiate_capabilities(args.harness_key or "opencode"), sys.stdout)
+        json.dump(negotiate_capabilities(args.argument or "opencode"), sys.stdout)
         sys.stdout.write("\n")
         return 0
     if args.mode == "run":
         return _run_attempt()
+    if args.mode == "abort":
+        session_id = args.argument
+        if not session_id:
+            session_file = os.environ.get(SESSION_FILE_ENV, "").strip()
+            if session_file:
+                try:
+                    session_id = Path(session_file).read_text(encoding="utf-8").strip()
+                except OSError:
+                    session_id = None
+        return _abort_session(session_id)
     return 2
 
 

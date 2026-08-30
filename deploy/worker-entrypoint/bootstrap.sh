@@ -260,10 +260,33 @@ codify_signal_exit() {
     trap - TERM INT
     CODIFY_CANCELLED=1
     echo "Cancellation signal received; finalizing task as cancelled" >&2
+    if declare -F adapter_terminate >/dev/null 2>&1; then
+        adapter_terminate "${CODIFY_HARNESS_ADAPTER_PID:-}" || true
+    fi
     # 143 = 128 + SIGTERM: the finalizer maps signal exit codes to cancelled.
     exit 143
 }
 trap codify_signal_exit TERM INT
+
+codify_drain_console_tee() {
+    # Background Harness processes inherit the FIFO writer.  A plain `wait`
+    # here can therefore hold the EXIT finalizer until Docker's ten-second
+    # stop budget expires, even after the canonical cancellation events have
+    # been written.  Give normal writers a short chance to drain, then close
+    # the tee so runtime archive sealing cannot be starved by an orphaned child.
+    local drain_seconds="${CODIFY_CONSOLE_TEE_DRAIN_SECONDS:-2}"
+    local deadline=$((SECONDS + drain_seconds))
+    if [ -n "${CONSOLE_TEE_PID:-}" ]; then
+        while kill -0 "${CONSOLE_TEE_PID}" 2>/dev/null; do
+            [ "${SECONDS}" -ge "${deadline}" ] && break
+            sleep 0.05
+        done
+        if kill -0 "${CONSOLE_TEE_PID}" 2>/dev/null; then
+            kill -TERM "${CONSOLE_TEE_PID}" 2>/dev/null || true
+        fi
+        wait "${CONSOLE_TEE_PID}" 2>/dev/null || true
+    fi
+}
 
 codify_finalize_on_exit() {
     local exit_code="${1:-0}"
@@ -275,11 +298,10 @@ codify_finalize_on_exit() {
         codify_harness_finalize_attempt "${exit_code}" || true
     fi
     # Detach the shell from the console FIFO and wait for tee to persist every
-    # buffered line before the archive snapshots console.log.
+    # buffered line before the archive snapshots console.log.  The drain is
+    # bounded because child processes may retain a copy of the FIFO writer.
     exec >/dev/null 2>&1
-    if [ -n "${CONSOLE_TEE_PID:-}" ]; then
-        wait "${CONSOLE_TEE_PID}" 2>/dev/null || true
-    fi
+    codify_drain_console_tee
     # Re-derive the canonical result so an orphaned adapter translator that raced
     # this finalizer cannot leave a stale harness-result.json in the archive.
     codify_harness_ensure_result "${exit_code}" || true

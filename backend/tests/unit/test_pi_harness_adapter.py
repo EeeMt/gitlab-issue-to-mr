@@ -720,6 +720,25 @@ def test_pi_continuation_raw_stream_maps_model_resolved(tmp_path):
     assert "harness.completed" not in by_type
 
 
+def test_pi_real_session_id_is_retained_for_result_after_sanitization(tmp_path):
+    runtime_dir = tmp_path / "real-session"
+    runtime_dir.mkdir()
+    real_session_id = "123e4567-e89b-12d3-a456-426614174000"
+    records = _probe_records("success")
+    records[0]["data"]["sessionId"] = real_session_id
+    records[0]["data"]["sessionFile"] = f"/root/.pi/sessions/session_{real_session_id}.jsonl"
+
+    _emit(runtime_dir, "run.started")
+    _translate(runtime_dir, records)
+
+    result = json.loads((runtime_dir / "harness-result.json").read_text(encoding="utf-8"))
+    assert result["session_id"] == real_session_id
+    completed = next(event for event in _events(runtime_dir) if event["type"] == "harness.completed")
+    assert completed["payload"]["session_id"] == real_session_id
+    raw = (runtime_dir / "harness-events/pi.jsonl").read_text(encoding="utf-8")
+    assert real_session_id not in raw
+
+
 def test_pi_runner_handshake_uses_new_session_not_resume():
     # Finding 1 regression guard: real pi 0.84.2 rejects the old handshake frame
     # ``{"type":"resume","sessionId":...}`` (``Unknown command: resume``); the pi

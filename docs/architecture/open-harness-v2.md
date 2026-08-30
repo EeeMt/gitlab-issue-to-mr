@@ -145,9 +145,11 @@ steering/follow-up 已是明确后续需求，先做 run 再换 Server 会产生
 - 新建 Profile/Issue 的兼容默认值当前仍是 Claude，V2 candidate 通过显式 Profile 选择
   `pi+opencode`；切换全局 Pi 默认属于 L6 hard cut，不在 Internal Preview 提前修改。
 
-当前剩余的是发布与验收边界，而非上述架构缺口：目标 Host 上已形成 `linux/amd64` 的 Pi/OpenCode
-candidate，但四 Harness 同一 composition、真实成功模型输出与 Git/MR、Pi 20-task 质量门禁以及
-`v2_only` hard cut 仍未完成。具体状态和停止条件见[阶段验收计划](../superpowers/plans/2026-08-23-open-harness-v2-stage-summary-and-remaining-plan.md)。
+当前剩余的是发布与验收边界，而非上述架构缺口：目标 Host 上的 `linux/amd64` 四 Harness 制品
+composition 已完成安装和 DB 绑定，Pi/OpenCode 也已完成代表性的真实模型输出、工具事件、usage、
+Session 和 Git/MR 对账；Claude/Codex 成功 canary、四 Harness 完整发布矩阵、Pi/OpenCode 三协议完整
+矩阵、Pi 20-task 质量门禁以及 `v2_only` hard cut 仍未完成。具体状态和停止条件见
+[阶段验收计划](../superpowers/plans/2026-08-23-open-harness-v2-stage-summary-and-remaining-plan.md)。
 
 ## 5. 分层架构
 

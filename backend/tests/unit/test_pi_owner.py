@@ -80,6 +80,97 @@ async def test_owner_get_state_is_a_real_pi_roundtrip(pi_owner, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_control_socket_is_available_during_initial_prompt(pi_owner, tmp_path):
+    """The first prompt must not hide the command gate until it settles."""
+    fake_pi = tmp_path / "fake_pi.py"
+    fake_pi.write_text(
+        "import json,sys\n"
+        "pending_prompt=None\n"
+        "def emit(item):\n"
+        " print(json.dumps(item),flush=True)\n"
+        "for line in sys.stdin:\n"
+        " r=json.loads(line); rid=r['id']; typ=r['type']\n"
+        " if typ == 'prompt':\n"
+        "  pending_prompt=rid\n"
+        " else:\n"
+        "  emit({'id':rid,'type':'response','command':typ,'success':True})\n"
+        "  if typ == 'steer' and pending_prompt is not None:\n"
+        "   emit({'id':pending_prompt,'type':'response','command':'prompt','success':True}); pending_prompt=None\n",
+        encoding="utf-8",
+    )
+    task_id = 918274
+    socket_path = Path(f"/tmp/pio-{task_id}.sock")
+    socket_path.unlink(missing_ok=True)
+    owner = pi_owner.PiOwner(
+        [sys.executable, str(fake_pi)],
+        tmp_path,
+        socket_path,
+        prompt="initial prompt",
+        task_id=task_id,
+        attempt_id="attempt-current",
+    )
+    start_task = asyncio.create_task(owner.start(start_control_server=True))
+    try:
+        for _ in range(100):
+            if socket_path.exists():
+                break
+            if start_task.done():
+                try:
+                    start_task.result()
+                except RuntimeError as exc:
+                    if "Operation not permitted" in str(exc):
+                        pytest.skip("sandbox disallows AF_UNIX bind under /tmp")
+                    raise
+            await asyncio.sleep(0.01)
+        assert socket_path.exists()
+
+        reader, writer = await asyncio.open_unix_connection(str(socket_path))
+        writer.write(
+            json.dumps(
+                {
+                    "task_id": task_id,
+                    "attempt_id": "attempt-current",
+                    "type": "get_state",
+                    "control_gate": "starting",
+                }
+            ).encode()
+            + b"\n"
+        )
+        await writer.drain()
+        assert json.loads((await reader.readline()).decode())["status"] == "ack"
+        writer.close()
+        await writer.wait_closed()
+
+        early_command = {
+            "task_id": task_id,
+            "attempt_id": "attempt-current",
+            "command_id": "cmd-early",
+            "type": "steer",
+            "control_gate": "accepting",
+            "payload": {"text": "steer during first prompt"},
+        }
+        reader, writer = await asyncio.open_unix_connection(str(socket_path))
+        writer.write(json.dumps(early_command).encode() + b"\n")
+        await writer.drain()
+        assert json.loads((await reader.readline()).decode())["status"] == "ack"
+        writer.close()
+        await writer.wait_closed()
+        await asyncio.wait_for(start_task, timeout=3)
+    finally:
+        if not start_task.done():
+            start_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await start_task
+        if owner.server is not None and owner.server.is_serving():
+            owner.server.close()
+            await owner.server.wait_closed()
+        if owner.process and owner.process.returncode is None:
+            owner.process.terminate()
+            await owner.process.wait()
+        socket_path.unlink(missing_ok=True)
+
+
+@pytest.mark.asyncio
 async def test_owner_rejects_stale_attempt_frame(pi_owner, tmp_path):
     owner = pi_owner.PiOwner(
         [sys.executable, "-c", "import time; time.sleep(30)"],

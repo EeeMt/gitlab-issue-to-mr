@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,13 @@ BOOTSTRAP_SCRIPT = (
 def _summary_function() -> str:
     source = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
     match = re.search(r"(?ms)^print_model_runtime_summary\(\) \{\n.*?^\}\n", source)
+    assert match is not None
+    return match.group(0)
+
+
+def _console_tee_drain_function() -> str:
+    source = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
+    match = re.search(r"(?ms)^codify_drain_console_tee\(\) \{\n.*?^\}\n", source)
     assert match is not None
     return match.group(0)
 
@@ -86,3 +94,31 @@ def test_startup_summary_uses_protocol_specific_endpoint_and_model(
     assert key_name in {"ANTHROPIC_API_KEY", "OPENAI_API_KEY"}
     assert "anthropic-fixture-secret" not in result.stdout
     assert "openai-fixture-secret" not in result.stdout
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFO is unavailable")
+def test_console_tee_drain_is_bounded_when_a_child_holds_the_writer(tmp_path):
+    pipe = tmp_path / "console.pipe"
+    os.mkfifo(pipe)
+    script = f"""
+{_console_tee_drain_function()}
+set -u
+tee "{tmp_path / 'console.log'}" < "{pipe}" >/dev/null &
+CONSOLE_TEE_PID=$!
+sleep 5 > "{pipe}" &
+writer=$!
+trap 'kill "$writer" "$CONSOLE_TEE_PID" 2>/dev/null || true; wait "$writer" "$CONSOLE_TEE_PID" 2>/dev/null || true' EXIT
+CODIFY_CONSOLE_TEE_DRAIN_SECONDS=1
+codify_drain_console_tee
+"""
+    started = time.monotonic()
+    result = subprocess.run(
+        ["bash", "-c", script],
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=4,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert time.monotonic() - started < 3

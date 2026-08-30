@@ -10,9 +10,11 @@ from __future__ import annotations
 import asyncio
 import unittest
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import DBAPIError
 from starlette.requests import Request
 
 from app.core.task_harness_commands import CommandCreateResult
@@ -62,6 +64,7 @@ class TaskCommandRoutesTest(unittest.TestCase):
         self.mock_db.execute = AsyncMock()
         self.mock_db.get = AsyncMock()
         self.mock_db.commit = AsyncMock()
+        self.mock_db.rollback = AsyncMock()
         self.mock_db.flush = AsyncMock()
         self.mock_db.add = MagicMock()
 
@@ -133,6 +136,38 @@ class TaskCommandRoutesTest(unittest.TestCase):
         self.assertFalse(body["created"])
         self.assertEqual(body["outcome"], "existing_same")
         self.assert_public_command_projection(body["command"])
+
+    def test_put_command_retries_once_after_postgres_deadlock(self):
+        result = CommandCreateResult(
+            command_id=VALID_ULID, sequence_no=1, created=True, outcome="created"
+        )
+        deadlock = DBAPIError(
+            "deadlock",
+            {},
+            SimpleNamespace(sqlstate="40P01"),
+        )
+        with (
+            patch(
+                "app.api.task_command_routes.get_task_with_access_check",
+                new=AsyncMock(return_value=MagicMock()),
+            ),
+            patch(
+                "app.api.task_command_routes.create_command",
+                new=AsyncMock(side_effect=[deadlock, result]),
+            ) as create_mock,
+            patch(
+                "app.api.task_command_routes._load_command",
+                new=AsyncMock(return_value=_command()),
+            ),
+        ):
+            resp = self.client.put(
+                f"/api/tasks/7/commands/{VALID_ULID}",
+                json={"type": "steer", "text": "先修复并发问题"},
+            )
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(create_mock.await_count, 2)
+        self.mock_db.rollback.assert_awaited_once()
+        self.assertTrue(resp.json()["created"])
 
     def test_put_command_conflict_returns_409(self):
         result = CommandCreateResult(

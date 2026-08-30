@@ -124,6 +124,10 @@ opencode_adapter_prepare_config() {
     export OPENCODE_CONFIG_DIR="${config_dir}"
     export CODIFY_OPENCODE_DATA_HOME="${xdg_data_home}"
     export OPENCODE_DISABLE_PROJECT_CONFIG="true"
+    # The frozen Snapshot already declares the exact Provider and Model.  The
+    # public models.dev catalog is non-essential and is not reachable from all
+    # authorized Hosts; prevent its startup refresh from aborting a Task.
+    export OPENCODE_DISABLE_MODELS_FETCH="1"
     # Do not scan the repository or any external Claude-compatible skills.
     # Managed Skills are installed below OPENCODE_CONFIG_DIR/skills instead.
     export OPENCODE_DISABLE_EXTERNAL_SKILLS="1"
@@ -254,6 +258,7 @@ opencode_adapter_materialize_skills() {
     export OPENCODE_CONFIG_DIR="${config_dir}"
     export CODIFY_OPENCODE_DATA_HOME="${XDG_DATA_HOME}"
     export OPENCODE_DISABLE_PROJECT_CONFIG="true"
+    export OPENCODE_DISABLE_MODELS_FETCH="1"
     export OPENCODE_DISABLE_EXTERNAL_SKILLS="1"
     export OPENCODE_DISABLE_CLAUDE_CODE_SKILLS="1"
     unset OPENCODE_CONFIG OPENCODE_CONFIG_CONTENT
@@ -306,6 +311,7 @@ opencode_adapter_run() {
     CODIFY_OPENCODE_RAW_EVENT_JSONL="${raw_file}" \
     CODIFY_OPENCODE_EVENT_TRANSLATOR="${CODIFY_OPENCODE_TRANSLATOR}" \
     CODIFY_OPENCODE_BRIDGE="${CODIFY_OPENCODE_BRIDGE}" \
+    CODIFY_OPENCODE_SESSION_FILE="${CODIFY_OPENCODE_SESSION_FILE:-${CODIFY_RUNTIME_DIR}/opencode-session.id}" \
     CODIFY_CANONICAL_EVENT_WRITER="${CODIFY_CANONICAL_EVENT_WRITER}" \
     OPENCODE_PORT="${OPENCODE_PORT}" \
     OPENCODE_SERVER_PASSWORD="${OPENCODE_SERVER_PASSWORD}" \
@@ -343,11 +349,19 @@ opencode_adapter_normalize_result() {
 }
 
 opencode_adapter_terminate() {
-    # SIGTERM: stop the Task-scoped OpenCode Server with no-daemon convergence.
-    # The Server process was started by the runner; on the container signal path
-    # the runner may already be gone, so fall back to the shared Runner's grace
-    # -> KILL. Prefer an in-flight abort before TERM when a Bridge is attached.
-    local pid="${1:-${OPENCODE_SERVER_PID:-}}"
+    # SIGTERM: request the native session abort before stopping the adapter.
+    # The marker is Task-local and is removed by the runner after cleanup.
+    local session_file="${CODIFY_OPENCODE_SESSION_FILE:-${CODIFY_RUNTIME_DIR}/opencode-session.id}"
+    local session_id
+    session_id="$(cat "${session_file}" 2>/dev/null || true)"
+    if [ -n "${session_id}" ]; then
+        OPENCODE_SERVER_PASSWORD="${OPENCODE_SERVER_PASSWORD:-}" \
+        OPENCODE_SERVER_USERNAME="${OPENCODE_SERVER_USERNAME:-opencode}" \
+        OPENCODE_PORT="${OPENCODE_PORT:-}" \
+        CODIFY_OPENCODE_SESSION_FILE="${session_file}" \
+        python3 "${CODIFY_OPENCODE_BRIDGE}" abort "${session_id}" || true
+    fi
+    local pid="${1:-}"
     if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
         kill -TERM "${pid}" 2>/dev/null || true
     fi

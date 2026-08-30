@@ -138,6 +138,24 @@ def test_opencode_stream_maps_sse_to_v2_canonical_events(tmp_path):
     assert result["result"] == "Hello world"
 
 
+def test_opencode_real_session_id_is_retained_for_result_after_sanitization(tmp_path):
+    runtime_dir = tmp_path / "real-session"
+    runtime_dir.mkdir()
+    real_session_id = "123e4567-e89b-12d3-a456-426614174000"
+    records = _success_records()
+    records[1]["properties"]["sessionID"] = real_session_id
+
+    _emit(runtime_dir, "run.started")
+    _translate(runtime_dir, records)
+
+    result = json.loads((runtime_dir / "harness-result.json").read_text(encoding="utf-8"))
+    assert result["session_id"] == real_session_id
+    completed = next(event for event in _events(runtime_dir) if event["type"] == "harness.completed")
+    assert completed["payload"]["session_id"] == real_session_id
+    raw = (runtime_dir / "harness-events/opencode.jsonl").read_text(encoding="utf-8")
+    assert real_session_id not in raw
+
+
 def test_opencode_usage_maps_native_fields_and_emits_usage_final(tmp_path):
     runtime_dir = tmp_path / "usage"
     runtime_dir.mkdir()
@@ -715,6 +733,57 @@ def test_opencode_translator_sanitizes_raw_archive(tmp_path):
     assert "API_KEY=sample1" not in raw
 
 
+def test_opencode_translator_ignores_late_event_after_task_terminal(tmp_path):
+    """A delayed SSE record cannot reopen a canonical Task after cancellation."""
+    runtime_dir = tmp_path / "late-event"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    _emit(
+        runtime_dir,
+        "harness.failed",
+        {"failure": {"kind": "cancelled", "message": "Cancelled by user"}},
+    )
+    _emit(runtime_dir, "worker.finalization", {"exit_code": 143})
+    _emit(runtime_dir, "run.failed", {"status": "cancelled", "success": False})
+    before = _events(runtime_dir)
+
+    # session.status would normally emit a diagnostic. The canonical writer
+    # rejects it after run.failed, and the translator must treat that specific
+    # late-stream rejection as a settled cancellation rather than traceback.
+    _translate(
+        runtime_dir,
+        [_record("session.status", {"status": {"type": "busy"}})],
+    )
+
+    assert _events(runtime_dir) == before
+
+
+def test_opencode_translator_ignores_duplicate_harness_terminal(tmp_path):
+    """A buffered SSE error cannot emit a second Harness terminal event."""
+    runtime_dir = tmp_path / "duplicate-harness-terminal"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    _emit(
+        runtime_dir,
+        "harness.failed",
+        {"failure": {"kind": "cancelled", "message": "Cancelled by user"}},
+    )
+    _emit(runtime_dir, "diagnostic", {"code": "session_busy"})
+    _emit(runtime_dir, "usage.final", {"usage": {"output_tokens": 0}})
+    before = _events(runtime_dir)
+
+    # OpenCode may report the same cancelled turn after the cancellation path
+    # has already emitted the shared Harness terminal and other non-terminal
+    # events. The strict writer must remain unchanged; only this translator's
+    # duplicate is ignored.
+    _translate(
+        runtime_dir,
+        [_record("session.error", {"error": {"name": "AbortError"}})],
+    )
+
+    assert _events(runtime_dir) == before
+
+
 # ── opencode_bridge: deterministic reject + negotiation + SSE parse ─────────
 
 def _load_bridge():
@@ -983,6 +1052,27 @@ def test_opencode_client_sets_basic_auth(tmp_path):
     assert headers["Authorization"].startswith("Basic ")
 
 
+def test_opencode_bridge_native_abort_uses_task_session(monkeypatch, capsys):
+    bridge = _load_bridge()
+    calls: list[str] = []
+
+    class _FakeClient:
+        def __init__(self, **kwargs):
+            assert kwargs["timeout"] == 2.0
+
+        def abort(self, session_id: str):
+            calls.append(session_id)
+            return 200, {}
+
+    monkeypatch.setattr(bridge, "OpenCodeServerClient", _FakeClient)
+    monkeypatch.setenv("OPENCODE_PORT", "8099")
+    monkeypatch.setenv("OPENCODE_SERVER_PASSWORD", "pw")
+
+    assert bridge._abort_session("ses-oc-abort") == 0
+    assert calls == ["ses-oc-abort"]
+    assert capsys.readouterr().err.strip() == "OpenCode native abort acknowledged: HTTP 200"
+
+
 # ── _run_attempt: subscribe-before-prompt (F1) + BrokenPipe tolerance (F2) ────
 
 def _run_attempt_env(tmp_path: Path) -> dict[str, str]:
@@ -1229,6 +1319,48 @@ def _source_adapter(script: str, env: dict[str, str]):
         capture_output=True,
         text=True,
     )
+
+
+def test_opencode_adapter_terminate_requests_native_abort_before_stopping_runner(tmp_path):
+    orchestration = tmp_path / "orchestration"
+    bridge = orchestration / "worker-entrypoint/harness/adapters/opencode_bridge.py"
+    bridge.parent.mkdir(parents=True)
+    bridge.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os\n"
+        "import sys\n"
+        "with open(os.environ['OPENCODE_TEST_ABORT'], 'w', encoding='utf-8') as handle:\n"
+        "    handle.write('\\n'.join(sys.argv[1:]) + '\\n')\n"
+        "print('native abort acknowledged: HTTP 200', file=sys.stderr)\n",
+        encoding="utf-8",
+    )
+    session_file = tmp_path / "runtime" / "opencode-session.id"
+    session_file.parent.mkdir()
+    session_file.write_text("ses-adapter-test\n", encoding="utf-8")
+    abort_args = tmp_path / "abort-args"
+    child = subprocess.Popen(["sleep", "30"])
+    try:
+        result = _source_adapter(
+            f'opencode_adapter_terminate "{child.pid}"',
+            {
+                "CODIFY_ORCHESTRATION_DIR": str(orchestration),
+                "CODIFY_RUNTIME_DIR": str(tmp_path / "runtime"),
+                "CODIFY_OPENCODE_SESSION_FILE": str(session_file),
+                "OPENCODE_PORT": "8099",
+                "OPENCODE_TEST_ABORT": str(abort_args),
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        assert "native abort acknowledged: HTTP 200" in result.stderr
+        child.wait(timeout=3)
+        assert abort_args.read_text(encoding="utf-8").splitlines() == [
+            "abort",
+            "ses-adapter-test",
+        ]
+    finally:
+        if child.poll() is None:
+            child.terminate()
+            child.wait(timeout=3)
 
 
 def test_opencode_verify_runtime_enforces_pinned_version(tmp_path):
@@ -1524,6 +1656,7 @@ printf '%s\\n' "$@" > "${OPENCODE_TEST_ARGS}"
     printf 'XDG_STATE_HOME=%s\\n' "$XDG_STATE_HOME"
     printf 'OPENCODE_CONFIG_DIR=%s\\n' "$OPENCODE_CONFIG_DIR"
     printf 'OPENCODE_DISABLE_PROJECT_CONFIG=%s\\n' "$OPENCODE_DISABLE_PROJECT_CONFIG"
+    printf 'OPENCODE_DISABLE_MODELS_FETCH=%s\\n' "$OPENCODE_DISABLE_MODELS_FETCH"
     printf 'OPENCODE_DISABLE_EXTERNAL_SKILLS=%s\\n' "$OPENCODE_DISABLE_EXTERNAL_SKILLS"
     printf 'OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=%s\\n' "$OPENCODE_DISABLE_CLAUDE_CODE_SKILLS"
 } > "${OPENCODE_TEST_ENV}"
@@ -1581,7 +1714,12 @@ def _assert_process_gone(pid: int, start_time: str | None) -> None:
         assert current != start_time, f"process {pid} survived cleanup"
 
 
-def _start_legacy_runner(tmp_path: Path, *, bridge_sleep: str = "0") -> tuple[subprocess.Popen[str], tuple[int, int], tuple[str | None, str | None]]:
+def _start_legacy_runner(
+    tmp_path: Path,
+    *,
+    bridge_sleep: str = "0",
+    stop_grace: str | None = "1",
+) -> tuple[subprocess.Popen[str], tuple[int, int], tuple[str | None, str | None]]:
     bin_dir = _write_runner_process_group_fixtures(tmp_path)
     prompt = tmp_path / "prompt.md"
     prompt.write_text("test", encoding="utf-8")
@@ -1601,9 +1739,10 @@ def _start_legacy_runner(tmp_path: Path, *, bridge_sleep: str = "0") -> tuple[su
         "OPENCODE_TEST_ARGS": str(tmp_path / "server-args"),
         "OPENCODE_TEST_ENV": str(tmp_path / "server-env"),
         "OPENCODE_TEST_BRIDGE_SLEEP": bridge_sleep,
-        "OPENCODE_SERVER_STOP_GRACE_SECONDS": "1",
         "PROMPT_FILE": str(prompt),
     }
+    if stop_grace is not None:
+        environment["OPENCODE_SERVER_STOP_GRACE_SECONDS"] = stop_grace
     process = subprocess.Popen(
         ["bash", str(LEGACY_RUNNER)],
         env=environment,
@@ -1639,6 +1778,7 @@ def test_opencode_legacy_runner_reaps_server_process_group_after_success(tmp_pat
     assert f"XDG_STATE_HOME={tmp_path}/runtime/opencode/xdg-state" in server_env
     assert f"OPENCODE_CONFIG_DIR={tmp_path}/runtime/opencode" in server_env
     assert "OPENCODE_DISABLE_PROJECT_CONFIG=true" in server_env
+    assert "OPENCODE_DISABLE_MODELS_FETCH=1" in server_env
     assert "OPENCODE_DISABLE_EXTERNAL_SKILLS=1" in server_env
     assert "OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1" in server_env
     _finish_runner(process, 0)
@@ -1658,6 +1798,15 @@ def test_opencode_legacy_runner_timeout_signal_reaps_ignoring_child(tmp_path):
     process, pids, starts = _start_legacy_runner(tmp_path, bridge_sleep="30")
     # GNU timeout delivers TERM to its child; deliver the same timeout signal
     # directly to keep the regression portable on macOS CI hosts.
+    process.send_signal(signal.SIGTERM)
+    _finish_runner(process, 143)
+    for pid, start in zip(pids, starts):
+        _assert_process_gone(pid, start)
+
+
+def test_opencode_legacy_runner_default_cleanup_fits_cancel_budget(tmp_path):
+    """Default server cleanup must leave time for the worker archive finalizer."""
+    process, pids, starts = _start_legacy_runner(tmp_path, bridge_sleep="0", stop_grace=None)
     process.send_signal(signal.SIGTERM)
     _finish_runner(process, 143)
     for pid, start in zip(pids, starts):

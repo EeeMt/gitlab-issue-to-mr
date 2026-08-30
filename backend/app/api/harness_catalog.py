@@ -28,7 +28,11 @@ from app.core.worker_kit_inventory import (
     AVAILABILITY_PRESENT,
 )
 from app.core.worker_profiles import get_default_worker_profile
-from app.core.worker_runtime_bundle import default_runtime_source_dir
+from app.core.worker_runtime_bundle import (
+    default_runtime_source_dir,
+    harness_manifest_from_bundle,
+    load_bound_runtime_bundle,
+)
 from app.core.worker_runtime_readiness import (
     READINESS_READY,
     READINESS_UNAVAILABLE,
@@ -189,13 +193,36 @@ def _project_catalog(manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
     except (HarnessRegistryError, ValueError, TypeError) as exc:
         # A frozen row that cannot satisfy the public V2 contract must not be
         # silently replaced with today's checkout manifest.
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "code": "invalid_runtime_bundle_catalog",
-                "message": "The task's frozen Runtime Bundle cannot provide a catalog.",
-            },
-        ) from exc
+        raise _invalid_runtime_bundle_catalog() from exc
+
+
+def _invalid_runtime_bundle_catalog() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "invalid_runtime_bundle_catalog",
+            "message": "The task's frozen Runtime Bundle cannot provide a catalog.",
+        },
+    )
+
+
+async def _task_catalog_bundle(
+    db: AsyncSession,
+    task: Task,
+    bundle: WorkerRuntimeBundle,
+) -> tuple[WorkerRuntimeBundle, Mapping[str, Any]]:
+    """Load and resolve the immutable Harness manifest for a task catalog."""
+    manifest = getattr(bundle, "manifest", None)
+    if isinstance(manifest, Mapping) and "command_schema" in manifest:
+        return bundle, manifest
+    try:
+        loaded_bundle = await load_bound_runtime_bundle(db, task)
+    except RuntimeError as exc:
+        raise _invalid_runtime_bundle_catalog() from exc
+    manifest = harness_manifest_from_bundle(loaded_bundle)
+    if not isinstance(manifest, Mapping):
+        raise _invalid_runtime_bundle_catalog()
+    return loaded_bundle, manifest
 
 
 def _v2_catalog_response(
@@ -205,6 +232,7 @@ def _v2_catalog_response(
     profile: Any | None = None,
     readiness: RuntimeReadiness | None = None,
     snapshot: TaskWorkerProfileSnapshot | None = None,
+    catalog_manifest: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     bound_harness_key = getattr(snapshot, "harness_key", None) if snapshot is not None else None
     runtime_overrides = {}
@@ -217,7 +245,9 @@ def _v2_catalog_response(
         "legacy": False,
         "read_only": False,
         "catalog": _catalog_with_runtime_state(
-            _project_catalog(bundle.manifest),
+            _project_catalog(
+                catalog_manifest if catalog_manifest is not None else bundle.manifest
+            ),
             profile=profile,
             readiness=readiness,
             bound_harness_key=bound_harness_key,
@@ -384,6 +414,7 @@ async def get_task_harness_catalog(
     bundle = task.runtime_bundle
     if bundle is None or bundle.contract_version != HARNESS_CONTRACT_VERSION_V2:
         return _legacy_catalog_response(bundle)
+    bundle, catalog_manifest = await _task_catalog_bundle(db, task, bundle)
     snapshot = getattr(task, "worker_profile_snapshot", None)
     readiness = (
         await _catalog_readiness_for_snapshot(db, snapshot)
@@ -395,4 +426,5 @@ async def get_task_harness_catalog(
         source="task_runtime_bundle",
         readiness=readiness,
         snapshot=snapshot,
+        catalog_manifest=catalog_manifest,
     )

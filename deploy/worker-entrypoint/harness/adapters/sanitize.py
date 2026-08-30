@@ -57,8 +57,8 @@ TOKEN_PATTERNS = (
     ),
     (
         re.compile(
-            r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
-            r"[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\b"
+            r"(?<![A-Za-z0-9])[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+            r"[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}(?![A-Za-z0-9])"
         ),
         lambda match: _stable_placeholder("UUID", match.group(0).lower()),
     ),

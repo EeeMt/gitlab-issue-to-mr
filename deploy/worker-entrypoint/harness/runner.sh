@@ -124,9 +124,13 @@ codify_harness_run() {
     # until the CLI exits, letting `docker stop` escalate to SIGKILL before the
     # finalizer can emit a cancelled terminal.
     adapter_run "${prompt_file}" "${result_file}" &
-    local adapter_pid=$!
+    CODIFY_HARNESS_ADAPTER_PID=$!
+    export CODIFY_HARNESS_ADAPTER_PID
+    local adapter_pid="${CODIFY_HARNESS_ADAPTER_PID}"
     wait "${adapter_pid}"
     local result=$?
+    CODIFY_HARNESS_ADAPTER_PID=""
+    export CODIFY_HARNESS_ADAPTER_PID
     adapter_normalize_result "${result_file}"
     local normalize_result=$?
     set -e

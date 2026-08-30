@@ -280,6 +280,20 @@ def test_sanitizer_redacts_reasoning_and_stabilizes_probe_correlation(tmp_path: 
     assert subprocess.run([str(SANITIZER), "--check", str(first)], check=False).returncode == 0
 
 
+def test_sanitizer_redacts_uuid_adjacent_to_underscore(tmp_path: Path):
+    source = tmp_path / "session.jsonl"
+    destination = tmp_path / "sanitized.jsonl"
+    session_id = "123e4567-e89b-12d3-a456-426614174000"
+    source.write_text(json.dumps({"session_file": f"session_{session_id}.jsonl"}) + "\n")
+
+    subprocess.run([str(SANITIZER), str(source), str(destination)], check=True)
+
+    sanitized = destination.read_text()
+    assert session_id not in sanitized
+    assert "<UUID:" in sanitized
+    assert subprocess.run([str(SANITIZER), "--check", str(destination)], check=False).returncode == 0
+
+
 def _event(seq: int, event_type: str, payload: dict | None = None) -> dict:
     if payload is None and event_type == "run.completed":
         payload = {"status": "completed", "success": True}

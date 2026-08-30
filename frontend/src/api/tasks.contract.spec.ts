@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { mockGet, mockPost, mockPatch } = vi.hoisted(() => ({
+const { mockGet, mockPost, mockPatch, mockPut } = vi.hoisted(() => ({
   mockGet: vi.fn(),
   mockPost: vi.fn(),
   mockPatch: vi.fn(),
+  mockPut: vi.fn(),
 }))
 
 vi.mock('./client', () => ({
@@ -11,6 +12,7 @@ vi.mock('./client', () => ({
     get: mockGet,
     post: mockPost,
     patch: mockPatch,
+    put: mockPut,
   }
 }))
 
@@ -21,6 +23,7 @@ import {
   getTaskArchive,
   previewRunInstructionTemplate,
   retryTask,
+  sendHarnessCommand,
   streamTaskLogs,
   updateTask,
   type CreateTaskRequest,
@@ -151,6 +154,19 @@ describe('task API boundary contract', () => {
       content: '{{user_prompt}}',
       available_placeholders: ['user_prompt'],
     })
+  })
+
+  it('sends a valid UUID command id', async () => {
+    mockPut.mockResolvedValue({ data: { command: { status: 'queued' }, created: true } })
+
+    await sendHarnessCommand(12, { type: 'steer', text: 'continue' })
+
+    expect(mockPut).toHaveBeenCalledOnce()
+    const [url, payload] = mockPut.mock.calls[0]
+    expect(url).toMatch(
+      /^\/tasks\/12\/commands\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    )
+    expect(payload).toEqual({ type: 'steer', text: 'continue' })
   })
 
   it('preserves batch, update and done SSE event semantics', () => {

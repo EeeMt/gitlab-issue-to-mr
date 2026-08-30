@@ -31,6 +31,7 @@ SSE subscription, creates the session, sends ``prompt_async``, and falls back to
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import subprocess
@@ -101,6 +102,8 @@ _INTERACTIVE_EVENT_TYPES = frozenset(
         "question.v2.rejected",
     }
 )
+_CANONICAL_CLOSED_TYPES = frozenset({"worker.finalization", "run.completed", "run.failed"})
+_HARNESS_TERMINAL_TYPES = frozenset({"harness.completed", "harness.failed"})
 
 # These are OpenCode server/catalog/UI events. They are deliberately explicit
 # no-ops: the sanitized raw SSE archive remains the source of truth, while
@@ -159,6 +162,38 @@ _STATE: dict = {
     "settled_line": None,
     "last_line": 1,
 }
+_REAL_SESSION_ID: str = ""
+
+
+def _capture_real_session_id(raw_text: str) -> None:
+    """Keep OpenCode's unmasked session id before sanitization so resume stays possible."""
+    global _REAL_SESSION_ID
+    if _REAL_SESSION_ID:
+        return
+    try:
+        record = json.loads(raw_text)
+    except json.JSONDecodeError:
+        return
+    properties = record.get("properties") if isinstance(record, dict) else None
+    session_id = (
+        properties.get("sessionID") or properties.get("sessionId")
+        if isinstance(properties, dict)
+        else None
+    )
+    if session_id is None and isinstance(record, dict):
+        data = record.get("data")
+        if isinstance(data, dict):
+            session_id = data.get("sessionID") or data.get("sessionId")
+    if isinstance(session_id, str) and session_id and "<" not in session_id:
+        _REAL_SESSION_ID = session_id
+
+
+def _session_id(value: object = None) -> str | None:
+    """Return the real session id when captured, else the sanitized fallback."""
+    if _REAL_SESSION_ID:
+        return _REAL_SESSION_ID
+    fallback = value if value is not None else _STATE.get("session_id")
+    return fallback if isinstance(fallback, str) and fallback else None
 
 
 def _failure_kind(message: str, *, status_code: object = None) -> str:
@@ -214,7 +249,7 @@ def _error_message(value: object, default: str) -> tuple[str, object]:
 def _remember_session(properties: dict) -> None:
     session_id = properties.get("sessionID") or properties.get("sessionId")
     if session_id:
-        _STATE["session_id"] = _STATE["session_id"] or session_id
+        _STATE["session_id"] = _STATE["session_id"] or _session_id(session_id)
 
 
 def _remember_assistant_message(message_id: object) -> str | None:
@@ -240,21 +275,71 @@ def _is_rate_limit_reason(value: object) -> bool:
 
 def _emit(event_type: str, payload: dict, raw_line: int) -> None:
     writer = os.environ["CODIFY_CANONICAL_EVENT_WRITER"]
-    subprocess.run(
-        [
-            sys.executable,
-            writer,
-            event_type,
-            "--payload",
-            json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
-            "--raw-stream",
-            "harness-events/opencode.jsonl",
-            "--raw-line",
-            str(raw_line),
-        ],
-        check=True,
-        stdout=subprocess.DEVNULL,
-    )
+    try:
+        subprocess.run(
+            [
+                sys.executable,
+                writer,
+                event_type,
+                "--payload",
+                json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                "--raw-stream",
+                "harness-events/opencode.jsonl",
+                "--raw-line",
+                str(raw_line),
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        # A container cancellation can close the canonical Task stream while
+        # OpenCode's already-buffered SSE records are still being translated.
+        # Keep the writer strict; discard only this translator's late event
+        # after the shared stream has reached its terminal boundary.
+        if _canonical_stream_closed(event_type):
+            return
+        if exc.stderr:
+            sys.stderr.write(exc.stderr)
+        raise
+
+
+def _canonical_stream_closed(event_type: str) -> bool:
+    """Return whether the shared canonical stream is already non-appendable.
+
+    The event writer serializes appends with the same lock. Taking a shared
+    lock here prevents a partial final JSON line from turning a known terminal
+    into an ordinary translator error while another finalizer is appending.
+    """
+    runtime_dir = os.environ.get("CODIFY_RUNTIME_DIR", "").strip()
+    if not runtime_dir:
+        return False
+    event_path = Path(runtime_dir) / "event.jsonl"
+    lock_path = Path(runtime_dir) / ".event.lock"
+    try:
+        lock_path.touch(exist_ok=True)
+        with lock_path.open("r+", encoding="utf-8") as lock:
+            fcntl.flock(lock, fcntl.LOCK_SH)
+            try:
+                last_type = None
+                harness_terminal_seen = False
+                for line in event_path.read_text(encoding="utf-8").splitlines():
+                    if line.strip():
+                        current_type = json.loads(line).get("type")
+                        last_type = current_type
+                        harness_terminal_seen = (
+                            harness_terminal_seen or current_type in _HARNESS_TERMINAL_TYPES
+                        )
+                return last_type in _CANONICAL_CLOSED_TYPES or (
+                    event_type in _HARNESS_TERMINAL_TYPES and harness_terminal_seen
+                )
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+    except (OSError, json.JSONDecodeError, TypeError):
+        # An unreadable or malformed stream is not evidence of a settled Task;
+        # preserve the original writer error for diagnosis.
+        return False
 
 
 def _usage(properties: dict) -> dict:
@@ -735,7 +820,7 @@ def _handle_durable_event(record_type: str, data: dict, raw_line: int) -> None:
 
     if record_type == "session.next.compaction.ended":
         payload = {
-            "session_id": data.get("sessionID"),
+            "session_id": _session_id(data.get("sessionID") or data.get("sessionId")),
             "reason": data.get("reason"),
         }
         summary = data.get("text")
@@ -961,9 +1046,7 @@ def _handle_session_status(properties: dict, raw_line: int) -> None:
             _finalize_terminal()
     elif status_type is not None:
         _emit("diagnostic", {"code": "unknown_session_status", "type": status_type}, raw_line)
-    session_id = properties.get("sessionID")
-    if session_id:
-        _STATE["session_id"] = _STATE["session_id"] or session_id
+    _remember_session(properties)
 
 
 def _handle_session_created(properties: dict, raw_line: int) -> None:
@@ -1140,7 +1223,7 @@ def _handle_message_part_updated(properties: dict, raw_line: int) -> None:
         )
     elif part_type == "compaction":
         payload = {
-            "session_id": properties.get("sessionID"),
+            "session_id": _session_id(properties.get("sessionID") or properties.get("sessionId")),
             "reason": part.get("reason"),
             "auto": part.get("auto"),
             "overflow": part.get("overflow"),
@@ -1270,7 +1353,7 @@ def translate(record: dict, raw_line: int) -> None:
     elif record_type == "session.compacted":
         _emit(
             "context.compacted",
-            {"session_id": properties.get("sessionID") or properties.get("sessionId")},
+            {"session_id": _session_id(properties.get("sessionID") or properties.get("sessionId"))},
             raw_line,
         )
     elif record_type in _INTERACTIVE_EVENT_TYPES or record_type in {
@@ -1317,6 +1400,7 @@ def main() -> int:
             raw_input = raw_input.rstrip("\n")
             if not raw_input.strip():
                 continue
+            _capture_real_session_id(raw_input)
             input_text = sanitize(raw_input)
             if not input_text:
                 continue

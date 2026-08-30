@@ -1511,6 +1511,9 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn('os.replace(sys.argv[1], sys.argv[2])', content)
         self.assertNotIn('[ -f "/workspace/event.jsonl" ]', content)
         self.assertNotIn('/workspace/.codify-archive', content)
+        self.assertIn('codify_drain_console_tee() {', content)
+        self.assertIn('local drain_seconds="${CODIFY_CONSOLE_TEE_DRAIN_SECONDS:-2}"', content)
+        self.assertIn('kill -TERM "${CONSOLE_TEE_PID}"', content)
 
         tee_index = content.index('exec > "${CONSOLE_TEE_PIPE}" 2>&1')
         banner_index = content.index('echo "Codify Worker"')
@@ -1518,7 +1521,7 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
 
         finalizer = self._extract_shell_function(content, "codify_finalize_on_exit")
         finalize_index = finalizer.index('codify_harness_finalize_attempt "${exit_code}"')
-        console_flush_index = finalizer.index('wait "${CONSOLE_TEE_PID}"')
+        console_flush_index = finalizer.index("codify_drain_console_tee")
         archive_index = finalizer.index("create_runtime_archive || true")
         self.assertGreater(console_flush_index, finalize_index)
         self.assertGreater(archive_index, finalize_index)

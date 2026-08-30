@@ -20,6 +20,7 @@ CODIFY_OPENCODE_BIN="${CODIFY_OPENCODE_BIN:?CODIFY_OPENCODE_BIN is required (res
 CODIFY_OPENCODE_RAW_EVENT_JSONL="${CODIFY_OPENCODE_RAW_EVENT_JSONL:-${CODIFY_RUNTIME_DIR}/harness-events/opencode.jsonl}"
 CODIFY_OPENCODE_EVENT_TRANSLATOR="${CODIFY_OPENCODE_EVENT_TRANSLATOR:-${CODIFY_ORCHESTRATION_DIR}/worker-entrypoint/harness/adapters/opencode_events.py}"
 CODIFY_OPENCODE_BRIDGE="${CODIFY_OPENCODE_BRIDGE:-${CODIFY_ORCHESTRATION_DIR}/worker-entrypoint/harness/adapters/opencode_bridge.py}"
+CODIFY_OPENCODE_SESSION_FILE="${CODIFY_OPENCODE_SESSION_FILE:-${CODIFY_RUNTIME_DIR}/opencode-session.id}"
 PROMPT_FILE="${PROMPT_FILE:-${CODIFY_HARNESS_PROMPT_FILE:-}}"
 OPENCODE_PORT="${OPENCODE_PORT:?OPENCODE_PORT is required}"
 OPENCODE_SERVER_PASSWORD="${OPENCODE_SERVER_PASSWORD:-}"
@@ -39,12 +40,15 @@ XDG_DATA_HOME="${CODIFY_OPENCODE_DATA_HOME}"
 XDG_CACHE_HOME="${OPENCODE_CONFIG_DIR}/xdg-cache"
 XDG_STATE_HOME="${OPENCODE_CONFIG_DIR}/xdg-state"
 OPENCODE_DISABLE_PROJECT_CONFIG="true"
+OPENCODE_DISABLE_MODELS_FETCH="${OPENCODE_DISABLE_MODELS_FETCH:-1}"
 OPENCODE_DISABLE_EXTERNAL_SKILLS="1"
 OPENCODE_DISABLE_CLAUDE_CODE_SKILLS="1"
 unset OPENCODE_CONFIG OPENCODE_CONFIG_CONTENT
 export HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME XDG_STATE_HOME \
     CODIFY_OPENCODE_DATA_HOME CODIFY_RESUME_SESSION \
-    OPENCODE_DISABLE_PROJECT_CONFIG OPENCODE_DISABLE_EXTERNAL_SKILLS \
+    CODIFY_OPENCODE_SESSION_FILE \
+    OPENCODE_DISABLE_PROJECT_CONFIG OPENCODE_DISABLE_MODELS_FETCH \
+    OPENCODE_DISABLE_EXTERNAL_SKILLS \
     OPENCODE_DISABLE_CLAUDE_CODE_SKILLS
 
 mkdir -p "$(dirname "${CODIFY_OPENCODE_RAW_EVENT_JSONL}")"
@@ -62,6 +66,7 @@ trap 'exit 143' TERM
 
 cleanup() {
     stop_server || true
+    rm -f "${CODIFY_OPENCODE_SESSION_FILE}"
     rm -rf "${RUN_DIR}"
 }
 
@@ -90,7 +95,10 @@ stop_server() {
         kill -TERM "-${pid}" 2>/dev/null || true
     fi
     # Poll for disappearance (no-daemon guarantee), then KILL after grace.
-    local deadline=$(( $(date +%s) + ${OPENCODE_SERVER_STOP_GRACE_SECONDS:-10} ))
+    # The worker cancel path gives the container 10 seconds before Docker
+    # escalates to SIGKILL. Keep server-group convergence below that budget so
+    # bootstrap's EXIT finalizer still has time to seal the runtime archive.
+    local deadline=$(( $(date +%s) + ${OPENCODE_SERVER_STOP_GRACE_SECONDS:-5} ))
     # The server leader may exit promptly while a plugin child ignores TERM;
     # test the group, not only its leader, before deciding convergence.
     while [ "$(date +%s)" -lt "${deadline}" ] && kill -0 "-${pid}" 2>/dev/null; do
@@ -126,6 +134,7 @@ start_server() {
     XDG_CACHE_HOME="${XDG_CACHE_HOME}" \
     XDG_STATE_HOME="${XDG_STATE_HOME}" \
     OPENCODE_DISABLE_PROJECT_CONFIG="${OPENCODE_DISABLE_PROJECT_CONFIG}" \
+    OPENCODE_DISABLE_MODELS_FETCH="${OPENCODE_DISABLE_MODELS_FETCH}" \
     OPENCODE_DISABLE_EXTERNAL_SKILLS="${OPENCODE_DISABLE_EXTERNAL_SKILLS}" \
     OPENCODE_DISABLE_CLAUDE_CODE_SKILLS="${OPENCODE_DISABLE_CLAUDE_CODE_SKILLS}" \
     CODIFY_OPENCODE_DATA_HOME="${CODIFY_OPENCODE_DATA_HOME}" \
