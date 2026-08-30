@@ -114,6 +114,15 @@ verify 已于 DB 时间 `2026-08-30 12:25:05.994124` 返回成功，`image/Kit/H
   与 #131 的 session ID 为不相等；两者在同一 Issue 内共享声明的 `projected_session_namespace` 和容器内
   OpenCode XDG/config 路径是预期的 namespace 设计，fresh input 与不同 session ID 证明没有复用旧会话，
   但不把同一 namespace 的结果冒充为跨 namespace 隔离证明。
+- 为验证 Issue 维度的隔离，使用已有的 Issue #18（同一 Profile 4、Provider 7、OpenCode）创建 Task #132；
+  它在当前 Bundle `101` 上以 `freeform`、fresh、只读 no-change 成功收口，41 个 canonical events 中只有
+  一个 terminal，重复 terminal console 命中数为 `0`，usage 为 input/output `79/50`、cached input
+  `7,722`，交付统计 `+0/-0`；attempt 为 `last_seq=41`、`control_state=closed`，archive
+  `task-132-runtime-archive.tar.gz` 为 7,385 bytes、SHA-256
+  `076062963325c37868d0869cc8c2b72db930583b3ddd8046f9d400f718cf8bfc`，无残留容器。#132 与 Issue22 的
+  #129 session ID 服务端比较为不相等；两个 Issue 虽共享同一算法生成的 namespace 字符串，但在
+  `issue_session_lineages` 中分别落入 Issue18 generation 2 与 Issue22 generation 44/45，证明实际查找键
+  包含 `issue_id`，不发生跨 Issue 会话复用。
 - 远端 UI 实证显示 Issue #22 已有 OpenCode V2 lineage，但旧前端只读取 `claude_session_id`，曾误显示
   “当前需求没有已记录的会话”。`5ef8ddd3` 将 TaskFormDrawer 的语义改为 `hasCurrentSession`，IssueView
   和 TaskView 同时识别 legacy session 与 `current_harness`；相关 3 个入口测试 335 passed，完整前端
@@ -149,8 +158,8 @@ Open-Harness V2 已形成一个可继续验证的 Internal Preview candidate，�
 - Pi 已有 execute、plan、freeform、fresh/continue、steering、follow-up、取消收口、usage、tool、Session、
   当前 Bundle no-change #128 和 Git/MR 的代表性真实证据；
 - OpenCode 已有 fresh/continue、Task Skill、usage、tool、Session、Git/MR，以及 native abort、当前
-  Bundle crash/no-change/server-close failure-path、正常 `session.idle` 收口和 fresh namespace probe 后
-  单一终态与 archive 收口的代表性真实证据；
+  Bundle crash/no-change/server-close failure-path、正常 `session.idle` 收口、fresh namespace probe 和
+  跨 Issue session 隔离后单一终态与 archive 收口的代表性真实证据；
 - Claude/Codex 已证明 V2 启动、失败分类和收口，但兼容 Provider 的额度限制仍阻塞真实成功 canary；
 - Pi/OpenCode 三协议完整 Endpoint 矩阵、四 Harness 完整真实矩阵、冻结 20-task benchmark、完整移动端/
   交互验收和发布签署均未完成。
@@ -180,7 +189,7 @@ benchmark 以 [V2 schema](../../architecture/open-harness-v2-schemas.md) 为准�
 | L1 架构/合同 | 通过 | ownership、schema、协议、identity、roll-forward-only 和 Runbook 已对齐 | 后续合同变化仍须回到共享 schema 评审 |
 | L2 源码/测试 | 通过（当前 revision） | V2 公共地基、Pi/OpenCode Adapter、四 Harness fixture、command plane、catalog 和 execution policy 已落地；`ab937400` 的完整 backend unit、Ruff 和 Shell/Python 检查通过，`5ef8ddd3` 的完整 frontend suite/build 通过，mock E2E 沿用已通过结果，远端 composition 以容器源码标记、footer 和运行时行为交叉核对 | 后续若改变源码或 composition，必须重新生成唯一 release evidence；`v2_only` 仍属于 L6 |
 | L3 不可变 composition | 部分通过 | `linux/amd64` Image + Kit `0.6.11` + Profile 4 已安装并完成 identity/DB 绑定；Profile generation `23` 重新 verify，OpenCode Task #125/#126/#127/#129/#130 绑定当前 Runtime Bundle `101`，Pi Task #128 绑定当前 Runtime Bundle `102` | readiness TTL 较短且会再次过期；Claude/Codex 各自基于成功 Task 的独立 Bundle 导出与最终 release freeze 尚未齐全 |
-| L4 真实 Host/Task | 部分通过 | Pi/OpenCode 有真实模型、工具、Session、终态、archive 和 Git/MR；Pi 已有 Skills 与 execute-no-change #118、当前 Bundle no-change #128，OpenCode 已有 task-private config/Skills isolation #119、continue #120、当前 Bundle crash #125、no-change #126、server-close failure-path #127、当前 revision fresh/continue 成功对 #129/#130 和 fresh namespace probe #131；#129/#130 已观察到正常 `session.idle` 收口；取消/abort 与 live command 有代表性证据 | Claude/Codex 成功路径、三协议完整矩阵、timeout、不同 namespace 的跨 Task 隔离、真实 recovery/concurrency 和完整异常矩阵未完成 |
+| L4 真实 Host/Task | 部分通过 | Pi/OpenCode 有真实模型、工具、Session、终态、archive 和 Git/MR；Pi 已有 Skills 与 execute-no-change #118、当前 Bundle no-change #128，OpenCode 已有 task-private config/Skills isolation #119、continue #120、当前 Bundle crash #125、no-change #126、server-close failure-path #127、当前 revision fresh/continue 成功对 #129/#130、fresh namespace probe #131 和跨 Issue 隔离 #132；#129/#130 已观察到正常 `session.idle` 收口；取消/abort 与 live command 有代表性证据 | Claude/Codex 成功路径、三协议完整矩阵、timeout、不同 endpoint/config 导致的不兼容 namespace、真实 recovery/concurrency 和完整异常矩阵未完成 |
 | L5 发布验收 | 未完成 | 验收场景和统计方法已冻结 | 四 Harness 功能矩阵、20-task、Pi 非劣性、完整 UI/交互和发布评审未通过 |
 | L6 hard cut | 未执行 | `v2_only` 与 V1 只读的源码路径存在 | 未切全局 Pi 默认，未进入维护窗口，未执行 hard-cut smoke |
 
@@ -195,7 +204,7 @@ benchmark 以 [V2 schema](../../architecture/open-harness-v2-schemas.md) 为准�
 | Phase 0：协议探针与接口冻结 | 部分完成 | 四 Harness fixture、V2 schema 和 20-task 定义已冻结；Pi/OpenCode 三协议真实 Endpoint 的双向、异常和恢复 probe 尚未齐全 |
 | Phase 1：V2 公共地基与 command plane | 已完成当前 revision recheck | 当前 revision 的完整 release regression 与远端 composition 已核对；`v2_only` 生产切换属于 L6，不能用源码测试代替 |
 | Phase 2：Pi 默认 Harness | 部分完成 | 代表性真实功能、Skills 和 execute-no-change 已有样本；仍缺三协议完整 conformance、timeout/failure、native terminate 边界，以及 rejected、重投、settled race、Scheduler recovery 的真实矩阵和 20-task 非劣性门槛 |
-| Phase 3：OpenCode 一级 Harness | 部分完成 | fresh/continue（当前 revision/Bundle 成功对 #129/#130）、Task-private Skills/配置、usage/tool、Git delivery、abort、当前 Bundle crash、no-change、server-close failure-path、正常 `session.idle` 收口和 fresh namespace probe 收口已有样本；仍缺三协议完整 conformance、Agent/Command/variant、timeout，以及不同 namespace 的跨 Task 隔离证明 |
+| Phase 3：OpenCode 一级 Harness | 部分完成 | fresh/continue（当前 revision/Bundle 成功对 #129/#130）、Task-private Skills/配置、usage/tool、Git delivery、abort、当前 Bundle crash、no-change、server-close failure-path、正常 `session.idle` 收口、fresh namespace probe 和跨 Issue 隔离收口已有样本；仍缺三协议完整 conformance、Agent/Command/variant、timeout，以及不同 endpoint/config 导致的不兼容 namespace 隔离证明 |
 | Phase 4：Claude/Codex V2 | 部分完成 | Adapter、协议声明、fixture/replay 和失败收口已落地；兼容 Provider 额度恢复后仍须完成两者的真实成功、Session、Skills、取消/timeout、usage、archive 和 Git/MR 矩阵 |
 | Phase 5：产品、制品、Canary 与 hard cut | 部分完成 | Kit/Profile/catalog/readiness 和部分 UI 已落地；四 Harness L4、20-task、完整 UI、release review、Pi 默认迁移和 `v2_only` 均未完成 |
 | Phase 6：OMP | 未开始 | 仅在 V2 hard cut 后独立评估，不进入当前 release candidate |
@@ -228,8 +237,9 @@ identity，不从 image、`PATH`、用户配置或另一 Harness 的成功结果
 - Pi 补齐 Skills、timeout/failure/execute-no-change、native terminate，以及 steering/follow-up 的
   rejected、幂等重投、settled race 和 Scheduler recovery；
 - OpenCode 已用当前 Bundle 证明 crash、no-change、server graceful-close failure-path、正常 `session.idle`
-  收口，以及当前 revision 的 fresh/continue 成功对（#129/#130）和 fresh namespace probe（#131）的终态收口；
-  仍须补齐 Agent、Command、variant、timeout，并验证不同 namespace、Task-private Skills/配置和工作区交付不会发生未声明串线；
+  收口，以及当前 revision 的 fresh/continue 成功对（#129/#130）、fresh namespace probe（#131）和跨 Issue
+  隔离（#132）的终态收口；仍须补齐 Agent、Command、variant、timeout，并验证不同 endpoint/config 导致的
+  不兼容 namespace、Task-private Skills/配置和工作区交付不会发生未声明串线；
 - 在兼容 Provider 容量可用后，完成 Claude/Codex 的成功 Task、fresh/continue、Skills、取消/timeout、
   usage、archive 和 Git/MR；保留现有限流失败证据，不以不兼容协议替代；
 - 在目标 Linux/PostgreSQL/AF_UNIX 环境重跑适用的 Scheduler、command、concurrency、cancel 和 recovery
