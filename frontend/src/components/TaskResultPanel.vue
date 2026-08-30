@@ -347,6 +347,13 @@ const failureKindLabel = computed(() => {
   return labels[props.task.failure_kind] || props.task.failure_kind
 })
 const failureSummaryMessage = computed(() => {
+  if (props.task.failure_kind === 'engine_error' && props.task.error_message) {
+    const firstLine = props.task.error_message
+      .split('\n')
+      .map((line) => line.trim())
+      .find(Boolean)
+    if (firstLine) return firstLine
+  }
   if (props.task.failure_kind === 'timeout') {
     const firstLine = (props.task.error_message || '')
       .split('\n')
