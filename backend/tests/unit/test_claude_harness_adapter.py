@@ -666,6 +666,130 @@ codify_harness_finalize_attempt {exit_code}
     assert terminal["payload"]["failure"]["message"] == "normalized failure"
 
 
+def test_outer_timeout_marker_reclassifies_terminals_and_result(tmp_path):
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    (runtime_dir / ".codify-timeout").touch()
+    _emit(
+        runtime_dir,
+        "harness.failed",
+        {"failure": {"kind": "cancelled", "message": "Cancelled by user"}},
+    )
+    (runtime_dir / "harness-result.json").write_text(
+        json.dumps(
+            {
+                "schema": "codify.worker.result/v1",
+                "status": "cancelled",
+                "success": False,
+                "result": "",
+                "harness_key": "claude",
+                "adapter_version": "1.0.0",
+                "cli_version": "2.1.152",
+                "session_id": "session-timeout",
+                "model": "claude-probe",
+                "usage": {
+                    "input_tokens": 1,
+                    "cached_input_tokens": 0,
+                    "output_tokens": 2,
+                    "reasoning_tokens": None,
+                    "cost": None,
+                    "currency": None,
+                    "engine_fields": {},
+                },
+                "failure": {
+                    "kind": "cancelled",
+                    "exit_code": 143,
+                    "message": "Cancelled by user",
+                },
+                "capability_warnings": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    environment = {
+        **_environment(runtime_dir),
+        "ENTRYPOINT_LIB_DIR": str(REPO_ROOT / "deploy/worker-entrypoint"),
+        "CODIFY_CANCELLED": "1",
+        "CODIFY_HARNESS_TERMINAL_SEEN": "1",
+    }
+    command = """
+source "$ENTRYPOINT_LIB_DIR/harness/common.sh"
+CODIFY_CANCELLED=1
+CODIFY_HARNESS_TERMINAL_SEEN=1
+codify_harness_finalize_attempt 143
+"""
+    subprocess.run(["bash", "-c", command], env=environment, check=True)
+
+    events = _events(runtime_dir)
+    replay = replay_events(events)
+    assert replay.terminal_type == "run.failed"
+    assert events[1]["payload"]["failure"] == {
+        "kind": "timeout",
+        "message": "Task timed out",
+    }
+    assert events[-1]["payload"]["status"] == "failed"
+    assert events[-1]["payload"]["failure"]["kind"] == "timeout"
+    result = validate_result(json.loads((runtime_dir / "harness-result.json").read_text()))
+    assert result["status"] == "failed"
+    assert result["failure"]["kind"] == "timeout"
+    assert result["session_id"] == "session-timeout"
+
+
+def test_outer_timeout_marker_overrides_completed_result(tmp_path):
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    (runtime_dir / ".codify-timeout").touch()
+    (runtime_dir / "harness-result.json").write_text(
+        json.dumps(
+            {
+                "schema": "codify.worker.result/v1",
+                "status": "completed",
+                "success": True,
+                "result": "done",
+                "harness_key": "claude",
+                "adapter_version": "1.0.0",
+                "cli_version": "2.1.152",
+                "session_id": "session-timeout-completed-race",
+                "model": "claude-probe",
+                "usage": {
+                    "input_tokens": 3,
+                    "cached_input_tokens": 1,
+                    "output_tokens": 4,
+                    "reasoning_tokens": None,
+                    "cost": None,
+                    "currency": None,
+                    "engine_fields": {},
+                },
+                "failure": None,
+                "capability_warnings": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    environment = {
+        **_environment(runtime_dir),
+        "ENTRYPOINT_LIB_DIR": str(REPO_ROOT / "deploy/worker-entrypoint"),
+        "CODIFY_CANCELLED": "1",
+        "CODIFY_HARNESS_TERMINAL_SEEN": "0",
+    }
+    command = """
+source "$ENTRYPOINT_LIB_DIR/harness/common.sh"
+CODIFY_CANCELLED=1
+CODIFY_HARNESS_TERMINAL_SEEN=0
+codify_harness_finalize_attempt 143
+"""
+    subprocess.run(["bash", "-c", command], env=environment, check=True)
+
+    result = validate_result(json.loads((runtime_dir / "harness-result.json").read_text()))
+    assert result["status"] == "failed"
+    assert result["success"] is False
+    assert result["failure"]["kind"] == "timeout"
+    assert result["failure"]["exit_code"] == 143
+    assert result["session_id"] == "session-timeout-completed-race"
+
+
 # ── V2 contract migration (Phase 4): the adapter honours CODIFY_RUNTIME_CONTRACT_VERSION ──
 
 V2_CONTRACT = "codify.worker.harness/v2"
@@ -923,4 +1047,3 @@ def test_claude_v1_translator_ignores_transport_env_exports(tmp_path):
     assert event["schema"] == "codify.worker.event/v1"
     assert "control_transport" not in event["harness"]
     assert "model_protocols" not in event["harness"]
-

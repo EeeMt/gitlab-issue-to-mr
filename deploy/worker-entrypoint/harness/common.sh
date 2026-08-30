@@ -4,10 +4,15 @@ CODIFY_ORCHESTRATION_DIR="${CODIFY_ORCHESTRATION_DIR:-${ENTRYPOINT_LIB_DIR%/work
 CODIFY_CANONICAL_EVENT_WRITER="${CODIFY_ORCHESTRATION_DIR}/worker-entrypoint/harness/events.py"
 CODIFY_HARNESS_RESULT_FILE="${CODIFY_RUNTIME_DIR}/harness-result.json"
 CODIFY_HARNESS_RAW_DIR="${CODIFY_RUNTIME_DIR}/harness-events"
+CODIFY_TIMEOUT_MARKER="${CODIFY_RUNTIME_DIR}/.codify-timeout"
 CODIFY_DELIVERY_STARTED=0
 CODIFY_HARNESS_TERMINAL_SEEN=0
 CODIFY_HARNESS_INITIALIZED=0
 export CODIFY_ORCHESTRATION_DIR CODIFY_CANONICAL_EVENT_WRITER CODIFY_HARNESS_RESULT_FILE
+
+codify_harness_timeout_requested() {
+    [ -f "${CODIFY_TIMEOUT_MARKER}" ]
+}
 
 codify_emit_event() {
     local event_type="$1"
@@ -49,16 +54,35 @@ codify_harness_ensure_result() {
     if [ -s "${CODIFY_HARNESS_RESULT_FILE}" ] \
         && jq -e --arg schema "${result_schema}" '.schema == $schema' \
             "${CODIFY_HARNESS_RESULT_FILE}" >/dev/null 2>&1; then
-        return 0
+        if ! codify_harness_timeout_requested; then
+            return 0
+        fi
+        # A valid adapter result may already have been written before the outer
+        # stop reached the runner. Preserve its identity, session and usage
+        # fields while correcting the authoritative timeout outcome.
+        if jq --argjson exit_code "${exit_code}" \
+            '.status = "failed"
+             | .success = false
+             | .failure = ((.failure // {}) + {kind:"timeout",exit_code:$exit_code,message:"Task timed out"})' \
+            "${CODIFY_HARNESS_RESULT_FILE}" > "${CODIFY_HARNESS_RESULT_FILE}.tmp"; then
+            mv "${CODIFY_HARNESS_RESULT_FILE}.tmp" "${CODIFY_HARNESS_RESULT_FILE}"
+            return 0
+        fi
+        rm -f "${CODIFY_HARNESS_RESULT_FILE}.tmp"
     fi
     local failure_kind="protocol_error"
     local result_status="protocol_error"
     local failure_message=""
-    failure_kind=$(jq -r \
-        'select(.type == "harness.failed") | .payload.failure.kind // empty' \
-        "${CODIFY_RUNTIME_DIR}/event.jsonl" 2>/dev/null | tail -n 1)
-    failure_kind="${failure_kind:-protocol_error}"
-    failure_message="$(codify_harness_last_failure_message)"
+    if codify_harness_timeout_requested; then
+        failure_kind="timeout"
+        failure_message="Task timed out"
+    else
+        failure_kind=$(jq -r \
+            'select(.type == "harness.failed") | .payload.failure.kind // empty' \
+            "${CODIFY_RUNTIME_DIR}/event.jsonl" 2>/dev/null | tail -n 1)
+        failure_kind="${failure_kind:-protocol_error}"
+        failure_message="$(codify_harness_last_failure_message)"
+    fi
     case "${failure_kind}" in
         cancelled) result_status="cancelled" ;;
         protocol_error) result_status="protocol_error" ;;
@@ -144,6 +168,10 @@ codify_harness_finalize_attempt() {
     if [ "${CODIFY_HARNESS_TERMINAL_SEEN}" -eq 0 ]; then
         if codify_event_type_exists "harness.completed" || codify_event_type_exists "harness.failed"; then
             CODIFY_HARNESS_TERMINAL_SEEN=1
+        elif codify_harness_timeout_requested; then
+            codify_emit_event "harness.failed" \
+                '{"failure":{"kind":"timeout","message":"Task timed out"}}'
+            CODIFY_HARNESS_TERMINAL_SEEN=1
         elif [ "${CODIFY_CANCELLED:-0}" -eq 1 ]; then
             codify_emit_event "harness.failed" \
                 '{"failure":{"kind":"cancelled","message":"Cancelled by user"}}'
@@ -193,12 +221,18 @@ codify_harness_finalize_attempt() {
         failure_kind=$(jq -r \
             'select(.type == "harness.failed") | .payload.failure.kind // empty' \
             "${CODIFY_RUNTIME_DIR}/event.jsonl" 2>/dev/null | tail -n 1)
-        case "${exit_code}" in
-            124) failure_kind="timeout" ;;
-            130 | 137 | 143) failure_kind="cancelled" ;;
-        esac
-        if [ "${CODIFY_CANCELLED:-0}" -eq 1 ]; then
-            failure_kind="cancelled"
+        if codify_harness_timeout_requested; then
+            failure_kind="timeout"
+            failure_message="Task timed out"
+        else
+            case "${exit_code}" in
+                124) failure_kind="timeout" ;;
+                130 | 137 | 143) failure_kind="cancelled" ;;
+            esac
+            if [ "${CODIFY_CANCELLED:-0}" -eq 1 ]; then
+                failure_kind="cancelled"
+            fi
+            failure_message="$(codify_harness_last_failure_message)"
         fi
         failure_kind="${failure_kind:-engine_error}"
         case "${failure_kind}" in
@@ -206,7 +240,6 @@ codify_harness_finalize_attempt() {
             protocol_error) task_status="protocol_error" ;;
             *) task_status="failed" ;;
         esac
-        failure_message="$(codify_harness_last_failure_message)"
         terminal_payload=$(jq -nc \
             --argjson exit_code "${exit_code}" \
             --arg kind "${failure_kind}" \

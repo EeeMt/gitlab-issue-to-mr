@@ -258,8 +258,17 @@ codify_signal_exit() {
     # Idempotent: a second TERM while the EXIT-trap finalizer is running must
     # not abort it (docker stop retries, double-cancel).
     trap - TERM INT
-    CODIFY_CANCELLED=1
-    echo "Cancellation signal received; finalizing task as cancelled" >&2
+    if declare -F codify_harness_timeout_requested >/dev/null 2>&1 \
+        && codify_harness_timeout_requested; then
+        # The backend writes this marker immediately before Docker stop. TERM
+        # is therefore an outer timeout, not a user cancellation (both use
+        # exit code 143 at the container boundary).
+        CODIFY_CANCELLED=0
+        echo "Timeout signal received; finalizing task as timeout" >&2
+    else
+        CODIFY_CANCELLED=1
+        echo "Cancellation signal received; finalizing task as cancelled" >&2
+    fi
     if declare -F adapter_terminate >/dev/null 2>&1; then
         adapter_terminate "${CODIFY_HARNESS_ADAPTER_PID:-}" || true
     fi

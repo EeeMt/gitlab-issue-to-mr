@@ -1,3 +1,5 @@
+import io
+import tarfile
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -1140,6 +1142,10 @@ async def test_worker_finalization_gracefully_stops_container_on_timeout():
         )
 
     container.stop.assert_called_once_with(timeout=15)
+    marker_call = worker.docker.put_archive.call_args
+    assert marker_call.args[1] == "/tmp/codify-runtime"
+    with tarfile.open(fileobj=io.BytesIO(marker_call.args[2])) as archive:
+        assert archive.getnames() == [".codify-timeout"]
     assert result is False
     assert task.status == TaskStatus.FAILED
     assert "Task timed out after 1800s" in task.error_message

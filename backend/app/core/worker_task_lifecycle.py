@@ -2,8 +2,10 @@
 
 import asyncio
 import hashlib
+import io
 import json
 import logging
+import tarfile
 import time
 from collections.abc import Mapping
 from datetime import datetime
@@ -85,6 +87,31 @@ from app.models import CIFailureRun, Issue, Task, TaskHarnessAttempt, TaskLog, T
 
 logger = logging.getLogger(__name__)
 _CONTAINER_RUNTIME_JSON = "/tmp/codify-runtime/runtime.json"
+_CONTAINER_TIMEOUT_MARKER_DIR = "/tmp/codify-runtime"
+_CONTAINER_TIMEOUT_MARKER_NAME = ".codify-timeout"
+
+
+def _build_timeout_marker_archive() -> bytes:
+    """Build the tiny marker archive used to distinguish outer timeout from TERM."""
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        marker = tarfile.TarInfo(name=_CONTAINER_TIMEOUT_MARKER_NAME)
+        marker.mode = 0o644
+        marker.mtime = 0
+        archive.addfile(marker)
+    return buffer.getvalue()
+
+
+_TIMEOUT_MARKER_ARCHIVE = _build_timeout_marker_archive()
+
+
+def _mark_container_timeout(worker, container) -> None:
+    """Persist the outer timeout cause before Docker sends the stop signal."""
+    worker.docker.put_archive(
+        container,
+        _CONTAINER_TIMEOUT_MARKER_DIR,
+        _TIMEOUT_MARKER_ARCHIVE,
+    )
 
 
 async def load_task_or_fail(db: AsyncSession, task_id: int) -> Task | None:
@@ -1145,6 +1172,22 @@ async def monitor_container_run(
         # flushes its canonical events) with a bounded grace, then force-kill
         # only if it does not exit in time. This leaves the workspace in a
         # consistent state instead of force-removing a mid-write container.
+        try:
+            # Docker exposes both a user cancellation and this timeout as TERM
+            # (143) inside the container. Write the cause first so the
+            # entrypoint can preserve the distinct canonical taxonomy while it
+            # performs the same graceful signal path.
+            await asyncio.to_thread(_mark_container_timeout, worker, container)
+            logger.info(
+                f"[Task {task.id}] Persisted timeout marker before container stop{resume_prefix}"
+            )
+        except Exception as exc:  # noqa: BLE001
+            # The task/database timeout remains authoritative if the Docker
+            # daemon closes the container race before the marker upload. Keep
+            # the stop path best-effort and retain the evidence in the logs.
+            logger.warning(
+                f"[Task {task.id}] Could not persist timeout marker before stop: {exc}"
+            )
         try:
             await asyncio.to_thread(container.stop, timeout=15)
             logger.info(

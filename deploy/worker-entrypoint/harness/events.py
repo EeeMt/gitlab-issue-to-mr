@@ -57,6 +57,11 @@ def _paths() -> tuple[Path, Path]:
     return runtime_dir / "event.jsonl", runtime_dir / ".event.lock"
 
 
+def _outer_timeout_requested(runtime_dir: Path) -> bool:
+    """Return whether the backend requested a wall-clock timeout stop."""
+    return (runtime_dir / ".codify-timeout").is_file()
+
+
 def _normalize_payload(event_type: str, payload: dict) -> dict:
     if event_type in {"usage.updated", "usage.final"}:
         source = payload.get("usage") or {}
@@ -83,6 +88,22 @@ def emit(event_type: str, payload: dict, raw_ref: dict | None) -> dict:
         }
         event_type = "diagnostic"
     event_path, lock_path = _paths()
+    if event_type in HARNESS_TERMINAL_TYPES | TASK_TERMINALS and _outer_timeout_requested(
+        event_path.parent
+    ):
+        # Docker uses SIGTERM/143 for both user cancellation and the backend's
+        # wall-clock timeout. The marker is written immediately before the
+        # backend calls Docker stop, so every terminal emitted after that point
+        # carries the authoritative timeout taxonomy.
+        payload = dict(payload)
+        failure = payload.get("failure")
+        failure = dict(failure) if isinstance(failure, dict) else {}
+        failure["kind"] = "timeout"
+        failure["message"] = "Task timed out"
+        payload["failure"] = failure
+        if event_type == "run.failed":
+            payload["status"] = "failed"
+            payload["success"] = False
     event_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path.touch(exist_ok=True)
     with lock_path.open("r+") as lock:
