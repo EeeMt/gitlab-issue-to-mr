@@ -1075,20 +1075,33 @@ async function refreshIssueTasks(requestedTaskId: number) {
 async function fetchTask(): Promise<boolean> {
   const requestGeneration = ++taskRequestGeneration
   const requestedTaskId = taskId.value
-  // Keep the command plane fail-closed while a refresh or task switch is
-  // waiting for the immutable catalog response.
-  attemptHarnessCapabilities.value = null
   loading.value = true
   try {
     const previousStatus = task.value?.status
+    const previousTaskId = task.value?.id
+    const previousHarnessKey = attemptHarnessKey.value
     const fetchedTask = await getTask(requestedTaskId)
     if (requestGeneration !== taskRequestGeneration || requestedTaskId !== taskId.value) {
       return false
     }
+
+    const fetchedHarnessKey = taskHarnessKey(fetchedTask)
+    const attemptChanged =
+      previousTaskId !== requestedTaskId
+      || previousHarnessKey !== fetchedHarnessKey
+      || (previousStatus !== 'running' && fetchedTask.status === 'running')
+    if (attemptChanged) {
+      // Keep the command plane fail-closed while a new task/attempt waits for
+      // its immutable catalog response.  Stable polling keeps the prior
+      // verified catalog mounted so the control card does not blink.
+      attemptHarnessCapabilities.value = null
+    }
     task.value = fetchedTask
     controlState.value = fetchedTask.control_state ?? null
-    attemptHarnessKey.value = fetchedTask.attempt_harness_key ?? null
-    await fetchHarnessCatalog(requestedTaskId, requestGeneration, fetchedTask)
+    attemptHarnessKey.value = fetchedHarnessKey
+    if (attemptChanged || attemptHarnessCapabilities.value === null) {
+      await fetchHarnessCatalog(requestedTaskId, requestGeneration, fetchedTask)
+    }
     if (requestGeneration !== taskRequestGeneration || requestedTaskId !== taskId.value) {
       return false
     }
@@ -1272,6 +1285,10 @@ function resetLogsState() {
   resetLogStreams()
 }
 
+function taskHarnessKey(value: Task | null | undefined): string | null {
+  return value?.attempt_harness_key ?? value?.harness_key ?? null
+}
+
 function handleVisibilityChange() {
   if (document.visibilityState !== 'visible') return
   void refreshTask()
@@ -1305,6 +1322,9 @@ watch(
     if (newId && newId !== oldId) {
       resetLogsState()
       task.value = null
+      controlState.value = null
+      attemptHarnessKey.value = null
+      attemptHarnessCapabilities.value = null
       activeRetryTask.value = null
       issueTasks.value = []
       issueDescription.value = undefined

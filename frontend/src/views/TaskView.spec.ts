@@ -770,6 +770,7 @@ describe('TaskView', () => {
     )
 
     const staleRefresh = wrapper.vm.fetchTask()
+    await nextTick()
     expect(wrapper.vm.attemptHarnessCapabilities).toBeNull()
     await router.push('/tasks/2')
     await vi.waitFor(() => expect(wrapper.vm.task?.id).toBe(2))
@@ -781,6 +782,39 @@ describe('TaskView', () => {
     await flushPromises()
     expect(wrapper.vm.task?.id).toBe(2)
     expect(wrapper.vm.attemptHarnessCapabilities).toEqual({ steering: false, follow_up: false })
+  })
+
+  it('keeps the verified steering catalog mounted during a stable active-task refresh', async () => {
+    const piCatalog = {
+      catalog: [{ key: 'pi', capabilities: { steering: true, follow_up: true } }],
+    }
+    ;(mockApi.getTaskHarnessCatalog as Mock).mockResolvedValue(piCatalog)
+    await mountComponent({
+      status: 'running',
+      harness_key: 'pi',
+      attempt_harness_key: 'pi',
+      control_state: 'accepting',
+    })
+    expect(wrapper.vm.attemptHarnessCapabilities).toEqual({ steering: true, follow_up: true })
+    const catalogCallsBeforeRefresh = (mockApi.getTaskHarnessCatalog as Mock).mock.calls.length
+
+    let resolveUnexpectedCatalog!: (value: unknown) => void
+    ;(mockApi.getTaskHarnessCatalog as Mock).mockImplementation(
+      () => new Promise(resolve => { resolveUnexpectedCatalog = resolve })
+    )
+    ;(mockApi.getTask as Mock).mockResolvedValue(createMockTaskWithStatus('running', {
+      harness_key: 'pi',
+      attempt_harness_key: 'pi',
+      control_state: 'accepting',
+    }))
+
+    const refresh = wrapper.vm.fetchTask()
+    await nextTick()
+
+    expect(wrapper.vm.attemptHarnessCapabilities).toEqual({ steering: true, follow_up: true })
+    expect((mockApi.getTaskHarnessCatalog as Mock).mock.calls.length).toBe(catalogCallsBeforeRefresh)
+    await refresh
+    expect(resolveUnexpectedCatalog).toBeUndefined()
   })
 
   it('reloads the frozen catalog when the mounted edit drawer opens', async () => {
