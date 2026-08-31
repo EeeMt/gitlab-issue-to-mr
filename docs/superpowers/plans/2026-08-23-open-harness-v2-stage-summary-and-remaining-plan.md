@@ -28,8 +28,8 @@ Open-Harness V2 已形成可继续验证的 Internal Preview candidate，但尚�
 - OpenCode `APIError` 的真实 `error.data.statusCode/message` 结构已纳入归一化，避免 Provider HTTP 429/401
   退化为 `engine_error`/`APIError`；本地 OpenCode/failure-detail 聚焦回归 80 条通过，完整 backend unit
   为 `3233 passed / 4 skipped`。目标 Host backend 已部署该修复并重新完成 Profile 4 四 Harness
-  verify-runtime/readiness。新的真实 Task 仍须绑定新 Bundle 验证，不能用历史 Task 137 的 canonical 结果
-  追认当前 taxonomy。
+  verify-runtime/readiness；真实 OpenCode Provider failure 已在新 Bundle 上验证 `rate_limited` 详情、Full
+  output、Raw Logs、canonical terminal 和 archive。不能用历史 Task 137 的 canonical 结果追认当前 taxonomy。
 - OpenCode Bridge 已补齐 Task-local 的逐请求 HTTP audit artifact，并把冻结 endpoint fingerprint、协议和
   `opencode.json` 路径/哈希绑定进记录；建 Session、prompt 和 command 的 HTTP 非 2xx 已统一转成 bounded /
   sanitized 的结构化失败事件，且目标 Host 的真实 Task 170 已归档 3 条 audit 记录并证明一个 task-local
@@ -53,9 +53,8 @@ Pi 默认值迁移，不启用 `v2_only`。普通 canary、故障定位 Task 和
 - 当前 candidate 使用 `linux/amd64`、Kit `0.6.11`、Profile 4，并已在 runner 修复后重新完成 Profile/runtime
   verify 和 readiness 对账；readiness 为短 TTL，下一轮 canary 开始前必须再次 verify；
 - 当前 candidate 已在目标 Host 部署并通过健康检查；Profile 4 已在最新 parser/Bridge 修复后再次完成四 Harness
-  verify-runtime/readiness，generation 为 `42`。该验证生成的是四 Harness 的候选验证归档，不会直接持久化
-  `worker_runtime_bundles`；下一条真实 Task 创建时必须从当前 source 绑定新的不可变 Bundle，既有 Task 170 的
-  Bundle `118` 保持不变。
+  verify-runtime/readiness，generation 为 `43`。Task 171 使用该 readiness 创建了新的不可变 Bundle `119`，既有
+  Task 170 的 Bundle `118` 保持不变。
 - 当前远端没有遗留 Codify Task worker 容器，磁盘未满，本轮未执行镜像清理；满盘时只按名称核对并清理
   Codify 调试镜像，不执行 broad prune；
 - 当前 Open-Harness V2 实现已提交为 `ab869c67c22bbcea33cefc4dbc034060e73a4a1f`；本轮 audit 增量后的 backend unit 为
@@ -90,7 +89,7 @@ Pi 默认值迁移，不启用 `v2_only`。普通 canary、故障定位 Task 和
 | L1 架构/合同 | 通过 | ownership、schema、协议、identity、roll-forward-only 和 Runbook 边界已对齐 | 后续合同变化仍须回到共享 schema 评审 |
 | L2 源码/测试 | 当前通过 | V2 公共地基、四 Harness fixture、Pi/OpenCode Adapter、command plane、catalog、execution policy、options freeze、归档错误详情、OpenCode HTTP audit 和相关回归已落地；当前工作树的 backend/frontend/mock/build 检查通过 | 当前工作树尚未形成唯一 release revision；任何后续源码或 composition 变化都必须重新生成完整 release evidence |
 | L3 不可变 composition | 部分通过 | `linux/amd64` Image、Kit、Profile、Adapter、Runtime Bundle 和 DB identity 已绑定；当前 candidate 服务与四个新 Bundle 已吸收并核对本轮 audit source；Profile 4 readiness 可供短窗口 canary 使用 | readiness 会过期；最终 release revision、独立 release evidence 以及 Claude/Codex 的真实成功 Bundle 证据尚未冻结 |
-| L4 真实 Host/Task | 部分通过 | Pi/OpenCode 已有真实模型、协议、工具、Session、终态、usage、archive、delivery 和 Git/MR；Pi 的 timeout、native terminate、真实 OpenRouter Provider failure、steering/follow-up、command、scheduler recovery 和 fail-closed 分支已有代表性证据；OpenCode 的 fresh/continue、Skills/config 隔离、crash/no-change、server close、timeout、namespace、options，以及 Task 170 的真实 server HTTP audit 已有代表性证据 | Claude/Codex 成功路径、Pi/OpenCode 完整协议异常/恢复矩阵、OpenCode 非 timeout Provider failure、幂等重投、不同 endpoint/config namespace 的跨 Task 真实证明、完整 recovery/concurrency 和四 Harness 交叉验收尚未完成 |
+| L4 真实 Host/Task | 部分通过 | Pi/OpenCode 已有真实模型、协议、工具、Session、终态、usage、archive、delivery 和 Git/MR；Pi 的 timeout、native terminate、真实 OpenRouter Provider failure、steering/follow-up、command、scheduler recovery 和 fail-closed 分支已有代表性证据；OpenCode 的 fresh/continue、Skills/config 隔离、crash/no-change、server close、timeout、namespace、options、Task 170 的真实 server HTTP audit，以及 Task 171 的真实 Provider failure 已有代表性证据 | Claude/Codex 成功路径、Pi/OpenCode 完整协议异常/恢复矩阵、幂等重投、不同 endpoint/config namespace 的跨 Task 真实证明、完整 recovery/concurrency 和四 Harness 交叉验收尚未完成 |
 | L5 发布验收 | 未完成 | 场景、统计口径和 UI/运维检查项已定义 | 四 Harness 功能矩阵、20-task、Pi 非劣性、完整 UI/交互、授权/凭据和发布评审未通过 |
 | L6 hard cut | 未执行 | `v2_only` 与 V1 只读路径存在 | 未切全局 Pi 默认，未进入维护窗口，未执行 hard-cut smoke |
 
@@ -105,7 +104,7 @@ Pi 默认值迁移，不启用 `v2_only`。普通 canary、故障定位 Task 和
 | Phase 0：协议探针与接口冻结 | 部分完成 | V2 schema、四 Harness fixture 和 20-task 定义已冻结；Pi/OpenCode 有三协议成功样本，双向细节、异常和恢复 probe 尚未齐全 |
 | Phase 1：V2 公共地基与 command plane | 当前 revision 已完成主要复核 | 最终唯一 revision 的完整 regression 和远端 composition 仍需重新冻结；`v2_only` 属于 L6，不能用源码测试替代 |
 | Phase 2：Pi 默认 Harness | 部分完成 | 已有代表性功能、Skills、execute/no-change、三协议成功、timeout、native terminate、command、steering/follow-up、scheduler recovery、取消竞态和 fail-closed recovery 证据；仍缺完整三协议 conformance、真实非 timeout failure、幂等重投、完整 recovery/concurrency 和 20-task 非劣性 |
-| Phase 3：OpenCode 一级 Harness | 部分完成 | 已有 fresh/continue、task-private Skills/config、usage/tool、Git delivery、abort、crash/no-change、server close、正常 session close、namespace、timeout、options 和 Task 170 真实 HTTP audit 样本；仍缺完整三协议异常/恢复 conformance、不同 endpoint/config 的跨 Task namespace 隔离证明 |
+| Phase 3：OpenCode 一级 Harness | 部分完成 | 已有 fresh/continue、task-private Skills/config、usage/tool、Git delivery、abort、crash/no-change、server close、正常 session close、namespace、timeout、options、Task 170 真实 HTTP audit 和 Task 171 真实 Provider failure 样本；仍缺完整三协议异常/恢复 conformance、不同 endpoint/config 的跨 Task namespace 隔离证明 |
 | Phase 4：Claude/Codex V2 | 部分完成 | Adapter、协议声明、fixture/replay 和失败收口已落地；额度可用后仍须完成成功、fresh/continue、Skills、取消/timeout、usage、archive 和 Git/MR 矩阵 |
 | Phase 5：产品、制品、Canary 与 hard cut | 部分完成 | Kit/Profile/catalog/readiness 和部分 UI 已落地；四 Harness L4、20-task、完整 UI、release review、Pi 默认迁移和 `v2_only` 均未完成 |
 | Phase 6：OMP | 未开始 | 仅在 V2 hard cut 后独立评估，不修改 V2 公共合同来迁就 OMP |
@@ -139,9 +138,9 @@ Runtime Bundle 拥有 Adapter/Bridge/orchestration bytes；实际执行只认冻
   使用真实兼容 Endpoint/Task 对账 config、model、usage、terminal、archive 和 delivery；禁止协议代理、
   URL 推断、隐式转换或回退冒充通过；
 - 对 Pi/OpenCode 补齐真实 Provider failure（包含非 timeout failure）、retry/recovery、取消/abort、command
-  replay/rejection/idempotency、Session lineage 和 namespace 证据；Pi 已有真实 OpenRouter failure probe，仍需
-  补齐 OpenCode 的真实 Provider failure；不把 Adapter 层合成错误、disposable probe 或历史限流样本直接当成
-  真实 Provider failure；
+  replay/rejection/idempotency、Session lineage 和 namespace 证据；Pi 与 OpenCode 已分别有真实 OpenRouter
+  failure probe，仍需补齐完整异常/恢复矩阵；不把 Adapter 层合成错误、disposable probe 或历史限流样本直接
+  当成真实 Provider failure；
 - OpenCode Bridge/归档路径已补齐逐请求 HTTP endpoint/config path 审计；Task 170 已在真实 Host/Task 核对每条
   请求的 route/status/config hash 与冻结 Snapshot，并验证一个 task-private namespace；仍须用不同 endpoint/config
   的真实 Task 证明 namespace 不会未声明串线，同时验证完整 task-private Skills/config、工作区交付和协议矩阵；

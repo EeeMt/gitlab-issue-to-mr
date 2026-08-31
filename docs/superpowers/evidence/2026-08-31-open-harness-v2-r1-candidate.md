@@ -7,7 +7,7 @@
 - 目标 Host：`192.168.50.129`
 - 目标平台：`linux/amd64`
 - 执行模式：`dual_canary`
-- 验证范围：候选服务、Profile 4、Worker Kit、V2 Runtime Bundle、OpenCode HTTP audit/failure 源码及真实 Task 170
+- 验证范围：候选服务、Profile 4、Worker Kit、V2 Runtime Bundle、OpenCode HTTP audit/failure 源码及真实 Task 170/171
 
 ## Provider composition
 
@@ -47,11 +47,11 @@ Host/Task 证据逐项完成。
 - Profile：`4 / v2-canary-0.6.11-four-harness`
 - Worker image：repository-digest pinned `linux/amd64` image
 - Worker Kit：`0.6.11`
-- Profile image identity generation：`42`
-- Worker Kit identity generation：`42`
-- Latest readiness: `ready`；Task 170 创建前已重新执行 Profile 4 verify-runtime 并完成 readiness 对账。该状态是短 TTL，后续 canary 仍须在提交前重新 verify。
+- Profile image identity generation：`43`
+- Worker Kit identity generation：`43`
+- Latest readiness: `ready`；Task 171 创建前已重新执行 Profile 4 verify-runtime 并完成 readiness 对账。该状态是短 TTL，后续 canary 仍须在提交前重新 verify。
 
-The four persisted V2 Bundles are:
+The four initial persisted V2 Bundles are:
 
 | Harness | Bundle ID | Bundle digest | Archive SHA-256 |
 | --- | ---: | --- | --- |
@@ -63,7 +63,9 @@ The four persisted V2 Bundles are:
 Bundle 115 在其生成时的归档源字节已与当时的本地受控文件逐项一致，且归档实际 SHA-256 与 manifest 中的
 `archive_sha256` 一致。`opencode-http-audit.jsonl` 是 Task 运行时 artifact，不会在空的 Bundle 中预置；
 真实 OpenCode Task 170 已核对该文件中的逐请求 route/status/config hash；Task 170 使用的最新冻结 Bundle
-为下方记录的 Bundle 118（generation 40），不以旧 Bundle 115 的标识替代本次执行证据。
+为下方记录的 Bundle 118（generation 40），不以旧 Bundle 115 的标识替代本次执行证据。Task 171 随后使用
+Profile generation `43` 新建的 Bundle `119`，其 digest 为
+`db8f10c45c676d09d3c65447c1b99bc680bc5057bab25b9d2c7d4e63203a93a4`。
 
 ## R2 Pi Provider failure probe
 
@@ -77,6 +79,28 @@ Task `169` 使用 Profile 4、Pi、Bundle `114`、`openrouter-glm52-anthropic`�
   `e17d57ee0e1f84053e53060f99dfb300b44a2b7060c6e5d2fa332b72b61a9690`；
 - Task worker 容器已清理。该失败样本证明 failure taxonomy 和展示/归档路径，不计为 Provider 成功或协议 conformance 成功。
 
+## R2 OpenCode Provider failure probe
+
+Task `171` 在目标 Host 的开发环境中通过 Issue 18 的真实创建任务流程提交，使用 Profile 4、OpenCode、Bundle
+`119`、`openrouter-glm52-anthropic`、模型 `z-ai/glm-5.2:free`、`anthropic_messages`、Freeform、P2、Execute Now
+和 Fresh session：
+
+- OpenCode server 的控制请求本身正常完成（`POST /session` 为 200、`POST /session/{session_id}/prompt_async` 为
+  204、`GET /event` 为 200 后关闭）；随后其真实上游 Provider 返回 HTTP `429`，Provider 为 `Decart`，
+  `provider_code=upstream_429`、`limit_source=upstream_provider_shared_pool`、`retry_after=5s`；任务最终分类为
+  `rate_limited`。
+- Task Result 和展开后的 Full output 均展示 bounded/sanitized 的 429 详情，Raw Logs 同时包含
+  `[archived harness error]` 及同一错误详情；未暴露 credential。该错误来自真实 OpenCode Provider 请求，不是
+  Adapter 层合成的 HTTP failure。
+- attempt 为 `task-171-attempt-1-a9a3715d0d4b`，event schema 为 `codify.worker.event/v2`，Adapter 为 `2.0.0`、
+  OpenCode CLI 为 `1.18.19`；canonical receipt 共 18 条，`harness.failed` 后唯一终态为 `run.failed`，
+  `last_seq=18`，attempt 为 `closed`。TaskLog 共 12 条，Raw Log chunk 共 4 条。
+- token usage 为 0，代码变更为 `+0/-0`；runtime archive 为 `task-171-runtime-archive.tar.gz`，大小 `7,093`
+  bytes，SHA-256 为 `dea7184fb06d594cb83186a4862025003a7301b698320160d35e23b4b628723b`；归档包含 canonical
+  `event.jsonl`、`harness-events/opencode.jsonl`、`harness-result.json` 和 `opencode-http-audit.jsonl`。
+- Task worker 容器已清理。该样本关闭了 OpenCode 的真实非 timeout Provider failure 证据缺口，但不计为协议成功、
+  完整 retry/recovery 矩阵或四 Harness conformance。
+
 ## OpenCode nested APIError and HTTP control failure follow-up
 
 - OpenCode 真实 `session.error` 的 `error.data.statusCode/message` 结构已纳入归一化；本地 OpenCode、failure-detail
@@ -85,11 +109,10 @@ Task `169` 使用 Profile 4、Pi、Bundle `114`、`openrouter-glm52-anthropic`�
   不把完整 response envelope 转入 raw/canonical event；本地两条 429/401 失败分类测试已覆盖 `rate_limited` 和
   `authentication_error`，translator 进程也在 setup/early-return 路径统一 close/reap。
 - 目标 Host backend/scheduler 已运行包含该修复的镜像 `sha256:7b060896d62dab5277acb8408ab5fdc9ebc51f478b546d07d148cdf970e9390d`；
-  Profile 4 随后重新完成四 Harness verify-runtime，页面显示 readiness `Ready`，Profile identity generation 为 `42`。
-  这次验证未创建真实 Task，已有 Task 170 的 Bundle `118` 不被追改。
-- Task 137 的历史 UI 复核已能展示 bounded/sanitized Provider 详情和 Raw Logs 归档错误；下一条真实 OpenCode Provider
-  failure 仍须在新 Bundle 上通过开发环境真实创建 Task 验证 canonical `rate_limited`/`authentication_error` taxonomy；
-  本轮未提交该新的真实 Task。
+  Profile 4 随后重新完成四 Harness verify-runtime，页面显示 readiness `Ready`，Profile identity generation 为 `43`。
+  Task 171 使用新的 Bundle `119`，既有 Task 170 的 Bundle `118` 未被追改。
+- Task 137 的历史 UI 复核已能展示 bounded/sanitized Provider 详情和 Raw Logs 归档错误；Task 171 在新 Bundle 上
+  通过真实 OpenCode Provider failure 进一步验证了 `rate_limited` taxonomy、Full output 和 Raw Logs 归档路径。
 
 ## Failure detail UI verification
 
@@ -98,6 +121,8 @@ Task `169` 使用 Profile 4、Pi、Bundle `114`、`openrouter-glm52-anthropic`�
 - 当前 candidate Task 169（Bundle `114`）的 Task Result 显示 `rate_limited` 及 bounded/sanitized 429 详情；
   展开 `Raw Logs` 后可见 Harness 非零退出和归档错误，未出现旧 runner 的成功提示。两者均未在展示文本中暴露
   credential。
+- 当前真实 OpenCode Task 171（Bundle `119`）的 Task Result、Full output 和 Raw Logs 均显示同一真实上游 429；
+  页面没有退化为孤立 `APIError`。其 canonical receipt、TaskLog 和 runtime archive 也已对账。
 
 ## R4 responsive UI spot-check
 
@@ -118,8 +143,8 @@ Task `169` 使用 Profile 4、Pi、Bundle `114`、`openrouter-glm52-anthropic`�
 - 从 Bundle 115 加载实际归档源字节执行回环 HTTP smoke：6 条 audit 记录覆盖 session create/get/prompt/status/abort
   和 SSE event subscribe，含合成 HTTP 429；记录不含请求体、模型名、session ID 或凭据，并包含 task-local config hash。
 - 远端 Docker 磁盘未满，本轮未执行镜像清理；若后续确实满盘，只清理已确认的 Codify 调试镜像，不做 broad prune。
-- Task 169 的真实 Pi Provider failure probe 和 Task 170 的真实 OpenCode HTTP-audit/namespace 样本已记录在
-  上方；下一次真实 Task 提交前仍须重新确认，并重新验证 readiness。
+- Task 169 的真实 Pi Provider failure、Task 170 的真实 OpenCode HTTP-audit/namespace 样本和 Task 171 的真实
+  OpenCode Provider failure 已记录在上方；下一次真实 Task 提交前仍须重新验证 readiness。
 
 ## R2 OpenCode HTTP audit canary
 
@@ -165,6 +190,7 @@ Profile 4 readiness，并显式选择 `openrouter-free`、OpenCode、Freeform、
 API key、request/response headers 或实际 session ID；`{session_id}` 只出现在脱敏后的 route template 中。
 目标 Host 上 Task 170 的 worker 容器已清理。
 
-这补齐了一个真实 OpenCode server HTTP audit 与单 Task namespace 样本，证明了本次冻结 Snapshot 到实际
-HTTP 请求的可追溯链路；它仍不等同于不同 endpoint/config 的交叉 Task namespace 隔离证明，也不替代 OpenCode
-三协议成功、Provider failure、retry/recovery、完整四 Harness conformance 或 L5/L6 验收。
+这补齐了一个真实 OpenCode server HTTP audit 与单 Task namespace 样本，并与上方 Task 171 的真实 Provider
+failure 共同证明了从冻结 Snapshot 到 OpenCode 控制面及上游失败结果的可追溯链路；它仍不等同于不同
+endpoint/config 的交叉 Task namespace 隔离证明，也不替代 OpenCode 三协议成功、retry/recovery、完整四 Harness
+conformance 或 L5/L6 验收。
