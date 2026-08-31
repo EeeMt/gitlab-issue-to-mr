@@ -58,7 +58,7 @@ Pi 默认值迁移，不启用 `v2_only`。普通 canary、故障定位 Task 和
   Bundle `118` 保持不变。
 - 当前远端没有遗留 Codify Task worker 容器，磁盘未满，本轮未执行镜像清理；满盘时只按名称核对并清理
   Codify 调试镜像，不执行 broad prune；
-- 当前 Open-Harness V2 增量已提交为 `e7373907fa1eb0706f35af096c211a73912f9191`；本轮 audit 增量后的 backend unit 为
+- 当前 Open-Harness V2 实现已提交为 `ab869c67c22bbcea33cefc4dbc034060e73a4a1f`；本轮 audit 增量后的 backend unit 为
   `3233 passed / 4 skipped`，OpenCode/
   failure-detail 聚焦 suite 为 `80 passed`，Pi adapter/owner/protocol focused suite
   为 `112 passed`，frontend unit 为 `79 files / 1683 passed`；目标 Host 上已有 mock-integration 全量为

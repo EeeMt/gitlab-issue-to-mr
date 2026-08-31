@@ -24,9 +24,9 @@ Host/Task 证据逐项完成。
 
 ## Source and service identity
 
-- 本地 Git HEAD：`e7373907fa1eb0706f35af096c211a73912f9191`
-- Open-Harness V2 源码增量已提交到该 revision；工作树仅保留测试生成的 `.vite` 结果，尚不能作为最终
-  release revision 的唯一 composition evidence
+- Open-Harness V2 实现 commit：`ab869c67c22bbcea33cefc4dbc034060e73a4a1f`
+- 该 revision 的源码增量已提交；工作树仅保留测试生成的 `.vite` 结果，尚不能作为最终 release revision
+  的唯一 composition evidence
 - backend/scheduler image：`codify-backend:latest`
 - backend/scheduler image ID：`sha256:7b060896d62dab5277acb8408ab5fdc9ebc51f478b546d07d148cdf970e9390d`
 - backend：healthy；scheduler：running；数据库容器：healthy
