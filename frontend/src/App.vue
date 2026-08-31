@@ -1283,6 +1283,16 @@ a.app-link:visited:hover {
     min-height: calc(100vh - 28px);
   }
 
+  .mobile-header__menu-button,
+  .mobile-header__create-issue-button,
+  .mobile-header__onboarding-button,
+  .mobile-header__logout-button {
+    min-width: 44px;
+    min-height: 44px;
+    --n-width: 44px !important;
+    --n-height: 44px !important;
+  }
+
   .nav-menu .n-menu-item-content {
     margin: 2px 0;
     border-radius: 12px;
@@ -1290,6 +1300,22 @@ a.app-link:visited:hover {
 
   .mobile-header__user-chip {
     max-width: 112px;
+  }
+}
+
+@media (max-width: 768px) {
+  .usage-indicator,
+  .app-shell__create-issue-button,
+  .app-shell__onboarding-button--icon-only {
+    min-width: 44px;
+    min-height: 44px;
+    --n-width: 44px !important;
+    --n-height: 44px !important;
+  }
+
+  .app-shell__logout-button {
+    min-height: 44px;
+    --n-height: 44px !important;
   }
 }
 

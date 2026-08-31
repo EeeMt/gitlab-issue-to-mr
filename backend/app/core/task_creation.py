@@ -46,6 +46,7 @@ async def prepare_task_runtime_snapshot(
     harness_key: str | None = None,
     endpoint: Any | None = None,
     shared_configuration: Any | None = None,
+    task_harness_options: dict[str, Any] | None = None,
 ) -> TaskWorkerProfileSnapshot:
     """Snapshot the worker profile and persist the task's rendered prompt.
 
@@ -64,6 +65,7 @@ async def prepare_task_runtime_snapshot(
         harness_key=harness_key,
         endpoint=endpoint,
         shared_configuration=shared_configuration,
+        task_harness_options=task_harness_options,
     )
     if skill_snapshots is None:
         resolved_skills = await resolve_task_skill_snapshots(

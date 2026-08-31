@@ -93,6 +93,7 @@ PY
 opencode_adapter_prepare_config() {
     # Task-scoped OpenCode config dir (ephemeral; never a shared user config).
     local config_dir="${CODIFY_RUNTIME_DIR}/opencode"
+    export CODIFY_OPENCODE_HTTP_AUDIT_FILE="${CODIFY_RUNTIME_DIR}/opencode-http-audit.jsonl"
     local task_home="${config_dir}/home"
     local xdg_config_home="${config_dir}/xdg-config"
     local xdg_data_home="${config_dir}/xdg-data"
@@ -133,6 +134,45 @@ opencode_adapter_prepare_config() {
     export OPENCODE_DISABLE_EXTERNAL_SKILLS="1"
     export OPENCODE_DISABLE_CLAUDE_CODE_SKILLS="1"
     unset OPENCODE_CONFIG OPENCODE_CONFIG_CONTENT
+
+    # Only the small, validated OpenCode options schema crosses the Snapshot
+    # boundary.  Do not accept arbitrary config or command names from the
+    # repository/environment: the backend has already validated the payload,
+    # and this worker-side check keeps a malformed/hand-built container
+    # fail-closed as well.
+    local options_json="${CODIFY_HARNESS_OPTIONS_JSON:-}"
+    if [ -z "${options_json}" ]; then
+        options_json='{}'
+    fi
+    if ! printf '%s' "${options_json}" | jq -e 'type == "object"' >/dev/null 2>&1; then
+        echo "OpenCode harness options are not a JSON object" >&2
+        return 1
+    fi
+    local option_agent option_command option_variant
+    option_agent="$(printf '%s' "${options_json}" | jq -r '.agent // "build"')"
+    option_command="$(printf '%s' "${options_json}" | jq -r '.command // empty')"
+    option_variant="$(printf '%s' "${options_json}" | jq -r '.model_variant // empty')"
+    if ! printf '%s' "${options_json}" | jq -e \
+        '(((keys - ["agent", "command", "model_variant"]) | length) == 0)
+         and ((.agent // "build") | IN("build", "plan", "general", "explore"))
+         and ((.command == null) or .command == "codify")
+         and ((.model_variant == null)
+              or (.model_variant | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")))' \
+        >/dev/null 2>&1; then
+        echo "OpenCode harness options contain an invalid agent, command, or model variant" >&2
+        return 1
+    fi
+    export CODIFY_OPENCODE_AGENT="${option_agent}"
+    if [ -n "${option_command}" ]; then
+        export CODIFY_OPENCODE_COMMAND="${option_command}"
+    else
+        unset CODIFY_OPENCODE_COMMAND
+    fi
+    if [ -n "${option_variant}" ]; then
+        export CODIFY_OPENCODE_VARIANT="${option_variant}"
+    else
+        unset CODIFY_OPENCODE_VARIANT
+    fi
 
     # Export the OpenCode transport/model identity so events.py forms the
     # correct V2 harness envelope. HTTP direct is the current production path;
@@ -212,12 +252,18 @@ opencode_adapter_prepare_config() {
             */v1|*/v1/) api_base="${base_url%/}" ;;
             *) api_base="${base_url%/}/v1" ;;
         esac
-        jq -nc \
+        local config_json
+        config_json="$(jq -nc \
             --arg model "${model}" \
             --arg api_base "${api_base}" \
             --arg npm "${provider_npm}" \
-            '{provider:{codify:{npm:$npm,options:{baseURL:$api_base,apiKey:"{env:OPENCODE_SNAPSHOT_KEY}"},models:{($model):{id:$model,provider:{id:"codify"}}}}}}' \
-            > "${config_dir}/opencode.json"
+            '{provider:{codify:{npm:$npm,options:{baseURL:$api_base,apiKey:"{env:OPENCODE_SNAPSHOT_KEY}"},models:{($model):{id:$model,provider:{id:"codify"}}}}}}')"
+        if [ -n "${option_command}" ]; then
+            config_json="$(printf '%s' "${config_json}" | jq \
+                --arg command "${option_command}" \
+                '. + {command:{($command):{description:"Codify task command",template:"$ARGUMENTS"}}}')"
+        fi
+        printf '%s\n' "${config_json}" > "${config_dir}/opencode.json"
         chown "${CODIFY_RUN_UID:-1000}:${CODIFY_RUN_GID:-1000}" "${config_dir}/opencode.json" 2>/dev/null || true
     fi
     export OPENCODE_MODEL="${model}"
@@ -304,11 +350,16 @@ opencode_adapter_run() {
     local prompt_file="$1"
     local result_file="$2"
     local raw_file="${CODIFY_HARNESS_RAW_DIR}/opencode.jsonl"
+    local audit_file="${CODIFY_OPENCODE_HTTP_AUDIT_FILE:-${CODIFY_RUNTIME_DIR}/opencode-http-audit.jsonl}"
     : > "${raw_file}"
+    : > "${audit_file}"
     chown 0:0 "${raw_file}"
+    chown 0:0 "${audit_file}"
     chmod 644 "${raw_file}"
+    chmod 644 "${audit_file}"
     CODIFY_OPENCODE_BIN="$(codify_opencode_bin)" \
     CODIFY_OPENCODE_RAW_EVENT_JSONL="${raw_file}" \
+    CODIFY_OPENCODE_HTTP_AUDIT_FILE="${audit_file}" \
     CODIFY_OPENCODE_EVENT_TRANSLATOR="${CODIFY_OPENCODE_TRANSLATOR}" \
     CODIFY_OPENCODE_BRIDGE="${CODIFY_OPENCODE_BRIDGE}" \
     CODIFY_OPENCODE_SESSION_FILE="${CODIFY_OPENCODE_SESSION_FILE:-${CODIFY_RUNTIME_DIR}/opencode-session.id}" \
@@ -355,9 +406,11 @@ opencode_adapter_terminate() {
     local session_id
     session_id="$(cat "${session_file}" 2>/dev/null || true)"
     if [ -n "${session_id}" ]; then
+        local audit_file="${CODIFY_OPENCODE_HTTP_AUDIT_FILE:-${CODIFY_RUNTIME_DIR}/opencode-http-audit.jsonl}"
         OPENCODE_SERVER_PASSWORD="${OPENCODE_SERVER_PASSWORD:-}" \
         OPENCODE_SERVER_USERNAME="${OPENCODE_SERVER_USERNAME:-opencode}" \
         OPENCODE_PORT="${OPENCODE_PORT:-}" \
+        CODIFY_OPENCODE_HTTP_AUDIT_FILE="${audit_file}" \
         CODIFY_OPENCODE_SESSION_FILE="${session_file}" \
         python3 "${CODIFY_OPENCODE_BRIDGE}" abort "${session_id}" || true
     fi

@@ -86,6 +86,13 @@ class ScrubSensitiveDataTests(unittest.TestCase):
         self.assertNotIn("sk-proj-abcdefghijklmnopqrstuvwxyz1234567890", result)
         self.assertIn("[OPENAI_API_KEY]", result)
 
+    def test_scrubs_openrouter_keys(self) -> None:
+        """OpenRouter sk-or-v1-* keys should be redacted."""
+        text = "Key sk-or-v1-abcdefghijklmnopqrstuvwxyz1234567890 for the API"
+        result = scrub_sensitive_data(text)
+        self.assertNotIn("sk-or-v1-abcdefghijklmnopqrstuvwxyz1234567890", result)
+        self.assertIn("[OPENROUTER_API_KEY]", result)
+
     def test_scrubs_generic_sk_keys(self) -> None:
         """Long generic sk-* keys should be redacted."""
         text = "token sk-abcdefghijklmnopqrstuvwxyz0123456789 here"

@@ -97,6 +97,10 @@ codify_harness_capability_enabled() {
 codify_harness_run() {
     local prompt_file="$1"
     local result_file="$2"
+    local errexit_enabled=0
+    case "$-" in
+        *e*) errexit_enabled=1 ;;
+    esac
     if ! codify_harness_initialize; then
         CODIFY_HARNESS_KEY="${CODIFY_HARNESS_KEY:-unknown}"
         CODIFY_ADAPTER_VERSION="${CODIFY_ADAPTER_VERSION:-unknown}"
@@ -133,7 +137,11 @@ codify_harness_run() {
     export CODIFY_HARNESS_ADAPTER_PID
     adapter_normalize_result "${result_file}"
     local normalize_result=$?
-    set -e
+    if [ "${errexit_enabled}" -eq 1 ]; then
+        set -e
+    else
+        set +e
+    fi
     if [ "${normalize_result}" -ne 0 ]; then
         if ! codify_event_type_exists "harness.completed" \
             && ! codify_event_type_exists "harness.failed"; then
@@ -164,6 +172,13 @@ codify_harness_run() {
         codify_emit_event "harness.failed" \
             "$(jq -nc --argjson exit_code "${result}" '{failure:{kind:"protocol_error",message:"Harness stream ended without result",exit_code:$exit_code}}')"
         CODIFY_HARNESS_TERMINAL_SEEN=1
+    fi
+    # A Harness process can exit cleanly after reporting a provider or runtime
+    # failure (Pi's owner deliberately uses a clean exit for a settled turn).
+    # The canonical terminal event is authoritative for the worker boundary;
+    # never let a zero process exit enter delivery after `harness.failed`.
+    if [ "${result}" -eq 0 ] && codify_event_type_exists "harness.failed"; then
+        result=1
     fi
     return "${result}"
 }

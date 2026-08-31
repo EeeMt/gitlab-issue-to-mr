@@ -1,4 +1,5 @@
-FROM python:3.11-slim
+ARG BASE_IMAGE=python:3.11-slim
+FROM ${BASE_IMAGE}
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
@@ -10,11 +11,11 @@ RUN git config --global user.email "mock@codify.test" \
     && git config --global user.name "Mock Server" \
     && git config --global init.defaultBranch main
 
-WORKDIR /app
+WORKDIR /mock-services
 COPY backend/tests/mock_integration/mock_server/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY backend/tests/mock_integration/mock_server/ /app/
+COPY backend/tests/mock_integration/mock_server/ /mock-services/
 
 RUN mkdir -p /repos
 

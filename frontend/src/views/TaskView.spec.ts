@@ -2499,6 +2499,26 @@ describe('TaskView', () => {
       expect(mockApi.getTaskContainerLogs).toHaveBeenCalledWith(1, 'db', 500_000)
     })
 
+    it('should render archived Harness failure details in the Raw Logs tab', async () => {
+      await mountComponent({ status: 'failed' })
+      ;(mockApi.getTaskContainerLogs as Mock).mockResolvedValueOnce({
+        container_id: null,
+        logs: 'worker output\n\n[archived harness error] APIError: HTTP 429; provider=Decart\n',
+        status: 'failed',
+        source: 'db',
+        last_sequence_no: 5,
+        raw_logs_finalized: true
+      })
+
+      await wrapper.vm.onRawTabOpen()
+      await flushPromises()
+      await nextTick()
+
+      expect(wrapper.vm.containerLogs).toContain('[archived harness error] APIError: HTTP 429')
+      const processPanel = wrapper.findComponent({ name: 'TaskProcessPanel' })
+      expect(processPanel.props('terminalHtml')).toContain('[archived harness error] APIError: HTTP 429')
+    })
+
     it('should close log stream on onRawTabClose', async () => {
       await mountComponent({ status: 'running', container_id: 'container-123' })
 

@@ -616,6 +616,10 @@ defineExpose({
     flex: 0 0 auto;
     width: 100%;
   }
+
+  :deep(.process-tabs .n-tabs-tab) {
+    min-height: 44px;
+  }
 }
 
 :deep(.process-tabs .n-tabs-rail) {
@@ -727,6 +731,8 @@ defineExpose({
   }
   .scroll-navigation__button {
     --n-padding: 0 8px !important;
+    --n-height: 44px !important;
+    min-height: 44px;
   }
 }
 </style>

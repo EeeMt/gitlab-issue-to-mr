@@ -44,6 +44,7 @@ def _task_issue_provider(protocol: str):
         api_key="fake-key",
         base_url="https://snapshot.example/v1",
         model="snapshot-model",
+        endpoint_fingerprint="v2:test-endpoint",
         max_turns=11,
         system_prompt=None,
     )
@@ -54,6 +55,7 @@ def test_anthropic_snapshot_emits_no_openai_credentials():
     task, issue, provider = _task_issue_provider("anthropic_messages")
     env = build_container_env(task, issue, None, None, provider, settings=_settings())
     assert env["CODIFY_MODEL_PROTOCOL"] == "anthropic_messages"
+    assert env["CODIFY_MODEL_ENDPOINT_FINGERPRINT"] == "v2:test-endpoint"
     assert env["ANTHROPIC_MODEL"] == "snapshot-model"
     assert not any(key.startswith("OPENAI_") for key in env)
 
@@ -70,6 +72,7 @@ def test_openai_snapshot_emits_no_anthropic_credentials():
     "protocol,custom_key",
     [
         ("anthropic_messages", "CODIFY_MODEL_PROTOCOL"),
+        ("anthropic_messages", "CODIFY_MODEL_ENDPOINT_FINGERPRINT"),
         ("anthropic_messages", "ANTHROPIC_API_KEY"),
         ("anthropic_messages", "OPENAI_MODEL"),
         ("openai_responses", "ANTHROPIC_MODEL"),
@@ -185,6 +188,7 @@ async def test_resolve_provider_uses_frozen_endpoint_after_live_endpoint_drift(m
     assert resolved.base_url == "https://snapshot.example/v1"
     assert resolved.model == "snapshot-model"
     assert resolved.model_protocol == "openai_responses"
+    assert resolved.endpoint_fingerprint == normalize_endpoint(frozen_provider).fingerprint
     assert resolved.api_key == "frozen-key"
     credential.assert_awaited_once_with(db, "cred-frozen", allow_retired=True)
 

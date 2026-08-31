@@ -37,9 +37,14 @@ def test_pi_v1_accepts_valid_values():
 # ── opencode/v1 typed validator ───────────────────────────────────────────────
 
 def test_opencode_v1_validates_allowlisted_values():
-    # No native option mapping is evidenced yet, so the namespace is empty.
-    options = validate_namespaced_options({"opencode": {}})
-    assert options["opencode"] == {}
+    options = validate_namespaced_options(
+        {"opencode": {"agent": "plan", "command": "codify", "model_variant": "auto"}}
+    )
+    assert options["opencode"] == {
+        "agent": "plan",
+        "command": "codify",
+        "model_variant": "auto",
+    }
 
 
 def test_opencode_v1_rejects_unknown_keys():
@@ -48,16 +53,12 @@ def test_opencode_v1_rejects_unknown_keys():
 
 
 def test_opencode_v1_fails_closed_outside_allowlist():
-    # No placeholder agent/command/variant is exposed as a selectable option.
-    with pytest.raises(HarnessOptionsError):
-        validate_namespaced_options({"opencode": {"agent": "build"}})
     with pytest.raises(HarnessOptionsError):
         validate_namespaced_options({"opencode": {"agent": "code"}})
-    # command / model_variant must be null in the first release.
     with pytest.raises(HarnessOptionsError):
         validate_namespaced_options({"opencode": {"command": "test"}})
     with pytest.raises(HarnessOptionsError):
-        validate_namespaced_options({"opencode": {"model_variant": "v1"}})
+        validate_namespaced_options({"opencode": {"model_variant": "not safe"}})
 
 
 # ── unknown namespaces are tolerated (forward-compat) ─────────────────────────
@@ -78,11 +79,16 @@ def test_task_override_rejects_non_override_field():
 
 
 def test_task_override_allows_only_flagged_opencode_fields():
-    assert not TASK_OVERRIDE_KEYS["opencode/v1"]
+    assert TASK_OVERRIDE_KEYS["opencode/v1"] == {
+        "agent",
+        "command",
+        "model_variant",
+    }
+    assert validate_task_overrides({"opencode": {"agent": "build"}}) == {
+        "opencode": {"agent": "build"}
+    }
     with pytest.raises(HarnessOptionsError):
-        validate_task_overrides({"opencode": {"agent": "build"}})
-    with pytest.raises(HarnessOptionsError):
-        validate_task_overrides({"opencode": {"agent": "code"}})
+        validate_task_overrides({"opencode": {"unsupported": True}})
 
 
 def test_task_override_accepts_only_flagged_fields():
@@ -115,7 +121,11 @@ def test_deep_merge_profile_default_plus_task_override():
         "steering_mode": "one-at-a-time",
         "follow_up_mode": "one-at-a-time",  # default applied by validator
     }
-    assert merged["opencode"] == {}
+    assert merged["opencode"] == {
+        "agent": "build",
+        "command": None,
+        "model_variant": None,
+    }
 
 
 def test_deep_merge_is_order_stable():
@@ -137,6 +147,18 @@ def test_deep_merge_is_order_stable():
 def test_deep_merge_override_adds_new_namespace():
     merged = deep_merge_options({"pi": {"thinking_level": "medium"}}, {"opencode": {"agent": "x"}})
     assert "pi" in merged and merged["opencode"] == {"agent": "x"}
+
+
+def test_deep_merge_explicit_null_clears_optional_profile_value():
+    merged = deep_merge_options(
+        {"opencode": {"agent": "build", "command": "codify", "model_variant": "auto"}},
+        {"opencode": {"command": None, "model_variant": None}},
+    )
+    assert merged["opencode"] == {
+        "agent": "build",
+        "command": None,
+        "model_variant": None,
+    }
 
 
 def test_deep_merge_empty_profile_is_empty():

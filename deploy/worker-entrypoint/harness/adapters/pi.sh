@@ -125,6 +125,15 @@ pi_adapter_prepare_config() {
         anthropic_messages)
             model="${ANTHROPIC_MODEL:-}"
             base_url="${ANTHROPIC_BASE_URL:-}"
+            # Pi's Anthropic implementation passes this value to the Anthropic
+            # SDK, whose request path already includes /v1/messages.  The
+            # shared Snapshot stores OpenRouter's OpenAI-style /api/v1 root,
+            # so remove exactly that suffix for Pi only; otherwise the SDK
+            # requests /api/v1/v1/messages and OpenRouter returns 404.
+            case "${base_url}" in
+                */v1/) base_url="${base_url%/v1/}" ;;
+                */v1) base_url="${base_url%/v1}" ;;
+            esac
             api_key="${ANTHROPIC_API_KEY:-}"
             api="anthropic-messages"
             ;;

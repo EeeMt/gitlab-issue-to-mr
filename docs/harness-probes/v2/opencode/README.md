@@ -15,9 +15,15 @@
 | Abort | ✅ | `POST /session/{id}/abort` 返回 **200 + `true`**；随后 assistant 消息 `error:true` 且带 completed 时间戳（操作被中断、settled 为错误态） |
 | Server 崩溃 | ⏳ | 未做主动崩溃注入（kill -9 serve 进程即模拟）；作为设备级异常由 Runner 的进程级 TERM/KILL 兜底。**待测** |
 
-## SDK-vs-HTTP 生产路径判定（§3.3 决策项）
+## SDK-vs-HTTP 探针判定（§3.3 历史决策项）
 
-**结论：生产路径选官方 `@opencode-ai/sdk`（Node SDK），基于其稳定 OpenAPI 3.1；HTTP 直连仅作为诊断/备援路径保留。**
+本节记录 Phase 0 探针阶段的 SDK 倾向性结论；Phase 3 实现前置 gate 随后因 Worker Bundle 成本将生产路径
+冻结为 Python HTTP/SSE Bridge。当前实现与边界以
+`docs/architecture/open-harness-v2-phase3-opencode-design.md` §2 为准，本节不作为当前 Runtime Bundle
+composition 的生产路径声明。
+
+**探针阶段结论：倾向官方 `@opencode-ai/sdk`（Node SDK），基于其稳定 OpenAPI 3.1；此结论未锁定最终
+Worker 实现路径。**
 
 依据：
 1. **stable OpenAPI 3.1 规范**：`/doc` 输出 OpenAPI 3.1，162 个 path，含完整的 request/response schema、`TextPartInput`、`OutputFormat`、`SessionStatus`、`Event` 等定义 —— 是唯一的事实协议源。

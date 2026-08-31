@@ -2,6 +2,7 @@ import json
 import tarfile
 
 from app.core import task_failure_details
+from app.core.worker import sanitize_sensitive_data
 
 
 def _write_archive(tmp_path, records: list[dict]) -> None:
@@ -79,3 +80,61 @@ def test_uses_latest_archived_session_error(tmp_path, monkeypatch):
     assert detail is not None
     assert "latest error" in detail
     assert "HTTP 502" in detail
+
+
+def test_sanitizes_openrouter_key_in_archived_upstream_detail(tmp_path, monkeypatch):
+    secret = "sk-or-v1-abcdefghijklmnopqrstuvwxyz0123456789"
+    _write_archive(tmp_path, [_session_error(raw=f"upstream key {secret}")])
+    monkeypatch.setattr(task_failure_details, "_ARCHIVE_STORE", str(tmp_path))
+
+    detail = task_failure_details.read_archived_harness_failure_detail(
+        137,
+        sanitize_sensitive_data,
+    )
+
+    assert detail is not None
+    assert secret not in detail
+    assert "[OPENROUTER_API_KEY]" in detail
+
+
+def test_projects_legacy_pi_html_error_without_exposing_archive_payload(tmp_path, monkeypatch):
+    _write_archive(
+        tmp_path,
+        [
+            {
+                "type": "message_end",
+                "message": {
+                    "errorMessage": "Not Found<!DOCTYPE html><script>secret payload</script>",
+                },
+            },
+            {
+                "type": "auto_retry_end",
+                "finalError": "HTTP 404: <!DOCTYPE html><script>secret payload</script>",
+            },
+        ],
+    )
+    monkeypatch.setattr(task_failure_details, "_ARCHIVE_STORE", str(tmp_path))
+
+    detail = task_failure_details.read_archived_harness_failure_detail(137, lambda text: text)
+
+    assert detail == "Pi provider returned HTTP 404 HTML error response"
+    assert len(detail) <= 1000
+    assert "secret payload" not in detail
+    assert "<" not in detail
+
+
+def test_projects_legacy_pi_plain_error_with_a_bound(tmp_path, monkeypatch):
+    _write_archive(
+        tmp_path,
+        [
+            {
+                "type": "auto_retry_end",
+                "finalError": "Pi provider connection failed",
+            }
+        ],
+    )
+    monkeypatch.setattr(task_failure_details, "_ARCHIVE_STORE", str(tmp_path))
+
+    detail = task_failure_details.read_archived_harness_failure_detail(137, lambda text: text)
+
+    assert detail == "Pi provider connection failed"

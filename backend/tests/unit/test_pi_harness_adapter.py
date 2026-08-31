@@ -250,6 +250,39 @@ def test_pi_provider_error_maps_to_rate_limited_terminal(tmp_path):
     assert result["failure"]["kind"] == "rate_limited"
 
 
+def test_pi_provider_failure_message_is_bounded_and_html_does_not_fake_auth_error(tmp_path):
+    """A large upstream error page must not bloat or misclassify the failure."""
+    runtime_dir = tmp_path / "bounded-provider-error"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    html_error = "404 Not Found authentication javascript " + ("x" * 10000)
+    _translate(
+        runtime_dir,
+        [
+            _get_state_record(),
+            {"id": 2, "type": "response", "command": "prompt", "success": True},
+            {
+                "type": "message_end",
+                "message": {
+                    "role": "assistant",
+                    "content": [],
+                    "stopReason": "error",
+                    "errorMessage": html_error,
+                },
+            },
+            {"type": "agent_end", "messages": [], "willRetry": False},
+            {"type": "agent_settled"},
+        ],
+    )
+
+    terminal = next(event for event in _events(runtime_dir) if event["type"] == "harness.failed")
+    failure = terminal["payload"]["failure"]
+    assert failure["kind"] == "engine_error"
+    assert len(failure["message"]) == 2000
+    result = json.loads((runtime_dir / "harness-result.json").read_text(encoding="utf-8"))
+    assert result["failure"] == failure
+
+
 def test_pi_delivered_is_native_ack_not_model_consumption(tmp_path):
     # A steer response with success:true followed by the turn completing emits
     # control.command.delivered; delivered == interface ACK, and the probe's
@@ -581,6 +614,34 @@ def test_pi_config_maps_snapshot_endpoint_to_models_json(tmp_path):
 
 
 @pytest.mark.parametrize(
+    ("endpoint_url", "expected_base_url"),
+    [
+        ("https://openrouter.ai/api/v1", "https://openrouter.ai/api"),
+        ("https://openrouter.ai/api/v1/", "https://openrouter.ai/api"),
+        ("https://api.deepseek.com/anthropic", "https://api.deepseek.com/anthropic"),
+    ],
+)
+def test_pi_anthropic_config_normalizes_sdk_base_url(endpoint_url, expected_base_url, tmp_path):
+    env = {
+        "CODIFY_RUNTIME_DIR": str(tmp_path),
+        "CODIFY_ORCHESTRATION_DIR": str(REPO_ROOT / "deploy"),
+        "CODIFY_RUN_UID": "1000",
+        "CODIFY_RUN_GID": "1000",
+        "HOME": str(tmp_path / "home"),
+        "ANTHROPIC_MODEL": "minimax/minimax-m3:free",
+        "ANTHROPIC_BASE_URL": endpoint_url,
+        "ANTHROPIC_API_KEY": "fake-key",
+    }
+    result = _source_adapter("pi_adapter_prepare_config", env)
+    assert result.returncode == 0, result.stderr
+    provider = json.loads(
+        (tmp_path / "home/.pi/agent/models.json").read_text(encoding="utf-8")
+    )["providers"]["codify"]
+    assert provider["api"] == "anthropic-messages"
+    assert provider["baseUrl"] == expected_base_url
+
+
+@pytest.mark.parametrize(
     ("protocol", "model", "endpoint_url", "api_key", "expected_api"),
     [
         (
@@ -786,6 +847,41 @@ def test_pi_runner_terminates_on_agent_settled_before_ack_continue():
     owner = (REPO_ROOT / "deploy/worker-entrypoint/harness/adapters/pi_owner.py").read_text(encoding="utf-8")
     assert 'record.get("type") == "agent_settled"' in owner
     assert "self.process.stdin.close()" in owner
+
+
+def test_pi_owner_accepts_large_jsonl_records(tmp_path):
+    """Pi RPC records may exceed asyncio's default 64 KiB line limit."""
+    import asyncio
+    import importlib
+    import sys
+
+    adapters_dir = str(HARNESS_DIR / "adapters")
+    if adapters_dir not in sys.path:
+        sys.path.insert(0, adapters_dir)
+    pi_owner = importlib.import_module("pi_owner")
+
+    stub = tmp_path / "pi-large-record-stub.py"
+    stub.write_text(
+        "import json\n"
+        "print(json.dumps({'type': 'oversized', 'payload': 'x' * 100000}), flush=True)\n"
+        "print(json.dumps({'type': 'agent_settled'}), flush=True)\n",
+        encoding="utf-8",
+    )
+    runtime_dir = tmp_path / "runtime"
+    owner = pi_owner.PiOwner(
+        [sys.executable, str(stub)], runtime_dir, tmp_path / "pi.sock"
+    )
+
+    async def run_owner():
+        await owner.start()
+        await asyncio.wait_for(owner.settled.wait(), timeout=5)
+        assert owner.process is not None
+        await asyncio.wait_for(owner.process.wait(), timeout=5)
+        await asyncio.sleep(0)
+        assert owner.failure is None
+        await owner.finish()
+
+    asyncio.run(run_owner())
 
 
 STUB_PI_TMPL = r'''#!/usr/bin/env python3

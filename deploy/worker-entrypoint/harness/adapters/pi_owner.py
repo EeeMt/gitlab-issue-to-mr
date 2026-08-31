@@ -19,6 +19,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 
+PI_RPC_STREAM_LIMIT = 16 * 1024 * 1024
+
+
 def _append_fsync(path: Path, item: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as stream:
@@ -152,6 +155,12 @@ class PiOwner:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            # Pi emits complete messages (including thinking/tool payloads) as
+            # one JSONL record. The default asyncio limit (64 KiB) can reject a
+            # valid Anthropic response before the translator sees it. Keep a
+            # bounded per-record buffer large enough for the pinned CLI while
+            # still failing closed on an unbounded/malformed stream.
+            limit=PI_RPC_STREAM_LIMIT,
         )
         # The adapter is deliberately one long-lived process.  It owns the
         # cross-record Pi state and writes canonical events while Pi remains
@@ -234,7 +243,7 @@ class PiOwner:
                 future = self.pending.pop(request_id, None)
                 if future is not None and not future.done():
                     future.set_result(record)
-        except (BrokenPipeError, ConnectionError, RuntimeError) as exc:
+        except (BrokenPipeError, ConnectionError, RuntimeError, ValueError) as exc:
             self._fail(exc)
         self.closed = True
         if not self.settled.is_set() and self.failure is None:

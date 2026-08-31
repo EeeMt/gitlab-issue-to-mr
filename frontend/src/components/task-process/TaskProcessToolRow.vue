@@ -378,4 +378,10 @@ const outputIsPlaceholder = computed(() => {
   font-style: italic;
   opacity: 0.4;
 }
+
+@media (max-width: 768px) {
+  .tool-badge {
+    min-height: 44px;
+  }
+}
 </style>

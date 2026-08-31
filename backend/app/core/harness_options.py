@@ -20,6 +20,7 @@ here.  A Profile default and any Task override are deterministically deep-merged
 
 from __future__ import annotations
 
+import re
 from typing import Any, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -33,13 +34,16 @@ NS_TO_OPTIONS_SCHEMA = {
 }
 
 # Fields a Task may override for each options-schema, mirroring the manifest
-# `task_override=true` flag.  Phase-1 policy: pi exposes its three high-frequency
-# fields. OpenCode currently has no fixed-version native mapping for agent,
-# command, or model_variant, so it exposes no task-overridable options.
+# `task_override=true` flag.  These are deliberately small, fixed-version
+# allowlists: arbitrary OpenCode config is never accepted from a Task request.
 TASK_OVERRIDE_KEYS: dict[str, frozenset[str]] = {
     "pi/v1": frozenset({"thinking_level", "steering_mode", "follow_up_mode"}),
-    "opencode/v1": frozenset(),
+    "opencode/v1": frozenset({"agent", "command", "model_variant"}),
 }
+
+OPENCODE_AGENT_ALLOWLIST = frozenset({"build", "plan", "general", "explore"})
+OPENCODE_COMMAND_ALLOWLIST = frozenset({"codify"})
+_OPENCODE_MODEL_VARIANT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
 
 
 # ── Typed validators ───────────────────────────────────────────────────────────
@@ -75,12 +79,42 @@ class PiV1Options(BaseModel):
 class OpenCodeV1Options(BaseModel):
     """Options schema ``opencode/v1`` (see open-harness-v2 phase3 design §7.3).
 
-    No OpenCode native options are exposed until each has a fixed-version,
-    end-to-end mapping. Keeping placeholder null fields would incorrectly make
-    unsupported choices look like selectable capabilities.
+    Only the fixed 1.18.19 native fields with a controlled Codify mapping are
+    exposed. ``model_variant`` is an identifier rather than arbitrary JSON: the
+    selected value is carried in the frozen Snapshot and passed to the pinned
+    Server request unchanged.
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    agent: str = Field(default="build")
+    command: str | None = Field(default=None)
+    model_variant: str | None = Field(default=None)
+
+    @field_validator("agent")
+    @classmethod
+    def _agent(cls, value: str) -> str:
+        if value not in OPENCODE_AGENT_ALLOWLIST:
+            raise ValueError(f"agent must be one of {sorted(OPENCODE_AGENT_ALLOWLIST)}")
+        return value
+
+    @field_validator("command")
+    @classmethod
+    def _command(cls, value: str | None) -> str | None:
+        if value is not None and value not in OPENCODE_COMMAND_ALLOWLIST:
+            raise ValueError(
+                f"command must be null or one of {sorted(OPENCODE_COMMAND_ALLOWLIST)}"
+            )
+        return value
+
+    @field_validator("model_variant")
+    @classmethod
+    def _model_variant(cls, value: str | None) -> str | None:
+        if value is not None and not _OPENCODE_MODEL_VARIANT_RE.fullmatch(value):
+            raise ValueError(
+                "model_variant must be null or a 1-64 character safe identifier"
+            )
+        return value
 
 
 
@@ -159,8 +193,12 @@ def validate_task_overrides(
                 f"task override: {sorted(unknown)} (allowed: {sorted(allowed)})"
             )
         try:
+            # Preserve the partial shape of a Task override.  Calling
+            # ``model_dump()`` with defaults would turn an override containing
+            # only ``agent`` into an implicit reset of command/variant.
             validated[namespace] = OPTION_VALIDATORS[schema](**value).model_dump(
-                exclude_none=False
+                exclude_unset=True,
+                exclude_none=False,
             )
         except ValidationError as exc:
             raise HarnessOptionsError(
@@ -184,8 +222,9 @@ def deep_merge_options(
       * overrides shallowly override per-namespace; within a namespace the
         override map is merged on top of the profile default for that namespace;
       * namespaces only present in overrides are added;
-      * null/absent values are dropped from the final payload so a "cleared"
-        field does not linger as an explicit null.
+      * absent values are omitted; an explicit null in an override is retained
+        so optional Profile defaults (for example OpenCode command/variant) can
+        be intentionally cleared.
     """
     profile = dict(profile_options or {})
     overrides = dict(task_overrides or {})

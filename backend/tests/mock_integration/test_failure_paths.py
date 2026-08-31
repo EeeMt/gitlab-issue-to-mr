@@ -112,17 +112,20 @@ class TestTaskCancel:
             )
 
             if resp.status_code == 200:
-                # Cancel succeeded — verify task is in a terminal state.
-                # The status may be "cancelled" (cancel set it) or "failed"
-                # (worker saw container killed and overwrote status).
-                # Both are acceptable outcomes of a successful cancel.
-                resp = await http_client.get(
-                    f"{backend_url}/api/tasks/{task_id}",
-                    headers=admin_auth_headers,
+                # The API persists the cancellation intent and stops the
+                # container before returning; the worker finalizer converges
+                # the terminal asynchronously.  Allow the documented
+                # completed-vs-cancelled race while waiting for convergence.
+                task = await wait_for_task_status(
+                    http_client,
+                    backend_url,
+                    task_id,
+                    target_statuses=["completed", "failed", "cancelled"],
+                    auth_headers=admin_auth_headers,
+                    timeout=30,
                 )
-                task = resp.json()
-                assert task["status"] in ("cancelled", "failed"), (
-                    f"Expected cancelled or failed after cancel, got {task['status']}"
+                assert task["status"] in ("completed", "cancelled", "failed"), (
+                    f"Expected a terminal status after cancel, got {task['status']}"
                 )
                 logger.info(f"✅ Task {task_id} cancel result: status={task['status']}")
             else:

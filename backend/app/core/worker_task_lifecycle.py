@@ -16,6 +16,7 @@ from gitlab import Gitlab
 from sqlalchemy import delete, select
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.ci_failure_logs import append_ci_failure_log
 from app.core.harness_attempts import create_task_attempt
@@ -124,7 +125,15 @@ async def load_task_or_fail(db: AsyncSession, task_id: int) -> Task | None:
 
 
 async def load_resume_task_or_fail(db: AsyncSession, task_id: int) -> Task | None:
-    result = await db.execute(select(Task).where(Task.id == task_id))
+    # The execution-policy gate reads the immutable snapshot directly.  Resume
+    # runs in an AsyncSession, so leaving this relationship lazy would attempt
+    # synchronous IO and raise MissingGreenlet before the worker can attach to
+    # its retained container.
+    result = await db.execute(
+        select(Task)
+        .where(Task.id == task_id)
+        .options(selectinload(Task.worker_profile_snapshot))
+    )
     task = result.scalar_one_or_none()
     if not task:
         logger.error(f"[Task {task_id}] Resume: task not found in database")
@@ -626,6 +635,19 @@ async def create_execute_container(
             frozen_config = getattr(frozen_snapshot, "harness_config_snapshot", None)
             if isinstance(frozen_config, dict):
                 sandbox_mode = frozen_config.get("sandbox_mode")
+                frozen_options = frozen_config.get("options")
+                selected_options = (
+                    frozen_options.get(attempt.harness_key)
+                    if isinstance(frozen_options, dict)
+                    else None
+                )
+                if isinstance(selected_options, dict):
+                    environment["CODIFY_HARNESS_OPTIONS_JSON"] = json.dumps(
+                        selected_options,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
             cli_binary_digest = getattr(frozen_snapshot, "cli_binary_digest", None)
     except Exception:  # noqa: BLE001 - sandbox policy is advisory for old snapshots
         sandbox_mode = None

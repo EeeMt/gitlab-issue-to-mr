@@ -6,6 +6,7 @@ import pytest
 from app.core.worker_kit import BAKED_IMAGE_MODE, MOUNTED_KIT_MODE
 from app.core.worker_profiles import (
     WorkerProfileValidationError,
+    apply_task_harness_options,
     build_worker_profile_environment_map,
     inspect_v2_worker_image_identity,
     parse_worker_profile_mounts,
@@ -461,6 +462,52 @@ def test_worker_profile_snapshot_freezes_capability_and_sandbox_policy():
     )
     assert tightened.harness_config_snapshot["sandbox_mode"] == "sandboxed"
     assert tightened.harness_config_snapshot["capabilities"]["sandbox_mode"] == "sandboxed"
+
+
+def test_snapshot_freezes_profile_and_partial_task_opencode_options():
+    profile = SimpleNamespace(
+        id=12,
+        name="OpenCode Options Worker",
+        image="codify-worker/opencode:2026.08",
+        volume_mounts=[],
+        environment_variables=[],
+        pre_script=None,
+        post_script=None,
+        default_execute_run_instruction_template="execute {{user_prompt}}",
+        default_plan_run_instruction_template="plan {{user_prompt}}",
+        ci_auto_repair_run_instruction_template="repair {{issue_title}}",
+        default_harness_key="opencode",
+        harness_constraints={},
+        harness_options={
+            "opencode": {
+                "agent": "build",
+                "command": "codify",
+                "model_variant": "auto",
+            }
+        },
+    )
+
+    snapshot = snapshot_from_profile(
+        SimpleNamespace(id=52),
+        profile,
+        task_harness_options={"opencode": {"agent": "plan"}},
+    )
+
+    assert snapshot.harness_config_snapshot["options"]["opencode"] == {
+        "agent": "plan",
+        "command": "codify",
+        "model_variant": "auto",
+    }
+
+    original_digest = snapshot.effective_configuration_digest
+    apply_task_harness_options(snapshot, {"opencode": {"model_variant": "fast"}})
+    snapshot.effective_configuration_digest = snapshot_effective_configuration_digest(snapshot)
+    assert snapshot.harness_config_snapshot["options"]["opencode"] == {
+        "agent": "plan",
+        "command": "codify",
+        "model_variant": "fast",
+    }
+    assert snapshot.effective_configuration_digest != original_digest
 
 
 def test_validate_worker_profile_docker_target_requires_complete_absolute_tls_paths():

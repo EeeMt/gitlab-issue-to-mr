@@ -27,6 +27,7 @@ from app.core.docker_client import (
 from app.core.harness_options import (
     deep_merge_options,
     validate_namespaced_options,
+    validate_task_overrides,
 )
 from app.core.harness_protocol import HARNESS_CONTRACT_VERSION, HARNESS_CONTRACT_VERSION_V2
 from app.core.harness_registry import capability_policy
@@ -588,6 +589,7 @@ def serialize_worker_profile_for_api(
         "enabled_harnesses": getattr(profile, "enabled_harnesses", None) or ["claude"],
         "default_harness_key": getattr(profile, "default_harness_key", None) or "claude",
         "harness_constraints": getattr(profile, "harness_constraints", None) or {},
+        "harness_options": getattr(profile, "harness_options", None) or {},
         "image_digest": getattr(profile, "image_digest", None),
         "verified_at": getattr(profile, "verified_at", None),
         "harness_runtimes": getattr(profile, "harness_runtimes", None) or {},
@@ -754,18 +756,50 @@ async def resolve_provider_for_issue(
     return provider
 
 
-def _freeze_harness_options(profile: WorkerProfile) -> dict[str, Any]:
+def _freeze_harness_options(
+    profile: WorkerProfile,
+    task_overrides: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     """Validate and deep-merge the Profile's namespaced harness_options.
 
-    Merges the Profile default with any Task override (none is plumbed through
-    task creation yet) and returns a deterministically-ordered payload frozen
-    into ``harness_config_snapshot["options"]``.  Invalid typed option values on
-    a Profile are rejected at snapshot time so a misconfigured Profile cannot
-    silently reach a Task.
+    Returns a deterministically-ordered payload frozen into
+    ``harness_config_snapshot["options"]``. Invalid typed option values on a
+    Profile or Task are rejected at snapshot time so a misconfigured value
+    cannot silently reach a Worker.
     """
     raw = getattr(profile, "harness_options", None) or {}
     validated = validate_namespaced_options(raw)
-    return deep_merge_options(validated, None)
+    overrides = validate_task_overrides(task_overrides)
+    return deep_merge_options(validated, overrides)
+
+
+def apply_task_harness_options(
+    snapshot: TaskWorkerProfileSnapshot,
+    task_overrides: Mapping[str, Any] | None,
+) -> TaskWorkerProfileSnapshot:
+    """Apply validated Task option overrides to an existing frozen snapshot.
+
+    Pending-task edits must update the immutable execution contract itself; a
+    later Worker must never consult the editable Profile to discover an option.
+    The existing merged snapshot is used as the base so a partial PATCH keeps
+    untouched options stable even though the original Profile is no longer
+    needed for the edit.
+    """
+    config = getattr(snapshot, "harness_config_snapshot", None)
+    if config is None:
+        config = {}
+    if not isinstance(config, dict):
+        raise ValueError("Task worker snapshot has an invalid harness config")
+    updated = dict(config)
+    current_options = updated.get("options")
+    if current_options is not None and not isinstance(current_options, dict):
+        raise ValueError("Task worker snapshot has invalid harness options")
+    updated["options"] = deep_merge_options(
+        current_options,
+        validate_task_overrides(task_overrides),
+    )
+    snapshot.harness_config_snapshot = updated
+    return snapshot
 
 
 def snapshot_from_profile(
@@ -776,6 +810,7 @@ def snapshot_from_profile(
     harness_key: str | None = None,
     endpoint: Any | None = None,
     shared_configuration: Any | None = None,
+    task_harness_options: Mapping[str, Any] | None = None,
 ) -> TaskWorkerProfileSnapshot:
     """Build an immutable task worker snapshot from a loaded profile.
 
@@ -902,7 +937,7 @@ def snapshot_from_profile(
             "capabilities": effective_capabilities,
             "sandbox_mode": effective_capabilities.get("sandbox_mode"),
             "constraints": dict(getattr(profile, "harness_constraints", None) or {}),
-            "options": _freeze_harness_options(profile),
+            "options": _freeze_harness_options(profile, task_harness_options),
         },
         image_digest=getattr(profile, "image_digest", None),
         model_endpoint_snapshot=endpoint.as_snapshot() if endpoint is not None else None,
@@ -929,6 +964,7 @@ async def replace_task_worker_snapshot(
     harness_key: str | None = None,
     endpoint: Any | None = None,
     shared_configuration: Any | None = None,
+    task_harness_options: Mapping[str, Any] | None = None,
 ) -> TaskWorkerProfileSnapshot:
     """Replace one task's worker profile snapshot.
 
@@ -953,6 +989,7 @@ async def replace_task_worker_snapshot(
         harness_key=harness_key,
         endpoint=endpoint,
         shared_configuration=shared,
+        task_harness_options=task_harness_options,
     )
     db.add(snapshot)
     task.worker_profile_id = profile.id

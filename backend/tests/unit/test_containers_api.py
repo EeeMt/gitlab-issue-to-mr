@@ -12,7 +12,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from fastapi.testclient import TestClient
 
-from app.api.containers import _compact_raw_log_noise, _get_container_pattern
+from app.api.containers import (
+    _append_archived_failure_detail,
+    _compact_raw_log_noise,
+    _get_container_pattern,
+)
 from app.core.docker_client import DockerConnectionConfig
 from app.core.worker_docker_targets import KnownDockerTarget
 from app.database import get_db
@@ -93,6 +97,47 @@ class ContainerLogsHelpersTests(unittest.TestCase):
         self.assertIn("[suppressed 3 CA certificate replacement lines]", compacted)
         self.assertNotIn("Replacing debian:Amazon_Root_CA_3.pem", compacted)
         self.assertIn("Tool output stays complete", compacted)
+
+
+class ArchivedFailureDetailRawLogsTests(unittest.IsolatedAsyncioTestCase):
+    """Ensure terminal raw logs expose safe archive-only failure details."""
+
+    async def test_failed_task_raw_logs_include_archived_harness_error(self):
+        from app.models import TaskStatus
+
+        detail = (
+            "APIError: HTTP 429; upstream provider rate-limited; "
+            "retry_after=5s; provider=Decart"
+        )
+        with patch(
+            "app.core.task_failure_details.read_archived_harness_failure_detail",
+            return_value=detail,
+        ):
+            logs = await _append_archived_failure_detail(
+                137,
+                TaskStatus.FAILED,
+                "worker output\n",
+                500_000,
+            )
+
+        self.assertIn("worker output", logs)
+        self.assertIn(f"[archived harness error] {detail}", logs)
+
+    async def test_active_task_raw_logs_do_not_append_archive_detail(self):
+        from app.models import TaskStatus
+
+        with patch(
+            "app.core.task_failure_details.read_archived_harness_failure_detail",
+        ) as read_detail:
+            logs = await _append_archived_failure_detail(
+                137,
+                TaskStatus.RUNNING,
+                "worker output\n",
+                500_000,
+            )
+
+        self.assertEqual(logs, "worker output\n")
+        read_detail.assert_not_called()
 
     @patch("app.api.containers.get_settings")
     def test_extract_container_info_valid_name(self, mock_settings):
@@ -467,6 +512,56 @@ class GetTaskContainerLogsHappyPathTests(unittest.TestCase):
         self.assertEqual(data["container_id"], "abc123def456")
         self.assertEqual(data["container_status"], "running")
         self.assertIn("Starting task", data["logs"])
+
+    def test_failed_live_container_logs_include_archived_harness_error(self):
+        """A retained failed container gets the same safe detail as DB fallback."""
+        from app.database import get_db
+        from app.dependencies.auth import require_authenticated_context
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
+        from app.models import TaskStatus
+
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+        task = MagicMock(
+            id=12,
+            container_id="retained-failed-container",
+            status=TaskStatus.FAILED,
+            raw_logs_finalized_at=None,
+        )
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = task
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        async def override_db():
+            yield mock_db
+
+        mock_container = MagicMock()
+        mock_container.status = "exited"
+        mock_container.logs.return_value = b"worker stopped\n"
+
+        mock_docker = MagicMock()
+        mock_docker.client.containers.get.return_value = mock_container
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
+
+        detail = "APIError: HTTP 429; upstream provider rate-limited; retry_after=5s"
+        with (
+            patch("app.api.containers.get_docker_client_async", return_value=mock_docker),
+            patch(
+                "app.core.task_failure_details.read_archived_harness_failure_detail",
+                return_value=detail,
+            ),
+        ):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/api/tasks/12/container-logs")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("worker stopped", response.json()["logs"])
+        self.assertIn(f"[archived harness error] {detail}", response.json()["logs"])
 
     def test_get_task_container_logs_returns_error_when_docker_fails(self):
         """When Docker fails, falls back to DB-stored log chunks (returns 200 with available data)."""

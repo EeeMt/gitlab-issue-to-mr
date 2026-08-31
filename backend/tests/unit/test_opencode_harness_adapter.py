@@ -3,13 +3,17 @@
 The OpenCode translator is driven by the Phase-0 probe framing (docs/harness-probes/v2/opencode/)
 and maps OpenCode's SSE ``{id, type, properties}`` records to canonical V2 events, using the
 three-signal settled judgment (design §4): ``session.idle`` + final assistant message + no
-error. First release has no command plane (steering=false/follow_up=false), so the bridge
-deterministically rejects every command (schemas.md §3.3 / phase3 design §5).
+error. The first release has no live command plane (steering=false/follow_up=false), so the
+bridge deterministically rejects runtime steering/follow-up commands (schemas.md §3.3 /
+phase3 design §5). Task-start native options may still use the fixed OpenCode
+``/session/{id}/command`` endpoint.
 """
 
 from __future__ import annotations
 
+import hashlib
 import http.client
+import io
 import json
 import os
 import signal
@@ -561,6 +565,35 @@ def test_opencode_structured_session_error_uses_status_code_taxonomy(tmp_path):
     assert "credentials rejected" in result["failure"]["message"]
 
 
+def test_opencode_api_error_data_uses_nested_provider_status_taxonomy(tmp_path):
+    runtime_dir = tmp_path / "nested-api-error"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    _translate(
+        runtime_dir,
+        [
+            _record(
+                "session.error",
+                {
+                    "sessionID": "ses-error",
+                    "error": {
+                        "name": "APIError",
+                        "data": {
+                            "message": "Provider returned error",
+                            "statusCode": 429,
+                        },
+                    },
+                },
+            ),
+        ],
+    )
+    result = json.loads((runtime_dir / "harness-result.json").read_text(encoding="utf-8"))
+    assert result["failure"] == {
+        "kind": "rate_limited",
+        "message": "Provider returned error",
+    }
+
+
 def test_opencode_known_server_events_are_archived_without_unknown_diagnostics(tmp_path):
     runtime_dir = tmp_path / "known-events"
     runtime_dir.mkdir()
@@ -915,6 +948,15 @@ def test_opencode_parse_sse_unwraps_global_payload_and_keeps_durable_data(tmp_pa
 
 def test_opencode_event_stream_preserves_durable_data(tmp_path, monkeypatch):
     bridge = _load_bridge()
+    audit_file = tmp_path / "opencode-http-audit.jsonl"
+    config_file = tmp_path / "opencode" / "opencode.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text('{"provider":"task-private"}\n', encoding="utf-8")
+    monkeypatch.setenv(bridge.HTTP_AUDIT_FILE_ENV, str(audit_file))
+    monkeypatch.setenv("OPENCODE_CONFIG_DIR", str(config_file.parent))
+    monkeypatch.setenv("CODIFY_MODEL_PROTOCOL", "anthropic_messages")
+    monkeypatch.setenv("CODIFY_MODEL_ENDPOINT_FINGERPRINT", "v2:stream-audit")
+    monkeypatch.setenv("OPENCODE_PROVIDER", "codify")
 
     class _Response:
         def __enter__(self):
@@ -946,6 +988,95 @@ def test_opencode_event_stream_preserves_durable_data(tmp_path, monkeypatch):
             "data": {"sessionID": "ses-1", "delta": "ok"},
         }
     ]
+    audit_records = [json.loads(line) for line in audit_file.read_text().splitlines()]
+    assert len(audit_records) == 1
+    assert audit_records[0]["operation"] == "event.subscribe"
+    assert audit_records[0]["path_template"] == "/event"
+    assert audit_records[0]["status_code"] == 200
+    assert audit_records[0]["outcome"] == "success"
+    assert audit_records[0]["config_path"] == str(config_file)
+    assert audit_records[0]["config_sha256"] == hashlib.sha256(
+        config_file.read_bytes()
+    ).hexdigest()
+    assert audit_records[0]["model_endpoint_fingerprint"] == "v2:stream-audit"
+
+
+def test_opencode_client_audits_request_without_payload_or_session_id(tmp_path, monkeypatch):
+    bridge = _load_bridge()
+    audit_file = tmp_path / "opencode-http-audit.jsonl"
+    config_file = tmp_path / "opencode" / "opencode.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text('{"provider":"task-private"}\n', encoding="utf-8")
+    monkeypatch.setenv(bridge.HTTP_AUDIT_FILE_ENV, str(audit_file))
+    monkeypatch.setenv("OPENCODE_CONFIG_DIR", str(config_file.parent))
+    monkeypatch.setenv("CODIFY_MODEL_PROTOCOL", "openai_responses")
+    monkeypatch.setenv("CODIFY_MODEL_ENDPOINT_FINGERPRINT", "v2:request-audit")
+    monkeypatch.setenv("OPENCODE_PROVIDER", "codify")
+
+    class _Response:
+        status = 204
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return b""
+
+    monkeypatch.setattr(bridge.urllib.request, "urlopen", lambda *args, **kwargs: _Response())
+    client = bridge.OpenCodeServerClient(port=8099, password="request-secret")
+
+    status, body = client.prompt_async("ses/request-secret", "prompt-request-secret")
+
+    assert status == 204
+    assert body == {}
+    audit_text = audit_file.read_text(encoding="utf-8")
+    record = json.loads(audit_text)
+    assert record["operation"] == "session.prompt_async"
+    assert record["path_template"] == "/session/{session_id}/prompt_async"
+    assert record["status_code"] == 204
+    assert record["outcome"] == "success"
+    assert record["config_path"] == str(config_file)
+    assert record["config_sha256"] == hashlib.sha256(
+        config_file.read_bytes()
+    ).hexdigest()
+    assert record["model_endpoint_fingerprint"] == "v2:request-audit"
+    assert "request-secret" not in audit_text
+    assert "prompt-request-secret" not in audit_text
+    assert "Authorization" not in audit_text
+
+
+def test_opencode_client_audits_http_error_without_response_body(tmp_path, monkeypatch):
+    bridge = _load_bridge()
+    audit_file = tmp_path / "opencode-http-audit.jsonl"
+    monkeypatch.setenv(bridge.HTTP_AUDIT_FILE_ENV, str(audit_file))
+
+    def _urlopen(*args, **kwargs):
+        raise bridge.urllib.error.HTTPError(
+            "http://127.0.0.1:8099/session/ses%2Fhttp-secret/status",
+            429,
+            "rate limited",
+            {},
+            io.BytesIO(b'{"error":"upstream-response-secret"}'),
+        )
+
+    monkeypatch.setattr(bridge.urllib.request, "urlopen", _urlopen)
+    client = bridge.OpenCodeServerClient(port=8099)
+
+    status, body = client.status("ses/http-secret")
+
+    assert status == 429
+    assert body == {"error": "upstream-response-secret"}
+    audit_text = audit_file.read_text(encoding="utf-8")
+    record = json.loads(audit_text)
+    assert record["operation"] == "session.status"
+    assert record["path_template"] == "/session/{session_id}/status"
+    assert record["status_code"] == 429
+    assert record["outcome"] == "http_error"
+    assert "http-secret" not in audit_text
+    assert "upstream-response-secret" not in audit_text
 
 
 def test_opencode_event_stream_classifies_incomplete_read_as_disconnect(monkeypatch):
@@ -1073,6 +1204,34 @@ def test_opencode_client_sets_basic_auth(tmp_path):
     assert headers["Authorization"].startswith("Basic ")
 
 
+def test_opencode_client_maps_agent_variant_and_command_payloads(monkeypatch):
+    bridge = _load_bridge()
+    calls: list[tuple[str, str, dict]] = []
+    client = bridge.OpenCodeServerClient(port=8099)
+
+    def _request(method: str, path: str, body: dict | None = None):
+        calls.append((method, path, body or {}))
+        return 204, {}
+
+    monkeypatch.setattr(client, "_request", _request)
+
+    client.prompt_async("ses/one", "prompt", agent="plan", variant="auto")
+    client.command("ses/one", "codify", "prompt", agent="plan", variant="auto")
+
+    assert calls == [
+        (
+            "POST",
+            "/session/ses%2Fone/prompt_async",
+            {"parts": [{"type": "text", "text": "prompt"}], "agent": "plan", "variant": "auto"},
+        ),
+        (
+            "POST",
+            "/session/ses%2Fone/command",
+            {"command": "codify", "arguments": "prompt", "agent": "plan", "variant": "auto"},
+        ),
+    ]
+
+
 def test_opencode_bridge_native_abort_uses_task_session(monkeypatch, capsys):
     bridge = _load_bridge()
     calls: list[str] = []
@@ -1177,6 +1336,141 @@ def test_opencode_run_attempt_subscribes_before_prompt(tmp_path, monkeypatch):
         "message.part.delta",
         "session.idle",
     ]
+
+
+def test_opencode_run_attempt_session_http_failure_emits_typed_terminal(tmp_path, monkeypatch):
+    bridge = _load_bridge()
+
+    class _CreateFailureClient:
+        def create_session(self, model_id: str, provider_id: str):
+            return 429, {"error": {"message": "provider rate limited"}}
+
+    monkeypatch.setattr(bridge, "OpenCodeServerClient", lambda **_kwargs: _CreateFailureClient())
+    for key, value in _run_attempt_env(tmp_path).items():
+        monkeypatch.setenv(key, value)
+    _emit(tmp_path, "run.started", {"runtime_bundle_digest": "d" * 64})
+
+    assert bridge._run_attempt() == 1
+    events = _events(tmp_path)
+    terminal = next(event for event in events if event["type"] == "harness.failed")
+    assert terminal["payload"]["failure"] == {
+        "kind": "rate_limited",
+        "message": "provider rate limited",
+    }
+    result = json.loads((tmp_path / "harness-result.json").read_text(encoding="utf-8"))
+    assert result["failure"] == terminal["payload"]["failure"]
+    raw = (tmp_path / "harness-events/opencode.jsonl").read_text(encoding="utf-8")
+    assert "provider rate limited" in raw
+
+
+def test_opencode_run_attempt_prompt_http_failure_emits_authentication_terminal(tmp_path, monkeypatch):
+    bridge = _load_bridge()
+
+    class _PromptFailureClient:
+        def create_session(self, model_id: str, provider_id: str):
+            return 200, {"info": {"id": "ses-oc-http-failure"}}
+
+        def event_stream(self):
+            yield {"id": "e1", "type": "server.connected", "properties": {}}
+
+        def prompt_async(self, session_id: str, text: str):
+            return 401, {"detail": "credentials rejected"}
+
+    monkeypatch.setattr(bridge, "OpenCodeServerClient", lambda **_kwargs: _PromptFailureClient())
+    for key, value in _run_attempt_env(tmp_path).items():
+        monkeypatch.setenv(key, value)
+    _emit(tmp_path, "run.started", {"runtime_bundle_digest": "d" * 64})
+
+    assert bridge._run_attempt() == 1
+    terminal = next(event for event in _events(tmp_path) if event["type"] == "harness.failed")
+    assert terminal["payload"]["failure"] == {
+        "kind": "authentication_error",
+        "message": "credentials rejected",
+    }
+    result = json.loads((tmp_path / "harness-result.json").read_text(encoding="utf-8"))
+    assert result["failure"] == terminal["payload"]["failure"]
+
+
+def test_opencode_run_attempt_command_http_failure_emits_engine_terminal(tmp_path, monkeypatch):
+    bridge = _load_bridge()
+
+    class _CommandFailureClient:
+        def create_session(self, model_id: str, provider_id: str):
+            return 200, {"info": {"id": "ses-oc-command-failure"}}
+
+        def event_stream(self):
+            yield {"id": "e1", "type": "server.connected", "properties": {}}
+
+        def command(self, session_id: str, command: str, arguments: str, **kwargs):
+            return 503, {"error": {"message": "OpenCode service overloaded"}}
+
+    monkeypatch.setattr(bridge, "OpenCodeServerClient", lambda **_kwargs: _CommandFailureClient())
+    for key, value in _run_attempt_env(tmp_path).items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("CODIFY_OPENCODE_AGENT", "plan")
+    monkeypatch.setenv("CODIFY_OPENCODE_COMMAND", "codify")
+    _emit(tmp_path, "run.started", {"runtime_bundle_digest": "d" * 64})
+
+    assert bridge._run_attempt() == 1
+    terminal = next(event for event in _events(tmp_path) if event["type"] == "harness.failed")
+    assert terminal["payload"]["failure"] == {
+        "kind": "engine_error",
+        "message": "OpenCode service overloaded",
+    }
+    result = json.loads((tmp_path / "harness-result.json").read_text(encoding="utf-8"))
+    assert result["failure"] == terminal["payload"]["failure"]
+
+
+def test_opencode_run_attempt_uses_frozen_native_command_options(tmp_path, monkeypatch):
+    bridge = _load_bridge()
+    calls: list[tuple] = []
+
+    class _CommandClient:
+        def create_session(self, model_id: str, provider_id: str):
+            calls.append(("create_session", model_id, provider_id))
+            return 200, {"info": {"id": "ses-oc-command"}}
+
+        def event_stream(self):
+            calls.append(("stream_established",))
+            yield {"id": "e1", "type": "server.connected", "properties": {}}
+            yield {
+                "id": "e2",
+                "type": "message.part.updated",
+                "properties": {
+                    "sessionID": "ses-oc-command",
+                    "part": {"type": "text", "text": "command result", "messageID": "m1"},
+                },
+            }
+            yield {
+                "id": "e3",
+                "type": "message.updated",
+                "properties": {"sessionID": "ses-oc-command", "info": {"id": "m1", "role": "assistant"}},
+            }
+            yield {"id": "e4", "type": "session.idle", "properties": {"sessionID": "ses-oc-command"}}
+
+        def command(self, session_id: str, command: str, arguments: str, **kwargs):
+            calls.append(("command", session_id, command, arguments, kwargs))
+            return 204, {}
+
+    monkeypatch.setattr(bridge, "OpenCodeServerClient", lambda **_kwargs: _CommandClient())
+    for key, value in _run_attempt_env(tmp_path).items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("CODIFY_OPENCODE_AGENT", "plan")
+    monkeypatch.setenv("CODIFY_OPENCODE_COMMAND", "codify")
+    monkeypatch.setenv("CODIFY_OPENCODE_VARIANT", "auto")
+    _emit(tmp_path, "run.started", {"runtime_bundle_digest": "d" * 64})
+
+    assert bridge._run_attempt() == 0
+    assert calls[1] == ("stream_established",)
+    assert calls[2] == (
+        "command",
+        "ses-oc-command",
+        "codify",
+        "do the thing",
+        {"agent": "plan", "variant": "auto"},
+    )
+    result = json.loads((tmp_path / "harness-result.json").read_text(encoding="utf-8"))
+    assert result["status"] == "completed"
 
 
 def test_opencode_run_attempt_status_fallback_after_disconnect(tmp_path, monkeypatch):
@@ -1445,6 +1739,62 @@ def test_opencode_prepare_config_writes_snapshot_endpoint(tmp_path):
     assert model["provider"] == {"id": "codify"}
     # A free loopback port was probed and a Task password generated.
     assert result.stdout.strip().isdigit()
+
+
+def test_opencode_prepare_config_maps_frozen_agent_command_and_variant(tmp_path):
+    env = {
+        "CODIFY_RUNTIME_DIR": str(tmp_path),
+        "CODIFY_ORCHESTRATION_DIR": str(REPO_ROOT / "deploy"),
+        "CODIFY_RUN_UID": "1000",
+        "CODIFY_RUN_GID": "1000",
+        "CODIFY_HARNESS_OPTIONS_JSON": json.dumps(
+            {"agent": "plan", "command": "codify", "model_variant": "auto"}
+        ),
+        "ANTHROPIC_MODEL": "deepseek-v4-flash",
+        "ANTHROPIC_BASE_URL": "https://api.deepseek.com/anthropic",
+        "ANTHROPIC_API_KEY": "fake-key",
+    }
+    result = _source_adapter(
+        "opencode_adapter_prepare_config && printf '%s|%s|%s' "
+        '"$CODIFY_OPENCODE_AGENT" "${CODIFY_OPENCODE_COMMAND}" "${CODIFY_OPENCODE_VARIANT}"',
+        env,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "plan|codify|auto"
+    content = json.loads((tmp_path / "opencode/opencode.json").read_text(encoding="utf-8"))
+    assert content["command"]["codify"] == {
+        "description": "Codify task command",
+        "template": "$ARGUMENTS",
+    }
+
+
+def test_opencode_prepare_config_rejects_invalid_frozen_options(tmp_path):
+    result = _source_adapter(
+        "opencode_adapter_prepare_config",
+        {
+            "CODIFY_RUNTIME_DIR": str(tmp_path),
+            "CODIFY_ORCHESTRATION_DIR": str(REPO_ROOT / "deploy"),
+            "CODIFY_HARNESS_OPTIONS_JSON": '{"command":"shell"}',
+        },
+    )
+
+    assert result.returncode != 0
+    assert "invalid agent, command, or model variant" in result.stderr
+
+
+def test_opencode_prepare_config_rejects_unknown_frozen_options(tmp_path):
+    result = _source_adapter(
+        "opencode_adapter_prepare_config",
+        {
+            "CODIFY_RUNTIME_DIR": str(tmp_path),
+            "CODIFY_ORCHESTRATION_DIR": str(REPO_ROOT / "deploy"),
+            "CODIFY_HARNESS_OPTIONS_JSON": '{"agent":"build","arbitrary_config":true}',
+        },
+    )
+
+    assert result.returncode != 0
+    assert "invalid agent, command, or model variant" in result.stderr
 
 
 @pytest.mark.parametrize(

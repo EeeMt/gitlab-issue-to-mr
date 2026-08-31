@@ -38,6 +38,15 @@ def loaded_task_relationship(task: Task, name: str) -> Any | None:
     return value
 
 
+def _snapshot_harness_options(snapshot: Any) -> dict[str, Any]:
+    """Return only the selected harness's non-secret frozen options."""
+    config = getattr(snapshot, "harness_config_snapshot", None)
+    options = config.get("options") if isinstance(config, dict) else None
+    harness_key = getattr(snapshot, "harness_key", None)
+    selected = options.get(harness_key) if isinstance(options, dict) else None
+    return dict(selected) if isinstance(selected, dict) else {}
+
+
 async def compute_task_queue_contexts(
     db: AsyncSession,
     tasks: list[Task],
@@ -160,6 +169,7 @@ def serialize_task(*args, **kwargs) -> dict:
                         if snapshot.model_endpoint_snapshot
                         else None
                     ),
+                    "harness_options": _snapshot_harness_options(snapshot),
                 }
                 if snapshot is not None
                 else None

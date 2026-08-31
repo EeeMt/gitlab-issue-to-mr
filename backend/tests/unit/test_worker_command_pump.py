@@ -276,6 +276,41 @@ async def test_pump_delivers_head_command(maker):
         assert await _row_status(db, command_ids[0]) == "delivered"
 
 
+async def test_pump_records_monotonic_native_delivery_timestamps(maker):
+    """Terminal delivery evidence is sampled after the native send marker."""
+    task_id, _, command_ids = await _seed_task_with_commands(maker, count=1)
+
+    async def native_ack_transport(frame, **kwargs):
+        return {
+            "status": "ack",
+            "native_sent": True,
+            "native_request_id": frame["native_request_id"],
+        }
+
+    async with maker() as db:
+        result = await run_pump_cycle(
+            db, task_id=task_id, owner=_owner(), transport=native_ack_transport
+        )
+        await db.commit()
+        row = (
+            await db.execute(
+                sa.text(
+                    "SELECT dispatch_started_at, native_sent_at, native_ack_at, delivered_at "
+                    "FROM task_harness_commands WHERE command_id = :c"
+                ),
+                {"c": command_ids[0]},
+            )
+        ).one()
+
+    assert result.commands_processed == 1
+    assert row.dispatch_started_at is not None
+    assert row.native_sent_at is not None
+    assert row.native_ack_at is not None
+    assert row.delivered_at is not None
+    assert row.dispatch_started_at <= row.native_sent_at <= row.native_ack_at
+    assert row.native_ack_at == row.delivered_at
+
+
 async def test_idle_accepting_attempt_does_not_starve_newer_queued_work(maker):
     """An accepting attempt with no queue item must not win the claim."""
     await _seed_task_with_commands(maker, create_commands=False)

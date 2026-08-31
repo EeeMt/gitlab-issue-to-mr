@@ -19,6 +19,7 @@ from app.api.task_responses import (
 )
 from app.api.task_schemas import UpdateTaskRequest
 from app.config import get_effective_settings
+from app.core.harness_options import HarnessOptionsError, validate_task_overrides
 from app.core.harness_registry import HarnessRegistryError
 from app.core.model_endpoints import (
     ensure_harness_protocol_compatibility,
@@ -34,6 +35,7 @@ from app.core.skills import (
 from app.core.task_prompt import TaskPromptValidationError, resolve_task_mode_template
 from app.core.worker_profiles import (
     WorkerProfileValidationError,
+    apply_task_harness_options,
     replace_task_worker_snapshot,
 )
 from app.core.worker_runtime_readiness import (
@@ -92,6 +94,15 @@ async def update_task_record(
     require_task_execution_writer(task, action="update")
 
     updated_fields = request.model_fields_set
+    task_harness_options = None
+    if "harness_options" in updated_fields:
+        try:
+            task_harness_options = validate_task_overrides(request.harness_options)
+        except HarnessOptionsError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
     original_task_mode = task.task_mode or "execute"
     if "user_prompt" in updated_fields:
         if not request.user_prompt or not request.user_prompt.strip():
@@ -261,6 +272,7 @@ async def update_task_record(
             harness_key=harness_key,
             endpoint=endpoint,
             shared_configuration=shared,
+            task_harness_options=task_harness_options,
         )
         # Preserve the task's skill selection across the switch: a task-sourced
         # selection carries its skill ids over (re-validated against the new
@@ -288,6 +300,26 @@ async def update_task_record(
             ) from exc
         replace_task_skill_references(snapshot, selected_skills)
         snapshot.skill_selection_source = selection_source
+        snapshot.effective_configuration_digest = snapshot_effective_configuration_digest(
+            snapshot
+        )
+
+    if "harness_options" in updated_fields:
+        if snapshot is None:
+            snapshot = await db.get(TaskWorkerProfileSnapshot, task.id)
+        if snapshot is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Task has no worker profile snapshot",
+            )
+        try:
+            apply_task_harness_options(snapshot, task_harness_options)
+        except (HarnessOptionsError, ValueError) as exc:
+            await db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
         snapshot.effective_configuration_digest = snapshot_effective_configuration_digest(
             snapshot
         )

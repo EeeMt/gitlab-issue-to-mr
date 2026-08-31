@@ -204,6 +204,28 @@ def test_update_request_accepts_three_task_modes_and_rejects_others() -> None:
         UpdateTaskRequest(task_mode="bogus")
 
 
+def test_task_request_exposes_validated_opencode_options_and_rejects_null_update() -> None:
+    create = CreateTaskRequest(
+        issue_id=1,
+        harness_options={
+            "opencode": {
+                "agent": "plan",
+                "command": "codify",
+                "model_variant": "auto",
+            }
+        },
+    )
+    assert create.harness_options == {
+        "opencode": {
+            "agent": "plan",
+            "command": "codify",
+            "model_variant": "auto",
+        }
+    }
+    with pytest.raises(ValidationError, match="harness_options cannot be null"):
+        UpdateTaskRequest.model_validate({"harness_options": None})
+
+
 def test_preview_request_accepts_three_modes_and_omitted_template() -> None:
     request = RunInstructionTemplatePreviewRequest(
         issue_id=1, task_mode="freeform", user_prompt="need"

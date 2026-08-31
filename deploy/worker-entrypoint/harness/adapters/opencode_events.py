@@ -17,15 +17,16 @@ multi-signal combination, NOT a single busy/idle field:
    from ``message.part.updated``/``message.part.delta``).
 3. The session is not in an error state.
 
-For OpenCode first release the attempt has no command plane (manifest
+For OpenCode first release the attempt has no live command plane (manifest
 ``steering=false``/``follow_up=false``, control state ``disabled``), so settled
 converges a single harness terminal directly — there is no accepting->closing
 ->drain gate. ``agent_settled`` is still surfaced as an auditable diagnostic
 marker so the projector's settled handling stays uniform across harnesses.
 
 Transport is owned by the Bridge (see opencode_bridge.py): it establishes the
-SSE subscription, creates the session, sends ``prompt_async``, and falls back to
-``GET /session/status`` after a disconnect. This module only normalizes records.
+SSE subscription, creates the session, sends the frozen startup ``command`` or
+``prompt_async``, and falls back to ``GET /session/status`` after a disconnect.
+This module only normalizes records.
 """
 
 from __future__ import annotations
@@ -229,6 +230,16 @@ def _error_message(value: object, default: str) -> tuple[str, object]:
         status_code = value.get("statusCode")
         if status_code is None:
             status_code = value.get("status_code") or value.get("status")
+        # OpenCode's APIError envelope keeps the provider response under
+        # ``error.data``. Read that nested record before falling back to the
+        # outer error name, otherwise a real HTTP 429/401 is reduced to the
+        # unhelpful ``APIError``/engine_error pair.
+        nested_data = value.get("data")
+        if isinstance(nested_data, dict):
+            nested_message, nested_status = _error_message(nested_data, default)
+            status_code = status_code if status_code is not None else nested_status
+            if nested_status is not None or nested_message != default:
+                return nested_message, status_code
         message_value = (
             value.get("message")
             or value.get("error")

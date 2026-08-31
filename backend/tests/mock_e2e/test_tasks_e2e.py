@@ -417,6 +417,137 @@ class TestCreateTask:
         assert data["issue_id"] == issue_id
         assert data["priority"] == 2
 
+    async def test_create_opencode_task_freezes_harness_options(
+        self, client, session_factory
+    ):
+        """The HTTP create path freezes OpenCode options into the task snapshot."""
+        async with session_factory() as session:
+            worker = await session.get(WorkerProfile, 1)
+            worker.enabled_harnesses = ["opencode"]
+            worker.default_harness_key = "opencode"
+            worker.harness_options = {
+                "opencode": {
+                    "agent": "build",
+                    "command": None,
+                    "model_variant": None,
+                }
+            }
+            await session.commit()
+
+        issue_resp = await client.post(
+            "/api/issues",
+            json={
+                "project_id": 1,
+                "title": "OpenCode options issue",
+                "target_branch": "main",
+                "worker_profile_id": 1,
+            },
+        )
+        assert issue_resp.status_code == 200
+
+        task_resp = await client.post(
+            "/api/tasks",
+            json={
+                "issue_id": issue_resp.json()["id"],
+                "provider_id": 1,
+                "user_prompt": "Verify frozen OpenCode options",
+                "harness_key": "opencode",
+                "session_mode": "fresh",
+                "harness_options": {
+                    "opencode": {
+                        "agent": "plan",
+                        "command": "codify",
+                        "model_variant": "auto",
+                    }
+                },
+            },
+        )
+        assert task_resp.status_code == 200, task_resp.text
+        task_data = task_resp.json()
+        assert task_data["harness_key"] == "opencode"
+        assert task_data["harness_snapshot"]["harness_options"] == {
+            "agent": "plan",
+            "command": "codify",
+            "model_variant": "auto",
+        }
+
+        async with session_factory() as session:
+            snapshot = await session.get(
+                TaskWorkerProfileSnapshot, task_data["id"]
+            )
+            assert snapshot.harness_config_snapshot["options"]["opencode"] == {
+                "agent": "plan",
+                "command": "codify",
+                "model_variant": "auto",
+            }
+
+    async def test_update_opencode_task_changes_frozen_options_and_digest(
+        self, client, session_factory
+    ):
+        """The HTTP update path edits the frozen options, not mutable Profile state."""
+        async with session_factory() as session:
+            worker = await session.get(WorkerProfile, 1)
+            worker.enabled_harnesses = ["opencode"]
+            worker.default_harness_key = "opencode"
+            worker.harness_options = {
+                "opencode": {
+                    "agent": "build",
+                    "command": None,
+                    "model_variant": None,
+                }
+            }
+            await session.commit()
+
+        issue_resp = await client.post(
+            "/api/issues",
+            json={
+                "project_id": 1,
+                "title": "OpenCode edit issue",
+                "target_branch": "main",
+                "worker_profile_id": 1,
+            },
+        )
+        assert issue_resp.status_code == 200
+        task_resp = await client.post(
+            "/api/tasks",
+            json={
+                "issue_id": issue_resp.json()["id"],
+                "provider_id": 1,
+                "user_prompt": "Verify editable frozen options",
+                "harness_key": "opencode",
+                "session_mode": "fresh",
+                "harness_options": {
+                    "opencode": {
+                        "agent": "plan",
+                        "command": "codify",
+                        "model_variant": "auto",
+                    }
+                },
+            },
+        )
+        assert task_resp.status_code == 200, task_resp.text
+        task_id = task_resp.json()["id"]
+        async with session_factory() as session:
+            before_snapshot = await session.get(TaskWorkerProfileSnapshot, task_id)
+            before_digest = before_snapshot.effective_configuration_digest
+
+        update_resp = await client.patch(
+            f"/api/tasks/{task_id}",
+            json={"harness_options": {"opencode": {"model_variant": "fast"}}},
+        )
+        assert update_resp.status_code == 200, update_resp.text
+        update_data = update_resp.json()
+        assert update_data["harness_snapshot"]["harness_options"] == {
+            "agent": "plan",
+            "command": "codify",
+            "model_variant": "fast",
+        }
+
+        async with session_factory() as session:
+            snapshot = await session.get(TaskWorkerProfileSnapshot, task_id)
+            assert snapshot.harness_config_snapshot["options"]["opencode"]["model_variant"] == "fast"
+            assert snapshot.effective_configuration_digest != before_digest
+
     async def test_create_task_rejects_disabled_provider(self, client, session_factory):
         """Create task rejects providers disabled in AI provider configuration."""
         async with session_factory() as session:

@@ -297,6 +297,7 @@ async def _resolve_frozen_provider(
         provider_driver=endpoint.provider_driver,
         provider_options=dict(endpoint.provider_options),
         credential_ref=credential_ref,
+        endpoint_fingerprint=endpoint.fingerprint,
         _codify_api_key_resolved=True,
     )
 
@@ -445,6 +446,9 @@ def _build_container_env_with_settings(
         "CODIFY_COAUTHOR_EMAIL": "codify@codify.local",
         "CODIFY_TASK_PROMPT_FILE": _TASK_PROMPT_CONTAINER_PATH,
     }
+    endpoint_fingerprint = getattr(provider, "endpoint_fingerprint", None)
+    if isinstance(endpoint_fingerprint, str) and endpoint_fingerprint:
+        environment["CODIFY_MODEL_ENDPOINT_FINGERPRINT"] = endpoint_fingerprint
 
     if model_protocol == "anthropic_messages":
         environment.update(

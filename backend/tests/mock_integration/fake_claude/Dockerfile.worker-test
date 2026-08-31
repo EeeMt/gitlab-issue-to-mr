@@ -1,6 +1,7 @@
 # Test worker image — real entrypoint.sh + fake Claude CLI
 # Built from base python image (does NOT need real claude binary download)
-FROM python:3.11-slim
+ARG BASE_IMAGE=python:3.11-slim
+FROM ${BASE_IMAGE}
 
 WORKDIR /app
 
@@ -19,6 +20,9 @@ RUN useradd --create-home --shell /bin/bash --uid 1000 codify
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
+# Test-only explicit CLI override. Production workers resolve this from the
+# frozen Worker Kit or an explicitly authorized host_mount instead.
+ENV CODIFY_CLAUDE_BIN=/usr/local/bin/claude
 
 # Install fake claude binary (responds to --version only)
 COPY backend/tests/mock_integration/fake_claude/fake-claude-binary /usr/local/bin/claude

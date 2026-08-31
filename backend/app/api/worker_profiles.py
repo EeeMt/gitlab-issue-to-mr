@@ -20,6 +20,7 @@ from sqlalchemy.orm import selectinload
 
 from app.config import get_effective_settings
 from app.core.docker_client import DockerClientWrapper, resolve_docker_connection
+from app.core.harness_options import HarnessOptionsError, validate_namespaced_options
 from app.core.harness_registry import (
     HarnessRegistryError,
     validate_enabled_harnesses,
@@ -129,6 +130,7 @@ class WorkerProfileRequestBase(BaseModel):
     enabled_harnesses: list[str] | None = None
     default_harness_key: str | None = Field(default=None, max_length=32)
     harness_constraints: dict[str, Any] | None = None
+    harness_options: dict[str, Any] | None = None
     image_digest: str | None = Field(default=None, max_length=128)
     harness_runtimes: dict[str, Any] | None = None
     expected_shared_revision: int | None = None
@@ -175,6 +177,11 @@ class WorkerProfileRequestBase(BaseModel):
             try:
                 validate_harness_runtimes(self.harness_runtimes)
             except HarnessRegistryError as exc:
+                raise ValueError(str(exc)) from exc
+        if self.harness_options is not None:
+            try:
+                validate_namespaced_options(self.harness_options)
+            except HarnessOptionsError as exc:
                 raise ValueError(str(exc)) from exc
         return self
 
@@ -1142,6 +1149,7 @@ async def create_worker_profile(
             ),
             default_harness_key=request.default_harness_key or "claude",
             harness_constraints=request.harness_constraints or {},
+            harness_options=validate_namespaced_options(request.harness_options),
             image_digest=request.image_digest,
             harness_runtimes=request.harness_runtimes or {},
             default_skills=[],
@@ -1253,6 +1261,7 @@ async def update_worker_profile(
             "enabled_harnesses",
             "default_harness_key",
             "harness_constraints",
+            "harness_options",
             "image_digest",
             "harness_runtimes",
         }
@@ -1283,6 +1292,8 @@ async def update_worker_profile(
                 profile.default_harness_key = merged_default
             if "harness_constraints" in fields:
                 profile.harness_constraints = request.harness_constraints or {}
+            if "harness_options" in fields:
+                profile.harness_options = validate_namespaced_options(request.harness_options)
             if "image_digest" in fields:
                 profile.image_digest = request.image_digest
             if "harness_runtimes" in fields:
@@ -1616,6 +1627,7 @@ async def duplicate_worker_profile(
             enabled_harnesses=list(getattr(source, "enabled_harnesses", None) or ["claude"]),
             default_harness_key=getattr(source, "default_harness_key", None) or "claude",
             harness_constraints=dict(getattr(source, "harness_constraints", None) or {}),
+            harness_options=dict(getattr(source, "harness_options", None) or {}),
             harness_runtimes=dict(getattr(source, "harness_runtimes", None) or {}),
             default_skills=default_skills,
         )

@@ -377,4 +377,10 @@ onBeforeUnmount(() => {
 .event-content--fadein {
   animation: content-fadein 0.18s ease;
 }
+
+@media (max-width: 768px) {
+  .tool-badge {
+    min-height: 44px;
+  }
+}
 </style>

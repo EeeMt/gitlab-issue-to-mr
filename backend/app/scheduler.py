@@ -2482,6 +2482,11 @@ class Scheduler:
                 task.raw_logs_finalized_at = (
                     getattr(task, "raw_logs_finalized_at", None) or utcnow()
                 )
+                await close_task_control_gates(
+                    db,
+                    task_id=task.id,
+                    reason="scheduler recovery confirmed worker container absent",
+                )
                 await self._release_issue_lock(
                     db,
                     issue_id=task.issue_id,
@@ -2594,6 +2599,11 @@ class Scheduler:
                         task.completed_at = utcnow()
                         task.raw_logs_finalized_at = (
                             getattr(task, "raw_logs_finalized_at", None) or utcnow()
+                        )
+                        await close_task_control_gates(
+                            db,
+                            task_id=task.id,
+                            reason="scheduler recovery confirmed worker container absent",
                         )
                         await self._release_issue_lock(
                             db,
@@ -2723,6 +2733,11 @@ class Scheduler:
                                     )
                                     task.container_id = None
                                     task.completed_at = utcnow()
+                                    await close_task_control_gates(
+                                        db,
+                                        task_id=task.id,
+                                        reason="scheduler recovery removed non-runnable worker container",
+                                    )
                                     await self._release_issue_lock(
                                         db,
                                         issue_id=task.issue_id,

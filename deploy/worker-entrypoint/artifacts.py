@@ -34,6 +34,7 @@ COPY_CHUNK_BYTES = 1024 * 1024
 
 BASE_ARCHIVE_FILES = (
     "event.jsonl",
+    "opencode-http-audit.jsonl",
     "harness-result.json",
     "runtime.json",
     "console.log",

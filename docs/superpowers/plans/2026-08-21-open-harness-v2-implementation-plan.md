@@ -85,7 +85,8 @@ Phase 2–4 可以由不同提交序列推进，但不得各自修改 V2 schema�
 - [ ] 记录官方下载来源、许可证、包名/二进制、平台、版本和 SHA-256。
 - [ ] 验证目标 Worker 架构（至少当前 linux/amd64）能离线运行已安装制品。
 - [ ] 记录 Pi RPC 和 OpenCode Server 的协议版本或版本探测结果。
-- [ ] 确认 OpenCode Bridge 使用官方 SDK 还是稳定 HTTP API；只选一个生产路径，另一条仅用于诊断。
+- [x] 确认 OpenCode Bridge 使用官方 SDK 还是稳定 HTTP API：按 Phase 3 实现前置 gate 冻结 Python HTTP/SSE
+  API 为生产路径，官方 SDK 仅作 probe/诊断参考。
 
 建议新增：
 

@@ -521,6 +521,34 @@ class TestRequireChangesSerialization(unittest.TestCase):
 
 
 class TestEndpointProtocolLegacyFallback(unittest.TestCase):
+    def test_serialize_exposes_selected_frozen_options_without_profile_namespace(self):
+        from app.api import task_responses as tr
+
+        snapshot = _make_worker_snapshot()
+        snapshot.harness_key = "opencode"
+        snapshot.harness_config_snapshot = {
+            "options": {
+                "opencode": {
+                    "agent": "plan",
+                    "command": "codify",
+                    "model_variant": "auto",
+                },
+                "pi": {"thinking_level": "low"},
+            }
+        }
+        with (
+            patch.object(tr, "_serialize_task_base", return_value={}),
+            patch.object(tr, "loaded_task_relationship", return_value=snapshot),
+            patch.object(tr, "skill_snapshots_from_task_snapshot", return_value=[]),
+        ):
+            body = tr.serialize_task(MagicMock())
+
+        assert body["harness_snapshot"]["harness_options"] == {
+            "agent": "plan",
+            "command": "codify",
+            "model_variant": "auto",
+        }
+
     def test_serialize_pre_074_snapshot_falls_back_to_wire_protocol_key(self):
         """A pre-074 snapshot (only ``wire_protocol``) still yields
         ``endpoint_protocol`` instead of null (F2 / historical V1 read)."""
@@ -2303,6 +2331,48 @@ class GetTaskEndpointTests(unittest.TestCase):
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 404)
+
+    def test_get_task_projects_safe_archive_detail_over_legacy_html_summary(self):
+        """GET /tasks/{id} must not re-expose a legacy HTML failure summary."""
+        task = _make_serializable_task(task_status=TaskStatus.FAILED, task_id=57)
+        task.error_message = "HTTP 404: <!DOCTYPE html><script>raw payload</script>"
+
+        task_result = MagicMock()
+        task_result.scalar_one_or_none.return_value = task
+        attempt_result = MagicMock()
+        attempt_result.first.return_value = None
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[task_result, attempt_result])
+
+        client, app = _make_app_client_with_db(mock_db)
+
+        with (
+            patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
+            patch("app.api.tasks.compute_task_queue_contexts", new=AsyncMock(return_value={})),
+            patch(
+                "app.api.tasks.asyncio.to_thread",
+                new=AsyncMock(return_value="Pi provider returned HTTP 404 HTML error response"),
+            ),
+            patch(
+                "app.api.tasks.load_task_failure_summary",
+                new=AsyncMock(
+                    return_value={
+                        "failure_kind": "engine_error",
+                        "failure_message": "HTTP 404: <!DOCTYPE html><script>raw payload</script>",
+                    }
+                ),
+            ),
+        ):
+            response = client.get("/api/tasks/57")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["error_message"], "Pi provider returned HTTP 404 HTML error response")
+        self.assertEqual(data["failure_message"], "Pi provider returned HTTP 404 HTML error response")
+        self.assertNotIn("<", data["error_message"])
+        self.assertNotIn("<", data["failure_message"])
 
     def test_get_task_response_includes_model_name_field(self):
         """GET /api/tasks/{id} response should include model_name field (None when not set)."""

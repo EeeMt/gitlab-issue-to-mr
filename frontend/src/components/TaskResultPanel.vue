@@ -1344,6 +1344,28 @@ const hasChanges = computed(() =>
   }
 }
 
+@media (max-width: 768px) {
+  .error-raw__toggle {
+    min-height: 44px;
+    padding: 8px 0;
+  }
+
+  .summary-trigger__main {
+    min-height: 44px;
+  }
+
+  .summary-trigger__action-btn,
+  .summary-trigger__chevron {
+    width: 44px;
+    height: 44px;
+  }
+
+  .summary-collapse-button {
+    min-height: 44px;
+    --n-height: 44px !important;
+  }
+}
+
 @media (max-width: 640px) {
   .summary-content--viewer {
     padding: 24px 18px;

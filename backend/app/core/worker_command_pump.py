@@ -696,7 +696,13 @@ async def dispatch_one_command(
             # terminal command with a late native ACK.
             return "terminalized"
     if status == DISPATCH_ACK:
-        delivered = await write_command_delivery(db, command_id=command.command_id, delivered_at=now)
+        # ``now`` is the durable dispatch-start timestamp.  The terminal
+        # delivery timestamp must be sampled after the transport returns so a
+        # real native-send marker can never appear later than its ACK.
+        delivered_at = utcnow()
+        delivered = await write_command_delivery(
+            db, command_id=command.command_id, delivered_at=delivered_at
+        )
         if not delivered:
             return "terminalized"
         await _record_control_event(
@@ -707,7 +713,7 @@ async def dispatch_one_command(
                 "command_id": command.command_id,
                 "payload_digest": command.payload_digest,
                 "sequence_no": command.sequence_no,
-                "delivered_at": now.isoformat(),
+                "delivered_at": delivered_at.isoformat(),
             },
         )
         return "delivered"
@@ -715,12 +721,13 @@ async def dispatch_one_command(
         code = outcome.get("rejection_code") or "delivery_outcome_unknown"
         # Transport text is untrusted (it can contain command/endpoint data).
         message = "control command rejected by Pi owner"
+        rejected_at = utcnow()
         await write_command_rejection(
             db,
             command_id=command.command_id,
             rejection_code=code,
             rejection_message=message,
-            rejected_at=now,
+            rejected_at=rejected_at,
         )
         await _record_control_event(
             db,

@@ -65,3 +65,24 @@ async def test_falls_back_to_terminal_status_when_failure_payload_missing():
         "failure_kind": "cancelled",
         "failure_message": None,
     }
+
+
+@pytest.mark.asyncio
+async def test_bounds_legacy_html_failure_message():
+    event = {
+        "type": "run.failed",
+        "payload": {
+            "status": "failed",
+            "failure": {
+                "kind": "engine_error",
+                "message": "HTTP 404: <!DOCTYPE html><script>raw payload</script>",
+            },
+        },
+    }
+    db = AsyncMock()
+    db.execute.side_effect = [_result("attempt-1"), _result(event)]
+
+    assert await load_task_failure_summary(db, 1) == {
+        "failure_kind": "engine_error",
+        "failure_message": "Provider returned HTTP 404 HTML error response",
+    }

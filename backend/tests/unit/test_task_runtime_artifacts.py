@@ -120,6 +120,9 @@ def test_valid_nested_artifacts_are_sealed_into_runtime_archive(tmp_path):
     _write_policy(helper)
     _prepare(helper)
     (helper.RUNTIME_DIR / "console.log").write_text("worker output", encoding="utf-8")
+    (helper.RUNTIME_DIR / "opencode-http-audit.jsonl").write_text(
+        '{"schema":"codify.opencode.http-audit/v1"}\n', encoding="utf-8"
+    )
     report = helper.ARTIFACT_DIR / "playwright" / "report"
     report.mkdir(parents=True)
     (report / "index.html").write_text("<html></html>", encoding="utf-8")
@@ -129,6 +132,7 @@ def test_valid_nested_artifacts_are_sealed_into_runtime_archive(tmp_path):
     archive_path = helper.RUNTIME_DIR / "task-17-runtime-archive.tar.gz"
     names = _archive_names(archive_path)
     assert "console.log" in names
+    assert "opencode-http-audit.jsonl" in names
     assert "artifacts/playwright/report/index.html" in names
     metadata = json.loads(helper.VALIDATION_FILE.read_text(encoding="utf-8"))
     assert metadata["status"] == "included"

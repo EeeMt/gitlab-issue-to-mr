@@ -2,6 +2,7 @@ import { api } from './client'
 
 export type TaskStatus = 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
 export type TaskMode = 'execute' | 'freeform' | 'plan'
+export type TaskHarnessOptions = Record<string, Record<string, unknown>>
 
 export interface TaskModelServiceSummary {
   configuration_source: 'execution_snapshot' | 'current_provider' | 'unavailable'
@@ -36,6 +37,7 @@ export interface TaskWorkerRuntimeSummary {
   worker_profile_id: number | null
   worker_profile_name: string | null
   harness_key?: string | null
+  harness_options?: Record<string, unknown>
   image: string | null
   runtime_mode: 'baked_image' | 'mounted_kit' | string | null
   worker_kit_version: string | null
@@ -113,6 +115,18 @@ export interface Task {
     read_only: boolean
     reason: string | null
   }
+  harness_snapshot?: {
+    harness_adapter_version: string | null
+    harness_adapter_digest: string | null
+    cli_source: string | null
+    cli_executable_path: string | null
+    cli_version: string | null
+    cli_binary_digest: string | null
+    image_digest: string | null
+    runtime_bundle_digest: string | null
+    endpoint_protocol: string | null
+    harness_options?: Record<string, unknown>
+  } | null
   worker_image?: string | null
   worker_runtime_mode?: 'baked_image' | 'mounted_kit' | string | null
   worker_kit_version?: string | null
@@ -231,6 +245,7 @@ export interface CreateTaskRequest {
   session_mode?: 'continue' | 'fresh'
   run_instruction_template?: string
   skill_ids?: number[]
+  harness_options?: TaskHarnessOptions
 }
 
 export interface RescheduleTaskRequest {
@@ -245,6 +260,7 @@ export interface UpdateTaskRequest {
   task_mode?: TaskMode
   run_instruction_template?: string
   skill_ids?: number[] | null
+  harness_options?: TaskHarnessOptions
 }
 
 export interface TaskLog {

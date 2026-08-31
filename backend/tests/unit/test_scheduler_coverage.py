@@ -656,6 +656,7 @@ class TestCrashRecoveryContainers(unittest.IsolatedAsyncioTestCase):
         with (
             patch("app.scheduler.AsyncSessionLocal", return_value=mock_db),
             patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker),
+            patch("app.scheduler.close_task_control_gates", new=AsyncMock()) as close_gates,
         ):
             await scheduler._crash_recovery()
 
@@ -664,6 +665,11 @@ class TestCrashRecoveryContainers(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(stuck_task.container_id)
         self.assertIsNotNone(stuck_task.completed_at)
         mock_db.commit.assert_awaited_once()
+        close_gates.assert_awaited_once_with(
+            mock_db,
+            task_id=10,
+            reason="scheduler recovery confirmed worker container absent",
+        )
 
     async def test_crash_recovery_continues_when_docker_fails(self) -> None:
         """Container cleanup failure should not prevent stuck-task recovery."""
@@ -864,6 +870,7 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
             patch("app.scheduler._get_recovery_docker_client", return_value=mock_docker),
             patch.object(scheduler, "_resume_task_background", new=MagicMock()),
             patch("app.scheduler.asyncio.create_task"),
+            patch("app.scheduler.close_task_control_gates", new=AsyncMock()) as close_gates,
         ):
             await scheduler._crash_recovery()
 
@@ -876,6 +883,11 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task_without_container.status, TaskStatus.FAILED)
         self.assertIn("container not found", task_without_container.error_message)
         self.assertIsNotNone(task_without_container.completed_at)
+        close_gates.assert_awaited_once_with(
+            mock_db,
+            task_id=20,
+            reason="scheduler recovery confirmed worker container absent",
+        )
 
     async def test_crash_recovery_exited_container_with_running_task(self) -> None:
         """An exited container for a RUNNING task should be RESUMED (not removed).

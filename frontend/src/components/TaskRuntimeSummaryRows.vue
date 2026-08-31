@@ -925,6 +925,13 @@ function formatDate(dateStr: string): string {
   line-height: 1.5;
 }
 
+@media (max-width: 768px) {
+  .metadata-summary-trigger {
+    min-height: 44px;
+    box-sizing: border-box;
+  }
+}
+
 @media (max-width: 420px) {
   .metadata-row {
     display: grid;

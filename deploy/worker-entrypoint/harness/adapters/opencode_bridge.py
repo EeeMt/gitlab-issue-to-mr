@@ -3,8 +3,9 @@
 
 OpenCode 1.18.19 drives a Task-scoped ``opencode serve`` (control transport
 ``server_http``). This module is the Bridge: it owns the HTTP transport to the
-Server (session create, ``prompt_async``, ``abort``, status fallback, SSE event
-subscription) and the deterministic reject for the command plane.
+Server (session create, ``prompt_async``/native startup ``command``, ``abort``,
+status fallback, SSE event subscription) and the deterministic reject for the
+live command plane.
 
 This is the production path decided by the Node-bundle gate (design §2 / §10):
 we talk to the Server with the Python stdlib ``urllib`` + a self-maintained SSE
@@ -39,16 +40,24 @@ from __future__ import annotations
 
 import argparse
 import base64
+import fcntl
+import hashlib
 import http.client
 import json
 import os
+import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Iterator
+
+from sanitize import clean_message, sanitize
 
 FRAME_VERSION = "1"
 REJECTION_CODE = "control_gate_closed"
@@ -56,15 +65,125 @@ REJECTION_MESSAGE = "opencode: steering/follow_up not supported in first release
 SUPPORTED_MODEL_PROTOCOLS = frozenset(
     {"anthropic_messages", "openai_responses", "openai_chat_completions"}
 )
+SUPPORTED_AGENTS = frozenset({"build", "plan", "general", "explore"})
+SUPPORTED_COMMANDS = frozenset({"codify"})
+MODEL_VARIANT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
 SESSION_FILE_ENV = "CODIFY_OPENCODE_SESSION_FILE"
+HTTP_AUDIT_FILE_ENV = "CODIFY_OPENCODE_HTTP_AUDIT_FILE"
+HTTP_AUDIT_SCHEMA = "codify.opencode.http-audit/v1"
+_HTTP_FAILURE_MESSAGE_MAX_CHARS = 500
+
+
+def _http_path_template(path: str) -> str:
+    """Reduce an OpenCode route to a session-id-free audit template."""
+    route = urllib.parse.urlsplit(path).path
+    if route == "/event":
+        return "/event"
+    if route == "/session":
+        return "/session"
+    parts = route.strip("/").split("/")
+    if len(parts) == 2 and parts[0] == "session":
+        return "/session/{session_id}"
+    if len(parts) == 3 and parts[0] == "session" and parts[2] in {
+        "abort",
+        "command",
+        "prompt_async",
+        "status",
+    }:
+        return f"/session/{{session_id}}/{parts[2]}"
+    return "/unknown"
+
+
+def _http_operation(method: str, path_template: str) -> str:
+    """Name the fixed OpenCode endpoint without retaining request payloads."""
+    operations = {
+        ("GET", "/event"): "event.subscribe",
+        ("POST", "/session"): "session.create",
+        ("GET", "/session/{session_id}"): "session.get",
+        ("POST", "/session/{session_id}/prompt_async"): "session.prompt_async",
+        ("POST", "/session/{session_id}/command"): "session.command",
+        ("POST", "/session/{session_id}/abort"): "session.abort",
+        ("GET", "/session/{session_id}/status"): "session.status",
+    }
+    return operations.get((method.upper(), path_template), "unknown")
+
+
+def _http_outcome(status_code: int | None) -> str:
+    if status_code is None:
+        return "transport_error"
+    return "success" if 200 <= status_code < 300 else "http_error"
+
+
+def _safe_http_failure_message(value: object, default: str) -> str:
+    """Extract a bounded message without archiving an HTTP response envelope."""
+    if isinstance(value, dict):
+        for key in ("message", "detail", "error", "title", "code", "data"):
+            candidate = value.get(key)
+            if candidate is None:
+                continue
+            message = _safe_http_failure_message(candidate, default)
+            if message != default:
+                return message
+        return default
+    if value is None or isinstance(value, (list, tuple, set)):
+        return default
+    message = clean_message(sanitize(str(value))).strip()
+    return message[:_HTTP_FAILURE_MESSAGE_MAX_CHARS] or default
+
+
+def _http_failure_record(
+    operation: str,
+    *,
+    status_code: int | None = None,
+    body: object = None,
+    message: str | None = None,
+) -> dict:
+    """Build a translator-owned synthetic error for a failed control request.
+
+    Only the bounded message and numeric status cross into the raw/canonical
+    event path. The complete response body is deliberately not forwarded: it
+    may contain provider headers, request IDs, or credential-shaped values.
+    """
+    default = f"OpenCode {operation} failed"
+    detail = _safe_http_failure_message(message, default) if message is not None else default
+    if detail == default:
+        detail = _safe_http_failure_message(body, default)
+    error_data: dict[str, object] = {"message": detail}
+    if isinstance(status_code, int) and not isinstance(status_code, bool):
+        error_data["statusCode"] = status_code
+    return {
+        "id": None,
+        "type": "session.error",
+        "properties": {
+            "error": {
+                "name": "OpenCodeHTTPError",
+                "data": error_data,
+            }
+        },
+    }
+
+
+def _server_failure_record(message: str) -> dict:
+    """Build a bounded crash-shaped event for an unavailable local Server."""
+    return {
+        "id": None,
+        "type": "session.error",
+        "properties": {
+            "error": {
+                "name": "OpenCodeServerCrash",
+                "message": clean_message(sanitize(message))[:_HTTP_FAILURE_MESSAGE_MAX_CHARS],
+            }
+        },
+    }
 
 
 def negotiate_capabilities(harness_key: str) -> dict:
     """Deterministic capability negotiation for the OpenCode control gate.
 
-    OpenCode first release has no command plane: steering/follow_up are both
+    OpenCode first release has no live command plane: steering/follow_up are both
     false, so the public control gate stays ``disabled`` and no queue is ever
-    produced. Mirrors backend ``V2_SYSTEM_CAPABILITY_UPPER_BOUND["opencode"]``.
+    produced. Task-start native ``command`` is separate from this live control
+    gate. Mirrors backend ``V2_SYSTEM_CAPABILITY_UPPER_BOUND["opencode"]``.
     """
     return {"steering": False, "follow_up": False}
 
@@ -159,6 +278,7 @@ class OpenCodeServerClient:
         username: str = "opencode",
         base_url: str | None = None,
         timeout: float = 30.0,
+        audit_file: str | os.PathLike[str] | None = None,
     ) -> None:
         host = "127.0.0.1"
         self.base_url = base_url or f"http://{host}:{port}"
@@ -167,6 +287,95 @@ class OpenCodeServerClient:
             token = base64.b64encode(f"{username}:{password}".encode()).decode()
             self._auth = f"Basic {token}"
         self.timeout = timeout
+        configured_audit_file = audit_file
+        if configured_audit_file is None:
+            configured_audit_file = os.environ.get(HTTP_AUDIT_FILE_ENV, "").strip() or None
+        self.audit_file = Path(configured_audit_file) if configured_audit_file else None
+        config_dir = os.environ.get("OPENCODE_CONFIG_DIR", "").strip()
+        self.config_path = str(Path(config_dir) / "opencode.json") if config_dir else None
+
+    def _write_http_audit(
+        self,
+        *,
+        request_id: str,
+        method: str,
+        path: str,
+        status_code: int | None,
+        outcome: str,
+        started: float,
+    ) -> None:
+        """Append one secret-free request record without affecting the request.
+
+        The audit stream is diagnostic evidence, not part of the OpenCode
+        control result. A missing/unwritable audit file must therefore never
+        turn a provider response into a different Task outcome. Request bodies,
+        response bodies, credentials, and session IDs are intentionally absent.
+        """
+        if self.audit_file is None:
+            return
+        config_sha256 = None
+        if self.config_path:
+            try:
+                config_sha256 = hashlib.sha256(
+                    Path(self.config_path).read_bytes()
+                ).hexdigest()
+            except OSError:
+                pass
+        path_template = _http_path_template(path)
+        record = {
+            "schema": HTTP_AUDIT_SCHEMA,
+            "request_id": request_id,
+            "occurred_at": datetime.now(UTC).isoformat(),
+            "method": method.upper(),
+            "operation": _http_operation(method, path_template),
+            "path_template": path_template,
+            "status_code": status_code,
+            "outcome": outcome,
+            "elapsed_ms": max(0, round((time.monotonic() - started) * 1000)),
+            "provider": os.environ.get("OPENCODE_PROVIDER") or None,
+            "model_protocol": os.environ.get("CODIFY_MODEL_PROTOCOL") or None,
+            "model_endpoint_fingerprint": os.environ.get(
+                "CODIFY_MODEL_ENDPOINT_FINGERPRINT"
+            )
+            or None,
+            "config_scope": "task_runtime",
+            "config_path": self.config_path,
+            "config_sha256": config_sha256,
+        }
+        fd = -1
+        locked = False
+        try:
+            self.audit_file.parent.mkdir(parents=True, exist_ok=True)
+            flags = (
+                os.O_WRONLY
+                | os.O_CREAT
+                | os.O_APPEND
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
+            )
+            fd = os.open(self.audit_file, flags, 0o644)
+            with os.fdopen(fd, "a", encoding="utf-8") as handle:
+                fd = -1
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+                locked = True
+                try:
+                    handle.write(json.dumps(record, ensure_ascii=True, separators=(",", ":")))
+                    handle.write("\n")
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                finally:
+                    if locked:
+                        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        except (OSError, ValueError):
+            # Diagnostics are best-effort and must not change control-plane
+            # behavior. The file itself contains no request payload to recover.
+            pass
+        finally:
+            if fd >= 0:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
 
     def _headers(self, extra: dict | None = None) -> dict:
         headers = {"Accept": "application/json"}
@@ -189,19 +398,36 @@ class OpenCodeServerClient:
         if body is not None:
             data = json.dumps(body, ensure_ascii=False).encode()
         request = urllib.request.Request(url, data=data, headers=headers, method=method)
+        request_id = uuid.uuid4().hex
+        started = time.monotonic()
+        status_code = None
+        outcome = "transport_error"
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as resp:  # noqa: S310 (loopback only)
+                status_code = getattr(resp, "status", 200)
+                outcome = _http_outcome(status_code)
                 raw = resp.read()
                 try:
                     return resp.status, json.loads(raw)
                 except (ValueError, TypeError):
                     return resp.status, {}
         except urllib.error.HTTPError as exc:
+            status_code = exc.code
+            outcome = _http_outcome(status_code)
             raw = exc.read()
             try:
                 return exc.code, json.loads(raw)
             except (ValueError, TypeError):
                 return exc.code, {}
+        finally:
+            self._write_http_audit(
+                request_id=request_id,
+                method=method,
+                path=path,
+                status_code=status_code,
+                outcome=outcome,
+                started=started,
+            )
 
     def create_session(self, model_id: str, provider_id: str) -> tuple[int, dict]:
         return self._request("POST", "/session", {"model": {"id": model_id, "providerID": provider_id}})
@@ -212,11 +438,43 @@ class OpenCodeServerClient:
             "GET", f"/session/{urllib.parse.quote(session_id, safe='')}"
         )
 
-    def prompt_async(self, session_id: str, text: str) -> tuple[int, dict]:
+    def prompt_async(
+        self,
+        session_id: str,
+        text: str,
+        *,
+        agent: str | None = None,
+        variant: str | None = None,
+    ) -> tuple[int, dict]:
+        body: dict = {"parts": [{"type": "text", "text": text}]}
+        if agent:
+            body["agent"] = agent
+        if variant:
+            body["variant"] = variant
         return self._request(
             "POST",
             f"/session/{urllib.parse.quote(session_id, safe='')}/prompt_async",
-            {"parts": [{"type": "text", "text": text}]},
+            body,
+        )
+
+    def command(
+        self,
+        session_id: str,
+        command: str,
+        arguments: str,
+        *,
+        agent: str | None = None,
+        variant: str | None = None,
+    ) -> tuple[int, dict]:
+        body: dict = {"command": command, "arguments": arguments}
+        if agent:
+            body["agent"] = agent
+        if variant:
+            body["variant"] = variant
+        return self._request(
+            "POST",
+            f"/session/{urllib.parse.quote(session_id, safe='')}/command",
+            body,
         )
 
     def abort(self, session_id: str) -> tuple[int, dict]:
@@ -241,9 +499,16 @@ class OpenCodeServerClient:
             headers=self._headers({"Accept": "text/event-stream"}),
             method="GET",
         )
+        request_id = uuid.uuid4().hex
+        started = time.monotonic()
+        status_code = None
+        outcome = "transport_error"
+        completed = False
         buffer = ""
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as resp:  # noqa: S310
+                status_code = getattr(resp, "status", 200)
+                outcome = _http_outcome(status_code)
                 while True:
                     # read1 returns as soon as any bytes are available instead of
                     # stalling until the full 8192 arrives; the 89B
@@ -266,13 +531,32 @@ class OpenCodeServerClient:
                             record["data"] = item["data"]
                         yield record
                     buffer = _sse_tail(buffer)
+                completed = True
+        except urllib.error.HTTPError as exc:
+            status_code = exc.code
+            outcome = "http_error"
+            raise ConnectionError(
+                f"OpenCode SSE event stream failed: HTTP {exc.code}"
+            ) from exc
         except (
             http.client.IncompleteRead,
             urllib.error.URLError,
             TimeoutError,
             ConnectionError,
         ) as exc:
+            outcome = "transport_error"
             raise ConnectionError(f"OpenCode SSE event stream failed: {exc}") from exc
+        finally:
+            if not completed and outcome == "success":
+                outcome = "closed"
+            self._write_http_audit(
+                request_id=request_id,
+                method="GET",
+                path="/event",
+                status_code=status_code,
+                outcome=outcome,
+                started=started,
+            )
 
 
 def _persist_session_id(session_id: str) -> None:
@@ -353,7 +637,7 @@ class OpenCodeBridge:
             return self._reject("invalid_command_type", "payload.text missing")
         if len(text) > 4000:
             return self._reject("payload_too_large", "payload.text exceeds 4000 chars")
-        # OpenCode first release has no command plane; the control gate is
+        # OpenCode first release has no live command plane; the control gate is
         # disabled, so any steer/follow_up is rejected deterministically. We
         # never emit control.command.delivered (no command is deliverable).
         return self._reject(REJECTION_CODE, REJECTION_MESSAGE)
@@ -382,6 +666,15 @@ def _forward(record: dict, proc: subprocess.Popen) -> bool:
     except BrokenPipeError:
         return False
     return True
+
+
+def _close_translator(proc: subprocess.Popen) -> None:
+    """Close and reap the translator on every bridge exit path."""
+    try:
+        proc.stdin.close()
+    except (BrokenPipeError, OSError, ValueError):
+        pass
+    proc.wait()
 
 
 def _recover_status(
@@ -471,7 +764,8 @@ def _run_attempt() -> int:
     The Server lifecycle (start/readiness/terminate) is owned by the bash
     adapter; this runs against an already-listening Server. It spawns the event
     translator (opencode_events.py) as a subprocess, forwards every parsed SSE
-    record to it, sends ``prompt_async``, and waits for the translator to
+    record to it, sends either the frozen startup ``command`` or ``prompt_async``,
+    and waits for the translator to
     converge the single harness terminal (it exits once ``session.idle``/error/
     EOF settles — see opencode_events.py).
 
@@ -502,47 +796,27 @@ def _run_attempt() -> int:
         print(f"OpenCode model is unset ({model_source})", file=sys.stderr)
         return 1
 
+    agent = os.environ.get("CODIFY_OPENCODE_AGENT", "").strip() or None
+    command = os.environ.get("CODIFY_OPENCODE_COMMAND", "").strip() or None
+    variant = os.environ.get("CODIFY_OPENCODE_VARIANT", "").strip() or None
+    if agent is not None and agent not in SUPPORTED_AGENTS:
+        print(f"invalid_agent_command: agent {agent!r} not in allowlist", file=sys.stderr)
+        return 1
+    if command is not None and command not in SUPPORTED_COMMANDS:
+        print(f"invalid_agent_command: command {command!r} not in allowlist", file=sys.stderr)
+        return 1
+    if variant is not None and not MODEL_VARIANT_RE.fullmatch(variant):
+        print(
+            f"invalid_agent_command: model variant {variant!r} is not a safe identifier",
+            file=sys.stderr,
+        )
+        return 1
+
     client = OpenCodeServerClient(port=port, password=password, username=username)
     translator = Path(os.environ["CODIFY_OPENCODE_EVENT_TRANSLATOR"])
     raw_file = Path(os.environ["CODIFY_OPENCODE_RAW_EVENT_JSONL"])
 
-    resume_session = (
-        os.environ.get("CODIFY_RESUME_SESSION") or os.environ.get("RESUME_SESSION") or ""
-    ).strip()
-    if resume_session:
-        status, session = client.get_session(resume_session)
-        session_info = session.get("info") if isinstance(session, dict) else None
-        session_id = (
-            session_info.get("id")
-            if isinstance(session_info, dict)
-            else session.get("id")
-            if isinstance(session, dict)
-            else None
-        )
-        if status != 200 or session_id != resume_session:
-            print(
-                f"OpenCode session resume failed: status={status} session={resume_session}",
-                file=sys.stderr,
-            )
-            return 1
-    else:
-        status, session = client.create_session(model_id, provider_id)
-        session_info = session.get("info") if isinstance(session, dict) else None
-        session_id = (
-            session_info.get("id")
-            if isinstance(session_info, dict)
-            else session.get("id")
-            if isinstance(session, dict)
-            else None
-        )
-    if not session_id:
-        operation = "resume" if resume_session else "create"
-        print(f"OpenCode session {operation} failed: status={status}", file=sys.stderr)
-        return 1
-    _persist_session_id(session_id)
-
     raw_file.parent.mkdir(parents=True, exist_ok=True)
-
     proc = subprocess.Popen(
         [sys.executable, str(translator), "--raw-file", str(raw_file)],
         stdin=subprocess.PIPE,
@@ -551,8 +825,72 @@ def _run_attempt() -> int:
     )
     assert proc.stdin is not None
 
-    prompt_file = Path(os.environ["PROMPT_FILE"])
-    prompt_text = prompt_file.read_text(encoding="utf-8")
+    setup_succeeded = False
+    try:
+        resume_session = (
+            os.environ.get("CODIFY_RESUME_SESSION") or os.environ.get("RESUME_SESSION") or ""
+        ).strip()
+        if resume_session:
+            status, session = client.get_session(resume_session)
+            session_info = session.get("info") if isinstance(session, dict) else None
+            session_id = (
+                session_info.get("id")
+                if isinstance(session_info, dict)
+                else session.get("id")
+                if isinstance(session, dict)
+                else None
+            )
+            if status != 200 or session_id != resume_session:
+                print(
+                    f"OpenCode session resume failed: status={status}",
+                    file=sys.stderr,
+                )
+                _forward(
+                    _http_failure_record(
+                        "session resume",
+                        status_code=status,
+                        body=session,
+                    ),
+                    proc,
+                )
+                return 1
+        else:
+            status, session = client.create_session(model_id, provider_id)
+            session_info = session.get("info") if isinstance(session, dict) else None
+            session_id = (
+                session_info.get("id")
+                if isinstance(session_info, dict)
+                else session.get("id")
+                if isinstance(session, dict)
+                else None
+            )
+        if not session_id:
+            operation = "resume" if resume_session else "create"
+            print(f"OpenCode session {operation} failed: status={status}", file=sys.stderr)
+            _forward(
+                _http_failure_record(
+                    f"session {operation}",
+                    status_code=status,
+                    body=session,
+                ),
+                proc,
+            )
+            return 1
+        _persist_session_id(session_id)
+
+        prompt_file = Path(os.environ["PROMPT_FILE"])
+        prompt_text = prompt_file.read_text(encoding="utf-8")
+        setup_succeeded = True
+    except (ConnectionError, OSError, TimeoutError) as exc:
+        print(f"OpenCode session setup failed: {exc}", file=sys.stderr)
+        _forward(
+            _server_failure_record("OpenCode server crash: session setup failed"),
+            proc,
+        )
+        return 1
+    finally:
+        if not setup_succeeded:
+            _close_translator(proc)
 
     try:
         # 1. Establish the SSE subscription and await server.connected (design
@@ -568,16 +906,53 @@ def _run_attempt() -> int:
                     break
         except ConnectionError as exc:
             print(f"OpenCode SSE subscription failed: {exc}", file=sys.stderr)
+            _forward(
+                _server_failure_record(
+                    "OpenCode server crash: SSE subscription failed",
+                ),
+                proc,
+            )
             return 1
         if not subscribed:
             print("OpenCode SSE subscription: server.connected not received", file=sys.stderr)
+            _forward(
+                _server_failure_record(
+                    "OpenCode server error: server.connected was not received",
+                ),
+                proc,
+            )
             return 1
 
         # 2. Now prompt (an async 204/202/200 ack); early events arrive on the
         #    already-established stream and are drained in step 3.
-        status, _ = client.prompt_async(session_id, prompt_text)
+        if command is not None:
+            status, response = client.command(
+                session_id,
+                command,
+                prompt_text,
+                agent=agent,
+                variant=variant,
+            )
+        elif agent is not None or variant is not None:
+            status, response = client.prompt_async(
+                session_id,
+                prompt_text,
+                agent=agent,
+                variant=variant,
+            )
+        else:
+            status, response = client.prompt_async(session_id, prompt_text)
         if status not in (200, 202, 204):
-            print(f"OpenCode prompt_async failed: status={status}", file=sys.stderr)
+            operation = "command" if command is not None else "prompt_async"
+            print(f"OpenCode {operation} failed: status={status}", file=sys.stderr)
+            _forward(
+                _http_failure_record(
+                    operation,
+                    status_code=status,
+                    body=response,
+                ),
+                proc,
+            )
             return 1
 
         # 3. Drain the remainder of the stream; on disconnect, fall back to
@@ -599,12 +974,7 @@ def _run_attempt() -> int:
         if stream_ended and not saw_terminal_signal and proc.poll() is None:
             _recover_status(client, session_id, proc)
     finally:
-        try:
-            proc.stdin.close()
-        except BrokenPipeError:
-            # The translator may have exited after publishing a terminal
-            # failure while the bridge was still draining the SSE stream.
-            pass
+        _close_translator(proc)
 
     rc = proc.wait()
     return rc

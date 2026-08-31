@@ -812,6 +812,7 @@ async def test_deferred_recovery_honors_cancel_intent_when_container_is_absent()
         patch(
             "app.scheduler.release_issue_execution_lock", new=AsyncMock()
         ) as release_lock,
+        patch("app.scheduler.close_task_control_gates", new=AsyncMock()) as close_gates,
     ):
         await scheduler._coordinate_unavailable_recovery(task.id)
 
@@ -819,6 +820,11 @@ async def test_deferred_recovery_honors_cancel_intent_when_container_is_absent()
     assert task.error_message == "Cancelled by user; worker container is confirmed absent"
     assert task.container_id is None
     release_lock.assert_awaited_once_with(db, issue_id=task.issue_id, owner_task_id=task.id)
+    close_gates.assert_awaited_once_with(
+        db,
+        task_id=task.id,
+        reason="scheduler recovery confirmed worker container absent",
+    )
     db.commit.assert_awaited_once()
     assert task.id not in scheduler._running_tasks
     assert task.issue_id not in scheduler._running_issues
@@ -902,6 +908,7 @@ async def test_deferred_recovery_keeps_cancelled_outcome_for_non_runnable_contai
         ) as persist_snapshot,
         patch.object(scheduler, "_resume_task_background", new=AsyncMock()) as resume,
         patch("app.scheduler.release_issue_execution_lock", new=AsyncMock()) as release_lock,
+        patch("app.scheduler.close_task_control_gates", new=AsyncMock()) as close_gates,
     ):
         await scheduler._coordinate_unavailable_recovery(task.id)
 
@@ -916,6 +923,11 @@ async def test_deferred_recovery_keeps_cancelled_outcome_for_non_runnable_contai
         content=b"worker stopped\n",
     )
     release_lock.assert_awaited_once_with(db, issue_id=task.issue_id, owner_task_id=task.id)
+    close_gates.assert_awaited_once_with(
+        db,
+        task_id=task.id,
+        reason="scheduler recovery removed non-runnable worker container",
+    )
     resume.assert_not_awaited()
 
 

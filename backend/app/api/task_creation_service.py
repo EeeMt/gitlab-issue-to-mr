@@ -27,6 +27,7 @@ from app.core.harness_execution_policy import (
     require_creatable_bundle_v2,
     require_task_executable_contract,
 )
+from app.core.harness_options import HarnessOptionsError, validate_task_overrides
 from app.core.harness_protocol import HARNESS_CONTRACT_VERSION_V2
 from app.core.harness_registry import (
     HarnessRegistryError,
@@ -488,6 +489,13 @@ async def create_task_record(
                     detail="续跑会话必须沿用原 Harness；切换 Harness 请勾选“使用新会话执行”",
                 )
             harness_key = current_harness
+    try:
+        task_harness_options = validate_task_overrides(request.harness_options)
+    except HarnessOptionsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
     enabled_harnesses = getattr(worker_profile, "enabled_harnesses", None)
     if not isinstance(enabled_harnesses, list) or not enabled_harnesses:
         enabled_harnesses = ["claude"]
@@ -641,6 +649,7 @@ async def create_task_record(
             harness_key=harness_key,
             endpoint=endpoint,
             shared_configuration=shared,
+            task_harness_options=task_harness_options,
         )
         bundle = await services.bind_runtime_bundle(db, task, harness_key=harness_key)
         # Execution policy: under v2_only, refuse to create a Task whose bound

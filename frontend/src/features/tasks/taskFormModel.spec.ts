@@ -142,6 +142,48 @@ describe('task form request contracts', () => {
     )
   })
 
+  it('includes OpenCode task options in a create request', () => {
+    const harnessOptions = {
+      opencode: {
+        agent: 'plan',
+        command: 'codify',
+        model_variant: 'auto',
+      },
+    }
+
+    expect(buildCreateTaskRequest(7, {
+      ...baseDraft,
+      harnessKey: 'opencode',
+      harnessOptions,
+    })).toEqual(expect.objectContaining({
+      harness_key: 'opencode',
+      harness_options: harnessOptions,
+    }))
+  })
+
+  it('only includes explicitly edited OpenCode options in an update patch', () => {
+    const harnessOptions = {
+      opencode: {
+        agent: 'plan',
+        command: 'codify',
+        model_variant: 'auto',
+      },
+    }
+
+    expect(buildUpdateTaskRequest({
+      ...existingTask,
+      provider_id: null,
+      require_changes: false,
+    }, {
+      ...baseDraft,
+      harnessKey: 'opencode',
+      harnessOptions,
+      harnessOptionsDirty: true,
+    }, baseDraft.runInstructionTemplate)).toEqual({
+      harness_options: harnessOptions,
+    })
+  })
+
   it('requests a fresh Claude session when selected', () => {
     expect(buildCreateTaskRequest(7, {
       ...baseDraft,

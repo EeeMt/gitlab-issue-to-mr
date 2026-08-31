@@ -538,6 +538,31 @@ def test_event_writer_derives_seq_from_stream_after_state_loss(tmp_path):
     assert [event["seq"] for event in _events(tmp_path)] == [1, 2, 3]
 
 
+def test_event_type_exists_finds_nonterminal_jsonl_record(tmp_path):
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir()
+    (runtime_dir / "event.jsonl").touch()
+    _emit(runtime_dir, "run.started")
+    _emit(runtime_dir, "diagnostic", {"code": "probe"})
+
+    environment = {
+        **_environment(runtime_dir),
+        "ENTRYPOINT_LIB_DIR": str(REPO_ROOT / "deploy/worker-entrypoint"),
+    }
+    command = """
+source "$ENTRYPOINT_LIB_DIR/harness/common.sh"
+codify_event_type_exists run.started
+"""
+    result = subprocess.run(
+        ["bash", "-c", command],
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+
+
 def test_runner_initialization_failure_still_emits_complete_failed_attempt(tmp_path):
     runtime_dir = tmp_path / "runtime"
     runtime_dir.mkdir()
@@ -569,6 +594,66 @@ codify_harness_finalize_attempt "$exit_code"
     assert events[1]["payload"]["failure"]["kind"] == "configuration_error"
     result = validate_result(json.loads((runtime_dir / "harness-result.json").read_text()))
     assert result["failure"]["kind"] == "configuration_error"
+
+
+def test_runner_returns_failure_when_clean_adapter_exit_has_harness_failure(tmp_path):
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir()
+    (runtime_dir / "event.jsonl").touch()
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("probe")
+    orchestration_dir = tmp_path / "orchestration"
+    adapter_dir = orchestration_dir / "worker-entrypoint/harness/adapters"
+    adapter_dir.mkdir(parents=True)
+    command_path = orchestration_dir / "fake-harness"
+    command_path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    command_path.chmod(0o755)
+    (adapter_dir / "test.sh").write_text(
+        """
+adapter_metadata() { printf '%s\\n' '{\"adapter_version\":\"1.0.0\"}'; }
+adapter_verify_runtime() { return 0; }
+adapter_detect_capabilities() { printf '%s\\n' '{}'; }
+adapter_prepare_config() { return 0; }
+adapter_build_command() { printf '%s\\n' \"${CODIFY_ORCHESTRATION_DIR}/fake-harness\"; }
+adapter_materialize_skills() { return 0; }
+adapter_stream_events() { return 0; }
+adapter_normalize_result() { return 0; }
+adapter_terminate() { return 0; }
+adapter_run() {
+    codify_emit_event \"harness.failed\" '{\"failure\":{\"kind\":\"rate_limited\",\"message\":\"429\"}}'
+    return 0
+}
+""",
+        encoding="utf-8",
+    )
+    environment = {
+        **_environment(runtime_dir),
+        "ENTRYPOINT_LIB_DIR": str(REPO_ROOT / "deploy/worker-entrypoint"),
+        "CODIFY_ORCHESTRATION_DIR": str(orchestration_dir),
+        "CODIFY_HARNESS_KEY": "test",
+        "CODIFY_ADAPTER_VERSION": "1.0.0",
+    }
+    command = f'''
+source "$ENTRYPOINT_LIB_DIR/harness/common.sh"
+source "$ENTRYPOINT_LIB_DIR/harness/runner.sh"
+export CODIFY_CANONICAL_EVENT_WRITER={EVENT_WRITER!s}
+set +e
+codify_harness_run {prompt!s} {tmp_path / "result.json"!s}
+runner_rc=$?
+printf 'runner_rc=%s\\n' "$runner_rc"
+'''
+    result = subprocess.run(
+        ["bash", "-c", command],
+        env=environment,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "runner_rc=1" in result.stdout
+    assert [event["type"] for event in _events(runtime_dir)] == [
+        "run.started",
+        "harness.failed",
+    ]
 
 
 def test_runner_propagates_run_started_write_failure(tmp_path):

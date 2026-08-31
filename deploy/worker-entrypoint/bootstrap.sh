@@ -203,6 +203,7 @@ create_runtime_archive() {
     local candidate
     for candidate in \
         event.jsonl \
+        opencode-http-audit.jsonl \
         harness-events \
         harness-result.json \
         runtime.json \

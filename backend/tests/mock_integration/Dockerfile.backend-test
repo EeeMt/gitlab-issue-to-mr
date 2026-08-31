@@ -6,5 +6,12 @@ FROM ${BASE_IMAGE}
 # Install test dependencies (baked into image to avoid runtime pip install)
 RUN pip install pytest pytest-asyncio httpx
 
+# Keep the test image's Runtime Bundle source in lockstep with the checkout.
+# The base production tag may be cached on a remote Docker daemon, while mock
+# integration tests must exercise the runtime orchestration under test.
+COPY deploy/entrypoint.worker.sh /opt/codify/runtime-source/deploy/entrypoint.worker.sh
+COPY deploy/ci-claude.sh /opt/codify/runtime-source/deploy/ci-claude.sh
+COPY deploy/worker-entrypoint/ /opt/codify/runtime-source/deploy/worker-entrypoint/
+
 # Copy test files (overridden by volume mount in docker-compose for dev)
 COPY backend/tests/ /app/tests/

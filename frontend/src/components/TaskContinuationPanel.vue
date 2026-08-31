@@ -118,4 +118,11 @@ function goToIssue() {
     grid-template-columns: 1fr;
   }
 }
+
+@media (max-width: 768px) {
+  .continuation-actions :deep(.n-button) {
+    min-height: 44px;
+    --n-height: 44px !important;
+  }
+}
 </style>

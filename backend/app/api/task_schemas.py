@@ -94,6 +94,7 @@ class UpdateTaskRequest(BaseModel):
     )
     skill_ids: list[StrictInt] | None = None
     worker_profile_id: int | None = None
+    harness_options: dict[str, Any] | None = None
 
     @field_validator("skill_ids")
     @classmethod
@@ -139,6 +140,15 @@ class UpdateTaskRequest(BaseModel):
             )
         return v
 
+    @field_validator("harness_options", mode="before")
+    @classmethod
+    def harness_options_not_null(cls, v: Any) -> Any:
+        if v is None:
+            raise ValueError(
+                "harness_options cannot be null; omit the key to leave it unchanged"
+            )
+        return v
+
 
 class CreateTaskRequest(BaseModel):
     """Request model for creating a task under an Issue."""
@@ -157,6 +167,7 @@ class CreateTaskRequest(BaseModel):
         default=None, max_length=MAX_RUN_INSTRUCTION_TEMPLATE_LENGTH
     )
     skill_ids: list[StrictInt] | None = None
+    harness_options: dict[str, Any] | None = None
 
     @field_validator("skill_ids")
     @classmethod

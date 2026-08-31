@@ -2055,10 +2055,42 @@ onBeforeUnmount(() => {
     justify-content: center;
   }
 
+  .task-actions__command {
+    min-height: 44px;
+    --n-height: 44px !important;
+  }
+
+  .task-actions__command--refresh {
+    min-width: 44px;
+    --n-width: 44px !important;
+  }
+
+  .task-actions__linked-task {
+    min-height: 44px;
+  }
+
   .task-prompt-card__controls {
     align-items: flex-start;
     width: 100%;
     flex-wrap: wrap;
+  }
+
+  .task-prompt-view-switch__button {
+    min-height: 44px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  .task-prompt-card__controls :deep(.n-button) {
+    min-width: 44px;
+    min-height: 44px;
+    --n-height: 44px !important;
+    --n-width: 44px !important;
+  }
+
+  .task-prompt-height-toggle {
+    --n-height: 44px !important;
+    --n-width: 44px !important;
   }
 
   .task-prompt-wrap {

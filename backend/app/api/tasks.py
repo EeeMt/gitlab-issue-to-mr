@@ -619,6 +619,7 @@ async def get_task(
     metadata = await get_project_metadata(task.project_id)
     t3 = time.time()
     result_data = _serialize_task(task, metadata, include_prompt_details=True)
+    archived_failure_detail = None
     if task.status in (TaskStatus.FAILED, TaskStatus.CANCELLED):
         from app.core.task_failure_details import read_archived_harness_failure_detail
         from app.core.worker import sanitize_sensitive_data
@@ -671,6 +672,15 @@ async def get_task(
         result_data["attempt_harness_key"] = attempt_row.harness_key
 
     failure_summary = await load_task_failure_summary(db, task.id)
+    if (
+        archived_failure_detail
+        and failure_summary.get("failure_kind") != "protocol_error"
+    ):
+        # Older Pi records could persist the raw provider response as the
+        # canonical failure message. Prefer the same bounded archive
+        # projection used for error_message so the summary cannot re-expose
+        # an immutable HTML/error payload.
+        failure_summary["failure_message"] = archived_failure_detail
     result_data.update(failure_summary)
     t4 = time.time()
 

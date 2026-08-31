@@ -95,4 +95,11 @@ const options = computed<Array<{ label: string; title: string; value: AppLocale 
   padding: 0 12px;
   font-size: 13px;
 }
+
+@media (max-width: 768px) {
+  .language-toggle--small .language-toggle__button {
+    min-width: 44px;
+    height: 44px;
+  }
+}
 </style>

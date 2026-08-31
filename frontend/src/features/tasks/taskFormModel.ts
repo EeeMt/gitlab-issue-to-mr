@@ -1,6 +1,7 @@
 import type {
   CreateTaskRequest,
   Task,
+  TaskHarnessOptions,
   TaskMode,
   UpdateTaskRequest,
 } from '../../api/tasks'
@@ -54,6 +55,8 @@ export interface TaskFormDraft {
   inheritProfileSkills: boolean
   selectedSkillIds: number[]
   skillSelectionDirty: boolean
+  harnessOptions?: TaskHarnessOptions
+  harnessOptionsDirty?: boolean
 }
 
 export function buildCreateTaskRequest(
@@ -80,6 +83,9 @@ export function buildCreateTaskRequest(
   }
   if (draft.harnessKey) {
     request.harness_key = draft.harnessKey
+  }
+  if (draft.harnessKey === 'opencode' && draft.harnessOptions) {
+    request.harness_options = structuredCloneTaskHarnessOptions(draft.harnessOptions)
   }
   if (!draft.inheritProfileSkills) {
     request.skill_ids = [...draft.selectedSkillIds]
@@ -138,5 +144,15 @@ export function buildUpdateTaskRequest(
     }
   }
 
+  if (draft.harnessOptionsDirty && draft.harnessKey === 'opencode' && draft.harnessOptions) {
+    request.harness_options = structuredCloneTaskHarnessOptions(draft.harnessOptions)
+  }
+
   return request
+}
+
+function structuredCloneTaskHarnessOptions(options: TaskHarnessOptions): TaskHarnessOptions {
+  return Object.fromEntries(
+    Object.entries(options).map(([namespace, values]) => [namespace, { ...values }]),
+  )
 }

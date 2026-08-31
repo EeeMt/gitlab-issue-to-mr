@@ -256,6 +256,10 @@ export interface WorkerProfileMount {
   mode: 'ro' | 'rw'
 }
 
+export interface WorkerProfileHarnessOptions {
+  [namespace: string]: Record<string, unknown>
+}
+
 export interface WorkerProfile {
   id: number
   name: string
@@ -284,6 +288,7 @@ export interface WorkerProfile {
   enabled_harnesses?: string[]
   default_harness_key?: string
   harness_constraints?: Record<string, unknown>
+  harness_options?: WorkerProfileHarnessOptions
   image_digest?: string | null
   overrides?: WorkerProfileOverrides
   effective?: WorkerProfileEffectiveConfiguration
@@ -413,6 +418,7 @@ export interface WorkerProfilePayload {
   enabled_harnesses?: string[]
   default_harness_key?: string
   harness_constraints?: Record<string, unknown>
+  harness_options?: WorkerProfileHarnessOptions
   default_execute_run_instruction_template?: string | null
   default_plan_run_instruction_template?: string | null
   ci_auto_repair_run_instruction_template?: string | null

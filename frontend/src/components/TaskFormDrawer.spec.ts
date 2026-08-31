@@ -2127,6 +2127,32 @@ describe('TaskFormDrawer', () => {
       expect(wrapper.vm.selectedProviderId).toBe(7)
     })
 
+    it('prefers bare frozen OpenCode options from the task response over profile defaults', async () => {
+      mockApi.getWorkerProfiles.mockResolvedValue([
+        {
+          ...mockWorkerProfiles[0],
+          enabled_harnesses: ['opencode'],
+          harness_options: {
+            opencode: { agent: 'build', command: null, model_variant: null },
+          },
+        },
+      ])
+
+      await mountEditDrawer({
+        harness_key: 'opencode',
+        worker_profile_id: 3,
+        harness_snapshot: {
+          harness_options: { agent: 'plan', command: 'codify', model_variant: 'auto' },
+        },
+      })
+      await wrapper.setProps({ show: true })
+      await flushPromises()
+
+      expect(wrapper.vm.opencodeAgent).toBe('plan')
+      expect(wrapper.vm.opencodeCommand).toBe('codify')
+      expect(wrapper.vm.opencodeModelVariant).toBe('auto')
+    })
+
     it('opens an editable task directly in the full form with its mode summary', async () => {
       await mountEditDrawer({ task_mode: 'plan' })
       await wrapper.setProps({ show: true })

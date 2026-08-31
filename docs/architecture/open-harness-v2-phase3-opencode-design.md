@@ -4,7 +4,7 @@
 **依据：** [open-harness-v2.md](open-harness-v2.md) §6/§8.2 | [冻结 Schema](open-harness-v2-schemas.md) | [实施计划](../superpowers/plans/2026-08-21-open-harness-v2-implementation-plan.md) §6
 **证据：** Phase 0 OpenCode probe（`docs/harness-probes/v2/opencode/`）、已验收 Phase 2 Pi 适配器（`deploy/worker-entrypoint/harness/adapters/pi*.py`、`manifest.json`、`worker_event_projector.py`）
 
-**交付结论：** 用 Task-scoped Server/SDK 边界交付 OpenCode 一级 Harness，首发不开放 live steering/follow-up，但控制面保留 capability negotiation + deterministic reject（证明公共 command plane 未来无需改造）。生产路径选官方 `@opencode-ai/sdk`，HTTP 直连仅诊断备援。
+**交付结论：** 用 Task-scoped Server/HTTP Bridge 边界交付 OpenCode 一级 Harness，首发不开放 live steering/follow-up，但控制面保留 capability negotiation + deterministic reject（证明公共 command plane 未来无需改造）。固定版本的 Python HTTP/SSE Bridge 是当前生产路径；官方 `@opencode-ai/sdk` 仅作为 Phase 0 probe 与协议诊断参考，不进入当前 Worker Runtime Bundle。
 
 ---
 
@@ -15,8 +15,8 @@
 | 控制传输 | `rpc_stdio`（Pi RPC JSONL over stdio） | `server_http`（每 Task `opencode serve`，loopback 显式端口） | 无 | **架构分界**：stdio 单进程 vs 独立 Server + HTTP/SDK 客户端 |
 | 适配器骨架 | `pi.sh` + `pi_bridge.py` + `pi_events.py` | `opencode.sh` + `opencode_bridge.py` + `opencode_events.py` | 同一 `adapter_{}` 合同、`_emit`/`_write_result`/`_usage` 归一化范式 | Server 生命周期、事件订阅、settled 判定 |
 | 事件归一化 | 单 streaming 进程读 stdin→`_emit` canonical | Server 事件订阅（SSE）+ 最终消息拉取 | `_emit`、`sanitize`、`_failure_kind`、`_usage` | 事件来源是 HTTP/SSE 而非流 |
-| control gate | `accepting→closing→drain` + `agent_settled` | `disabled`（首发无 command）+ **capability negotiation + deterministic reject** | Phase-1 `bridge.try_dispatch` / `control_client.py` 的 outcome 合同 | Pi 是 `accepting` 真接收；OpenCode 是 `disabled` 但谈判+拒绝 |
-| manifest 能力 | `steering=true/follow_up=true` | `steering=false/follow_up=false` | manifest `capabilities` + `model_protocols` | 首发不开 command |
+| control gate | `accepting→closing→drain` + `agent_settled` | `disabled`（首发无 live command）+ **capability negotiation + deterministic reject** | Phase-1 `bridge.try_dispatch` / `control_client.py` 的 outcome 合同 | Pi 是 `accepting` 真接收；OpenCode 是 `disabled` 但谈判+拒绝 |
+| manifest 能力 | `steering=true/follow_up=true` | `steering=false/follow_up=false` | manifest `capabilities` + `model_protocols` | 首发不开 live command |
 | settled | `agent_settled` = 权威 | `session.idle`(SSE) **或** status 非 busy + 最终 assistant message | 单 Harness terminal 收敛规则 | 需多信号共同判定 |
 | crash 分类 | `_failure_kind(text)` | `crash` / `http_timeout` / `session_missing` / `invalid_agent_command` | `_failure_kind` 兜底 | 新增 Server/HTTP 层分类 |
 | 退出清理 | SIGTERM → native abort → grace KILL | Server、Bridge、subprocess 进公共 Runner 信号树 | `adapter_terminate` | Server 属长期 daemon，需确定性收敛 |
@@ -44,18 +44,24 @@
 
 ---
 
-## 2. §6.1/§6.2 官方 SDK/HTTP client 选择（复用 Phase 0 判定）
+## 2. §6.1/§6.2 HTTP client / SDK 选择（复用 Phase 0 probe，落实实现前置 gate）
 
-**生产路径（冻结）**：官方 `@opencode-ai/sdk`（Node SDK，由 Server `/doc` 的 OpenAPI 3.1 规范生成，162 paths）。
-**备援/诊断**：HTTP 直连 + 自维护 SSE 解析（仅在 Node 依赖不可接受时启用）。
+**生产路径（冻结）**：固定版本的 Python stdlib HTTP 直连 + 自维护 SSE 解析。Bridge 使用 Server `/doc` 的
+OpenAPI 3.1 作为协议事实源，但不在 Worker 中引入 Node runtime 或 `@opencode-ai/sdk`。
+**探针/诊断参考**：官方 `@opencode-ai/sdk`（由 Server `/doc` 规范生成，162 paths），不作为当前执行路径。
 
-- **选 SDK 的理由（probe 结论）**：稳定 OpenAPI 3.1 是唯一事实协议源；SDK 由该 spec 生成，类型与运行时一致，避免 hand-rolled 代理漂移；SDK 对 SSE 流式事件有封装，比裸 curl 订阅稳；`abort` 返回类型化 `true`，方法签名与 spec 对齐。
-- **成本/风险（评审裁决 ②：实现前置 gate，非后置）**：SDK 冻结为正确生产路径，但整条 Phase 3 都建在 Node runtime 上——若 Node bundle 成本在实现后才被否，需整段重写 HTTP 退化路径。因此 **Node bundle 成本（Node runtime + SDK 版本冻结 + Worker 镜像离线安装体积）必须在编写 `opencode.sh`/Bridge **之前**以成本估算定案**（与 Phase 2 已核算的 Node bundle 叠加）；不满足 → **立即切 HTTP 直连**（诊断路径升级为生产路径，自维护 SSE 解析），避免在可逆转假设上开工。该门禁项前置到实现起步，见 §10 交付切分。
+- **保留的 probe 结论**：稳定 OpenAPI 3.1 是唯一事实协议源；官方 SDK 由该 spec 生成，适合作为协议形状和诊断互操作性参考；`abort` 返回类型化 `true`，方法签名与 spec 对齐。
+- **实现前置 gate 的落地结果**：Node runtime + SDK 的 Worker Bundle 成本不纳入当前交付，故按 gate 将 HTTP 直连从诊断备援提升为生产路径；Python stdlib + 自维护 SSE parser 已进入 Runtime Bundle，并以固定 Server API、回归测试和远端 canary 作为漂移约束。
 
-**SDK 使用边界**
+**HTTP Bridge 使用边界**
 - 每 Task 一个 Server，Bridge 只连本 Task 的 `127.0.0.1:${OPENCODE_PORT}`（显式传入，§1.1），不连外部/共享 Server。
 - `model`/`baseURL`/`apiKey` 全部来自**冻结 Snapshot**（经 env `{env:...}` 插值注入），OpenCode 原生 Agent/Command/model variant 只能改变 Snapshot 允许的变体，**不能覆盖冻结 Endpoint**。
 - OpenCode env 插值语法为 **`{env:VAR}`**（非 `$VAR`，probe 关键事实）；`compat_profile`（如 `deepseek-anthropic`）在 Endpoint 声明，不从 provider 层新增协议名。
+- Bridge 对每一次 Server HTTP 请求（包括 `/event` SSE、Session、prompt/command、status 和 abort）追加一条
+  脱敏记录到 Task-local `opencode-http-audit.jsonl`，并纳入 runtime archive。记录包含固定 route template、HTTP
+  status、outcome、耗时、冻结 endpoint fingerprint、协议和 `opencode.json` 路径/哈希；不记录请求/响应正文、认证
+  header 或 Session ID，审计写入失败也不改变控制结果。该 artifact 证明请求绑定到了哪一组冻结 config；不同
+  endpoint/config 的 namespace 不串线仍须用真实 Host/Task 证据验收。
 
 ---
 
@@ -65,8 +71,8 @@
 
 - **fresh**：`POST /session`（需 `model:{id,providerID}`，probe 事实）→ 返回 `ses_…` + `version` + `directory`；记录 `session_id` 到 `_STATE`（供 result v2 携带）。
 - **continue / resume**：同一 Session ID 恢复既有会话（同 `issue_id + harness_key + session_namespace`）；`input_session_id` 存在时用既有 `ses_…` 恢复，否则 fresh。**禁止跨 Harness Session**（V1 lineage 不允许 V2 continue，首 Task 必须 fresh）。
-- **事件订阅顺序（关键，防漏首事件，冻结）**：**先建立 `/event`(SSE) 订阅，再发 `prompt_async`**。否则 prompt 的早期事件（`session.status(busy)`、首 `message.part.*`）可能在订阅建立前被吞。订阅就绪信号 = 收到 `server.connected` 后再发 prompt。事件通过 SDK 的 SSE 封装订阅，缓冲到本地队列，由 `opencode_events.py` 归一化。
-- 事件消费与 `/session/status` 轮询**互补**：SSE 作为主事件源；`session.idle` 是 settled 信号；`GET /session/status` 作为恢复/兜底（断线后重连请求最终状态）。
+- **事件订阅顺序（关键，防漏首事件，冻结）**：**先建立 `/event`(SSE) 订阅，再发 `prompt_async`**。否则 prompt 的早期事件（`session.status(busy)`、首 `message.part.*`）可能在订阅建立前被吞。订阅就绪信号 = 收到 `server.connected` 后再发 prompt。由 Python Bridge 的 SSE parser 订阅并缓冲到本地队列，再交给 `opencode_events.py` 归一化。
+- 事件消费与 `/session/status` 轮询**互补**：SSE parser 作为主事件源；`session.idle` 是 settled 信号；`GET /session/status` 作为恢复/兜底（断线后重连请求最终状态）。
 
 ### 3.2 能力模型（§6.2，冻结）
 
@@ -115,7 +121,7 @@
 
 ## 5. §6.3 首发 command 边界（control endpoint 谈判 + 确定性拒绝）
 
-**开局（冻结）**：OpenCode 首发 `manifest.capabilities.steering=false/follow_up=false`，attempt `control_state=disabled`（进入 `backend/bridge.negotiate_capabilities` 后 `steering/follow_up=False`，控制面不产生可投递队列）。
+**开局（冻结）**：OpenCode 首发 `manifest.capabilities.steering=false/follow_up=false`，attempt `control_state=disabled`（进入 `backend/bridge.negotiate_capabilities` 后 `steering/follow_up=False`，live 控制面不产生可投递队列）。任务启动阶段的固定 `command` 选项不属于该 live 控制面。
 
 **但 Bridge 仍实现 control endpoint 的 capability negotiation + deterministic reject**（证明公共 command plane 未来无需改）：
 
@@ -204,6 +210,11 @@ backend/tests/unit/test_opencode_harness_adapter.py
 - `agent`/`command`/`model_variant` 只允许 manifest/Snapshot allowlist 值；未知值 Task 创建拒绝。
 - Profile 默认与 Task override deterministic deep merge → 冻结到 `harness_config_snapshot`；Snapshot fingerprint 纳入 options。
 - 低频设置（插件/MCP/project config）由可信仓库提供，但 Endpoint 模型字段始终由 Snapshot 强制覆盖。
+
+这里的 `command` 是任务启动时对 OpenCode Server 的原生
+`POST /session/{id}/command` 请求，用于把初始任务作为受控 Command 执行；它不等同于运行中的
+steering/follow_up 控制面。首发仍保持 `capabilities.steering=false`、`follow_up=false`，不把运行中
+通用控制命令伪装成 OpenCode Command。
 
 ---
 

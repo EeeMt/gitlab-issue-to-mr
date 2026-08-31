@@ -195,13 +195,28 @@ def _failure_kind(message: str) -> str:
     lowered = str(message).lower()
     if "abort" in lowered or "interrupt" in lowered:
         return "cancelled"
-    if "401" in lowered or "unauthorized" in lowered or "authentication" in lowered:
+    # Do not match the bare word "authentication": an upstream HTML error
+    # page can contain it in embedded JavaScript and is not thereby an auth
+    # failure. Prefer explicit status/error phrases from the provider.
+    if (
+        "401" in lowered
+        or "unauthorized" in lowered
+        or "authentication failed" in lowered
+        or "authentication error" in lowered
+        or "invalid api key" in lowered
+        or "invalid x-api-key" in lowered
+    ):
         return "authentication_error"
     if "429" in lowered or "rate limit" in lowered or "too many requests" in lowered:
         return "rate_limited"
     if "sandbox" in lowered or "permission denied" in lowered:
         return "sandbox_error"
     return "engine_error"
+
+
+def _failure_message(value: object, fallback: str) -> str:
+    """Return a sanitized, bounded message for canonical failure payloads."""
+    return clean_message(sanitize(str(value or fallback)))[:_FAILURE_MESSAGE_MAX_CHARS]
 
 
 def _emit(event_type: str, payload: dict, raw_line: int) -> None:
@@ -263,6 +278,7 @@ def _usage(record: dict) -> dict:
 _TOOL_OUTPUT_MAX_CHARS = 2000
 _TOOL_COMMAND_MAX_CHARS = 1000
 _TOOL_VALUE_MAX_CHARS = 4000
+_FAILURE_MESSAGE_MAX_CHARS = _TOOL_OUTPUT_MAX_CHARS
 _TOOL_NAME_ALIASES = {
     "bash": "Bash",
     "shell": "Bash",
@@ -690,7 +706,7 @@ def _handle_message_end(record: dict, raw_line: int) -> None:
         and isinstance(error_message, str)
         and error_message.strip()
     ):
-        failure_message = clean_message(sanitize(str(error_message or "Pi message ended with an error")))
+        failure_message = _failure_message(error_message, "Pi message ended with an error")
         failure_kind = _failure_kind(failure_message)
         _STATE["terminal_failure"] = {
             "kind": failure_kind,
@@ -701,7 +717,7 @@ def _handle_message_end(record: dict, raw_line: int) -> None:
         _STATE["aborted"] = True
         failure = {
             "kind": "cancelled",
-            "message": clean_message(sanitize(str(message.get("errorMessage") or "Pi run aborted"))),
+            "message": _failure_message(message.get("errorMessage"), "Pi run aborted"),
         }
         _STATE["terminal_failure"] = failure
         return
@@ -847,7 +863,7 @@ def _retry_payload(record: dict, *, source: str | None = None) -> dict:
     payload = {
         "attempt": record.get("attempt"),
         "max_attempts": record.get("maxAttempts"),
-        "failure_kind": _failure_kind(clean_message(sanitize(str(message or "Pi provider retry")))),
+        "failure_kind": _failure_kind(_failure_message(message, "Pi provider retry")),
         "retry_delay_ms": record.get("delayMs"),
     }
     if source:
@@ -869,7 +885,7 @@ def _handle_retry_end(record: dict, raw_line: int) -> None:
         "success": bool(record.get("success")),
     }
     if not record.get("success"):
-        message = clean_message(sanitize(str(record.get("finalError") or "Pi provider retry failed")))
+        message = _failure_message(record.get("finalError"), "Pi provider retry failed")
         _STATE["terminal_failure"] = {"kind": _failure_kind(message), "message": message}
         payload["failure_kind"] = _STATE["terminal_failure"]["kind"]
     _emit("diagnostic", payload, raw_line)
@@ -899,7 +915,7 @@ def _handle_compaction(record: dict, raw_line: int) -> None:
     _emit("context.compacted", payload, raw_line)
     error_message = record.get("errorMessage")
     if error_message and not record.get("aborted") and not record.get("willRetry"):
-        message = clean_message(sanitize(str(error_message)))
+        message = _failure_message(error_message, "Pi compaction failed")
         _STATE["terminal_failure"] = {"kind": _failure_kind(message), "message": message}
 
 
@@ -912,7 +928,7 @@ def _handle_agent_end(record: dict, raw_line: int) -> None:
     failure_message = record.get("errorMessage") or record.get("terminationReason")
     if will_retry or failure_message:
         if failure_message:
-            message = clean_message(sanitize(str(failure_message)))
+            message = _failure_message(failure_message, "Pi agent ended with an error")
             _STATE["terminal_failure"] = {"kind": _failure_kind(message), "message": message}
     else:
         # ``agent_end`` alone is not a terminal.  Pi emits agent_settled after

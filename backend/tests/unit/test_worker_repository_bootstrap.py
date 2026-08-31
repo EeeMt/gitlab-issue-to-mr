@@ -964,6 +964,10 @@ def test_runtime_archive_fallback_keeps_sanitized_raw_harness_events(tmp_path: P
         '{"type":"system","subtype":"init"}\n',
         encoding="utf-8",
     )
+    (runtime_dir / "opencode-http-audit.jsonl").write_text(
+        '{"schema":"codify.opencode.http-audit/v1"}\n',
+        encoding="utf-8",
+    )
     bootstrap = BOOTSTRAP_SCRIPT.read_text()
     match = re.search(r"(?ms)^create_runtime_archive\(\) \{\n.*?^\}\n", bootstrap)
     assert match is not None
@@ -989,6 +993,7 @@ def test_runtime_archive_fallback_keeps_sanitized_raw_harness_events(tmp_path: P
     with tarfile.open(archive_path, "r:gz") as archive:
         assert set(archive.getnames()) == {
             "event.jsonl",
+            "opencode-http-audit.jsonl",
             "harness-events",
             "harness-events/claude.jsonl",
         }

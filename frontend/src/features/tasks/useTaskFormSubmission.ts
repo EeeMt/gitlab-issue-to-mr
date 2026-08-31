@@ -18,6 +18,7 @@ import {
   type TaskMode,
   type TaskScheduleType,
 } from './taskFormModel'
+import type { TaskHarnessOptions } from '../../api/tasks'
 
 interface TaskFormSubmissionOptions {
   issueId: Readonly<Ref<number | undefined>>
@@ -38,6 +39,8 @@ interface TaskFormSubmissionOptions {
   inheritProfileSkills: Ref<boolean>
   selectedSkillIds: Ref<number[]>
   skillSelectionDirty: Ref<boolean>
+  harnessOptions: Readonly<Ref<TaskHarnessOptions | undefined>>
+  harnessOptionsDirty: Readonly<Ref<boolean>>
   submissionBlocked?: Readonly<Ref<boolean>>
   defaultsError: Readonly<Ref<string>>
   getDefaultRunInstructionTemplate: (mode: Exclude<TaskMode, 'freeform'>) => string
@@ -116,6 +119,8 @@ export function useTaskFormSubmission(options: TaskFormSubmissionOptions) {
         inheritProfileSkills: options.inheritProfileSkills.value,
         selectedSkillIds: options.selectedSkillIds.value,
         skillSelectionDirty: options.skillSelectionDirty.value,
+        harnessOptions: options.harnessOptions.value,
+        harnessOptionsDirty: options.harnessOptionsDirty.value,
       })
       const created = await createTask(request)
       message.success(buildTaskCreatedMessage(created))
@@ -169,6 +174,8 @@ export function useTaskFormSubmission(options: TaskFormSubmissionOptions) {
       inheritProfileSkills: options.inheritProfileSkills.value,
       selectedSkillIds: options.selectedSkillIds.value,
       skillSelectionDirty: options.skillSelectionDirty.value,
+      harnessOptions: options.harnessOptions.value,
+      harnessOptionsDirty: options.harnessOptionsDirty.value,
     }, options.initialRunInstructionTemplate.value)
 
     if (Object.keys(request).length === 0) {

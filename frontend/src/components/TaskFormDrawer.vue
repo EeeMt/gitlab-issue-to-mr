@@ -603,6 +603,53 @@
                       </label>
                     </div>
                     <div
+                      v-if="resolvedHarnessKey === 'opencode'"
+                      class="execution-environment__harness-options"
+                      data-testid="opencode-harness-options"
+                    >
+                      <div class="execution-environment__skills-header">
+                        <span>{{ t('createTask.openCodeOptions') }}</span>
+                        <span class="execution-environment__skills-hint">
+                          {{ t('createTask.openCodeOptionsHint') }}
+                        </span>
+                      </div>
+                      <div class="execution-environment__fields">
+                        <label class="execution-environment__field">
+                          <span>{{ t('createTask.openCodeAgent') }}</span>
+                          <n-select
+                            :value="opencodeAgent"
+                            :options="opencodeAgentOptions"
+                            data-testid="opencode-agent-select"
+                            @update:value="handleOpenCodeAgentChange"
+                          />
+                        </label>
+                        <label class="execution-environment__field">
+                          <span>{{ t('createTask.openCodeCommand') }}</span>
+                          <n-select
+                            :value="opencodeCommand"
+                            :options="opencodeCommandOptions"
+                            clearable
+                            data-testid="opencode-command-select"
+                            @update:value="handleOpenCodeCommandChange"
+                          />
+                        </label>
+                        <label class="execution-environment__field">
+                          <span>{{ t('createTask.openCodeModelVariant') }}</span>
+                          <n-input
+                            :value="opencodeModelVariant ?? ''"
+                            maxlength="64"
+                            clearable
+                            :placeholder="t('createTask.openCodeModelVariantPlaceholder')"
+                            data-testid="opencode-model-variant-input"
+                            @update:value="handleOpenCodeModelVariantChange"
+                          />
+                        </label>
+                      </div>
+                      <span class="execution-environment__skills-hint">
+                        {{ t('createTask.openCodeOptionsSnapshotHint') }}
+                      </span>
+                    </div>
+                    <div
                       v-if="harnessCatalogUnavailable"
                       class="execution-environment__warning"
                       data-testid="task-harness-catalog-error"
@@ -780,7 +827,8 @@ import {
   getRunInstructionTemplateDefaults,
   getTaskScheduleConstraints,
   type AIProvider,
-  type Task, type TaskScheduleWindow, type TaskSkillSnapshot, type RunInstructionTemplateDefaults
+  type Task, type TaskHarnessOptions, type TaskScheduleWindow, type TaskSkillSnapshot,
+  type RunInstructionTemplateDefaults,
 } from '../api'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeUtc8Compact, formatTimeUtc8, parseUtcDate } from '../utils/datetime'
@@ -1096,6 +1144,10 @@ const executionEnvironmentContentId = `${useId()}-execution-environment-content`
 const executionOptionsReady = ref(false)
 const selectedProviderId = ref<number | null>(null)
 const harnessKey = ref<string | null>(null)
+const opencodeAgent = ref('build')
+const opencodeCommand = ref<string | null>(null)
+const opencodeModelVariant = ref<string | null>(null)
+const harnessOptionsDirty = ref(false)
 const harnessLocked = computed(
   () => props.mode === 'edit'
     || (!startFreshSession.value && !!props.issueCurrentHarness),
@@ -1174,6 +1226,59 @@ const resolvedHarnessKey = computed(() =>
   ?? effectiveWorkerProfile.value?.default_harness_key
   ?? 'claude',
 )
+const opencodeAgentOptions = computed(() => [
+  { label: 'build', value: 'build' },
+  { label: 'plan', value: 'plan' },
+  { label: 'general', value: 'general' },
+  { label: 'explore', value: 'explore' },
+])
+const opencodeCommandOptions = computed(() => [
+  { label: t('createTask.openCodeNoCommand'), value: '' },
+  { label: 'codify', value: 'codify' },
+])
+const selectedHarnessOptions = computed<TaskHarnessOptions | undefined>(() => {
+  if (resolvedHarnessKey.value !== 'opencode') return undefined
+  return {
+    opencode: {
+      agent: opencodeAgent.value,
+      command: opencodeCommand.value,
+      model_variant: opencodeModelVariant.value || null,
+    },
+  }
+})
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function openCodeOptionsSource(): Record<string, unknown> | null {
+  const taskOptions = recordValue(props.task?.harness_snapshot?.harness_options)
+  if (taskOptions) {
+    // Task responses expose only the selected harness's frozen options, while
+    // older/internal callers may still provide the namespaced shape. Support
+    // both without falling back to mutable Profile defaults for a non-empty
+    // frozen Task payload.
+    const taskNamespaced = recordValue(taskOptions.opencode)
+    if (taskNamespaced) return taskNamespaced
+    if (Object.keys(taskOptions).length > 0) return taskOptions
+  }
+  const profileOptions = recordValue(effectiveWorkerProfile.value?.harness_options)
+  return profileOptions ? recordValue(profileOptions.opencode) : null
+}
+
+function syncOpenCodeOptionsFromSnapshot() {
+  if (resolvedHarnessKey.value !== 'opencode') return
+  const source = openCodeOptionsSource()
+  const agent = source?.agent
+  const command = source?.command
+  const variant = source?.model_variant
+  opencodeAgent.value = typeof agent === 'string' && agent ? agent : 'build'
+  opencodeCommand.value = command === 'codify' ? 'codify' : null
+  opencodeModelVariant.value = typeof variant === 'string' && variant ? variant : null
+}
+
 const harnessCatalogIdentity = computed(() => {
   const identity = props.mode === 'edit' ? props.task?.id : props.workerProfileId
   return `${props.mode}:${identity ?? 'pending'}`
@@ -1320,7 +1425,7 @@ const harnessCatalogStatusRows = computed(() => {
     }))
 })
 const executionEnvironmentOverridden = computed(() =>
-  selectedProviderId.value !== null || !inheritProfileSkills.value
+  selectedProviderId.value !== null || !inheritProfileSkills.value || harnessOptionsDirty.value
 )
 const providerAutoAdjusted = ref(false)
 let providerAutoAdjustSource: number | null | undefined
@@ -1552,6 +1657,13 @@ watch(resolvedHarnessKey, (harnessKey, previous) => {
   reconcileProviderForHarness(harnessKey, shouldRestore)
 })
 
+watch(
+  [effectiveWorkerProfile, () => props.task, resolvedHarnessKey, () => props.show],
+  () => {
+    if (!harnessOptionsDirty.value) syncOpenCodeOptionsFromSnapshot()
+  },
+)
+
 watch([selectableProviders, effectiveProvider, harnessCatalog], () => {
   reconcileProviderForHarness(resolvedHarnessKey.value)
 })
@@ -1568,6 +1680,7 @@ watch(() => props.show, (val) => {
     providerAutoAdjusted.value = false
     providerAutoAdjustSource = undefined
     providerAutoAdjustedForHarness = null
+    harnessOptionsDirty.value = false
     if (props.mode === 'edit' && props.task) {
       drawerView.value = 'full-form'
       prompt.value = props.task.user_prompt ?? ''
@@ -1578,6 +1691,7 @@ watch(() => props.show, (val) => {
       harnessKey.value = props.task.harness_key
         ?? effectiveWorkerProfile.value?.default_harness_key
         ?? 'claude'
+      syncOpenCodeOptionsFromSnapshot()
       inheritProfileSkills.value =
         (props.task.skill_selection_source ?? 'profile') === 'profile'
       selectedSkillIds.value = [...(props.task.skill_ids ?? [])]
@@ -1628,6 +1742,7 @@ watch(() => props.show, (val) => {
         ?? props.issueDefaultHarness
         ?? effectiveWorkerProfile.value?.default_harness_key
         ?? 'claude'
+      syncOpenCodeOptionsFromSnapshot()
       scheduleType.value = 'now'
       scheduledAt.value = null
       scheduleWindow.value = null
@@ -1838,6 +1953,8 @@ function restoreExecutionEnvironmentDefaults() {
   providerAutoAdjustSource = undefined
   providerAutoAdjustedForHarness = null
   handleSkillInheritanceUpdate(true)
+  harnessOptionsDirty.value = false
+  syncOpenCodeOptionsFromSnapshot()
   if (!executionEnvironmentMissing.value) {
     executionEnvironmentExpanded.value = false
   }
@@ -1848,6 +1965,22 @@ function handleProviderChange(value: number | null) {
   providerAutoAdjusted.value = false
   providerAutoAdjustSource = undefined
   providerAutoAdjustedForHarness = null
+}
+
+function handleOpenCodeAgentChange(value: string | null) {
+  if (!value) return
+  opencodeAgent.value = value
+  harnessOptionsDirty.value = true
+}
+
+function handleOpenCodeCommandChange(value: string | null) {
+  opencodeCommand.value = value === 'codify' ? 'codify' : null
+  harnessOptionsDirty.value = true
+}
+
+function handleOpenCodeModelVariantChange(value: string) {
+  opencodeModelVariant.value = value.trim() || null
+  harnessOptionsDirty.value = true
 }
 
 function handleSkillInheritanceUpdate(value: boolean) {
@@ -1964,6 +2097,8 @@ const {
   inheritProfileSkills,
   selectedSkillIds,
   skillSelectionDirty,
+  harnessOptions: selectedHarnessOptions,
+  harnessOptionsDirty,
   defaultsError,
   getDefaultRunInstructionTemplate,
   clearScheduledTasks,
@@ -2970,6 +3105,18 @@ onBeforeUnmount(() => {
   color: var(--n-text-color-3);
   font-size: 10px;
   line-height: 14px;
+}
+
+.execution-environment__harness-options {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--n-border-color);
+}
+
+.execution-environment__harness-options > .execution-environment__fields {
+  margin-top: 1px;
 }
 
 .execution-environment__skills {

@@ -396,6 +396,6 @@ Phase 0 待决 5 项逐一裁量：可冻结的纳入 schema（本次已落地�
 | 2 | **Claude 2.1.152 SHA-256 未在 linux/amd64 重算**（V1 为 macOS Operator CLI） | Worker 侧为镜像注入，版本沿用 V1；**不阻塞 schema 冻结** | 后置依赖：实施阶段以 Worker-kit image digest 固定并写入 manifest `source` |
 | 3 | **未触发场景**（Pi compaction/auto_retry；OpenCode `session.error`/权限阻塞/主动 crash 注入） | 不改变已冻结信封/类型；事件词汇已预留 `context.compacted`、`provider.retry`、`diagnostic`、`failure.kind=crash` | 后置依赖：V2 集成阶段补 probe，作为 Phase 2/3 的 conformance 输入 |
 | 4 | **openai 双协议真实 Task 待验**（源码和 Bundle 已声明三协议） | 矩阵与 fail-closed 合同已冻结；真实 Endpoint/Task 行为仍不以源码声明代替 | 后置依赖：N3/L5 对 Pi/OpenCode 分别完成对应端点 conformance、usage、terminal 与 delivery 验证 |
-| 5 | **OpenCode Node SDK 依赖**（`@opencode-ai/sdk`，新增 Node runtime） | 生产路径判定已冻结（SDK）；成本计入 | 后置依赖：Worker-kit 核算 Node bundle 体积/离线可安装性；不接受则退化 HTTP 直连（诊断路径），Phase 3 decision gate |
+| 5 | **OpenCode Node SDK 依赖**（`@opencode-ai/sdk`，新增 Node runtime） | Phase 0 probe 倾向 SDK；Phase 3 实现前置 gate 已将当前生产路径冻结为 Python HTTP/SSE Bridge，Node 成本不纳入当前 Bundle | 后置依赖：若未来重新引入 SDK，需单独核算 Node bundle 体积/离线可安装性并重新生成 composition evidence；当前不把 SDK 作为执行路径 |
 
 **结论**：5 项均**不阻塞 schema 冻结**。FREEZE-ABLE 已纳入本文件（OpenCode 版本/字节数、crash 分类、3 控制事件）；需真实 V2 集成才可验的列入 Phase 2–4 依赖清单。

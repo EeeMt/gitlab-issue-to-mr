@@ -3,6 +3,7 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.task_failure_details import project_failure_message
 from app.core.worker import sanitize_sensitive_data
 from app.models import TaskHarnessAttempt, TaskHarnessEventReceipt
 
@@ -56,6 +57,7 @@ async def load_task_failure_summary(
             sanitize_sensitive_data(kind)[:_MAX_FAILURE_MESSAGE_LENGTH] or None
         ),
         "failure_message": (
-            sanitize_sensitive_data(message)[:_MAX_FAILURE_MESSAGE_LENGTH] or None
+            project_failure_message(message, sanitize_sensitive_data)
+            or None
         ),
     }

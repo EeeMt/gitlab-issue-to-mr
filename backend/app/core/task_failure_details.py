@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tarfile
 from collections.abc import Callable, Iterator
 from typing import Any
@@ -16,6 +17,8 @@ _HARNESS_EVENT_PREFIX = "harness-events/"
 _MAX_EVENT_MEMBER_BYTES = 2 * 1024 * 1024
 _MAX_FRAGMENT_LENGTH = 500
 _MAX_FAILURE_DETAIL_LENGTH = 1000
+_HTML_ERROR_MARKERS = ("<!doctype html", "<html", "<script", "__next_f")
+_HTTP_STATUS_RE = re.compile(r"^\s*(?:HTTP(?:Error)?\s*[:/]?\s*)?([1-5]\d{2})\b", re.IGNORECASE)
 
 
 def _iter_archived_records(task_id: int) -> Iterator[dict[str, Any]]:
@@ -88,11 +91,68 @@ def _response_body_data(response_body: Any) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def _legacy_pi_error_values(record: dict[str, Any]) -> Iterator[Any]:
+    """Yield error fields emitted by older Pi JSONL records.
+
+    Pi versions used before the canonical failure projection placed the same
+    provider error in several retry/message records. Keep this reader narrow
+    and field-based so arbitrary model text is never promoted to a failure
+    detail.
+    """
+    record_type = record.get("type")
+    if record_type in {"message_start", "message_end"}:
+        message = record.get("message")
+        if isinstance(message, dict):
+            yield message.get("errorMessage")
+    elif record_type == "agent_end":
+        messages = record.get("messages")
+        if isinstance(messages, list):
+            for message in messages:
+                if isinstance(message, dict):
+                    yield message.get("errorMessage")
+    elif record_type == "auto_retry_start":
+        yield record.get("errorMessage")
+    elif record_type == "auto_retry_end":
+        yield record.get("finalError")
+
+
+def project_failure_message(
+    value: Any,
+    sanitize_sensitive_data: Callable[[str], str],
+    *,
+    label: str = "Provider",
+) -> str | None:
+    """Return a bounded failure message without exposing raw HTML payloads."""
+    if value is None:
+        return None
+    raw = str(value)
+    if not raw.strip():
+        return None
+    lowered = raw.lower()
+    html_positions = [lowered.find(marker) for marker in _HTML_ERROR_MARKERS]
+    html_position = min((position for position in html_positions if position >= 0), default=-1)
+    if html_position >= 0:
+        prefix = sanitize_sensitive_data(" ".join(raw[:html_position].split()))
+        status_match = _HTTP_STATUS_RE.search(prefix)
+        if status_match:
+            return f"{label} returned HTTP {status_match.group(1)} HTML error response"
+        return f"{label} returned an HTML error response"
+    return _clean_fragment(raw, sanitize_sensitive_data, limit=_MAX_FAILURE_DETAIL_LENGTH)
+
+
 def _build_failure_detail(
     record: dict[str, Any],
     sanitize_sensitive_data: Callable[[str], str],
 ) -> str | None:
     if record.get("type") != "session.error":
+        for value in _legacy_pi_error_values(record):
+            detail = project_failure_message(
+                value,
+                sanitize_sensitive_data,
+                label="Pi provider",
+            )
+            if detail:
+                return detail
         return None
     properties = record.get("properties")
     error = properties.get("error") if isinstance(properties, dict) else None
@@ -105,7 +165,7 @@ def _build_failure_detail(
     name = _clean_fragment(error.get("name"), sanitize_sensitive_data)
     status_code = data.get("statusCode")
     status_text = str(status_code) if isinstance(status_code, int) else ""
-    message = _clean_fragment(data.get("message"), sanitize_sensitive_data)
+    message = project_failure_message(data.get("message"), sanitize_sensitive_data) or ""
     body = _response_body_data(data.get("responseBody"))
     body_error = body.get("error") if isinstance(body.get("error"), dict) else {}
     metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
@@ -113,7 +173,7 @@ def _build_failure_detail(
     # OpenRouter puts the useful upstream explanation in metadata.raw. Only
     # include that field; responseHeaders and request IDs are deliberately
     # excluded from the product-visible error.
-    upstream = _clean_fragment(metadata.get("raw"), sanitize_sensitive_data)
+    upstream = project_failure_message(metadata.get("raw"), sanitize_sensitive_data) or ""
     if upstream and upstream != message:
         message = upstream
     if not message:

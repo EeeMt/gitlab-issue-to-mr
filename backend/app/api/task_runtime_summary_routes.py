@@ -167,6 +167,15 @@ def _serialize_worker_environment(snapshot: Any) -> list[dict[str, Any]]:
     return variables
 
 
+def _serialize_snapshot_harness_options(snapshot: Any) -> dict[str, Any]:
+    """Expose only the selected, non-secret Harness option snapshot."""
+    config = getattr(snapshot, "harness_config_snapshot", None)
+    options = config.get("options") if isinstance(config, dict) else None
+    harness_key = getattr(snapshot, "harness_key", None)
+    selected = options.get(harness_key) if isinstance(options, dict) else None
+    return dict(selected) if isinstance(selected, dict) else {}
+
+
 def serialize_worker_runtime_summary(task: Task) -> dict[str, Any]:
     """Serialize the immutable worker snapshot without Docker credentials or values."""
     snapshot = loaded_task_relationship(task, "worker_profile_snapshot")
@@ -175,6 +184,8 @@ def serialize_worker_runtime_summary(task: Task) -> dict[str, Any]:
             "snapshot_available": False,
             "worker_profile_id": getattr(task, "worker_profile_id", None),
             "worker_profile_name": None,
+            "harness_key": getattr(task, "harness_key", None),
+            "harness_options": {},
             "image": None,
             "runtime_mode": None,
             "worker_kit_version": None,
@@ -193,6 +204,8 @@ def serialize_worker_runtime_summary(task: Task) -> dict[str, Any]:
         "snapshot_available": True,
         "worker_profile_id": snapshot.worker_profile_id,
         "worker_profile_name": snapshot.profile_name,
+        "harness_key": getattr(snapshot, "harness_key", None),
+        "harness_options": _serialize_snapshot_harness_options(snapshot),
         "image": snapshot.image,
         "runtime_mode": snapshot.runtime_mode,
         "worker_kit_version": snapshot.worker_kit_version,

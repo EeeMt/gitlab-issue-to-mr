@@ -645,6 +645,12 @@ async def get_task_container_logs(
         )
         raw_logs = await asyncio.to_thread(container.logs, stdout=True, stderr=True, tail=200)
         logs = raw_logs.decode("utf-8", errors="replace")
+        logs = await _append_archived_failure_detail(
+            task_id,
+            task.status,
+            logs,
+            tail_chars,
+        )
         return {
             "container_id": task.container_id,
             "container_status": container.status,

@@ -117,6 +117,9 @@ def scrub_sensitive_data(text: str) -> str:
     text = re.sub(r"glpat-[a-zA-Z0-9\-]{10,}", "[GITLAB_TOKEN]", text)
     # Anthropic (sk-ant-* / sk-cp-* / sk-api-*)
     text = re.sub(r"sk-(?:cp|ant|api)-[a-zA-Z0-9\-]{10,}", "[ANTHROPIC_API_KEY]", text)
+    # OpenRouter (sk-or-v1-* keys contain hyphens and do not match the generic
+    # OpenAI pattern below).
+    text = re.sub(r"sk-or-v1-[a-zA-Z0-9_-]{10,}", "[OPENROUTER_API_KEY]", text)
     # OpenAI (sk-proj-* and generic sk-* with a long enough body to avoid prose)
     text = re.sub(r"sk-proj-[a-zA-Z0-9_\-]{20,}", "[OPENAI_API_KEY]", text)
     text = re.sub(r"sk-[a-zA-Z0-9]{24,}", "[OPENAI_API_KEY]", text)

@@ -29,6 +29,7 @@ services:
     build:
       context: ../../../
       dockerfile: backend/tests/mock_integration/mock_server/Dockerfile
+    image: ${MOCK_SERVICES_IMAGE:-codify-mock-services:latest}
     ports:
       - "${MOCK_PORT_MOCK:-19000}:9000"
     healthcheck:
@@ -62,6 +63,7 @@ services:
       WORKER_SKIP_IMAGE_PULL: "true"
       TASK_TIMEOUT: "120"
       DEFAULT_TARGET_BRANCH: main
+      HARNESS_EXECUTION_MODE: dual_canary
       SECRET_KEY: mock-secret-key-for-testing-only
       BACKEND_URL: http://backend:8000
     volumes:
@@ -102,6 +104,7 @@ services:
       WORKER_SKIP_IMAGE_PULL: "true"
       TASK_TIMEOUT: "120"
       DEFAULT_TARGET_BRANCH: main
+      HARNESS_EXECUTION_MODE: dual_canary
       SECRET_KEY: mock-secret-key-for-testing-only
       BACKEND_URL: http://backend:8000
     volumes:

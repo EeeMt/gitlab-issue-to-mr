@@ -26,7 +26,7 @@ codify_emit_event() {
 codify_event_type_exists() {
     local event_type="$1"
     [ -s "${CODIFY_RUNTIME_DIR}/event.jsonl" ] \
-        && jq -e --arg type "${event_type}" 'select(.type == $type)' \
+        && jq -e -s --arg type "${event_type}" 'any(.[]; .type == $type)' \
             "${CODIFY_RUNTIME_DIR}/event.jsonl" >/dev/null 2>&1
 }
 
