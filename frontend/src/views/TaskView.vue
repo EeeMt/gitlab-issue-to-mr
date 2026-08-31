@@ -299,7 +299,7 @@
               >
                 <template #header>
                   <div class="task-card__header">
-                    <div>
+                    <div class="task-card__heading">
                       <div class="task-card__eyebrow">{{ t('taskView.executionInput') }}</div>
                       <div class="task-card__title">{{ t('taskView.runInstruction') }}</div>
                     </div>
@@ -1714,6 +1714,11 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+  min-width: 0;
+}
+
+.task-card__heading {
+  min-width: 0;
 }
 
 .task-card__title {
@@ -2012,6 +2017,11 @@ onBeforeUnmount(() => {
 
   .task-card__header {
     align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .task-card__heading {
+    width: 100%;
   }
 
   .task-actions__toolbar {
@@ -2027,6 +2037,8 @@ onBeforeUnmount(() => {
 
   .task-prompt-card__controls {
     align-items: flex-start;
+    width: 100%;
+    flex-wrap: wrap;
   }
 
   .task-prompt-wrap {

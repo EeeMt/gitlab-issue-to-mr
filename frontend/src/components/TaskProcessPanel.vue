@@ -599,6 +599,25 @@ defineExpose({
   width: 264px;
   min-width: 0;
 }
+
+@media (max-width: 768px) {
+  .process-header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .process-header__meta {
+    flex: 0 0 auto;
+    flex-wrap: wrap;
+  }
+
+  .process-tabs--header {
+    flex: 0 0 auto;
+    width: 100%;
+  }
+}
+
 :deep(.process-tabs .n-tabs-rail) {
   border-radius: 14px;
 }
