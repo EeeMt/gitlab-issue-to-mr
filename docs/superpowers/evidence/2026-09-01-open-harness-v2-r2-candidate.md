@@ -23,6 +23,21 @@
 
 两条 audit 都记录 `POST /session=200`、`POST /session/{session_id}/prompt_async=204` 和 `GET /event=200` 后关闭，配置路径均为 task-local 的 `/tmp/codify-runtime/opencode/opencode.json`。namespace、endpoint fingerprint、config SHA 和 session ID 均不同；GitLab 两个 commit 各自只有一个新增文件，证明没有把另一条 endpoint/config 的运行上下文未声明串入当前 Task。Issue 工作区复用导致后一条任务能看到前一条已交付文件，这是预期的 repository/worktree 行为，不是 session namespace 泄漏。
 
+## Current protocol row closure
+
+当前 candidate 的 8 个适用 Harness/Model Protocol 行均有真实成功 Task；每行都使用 Profile 4 的冻结 identity，并以独立 Task snapshot、canonical terminal、usage、runtime archive 和 Git/delivery 结果对账。失败样本仍按原样保留，不把 Provider access failure 追认为协议成功。
+
+| Harness | `model_protocol` | Task | Bundle | Provider | result |
+| --- | --- | ---: | ---: | --- | --- |
+| OpenCode | `openai_chat_completions` | `177` | `119` | `openrouter-free` | completed |
+| OpenCode | `openai_responses` | `178` | `119` | `openrouter-minimax-responses` | completed |
+| OpenCode | `anthropic_messages` | `196` | `119` | `openrouter-minimax-anthropic` | completed |
+| Pi | `openai_chat_completions` | `179` | `122` | `openrouter-free` | completed |
+| Pi | `openai_responses` | `185` | `122` | `openrouter-minimax-responses` | completed |
+| Pi | `anthropic_messages` | `197` | `122` | `openrouter-minimax-anthropic` | completed |
+| Claude | `anthropic_messages` | `187` | `121` | `openrouter-minimax-anthropic` | completed |
+| Codex | `openai_responses` | `192` | `120` | `openrouter-minimax-responses` | completed |
+
 ## Codex and Claude current candidates
 
 - Codex Task `173` 使用 Profile 4、Bundle `120`、`openrouter-minimax-responses` 的 `openai_responses`，真实执行成功并完成 canonical/archive/usage/GitLab delivery：input `66,400`、output `542`，archive `6,610` bytes，commit `9cfe6f0796bdfc8fb836e4517b749fe6afbea261`。同 Provider 的 Codex Task `172` 因 OpenCode Zen 真实 `429` 失败，原样保留，不能作为成功。
@@ -34,7 +49,14 @@
 - Task `189` 保留为 early-cancel race 证据：UI 在 Worker 发布稳定 container ID 前取消，API 返回“cancellation remains pending”，随后后台在创建 Worker 前收敛为 `cancelled`；无 attempt、archive、usage 或 commit。因此它不是 Harness cancellation conformance，不能替代稳定态取消样本。
 - Task `190` 在同一 Provider 11、Profile 4、Bundle `121` 上完成了稳定态 Claude 取消：先确认 Worker/container ID 和 attempt `task-190-attempt-1-f1a4ca53f92d` 已初始化，并已持久化首个 `sleep 180` 的 `tool.started`，再通过 UI 取消。canonical receipts seq `1–7` 连续，唯一终态为 `run.failed`，事件链为 `run.started, model.resolved, diagnostic, tool.started, harness.failed, worker.finalization, run.failed`；TaskLog 的 `harness.failed` 为 `kind=cancelled`、Worker exit `143`，无 token、diff 或 commit，runtime archive `4,068` bytes、SHA-256 `104a15902b508c9d365b553741244b6a38ea50341b5a419989db96b1713592da`，Worker 容器已清理。
 - Task `191` 完成了同一 Claude candidate 的自动 timeout：Runtime 的全局 Task Timeout 临时从 `1,800` 秒调整为最小可保存值 `60` 秒，任务结束后已恢复为 `1,800` 秒；Task 使用 Provider 11、Profile 4、Bundle `121`、Fresh session，attempt `task-191-attempt-1-4f35e56499be` 的 canonical receipts seq `1–7` 连续，唯一终态为 `run.failed`，事件链为 `run.started, model.resolved, diagnostic, tool.started, harness.failed, worker.finalization, run.failed`。Task 记录 `Task timed out after 60s`，TaskLog 明确 `sleep 180`、`failure.kind=timeout`、Worker exit `143`、零 diff、无 token 和 commit；runtime archive `4,445` bytes、SHA-256 `a1030ff5b2a8637526261eece79271d37920867081f8a205bcab14106f864821`，Worker 容器已清理。
-- Task `186`、`187`、`188`、`190` 和 `191` 共同证明了当前 Claude candidate 的真实 failure/success、endpoint 根路径修正、continue、稳定态取消和 timeout 分类；Task `189` 的创建前取消 race 单独保留。适用协议矩阵的完整当前-candidate success/failure 与生命周期逐行收口仍未完成。
+- Task `186`、`187`、`188`、`190` 和 `191` 共同证明了当前 Claude candidate 的真实 failure/success、endpoint 根路径修正、continue、稳定态取消和 timeout 分类；Task `189` 的创建前取消 race 单独保留。结合 Codex lifecycle 和 protocol row closure，R2 的适用协议与生命周期证据已闭合。
+
+## Codex current candidate lifecycle
+
+- Task `192` 在 Profile 4、Provider 12、Bundle `120` 上完成 Codex `openai_responses` fresh：attempt `task-192-attempt-1-e94f85b1cbaf`，projected namespace `codex-f624dedd714cca08`，output session `01a05b1c-6ec3-7922-b093-7405f5614357`；canonical receipts seq `1–14` 连续，唯一终态 `run.completed`，usage input `21,057` / output `190`，runtime archive `4,631` bytes、SHA-256 `4a9b67acb2ff42f59d565a43b2b28ef3844ef792dc67b4942da421b00d4715a0`，commit `931a9d627357960924e29a045752889d7a11120a`，仅新增 `r2-codex-lifecycle-fresh-20260901.txt`。
+- Task `193` 继续 Task `192` 的同一 Codex session：attempt `task-193-attempt-1-5c24df558590`，input/output session 均为 `01a05b1c-6ec3-7922-b093-7405f5614357`，namespace 保持 `codex-f624dedd714cca08`；canonical receipts seq `1–12` 连续，唯一终态 `run.completed`，usage input `42,800` / output `372`，runtime archive `4,464` bytes、SHA-256 `f2db2ec08dcbb27b82b851b482e8a0852ac4bd31e6e9b19fc1efb9e9d94d072e`，commit `a3e833829adb151edc81c3243b26221ffa623b1a`，仅新增 `r2-codex-lifecycle-continue-20260901.txt`。
+- Task `194` 在确认 Worker/container 与 attempt `task-194-attempt-1-70ec98fa85b4` 已初始化、首个 `sleep 180` 已进入 `tool.started` 后通过 UI 取消；canonical receipts seq `1–9` 连续，唯一终态 `run.failed`，TaskLog 为 `harness.failed kind=cancelled`、Worker exit `143`，无 token/diff/commit，runtime archive `3,194` bytes、SHA-256 `c8144c40902f0dc2d90717468387e2bd162c98801ee045395423dc0c6d0675fe`。
+- Task `195` 在 Runtime 全局 timeout 临时设为 `60` 秒后执行同一 `sleep 180` 控制任务，并在终态后恢复 `1,800` 秒；attempt `task-195-attempt-1-458aa9d40942` 的 canonical receipts seq `1–10` 连续，唯一终态 `run.failed`，Task 记录 `Task timed out after 60s`，TaskLog 为 `failure.kind=timeout`、Worker exit `143`、零 diff、无 token/commit，runtime archive `3,381` bytes、SHA-256 `07bf427b3709b613693b4b725f235b1d8499e620ad9063a4c369fcf0bb8fcb81`。
 
 ## Pi command/recovery boundary
 
@@ -69,6 +91,6 @@ backend/.venv/bin/python -m pytest -q \
 
 ## Current R2 boundary
 
-- 已补齐：OpenCode `openai_chat_completions` 与 `openai_responses` 的当前 Bundle 成功链路、task-private namespace/config 隔离、Codex 当前 `openai_responses` 成功链路，以及当前 Pi Bundle 的正常运行、`openai_responses` 成功、控制端点启动、command delivery/cancel、Worker 缺失后的 live rejection/recovery 和 dispatcher crash-recovery unknown outcome；Claude 当前 candidate 的 `anthropic_messages` fresh success、continue、稳定态取消和 timeout 也已补证。
-- 未关闭：适用协议矩阵的完整当前-candidate success/failure 与生命周期逐行收口；Task `189` 的 early-cancel race 不能替代 Harness cancellation conformance。Task `186` 的 `404 / model_not_found` 失败、Task `187` 的 endpoint 修正后成功及 Tasks `188`、`190`、`191` 均已归档。
-- R3 正式 20-task benchmark、R4 L5 发布评审和 R5 L6 hard cut 均未开始；本文件中的 exploratory/debug Task 不计入 benchmark cohort。
+- 已补齐：OpenCode/Pi 三种适用协议的当前 Bundle 成功链路、task-private namespace/config 隔离、Codex 当前 `openai_responses` 的 fresh/continue/稳定态取消/timeout、Claude 当前 `anthropic_messages` 的 fresh/continue/稳定态取消/timeout，以及 Pi 的控制端点、command delivery/cancel、Worker 缺失后的 live rejection/recovery 和 dispatcher crash-recovery unknown outcome。
+- R2 已闭合：8 个适用协议行、唯一 terminal、usage、archive、delivery、Session lineage 和控制/恢复闭环均有可追溯证据；Task `189` 的 early-cancel race 作为非 conformance 样本单独保留，Task `186` 等 Provider failure 也不追认为成功。
+- R3 正式 20-task benchmark、R4 L5 发布评审和 R5 L6 hard cut 尚未开始；本文件中的 exploratory/debug Task 不计入 benchmark cohort。

@@ -13,7 +13,7 @@ Open-Harness V2 需要按两个不同里程碑判断，不能把它们混成一�
 | 里程碑 | 当前状态 | 准确边界 |
 | --- | --- | --- |
 | A. Pi + OpenCode `dual_canary` Internal Preview | **已完成** | 公共 V2 合同、Kit/Profile/Bundle composition、Pi/OpenCode 主要执行链路和代表性真实证据已经形成可用 candidate |
-| B. 四 Harness、Pi 全局默认、`v2_only` hard cut | **未完成** | 仍需关闭适用协议/生命周期矩阵、正式 benchmark、L5 发布评审和 L6 维护窗口 |
+| B. 四 Harness、Pi 全局默认、`v2_only` hard cut | **未完成** | R2 适用协议/生命周期矩阵已关闭；仍需正式 benchmark、L5 发布评审和 L6 维护窗口 |
 
 因此，项目不是“没有推进”，而是此前文档把已经完成的实现、历史证据、每轮 readiness 预检和最终 hard-cut
 门禁反复列为“剩余工作”，造成了进度失真。
@@ -28,7 +28,7 @@ Open-Harness V2 需要按两个不同里程碑判断，不能把它们混成一�
   证据，历史上也已覆盖各自声明的三种协议；本轮 [R2 candidate evidence](../evidence/2026-09-01-open-harness-v2-r2-candidate.md)
   又补齐了当前 Bundle 的 OpenCode 两种 endpoint/config 隔离成功链路、Codex Responses 成功链路，以及 Pi 当前 Bundle
   的 `openai_responses` 成功、command delivery/cancel、Worker 缺失后 live rejection/recovery 和 dispatcher crash-recovery unknown outcome；
-  Claude 当前 candidate 的 `404 / model_not_found` 失败分类、修正 endpoint 根路径后的 `anthropic_messages` fresh 成功、continue、稳定态取消和 timeout 也已归档；后续仍只按源码变更影响面补跑，不重新清零全部已冻结证据；
+  Claude 当前 candidate 的 `404 / model_not_found` 失败分类、修正 endpoint 根路径后的 `anthropic_messages` fresh 成功、continue、稳定态取消和 timeout，以及 Codex 当前 `openai_responses` 的 fresh/continue/稳定态取消/timeout 也已归档；R2 已闭合，后续仍只按源码变更影响面补跑，不重新清零全部已冻结证据；
 - 当前运行模式仍应保持 `dual_canary`。Profile-local 的 Pi 选择不等于系统全局默认，也不等于
   `v2_only`；
 - readiness 是短 TTL 的逐次 canary 预检。过期时必须在下一次执行前重新 verify，但它不是一个永久未完成的
@@ -36,8 +36,8 @@ Open-Harness V2 需要按两个不同里程碑判断，不能把它们混成一�
 - 未跟踪的测试缓存或文档提交不改变已提交的 runtime source/composition；只有源码、Kit、Image、Bundle、
   Profile 或目标平台发生实质变化时，才按影响面更新 release evidence。
 
-从现在起只保留四个剩余工作包：R2 关闭 hard-cut conformance、R3 执行正式 20-task benchmark、R4 完成
-L5 发布评审、R5 在维护窗口执行 L6。执行顺序为 **R2 → R3 → R4 → R5**。
+从现在起只保留三个剩余工作包：R3 执行正式 20-task benchmark、R4 完成 L5 发布评审、R5 在维护窗口
+执行 L6。R2 已于本轮关闭，执行顺序为 **R3 → R4 → R5**。
 
 ## 2. `dual_canary` 的准确边界
 
@@ -59,7 +59,7 @@ L5 发布评审、R5 在维护窗口执行 L6。执行顺序为 **R2 → R3 → 
 | L1 架构/合同 | **通过** | ownership、schema、协议矩阵、identity、roll-forward-only 和 Runbook 边界已冻结 | 后续合同变化仍须回到共享 schema 评审 |
 | L2 源码/测试 | **当前 candidate 通过** | V2 公共地基、四 Harness fixture、Pi/OpenCode Adapter、command、catalog、execution policy、options freeze、错误归档/展示和相关回归已形成唯一实现 revision | 后续源码变更须按影响面重跑并更新 evidence |
 | L3 不可变 composition | **Internal Preview candidate 通过** | 目标平台的 Image、Kit、Profile、Adapter、Bundle 和数据库 identity 可追溯 | hard-cut 前仍须对最终 candidate 再做一次逐次 readiness 预检 |
-| L4 真实 Host/Task | **部分通过** | Pi/OpenCode 的主要成功、失败、Session、usage、terminal、archive、delivery、command/recovery 和协议样本已有代表性证据；当前 Bundle 的 OpenCode 跨 endpoint/config 隔离、Codex Responses 成功、Pi `openai_responses` 成功、Claude `anthropic_messages` fresh success/continue/稳定态取消/timeout、command delivery/cancel、Worker 缺失后的 live rejection/recovery、dispatcher crash-recovery unknown outcome 已补证 | 适用协议/生命周期矩阵的完整当前-candidate 收口仍须关闭 |
+| L4 真实 Host/Task | **部分通过** | Pi/OpenCode 的主要成功、失败、Session、usage、terminal、archive、delivery、command/recovery 和协议样本已有代表性证据；当前 candidate 的 8 个适用协议行、Codex/Claude fresh/continue/稳定态取消/timeout、Pi command/recovery 和 OpenCode endpoint/config 隔离已补证 | L4 仍需正式 benchmark cohort、完整 UI/运维验收和发布评审 |
 | L5 发布验收 | **未完成** | 场景、统计口径和 UI/运维检查面已经定义 | 正式 20-task、Pi 非劣性、剩余 UI/运维检查和 go/no-go 签署 |
 | L6 hard cut | **未执行** | `v2_only`、Pi 默认值和 V1 只读边界已有实现路径 | 尚未进入独立维护窗口执行和验证 |
 
@@ -95,7 +95,7 @@ Runtime Bundle 拥有 Adapter/Bridge/orchestration bytes；实际执行只认冻
 **关闭规则：** 下一轮 canary 前重新 verify readiness 是执行预检，不重新打开 R1。只有 runtime source 或
 composition identity 实质变化时，才按影响面补充 evidence。
 
-### R2 — 关闭四 Harness hard-cut conformance（剩余工程主线）
+### R2 — 关闭四 Harness hard-cut conformance（已完成）
 
 按[冻结 schema](../../architecture/open-harness-v2-schemas.md)执行的适用协议矩阵如下：
 
@@ -109,29 +109,30 @@ composition identity 实质变化时，才按影响面补充 evidence。
 不得要求 Claude/Codex 执行其未声明的协议，也不得用协议代理、URL 推断、隐式转换或其他 Harness 的成功结果
 冒充通过。Pi/OpenCode 已冻结且未受后续变更影响的证据继续有效，只补跑变更实际影响的行。
 
-R2 只剩以下闭环项：
+R2 本轮已完成以下闭环项：
 
-1. **部分完成：** 当前 candidate 的 OpenCode Chat/Responses 成功和真实 Anthropic failure 已对账
-   config、protocol、usage、唯一 terminal、archive 和 delivery；仍须按影响面收口其余适用协议行。
-2. **部分完成：** Codex `openai_responses` 的当前 Profile 成功链路已补齐；Claude
+1. **本轮已完成：** 当前 candidate 的 OpenCode Chat、Responses 和 Anthropic 三个成功行均已对账
+   config、protocol、usage、唯一 terminal、archive 和 delivery；Provider access failure 仍按原样保留。
+2. **本轮已完成：** Codex `openai_responses` 的当前 Profile fresh/continue/稳定态取消/timeout 生命周期已补齐（Tasks `192`–`195`）；Claude
    `anthropic_messages` 的当前 candidate failure Task `186`（`404 / model_not_found`、零 token、无代码交付）和
    endpoint 根路径修正后的 fresh success Task `187` 均已归档。Task `187` 使用 Provider 11 的
    `https://openrouter.ai/api`、Bundle `121`，完成 usage、archive 和 Git delivery；Task `188` 补齐了同一
    session 的 continue，Task `190` 补齐了 attempt 初始化后的稳定态取消，Task `191` 补齐了全局 timeout；Task
    `189` 的创建前 early-cancel race 单独保留，不能作为 Harness cancellation conformance。适用协议矩阵的完整
-   当前-candidate success/failure 与生命周期逐行收口仍未完成。
+   当前-candidate success/failure 与生命周期逐行收口已完成。
 3. **本轮已完成：** 当前 Bundle 已有 Pi 正常运行和控制端点启动；幂等 replay、closed gate 和 Scheduler
    recovery 的聚焦套件已通过；Task `181` 完成了 queued command 在 Worker 缺失后的
    `control_gate_closed` live rejection/recovery，Task `182` 完成了实际 command delivery 与取消收敛，Task
    `184` 完成了持久化 `dispatching` 命令在 dispatcher crash/recovery 后的 `outcome_unknown` 收敛，Task `185`
-   完成了当前 Bundle Pi `openai_responses` 的真实成功链路。
+   完成了当前 Bundle Pi `openai_responses` 的真实成功链路，Task `197` 完成了当前 Bundle Pi
+   `anthropic_messages` 的真实成功链路。
 4. **本轮已完成：** 不同 endpoint/config 的真实 OpenCode Task 已证明 task-private namespace、endpoint
    fingerprint 和 task-local config 不会未声明串线；详见独立 evidence 文件。
 5. **本轮已执行受影响聚焦回归：** Linux/PostgreSQL 的 Scheduler、command、attempt、terminal、archive
    和 recovery 相关 suite 已通过；源码或 composition 后续再变更时，只按实际影响面重跑，不清零既有 green evidence。
 
-**退出条件：** 所有适用协议行和上述闭环项均可追溯，无隐式回退、跨 Task 污染、重复 terminal 或
-P0/P1。失败样本保留原样，不得事后追认为成功。
+**退出条件：** 已满足。所有适用协议行和上述闭环项均可追溯，无隐式回退、跨 Task 污染、重复 terminal
+或 P0/P1；失败样本保留原样，没有事后追认为成功。
 
 ### R3 — 执行正式 20-task benchmark（下一主里程碑）
 
