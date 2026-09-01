@@ -158,7 +158,11 @@ R2 本轮已完成以下闭环项：
 - [x] 已完成场景 07 的无改动配对：Pi Task `232` / Issue `51` 与 OpenCode Task `233` / Issue `52` 均为
   `execute` + `require_changes=false`，只读检查后以 canonical `run.completed(success=true)` 收敛，
   delivery/finalization 均为 `0/0` 且远端 workspace clean；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)。
-- [ ] 当前 R3 登记册剩余场景 08–20；
+- [x] 已完成场景 08 的正式可比 fresh→continue 配对：Pi Task `238` → `239` / Issue `55` 与 OpenCode
+  Task `236` → `237` / Issue `54` 均使用同一 Issue/lineage、`require_changes=true` 和冻结 Provider，
+  input/output session 可追溯，最终都只交付 seed + continuation 文件；早期 Pi `234` → `235` 的
+  `require_changes` 配置差异作为保留诊断样本记录；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)。
+- [ ] 当前 R3 登记册剩余场景 09–20；
 - [ ] 在冻结 cohort 上分别执行 Pi 与 OpenCode 的 20 个同场景样本（需要 fresh/continue 或
   failure→delivery 的场景按一个场景登记多个 Task）；
 - 每个样本记录验收结论、failure taxonomy、耗时、token、工具调用、archive 和 delivery；修复后可重跑，

@@ -168,6 +168,63 @@ Provider `7 / openrouter-free`、Profile 4 `v2-canary-0.6.11-four-harness` 和 f
 summary 均不替代 `require_changes=false`、canonical terminal、`0/0` diff 和远端 clean workspace
 的人工验收。
 
+### Scenario 08 resume/continue lineage
+
+场景 08 的固定验收是：先以 `fresh` Task 创建并交付 `r3-s08-seed.txt`，再在同一 Issue/lineage
+中以 `continue` Task 读取并验证 seed，追加并交付 `r3-s08-continue.txt`。两个 Task 必须能通过
+`input_session_id`、`output_session_id`、previous-task metadata 和同一工作分支追溯；两个 Harness
+仍使用相同的 Provider `7 / openrouter-free`、Profile 4 和各自冻结 Bundle。
+
+#### Retained first Pi lineage (not the formal comparable pair)
+
+Pi 的初次执行 `#234 / Issue #53` → `#235 / Issue #53` 已真实证明了 fresh→continue，但 fresh Task
+使用了 UI 默认的 `require_changes=false`，而 continue Task 为 `true`；该配置差异不改写历史，样本
+保留为 lineage 诊断，不作为正式可比 Pi pair。#234 使用 Bundle `134`、attempt
+`task-234-attempt-1-8d51b614c097`、output session `01a05c56-5086-79cf-b5af-0117652bb432`，
+`fresh`，139.789s，in/cached/out/reasoning `116/3,000/573/null`，seq `1–111`、8/8 tool、
+40 diagnostics、2 次 `provider.retry`，commit `a5663e9cc85bdf751bf9d039b93eb10706bd7ca6`，
+archive `60c9b32afd90dfb7cc1053d3d3eeee5582894db0e1cbabbd88a1c62ab4cff17d` / 17,433 B；#235
+使用 `continue`、input session `01a05c56-5086-79cf-b5af-0117652bb432`、output session
+`01a05c5b-1258-7af6-8609-bbb558a2c448`，133.930s，in/cached/out/reasoning
+`238/2,956/531/null`，seq `1–335`、7/7 tool，commit `4aa38435c83486c9af4a28dc8c1dfde1e9df3399`，
+archive `da521da178d3e14e1127b30e3b1b38c3634673afcc8a32c3d62003e63ef29544` / 30,580 B；最终
+workspace 只含 README 与两个目标文件且 clean。
+
+#### Formal comparable pair
+
+- Pi `#238 / Issue #55` → `#239 / Issue #55`：两边均 `require_changes=true`、Bundle `134`，runtime
+  bundle digest `df785a1a7eb1dd0206a424f1858e118b0e0056147e3bb3c1d263f188a9f6bb42`，Profile Verify
+  generation `50`，Pi adapter digest `9425b09721f3840f9228b236821164dd3c0ee7cb9e77fbe4ad5b91f360ea542c`。
+  fresh #238 的 attempt 为 `task-238-attempt-1-055588451bed`、output session
+  `01a05c6a-3c0a-709e-afa8-467300749a8e`、149.883s、in/cached/out/reasoning
+  `280/3,696/587/null`、seq `1–375`、11/11 tool、45 diagnostics、archive
+  `7d9862df84f853cf916d0eb4180cf86a9d003359a5c169326a9d8e02c5b131da` / 35,026 B，delivery
+  commit `5bb6f09561c43475df74d164696a6665629b8aa7`；continue #239 的 attempt 为
+  `task-239-attempt-1-bcc8ea1608d6`，input session 等于 #238 output session，output session
+  `01a05c6e-1cb9-783d-93b5-e2b29eb9b3c4`、137.420s、in/cached/out/reasoning
+  `248/2,943/462/null`、seq `1–304`、8/8 tool、33 diagnostics、archive
+  `299322f0ec1e1afa92a5a49505c79fadbdb42dd83aefbdf34f87af57f7c752b7` / 28,552 B，delivery
+  commit `344f3e79e7085a4ecc706db272a4ecbb33347481`。两次 terminal 均为 `run.completed(success=true)`，
+  delivery 与 finalization 均 exit 0，最终 workspace 只含 README、`r3-s08-seed.txt` 和
+  `r3-s08-continue.txt`，container 均已清理。
+- OpenCode `#236 / Issue #54` → `#237 / Issue #54`：两边均 `require_changes=true`、Bundle `133`，runtime
+  bundle digest `722979f2e969a39f9fdfad44b7aa7a6955002e3f4ea46989333a3ec9bc83c7dd`，task snapshot
+  固定 Agent `build`、allowlisted command `codify`，Profile Verify generation `50`，OpenCode adapter
+  digest `914e3b11f91c658e99643a616287f67fa9cc2d11cf4fba55f4d3d5832fdcb6f2`。fresh #236 的 attempt
+  为 `task-236-attempt-1-aa2d6557448d`、output session `ses_fa39fc307ffeq6zubJu20BnAi5`、140.262s、
+  in/cached/out/reasoning `186/8,559/226/0`、seq `1–145`、5/5 tool、19 diagnostics、archive
+  `c110f9c0c5c2c81fbdc25cc5a920a76ce3730e833bb404bb03d11131f5a8032b` / 22,667 B，delivery commit
+  `94fc3a7155fb1424a453c5742cff907f7d1c71ab`；continue #237 的 attempt 为
+  `task-237-attempt-1-89accd0b5583`，input/output session 均为 `ses_fa39fc307ffeq6zubJu20BnAi5`、
+  132.387s、in/cached/out/reasoning `203/9,703/240/0`、seq `1–133`、4/4 tool、16 diagnostics、
+  archive `5841bc4a9fa483d70942c750ea915d24da40c05d6825c8fa273076a39f54c01f` / 20,741 B，delivery
+  commit `05432842f97fd1fc879a8c730cf328fa4387de7e`。fresh/continue 中的 OpenCode commit command
+  tool error (`exit 128`) 均被后续 Task 事件继续处理，未污染 terminal；最终 workspace 只含 README、
+  两个目标文件且 clean，container 均已清理。
+
+因此场景 08 以正式可比的 Pi `#238/#239` + OpenCode `#236/#237` 登记为 pass；初次 Pi
+`#234/#235` 的配置差异和所有 tool-level error 均保留，不把它们静默替换成正式样本。
+
 ## Acceptance and evidence contract
 
 每个 Task 完成或进入 terminal 后，登记以下字段：Task/Issue ID、Harness、Bundle/attempt、task mode、
@@ -194,7 +251,7 @@ Task ID 留空表示尚未执行；正式执行过程中只追加结果，不改
 | 5 | 工具失败：执行一个明确预期失败的无害命令，继续完成标记文件；失败不污染 terminal | `#228 / Issue #48`；Bundle `132`；attempt `task-228-attempt-1-11cefcad3fda`；`execute/fresh`；seq `1–346`；7/7 tool；archive 31,543 B；commit `01ae03e…`；MR !44 | `#231 / Issue #50`；Bundle `133`；attempt `task-231-attempt-1-1a8a35382d1b`；`execute/fresh`；seq `1–170`；4/4 tool；archive 23,736 B；commit `ef71698…`；MR !46 | pass（严格 standalone exit 7 均有 canonical `error=true`，之后继续写入并交付唯一 marker；#229 的 `exit_code=7,error=false` 缺陷及 #226/#227 掩盖退出样本保留） |
 | 6 | 测试修复：建立/识别一个失败测试，修复后重新运行并交付通过结果 | `#223 / Issue #44`；Bundle `129`；attempt `task-223-attempt-1-d824ebd9ad50`；`execute/fresh`；seq `1–216`；15/15 tool；archive 43,055 B；commit `aa78dec…`；MR !40 | `#225 / Issue #45`；首轮 `#224` 为保留的 OpenCode `permission.asked` / `sandbox_error` 失败（Bundle `130`，seq `1–122`），retry Bundle `131`；attempt `task-225-attempt-1-7aeae9f16c25`；`execute/fresh`；seq `1–375`；15/15 tool；archive 57,684 B；commit `7888ef5…`；MR !41 ready | pass（两边均记录初始失败与同一测试成功重跑；最终只含两个 fixture 文件且无 Python cache；#224 失败证据保留） |
 | 7 | 无改动：`execute` + `require_changes=false`，只读检查，完成且无 commit/diff | `#232 / Issue #51`；Bundle `134`；attempt `task-232-attempt-1-434e1c03d681`；`execute/fresh`；seq `1–46`；2/2 tool；archive 14,384 B；commit null；MR !47 | `#233 / Issue #52`；Bundle `133`；attempt `task-233-attempt-1-c479e0c4e54a`；`execute/fresh`；seq `1–172`；4/4 tool；archive 27,182 B；commit null；MR !48 | pass（两边只读验收通过；`require_changes=false`，canonical terminal 成功，delivery/finalization 均为 0/0，远端 workspace clean） |
-| 8 | resume/continue：fresh seed 后在同一 Issue/lineage continue，两个 Task 均可追溯 | — | — | pending |
+| 8 | resume/continue：fresh seed 后在同一 Issue/lineage continue，两个 Task 均可追溯 | `#238 → #239 / Issue #55`；Bundle `134`；fresh/continue；seq `1–375` / `1–304`；11/11、8/8 tool；archive 35,026 B / 28,552 B；commits `5bb6f09…` / `344f3e79…`；MR !51 | `#236 → #237 / Issue #54`；Bundle `133`；fresh/continue；seq `1–145` / `1–133`；5/5、4/4 tool；archive 22,667 B / 20,741 B；commits `94fc3a7…` / `05432842…`；MR !50 | pass（两边均同 Issue/lineage 完成 fresh→continue；input session 可追溯，最终各只含 seed + continuation 文件，workspace clean） |
 | 9 | 稳定态取消：确认 attempt/container/tool 已初始化后取消；`cancelled`、SIGTERM、清理 | — | — | pending |
 | 10 | timeout/SIGKILL：临时使用最小可保存 timeout，任务阻塞并由 runner 收敛，恢复配置 | — | — | pending |
 | 11 | context compaction：长上下文任务必须产生 `context.compacted`，其后仍有唯一 terminal | — | — | pending |
