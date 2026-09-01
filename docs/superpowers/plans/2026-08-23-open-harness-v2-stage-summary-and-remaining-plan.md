@@ -26,7 +26,8 @@ Open-Harness V2 需要按两个不同里程碑判断，不能把它们混成一�
   [R1 candidate evidence](../evidence/2026-08-31-open-harness-v2-r1-candidate.md)；
 - Pi/OpenCode 已有真实成功、失败、timeout/cancel、usage、Session、工具调用、archive 和 delivery 的代表性
   证据，历史上也已覆盖各自声明的三种协议；本轮 [R2 candidate evidence](../evidence/2026-09-01-open-harness-v2-r2-candidate.md)
-  又补齐了当前 Bundle 的 OpenCode 两种 endpoint/config 隔离成功链路和 Codex Responses 成功链路；后续仍只按源码变更影响面补跑，不重新清零全部已冻结证据；
+  又补齐了当前 Bundle 的 OpenCode 两种 endpoint/config 隔离成功链路、Codex Responses 成功链路，以及 Pi 当前 Bundle
+  的 Worker 缺失后 live rejection/recovery；后续仍只按源码变更影响面补跑，不重新清零全部已冻结证据；
 - 当前运行模式仍应保持 `dual_canary`。Profile-local 的 Pi 选择不等于系统全局默认，也不等于
   `v2_only`；
 - readiness 是短 TTL 的逐次 canary 预检。过期时必须在下一次执行前重新 verify，但它不是一个永久未完成的
@@ -57,7 +58,7 @@ L5 发布评审、R5 在维护窗口执行 L6。执行顺序为 **R2 → R3 → 
 | L1 架构/合同 | **通过** | ownership、schema、协议矩阵、identity、roll-forward-only 和 Runbook 边界已冻结 | 后续合同变化仍须回到共享 schema 评审 |
 | L2 源码/测试 | **当前 candidate 通过** | V2 公共地基、四 Harness fixture、Pi/OpenCode Adapter、command、catalog、execution policy、options freeze、错误归档/展示和相关回归已形成唯一实现 revision | 后续源码变更须按影响面重跑并更新 evidence |
 | L3 不可变 composition | **Internal Preview candidate 通过** | 目标平台的 Image、Kit、Profile、Adapter、Bundle 和数据库 identity 可追溯 | hard-cut 前仍须对最终 candidate 再做一次逐次 readiness 预检 |
-| L4 真实 Host/Task | **部分通过** | Pi/OpenCode 的主要成功、失败、Session、usage、terminal、archive、delivery、command/recovery 和协议样本已有代表性证据；当前 Bundle 的 OpenCode 跨 endpoint/config 隔离和 Codex Responses 成功已补证 | Claude 支持协议成功、Pi 当前 Bundle 的 live rejection/恢复组合、适用协议矩阵的完整当前-candidate 收口仍须关闭 |
+| L4 真实 Host/Task | **部分通过** | Pi/OpenCode 的主要成功、失败、Session、usage、terminal、archive、delivery、command/recovery 和协议样本已有代表性证据；当前 Bundle 的 OpenCode 跨 endpoint/config 隔离、Codex Responses 成功和 Pi Worker 缺失后的 live rejection/recovery 已补证 | Claude 支持协议成功、Pi 当前 Bundle 的 dispatching → unknown-outcome 现场样本、适用协议矩阵的完整当前-candidate 收口仍须关闭 |
 | L5 发布验收 | **未完成** | 场景、统计口径和 UI/运维检查面已经定义 | 正式 20-task、Pi 非劣性、剩余 UI/运维检查和 go/no-go 签署 |
 | L6 hard cut | **未执行** | `v2_only`、Pi 默认值和 V1 只读边界已有实现路径 | 尚未进入独立维护窗口执行和验证 |
 
@@ -115,8 +116,9 @@ R2 只剩以下闭环项：
    `anthropic_messages` 仍等待实际可用且兼容的 Provider，且 fresh/continue、取消/timeout、usage、
    archive 和 Git delivery 的完整矩阵尚未关闭。
 3. **部分完成：** 当前 Bundle 已有 Pi 正常运行和控制端点启动；幂等 replay、closed gate 和 Scheduler
-   recovery 的聚焦套件已通过，live rejection/unknown-outcome/recovery 仍只有旧 Bundle 的现场样本，需在
-   当前 Bundle 上完成一次同等证据。
+   recovery 的聚焦套件已通过；Task `181` 又在当前 Bundle 上完成了 queued command 在 Worker 缺失后的
+   `control_gate_closed` live rejection/recovery。当前 Bundle 的 dispatching → `outcome_unknown` 现场样本仍未
+   复现，旧 Bundle 的 Task `165` 仍作为该分支的边界证据。
 4. **本轮已完成：** 不同 endpoint/config 的真实 OpenCode Task 已证明 task-private namespace、endpoint
    fingerprint 和 task-local config 不会未声明串线；详见独立 evidence 文件。
 5. **本轮已执行受影响聚焦回归：** Linux/PostgreSQL 的 Scheduler、command、attempt、terminal、archive

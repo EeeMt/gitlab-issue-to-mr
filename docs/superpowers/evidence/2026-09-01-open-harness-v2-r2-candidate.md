@@ -32,7 +32,9 @@
 
 当前候选 Pi Task `179` 使用 Profile 4、Bundle `122`、Provider 7、Fresh session；attempt `task-179-attempt-1-aae2e80bb937` 的 `codify.worker.event/v2` seq 1–27 以唯一 `run.completed` 结束，control state 为 `closed`，archive `5,162` bytes，usage 为 input `55` / output `17` / total `72`。运行中 UI 曾显示 `Accepting commands`，说明当前 Bundle 的正常控制端点已启动；本 Task 没有额外 command row。
 
-既有 live command/recovery 样本仍保留其原始 Bundle 边界：Bundle `111` 上的 Task `164` 为 `steer=delivered`，Task `165` 为 `outcome_unknown` / `delivery_outcome_unknown`，Task `166` 为 `control_gate_closed` 且记录 scheduler recovery 确认 Worker 容器不存在。它们不能直接替代 Bundle `122` 的同类 live rejection/recovery 证据，但与当前源码聚焦测试共同覆盖了命令幂等、严格顺序、closed gate、unknown outcome、CAS terminal 和 recovery。
+本轮又在当前 Bundle `122` 上执行了 Task `181` 的受控恢复竞态：Task 使用 Profile 4、Provider 7、Pi、Fresh session，attempt 为 `task-181-attempt-1-2c78af685c5f`，Bundle digest 为 `9d14951d9abf94c70754364cd54efcc534d49d82e567ad4710cc1c1cce5a465a`，projected namespace 为 `pi-bb870ebba4d70be9`。attempt 进入 `accepting` 后，先暂停 `codify-scheduler`，再通过已登录任务页写入 command `a071d0ad-ed0d-4368-b375-3821143f4623`（seq `1`，`queued`）；随后只移除了已核对的 Worker `codify-181-issue18` / container `8f7c94f4bc32cece7462c76358c99bb609ed8a4efa439179fef41cbc58afbcc4`，启动 scheduler。恢复日志确认 Docker daemon 可达但容器不存在，Task `181` 被标记为 `failed`，error 为 `Task was running when scheduler restarted (container not found)`；attempt 最终为 `closed`、last seq `12`，command 变为 `rejected` / `control_gate_closed`，rejection message 为 `scheduler recovery confirmed worker container absent`，`delivery_attempts=0` 且没有 `native_request_id`。任务页同步显示 `Failed`、Live steering `Closed` 和 command `Rejected`。
+
+Task `181` 是当前 Bundle 的 live rejection/recovery 证据，不是成功样本：因故意移除 Worker，没有形成完整 terminal event、runtime archive 或 usage ledger。既有 live command/recovery 样本仍保留其原始 Bundle 边界：Bundle `111` 上的 Task `164` 为 `steer=delivered`，Task `165` 为 `outcome_unknown` / `delivery_outcome_unknown`，Task `166` 为 `control_gate_closed` 且记录 scheduler recovery 确认 Worker 容器不存在。旧样本不能替代当前 Bundle 的成功运行身份，但与 Task `181` 及当前源码聚焦测试共同覆盖了 delivered、closed-gate rejection、unknown outcome、CAS terminal 和 recovery；当前 Bundle 的 dispatching → unknown-outcome 现场样本仍未复现。
 
 本轮执行的聚焦套件为：
 
@@ -52,6 +54,6 @@ backend/.venv/bin/python -m pytest -q \
 
 ## Current R2 boundary
 
-- 已补齐：OpenCode `openai_chat_completions` 与 `openai_responses` 的当前 Bundle 成功链路、task-private namespace/config 隔离、Codex 当前 `openai_responses` 成功链路，以及当前 Pi Bundle 的正常运行和控制端点启动。
-- 未关闭：Claude `anthropic_messages` 当前兼容 Provider 的成功链路；Pi 在当前 Bundle 上的 live rejection/unknown-outcome/Scheduler-recovery 组合；适用协议矩阵的完整当前-candidate success/failure 逐行收口。
+- 已补齐：OpenCode `openai_chat_completions` 与 `openai_responses` 的当前 Bundle 成功链路、task-private namespace/config 隔离、Codex 当前 `openai_responses` 成功链路，以及当前 Pi Bundle 的正常运行、控制端点启动和 Worker 缺失后的 live rejection/recovery。
+- 未关闭：Claude `anthropic_messages` 当前兼容 Provider 的成功链路；当前 Pi Bundle 的 dispatching → unknown-outcome 现场样本；适用协议矩阵的完整当前-candidate success/failure 逐行收口。
 - R3 正式 20-task benchmark、R4 L5 发布评审和 R5 L6 hard cut 均未开始；本文件中的 exploratory/debug Task 不计入 benchmark cohort。
