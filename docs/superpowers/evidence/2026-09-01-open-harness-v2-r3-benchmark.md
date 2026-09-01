@@ -72,6 +72,66 @@ OpenCode `external_directory` 的最小规则修复（仅 `/tmp/**` allow，其�
 prompt，各自使用 Harness-specific Bundle；因此这一对是源码影响面下的 post-fix 场景 06 配对，而不是
 对原始 `123/124` candidate 的静默改写。
 
+### Scenario 05 tool-failure acceptance and OpenCode exit classification
+
+场景 05 的固定语义是：以 standalone shell tool call 执行无害的 `sh -c 'exit 7'`，让该 tool
+明确返回非零并继续完成唯一标记文件；预期 tool failure 不得把 Harness 或 Task terminal 污染成失败。
+本轮保留了两组发现过程，并只把修复后的 Pi/OpenCode 样本登记为 pass。
+
+#### Initial masked-exit samples (retained)
+
+- `#226 / Issue #46`（Pi，Bundle `132`，digest
+  `2a5439e1dd05c90929a30faff766a864599bfb44d5d0a962d5bd0f5ba265da0a`；attempt
+  `task-226-attempt-1-ee8c5176c87b`；`execute/fresh`；173.212s；in/cached/out/reasoning
+  `152/2,805/399/null`；seq `1–254`，7/7 tool，唯一 terminal `run.completed`；commit
+  `2b528636acf3bb3da3f67b9737d68e1a30b3a9fb`，MR !42；archive
+  `1bc661765278114edc551ff4ee7a1a777d76b5111685b4c106940ad8013a710c` / 24,778 B）将
+  `exit 7` 与后续 `echo` 放在同一 shell tool call 中，因而该预期失败没有形成 `error=true`；随后
+  的 `xxd` 缺失产生了一个非预期 tool error。任务仍只交付 `r3-s05-marker.txt`，但不计为场景通过。
+- `#227 / Issue #47`（OpenCode，Bundle `131`，digest
+  `dc75781511e5770edcc5215beafddde34247f1b2c5d2b5254940ea6abe85051c`；attempt
+  `task-227-attempt-1-2e2a3cfc6725`；155.255s；in/cached/out/reasoning
+  `50/8,178/202/0`；seq `1–47`，4/4 tool，唯一 terminal `run.completed`；commit
+  `063a491d0cea4be7c4ead522e389fb3d62771405`，MR !43；archive
+  `6f72dbdd45d80904e01c2be250c83e63713f3b2b424d899bbeaac9b2dd261156` / 13,751 B）同样掩盖了
+  非零退出，canonical tool event 没有 `error=true`，因此不计为场景通过。
+
+#### Strict rerun and bug discovery
+
+- `#228 / Issue #48`（Pi，Bundle `132`；attempt `task-228-attempt-1-11cefcad3fda`；172.820s；
+  in/cached/out/reasoning `105/2,734/638/null`；seq `1–346`，7/7 tool；seq 47 的 standalone
+  `sh -c 'exit 7'` 为 `error=true`，随后 `harness.completed`、delivery 和 `run.completed` 均成功；
+  commit `01ae03e5cfa65973f0d74da9263f00569171aaf6`，MR !44；archive
+  `f3c95876cecc650e42f9e67e72c8e96ed9884a517fce9c31ada254dddaa1e9ba` / 31,543 B）。最终 branch
+  clean，除 `README.md` 外只含 `r3-s05-strict-marker.txt`，内容为 `r3-s05-strict-ok`。
+- `#229 / Issue #49`（OpenCode，Bundle `131`；attempt `task-229-attempt-1-f841e67206df`；
+  155.255s；in/cached/out/reasoning `82/8,212/428/0`；seq `1–211`，4/4 tool；seq 10 已携带
+  `exit_code=7`，但错误标记仍是 `false`；任务 terminal/delivery 成功但人工验收失败；commit
+  `478a8343d42b49ab79b100ece80f1224bd918e41`，MR !45；archive
+  `1bc5366ba561e3b9ce965d89a73f8f3b4f524c13e0bc17ab6a960e26ee4051ea` / 27,154 B）。这确认根因在
+  OpenCode translator 只按 status/error 字段判定 tool failure，未把非零 exit code 纳入判定。
+
+源码修复提交为 `0b4cb177`：`message.part.updated` 和 `session.next.*` durable 两条 OpenCode
+路径都将整数非零 `exit_code` 映射为 `tool.completed.error=true`，并保留退出码；对应 adapter 单测
+覆盖正常退出、exit 7 和 durable 结果。修复后 Profile 4 Verify 为 generation `50`，OpenCode
+adapter digest `914e3b11f91c658e99643a616287f67fa9cc2d11cf4fba55f4d3d5832fdcb6f2`。
+
+#### Post-fix OpenCode delivery
+
+`#231 / Issue #50` 使用修复后的 OpenCode Bundle `133`，digest
+`722979f2e969a39f9fdfad44b7aa7a6955002e3f4ea46989333a3ec9bc83c7dd`；attempt
+`task-231-attempt-1-1a8a35382d1b`；`execute/fresh`，task snapshot 固定 Agent `build`、allowlisted
+command `codify`；144.059s；in/cached/out/reasoning `205/8,319/331/0`；seq `1–170`，4/4 tool，
+diagnostics 16；seq 22 的 standalone `sh -c 'exit 7'` 为 `error=true, exit_code=7`，之后 seq 166
+`harness.completed`、seq 168 `delivery.completed`、seq 169 `worker.finalization(exit_code=0)` 和
+seq 170 `run.completed(success=true)` 全部收敛。commit `ef716981b002bd001553688f765c83b05d2accfd`，
+MR !46；archive `f1f418be1cff9d8477e6917e671fb3f768830c7120a63312fae2d6e59d1631f2` / 23,736 B。
+最终 branch clean，除 `README.md` 外只含 `r3-s05-strict-marker.txt`，内容为 `r3-s05-strict-ok`；
+所有 #226–#231 worker container 均已清理。
+
+因此场景 05 以 Pi `#228` + 修复后 OpenCode `#231` 登记为 pass；#226/#227 的 completed-but-
+semantically-invalid 样本，以及 #229 暴露 adapter 缺陷的样本均保留，不从记录中删除。
+
 ## Acceptance and evidence contract
 
 每个 Task 完成或进入 terminal 后，登记以下字段：Task/Issue ID、Harness、Bundle/attempt、task mode、
@@ -95,7 +155,7 @@ Task ID 留空表示尚未执行；正式执行过程中只追加结果，不改
 | 2 | `execute` 模式：完成一个最小、可验收的单文件变更并 delivery | `#202 / Issue #26`；Bundle `123`；attempt `task-202-attempt-1-63cdebe66ea8`；`execute/fresh`；output session `01a05b6b-28ea-7529-a6cb-8c6feb0d8943`；443.414s；in 95 / cached 2,638 / out 199 / reasoning null；7 对 tool 事件；seq 1–194，唯一 terminal `run.completed(success=true)`；`provider.retry` seq 45 (`engine_error`，随后成功)；1/0，commit `2c110cb57762415faf19b224f097e5f295c5742a`；archive `aff00463349bd022dc16adb36963c741ed9d86d0d73b8304118ae0809675a7f5` / 19,482 B；MR !22 `in_review`；container 已清理 | `#204 / Issue #28`（首次尝试 `#203 / Issue #27` 停滞取消，失败证据保留且不计入成功配对）；Bundle `124`；attempt `task-204-attempt-1-db897b7cbd8b`；`execute/fresh`；output session `ses_fa4878450ffepy3SfdOdvqOc5Q`；154.833s；in 114 / cached 8,684 / out 159 / reasoning 0；7 对 tool 事件；seq 1–143，唯一 terminal `run.completed(success=true)`；1/0，commit `c926b7ecb8a9f5331602b7b9c78dabdd8f868a3b`；archive `d489331989004d62fbe8ca03abf1da5660388c5d9f55a28826cd18a8f4ac9339` / 22,931 B；MR !24 `in_review`；container 已清理 | pass（两边均创建唯一 `r3-s02-marker.txt` 并完成单文件验收；Pi 有 1 次真实 `provider.retry`；Issue 上的初始 MR 是 plan/execute 共用的 pre-run tracking 生命周期，不计为 Git commit delivery；#203 的停滞取消不从失败记录中删除） |
 | 3 | `freeform` 模式：完成一个最小、可验收的单文件变更并 delivery | `#205 / Issue #29`；Bundle `123`；attempt `task-205-attempt-1-c7362711a113`；`freeform/fresh`；output session `01a05b86-3118-78b3-ba66-c19d931ec050`；111.955s；in 149 / cached 1,713 / out 78 / reasoning null；3 对 tool 事件；seq 1–68，唯一 terminal `run.completed(success=true)`；1/0，commit `116ab830ebeb7646b4141f26885ae2c2c79707f4`；archive `21dd54c69bd989872e77693ad6343f4e16705ff1fcabb173c33f07449886aae3` / 8,988 B；MR !25 `in_review`；container 已清理 | `#206 / Issue #30`；Bundle `124`；attempt `task-206-attempt-1-7ffd7bbe93e5`；`freeform/fresh`；output session `ses_fa4783e89ffeYzWQqnA8E0jzr9`；128.508s；in 134 / cached 8,044 / out 32 / reasoning 0；4 对 tool 事件；seq 1–54，唯一 terminal `run.completed(success=true)`；1/0，commit `6292751de16e27ed62230b9bf8b9aec310fd5972`；archive `bbb1b1e8768a513e7fe91de6bdb1def89820c8af5053d98dbb4c4a6edb93c6bf` / 13,015 B；MR !26 `in_review`；container 已清理 | pass（两边均创建并验证唯一 `r3-s03-marker.txt`，内容为 `r3-s03-ok`，无其他文件修改，并成功 delivery） |
 | 4 | 工具成功：执行只读 shell 检查后完成标记文件；tool start/complete 成对出现 | `#207 / Issue #31`；Bundle `123`；attempt `task-207-attempt-1-d9d2c17503c0`；`execute/fresh`；output session `01a05b8f-0f1b-76e1-867d-0c79ba6048db`；167.550s；in 228 / cached 3,149 / out 526 / reasoning null；8 对 tool 事件；seq 1–306，唯一 terminal `run.completed(success=true)`；1/0，commit `0eeaae5551d76a83ed1e15e817525cd564ddd8f0`；archive `d6f7621e3937f4e02b83ed3f6056862391ba88c2b887b90fc986956b1d1c2fc3` / 29,347 B；MR !27 `in_review`；container 已清理 | `#208 / Issue #32`；Bundle `124`；attempt `task-208-attempt-1-8d9d3a7d9196`；`execute/fresh`；output session `ses_fa47002eeffeD1G0szjhjLV1OE`；166.149s；in 133 / cached 10,512 / out 314 / reasoning 0；10 对 tool 事件；seq 1–283，唯一 terminal `run.completed(success=true)`；1/0，commit `a98fccffdef1ec1834a0969487deaab45ba89c5d`；archive `f986a96382e00e2c14d886d22806c46c76e75f11c71029720e820e5b0d409089` / 39,605 B；MR !28 `in_review`；container 已清理 | pass（两边均先完成成功的只读 shell 检查，再创建并验证唯一 `r3-s04-marker.txt`，并成功 delivery；#207/#208 的 tool start/complete 分别为 8/8、10/10，期间的无害路径探测错误保留在 TaskLog，不影响 terminal） |
-| 5 | 工具失败：执行一个明确预期失败的无害命令，继续完成标记文件；失败不污染 terminal | — | — | pending |
+| 5 | 工具失败：执行一个明确预期失败的无害命令，继续完成标记文件；失败不污染 terminal | `#228 / Issue #48`；Bundle `132`；attempt `task-228-attempt-1-11cefcad3fda`；`execute/fresh`；seq `1–346`；7/7 tool；archive 31,543 B；commit `01ae03e…`；MR !44 | `#231 / Issue #50`；Bundle `133`；attempt `task-231-attempt-1-1a8a35382d1b`；`execute/fresh`；seq `1–170`；4/4 tool；archive 23,736 B；commit `ef71698…`；MR !46 | pass（严格 standalone exit 7 均有 canonical `error=true`，之后继续写入并交付唯一 marker；#229 的 `exit_code=7,error=false` 缺陷及 #226/#227 掩盖退出样本保留） |
 | 6 | 测试修复：建立/识别一个失败测试，修复后重新运行并交付通过结果 | `#223 / Issue #44`；Bundle `129`；attempt `task-223-attempt-1-d824ebd9ad50`；`execute/fresh`；seq `1–216`；15/15 tool；archive 43,055 B；commit `aa78dec…`；MR !40 | `#225 / Issue #45`；首轮 `#224` 为保留的 OpenCode `permission.asked` / `sandbox_error` 失败（Bundle `130`，seq `1–122`），retry Bundle `131`；attempt `task-225-attempt-1-7aeae9f16c25`；`execute/fresh`；seq `1–375`；15/15 tool；archive 57,684 B；commit `7888ef5…`；MR !41 ready | pass（两边均记录初始失败与同一测试成功重跑；最终只含两个 fixture 文件且无 Python cache；#224 失败证据保留） |
 | 7 | 无改动：`execute` + `require_changes=false`，只读检查，完成且无 commit/diff | — | — | pending |
 | 8 | resume/continue：fresh seed 后在同一 Issue/lineage continue，两个 Task 均可追溯 | — | — | pending |
