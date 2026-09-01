@@ -196,7 +196,14 @@ R2 本轮已完成以下闭环项：
   probe 仍以同一 `protocol_error` 失败。随后 `#305/#306` 的 clean-idle Task-local watcher、`#307` 的
   空白容忍 watcher 和 `#308` 的远端 Host-side watcher 均未在容器清理前形成可追踪的 compact HTTP 状态；
   四个 Task 都只留下一个 raw `session.idle` 和正常 terminal，没有 canonical/raw compaction event，故不
-  改变 `blocked_external_fixture` 状态；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
+  改变 `blocked_external_fixture` 状态。2026-09-02 对固定 Kit 中 OpenCode `1.18.19` 的 exact-tag
+  compaction source 做了只读核对：该版本只有 automatic/overflow compaction processing，没有 V2
+  manual compaction producer；官方上游 issue [#40614](https://github.com/anomalyco/opencode/issues/40614)
+  记录 `SessionV2.compact` 当前为 `OperationUnavailableError` 并由 Server 映射为 `503`。因此
+  `#298/#300` 的 `503` 是固定上游能力边界，不是 Codify adapter 的 event-order 缺陷；在获得支持
+  manual compaction 的新 Kit/固定 build 或可验证 automatic-compaction fixture 前，不再叠加同类 route
+  probe，也不放宽 `session.idle` active-tool 的 fail-closed 规则；详见
+  [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
 - [x] 已执行场景 12 的两轮正式 Pi/OpenCode retry probe：`254/255` 与 `256/257` 均成功完成并交付，
   但四个任务都没有 `provider.retry`；`250/251` 中同一冻结 Provider 的真实 `rate_limited` 事件作为
   场景 11 关联诊断保留，不重复计入场景 12，因此场景 12 登记为 `not_triggered`；详见
@@ -233,9 +240,11 @@ R2 本轮已完成以下闭环项：
   finalization diff `240/0`；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
 - [ ] 当前 R3 剩余退出项为：场景 11 的 OpenCode 可验证 compaction event/fixture，以及场景 13 的真实
   401 fixture；Provider 7 的 TLS error 本轮未再复现，高上下文正式重跑和 native compact route 探针仍没有
-  结构化 `context.compacted`（包括 #302–#308 的 idle-window/route 诊断）；本轮 #296 的 401 是 OpenCode Server Basic Auth，#299/#301 是 Provider
-  rate limit，均不替代场景 13；场景 14 的 invalid-session 子场景已闭合，network interruption 明确保持
-  `not_triggered`，不把已有 TLS/protocol 样本重复计入；
+  结构化 `context.compacted`（包括 #302–#308 的 idle-window/route 诊断）。固定 OpenCode `1.18.19`
+  的 native compact `503` 已由上游 V2 manual-compaction 能力边界解释；只有新 Kit/固定 build 或真实
+  automatic-compaction fixture 变化后才重新冻结并补跑场景 11。本轮 #296 的 401 是 OpenCode Server
+  Basic Auth，#299/#301 是 Provider rate limit，均不替代场景 13；场景 14 的 invalid-session 子场景
+  已闭合，network interruption 明确保持 `not_triggered`，不把已有 TLS/protocol 样本重复计入；
   在这些项完成前不关闭 R3，也不进入 R4；
 - [ ] 在冻结 cohort 上分别执行 Pi 与 OpenCode 的 20 个同场景样本（需要 fresh/continue 或
   failure→delivery 的场景按一个场景登记多个 Task）；
