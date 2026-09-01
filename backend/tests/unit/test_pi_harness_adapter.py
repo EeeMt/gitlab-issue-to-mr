@@ -583,6 +583,10 @@ def _source_adapter(script: str, env: dict[str, str]):
 def test_pi_adapter_propagates_worker_privilege_drop_to_runner():
     content = ADAPTER.read_text(encoding="utf-8")
     assert 'CODIFY_PI_RUN_AS="${CODIFY_PI_RUN_AS:-${CODIFY_RUN_AS:-}}" \\' in content
+    assert 'CODIFY_PI_CLI_HOME="${CODIFY_PI_CLI_HOME:-/home/codify}"' in content
+    assert 'HOME="${CODIFY_PI_CLI_HOME:-/home/codify}"' in (
+        (REPO_ROOT / "deploy/worker-entrypoint/legacy/pi-run.sh").read_text(encoding="utf-8")
+    )
 
 
 def _pi_prepare_config(tmp_path: Path) -> Path:
@@ -592,13 +596,14 @@ def _pi_prepare_config(tmp_path: Path) -> Path:
         "CODIFY_RUN_UID": "1000",
         "CODIFY_RUN_GID": "1000",
         "HOME": str(tmp_path / "home"),
+        "CODIFY_PI_CLI_HOME": str(tmp_path / "cli-home"),
         "ANTHROPIC_MODEL": "deepseek-v4-flash",
         "ANTHROPIC_BASE_URL": "https://api.deepseek.com/anthropic",
         "ANTHROPIC_API_KEY": "fake-key",
     }
     result = _source_adapter("pi_adapter_prepare_config", env)
     assert result.returncode == 0, result.stderr
-    return tmp_path / "home"
+    return tmp_path / "cli-home"
 
 
 def test_pi_config_maps_snapshot_endpoint_to_models_json(tmp_path):
@@ -633,6 +638,7 @@ def test_pi_anthropic_config_normalizes_sdk_base_url(endpoint_url, expected_base
         "CODIFY_RUN_UID": "1000",
         "CODIFY_RUN_GID": "1000",
         "HOME": str(tmp_path / "home"),
+        "CODIFY_PI_CLI_HOME": str(tmp_path / "home"),
         "ANTHROPIC_MODEL": "minimax/minimax-m3:free",
         "ANTHROPIC_BASE_URL": endpoint_url,
         "ANTHROPIC_API_KEY": "fake-key",
@@ -674,6 +680,7 @@ def test_pi_config_maps_openai_protocols_to_native_apis(
         "CODIFY_RUN_UID": "1000",
         "CODIFY_RUN_GID": "1000",
         "HOME": str(tmp_path / "home"),
+        "CODIFY_PI_CLI_HOME": str(tmp_path / "home"),
         "CODIFY_MODEL_PROTOCOL": protocol,
         "ANTHROPIC_MODEL": "wrong-anthropic-model",
         "ANTHROPIC_BASE_URL": "https://wrong-anthropic.example",

@@ -37,7 +37,7 @@ if [ -n "${CODIFY_PI_RUN_AS:-}" ]; then
         echo "CODIFY_PI_RUN_AS must be an executable absolute path: ${CODIFY_PI_RUN_AS}" >&2
         exit 1
     fi
-    PI_COMMAND=(env HOME=/home/codify USER=codify LOGNAME=codify \
+    PI_COMMAND=(env HOME="${CODIFY_PI_CLI_HOME:-/home/codify}" USER=codify LOGNAME=codify \
         "${CODIFY_PI_RUN_AS}" -- "${PI_COMMAND[@]}")
 else
     PI_COMMAND=(env USER="${USER:-root}" "${PI_COMMAND[@]}")

@@ -156,12 +156,15 @@ pi_adapter_prepare_config() {
     esac
     if [ -n "${model}" ] && [ -n "${base_url}" ] && [ -n "${api_key}" ]; then
         # pi 0.84.2 reads custom providers only from ~/.pi/agent/models.json
-        # (the CLI subprocess HOME); it ignores the PI_HOME env var. PI_HOME
-        # above is kept ONLY for the issue-shared session/skills persistence.
+        # (the CLI subprocess HOME); it ignores the PI_HOME env var. Keep the
+        # configuration path aligned with the HOME used by pi-run.sh after the
+        # CLI drops to the worker identity. PI_HOME above is ONLY for the
+        # issue-shared session/skills persistence.
         # The CLI parses only the array form of providers.<name>.models, so the
         # frozen Snapshot must be written in that shape or --list-models is
         # empty and every prompt fails with "Model not found".
-        local models_file="${HOME:-/root}/.pi/agent/models.json"
+        export CODIFY_PI_CLI_HOME="${CODIFY_PI_CLI_HOME:-/home/codify}"
+        local models_file="${CODIFY_PI_CLI_HOME}/.pi/agent/models.json"
         mkdir -p "$(dirname "${models_file}")"
         # The provider id/name are namespaced to Codify so Pi never shares state
         # with another harness; baseUrl is the frozen Snapshot endpoint.
