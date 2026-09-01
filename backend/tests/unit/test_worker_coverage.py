@@ -1287,6 +1287,15 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn('log_type="delivery_summary"', artifacts)
         self.assertIn('await _save_delivery_summary_from_container(worker, container, task, db)', lifecycle)
 
+    def test_entrypoint_removes_untracked_python_bytecode_before_delivery(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = _read_worker_entrypoint_sources(script)
+
+        self.assertIn(
+            'git clean -fd -- "**/__pycache__" "**/*.pyc" "**/*.pyo"',
+            content,
+        )
+
     def test_codegraph_sync_failure_keeps_exit_code_and_prints_status_diagnostic(self):
         script = (
             Path(__file__).resolve().parents[3]

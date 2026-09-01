@@ -175,6 +175,10 @@ pi_adapter_prepare_config() {
             --arg api "${api}" \
             '{providers:{codify:{baseUrl:$base_url,api:$api,apiKey:$api_key,models:[{id:$model,name:$model,reasoning:false,input:["text"],contextWindow:128000,maxTokens:8192}]}}}' \
             > "${models_file}"
+        # The adapter prepares this directory as root before Pi drops to the
+        # worker identity. Pi also creates its session directory below it, so
+        # the worker must own the directory tree, not only models.json.
+        chown -R "${CODIFY_RUN_UID:-1000}:${CODIFY_RUN_GID:-1000}" "$(dirname "${models_file}")" 2>/dev/null || true
         chown "${CODIFY_RUN_UID:-1000}:${CODIFY_RUN_GID:-1000}" "${models_file}" 2>/dev/null || true
         chmod 600 "${models_file}" 2>/dev/null || true
     fi

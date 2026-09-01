@@ -100,6 +100,11 @@ if [ "${TASK_MODE}" = "plan" ]; then
 fi
 
 # Now commit and push the changes
+# Python-based validation commonly leaves untracked bytecode beside the source
+# files. It is a runtime artifact, not task delivery; remove only untracked
+# cache files before calculating and staging the workspace diff.
+codify_run_shell 'cd /workspace && git clean -fd -- "**/__pycache__" "**/*.pyc" "**/*.pyo"' || true
+
 # Check if any changes were made (excluding result.md)
 CHANGES=$(codify_run_shell 'cd /workspace && git status --porcelain' || true)
 if [ -n "$CHANGES" ]; then

@@ -584,6 +584,10 @@ def test_pi_adapter_propagates_worker_privilege_drop_to_runner():
     content = ADAPTER.read_text(encoding="utf-8")
     assert 'CODIFY_PI_RUN_AS="${CODIFY_PI_RUN_AS:-${CODIFY_RUN_AS:-}}" \\' in content
     assert 'CODIFY_PI_CLI_HOME="${CODIFY_PI_CLI_HOME:-/home/codify}"' in content
+    assert (
+        'chown -R "${CODIFY_RUN_UID:-1000}:${CODIFY_RUN_GID:-1000}" '
+        '"$(dirname "${models_file}")"' in content
+    )
     assert 'HOME="${CODIFY_PI_CLI_HOME:-/home/codify}"' in (
         (REPO_ROOT / "deploy/worker-entrypoint/legacy/pi-run.sh").read_text(encoding="utf-8")
     )
