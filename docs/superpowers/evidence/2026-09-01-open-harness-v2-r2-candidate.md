@@ -28,6 +28,9 @@
 - Codex Task `173` 使用 Profile 4、Bundle `120`、`openrouter-minimax-responses` 的 `openai_responses`，真实执行成功并完成 canonical/archive/usage/GitLab delivery：input `66,400`、output `542`，archive `6,610` bytes，commit `9cfe6f0796bdfc8fb836e4517b749fe6afbea261`。同 Provider 的 Codex Task `172` 因 OpenCode Zen 真实 `429` 失败，原样保留，不能作为成功。
 - Claude Task `174` 使用 `openrouter-minimax-anthropic` / `minimax/minimax-m3:free`，Task `175` 使用 `openrouter-glm52-anthropic` / `z-ai/glm-5.2:free`；两条真实 `anthropic_messages` 请求均返回 `404 model_not_found`，token 为零且没有代码提交。它们证明了当前 Provider access/capacity 的真实失败分类，但没有关闭 Claude 成功 conformance。已知受限的 OpenCode Zen Provider 没有重复消耗，也没有用不兼容协议冒充 Claude 成功。
 - 当前 Profile 4 的 Claude Task `186` 又在 Claude Bundle `121` 上复核了同一失败边界：Provider 11（`openrouter-minimax-anthropic` / `minimax/minimax-m3:free`）、Fresh session、attempt `task-186-attempt-1-64a1bde06c84`，`codify.worker.event/v2` seq `1–7` 以唯一 `run.failed` 结束，Adapter `1.0.1`、CLI `2.1.153`，runtime archive `4,144` bytes，usage input/output 均为 `0`，无 commit；CLI 返回 `404 / model_not_found`（model may not exist or may not be accessible）。该样本把失败分类推进到当前 Claude candidate，但仍不能替代兼容 Provider 的成功 conformance。
+- 修正 Provider-11 的 endpoint 前，配置页编辑会因为同时提交 `openai_compatible + anthropic_messages` 却遗漏已有的 `provider_driver=openrouter` 而返回 `422`；提交 `4642ad60` 让编辑表单保留该 driver。随后通过 UI 将 Provider-11 的根地址保存为 `https://openrouter.ai/api`，保留 model `minimax/minimax-m3:free`、protocol `anthropic_messages` 和 `provider_driver=openrouter`。
+- 当前 Profile 4 的 Claude Task `187` 在该修正配置上完成了真实成功链路：Provider 11、Fresh session、Bundle `121`、attempt `task-187-attempt-1-e42c7e95c99a`，projected namespace `claude-26dcac44aab5d23b`，session `8a1e8896-0536-48ee-b3c6-569b0781f3b6`。任务表快照记录 `base_url=https://openrouter.ai/api`、`model_protocol=anthropic_messages`；canonical receipts seq `1–15` 连续，唯一终态为 `run.completed`，control state closed；runtime archive `6,421` bytes，SHA-256 `b9924bcbfaead8001c7f1ef8ba40504f55d8a230a8fd1c9b8711392cbbc6e934`，`codify.worker.result/v2`、Adapter `1.0.1`、CLI `2.1.153`，usage input `4,284` / output `244` / total `4,528`，delivery validation `ok=true`，commit `4c2b2a0472352bcf5d587645de2e9697d802878b`，仅新增 `r2-claude-anthropic-root-20260901.txt`。任务页显示 `Completed`、`Fresh session`、Claude 和 Provider-11，Worker 容器随后已清理。
+- Task `186` 的失败与 Task `187` 的成功共同证明了当前 Claude candidate 的真实 failure/success 分类和 endpoint 根路径修正效果；它们尚未关闭 Claude 的 continue、取消/timeout 以及完整适用生命周期矩阵。
 
 ## Pi command/recovery boundary
 
@@ -63,5 +66,5 @@ backend/.venv/bin/python -m pytest -q \
 ## Current R2 boundary
 
 - 已补齐：OpenCode `openai_chat_completions` 与 `openai_responses` 的当前 Bundle 成功链路、task-private namespace/config 隔离、Codex 当前 `openai_responses` 成功链路，以及当前 Pi Bundle 的正常运行、`openai_responses` 成功、控制端点启动、command delivery/cancel、Worker 缺失后的 live rejection/recovery 和 dispatcher crash-recovery unknown outcome。
-- 未关闭：Claude `anthropic_messages` 当前兼容 Provider 的成功链路（Task `186` 的 `404 / model_not_found` 失败已归档）；适用协议矩阵的完整当前-candidate success/failure 逐行收口。
+- 未关闭：Claude `anthropic_messages` 的 continue、取消/timeout 及完整适用生命周期矩阵；Task `186` 的 `404 / model_not_found` 失败与 Task `187` 的 endpoint 修正后成功均已归档，但适用协议矩阵的完整当前-candidate success/failure 逐行收口仍未完成。
 - R3 正式 20-task benchmark、R4 L5 发布评审和 R5 L6 hard cut 均未开始；本文件中的 exploratory/debug Task 不计入 benchmark cohort。
