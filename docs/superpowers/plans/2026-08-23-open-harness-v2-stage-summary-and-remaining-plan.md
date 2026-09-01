@@ -171,7 +171,13 @@ R2 本轮已完成以下闭环项：
   Issue `60` 均在 `tool.started(sleep 180)` 后由临时 `60s` runner timeout 产生
   `harness.failed(timeout)` → `worker.finalization(exit_code=143)` → `run.failed(timeout)`，archive 和
   container 清理成立；随后将全局 `task_timeout` 恢复为 `1800s` 并确认队列为空；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)。
-- [ ] 当前 R3 登记册剩余场景 11–20；场景 09 的 OpenCode 半边仍需外部 fixture 恢复后补跑；
+- [ ] 已完成场景 11 的 Pi compaction/recovery 证据：正式 Task `251` 产生 5 个 `context.compacted` 后以
+  唯一 `run.failed` 收敛，同一 Issue 的 Task `252` 完成 post-compaction marker delivery；OpenCode Task
+  `253` 产生 41/41 tool 和 4 次 retry，但没有 compaction，最终为 `engine_error: unknown certificate
+  verification error`，因此场景 11 登记为 `blocked_external_fixture`，不把 Pi 半边追认为完整通过；详见
+  [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
+- [ ] 当前 R3 登记册的未执行场景为 12–20；场景 09 和 11 的 OpenCode 半边仍需在不改变冻结 Provider
+  的前提下恢复外部 fixture 后补跑；
 - [ ] 在冻结 cohort 上分别执行 Pi 与 OpenCode 的 20 个同场景样本（需要 fresh/continue 或
   failure→delivery 的场景按一个场景登记多个 Task）；
 - 每个样本记录验收结论、failure taxonomy、耗时、token、工具调用、archive 和 delivery；修复后可重跑，
