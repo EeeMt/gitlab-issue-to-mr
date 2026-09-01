@@ -154,7 +154,11 @@ R2 本轮已完成以下闭环项：
   `225` / Issue `45`）：两边都记录了同一测试的初始失败与成功重跑，并最终只交付 `r3-s06.py`、
   `r3-s06_test.py`；OpenCode 首轮 Task `224` 的真实 `permission.asked` / `sandbox_error` 失败保留。由于
   `d26971ec`、`796fe051` 先后影响交付清理与 OpenCode Task-local scratch 权限，以上是按源码影响面追加的
-  post-fix candidate evidence，不静默替换原始 candidate 记录；当前 R3 登记册剩余场景 07–20；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)。
+  post-fix candidate evidence，不静默替换原始 candidate 记录；当时 R3 登记册剩余场景 07–20；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)。
+- [x] 已完成场景 07 的无改动配对：Pi Task `232` / Issue `51` 与 OpenCode Task `233` / Issue `52` 均为
+  `execute` + `require_changes=false`，只读检查后以 canonical `run.completed(success=true)` 收敛，
+  delivery/finalization 均为 `0/0` 且远端 workspace clean；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)。
+- [ ] 当前 R3 登记册剩余场景 08–20；
 - [ ] 在冻结 cohort 上分别执行 Pi 与 OpenCode 的 20 个同场景样本（需要 fresh/continue 或
   failure→delivery 的场景按一个场景登记多个 Task）；
 - 每个样本记录验收结论、failure taxonomy、耗时、token、工具调用、archive 和 delivery；修复后可重跑，
