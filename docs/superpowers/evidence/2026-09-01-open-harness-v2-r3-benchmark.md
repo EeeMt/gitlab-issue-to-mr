@@ -52,6 +52,26 @@ tool 事件，但随后长期没有新的 Harness 事件，人工取消后以 `h
   `07125d84adebf434d7c30a0a7a4b578a959210ac38d57d9e840223be906277ee` / 10,945 B；MR !23 无 commit；
   container 已清理。
 
+### Scenario 06 source-change rerun and failure-to-delivery lineage
+
+场景 06 的原始 cohort candidate 是 Bundle `123/124`。随后源码影响了 Worker identity、交付前缓存清理和
+OpenCode 的 Task-local scratch 权限，因此按影响面保留旧失败并追加 post-fix rerun；这些记录不替换前面的
+benchmark 样本，也不把单个 `completed` 状态当作人工验收。Profile `4` 在
+`2026-09-01 08:26:12.303309` 重新 Verify，generation `49`，之后 OpenCode 使用 Bundle `131`。
+
+| Task | Candidate / attempt / usage | Canonical and delivery | Manual acceptance |
+|---|---|---|---|
+| `#223 / Issue #44` | Pi Bundle `129` (`a73fd27383944edc39d98d478c4dce992b7c5efcf74a152750ab1be3569ee061`)；`task-223-attempt-1-d824ebd9ad50`；`execute/fresh`；160.856s；in/cached/out/reasoning `51/8,081/501/null`；archive `65b4d8725742b5b11bf6161d7537cf75fb5232f74f30c50b9ad6d02bc7308b36` / 43,055 B | seq `1–216`，唯一 terminal `run.completed(success=true)`；15/15 tool；`delivery.completed` seq 214、`worker.finalization` seq 215，commit `aa78decde78cdaeb3f325bae6d53a88b0664b262`；MR !40；container 已清理 | 初始 3 个断言失败，修复后同一测试 10/10 通过；最终 branch clean，HEAD 只含 `r3-s06.py` 与 `r3-s06_test.py`，无 `__pycache__`。 |
+| `#224 / Issue #45` | OpenCode Bundle `130` (`51ef78a43cc0afecf052c6723ee8d293f69894788fc04d95b7070c835cabcef3`)；`task-224-attempt-1-5bbf80d28b2e`；`execute/fresh`；140.669s；in/cached/out/reasoning `0/0/0/0`；archive `efcbe4addd7e43b387c9d648511c43425413e1338d74a2c0ac4020e53fb91456` / 24,921 B | seq `1–122`；5 tool start / 4 tool complete；`harness.failed` seq 120、`worker.finalization` seq 121、唯一 terminal `run.failed` seq 122；failure `sandbox_error`（`permission.asked` 要求交互响应）；无 commit；MR !41 初始 draft；container 已清理 | 保留为真实 OpenCode permission 边界失败，不计入成功配对。 |
+| `#225 / Issue #45` | OpenCode Bundle `131` (`dc75781511e5770edcc5215beafddde34247f1b2c5d2b5254940ea6abe85051c`)；`task-225-attempt-1-7aeae9f16c25`；`execute/fresh`；173.361s；in/cached/out/reasoning `176/13,188/415/0`；archive `1b974417a5e84a337bc39219329b680e5aeb8f3c8e59db4900fe038a4e90ed12` / 57,684 B | seq `1–375`，唯一 terminal `run.completed(success=true)`；15/15 tool；`delivery.completed` seq 373、`worker.finalization` seq 374，commit `7888ef59af89a740df70c054cf3070002c4523c3`；MR !41 ready；container 已清理 | 初始 3 个断言失败，修复后同一测试 9/9 通过；清理两项 `__pycache__` 后最终 branch clean，HEAD 只含 `r3-s06.py` 与 `r3-s06_test.py`。 |
+
+`#224 → #225` 是同一 Issue 内的 failure→delivery lineage：失败样本的 workspace 残留被 retry 识别并在
+交付前清理，最终只发布两个目标 fixture 文件。`#225` 的 Bundle `131` 包含 commit `796fe051` 对
+OpenCode `external_directory` 的最小规则修复（仅 `/tmp/**` allow，其他外部路径仍为 ask/fail-closed）；
+此前共享交付修复由 `d26971ec` 验证。Pi `#223` 与 OpenCode `#225` 使用相同 Host/Profile/Provider/语义
+prompt，各自使用 Harness-specific Bundle；因此这一对是源码影响面下的 post-fix 场景 06 配对，而不是
+对原始 `123/124` candidate 的静默改写。
+
 ## Acceptance and evidence contract
 
 每个 Task 完成或进入 terminal 后，登记以下字段：Task/Issue ID、Harness、Bundle/attempt、task mode、
@@ -76,7 +96,7 @@ Task ID 留空表示尚未执行；正式执行过程中只追加结果，不改
 | 3 | `freeform` 模式：完成一个最小、可验收的单文件变更并 delivery | `#205 / Issue #29`；Bundle `123`；attempt `task-205-attempt-1-c7362711a113`；`freeform/fresh`；output session `01a05b86-3118-78b3-ba66-c19d931ec050`；111.955s；in 149 / cached 1,713 / out 78 / reasoning null；3 对 tool 事件；seq 1–68，唯一 terminal `run.completed(success=true)`；1/0，commit `116ab830ebeb7646b4141f26885ae2c2c79707f4`；archive `21dd54c69bd989872e77693ad6343f4e16705ff1fcabb173c33f07449886aae3` / 8,988 B；MR !25 `in_review`；container 已清理 | `#206 / Issue #30`；Bundle `124`；attempt `task-206-attempt-1-7ffd7bbe93e5`；`freeform/fresh`；output session `ses_fa4783e89ffeYzWQqnA8E0jzr9`；128.508s；in 134 / cached 8,044 / out 32 / reasoning 0；4 对 tool 事件；seq 1–54，唯一 terminal `run.completed(success=true)`；1/0，commit `6292751de16e27ed62230b9bf8b9aec310fd5972`；archive `bbb1b1e8768a513e7fe91de6bdb1def89820c8af5053d98dbb4c4a6edb93c6bf` / 13,015 B；MR !26 `in_review`；container 已清理 | pass（两边均创建并验证唯一 `r3-s03-marker.txt`，内容为 `r3-s03-ok`，无其他文件修改，并成功 delivery） |
 | 4 | 工具成功：执行只读 shell 检查后完成标记文件；tool start/complete 成对出现 | `#207 / Issue #31`；Bundle `123`；attempt `task-207-attempt-1-d9d2c17503c0`；`execute/fresh`；output session `01a05b8f-0f1b-76e1-867d-0c79ba6048db`；167.550s；in 228 / cached 3,149 / out 526 / reasoning null；8 对 tool 事件；seq 1–306，唯一 terminal `run.completed(success=true)`；1/0，commit `0eeaae5551d76a83ed1e15e817525cd564ddd8f0`；archive `d6f7621e3937f4e02b83ed3f6056862391ba88c2b887b90fc986956b1d1c2fc3` / 29,347 B；MR !27 `in_review`；container 已清理 | `#208 / Issue #32`；Bundle `124`；attempt `task-208-attempt-1-8d9d3a7d9196`；`execute/fresh`；output session `ses_fa47002eeffeD1G0szjhjLV1OE`；166.149s；in 133 / cached 10,512 / out 314 / reasoning 0；10 对 tool 事件；seq 1–283，唯一 terminal `run.completed(success=true)`；1/0，commit `a98fccffdef1ec1834a0969487deaab45ba89c5d`；archive `f986a96382e00e2c14d886d22806c46c76e75f11c71029720e820e5b0d409089` / 39,605 B；MR !28 `in_review`；container 已清理 | pass（两边均先完成成功的只读 shell 检查，再创建并验证唯一 `r3-s04-marker.txt`，并成功 delivery；#207/#208 的 tool start/complete 分别为 8/8、10/10，期间的无害路径探测错误保留在 TaskLog，不影响 terminal） |
 | 5 | 工具失败：执行一个明确预期失败的无害命令，继续完成标记文件；失败不污染 terminal | — | — | pending |
-| 6 | 测试修复：建立/识别一个失败测试，修复后重新运行并交付通过结果 | — | — | pending |
+| 6 | 测试修复：建立/识别一个失败测试，修复后重新运行并交付通过结果 | `#223 / Issue #44`；Bundle `129`；attempt `task-223-attempt-1-d824ebd9ad50`；`execute/fresh`；seq `1–216`；15/15 tool；archive 43,055 B；commit `aa78dec…`；MR !40 | `#225 / Issue #45`；首轮 `#224` 为保留的 OpenCode `permission.asked` / `sandbox_error` 失败（Bundle `130`，seq `1–122`），retry Bundle `131`；attempt `task-225-attempt-1-7aeae9f16c25`；`execute/fresh`；seq `1–375`；15/15 tool；archive 57,684 B；commit `7888ef5…`；MR !41 ready | pass（两边均记录初始失败与同一测试成功重跑；最终只含两个 fixture 文件且无 Python cache；#224 失败证据保留） |
 | 7 | 无改动：`execute` + `require_changes=false`，只读检查，完成且无 commit/diff | — | — | pending |
 | 8 | resume/continue：fresh seed 后在同一 Issue/lineage continue，两个 Task 均可追溯 | — | — | pending |
 | 9 | 稳定态取消：确认 attempt/container/tool 已初始化后取消；`cancelled`、SIGTERM、清理 | — | — | pending |
@@ -103,7 +123,9 @@ Task ID 追溯，不把凭据写入文档。
 | 2 | `#202 / Issue #26` — completed；Pi Bundle `123`；1/0；443.414s；in 95 / cached 2,638 / out 199；7 对 tool；seq 1–194；archive 19,482 B；MR !22；commit `2c110cb5…` | `#204 / Issue #28` — completed；OpenCode Bundle `124`；1/0；154.833s；in 114 / cached 8,684 / out 159；7 对 tool；seq 1–143；archive 22,931 B；MR !24；commit `c926b7ec…`；`#203 / Issue #27` 为保留的首次停滞取消失败 | frozen Provider `7 / openrouter-free`, `execute/fresh`, same semantic marker prompt | pass（#202/#204 均为唯一 marker 文件并成功 delivery；#202 有 1 次 `provider.retry`；#203 canonical 失败链路保留，不计入成功配对） |
 | 3 | `#205 / Issue #29` — completed；Pi Bundle `123`；1/0；111.955s；in 149 / cached 1,713 / out 78；3 对 tool；seq 1–68；archive 8,988 B；MR !25；commit `116ab830…` | `#206 / Issue #30` — completed；OpenCode Bundle `124`；1/0；128.508s；in 134 / cached 8,044 / out 32；4 对 tool；seq 1–54；archive 13,015 B；MR !26；commit `6292751d…` | frozen Provider `7 / openrouter-free`, `freeform/fresh`, same semantic marker prompt | pass（两边均完成唯一 marker 文件验收和 delivery） |
 | 4 | `#207 / Issue #31` — completed；Pi Bundle `123`；1/0；167.550s；in 228 / cached 3,149 / out 526；8 对 tool（8/8）；seq 1–306；archive 29,347 B；MR !27；commit `0eeaae55…` | `#208 / Issue #32` — completed；OpenCode Bundle `124`；1/0；166.149s；in 133 / cached 10,512 / out 314；10 对 tool（10/10）；seq 1–283；archive 39,605 B；MR !28；commit `a98fccff…` | frozen Provider `7 / openrouter-free`, `execute/fresh`, same semantic tool-success prompt | pass（两边都有成功只读检查和 marker delivery；观察到的路径探测错误不影响 tool pairing/terminal，详情见 TaskLog） |
-| 5–20 | pending | pending | frozen above | cohort execution not complete |
+| 5 | — | — | frozen Provider `7 / openrouter-free`, `execute/fresh`, same semantic tool-failure prompt | pending |
+| 6 | `#223 / Issue #44` — completed；Pi Bundle `129`；1/0；160.856s；in 51 / cached 8,081 / out 501；15 对 tool（15/15）；seq 1–216；archive 43,055 B；MR !40；commit `aa78dec…` | `#225 / Issue #45` — completed；OpenCode Bundle `131`；1/0；173.361s；in 176 / cached 13,188 / out 415；15 对 tool（15/15）；seq 1–375；archive 57,684 B；MR !41；commit `7888ef5…`；`#224` 为保留的首轮 sandbox_error 失败 | frozen Provider `7 / openrouter-free`, `execute/fresh`, same semantic test-repair prompt | pass（failure→delivery 顺序可追溯；两边最终均只含两个 fixture 文件；OpenCode 的 `/tmp/**` 权限修复和交付前 Python cache 清理均有真实 Host 证据） |
+| 7–20 | pending | pending | frozen above | cohort execution not complete |
 
 ## Current stop boundary
 
