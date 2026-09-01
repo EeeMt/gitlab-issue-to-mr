@@ -776,7 +776,8 @@ def test_pi_verify_runtime_enforces_pinned_cli_version(tmp_path):
 
 def test_pi_continuation_raw_stream_maps_model_resolved(tmp_path):
     # Real pi 0.84.2 continuation wire (docs/harness-probes/v2/pi/continuation.raw.jsonl):
-    # the runner sends ``new_session`` with ``parentSessionId`` to continue a task;
+    # the runner resolves the lineage ID to a session file and sends
+    # new_session with parentSession to continue a task;
     # pi accepts it (success:true) and the following get_state returns the new child
     # session, from which the translator captures model + session_id. The new_session
     # ACK itself carries no canonical event and a handshake-only stream (no model
@@ -816,16 +817,49 @@ def test_pi_real_session_id_is_retained_for_result_after_sanitization(tmp_path):
     assert real_session_id not in raw
 
 
+def test_pi_real_session_id_tracks_active_session_after_startup_state(tmp_path):
+    runtime_dir = tmp_path / "active-session"
+    runtime_dir.mkdir()
+    startup_session_id = "123e4567-e89b-12d3-a456-426614174000"
+    active_session_id = "123e4567-e89b-12d3-a456-426614174001"
+    records = _probe_records("success")
+    records[0]["data"]["sessionId"] = startup_session_id
+    records.insert(
+        1,
+        {
+            "id": 2,
+            "type": "response",
+            "command": "new_session",
+            "success": True,
+            "data": {"cancelled": False},
+        },
+    )
+    active_state = json.loads(json.dumps(records[0]))
+    active_state["id"] = 3
+    active_state["data"]["sessionId"] = active_session_id
+    records.insert(2, active_state)
+
+    _emit(runtime_dir, "run.started")
+    _translate(runtime_dir, records)
+
+    result = json.loads((runtime_dir / "harness-result.json").read_text(encoding="utf-8"))
+    assert result["session_id"] == active_session_id
+    completed = next(event for event in _events(runtime_dir) if event["type"] == "harness.completed")
+    assert completed["payload"]["session_id"] == active_session_id
+
+
 def test_pi_runner_handshake_uses_new_session_not_resume():
     # Finding 1 regression guard: real pi 0.84.2 rejects the old handshake frame
-    # ``{"type":"resume","sessionId":...}`` (``Unknown command: resume``); the pi
-    # runner must request sessions via ``new_session`` (+ optional
-    # ``parentSessionId`` for a continued task), then keep get_state -> prompt.
+    # The old resume command is rejected by pi; the runner must request
+    # sessions via new_session (+ optional parentSession path for a continued
+    # task), then keep get_state -> prompt.
     owner = (REPO_ROOT / "deploy/worker-entrypoint/harness/adapters/pi_owner.py").read_text(encoding="utf-8")
     assert '"type":"resume"' not in owner
-    # Continuations reference the parent; first sessions use the bare frame.
-    assert "parentSessionId" in owner
-    assert '("new_session", None' in owner
+    # Continuations reference the persisted parent path; missing parents fail
+    # closed instead of silently creating a fresh session.
+    assert '"parentSession"' in owner
+    assert "parentSessionId" not in owner
+    assert '"new_session",' in owner
     # get_state / prompt frame sequence is preserved by the single owner.
     assert '("get_state", None' in owner
     assert '("prompt", self.prompt' in owner
@@ -841,6 +875,7 @@ def test_pi_runner_pins_codify_provider_and_snapshot_model():
     # $HOME/.pi/agent/models.json.
     runner = (REPO_ROOT / "deploy/worker-entrypoint/legacy/pi-run.sh").read_text(encoding="utf-8")
     assert "--mode rpc --provider codify" in runner
+    assert '--session-dir "${PI_NATIVE_SESSION_DIR}"' in runner
     assert "--model \"${PI_MODEL_RPC}\"" in runner
     # The model resolves from the protocol-specific Snapshot env selected by
     # pi.sh prepare_config; a stale harness-specific variable is ignored.

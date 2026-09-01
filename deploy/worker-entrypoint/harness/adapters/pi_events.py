@@ -163,20 +163,29 @@ _REAL_SESSION_ID: str = ""
 
 
 def _capture_real_session_id(raw_text: str) -> None:
-    """Keep Pi's unmasked session id before sanitization so resume stays possible."""
+    """Keep the latest active Pi session id before sanitization.
+
+    Pi emits an unsolicited startup ``get_state`` before the owner's
+    ``new_session`` handshake.  That state points at a throwaway session file;
+    the following ``get_state`` is the session actually used by the turn.  Do
+    not keep only the first ID, or the next task cannot resolve its parent file.
+    """
     global _REAL_SESSION_ID
-    if _REAL_SESSION_ID:
-        return
     try:
         record = json.loads(raw_text)
     except json.JSONDecodeError:
         return
-    data = record.get("data") if isinstance(record, dict) else None
+    if (
+        not isinstance(record, dict)
+        or record.get("type") != "response"
+        or record.get("command") != "get_state"
+        or not record.get("success")
+    ):
+        return
+    data = record.get("data")
     session_id = (
         data.get("sessionId")
         if isinstance(data, dict)
-        else record.get("sessionId")
-        if isinstance(record, dict)
         else None
     )
     if isinstance(session_id, str) and session_id and "<" not in session_id:

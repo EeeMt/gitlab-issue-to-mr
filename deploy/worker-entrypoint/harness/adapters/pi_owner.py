@@ -46,7 +46,7 @@ class PiOwner:
     def __init__(
         self, command: list[str], runtime_dir: Path, socket_path: Path, prompt: str | None = None,
         parent_session: str | None = None, translator: Path | None = None, task_id: int | None = None,
-        attempt_id: str | None = None,
+        attempt_id: str | None = None, session_dir: Path | None = None,
     ):
         self.command = command
         self.runtime_dir = runtime_dir
@@ -59,7 +59,8 @@ class PiOwner:
         self.closed = False
         self.dispatch_lock = asyncio.Lock()
         self.prompt = prompt
-        self.parent_session = parent_session
+        self.parent_session = parent_session.strip() if isinstance(parent_session, str) else None
+        self.session_dir = session_dir
         self.settled = asyncio.Event()
         self.close_requested = asyncio.Event()
         self.raw_events = runtime_dir / "harness-events" / "pi.jsonl"
@@ -147,7 +148,34 @@ class PiOwner:
         except OSError as exc:
             raise RuntimeError(f"cannot bind Pi control socket {self.socket_path}: {exc}") from exc
 
+    def _resolve_parent_session_path(self) -> Path | None:
+        """Resolve the persisted session file required by Pi's native RPC.
+
+        Codify stores a session ID in the lineage row, while Pi's new_session
+        RPC expects the parent session path. Passing the ID under an unknown
+        field (or passing a missing path) makes Pi create a fresh session,
+        which silently violates continue semantics.
+        """
+        if not self.parent_session:
+            return None
+        if self.session_dir is None:
+            raise RuntimeError("Pi parent session storage is not configured")
+        if not self.session_dir.is_dir():
+            raise RuntimeError("Pi parent session is not available")
+
+        suffix = f"_{self.parent_session}"
+        try:
+            for candidate in self.session_dir.rglob("*.jsonl"):
+                if candidate.is_file() and candidate.stem.endswith(suffix):
+                    return candidate
+        except OSError as exc:
+            raise RuntimeError("Could not inspect Pi parent session storage") from exc
+        raise RuntimeError("Pi parent session is not available")
+
     async def start(self, *, start_control_server: bool = False) -> None:
+        parent_session_path = (
+            self._resolve_parent_session_path() if self.prompt is not None else None
+        )
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
         self.socket_path.unlink(missing_ok=True)
         self.process = await asyncio.create_subprocess_exec(
@@ -182,7 +210,11 @@ class PiOwner:
             await self._start_server()
         if self.prompt is not None:
             for command, message, extra in (
-                ("new_session", None, {"parentSessionId": self.parent_session} if self.parent_session else {}),
+                (
+                    "new_session",
+                    None,
+                    {"parentSession": str(parent_session_path)} if parent_session_path else {},
+                ),
                 ("get_state", None, {}),
                 ("prompt", self.prompt, {}),
             ):
@@ -384,8 +416,15 @@ class PiOwner:
 async def _main(args) -> None:
     prompt = Path(args.prompt_file).read_text(encoding="utf-8") if args.prompt_file else None
     owner = PiOwner(
-        shlex.split(args.command), Path(args.runtime_dir), Path(args.socket), prompt, args.parent_session,
-        Path(args.translator) if args.translator else None, args.task_id, args.attempt_id,
+        shlex.split(args.command),
+        Path(args.runtime_dir),
+        Path(args.socket),
+        prompt=prompt,
+        parent_session=args.parent_session,
+        translator=Path(args.translator) if args.translator else None,
+        task_id=args.task_id,
+        attempt_id=args.attempt_id,
+        session_dir=Path(args.session_dir) if args.session_dir else None,
     )
     server: asyncio.Task | None = None
     try:
@@ -452,6 +491,7 @@ if __name__ == "__main__":
     parser.add_argument("--command", required=True)
     parser.add_argument("--prompt-file")
     parser.add_argument("--parent-session")
+    parser.add_argument("--session-dir")
     parser.add_argument("--translator")
     parser.add_argument("--task-id", type=int)
     parser.add_argument("--attempt-id")

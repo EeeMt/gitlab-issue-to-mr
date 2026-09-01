@@ -9,7 +9,7 @@
 | 场景 | fixture | 结果 | 关键证据 |
 |---|---|---|---|
 | init / version / clean shutdown / fresh session | `success.raw.jsonl` | ✅ | `get_state` 返回真实模型/会话；`prompt success:true` 仅代表**接口 ACK**（非模型消费）；`agent_settled` 是真正的 settled 终态；流末干净关闭（无残留进程） |
-| fresh 会话 / continue 会话 | `success.raw.jsonl` · `continuation.raw.jsonl` | ✅ | 首会话发无 parent 的 `new_session` → `get_state` 反映 `messageCount:0`；续会话（`CODIFY_RESUME_SESSION`）发 `new_session`+`parentSessionId` → `get_state` 返回新子会话；真实 0.84.2 拒绝旧 `type:resume`（`Unknown command: resume`） |
+| fresh 会话 / continue 会话 | `success.raw.jsonl` · `continuation.raw.jsonl` | ✅ | 首会话发无 parent 的 `new_session` → `get_state` 反映 `messageCount:0`；续会话（`CODIFY_RESUME_SESSION`）先解析为持久化 session 文件，再发 `new_session`+`parentSession` 路径 → `get_state` 返回新子会话；缺失 parent 在 Adapter 侧 fail-closed；真实 0.84.2 拒绝旧 `type:resume`（`Unknown command: resume`） |
 | steer（工具调用后、下次模型调用前送达） | `steer.raw.jsonl` | ✅ | `queue_update` 的 `steering` 数组列出排队消息；**`steer success:true` 为原生 ACK（`delivered`），无 command_id**；steer 在 turn 边界送达，队列随后排空；两轮 turn 均完成 |
 | follow-up（当前工作结束后继续处理） | `followup.raw.jsonl` | ✅ | `follow_up success:true` ACK；`queue_update.followUp` 记录排队文本；follow_up 成为第二轮独立 user turn，代理按新指令输出；`followUpMode: one-at-a-time` 生效 |
 | settled / closing / drain 竞争 | `success/steer/followup` | ✅ | `agent_settled` 是 attempt 级 settled 判定；settled 前队列已排空 |
@@ -23,7 +23,7 @@
 4. **命令类型**：`steer`（工具调用后、下一模型调用前送达）、`follow_up`（当前工作结束后继续）。与 §6.3 首发命令类型一致。
 5. **Pi 无显式协议版本号**：RPC 事件不带 schema/version 字段；协议版本由 Pi CLI 版本 (`0.84.2`) 隐式承载，V2 固定该版本。
 6. **`followUpMode: one-at-a-time`** 与 `steeringMode: one-at-a-time` 为 get_state 暴露的控制面状态，映射到 V2 command 队列约束。
-7. **续会话帧是 `new_session`+`parentSessionId`，不是 `resume`。** 真实 0.84.2 对 `{"id":1,"type":"resume","sessionId":...}` 返回 `{"success":false,"error":"Unknown command: resume"}`；对 `{"id":1,"type":"new_session","parentSessionId":...}` 返回 `success:true`，随后 `get_state` 返回新的子会话（新 sessionFile）。首会话则为无 parent 的裸 `new_session`。
+7. **续会话帧是 `new_session`+`parentSession` 路径，不是 `resume` 或 `parentSessionId`。** 真实 0.84.2 对 `{"id":1,"type":"resume","sessionId":...}` 返回 `{"success":false,"error":"Unknown command: resume"}`；对 `{"id":1,"type":"new_session","parentSession":"/path/to/parent-session.jsonl"}` 返回 `success:true`，随后 `get_state` 返回新的子会话（新 sessionFile）。Codify 从 lineage 保存的 session ID 精确解析该文件；文件不存在时在启动前 fail-closed。首会话则为无 parent 的裸 `new_session`。
 
 ## 事件类型清单（Observed）
 

@@ -10,8 +10,9 @@ CODIFY_PI_BRIDGE="${CODIFY_PI_BRIDGE:-${CODIFY_ORCHESTRATION_DIR}/worker-entrypo
 PROMPT_FILE="${PROMPT_FILE:-${CODIFY_HARNESS_PROMPT_FILE:-}}"
 PI_SESSION_DIR="${PI_SESSION_DIR:-${CODIFY_RUNTIME_DIR}/pi-session}"
 CODIFY_RESUME_SESSION="${CODIFY_RESUME_SESSION:-${RESUME_SESSION:-}}"
+PI_NATIVE_SESSION_DIR="${PI_HOME:-${CODIFY_RUNTIME_DIR}/pi-home}/sessions"
 
-mkdir -p "$(dirname "${CODIFY_PI_RAW_EVENT_JSONL}")" "${PI_SESSION_DIR}"
+mkdir -p "$(dirname "${CODIFY_PI_RAW_EVENT_JSONL}")" "${PI_SESSION_DIR}" "${PI_NATIVE_SESSION_DIR}"
 if [ -z "${PROMPT_FILE}" ] || [ ! -s "${PROMPT_FILE}" ]; then
     echo "Pi prompt file is missing: ${PROMPT_FILE}" >&2
     exit 1
@@ -28,7 +29,7 @@ case "${CODIFY_MODEL_PROTOCOL:-anthropic_messages}" in
         exit 1
         ;;
 esac
-PI_COMMAND=("${CODIFY_PI_BIN}" --mode rpc --provider codify)
+PI_COMMAND=("${CODIFY_PI_BIN}" --mode rpc --provider codify --session-dir "${PI_NATIVE_SESSION_DIR}")
 if [ -n "${PI_MODEL_RPC}" ]; then
     PI_COMMAND+=(--model "${PI_MODEL_RPC}")
 fi
@@ -60,6 +61,7 @@ run_pi_owner() {
         --task-id "${TASK_ID}" \
         --attempt-id "${CODIFY_ATTEMPT_ID:?CODIFY_ATTEMPT_ID is required for Pi control}" \
         --runtime-dir "${CODIFY_RUNTIME_DIR}" \
+        --session-dir "${PI_NATIVE_SESSION_DIR}" \
         --command "${PI_OWNER_COMMAND}" \
         --translator "${CODIFY_PI_EVENT_TRANSLATOR}" \
         --prompt-file "${PROMPT_FILE}" ${CODIFY_PI_OWNER_NO_SOCKET:+--no-socket} "$@"

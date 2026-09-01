@@ -80,6 +80,67 @@ async def test_owner_get_state_is_a_real_pi_roundtrip(pi_owner, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_owner_rejects_missing_parent_session_before_start(pi_owner, tmp_path):
+    owner = pi_owner.PiOwner(
+        [sys.executable, "-c", "raise SystemExit(99)"],
+        tmp_path / "runtime",
+        tmp_path / "owner.sock",
+        prompt="initial prompt",
+        parent_session="01a05d3d-0000-7000-8000-000000000000",
+        session_dir=tmp_path / "sessions",
+    )
+
+    with pytest.raises(RuntimeError, match="parent session is not available"):
+        await owner.start()
+
+    assert owner.process is None
+
+
+@pytest.mark.asyncio
+async def test_owner_sends_parent_session_path_to_native_rpc(pi_owner, tmp_path):
+    session_id = "01a05d3d-0000-7000-8000-000000000000"
+    session_dir = tmp_path / "sessions"
+    session_dir.mkdir()
+    parent_path = session_dir / f"2026-09-01T00-00-00-000Z_{session_id}.jsonl"
+    parent_path.write_text(
+        '{"type":"session","version":3,"id":"%s"}\n' % session_id,
+        encoding="utf-8",
+    )
+    requests = tmp_path / "requests.jsonl"
+    fake_pi = tmp_path / "fake_pi.py"
+    fake_pi.write_text(
+        "import json, sys\n"
+        "path = sys.argv[1]\n"
+        "for line in sys.stdin:\n"
+        " request = json.loads(line)\n"
+        " with open(path, 'a', encoding='utf-8') as out: out.write(json.dumps(request) + '\\n')\n"
+        " response = {'id': request['id'], 'type': 'response', 'command': request['type'], 'success': True}\n"
+        " if request['type'] == 'get_state': response['data'] = {'sessionId': 'child', 'model': {}}\n"
+        " print(json.dumps(response), flush=True)\n",
+        encoding="utf-8",
+    )
+    owner = pi_owner.PiOwner(
+        [sys.executable, str(fake_pi), str(requests)],
+        tmp_path / "runtime",
+        tmp_path / "owner.sock",
+        prompt="initial prompt",
+        parent_session=session_id,
+        session_dir=session_dir,
+    )
+
+    try:
+        await owner.start()
+        native = [json.loads(line) for line in requests.read_text().splitlines()]
+        new_session = next(item for item in native if item["type"] == "new_session")
+        assert new_session["parentSession"] == str(parent_path)
+        assert "parentSessionId" not in new_session
+    finally:
+        if owner.process and owner.process.returncode is None:
+            owner.process.terminate()
+            await owner.process.wait()
+
+
+@pytest.mark.asyncio
 async def test_control_socket_is_available_during_initial_prompt(pi_owner, tmp_path):
     """The first prompt must not hide the command gate until it settles."""
     fake_pi = tmp_path / "fake_pi.py"

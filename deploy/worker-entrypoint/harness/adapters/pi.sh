@@ -86,7 +86,11 @@ pi_adapter_prepare_config() {
     else
         export PI_HOME="${CODIFY_RUNTIME_DIR}/pi-home"
     fi
-    mkdir -p "${PI_HOME}"
+    # pi-run.sh passes this directory explicitly through --session-dir. Pi
+    # does not use the application-specific PI_HOME variable for native
+    # session storage, so keeping the path explicit is part of the adapter
+    # contract rather than relying on the CLI subprocess HOME.
+    mkdir -p "${PI_HOME}/sessions"
     chown -R "${CODIFY_RUN_UID:-1000}:${CODIFY_RUN_GID:-1000}" "${PI_HOME}" 2>/dev/null || true
 
     # Export the Pi transport/model identity so events.py forms the correct V2
