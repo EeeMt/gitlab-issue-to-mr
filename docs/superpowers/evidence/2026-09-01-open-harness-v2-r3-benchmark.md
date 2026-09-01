@@ -437,10 +437,44 @@ Scenario 11 的追加失败/未触发证据，不覆盖前述失败样本：
 这组 alternate-provider 结果说明，即使有效文件读取使 cached input 达到 `68,894`，当前 Bundle/模型
 也未产生压缩事件；它既不能证明冻结 Provider `7` 的 compaction 可用，也不能替代正式失败证据。
 
+#### 2026-09-02 native compact route / session marker probe
+
+为排除“Task 进程拿不到 OpenCode session marker”这一运行时变量，在远端 Host 重新构建并重启
+backend/scheduler 后，Profile `4` Verify generation 更新为 `53`，新任务绑定 Bundle `138`，digest
+`3b53a1b2e5d2fc4cb85cfb461b041e43da6d064a38a0f88ee4c83cc54506341f`。该 Bundle 包含源码提交
+`a915fb70`：`opencode-session.id` 是非 secret 的 session ID，改为允许 Task 进程读取（`0644`），
+外层 adapter 仍在任务结束时清理 marker。Focused adapter suite 为 `72 passed`。
+
+OpenCode `1.18.19` 的本地 `/doc` 明确暴露 `POST /api/session/{sessionID}/compact`，返回契约包括
+`204/400/401/404/503`。在真实 Task 内使用 Task-local server 环境完成 native POST，并且只记录 HTTP
+状态，不记录 credential 或响应体：
+
+- `#296`（Provider `7`、旧 Bundle `137`）先以 `sleep` 保持 server 活跃，随后取消；外部无凭据请求得到的
+  `401` 是 OpenCode Server 自身的 Basic Auth，不属于 AI Provider authentication failure，故不计入场景 13。
+- `#297` 取消，原因是模型没有按验收要求把每个 chunk 的实际内容放入上下文；它不计入 compaction 证据。
+- `#298`（旧 Bundle `137`、Provider `7`）成功完成 marker/请求路径并记录真实
+  `compact_http_status=503`，但 canonical `context.compacted=0`，raw `session.compacted` 与
+  `session.next.compaction.ended` 均为 `0`；archive `task-298-runtime-archive.tar.gz` / `60,839 B`。
+- `#299` 使用已有 Provider `3 / opencode-minimax`，在进入 Harness 前真实返回 `rate_limited`（月度额度
+  限制）；没有 compact 请求，不能替代 Provider `7` 的 compaction 结果。
+- `#300` 使用新 Bundle `138` 和 Provider `7`；Task 进程已能读取 marker，并记录真实
+  `compact_http_status=503`。其首个 fixture shell 命令实际因遗漏 `> "$FIX"` 退出 `2`，因此不能声称
+  完成有效 fixture 读取；即使如此，后续 native POST 已到达 OpenCode，archive 的 canonical/raw
+  compaction 计数仍为 `0`，archive `task-300-runtime-archive.tar.gz` / `24,190 B`。
+- `#301` 使用已有 Provider `4 / opencode-luna`，在进入 Harness 前同样真实返回 `rate_limited`；没有
+  compact 请求。
+
+这组探针证明了 route 存在、marker 权限问题已排除，以及冻结 Provider `7` 在两次真实 native POST 中
+返回 `503`；它没有产生结构化 `context.compacted` / `session.compacted` / durable compaction event。
+由于该 POST 是 Task 内对 Server route 的外部控制请求，不会出现在 adapter 的 HTTP audit
+`session.compact` 操作中；验收仍以 TaskLog、raw OpenCode archive 和 canonical event 为准。Provider `3`
+与 `4` 的额度限制也没有提供可比的成功样本，因此不改变 Scenario 11 的 blocker。
+
 因此场景 11 登记为 `blocked_external_fixture`：Pi 半边已证明 compaction、唯一 terminal 和同 lineage
-recovery delivery；OpenCode `#253/#276` 的 TLS engine error 本轮未在 `#293/#295` 重现，但三次
-Provider 7 正式阈值重跑都没有可验证的 `context.compacted`，`#294` 还是 count-only 探针。后续只有在
-不改变冻结 Provider 的前提下获得可验证的 OpenCode compaction event/fixture，才能补跑并关闭该场景。
+recovery delivery；OpenCode `#253/#276` 的 TLS engine error 本轮未在 `#293/#295` 重现，
+`#293/#295` 和这次 `#298/#300` 都没有可验证的 `context.compacted`，`#294` 还是 count-only 探针。
+后续只有在不改变冻结 Provider 的前提下获得可验证的 OpenCode compaction event/fixture，才能补跑并关闭
+该场景；在 Provider 额度或外部 fixture 不变化前，不再叠加 alternate-provider 探针。
 
 ### Scenario 12 provider rate limit
 
@@ -478,8 +512,9 @@ rate-limit acceptance 已闭合；#250/#251 的真实分类证据保留为关联
 
 场景 13 只接受真实的 401 / `authentication_error`，不读取或修改 Provider secret，也不通过临时错误配置
 伪造认证失败。开发环境当前只读 Provider 元数据显示 Provider `3–12` 均为 enabled，没有专门的 401
-fixture；已有任务中的 `engine_error`、`protocol_error` 和 `rate_limited` 也不等价于认证失败。因此本场景
-登记为 `blocked_external_fixture`，待提供不改变冻结 Provider 的真实认证失败 fixture 后再补跑。
+fixture；本轮 #296 的无凭据 `401` 已确认是 OpenCode Server Basic Auth，不能冒充 Provider 401；#299/#301
+的 `rate_limited` 也不等价于认证失败。因此本场景登记为 `blocked_external_fixture`，待提供不改变冻结
+Provider 的真实认证失败 fixture 后再补跑。
 
 ### Scenario 14 network interruption / invalid session
 

@@ -183,6 +183,14 @@ R2 本轮已完成以下闭环项：
   `46/46` tool、seq `1–370`，cached input `68,894`，但 raw/canonical/Host 仍为 0 个
   `context.compacted`，不改变冻结 Provider `7` 的外部 fixture blocker；详见
   [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
+- [ ] 场景 11 的 native OpenCode compact route 探针已完成但未通过：源码提交 `a915fb70` 将 Task-local
+  session marker 调整为 Task 进程可读，Profile 4 generation `53` 生成 Bundle `138`；Provider `7` 的
+  `#298`（旧 Bundle `137`）与 `#300`（新 Bundle `138`）均真实调用 OpenCode `1.18.19` 的
+  `POST /api/session/{sessionID}/compact` 并返回 `503`，canonical/raw 均为 0 个 compaction event。
+  `#300` 的 fixture 命令还因遗漏输出重定向退出 `2`，不能作为有效长上下文样本；Provider `3` 的 `#299`
+  与 Provider `4` 的 `#301` 在进入 Harness 前均为真实 `rate_limited`。这些结果排除了 marker 权限障碍，
+  但未提供 OpenCode compaction event/fixture；Scenario 11 继续保持 `blocked_external_fixture`，不再
+  叠加 alternate-provider 探针；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
 - [x] 已执行场景 12 的两轮正式 Pi/OpenCode retry probe：`254/255` 与 `256/257` 均成功完成并交付，
   但四个任务都没有 `provider.retry`；`250/251` 中同一冻结 Provider 的真实 `rate_limited` 事件作为
   场景 11 关联诊断保留，不重复计入场景 12，因此场景 12 登记为 `not_triggered`；详见
@@ -218,8 +226,9 @@ R2 本轮已完成以下闭环项：
   的 protocol/delivery failures 保留，独立 `#270 / Issue #77` 完成三个 80 行文件、报告和公共 delivery，
   finalization diff `240/0`；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
 - [ ] 当前 R3 剩余退出项为：场景 11 的 OpenCode 可验证 compaction event/fixture，以及场景 13 的真实
-  401 fixture；Provider 7 的 TLS error 本轮未再复现，但高上下文正式重跑仍没有结构化
-  `context.compacted`；场景 14 的 invalid-session 子场景已闭合，network interruption 明确保持
+  401 fixture；Provider 7 的 TLS error 本轮未再复现，高上下文正式重跑和 native compact route 探针仍没有
+  结构化 `context.compacted`；本轮 #296 的 401 是 OpenCode Server Basic Auth，#299/#301 是 Provider
+  rate limit，均不替代场景 13；场景 14 的 invalid-session 子场景已闭合，network interruption 明确保持
   `not_triggered`，不把已有 TLS/protocol 样本重复计入；
   在这些项完成前不关闭 R3，也不进入 R4；
 - [ ] 在冻结 cohort 上分别执行 Pi 与 OpenCode 的 20 个同场景样本（需要 fresh/continue 或
