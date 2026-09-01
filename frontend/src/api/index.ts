@@ -229,6 +229,7 @@ export interface UpdateProviderRequest {
   clear_system_prompt?: boolean
   provider_kind?: string
   model_protocol?: string
+  provider_driver?: string | null
   compat_profile?: string | null
   is_disabled?: boolean
 }

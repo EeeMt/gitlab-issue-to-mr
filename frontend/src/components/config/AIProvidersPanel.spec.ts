@@ -306,6 +306,37 @@ describe('AIProvidersPanel', () => {
     expect(wrapper.vm.formValue.model_protocol).toBe('openai_responses')
   })
 
+  it('preserves the existing provider driver when saving a multi-protocol provider', async () => {
+    const provider = {
+      id: 11,
+      name: 'openrouter-anthropic',
+      base_url: 'https://openrouter.ai/api/v1',
+      model: 'minimax/minimax-m3:free',
+      max_turns: 50,
+      api_key_configured: true,
+      system_prompt: null,
+      provider_kind: 'openai_compatible',
+      model_protocol: 'anthropic_messages',
+      provider_driver: 'openrouter',
+      is_default: false,
+      is_disabled: false
+    }
+    const wrapper = mount(AIProvidersPanel, {
+      props: { isMobile: false },
+      global: {
+        stubs: ['NCard', 'NButton', 'NDataTable', 'NModal', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSelect', 'NSpace', 'NSwitch', 'NTag']
+      }
+    })
+
+    await wrapper.vm.openEdit(provider)
+    wrapper.vm.formRef = { validate: () => Promise.resolve() }
+    await wrapper.vm.handleSave()
+
+    expect(mockApi.updateProvider).toHaveBeenCalledWith(11, expect.objectContaining({
+      provider_driver: 'openrouter'
+    }))
+  })
+
   it('disables actions that would violate provider status rules', async () => {
     const wrapper = mount(AIProvidersPanel, {
       props: { isMobile: false },

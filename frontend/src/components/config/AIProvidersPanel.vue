@@ -544,6 +544,7 @@ async function handleSave() {
         max_turns: formValue.value.max_turns,
         provider_kind: formValue.value.provider_kind,
         model_protocol: formValue.value.model_protocol,
+        provider_driver: editingProvider.value.provider_driver,
         is_disabled: formValue.value.is_disabled
       }
       if (formValue.value.api_key.trim()) {
