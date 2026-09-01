@@ -182,8 +182,15 @@ R2 本轮已完成以下闭环项：
   [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
 - [ ] 场景 13 的认证失败仍为 `blocked_external_fixture`：只读复核 Provider `3–12` 均 enabled，开发环境
   没有专用 401 fixture；未读取或修改 Provider secret，不伪造认证错误；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
-- [ ] 场景 14 的 network/invalid-session 仍为 `not_triggered`：当前没有可安全、可重复的专用断线或非法
-  Session fixture，已有 protocol/TLS 错误不改写为 invalid-session；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
+- [x] 已完成场景 14 的 invalid-session 子场景：OpenCode `#281 / Issue #84` 的真实不存在 Session
+  以 `engine_error` 收敛，当前 Pi `#289 / Issue #87` 的真实 bogus lineage 以 Adapter-side
+  `protocol_error: Pi parent session is not available` fail-closed；两边均有唯一 terminal、archive、无
+  output session 和 Worker 清理证据。网络断线分支本轮仍为 `not_triggered`，不把既有 TLS/protocol
+  错误改写为网络或 invalid-session 证据；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
+- [x] 已完成 Pi 原生 session persistence 影响面修复与真实控制：修复 `e33df7e6` 通过 63 个 Pi
+  focused tests；Profile 4 generation `52` / Bundle `136` 下 `#287 → #288 / Issue #86` 完成
+  fresh→continue，DB output 与 Host JSONL header 一致，child header 含原生 `parentSession`；修复前
+  的 #285 ID capture mismatch 与 #286 fail-closed 中间证据保留；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
 - [x] 已完成场景 15 的 longest-context 正式重跑：初次 `#271/#272` 保留为未达 50-call 指令的 probe，
   独立长输入重跑 `#273 / Issue #81`（OpenCode）与 `#274 / Issue #80`（Pi）分别完成 21/21、24/24
   tool，cached input `20,822` / `18,006`，唯一 `run.completed`、0/0 delivery；两边没有
@@ -203,8 +210,9 @@ R2 本轮已完成以下闭环项：
 - [x] 已完成场景 20 高 token 生成：Pi `#266 / Issue #75` 成功；OpenCode `#267/#269 / Issue #76`
   的 protocol/delivery failures 保留，独立 `#270 / Issue #77` 完成三个 80 行文件、报告和公共 delivery，
   finalization diff `240/0`；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
-- [ ] 当前 R3 剩余退出项为：场景 11 的 OpenCode 外部 compaction fixture recovery、场景 13 的真实 401
-  fixture，以及场景 14 的真实 network/invalid-session fixture；
+- [ ] 当前 R3 剩余退出项为：场景 11 的 OpenCode 外部 compaction fixture recovery，以及场景 13 的真实
+  401 fixture；场景 14 的 invalid-session 子场景已闭合，network interruption 明确保持
+  `not_triggered`，不把已有 TLS/protocol 样本重复计入；
   在这些项完成前不关闭 R3，也不进入 R4；
 - [ ] 在冻结 cohort 上分别执行 Pi 与 OpenCode 的 20 个同场景样本（需要 fresh/continue 或
   failure→delivery 的场景按一个场景登记多个 Task）；

@@ -32,6 +32,46 @@
   401 而覆盖现有 Provider secret。若 Host 没有预配置的 401 endpoint，则认证失败场景必须登记为
   `blocked_external_fixture`，不能伪造通过。
 
+### Post-fix Pi native session control (impact evidence)
+
+这是一组针对 Pi session-path 修复的影响面验证，不替换已经冻结的 20 场原始 cohort，也不把修复前的
+失败样本删除。源码修复 revision 为 `e33df7e6`：Pi Adapter 将 lineage 中的 session ID 精确解析为
+持久化 JSONL 文件，向 Pi 0.84.2 发送原生 `new_session` + `parentSession` 绝对路径；父文件缺失时在
+spawn 前 fail-closed；同时只从 owner 发出的成功 `get_state` 捕获最新 active session ID。Pi focused
+suite `test_pi_owner.py` + `test_pi_harness_adapter.py` 为 `63 passed`，`pi-run.sh` shell syntax check
+通过。
+
+本次真实 Host 验证先重新核对 Profile 4：generation `52`，verified at
+`2026-09-01 15:06:55.444794`，Worker Kit `0.6.11` at
+`/opt/codify/worker-kits/0.6.11-linux-amd64-b4b6321fb399`，Pi adapter digest
+`c7f81e811affe51ea2af5bcb4bd37b784a00218b55fb2e9fa0cd40836cd6f4eb`，OpenCode adapter digest
+`53666f397a208e5e136d673da6031d01f7cedf014081f5312677035148cf7b63`。受影响任务使用 Bundle `136`
+（digest `82be21c1ef4a7a35f0f2e2429dd7651272749b2451fff38269afd8d5e0c994ee`）和同一冻结 Provider
+`7 / openrouter-free`；Worker image 和 Kit identity 与 Frozen runtime 小节一致。
+
+- #287 / Issue #86 是 `plan/fresh`，attempt `task-287-attempt-1-4cebd64798ba`，耗时
+  `129.031s`，canonical seq `1–109`，3/3 tool，usage `1003/1938`，0 changes，output session
+  `01a05d86-b394-7f4b-a4df-37045c6f51e0`，唯一 `run.completed`，archive
+  `fc3df9cc6001fe9e7817848fd42a220a162bc63d2467c1ae2e07f88e8678bfd1` / `30,887 B`。
+- #288 / Issue #86 是 `plan/continue`，attempt `task-288-attempt-1-1f1a582dab3e`，耗时
+  `263.546s`，canonical seq `1–1651`，10/10 tool，`provider.retry=1`，usage `3912/3722`，0 changes；其
+  `input_session_id` 精确等于 #287 output，output session 为
+  `01a05d8d-a7de-7299-b7b8-5ef928aef8a0`，唯一 `run.completed`，archive
+  `7de904c321d6772e2cadfe0bef4d24d93463cb10f19e05ef4722729e7bf1184b` / `149,461 B`。
+- Host shared `pi-home/sessions` 同时存在 #287 和 #288 的 JSONL。#287 文件 header 的 `id` 等于
+  DB output；#288 文件 header 的 `id` 等于 DB output，并含
+  `parentSession=/opt/codify-issue-shared/pi-home/sessions/2026-09-01T15-11-44-020Z_01a05d86-b394-7f4b-a4df-37045c6f51e0.jsonl`。
+  #288 脱敏 RPC 归档的 response 顺序为 `new_session → get_state → prompt → get_state`，最终
+  `get_state` 指向该 child 文件；其 event receipts 有唯一 `harness.completed`、
+  `delivery.completed` 和 `run.completed`，attempt 最终 `closed`。
+
+修复过程中的中间样本也保留：旧的 session-ID 捕获逻辑使 #285 的 DB output 与 Host 最终文件 ID 不同；
+随后 #286 使用这个错误 ID，被新 resolver 正确拒绝为 `protocol_error: Pi parent session is not
+available`，没有启动 Pi。它们分别是 archive `878b589c638cf8f3780040c1bcbdc988728ed638eb8b7b0099a8d7b6b68f9015`
+/ `81,642 B` 和 `bcbbfdce64ef105829cae181a741f3c69e8ff1e8f0869081f14644c482924777` / `2,880 B`。
+这解释了为何必须同时修正原生 parent path 和 active session ID capture，不能只凭 #287 单次 fresh 成功
+判断 continue 已正确。
+
 Task `198` 在 readiness re-verify 后但本 cohort candidate re-baseline 前被 scheduler 领取，绑定 Bundle
 `123` 并在确认 identity 边界后取消；Task `199` 同样在 OpenCode candidate re-baseline 前使用了错误的
 Provider 3/Bundle `124`，随后取消。两者都是 exploratory identity/config-transition 记录，不计入任何 R3
@@ -390,9 +430,29 @@ fixture；已有任务中的 `engine_error`、`protocol_error` 和 `rate_limited
 
 ### Scenario 14 network interruption / invalid session
 
-当前没有可安全、可重复的网络断线或非法 Session fixture。场景 09/11/17/20 中保留的 OpenCode
-`protocol_error`、Provider/TLS 和 delivery failure 均有各自的 failure taxonomy，不能改写为
-`invalid_session` 或网络恢复证据；因此场景 14 登记为 `not_triggered`，不把已有错误样本重复计入。
+网络断线分支本轮没有触发，仍登记为 `not_triggered`；但 invalid-session 分支已使用隔离 fixture
+真实执行，且没有读取或修改任何 Provider secret：
+
+- OpenCode #281 / Issue #84 使用 Bundle `133`、attempt `task-281-attempt-1-b8c96260cd74`，
+  `continue` 输入为不存在的 session ID，canonical seq `1–4` 以唯一
+  `harness.failed(engine_error: Session not found)` → `worker.finalization(exit_code=1)` →
+  `run.failed(engine_error)` 收敛；archive
+  `838f07971ec3ae16d1dd2ca0466a6153dd5c7edb5a8ee1bcb71a652cc17ccac4` / `2,835 B`，无 output
+  session，container 已清理。
+- Pi #282 / Issue #85 是修复前保留的负面样本：未被 Pi 识别的 `parentSessionId` 使 Pi 静默创建
+  fresh session，DB 记录 bogus input 与新的 output，archive
+  `fbe71e57d7ae754271f31a13019133f53bfce22865c670d59eb9251e8a9ed027` / `166,892 B`；该行为
+  不计为通过，且历史记录不改写。
+- Pi #289 / Issue #87 使用当前 Bundle `136`、attempt `task-289-attempt-1-b5cdfed0c915`，
+  `continue` 输入为 `01a05d8e-0000-7000-8000-000000000000`，耗时 `92.122s`，canonical seq
+  `1–4` 以唯一 `harness.failed(protocol_error: Pi parent session is not available)` →
+  `worker.finalization(exit_code=1)` → `run.failed(protocol_error)` 收敛；无 tool/usage/output
+  session，archive `e7726095366d62b5b3e58f5e67d8c9f22b67673401bef74432a6b69ebfa1fc46` /
+  `2,788 B`，#87 的 Host `pi-home` 目录为空，Worker container 已清理。
+
+因此场景 14 登记为 `pass (invalid-session branch)`，并明确保留 network interruption 为
+`not_triggered`；OpenCode 的 engine-level session-not-found 与 Pi 的 adapter-side protocol error 是各自正确的
+failure taxonomy，不能合并成同一错误字符串，也不能把既有 TLS/protocol 样本改写为本场景证据。
 
 ### Scenario 15 longest-context
 
@@ -572,7 +632,7 @@ Task ID 留空表示尚未执行；正式执行过程中只追加结果，不改
 | 11 | context compaction：长上下文任务必须产生 `context.compacted`，其后仍有唯一 terminal | `#251 → #252 / Issue #63`；Bundle `134`；5 次 compaction，`#251` seq `1–929` 失败后 `#252` 完成 recovery delivery；archives `1,778,253 / 35,934 B`；最终 commit `38f3a610…` | `#253 + #276 / Issue #64`；#276 37/37 tool、seq `1–307`、3 次 retry、cached 436,138、无 compaction、engine_error；archive 205,787 B；无 commit | blocked_external_fixture（Pi compaction/唯一 terminal/recovery 成立；OpenCode 长上下文仍被 Provider/TLS fixture 阻塞） |
 | 12 | rate limit：使用已有受限 Provider，记录 `provider.retry` 与 `rate_limited` 分类 | `#254 / Issue #65`、`#256 / Issue #67`；Bundle `134`；13/13、26/26 tool；seq `1–427` / `1–592`；archives `44,906 / 57,578 B`；commits `d10ab625…` / `f16e80eb…` | `#255 / Issue #66`、`#257 / Issue #68`；Bundle `133`；8/8、26/26 tool；seq `1–318` / `1–309`；archives `42,300 / 49,189 B`；commits `29a3181a…` / `7b63cdc5…` | not_triggered（正式 probe 均无 retry；#250/#251 的真实 `rate_limited` 只作为场景 11 关联诊断保留） |
 | 13 | authentication failure：只接受真实 401/`authentication_error`；无 401 fixture 不得伪造 | 无任务；Provider `3–12` enabled，未发现专用 401 fixture | 无任务；同左 | blocked_external_fixture |
-| 14 | network/invalid session：真实断线或非法 Session，记录 retry/engine 或 invalid-session 分类 | 已有 protocol/TLS 错误不属于本场景；无专用 fixture | 同左；无专用 fixture | not_triggered |
+| 14 | network/invalid session：真实断线或非法 Session，记录 retry/engine 或 invalid-session 分类 | `#289 / Issue #87`；Bundle `136`；`plan/continue`；attempt `task-289-attempt-1-b5cdfed0c915`；seq `1–4`；archive `2,788 B`；无 output session；container 已清理 | `#281 / Issue #84`；Bundle `133`；`plan/continue`；attempt `task-281-attempt-1-b8c96260cd74`；seq `1–4`；archive `2,835 B`；engine_error；无 output session；container 已清理 | pass（invalid-session 分支真实触发；network interruption 保留为 not_triggered；两种 Harness 各自 taxonomy、唯一 terminal、archive 和清理成立） |
 | 15 | longest-context：长输入/多轮任务记录 usage、compaction 边界和完成/失败结果 | formal retry `#274 / Issue #80`；24/24 tool；seq `1–265`；191.327s；in 34 / cached 18,006 / out 1,363；archive 54,696 B | formal retry `#273 / Issue #81`；21/21 tool；seq `1–165`；281.968s；in 161 / cached 20,822 / out 908；1 retry；archive 37,704 B | pass（两边 0/0、唯一 `run.completed`；未触发 `context.compacted`，按边界事实记录） |
 | 16 | 多文件重构：小型 fixture 的多文件一致性改造，测试、commit、push/MR | `#258 / Issue #69`；9/9 tool；seq `1–122`；commit `bca2afde…`；archive 26,551 B | `#259 / Issue #70`；11/11 tool；seq `1–269`；commit `d573243b…`；archive 41,822 B | pass（两边完成两文件测试和 delivery；模型先 commit，finalization diff 0/0） |
 | 17 | 单文件 bug fix：只改目标文件，测试/验收通过并 delivery | `#262 → #265 / Issue #73`；seed/fix；18/18、20/20 tool；commits `9cf57ccb…` / `ad238760…` | `#263/#264 → #268 / Issue #74`；两次 protocol failure 后 recovery；7/7 tool；commit `5148732c…` | pass（最终只改目标文件并 delivery；原始 OpenCode failures 保留） |
