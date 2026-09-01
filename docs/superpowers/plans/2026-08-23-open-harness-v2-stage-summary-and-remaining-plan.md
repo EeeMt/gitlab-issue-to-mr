@@ -143,6 +143,9 @@ R2 本轮已完成以下闭环项：
 - [x] 已完成场景 01–03 的 Pi/OpenCode 正式配对：场景 02 的 OpenCode 首次停滞取消（Task `203`）保留为失败
   证据，独立 fresh retry（Task `204`）成功；场景 03 的 `freeform/fresh`（Task `205`/`206`）也已成功；当前
   登记册已更新，场景 04–20 仍待执行；
+- [x] 已完成场景 04 `execute/fresh` 工具成功配对（Task `207`/`208`）：两边均有成功只读 shell 检查、完整
+  tool start/complete 配对和 marker delivery；无害路径探测错误保留在 TaskLog；当前登记册已更新，场景
+  05–20 仍待执行；
 - [ ] 在冻结 cohort 上分别执行 Pi 与 OpenCode 的 20 个同场景样本（需要 fresh/continue 或
   failure→delivery 的场景按一个场景登记多个 Task）；
 - 每个样本记录验收结论、failure taxonomy、耗时、token、工具调用、archive 和 delivery；修复后可重跑，
