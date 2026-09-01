@@ -162,7 +162,12 @@ R2 本轮已完成以下闭环项：
   Task `236` → `237` / Issue `54` 均使用同一 Issue/lineage、`require_changes=true` 和冻结 Provider，
   input/output session 可追溯，最终都只交付 seed + continuation 文件；早期 Pi `234` → `235` 的
   `require_changes` 配置差异作为保留诊断样本记录；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)。
-- [ ] 当前 R3 登记册剩余场景 09–20；
+- [ ] 场景 09 的 Pi Task `240` 已完成稳定态取消验收：在 `tool.started(sleep 120)` 后取消，
+  canonical `harness.failed(cancelled)` → `worker.finalization(exit_code=143)` → `run.failed(cancelled)`、
+  archive 和 container 清理均成立；OpenCode Task `241`→`242`→`243` 及短 prompt Task `244` 均在首个
+  tool 前以 `protocol_error` timeout 失败，标记为 `blocked_external_fixture`，不计为通过，待恢复既有
+  Provider/endpoint 后重跑；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)。
+- [ ] 当前 R3 登记册剩余场景 10–20；场景 09 的 OpenCode 半边仍需外部 fixture 恢复后补跑；
 - [ ] 在冻结 cohort 上分别执行 Pi 与 OpenCode 的 20 个同场景样本（需要 fresh/continue 或
   failure→delivery 的场景按一个场景登记多个 Task）；
 - 每个样本记录验收结论、failure taxonomy、耗时、token、工具调用、archive 和 delivery；修复后可重跑，
