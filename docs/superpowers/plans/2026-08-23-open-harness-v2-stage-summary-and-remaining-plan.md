@@ -162,20 +162,20 @@ R2 本轮已完成以下闭环项：
   Task `236` → `237` / Issue `54` 均使用同一 Issue/lineage、`require_changes=true` 和冻结 Provider，
   input/output session 可追溯，最终都只交付 seed + continuation 文件；早期 Pi `234` → `235` 的
   `require_changes` 配置差异作为保留诊断样本记录；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)。
-- [ ] 场景 09 的 Pi Task `240` 已完成稳定态取消验收：在 `tool.started(sleep 120)` 后取消，
-  canonical `harness.failed(cancelled)` → `worker.finalization(exit_code=143)` → `run.failed(cancelled)`、
-  archive 和 container 清理均成立；OpenCode Task `241`→`242`→`243` 及短 prompt Task `244` 均在首个
-  tool 前以 `protocol_error` timeout 失败，标记为 `blocked_external_fixture`，不计为通过，待恢复既有
-  Provider/endpoint 后重跑；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)。
+- [x] 已完成场景 09 的 Pi/OpenCode 稳定态取消配对：Pi Task `240` 与外部 fixture 恢复后追加的 OpenCode
+  Task `275` 均在 `tool.started(sleep 120)` 后由 UI 取消，canonical
+  `harness.failed(cancelled)` → `worker.finalization(exit_code=143)` → `run.failed(cancelled)`、archive
+  和 container 清理均成立；OpenCode Task `241`→`242`→`243` 及短 prompt Task `244` 的首工具前
+  `protocol_error` 失败仍保留；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)。
 - [x] 已完成场景 10 的 Pi/OpenCode timeout 配对：Pi Task `245` / Issue `59` 与 OpenCode Task `246` /
   Issue `60` 均在 `tool.started(sleep 180)` 后由临时 `60s` runner timeout 产生
   `harness.failed(timeout)` → `worker.finalization(exit_code=143)` → `run.failed(timeout)`，archive 和
   container 清理成立；随后将全局 `task_timeout` 恢复为 `1800s` 并确认队列为空；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)。
 - [ ] 已完成场景 11 的 Pi compaction/recovery 证据：正式 Task `251` 产生 5 个 `context.compacted` 后以
   唯一 `run.failed` 收敛，同一 Issue 的 Task `252` 完成 post-compaction marker delivery；OpenCode Task
-  `253` 产生 41/41 tool 和 4 次 retry，但没有 compaction，最终为 `engine_error: unknown certificate
-  verification error`，因此场景 11 登记为 `blocked_external_fixture`，不把 Pi 半边追认为完整通过；详见
-  [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
+  `253` 与恢复后追加的 `276` 分别产生 41/41、37/37 tool 和 4、3 次 retry，但都没有 compaction，最终
+  为 `engine_error: unknown certificate verification error`，因此场景 11 仍登记为
+  `blocked_external_fixture`，不把 Pi 半边追认为完整通过；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
 - [x] 已执行场景 12 的两轮正式 Pi/OpenCode retry probe：`254/255` 与 `256/257` 均成功完成并交付，
   但四个任务都没有 `provider.retry`；`250/251` 中同一冻结 Provider 的真实 `rate_limited` 事件作为
   场景 11 关联诊断保留，不重复计入场景 12，因此场景 12 登记为 `not_triggered`；详见
@@ -201,8 +201,9 @@ R2 本轮已完成以下闭环项：
 - [x] 已完成场景 20 高 token 生成：Pi `#266 / Issue #75` 成功；OpenCode `#267/#269 / Issue #76`
   的 protocol/delivery failures 保留，独立 `#270 / Issue #77` 完成三个 80 行文件、报告和公共 delivery，
   finalization diff `240/0`；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
-- [ ] 当前 R3 剩余退出项为：场景 09 和 11 的 OpenCode 外部 fixture recovery、场景 13 的真实 401 fixture、
-  场景 14 的真实 network/invalid-session fixture，以及场景 19 的独立 failure→public delivery cohort；
+- [ ] 当前 R3 剩余退出项为：场景 11 的 OpenCode 外部 compaction fixture recovery、场景 13 的真实 401
+  fixture、场景 14 的真实 network/invalid-session fixture，以及场景 19 的独立 failure→public delivery
+  cohort；
   在这些项完成前不关闭 R3，也不进入 R4；
 - [ ] 在冻结 cohort 上分别执行 Pi 与 OpenCode 的 20 个同场景样本（需要 fresh/continue 或
   failure→delivery 的场景按一个场景登记多个 Task）；

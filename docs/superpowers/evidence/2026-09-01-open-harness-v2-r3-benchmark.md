@@ -253,9 +253,16 @@ Task 必须以 `cancelled` 收敛，canonical stream 要包含 SIGTERM 对应的
   证据指向冻结 Provider/endpoint 的外部 fixture 不可用，而不是场景 prompt 长度；这些失败样本全部保留，
   不计为场景通过，也不把 OpenCode 半边改记为取消成功。
 
-因此场景 09 的 Pi 半边通过稳定态取消验收，但 OpenCode 半边为 `blocked_external_fixture`，配对场景
-整体不关闭；后续仍需恢复可用的既有 Provider/endpoint 或提供真实可用的外部 fixture 后重跑 OpenCode
-半边，才能把场景 09 记为 pass。
+- 外部 fixture 恢复后追加 OpenCode `#275 / Issue #57`，attempt
+  `task-275-attempt-1-955ba767a304`。在确认 container `codify-275-issue57`、attempt 和首个工具后，
+  seq 8 为 `tool.started(Bash: sleep 120)`；操作员随后从 Task UI 发出取消，seq 10 为
+  `harness.failed(kind=cancelled)`，seq 11 为 `worker.finalization(exit_code=143, diff=0/0)`，seq 12
+  为唯一 `run.failed(status=cancelled, failure.kind=cancelled, exit_code=143)`。Task 耗时 `157.670s`、
+  0/0、无 commit，archive `52d4893b0a8468670e7d7638962e5a2ec0218bf573530463faec83a9c0686648` /
+  `7,148 B`，attempt closed 且 container 已清理。
+
+因此场景 09 现在以 Pi `#240` + OpenCode `#275` 登记为 `pass`；#241–#244 的首工具前 protocol
+failure 仍作为历史失败证据保留，不从 cohort 删除。
 
 ### Scenario 10 timeout/SIGKILL convergence
 
@@ -327,10 +334,20 @@ Provider `7 / openrouter-free`、Profile 4 和各自冻结 Bundle。
   `run.failed`；无 commit。archive `ec852c8104664037d8fbac39e4d7a81a2b2cb5877f75a21ed3dafce5e292c961`
   / `220,592 B`，container 已清理。该结果没有达到压缩场景的前置验收，保留为冻结 OpenRouter/TLS
   外部 fixture 阻塞，不把 Provider 错误伪造成 OpenCode compaction 通过。
+- 外部 fixture 恢复后追加 OpenCode `#276 / Issue #64`，attempt
+  `task-276-attempt-1-1feafcb22080`。该 Task 实际完成 37/37 个 2,000 行 chunk 读取，耗时 `856.314s`，
+  canonical seq `1–307`，产生 3 次 `provider.retry(failure_kind=engine_error)`，cached usage 最高
+  `436,138`（最后一次 usage 为 in `14,189` / cached `436,138` / out `59`），但仍没有
+  `context.compacted`；随后 seq 305 为 `harness.failed(engine_error: unknown certificate verification error)`，
+  seq 306 为 `worker.finalization(exit_code=1, diff=0/0)`，seq 307 为唯一 `run.failed`。archive
+  `c21e4b5d4c2ddd8f12bb52ad49da2ee3bf51d3ac40249909c3ac79a632b2cea9` / `205,787 B`，无 commit，
+  attempt closed 且 container 已清理。该样本证明已越过此前首工具前失败并承受真实长上下文，但仍未
+  满足 compaction 前置验收。
 
 因此场景 11 登记为 `blocked_external_fixture`：Pi 半边已证明 compaction、唯一 terminal 和同 lineage
-recovery delivery；OpenCode 半边未触发 `context.compacted`，且以可追溯的 Provider/TLS engine error 结束。
-后续只有在不改变冻结 Provider 的前提下恢复可用外部 fixture，才能补跑 OpenCode 并关闭该场景。
+recovery delivery；OpenCode `#253/#276` 均未触发 `context.compacted`，并以可追溯的 Provider/TLS engine
+error 结束。后续只有在不改变冻结 Provider 的前提下恢复可用外部 compaction fixture，才能补跑并关闭
+该场景。
 
 ### Scenario 12 provider rate limit
 
@@ -512,9 +529,9 @@ Task ID 留空表示尚未执行；正式执行过程中只追加结果，不改
 | 6 | 测试修复：建立/识别一个失败测试，修复后重新运行并交付通过结果 | `#223 / Issue #44`；Bundle `129`；attempt `task-223-attempt-1-d824ebd9ad50`；`execute/fresh`；seq `1–216`；15/15 tool；archive 43,055 B；commit `aa78dec…`；MR !40 | `#225 / Issue #45`；首轮 `#224` 为保留的 OpenCode `permission.asked` / `sandbox_error` 失败（Bundle `130`，seq `1–122`），retry Bundle `131`；attempt `task-225-attempt-1-7aeae9f16c25`；`execute/fresh`；seq `1–375`；15/15 tool；archive 57,684 B；commit `7888ef5…`；MR !41 ready | pass（两边均记录初始失败与同一测试成功重跑；最终只含两个 fixture 文件且无 Python cache；#224 失败证据保留） |
 | 7 | 无改动：`execute` + `require_changes=false`，只读检查，完成且无 commit/diff | `#232 / Issue #51`；Bundle `134`；attempt `task-232-attempt-1-434e1c03d681`；`execute/fresh`；seq `1–46`；2/2 tool；archive 14,384 B；commit null；MR !47 | `#233 / Issue #52`；Bundle `133`；attempt `task-233-attempt-1-c479e0c4e54a`；`execute/fresh`；seq `1–172`；4/4 tool；archive 27,182 B；commit null；MR !48 | pass（两边只读验收通过；`require_changes=false`，canonical terminal 成功，delivery/finalization 均为 0/0，远端 workspace clean） |
 | 8 | resume/continue：fresh seed 后在同一 Issue/lineage continue，两个 Task 均可追溯 | `#238 → #239 / Issue #55`；Bundle `134`；fresh/continue；seq `1–375` / `1–304`；11/11、8/8 tool；archive 35,026 B / 28,552 B；commits `5bb6f09…` / `344f3e79…`；MR !51 | `#236 → #237 / Issue #54`；Bundle `133`；fresh/continue；seq `1–145` / `1–133`；5/5、4/4 tool；archive 22,667 B / 20,741 B；commits `94fc3a7…` / `05432842…`；MR !50 | pass（两边均同 Issue/lineage 完成 fresh→continue；input session 可追溯，最终各只含 seed + continuation 文件，workspace clean） |
-| 9 | 稳定态取消：确认 attempt/container/tool 已初始化后取消；`cancelled`、SIGTERM、清理 | `#240 / Issue #56`；Bundle `134`；attempt `task-240-attempt-1-093430781533`；`execute/fresh`；`require_changes=true`；seq `1–19`，seq 16 `tool.started(sleep 120)`，seq 17 `harness.failed(cancelled)`，seq 18 `worker.finalization(exit 143)`，seq 19 `run.failed(cancelled)`；archive 5,114 B；无 commit | `#241 → #242 → #243 / Issue #57`；`#244 / Issue #58`（短 prompt 复现）；Bundle `133`；各 `last_seq=4`，无 `tool.started`，唯一 terminal `run.failed(protocol_error)`；archive 3,688 / 3,793 / 3,790 / 3,651 B；均无 commit | blocked_external_fixture（Pi 稳定态取消通过；OpenCode 在首工具前反复 timeout，未达到取消前置条件，不计为通过） |
+| 9 | 稳定态取消：确认 attempt/container/tool 已初始化后取消；`cancelled`、SIGTERM、清理 | `#240 / Issue #56`；Bundle `134`；attempt `task-240-attempt-1-093430781533`；`execute/fresh`；require_changes=true；seq `1–19`；tool started 后取消；archive 5,114 B；无 commit | 历史 `#241 → #242 → #243`、`#244` 首工具前 protocol failure 保留；最终 `#275 / Issue #57`；seq `1–12`，tool started 后取消；archive 7,148 B；无 commit | pass（#240/#275 均满足稳定态取消、exit 143、唯一 terminal 和清理） |
 | 10 | timeout/SIGKILL：临时使用最小可保存 timeout，任务阻塞并由 runner 收敛，恢复配置 | `#245 / Issue #59`；Bundle `134`；attempt `task-245-attempt-1-078f64dfad02`；`execute/fresh`；`require_changes=true`；seq `1–22`，`tool.started(sleep 180)` → `harness.failed(timeout)` → `worker.finalization(exit 143)` → `run.failed(timeout)`；archive 5,447 B；无 commit | `#246 / Issue #60`；Bundle `133`；attempt `task-246-attempt-1-2d40ba54e123`；`execute/fresh`；`require_changes=true`；seq `1–18`，`tool.started(sleep 180)` → `harness.failed(timeout)` → `worker.finalization(exit 143)` → `run.failed(timeout)`；archive 7,682 B；无 commit | pass（两边均由临时 60s runner timeout 真实收敛，配置恢复为 1800s，container/workspace 清理成立） |
-| 11 | context compaction：长上下文任务必须产生 `context.compacted`，其后仍有唯一 terminal | `#251 → #252 / Issue #63`；Bundle `134`；5 次 compaction，`#251` seq `1–929` 失败后 `#252` 完成 recovery delivery；archives `1,778,253 / 35,934 B`；最终 commit `38f3a610…` | `#253 / Issue #64`；Bundle `133`；41/41 tool，seq `1–391`，4 次 `provider.retry`，无 compaction，`engine_error(unknown certificate verification error)`；archive `220,592 B`；无 commit | blocked_external_fixture（Pi 半边 compaction/唯一 terminal/recovery 成立；OpenCode 被 Provider/TLS fixture 阻塞） |
+| 11 | context compaction：长上下文任务必须产生 `context.compacted`，其后仍有唯一 terminal | `#251 → #252 / Issue #63`；Bundle `134`；5 次 compaction，`#251` seq `1–929` 失败后 `#252` 完成 recovery delivery；archives `1,778,253 / 35,934 B`；最终 commit `38f3a610…` | `#253 + #276 / Issue #64`；#276 37/37 tool、seq `1–307`、3 次 retry、cached 436,138、无 compaction、engine_error；archive 205,787 B；无 commit | blocked_external_fixture（Pi compaction/唯一 terminal/recovery 成立；OpenCode 长上下文仍被 Provider/TLS fixture 阻塞） |
 | 12 | rate limit：使用已有受限 Provider，记录 `provider.retry` 与 `rate_limited` 分类 | `#254 / Issue #65`、`#256 / Issue #67`；Bundle `134`；13/13、26/26 tool；seq `1–427` / `1–592`；archives `44,906 / 57,578 B`；commits `d10ab625…` / `f16e80eb…` | `#255 / Issue #66`、`#257 / Issue #68`；Bundle `133`；8/8、26/26 tool；seq `1–318` / `1–309`；archives `42,300 / 49,189 B`；commits `29a3181a…` / `7b63cdc5…` | not_triggered（正式 probe 均无 retry；#250/#251 的真实 `rate_limited` 只作为场景 11 关联诊断保留） |
 | 13 | authentication failure：只接受真实 401/`authentication_error`；无 401 fixture 不得伪造 | 无任务；Provider `3–12` enabled，未发现专用 401 fixture | 无任务；同左 | blocked_external_fixture |
 | 14 | network/invalid session：真实断线或非法 Session，记录 retry/engine 或 invalid-session 分类 | 已有 protocol/TLS 错误不属于本场景；无专用 fixture | 同左；无专用 fixture | not_triggered |
@@ -540,9 +557,9 @@ Task ID 追溯，不把凭据写入文档。
 | 6 | `#223 / Issue #44` — completed；Pi Bundle `129`；1/0；160.856s；in 51 / cached 8,081 / out 501；15 对 tool（15/15）；seq 1–216；archive 43,055 B；MR !40；commit `aa78dec…` | `#225 / Issue #45` — completed；OpenCode Bundle `131`；1/0；173.361s；in 176 / cached 13,188 / out 415；15 对 tool（15/15）；seq 1–375；archive 57,684 B；MR !41；commit `7888ef5…`；`#224` 为保留的首轮 sandbox_error 失败 | frozen Provider `7 / openrouter-free`, `execute/fresh`, same semantic test-repair prompt | pass（failure→delivery 顺序可追溯；两边最终均只含两个 fixture 文件；OpenCode 的 `/tmp/**` 权限修复和交付前 Python cache 清理均有真实 Host 证据） |
 | 7 | `#232 / Issue #51` — completed；Pi Bundle `134`；0/0；108.496s；2 对 tool；seq 1–46；archive 14,384 B；MR !47 无 commit | `#233 / Issue #52` — completed；OpenCode Bundle `133`；0/0；138.661s；4 对 tool；seq 1–172；archive 27,182 B；MR !48 无 commit | frozen Provider `7 / openrouter-free`, `execute/fresh`, `require_changes=false` | pass（只读验收、canonical terminal、0/0 delivery/finalization 和 clean workspace 均成立） |
 | 8 | `#238 → #239 / Issue #55` — completed；Pi Bundle `134`；fresh/continue；seq 1–375 / 1–304；archive 35,026 / 28,552 B；commits `5bb6f09…` / `344f3e79…` | `#236 → #237 / Issue #54` — completed；OpenCode Bundle `133`；fresh/continue；seq 1–145 / 1–133；archive 22,667 / 20,741 B；commits `94fc3a7…` / `05432842…` | frozen Provider `7 / openrouter-free`, same Issue/lineage, `require_changes=true` | pass（session lineage、seed/continuation delivery 和 clean workspace 均成立） |
-| 9 | `#240 / Issue #56` — cancelled；Pi Bundle `134`；`execute/fresh`；150.515s；seq 1–19；`tool.started` 后取消；archive 5,114 B；无 commit；container 已清理 | `#241 → #242 → #243 / Issue #57`；`#244 / Issue #58` — failed；OpenCode Bundle `133`；134.258 / 126.870 / 127.267 / 135.584s；均 seq 1–4、无 tool、`protocol_error`；archive 3,688 / 3,793 / 3,790 / 3,651 B；无 commit；container 已清理 | frozen Provider `7 / openrouter-free`, `execute/fresh`, `require_changes=true`, Pi/OpenCode same cancellation prompt（#244 为短 prompt 复现） | blocked_external_fixture（Pi 收到真实取消并以 SIGTERM/exit 143 收敛；OpenCode 未进入稳定态，失败样本保留） |
+| 9 | `#240 / Issue #56` — cancelled；Pi Bundle `134`；`execute/fresh`；150.515s；seq 1–19；`tool.started` 后取消；archive 5,114 B；无 commit；container 已清理 | 历史 `#241/#242/#243 / Issue #57` 与 `#244 / Issue #58` 首工具前 protocol failure 保留；最终 `#275 / Issue #57` — cancelled；157.670s；seq 1–12；`tool.started` 后取消；archive 7,148 B；无 commit；container 已清理 | frozen Provider `7 / openrouter-free`, `execute/fresh`, `require_changes=true`, same cancellation prompt | pass（#240/#275 均稳定态取消并以 exit 143/唯一 terminal 收敛） |
 | 10 | `#245 / Issue #59` — failed(timeout)；Pi Bundle `134`；1,713/128/47；144.750s；1/1 tool；seq 1–22；archive 5,447 B；无 commit；container 已清理 | `#246 / Issue #60` — failed(timeout)；OpenCode Bundle `133`；0/0/0；144.617s；1/1 tool；seq 1–18；archive 7,682 B；无 commit；container 已清理 | frozen Provider `7 / openrouter-free`, `execute/fresh`, `require_changes=true`, same `sleep 180` prompt；global timeout temporarily 60s then restored 1800s | pass（两边均在 tool started 后由 runner 以 timeout/exit 143 收敛，队列为空且配置已恢复） |
-| 11 | `#251 → #252 / Issue #63` — compaction/失败→delivery recovery；Bundle `134`；#251 5 次 compaction、seq `1–929`、archive 1,778,253 B；#252 seq `1–305`、commit `38f3a610…`、archive 35,934 B | `#253 / Issue #64` — Bundle `133`；41/41 tool、seq `1–391`、4 次 retry、无 compaction；archive 220,592 B；engine_error，无 commit | blocked_external_fixture（Pi compaction 和 recovery 可验收；OpenCode unknown certificate verification error，待外部 fixture 恢复） |
+| 11 | `#251 → #252 / Issue #63` — compaction/失败→delivery recovery；Bundle `134`；#251 5 次 compaction、seq `1–929`、archive 1,778,253 B；#252 seq `1–305`、commit `38f3a610…`、archive 35,934 B | `#253 + #276 / Issue #64` — #276 37/37 tool、seq `1–307`、3 次 retry、cached 436,138、无 compaction；archive 205,787 B；unknown certificate verification error；无 commit | blocked_external_fixture（Pi compaction 和 recovery 可验收；OpenCode 长上下文仍未触发 compaction） |
 | 12 | `#254 / Issue #65` + `#256 / Issue #67` — completed；Bundle `134`；13/13、26/26 tool；seq `1–427` / `1–592`；archives 44,906 / 57,578 B；commits `d10ab625…` / `f16e80eb…` | `#255 / Issue #66` + `#257 / Issue #68` — completed；Bundle `133`；8/8、26/26 tool；seq `1–318` / `1–309`；archives 42,300 / 49,189 B；commits `29a3181a…` / `7b63cdc5…` | not_triggered（两轮正式 probe 无 `provider.retry`；#250/#251 的 rate_limited 不重复计入） |
 | 13 | 无任务；Provider `3–12` enabled，无专用 401 fixture | 无任务；同左 | frozen Provider metadata；不读取 secret | blocked_external_fixture |
 | 14 | 未形成专用 network/invalid-session fixture | 未形成专用 network/invalid-session fixture | 既有 protocol/TLS 错误不改写为 invalid session | not_triggered |
