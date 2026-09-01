@@ -1,6 +1,6 @@
 # Open-Harness V2 阶段结论与剩余验收计划
 
-**复核日期：** 2026-09-01
+**复核日期：** 2026-09-02
 
 > 本文件只保留当前结论、证据边界、剩余退出条件和停止规则。历史 Task 编号、构建日志、镜像 digest、
 > generation、测试计数和 Host 运行快照不在正文重复；需要复核时，以 Git history、runtime archive、数据库
@@ -174,7 +174,10 @@ R2 本轮已完成以下闭环项：
 - [ ] 已完成场景 11 的 Pi compaction/recovery 证据：正式 Task `251` 产生 5 个 `context.compacted` 后以
   唯一 `run.failed` 收敛，同一 Issue 的 Task `252` 完成 post-compaction marker delivery；OpenCode Task
   `253` 与恢复后追加的 `276` 分别产生 41/41、37/37 tool 和 4、3 次 retry，但都没有 compaction，最终
-  为 `engine_error: unknown certificate verification error`，因此场景 11 仍登记为
+  为 `engine_error: unknown certificate verification error`。随后冻结 Provider 7 的正式重跑 `#293`（50 个
+  2,000 行 direct chunk，cached `316,034`）与 `#295`（50 个 8,000 行 direct chunk）均成功 delivery，
+  但 raw/canonical/Host 仍没有结构化 `context.compacted`；`#294` 实际为 `sed | wc -l` 的 count-only
+  探针。TLS error 本轮未再复现，但场景 11 仍登记为
   `blocked_external_fixture`，不把 Pi 半边追认为完整通过。2026-09-02 以已有 alternate Provider `12`、Bundle
   `137` 追加 `#290/#291/#292` 诊断；其中 `#292` 在真实 `README.md` 上完成 40 次有效读取，canonical
   `46/46` tool、seq `1–370`，cached input `68,894`，但 raw/canonical/Host 仍为 0 个
@@ -214,8 +217,9 @@ R2 本轮已完成以下闭环项：
 - [x] 已完成场景 20 高 token 生成：Pi `#266 / Issue #75` 成功；OpenCode `#267/#269 / Issue #76`
   的 protocol/delivery failures 保留，独立 `#270 / Issue #77` 完成三个 80 行文件、报告和公共 delivery，
   finalization diff `240/0`；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
-- [ ] 当前 R3 剩余退出项为：场景 11 的 OpenCode 外部 compaction fixture recovery，以及场景 13 的真实
-  401 fixture；场景 14 的 invalid-session 子场景已闭合，network interruption 明确保持
+- [ ] 当前 R3 剩余退出项为：场景 11 的 OpenCode 可验证 compaction event/fixture，以及场景 13 的真实
+  401 fixture；Provider 7 的 TLS error 本轮未再复现，但高上下文正式重跑仍没有结构化
+  `context.compacted`；场景 14 的 invalid-session 子场景已闭合，network interruption 明确保持
   `not_triggered`，不把已有 TLS/protocol 样本重复计入；
   在这些项完成前不关闭 R3，也不进入 R4；
 - [ ] 在冻结 cohort 上分别执行 Pi 与 OpenCode 的 20 个同场景样本（需要 fresh/continue 或

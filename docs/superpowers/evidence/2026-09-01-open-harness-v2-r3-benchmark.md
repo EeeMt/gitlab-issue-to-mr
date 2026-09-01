@@ -384,6 +384,38 @@ Provider `7 / openrouter-free`、Profile 4 和各自冻结 Bundle。
   attempt closed 且 container 已清理。该样本证明已越过此前首工具前失败并承受真实长上下文，但仍未
   满足 compaction 前置验收。
 
+随后在冻结 Provider `7 / openrouter-free` 上又执行了三次正式阈值重跑，均使用 OpenCode、Profile 4、
+Bundle `137`、`execute/fresh`、`require_changes=true` 和独立 Issue/branch；这些 Task 保留为正式
+Scenario 11 的追加失败/未触发证据，不覆盖前述失败样本：
+
+- `#293 / Issue #64`（attempt `task-293-attempt-1-e029851df1c4`）直接创建并读取 100,000 行文件的
+  50 个连续 2,000 行 chunk，耗时 `693.971s`，canonical seq `1–902`，56/56 tool，6 次
+  `provider.retry(failure_kind=engine_error)`，usage `164/316,034/494`（input/cached/output），
+  无 `context.compacted`；随后 `harness.completed` → `delivery.completed`（commit
+  `73b7c48f46b8d2f09ce1f842bb5d6ae443363a6f`）→ `worker.finalization(diff=1/0)` → 唯一
+  `run.completed`。archive `7bf2c0013a2b208ec1e7cda42ad7ebda6a3f6986bcd45a965524119809860b3` /
+  `461,284 B`，Host Worker 已清理。
+- `#294 / Issue #89` 的 50 次调用实际被模型改写为 `sed | wc -l`，只验证行数而没有把 chunk 内容放入
+  上下文；耗时 `255.752s`，canonical seq `1–572`，55/55 tool，最终 `run.completed`，usage
+  `192/13,589/475`，无 `context.compacted`。它是保留的无效阈值探针，commit
+  `0504261b15eb0fb600a7c706930ed813d0c103d3`、archive
+  `0e9b2be3a5ff28e65377f8351d5e330007132d1f045261f6f5ff836457511c6d` / `78,145 B`，Host Worker
+  已清理。
+- `#295 / Issue #90` 禁止管道并直接读取 400,000 行文件的 50 个连续 8,000 行 chunk，耗时 `317.094s`，
+  canonical seq `1–649`，58/58 tool，usage `131/143,927/538`，最终 delivery commit
+  `cd5e3ce65b22d2fd2cb68d314ce3b3a5a4510d24`、`worker.finalization(diff=1/0)` 和唯一
+  `run.completed`；canonical `context.compacted=0`。其最终模型文本声称“emitted”，但该词只出现在
+  assistant report；归档 `event.jsonl` 没有 `type=context.compacted`，raw OpenCode 结构事件没有
+  `session.compacted` 或 `session.next.compaction.ended`，Host shared log 同样没有这两个事件。archive
+  `ff06e544561574bd05a9546486b8e4a90315de1b3016f5ccf838ea360a282daf` / `434,346 B`，Host Worker
+  已清理。
+
+因此 #293 和 #295 证明当前冻结 Provider 7 已能完成真实高上下文任务，之前的 TLS engine error 本轮未再
+复现；但在最高约 `316,034` cached input 的直接输出样本中仍没有结构化 compaction 事件。模型最终文本、
+日志中出现的 `context.compacted` 字样不能替代 raw/canonical event。Scenario 11 仍未满足“压缩后继续并
+唯一 terminal”的硬验收，状态保持 `blocked_external_fixture`，不把三次成功 delivery 追认为 compaction
+通过。
+
 为排除“OpenCode 没有执行足够多的有效上下文输入”这一独立变量，2026-09-02 又在独立 Issue `88`
 上使用已有但非冻结的 Provider `12 / openrouter-minimax-responses`（model
 `minimax/minimax-m3:free`、`openai_responses`）做 alternate-provider 诊断；三次 Task 均绑定 Bundle
@@ -402,15 +434,13 @@ Provider `7 / openrouter-free`、Profile 4 和各自冻结 Bundle。
   `event.jsonl` 与 `harness-events/opencode.jsonl` 都没有 compaction event，Host shared OpenCode log
   中 `context.compacted`、`session.compacted` 和 `session.next.compaction.ended` 计数也均为 0。
 
-这组结果说明：在当前 alternate Provider 上，即使有效文件读取使 cached input 达到 `68,894`，当前
-Bundle/模型仍未产生压缩事件；它既不能证明冻结 Provider `7` 的 compaction 可用，也不能替代
-`#253/#276` 的正式失败证据。因此 Scenario 11 仍保持 `blocked_external_fixture`，后续只有在不改变
-冻结 Provider 的前提下恢复可用的外部 compaction fixture，才能补跑正式 OpenCode 半边。
+这组 alternate-provider 结果说明，即使有效文件读取使 cached input 达到 `68,894`，当前 Bundle/模型
+也未产生压缩事件；它既不能证明冻结 Provider `7` 的 compaction 可用，也不能替代正式失败证据。
 
 因此场景 11 登记为 `blocked_external_fixture`：Pi 半边已证明 compaction、唯一 terminal 和同 lineage
-recovery delivery；OpenCode `#253/#276` 均未触发 `context.compacted`，并以可追溯的 Provider/TLS engine
-error 结束。后续只有在不改变冻结 Provider 的前提下恢复可用外部 compaction fixture，才能补跑并关闭
-该场景。
+recovery delivery；OpenCode `#253/#276` 的 TLS engine error 本轮未在 `#293/#295` 重现，但三次
+Provider 7 正式阈值重跑都没有可验证的 `context.compacted`，`#294` 还是 count-only 探针。后续只有在
+不改变冻结 Provider 的前提下获得可验证的 OpenCode compaction event/fixture，才能补跑并关闭该场景。
 
 ### Scenario 12 provider rate limit
 
@@ -667,6 +697,10 @@ Task ID 留空表示尚未执行；正式执行过程中只追加结果，不改
 
 下表只登记已经完成或明确终止的场景摘要；详细 raw archive、TaskLog、canonical event 和 UI 证据按
 Task ID 追溯，不把凭据写入文档。
+
+> Scenario 11 行的 OpenCode 原始 cohort 摘要保留了 `#253/#276` 的 TLS failure 记录；后续正式追加的
+> `#293/#294/#295` 结果以本文件的 Scenario 11 章节为准：TLS error 未再复现，但没有结构化
+> `context.compacted`，因此状态仍为 `blocked_external_fixture`。
 
 | Pair | Pi | OpenCode | Same prompt/Provider | Result / note |
 |---:|---|---|---|---|
