@@ -37,6 +37,21 @@ Task `198` 在 readiness re-verify 后但本 cohort candidate re-baseline 前被
 Provider 3/Bundle `124`，随后取消。两者都是 exploratory identity/config-transition 记录，不计入任何 R3
 场景；Task `200` 才是修正后的 OpenCode 场景 01 样本。
 
+Task `203` 是场景 02 的第一次 OpenCode `execute/fresh` 尝试：已进入 server HTTP session 并产生 3 对
+tool 事件，但随后长期没有新的 Harness 事件，人工取消后以 `harness.failed(kind=cancelled)`、
+`worker.finalization(exit_code=143)` 和 `run.failed` 收敛。它的 canonical seq `1–33`、0 usage、归档和
+清理状态全部保留，作为可追溯的停滞/取消失败样本，不计入成功配对；Task `204` 是相同语义 prompt
+下重新创建的独立 Issue/lineage，不复用 `203`。
+
+### Retained terminal record
+
+- Task `203 / Issue #27`：OpenCode Bundle `124`，attempt `task-203-attempt-1-9ef9483f7b1d`，
+  `execute/fresh`；output session 为空；685.386s；in/cached/out/reasoning `0/0/0/0`；3 对 tool
+  事件；canonical seq `1–33`，唯一 terminal 为 `run.failed(status=cancelled, failure.kind=cancelled)`；
+  `harness.failed` seq 31，`worker.finalization` seq 32（exit 143，0/0，commit null）；archive
+  `07125d84adebf434d7c30a0a7a4b578a959210ac38d57d9e840223be906277ee` / 10,945 B；MR !23 无 commit；
+  container 已清理。
+
 ## Acceptance and evidence contract
 
 每个 Task 完成或进入 terminal 后，登记以下字段：Task/Issue ID、Harness、Bundle/attempt、task mode、
@@ -57,7 +72,7 @@ Task ID 留空表示尚未执行；正式执行过程中只追加结果，不改
 | # | 场景与固定验收 | Pi Task(s) / Issue | OpenCode Task(s) / Issue | 状态 |
 |---:|---|---|---|---|
 | 1 | `plan` 模式：只读检查并返回计划，无代码变更、无 Git delivery | `#201 / Issue #25`；Bundle `123`；attempt `task-201-attempt-1-577ce4a8347c`；`plan/fresh`；output session `01a05b5c-a43b-7525-a72e-88834b361e25`；522.924s；in 101 / cached 6,096 / out 1,610 / reasoning null；11 对 tool 事件；seq 1–935，唯一 terminal `run.completed(success=true)`；`provider.retry` seq 56 (`engine_error`，随后成功)；0/0，commit null；archive `1724105c28854e501af9f0f012a07214d37830efda320925cf276570ea5629ce` / 75,289 B；container 已清理 | `#200 / Issue #24`；Bundle `124`；attempt `task-200-attempt-1-8d29ba0b9e28`；`plan/fresh`；output session `ses_fa4ac31ecffe1UmB3S3VmA3oEU`；220.785s；in 101 / cached 10,417 / out 1,837 / reasoning 0；7 对 tool 事件；seq 1–905，唯一 terminal `run.completed(success=true)`；0/0，commit null；archive `cc4df4e4d68e9dd32fbf73cc3e796b7735688fa0c3af5038cbdc16b8d91c0fdb` / 85,968 B；container 已清理 | pass（两边均通过只读验收，无 Git commit/diff；Issue 上的初始 MR 是 plan/execute 共用的 pre-run tracking 生命周期，不计为 commit delivery；Pi 记录 1 次真实 retry） |
-| 2 | `execute` 模式：完成一个最小、可验收的单文件变更并 delivery | — | — | pending |
+| 2 | `execute` 模式：完成一个最小、可验收的单文件变更并 delivery | `#202 / Issue #26`；Bundle `123`；attempt `task-202-attempt-1-63cdebe66ea8`；`execute/fresh`；output session `01a05b6b-28ea-7529-a6cb-8c6feb0d8943`；443.414s；in 95 / cached 2,638 / out 199 / reasoning null；7 对 tool 事件；seq 1–194，唯一 terminal `run.completed(success=true)`；`provider.retry` seq 45 (`engine_error`，随后成功)；1/0，commit `2c110cb57762415faf19b224f097e5f295c5742a`；archive `aff00463349bd022dc16adb36963c741ed9d86d0d73b8304118ae0809675a7f5` / 19,482 B；MR !22 `in_review`；container 已清理 | `#204 / Issue #28`（首次尝试 `#203 / Issue #27` 停滞取消，失败证据保留且不计入成功配对）；Bundle `124`；attempt `task-204-attempt-1-db897b7cbd8b`；`execute/fresh`；output session `ses_fa4878450ffepy3SfdOdvqOc5Q`；154.833s；in 114 / cached 8,684 / out 159 / reasoning 0；7 对 tool 事件；seq 1–143，唯一 terminal `run.completed(success=true)`；1/0，commit `c926b7ecb8a9f5331602b7b9c78dabdd8f868a3b`；archive `d489331989004d62fbe8ca03abf1da5660388c5d9f55a28826cd18a8f4ac9339` / 22,931 B；MR !24 `in_review`；container 已清理 | pass（两边均创建唯一 `r3-s02-marker.txt` 并完成单文件验收；Pi 有 1 次真实 `provider.retry`；Issue 上的初始 MR 是 plan/execute 共用的 pre-run tracking 生命周期，不计为 Git commit delivery；#203 的停滞取消不从失败记录中删除） |
 | 3 | `freeform` 模式：完成一个最小、可验收的单文件变更并 delivery | — | — | pending |
 | 4 | 工具成功：执行只读 shell 检查后完成标记文件；tool start/complete 成对出现 | — | — | pending |
 | 5 | 工具失败：执行一个明确预期失败的无害命令，继续完成标记文件；失败不污染 terminal | — | — | pending |
@@ -85,7 +100,8 @@ Task ID 追溯，不把凭据写入文档。
 | Pair | Pi | OpenCode | Same prompt/Provider | Result / note |
 |---:|---|---|---|---|
 | 1 | `#201 / Issue #25` — completed；Pi Bundle `123`；0/0；522.924s；in 101 / cached 6,096 / out 1,610；11 对 tool；seq 1–935；archive 75,289 B；MR !21 无 commit | `#200 / Issue #24` — completed；OpenCode Bundle `124`；0/0；220.785s；in 101 / cached 10,417 / out 1,837；7 对 tool；seq 1–905；archive 85,968 B；MR !20 无 commit | frozen Provider `7 / openrouter-free`, `plan/fresh`, same semantic prompt | pass（只读结果和无变更验收通过；Pi 有 1 次 `provider.retry` 后成功；MR 为 pre-run tracking artifact） |
-| 2–20 | pending | pending | frozen above | cohort execution not complete |
+| 2 | `#202 / Issue #26` — completed；Pi Bundle `123`；1/0；443.414s；in 95 / cached 2,638 / out 199；7 对 tool；seq 1–194；archive 19,482 B；MR !22；commit `2c110cb5…` | `#204 / Issue #28` — completed；OpenCode Bundle `124`；1/0；154.833s；in 114 / cached 8,684 / out 159；7 对 tool；seq 1–143；archive 22,931 B；MR !24；commit `c926b7ec…`；`#203 / Issue #27` 为保留的首次停滞取消失败 | frozen Provider `7 / openrouter-free`, `execute/fresh`, same semantic marker prompt | pass（#202/#204 均为唯一 marker 文件并成功 delivery；#202 有 1 次 `provider.retry`；#203 canonical 失败链路保留，不计入成功配对） |
+| 3–20 | pending | pending | frozen above | cohort execution not complete |
 
 ## Current stop boundary
 
