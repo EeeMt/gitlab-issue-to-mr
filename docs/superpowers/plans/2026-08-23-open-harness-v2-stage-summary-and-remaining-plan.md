@@ -134,11 +134,14 @@ R2 本轮已完成以下闭环项：
 **退出条件：** 已满足。所有适用协议行和上述闭环项均可追溯，无隐式回退、跨 Task 污染、重复 terminal
 或 P0/P1；失败样本保留原样，没有事后追认为成功。
 
-### R3 — 执行正式 20-task benchmark（下一主里程碑）
+### R3 — 执行正式 20-task benchmark（进行中）
 
 - 严格使用 [V2 schema §11](../../architecture/open-harness-v2-schemas.md#11-20-%E4%B8%AA-benchmark-%E4%BB%BB%E5%8A%A1%E4%B8%8E%E7%BB%9F%E8%AE%A1%E6%96%B9%E6%B3%95)
   冻结的 20 个多样化场景、成功标准、可比 Endpoint/model 和统计方法；
-- 开始前冻结 candidate、Provider/model、协议映射和人工验收口径；
+- [x] 开始前冻结 candidate、Provider/model、协议映射、人工验收口径和独立 Issue/lineage 隔离策略；详见
+  [R3 benchmark cohort evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
+- [ ] 在冻结 cohort 上分别执行 Pi 与 OpenCode 的 20 个同场景样本（需要 fresh/continue 或
+  failure→delivery 的场景按一个场景登记多个 Task）；
 - 每个样本记录验收结论、failure taxonomy、耗时、token、工具调用、archive 和 delivery；修复后可重跑，
   但不得删除失败样本或把探索性 canary 追认成 benchmark；
 - [现有 benchmark shell](../../../scripts/harness-probes/v2/benchmark.sh) 只重复生命周期诊断 prompt，
