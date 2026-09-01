@@ -175,7 +175,11 @@ R2 本轮已完成以下闭环项：
   唯一 `run.failed` 收敛，同一 Issue 的 Task `252` 完成 post-compaction marker delivery；OpenCode Task
   `253` 与恢复后追加的 `276` 分别产生 41/41、37/37 tool 和 4、3 次 retry，但都没有 compaction，最终
   为 `engine_error: unknown certificate verification error`，因此场景 11 仍登记为
-  `blocked_external_fixture`，不把 Pi 半边追认为完整通过；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
+  `blocked_external_fixture`，不把 Pi 半边追认为完整通过。2026-09-02 以已有 alternate Provider `12`、Bundle
+  `137` 追加 `#290/#291/#292` 诊断；其中 `#292` 在真实 `README.md` 上完成 40 次有效读取，canonical
+  `46/46` tool、seq `1–370`，cached input `68,894`，但 raw/canonical/Host 仍为 0 个
+  `context.compacted`，不改变冻结 Provider `7` 的外部 fixture blocker；详见
+  [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
 - [x] 已执行场景 12 的两轮正式 Pi/OpenCode retry probe：`254/255` 与 `256/257` 均成功完成并交付，
   但四个任务都没有 `provider.retry`；`250/251` 中同一冻结 Provider 的真实 `rate_limited` 事件作为
   场景 11 关联诊断保留，不重复计入场景 12，因此场景 12 登记为 `not_triggered`；详见

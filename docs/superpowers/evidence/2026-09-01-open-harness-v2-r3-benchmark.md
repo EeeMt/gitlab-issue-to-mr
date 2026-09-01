@@ -384,6 +384,29 @@ Provider `7 / openrouter-free`、Profile 4 和各自冻结 Bundle。
   attempt closed 且 container 已清理。该样本证明已越过此前首工具前失败并承受真实长上下文，但仍未
   满足 compaction 前置验收。
 
+为排除“OpenCode 没有执行足够多的有效上下文输入”这一独立变量，2026-09-02 又在独立 Issue `88`
+上使用已有但非冻结的 Provider `12 / openrouter-minimax-responses`（model
+`minimax/minimax-m3:free`、`openai_responses`）做 alternate-provider 诊断；三次 Task 均绑定 Bundle
+`137`（digest `64f713267cccc19b7730101b075df5962c89f0accfe3d67b3d29bcba4c1dbb7d`），不计入正式 cohort：
+
+- `#290` 是 `plan/fresh`，只完成 3/3 tool、canonical seq `1–83`，没有进入 40-call probe；archive
+  `c917c26240e77f0b5fc2e9ca49469ad74faf894dcdaacf678921a348b4930eee` / `21,608 B`。
+- `#291` 是 `execute/fresh`，任务结果报告完成 40 次指定调用，但目标的 benchmark 文档在真实
+  `kit-owned-l3` workspace 中不存在，40 次均为 `sed ENOENT`；canonical receipts 为 42/42 tool、seq
+  `1–330`、耗时 `206.732s`，无 `context.compacted`，archive
+  `80d7e2a35270ac1c44aa07ea6b79d162da262089979dfff2cdfbe5653469d9bc` / `47,317 B`。
+- `#292` 改为读取真实存在的仓库根 `README.md`，任务结果报告完成 40 次有效只读调用；canonical
+  receipts 为 46/46 tool、seq `1–370`、耗时 `248.115s`，usage 为 input `196` / cached `68,894` /
+  output `118`，唯一 terminal 为 `run.completed`，workspace clean，且 `context.compacted=0`；archive
+  `5a819bee2395b99f128f572924a2127c6ed2ebbae0104321ceba5d77c8b5c2b9` / `65,374 B`。归档中的
+  `event.jsonl` 与 `harness-events/opencode.jsonl` 都没有 compaction event，Host shared OpenCode log
+  中 `context.compacted`、`session.compacted` 和 `session.next.compaction.ended` 计数也均为 0。
+
+这组结果说明：在当前 alternate Provider 上，即使有效文件读取使 cached input 达到 `68,894`，当前
+Bundle/模型仍未产生压缩事件；它既不能证明冻结 Provider `7` 的 compaction 可用，也不能替代
+`#253/#276` 的正式失败证据。因此 Scenario 11 仍保持 `blocked_external_fixture`，后续只有在不改变
+冻结 Provider 的前提下恢复可用的外部 compaction fixture，才能补跑正式 OpenCode 半边。
+
 因此场景 11 登记为 `blocked_external_fixture`：Pi 半边已证明 compaction、唯一 terminal 和同 lineage
 recovery delivery；OpenCode `#253/#276` 均未触发 `context.compacted`，并以可追溯的 Provider/TLS engine
 error 结束。后续只有在不改变冻结 Provider 的前提下恢复可用外部 compaction fixture，才能补跑并关闭
