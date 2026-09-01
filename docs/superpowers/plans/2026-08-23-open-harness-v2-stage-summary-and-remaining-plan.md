@@ -27,7 +27,7 @@ Open-Harness V2 需要按两个不同里程碑判断，不能把它们混成一�
 - Pi/OpenCode 已有真实成功、失败、timeout/cancel、usage、Session、工具调用、archive 和 delivery 的代表性
   证据，历史上也已覆盖各自声明的三种协议；本轮 [R2 candidate evidence](../evidence/2026-09-01-open-harness-v2-r2-candidate.md)
   又补齐了当前 Bundle 的 OpenCode 两种 endpoint/config 隔离成功链路、Codex Responses 成功链路，以及 Pi 当前 Bundle
-  的 `openai_responses` 成功、command delivery/cancel、Worker 缺失后 live rejection/recovery 和 dispatcher crash-recovery unknown outcome；后续仍只按源码变更影响面补跑，不重新清零全部已冻结证据；
+  的 `openai_responses` 成功、command delivery/cancel、Worker 缺失后 live rejection/recovery 和 dispatcher crash-recovery unknown outcome，以及 Claude 当前 candidate 的 `404 / model_not_found` 失败分类；后续仍只按源码变更影响面补跑，不重新清零全部已冻结证据；
 - 当前运行模式仍应保持 `dual_canary`。Profile-local 的 Pi 选择不等于系统全局默认，也不等于
   `v2_only`；
 - readiness 是短 TTL 的逐次 canary 预检。过期时必须在下一次执行前重新 verify，但它不是一个永久未完成的
@@ -113,8 +113,9 @@ R2 只剩以下闭环项：
 1. **部分完成：** 当前 candidate 的 OpenCode Chat/Responses 成功和真实 Anthropic failure 已对账
    config、protocol、usage、唯一 terminal、archive 和 delivery；仍须按影响面收口其余适用协议行。
 2. **部分完成：** Codex `openai_responses` 的当前 Profile 成功链路已补齐；Claude
-   `anthropic_messages` 仍等待实际可用且兼容的 Provider，且 fresh/continue、取消/timeout、usage、
-   archive 和 Git delivery 的完整矩阵尚未关闭。
+   `anthropic_messages` 的当前 candidate Task `186` 已复现并归档 `404 / model_not_found`、零 token、无代码交付
+   失败；仍等待实际可用且兼容的 Provider，且 fresh/continue、取消/timeout、usage、archive 和 Git delivery
+   的完整矩阵尚未关闭。
 3. **本轮已完成：** 当前 Bundle 已有 Pi 正常运行和控制端点启动；幂等 replay、closed gate 和 Scheduler
    recovery 的聚焦套件已通过；Task `181` 完成了 queued command 在 Worker 缺失后的
    `control_gate_closed` live rejection/recovery，Task `182` 完成了实际 command delivery 与取消收敛，Task
