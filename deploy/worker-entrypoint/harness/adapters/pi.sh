@@ -210,7 +210,12 @@ pi_adapter_run() {
     : > "${raw_file}"
     chown 0:0 "${raw_file}"
     chmod 644 "${raw_file}"
-    CODIFY_PI_RUN_AS="${CODIFY_PI_RUN_AS:-}" \
+    # Keep the root adapter/translator as the audit owner, but run the Pi
+    # process itself as the unprivileged workspace user. Otherwise a Harness
+    # git commit can leave root-owned .git metadata and make the outer Worker
+    # delivery commit fail when runtime-generated files (for example Python
+    # __pycache__) are present.
+    CODIFY_PI_RUN_AS="${CODIFY_PI_RUN_AS:-${CODIFY_RUN_AS:-}}" \
     CODIFY_PI_BIN="$(codify_pi_bin)" \
     CODIFY_PI_RAW_EVENT_JSONL="${raw_file}" \
     CODIFY_PI_EVENT_TRANSLATOR="${CODIFY_PI_TRANSLATOR}" \

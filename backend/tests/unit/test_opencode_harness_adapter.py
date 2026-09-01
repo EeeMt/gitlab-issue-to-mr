@@ -2017,6 +2017,12 @@ import sys
 pid = int(sys.argv[-1])
 print(os.getpgid(pid))
 """,
+        "codify-run-as": """#!/bin/sh
+if [ "$1" = "--" ]; then shift; fi
+printf '%s\n' "$*" > "${OPENCODE_TEST_RUN_AS}"
+export OPENCODE_RUN_AS_TEST=1
+exec "$@"
+""",
         "opencode": """#!/bin/bash
 printf '%s\\n' "$@" > "${OPENCODE_TEST_ARGS}"
 {
@@ -2030,6 +2036,7 @@ printf '%s\\n' "$@" > "${OPENCODE_TEST_ARGS}"
     printf 'OPENCODE_DISABLE_MODELS_FETCH=%s\\n' "$OPENCODE_DISABLE_MODELS_FETCH"
     printf 'OPENCODE_DISABLE_EXTERNAL_SKILLS=%s\\n' "$OPENCODE_DISABLE_EXTERNAL_SKILLS"
     printf 'OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=%s\\n' "$OPENCODE_DISABLE_CLAUDE_CODE_SKILLS"
+    printf 'OPENCODE_RUN_AS_TEST=%s\\n' "${OPENCODE_RUN_AS_TEST:-}"
 } > "${OPENCODE_TEST_ENV}"
 (
     trap '' TERM
@@ -2090,6 +2097,7 @@ def _start_legacy_runner(
     *,
     bridge_sleep: str = "0",
     stop_grace: str | None = "1",
+    run_as: bool = False,
 ) -> tuple[subprocess.Popen[str], tuple[int, int], tuple[str | None, str | None]]:
     bin_dir = _write_runner_process_group_fixtures(tmp_path)
     prompt = tmp_path / "prompt.md"
@@ -2112,6 +2120,9 @@ def _start_legacy_runner(
         "OPENCODE_TEST_BRIDGE_SLEEP": bridge_sleep,
         "PROMPT_FILE": str(prompt),
     }
+    if run_as:
+        environment["CODIFY_OPENCODE_RUN_AS"] = str(bin_dir / "codify-run-as")
+        environment["OPENCODE_TEST_RUN_AS"] = str(tmp_path / "run-as-invocation")
     if stop_grace is not None:
         environment["OPENCODE_SERVER_STOP_GRACE_SECONDS"] = stop_grace
     process = subprocess.Popen(
@@ -2152,6 +2163,18 @@ def test_opencode_legacy_runner_reaps_server_process_group_after_success(tmp_pat
     assert "OPENCODE_DISABLE_MODELS_FETCH=1" in server_env
     assert "OPENCODE_DISABLE_EXTERNAL_SKILLS=1" in server_env
     assert "OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1" in server_env
+    _finish_runner(process, 0)
+    for pid, start in zip(pids, starts):
+        _assert_process_gone(pid, start)
+
+
+def test_opencode_legacy_runner_drops_server_to_worker_identity(tmp_path):
+    process, pids, starts = _start_legacy_runner(tmp_path, run_as=True)
+    assert (tmp_path / "run-as-invocation").read_text(encoding="utf-8").startswith(
+        "setsid "
+    )
+    server_env = (tmp_path / "server-env").read_text(encoding="utf-8")
+    assert "OPENCODE_RUN_AS_TEST=1" in server_env
     _finish_runner(process, 0)
     for pid, start in zip(pids, starts):
         _assert_process_gone(pid, start)

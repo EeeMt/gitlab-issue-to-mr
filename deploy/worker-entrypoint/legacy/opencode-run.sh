@@ -126,6 +126,24 @@ start_server() {
         echo "OpenCode Server requires setsid for safe process-group cleanup" >&2
         return 1
     fi
+    local -a server_command=(
+        setsid "${CODIFY_OPENCODE_BIN}" serve
+        --pure
+        --hostname 127.0.0.1
+        --port "${OPENCODE_PORT}"
+    )
+    if [ -n "${CODIFY_OPENCODE_RUN_AS:-}" ]; then
+        if [[ "${CODIFY_OPENCODE_RUN_AS}" != /* || ! -x "${CODIFY_OPENCODE_RUN_AS}" ]]; then
+            echo "CODIFY_OPENCODE_RUN_AS must be an executable absolute path: ${CODIFY_OPENCODE_RUN_AS}" >&2
+            return 1
+        fi
+        # Keep this shell/bridge root-owned so it can write the audit stream,
+        # but drop the Server (including its repository tools) before exec.
+        server_command=(
+            env HOME="${HOME}" USER=codify LOGNAME=codify
+            "${CODIFY_OPENCODE_RUN_AS}" -- "${server_command[@]}"
+        )
+    fi
     OPENCODE_SERVER_PASSWORD="${OPENCODE_SERVER_PASSWORD}" \
     OPENCODE_SNAPSHOT_KEY="${OPENCODE_SNAPSHOT_KEY}" \
     OPENCODE_CONFIG_DIR="${OPENCODE_CONFIG_DIR}" \
@@ -139,10 +157,7 @@ start_server() {
     OPENCODE_DISABLE_EXTERNAL_SKILLS="${OPENCODE_DISABLE_EXTERNAL_SKILLS}" \
     OPENCODE_DISABLE_CLAUDE_CODE_SKILLS="${OPENCODE_DISABLE_CLAUDE_CODE_SKILLS}" \
     CODIFY_OPENCODE_DATA_HOME="${CODIFY_OPENCODE_DATA_HOME}" \
-    setsid "${CODIFY_OPENCODE_BIN}" serve \
-        --pure \
-        --hostname 127.0.0.1 \
-        --port "${OPENCODE_PORT}" \
+    "${server_command[@]}" \
         > "${RUN_DIR}/server.log" 2>&1 &
     local pid=$!
     if ! kill -0 "${pid}" 2>/dev/null; then

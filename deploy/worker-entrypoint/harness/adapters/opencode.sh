@@ -357,11 +357,15 @@ opencode_adapter_run() {
     chown 0:0 "${audit_file}"
     chmod 644 "${raw_file}"
     chmod 644 "${audit_file}"
+    # The root adapter owns the canonical event stream; the OpenCode Server
+    # and its repository tools must run as codify so Harness-created files and
+    # Git metadata remain writable by the outer Worker delivery path.
     CODIFY_OPENCODE_BIN="$(codify_opencode_bin)" \
     CODIFY_OPENCODE_RAW_EVENT_JSONL="${raw_file}" \
     CODIFY_OPENCODE_HTTP_AUDIT_FILE="${audit_file}" \
     CODIFY_OPENCODE_EVENT_TRANSLATOR="${CODIFY_OPENCODE_TRANSLATOR}" \
     CODIFY_OPENCODE_BRIDGE="${CODIFY_OPENCODE_BRIDGE}" \
+    CODIFY_OPENCODE_RUN_AS="${CODIFY_OPENCODE_RUN_AS:-${CODIFY_RUN_AS:-}}" \
     CODIFY_OPENCODE_SESSION_FILE="${CODIFY_OPENCODE_SESSION_FILE:-${CODIFY_RUNTIME_DIR}/opencode-session.id}" \
     CODIFY_CANONICAL_EVENT_WRITER="${CODIFY_CANONICAL_EVENT_WRITER}" \
     OPENCODE_PORT="${OPENCODE_PORT}" \

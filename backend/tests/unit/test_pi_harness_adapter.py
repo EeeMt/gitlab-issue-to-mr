@@ -580,6 +580,11 @@ def _source_adapter(script: str, env: dict[str, str]):
     )
 
 
+def test_pi_adapter_propagates_worker_privilege_drop_to_runner():
+    content = ADAPTER.read_text(encoding="utf-8")
+    assert 'CODIFY_PI_RUN_AS="${CODIFY_PI_RUN_AS:-${CODIFY_RUN_AS:-}}" \\' in content
+
+
 def _pi_prepare_config(tmp_path: Path) -> Path:
     env = {
         "CODIFY_RUNTIME_DIR": str(tmp_path),
