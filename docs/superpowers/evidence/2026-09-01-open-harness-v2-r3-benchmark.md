@@ -14,10 +14,14 @@
 - Profile：`4 / v2-canary-0.6.11-four-harness`。
 - Worker image：
   `127.0.0.1:5000/codify-worker/java21-maven@sha256:234582c692d1ebb00ba8e882160618c2258463149d968009ac81c545e63a538b`。
-- Pi Bundle：`122`，digest
-  `9d14951d9abf94c70754364cd54efcc534d49d82e567ad4710cc1c1cce5a465a`，Pi `0.84.2`，Adapter `2.0.0`。
-- OpenCode Bundle：`119`，digest
-  `db8f10c45c676d09d3c65447c1b99bc680bc5057bab25b9d2c7d4e63203a93a4`，OpenCode `1.18.19`，Adapter `2.0.0`。
+- Pi Bundle：`123`，digest
+  `9d7ae9cc1aa957af26dcf98a2ded6d7c8738529ab8c0693178d9303e10b84c9d`，Pi `0.84.2`，Adapter `2.0.0`。
+  这是本轮 readiness re-verify 后由当前 Profile 4 生成的 candidate；它与 Bundle `122` 的运行时、Kit、
+  Image、Adapter 和文件 manifest 相同，仅 verification generation/time 与派生 bundle digest 更新。
+- OpenCode Bundle：`124`，digest
+  `5886b3026ecc8c483c85c0affb81b21a4e397f5c75ea414649c74b5b63233e51`，OpenCode `1.18.19`，Adapter `2.0.0`。
+  这是本轮 readiness re-verify 后由当前 Profile 4 生成的 candidate；它与 Bundle `119` 的运行时、Kit、
+  Image、Adapter 和文件 manifest 相同，仅 verification generation/time 与派生 bundle digest 更新。
 - 可比成功基准 Provider：`7 / openrouter-free`，`https://openrouter.ai/api/v1`，model
   `minimax/minimax-m3:free`，`openai_chat_completions`，driver `openrouter`。
 - 当前较优兼容 Harness：OpenCode；其余三种适用 protocol 行和本轮生命周期样本已经在 R2 evidence
@@ -27,6 +31,11 @@
 - 受控故障只使用已有 Provider 或任务生命周期控制；不打印、复制或破坏现有 credential，不为制造
   401 而覆盖现有 Provider secret。若 Host 没有预配置的 401 endpoint，则认证失败场景必须登记为
   `blocked_external_fixture`，不能伪造通过。
+
+Task `198` 在 readiness re-verify 后但本 cohort candidate re-baseline 前被 scheduler 领取，绑定 Bundle
+`123` 并在确认 identity 边界后取消；Task `199` 同样在 OpenCode candidate re-baseline 前使用了错误的
+Provider 3/Bundle `124`，随后取消。两者都是 exploratory identity/config-transition 记录，不计入任何 R3
+场景；Task `200` 才是修正后的 OpenCode 场景 01 样本。
 
 ## Acceptance and evidence contract
 
@@ -47,7 +56,7 @@ Task ID 留空表示尚未执行；正式执行过程中只追加结果，不改
 
 | # | 场景与固定验收 | Pi Task(s) / Issue | OpenCode Task(s) / Issue | 状态 |
 |---:|---|---|---|---|
-| 1 | `plan` 模式：只读检查并返回计划，无代码变更、无 delivery | — | — | pending |
+| 1 | `plan` 模式：只读检查并返回计划，无代码变更、无 Git delivery | `#201 / Issue #25`；Bundle `123`；attempt `task-201-attempt-1-577ce4a8347c`；`plan/fresh`；output session `01a05b5c-a43b-7525-a72e-88834b361e25`；522.924s；in 101 / cached 6,096 / out 1,610 / reasoning null；11 对 tool 事件；seq 1–935，唯一 terminal `run.completed(success=true)`；`provider.retry` seq 56 (`engine_error`，随后成功)；0/0，commit null；archive `1724105c28854e501af9f0f012a07214d37830efda320925cf276570ea5629ce` / 75,289 B；container 已清理 | `#200 / Issue #24`；Bundle `124`；attempt `task-200-attempt-1-8d29ba0b9e28`；`plan/fresh`；output session `ses_fa4ac31ecffe1UmB3S3VmA3oEU`；220.785s；in 101 / cached 10,417 / out 1,837 / reasoning 0；7 对 tool 事件；seq 1–905，唯一 terminal `run.completed(success=true)`；0/0，commit null；archive `cc4df4e4d68e9dd32fbf73cc3e796b7735688fa0c3af5038cbdc16b8d91c0fdb` / 85,968 B；container 已清理 | pass（两边均通过只读验收，无 Git commit/diff；Issue 上的初始 MR 是 plan/execute 共用的 pre-run tracking 生命周期，不计为 commit delivery；Pi 记录 1 次真实 retry） |
 | 2 | `execute` 模式：完成一个最小、可验收的单文件变更并 delivery | — | — | pending |
 | 3 | `freeform` 模式：完成一个最小、可验收的单文件变更并 delivery | — | — | pending |
 | 4 | 工具成功：执行只读 shell 检查后完成标记文件；tool start/complete 成对出现 | — | — | pending |
@@ -75,7 +84,8 @@ Task ID 追溯，不把凭据写入文档。
 
 | Pair | Pi | OpenCode | Same prompt/Provider | Result / note |
 |---:|---|---|---|---|
-| 1–20 | pending | pending | frozen above | cohort execution not complete |
+| 1 | `#201 / Issue #25` — completed；Pi Bundle `123`；0/0；522.924s；in 101 / cached 6,096 / out 1,610；11 对 tool；seq 1–935；archive 75,289 B；MR !21 无 commit | `#200 / Issue #24` — completed；OpenCode Bundle `124`；0/0；220.785s；in 101 / cached 10,417 / out 1,837；7 对 tool；seq 1–905；archive 85,968 B；MR !20 无 commit | frozen Provider `7 / openrouter-free`, `plan/fresh`, same semantic prompt | pass（只读结果和无变更验收通过；Pi 有 1 次 `provider.retry` 后成功；MR 为 pre-run tracking artifact） |
+| 2–20 | pending | pending | frozen above | cohort execution not complete |
 
 ## Current stop boundary
 
