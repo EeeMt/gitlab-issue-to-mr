@@ -167,7 +167,11 @@ R2 本轮已完成以下闭环项：
   archive 和 container 清理均成立；OpenCode Task `241`→`242`→`243` 及短 prompt Task `244` 均在首个
   tool 前以 `protocol_error` timeout 失败，标记为 `blocked_external_fixture`，不计为通过，待恢复既有
   Provider/endpoint 后重跑；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)。
-- [ ] 当前 R3 登记册剩余场景 10–20；场景 09 的 OpenCode 半边仍需外部 fixture 恢复后补跑；
+- [x] 已完成场景 10 的 Pi/OpenCode timeout 配对：Pi Task `245` / Issue `59` 与 OpenCode Task `246` /
+  Issue `60` 均在 `tool.started(sleep 180)` 后由临时 `60s` runner timeout 产生
+  `harness.failed(timeout)` → `worker.finalization(exit_code=143)` → `run.failed(timeout)`，archive 和
+  container 清理成立；随后将全局 `task_timeout` 恢复为 `1800s` 并确认队列为空；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)。
+- [ ] 当前 R3 登记册剩余场景 11–20；场景 09 的 OpenCode 半边仍需外部 fixture 恢复后补跑；
 - [ ] 在冻结 cohort 上分别执行 Pi 与 OpenCode 的 20 个同场景样本（需要 fresh/continue 或
   failure→delivery 的场景按一个场景登记多个 Task）；
 - 每个样本记录验收结论、failure taxonomy、耗时、token、工具调用、archive 和 delivery；修复后可重跑，

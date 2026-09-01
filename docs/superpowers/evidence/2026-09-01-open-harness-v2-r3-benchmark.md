@@ -257,6 +257,41 @@ Task 必须以 `cancelled` 收敛，canonical stream 要包含 SIGTERM 对应的
 整体不关闭；后续仍需恢复可用的既有 Provider/endpoint 或提供真实可用的外部 fixture 后重跑 OpenCode
 半边，才能把场景 09 记为 pass。
 
+### Scenario 10 timeout/SIGKILL convergence
+
+场景 10 的固定验收是：在没有 `pending/queued/running` Task 时，把可保存的全局 Task Timeout 临时从
+`1,800s` 调整到最小值 `60s`，运行首个 standalone `sleep 180`，由 runner 触发 timeout 并完成 TERM/KILL
+收敛；样本结束后恢复 `1,800s`，且不留下 Worker container 或 workspace 变更。两边都使用冻结 Provider
+`7 / openrouter-free`、Profile 4、各自冻结 Bundle 和 `require_changes=true`。
+
+- Pi `#245 / Issue #59` 使用 Bundle `134`、runtime bundle digest
+  `df785a1a7eb1dd0206a424f1858e118b0e0056147e3bb3c1d263f188a9f6bb42`、attempt
+  `task-245-attempt-1-078f64dfad02`、`execute/fresh`，耗时 `144.750s`，usage
+  `in/cached/out/reasoning=1,713/128/47/null`，raw log `3 chunks / 2,167 B`。canonical seq `1–22`，
+  event count 为 `diagnostic=5`、`message.delta=8`、`usage.updated=2`、`tool.started=1` 及各一个
+  `run.started`、`model.resolved`、`harness.failed`、`worker.finalization`、`run.failed`；seq 19 为
+  `tool.started(Bash: sleep 180)`，seq 20 为 `harness.failed(kind=timeout)`，seq 21 为
+  `worker.finalization(exit_code=143, commit=null, diff=0/0)`，seq 22 为唯一
+  `run.failed(status=failed, failure.kind=timeout, exit_code=143)`。Task 无 commit、无变更，archive
+  `871202ca0e4f06e70ca5c12da2060e6a7743254cf598eb341e0650a6085a1d9d` / `5,447 B`，attempt closed，
+  container 已清理。
+- OpenCode `#246 / Issue #60` 使用 Bundle `133`、runtime bundle digest
+  `722979f2e969a39f9fdfad44b7aa7a6955002e3f4ea46989333a3ec9bc83c7dd`、attempt
+  `task-246-attempt-1-2d40ba54e123`、固定 Agent `build`/allowlisted command `codify`、`execute/fresh`，
+  耗时 `144.617s`，usage `in/cached/out/reasoning=0/0/0/0`，raw log `4 chunks / 2,218 B`。canonical
+  seq `1–18`，event count 为 `diagnostic=3`、`message.delta=9`、`tool.started=1` 及各一个
+  `run.started`、`harness.failed`、`worker.finalization`、`run.failed`、`usage.final`；seq 14 为
+  `tool.started(Bash: sleep 180)`，seq 16 为 `harness.failed(kind=timeout)`，seq 17 为
+  `worker.finalization(exit_code=143, commit=null, diff=0/0)`，seq 18 为唯一
+  `run.failed(status=failed, failure.kind=timeout, exit_code=143)`。Task 无 commit、无变更，archive
+  `5acd83b2b39380ecf95a34840edf3e4c918990bc81d48c477570da16476b4311` / `7,682 B`，attempt closed，
+  container 已清理。
+
+两次 Task 结束后均通过 Runtime Settings 将 `task_timeout` 恢复为 `1,800s`，数据库最终值为
+`1800`，且队列仍为空。因此场景 10 以 Pi `#245` + OpenCode `#246` 登记为 pass；这组样本证明了
+两种 Harness 都能在已初始化 tool 的阻塞态下由公共 runner 分类为 timeout、发出 `exit_code=143` 并完成
+清理，未将 wall-clock timeout 误记为用户取消。
+
 ## Acceptance and evidence contract
 
 每个 Task 完成或进入 terminal 后，登记以下字段：Task/Issue ID、Harness、Bundle/attempt、task mode、
@@ -285,7 +320,7 @@ Task ID 留空表示尚未执行；正式执行过程中只追加结果，不改
 | 7 | 无改动：`execute` + `require_changes=false`，只读检查，完成且无 commit/diff | `#232 / Issue #51`；Bundle `134`；attempt `task-232-attempt-1-434e1c03d681`；`execute/fresh`；seq `1–46`；2/2 tool；archive 14,384 B；commit null；MR !47 | `#233 / Issue #52`；Bundle `133`；attempt `task-233-attempt-1-c479e0c4e54a`；`execute/fresh`；seq `1–172`；4/4 tool；archive 27,182 B；commit null；MR !48 | pass（两边只读验收通过；`require_changes=false`，canonical terminal 成功，delivery/finalization 均为 0/0，远端 workspace clean） |
 | 8 | resume/continue：fresh seed 后在同一 Issue/lineage continue，两个 Task 均可追溯 | `#238 → #239 / Issue #55`；Bundle `134`；fresh/continue；seq `1–375` / `1–304`；11/11、8/8 tool；archive 35,026 B / 28,552 B；commits `5bb6f09…` / `344f3e79…`；MR !51 | `#236 → #237 / Issue #54`；Bundle `133`；fresh/continue；seq `1–145` / `1–133`；5/5、4/4 tool；archive 22,667 B / 20,741 B；commits `94fc3a7…` / `05432842…`；MR !50 | pass（两边均同 Issue/lineage 完成 fresh→continue；input session 可追溯，最终各只含 seed + continuation 文件，workspace clean） |
 | 9 | 稳定态取消：确认 attempt/container/tool 已初始化后取消；`cancelled`、SIGTERM、清理 | `#240 / Issue #56`；Bundle `134`；attempt `task-240-attempt-1-093430781533`；`execute/fresh`；`require_changes=true`；seq `1–19`，seq 16 `tool.started(sleep 120)`，seq 17 `harness.failed(cancelled)`，seq 18 `worker.finalization(exit 143)`，seq 19 `run.failed(cancelled)`；archive 5,114 B；无 commit | `#241 → #242 → #243 / Issue #57`；`#244 / Issue #58`（短 prompt 复现）；Bundle `133`；各 `last_seq=4`，无 `tool.started`，唯一 terminal `run.failed(protocol_error)`；archive 3,688 / 3,793 / 3,790 / 3,651 B；均无 commit | blocked_external_fixture（Pi 稳定态取消通过；OpenCode 在首工具前反复 timeout，未达到取消前置条件，不计为通过） |
-| 10 | timeout/SIGKILL：临时使用最小可保存 timeout，任务阻塞并由 runner 收敛，恢复配置 | — | — | pending |
+| 10 | timeout/SIGKILL：临时使用最小可保存 timeout，任务阻塞并由 runner 收敛，恢复配置 | `#245 / Issue #59`；Bundle `134`；attempt `task-245-attempt-1-078f64dfad02`；`execute/fresh`；`require_changes=true`；seq `1–22`，`tool.started(sleep 180)` → `harness.failed(timeout)` → `worker.finalization(exit 143)` → `run.failed(timeout)`；archive 5,447 B；无 commit | `#246 / Issue #60`；Bundle `133`；attempt `task-246-attempt-1-2d40ba54e123`；`execute/fresh`；`require_changes=true`；seq `1–18`，`tool.started(sleep 180)` → `harness.failed(timeout)` → `worker.finalization(exit 143)` → `run.failed(timeout)`；archive 7,682 B；无 commit | pass（两边均由临时 60s runner timeout 真实收敛，配置恢复为 1800s，container/workspace 清理成立） |
 | 11 | context compaction：长上下文任务必须产生 `context.compacted`，其后仍有唯一 terminal | — | — | pending |
 | 12 | rate limit：使用已有受限 Provider，记录 `provider.retry` 与 `rate_limited` 分类 | — | — | pending |
 | 13 | authentication failure：只接受真实 401/`authentication_error`；无 401 fixture 不得伪造 | — | — | pending |
@@ -313,7 +348,8 @@ Task ID 追溯，不把凭据写入文档。
 | 7 | `#232 / Issue #51` — completed；Pi Bundle `134`；0/0；108.496s；2 对 tool；seq 1–46；archive 14,384 B；MR !47 无 commit | `#233 / Issue #52` — completed；OpenCode Bundle `133`；0/0；138.661s；4 对 tool；seq 1–172；archive 27,182 B；MR !48 无 commit | frozen Provider `7 / openrouter-free`, `execute/fresh`, `require_changes=false` | pass（只读验收、canonical terminal、0/0 delivery/finalization 和 clean workspace 均成立） |
 | 8 | `#238 → #239 / Issue #55` — completed；Pi Bundle `134`；fresh/continue；seq 1–375 / 1–304；archive 35,026 / 28,552 B；commits `5bb6f09…` / `344f3e79…` | `#236 → #237 / Issue #54` — completed；OpenCode Bundle `133`；fresh/continue；seq 1–145 / 1–133；archive 22,667 / 20,741 B；commits `94fc3a7…` / `05432842…` | frozen Provider `7 / openrouter-free`, same Issue/lineage, `require_changes=true` | pass（session lineage、seed/continuation delivery 和 clean workspace 均成立） |
 | 9 | `#240 / Issue #56` — cancelled；Pi Bundle `134`；`execute/fresh`；150.515s；seq 1–19；`tool.started` 后取消；archive 5,114 B；无 commit；container 已清理 | `#241 → #242 → #243 / Issue #57`；`#244 / Issue #58` — failed；OpenCode Bundle `133`；134.258 / 126.870 / 127.267 / 135.584s；均 seq 1–4、无 tool、`protocol_error`；archive 3,688 / 3,793 / 3,790 / 3,651 B；无 commit；container 已清理 | frozen Provider `7 / openrouter-free`, `execute/fresh`, `require_changes=true`, Pi/OpenCode same cancellation prompt（#244 为短 prompt 复现） | blocked_external_fixture（Pi 收到真实取消并以 SIGTERM/exit 143 收敛；OpenCode 未进入稳定态，失败样本保留） |
-| 10–20 | pending | pending | frozen above | cohort execution not complete; scenario 09 OpenCode requires external fixture recovery |
+| 10 | `#245 / Issue #59` — failed(timeout)；Pi Bundle `134`；1,713/128/47；144.750s；1/1 tool；seq 1–22；archive 5,447 B；无 commit；container 已清理 | `#246 / Issue #60` — failed(timeout)；OpenCode Bundle `133`；0/0/0；144.617s；1/1 tool；seq 1–18；archive 7,682 B；无 commit；container 已清理 | frozen Provider `7 / openrouter-free`, `execute/fresh`, `require_changes=true`, same `sleep 180` prompt；global timeout temporarily 60s then restored 1800s | pass（两边均在 tool started 后由 runner 以 timeout/exit 143 收敛，队列为空且配置已恢复） |
+| 11–20 | pending | pending | frozen above | cohort execution not complete; scenario 09 OpenCode requires external fixture recovery |
 
 ## Current stop boundary
 
