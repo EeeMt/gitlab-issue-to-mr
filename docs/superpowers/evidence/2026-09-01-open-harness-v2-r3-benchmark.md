@@ -472,9 +472,47 @@ out 2,149，archive `8f7f57a0b3302af953ab63a8d9f14bbaf86b12ab21fac09fc378b610dd1
 
 ### Scenario 19 failure followed by public delivery
 
-本轮没有新增一组独立的、两种 Harness 均可比的 failure → public delivery 样本。场景 11 的
-`#251 → #252`、场景 17 的 `#263/#264 → #268` 和场景 20 的 `#267/#269 → #270` 分别归属于各自
-固定场景，不能重复计入场景 19；因此场景 19 保持 `pending`，待专门 lineage 补跑后再判定。
+本轮新增一组独立的、两种 Harness 均可比的 failure → public delivery lineage，不复用场景 11、17
+或 20 的 Issue。两条首轮任务都先产生了真实 failure 证据，随后在同一 Issue/lineage 上以新会话
+追加 recovery，分别完成唯一 marker 文件的公共 Git delivery。
+
+- Pi 首轮 `#277 / Issue #82` 使用 Bundle `134`、attempt `task-277-attempt-1-8d4e17c4aac7`、
+  `execute/continue`，耗时 `232.491s`，usage in/cached/out/reasoning `34/1,868/290/null`，
+  canonical seq `1–36`，`tool.started(Bash: sleep 120)` → `tool.completed`，随后
+  `harness.completed`；因首轮无变更，公共 delivery 在 seq 34 以 `delivery.failed(exit_code=1,
+  commit_sha=null)` 收敛，seq 35 `worker.finalization(exit_code=1, diff=0/0)`，唯一
+  `run.failed(failure.kind=engine_error)`。archive `6d7195468d3627e5187695acc738ea549bf1ed7ba54a550338845a002b9b113c`
+  / `7,582 B`，TaskLog 4 raw chunks / 2,369 B，MR !78 无 commit；该真实 delivery failure 保留为
+  lineage 的首轮失败样本。
+- Pi recovery `#279 / Issue #82` 使用 Bundle `134`、attempt `task-279-attempt-1-0bb66d9284fb`、
+  `execute/fresh`、output session `01a05d3d-aad9-7fe9-a3d7-17880da78406`，耗时 `133.059s`，
+  usage `165/2,437/272/null`，5/5 tool，canonical seq `1–69`；`harness.completed` →
+  `delivery.completed(exit_code=0, commit_sha=d1cfaa02ae3c59b016954edfdebda1e557c48547)` →
+  `worker.finalization(exit_code=0, diff=1/0)` → 唯一 `run.completed(success=true)`。TaskLog 6 raw
+  chunks / 4,653 B，archive `7b9ffabeb16d52077420454732c21d0434f2d8d60f5bf6a0bce08809f079b97a` /
+  `13,440 B`；MR !78 Changes 只有 `r3_s19_recovered_pi.txt`，内容为
+  `r3-s19-recovered-pi-ok`，并由后续 `od -c` 工具输出确认尾换行。首次 `xxd` 探测因镜像未安装
+  `xxd` 返回 tool error，但未污染 Harness/Task terminal；Worker container 已清理。
+- OpenCode 首轮 `#278 / Issue #83` 使用 Bundle `133`、attempt `task-278-attempt-1-87be480ae0da`、
+  `execute/continue`，耗时 `207.554s`，usage `0/0/0/0`，canonical seq `1–13`；在确认
+  `codify-278-issue83`、attempt 和 `tool.started(Bash: sleep 120)` seq 9 后由 Task UI 取消，seq 11
+  `harness.failed(kind=cancelled)`、seq 12 `worker.finalization(exit_code=143, diff=0/0)`、唯一
+  `run.failed(status=cancelled, failure.kind=cancelled, exit_code=143)`。archive
+  `4f0a45dff96c084b7eda3edec1b3269645b52a39c338c11d9929cc237071bbaa` / `7,552 B`，TaskLog 5 raw
+  chunks / 2,991 B，MR !79 无 commit；container 已清理。
+- OpenCode recovery `#280 / Issue #83` 使用 Bundle `133`、attempt `task-280-attempt-1-3d4376aadc22`、
+  `execute/fresh`、output session `ses_fa2c1a394ffew7dkx4eEKA40et`，耗时 `135.217s`，usage
+  `110/8,582/214/0`，4/4 tool，canonical seq `1–48`；`harness.completed` →
+  `delivery.completed(exit_code=0, commit_sha=571aabc5f9150a4f58b133ae27249fe799bab807)` →
+  `worker.finalization(exit_code=0, diff=1/0)` → 唯一 `run.completed(success=true)`。TaskLog 5 raw
+  chunks / 4,707 B，archive `ef07fdbdaae1fc4a91c39d741a18039c4292c15eacc2be4ca0431718ed192f3c` /
+  `15,078 B`；MR !79 Changes 只有 `r3_s19_recovered_opencode.txt`，内容为
+  `r3-s19-recovered-opencode-ok`，TaskLog 中独立 shell 校验明确报告 content and trailing newline
+  verified；container 已清理。
+
+因此场景 19 登记为 `pass`：失败类型、canonical 唯一 terminal、同 Issue/lineage 顺序、两个公共
+commit、单文件内容、archive/TaskLog 和 Worker 清理均可追溯；`#277` 的 delivery failure 与
+`#278` 的稳定态取消均保留，不从历史删除或改写。
 
 ### Scenario 20 high-token generation
 
@@ -539,7 +577,7 @@ Task ID 留空表示尚未执行；正式执行过程中只追加结果，不改
 | 16 | 多文件重构：小型 fixture 的多文件一致性改造，测试、commit、push/MR | `#258 / Issue #69`；9/9 tool；seq `1–122`；commit `bca2afde…`；archive 26,551 B | `#259 / Issue #70`；11/11 tool；seq `1–269`；commit `d573243b…`；archive 41,822 B | pass（两边完成两文件测试和 delivery；模型先 commit，finalization diff 0/0） |
 | 17 | 单文件 bug fix：只改目标文件，测试/验收通过并 delivery | `#262 → #265 / Issue #73`；seed/fix；18/18、20/20 tool；commits `9cf57ccb…` / `ad238760…` | `#263/#264 → #268 / Issue #74`；两次 protocol failure 后 recovery；7/7 tool；commit `5148732c…` | pass（最终只改目标文件并 delivery；原始 OpenCode failures 保留） |
 | 18 | 纯分析：只读仓库并输出分析，无写入、commit 或 delivery | `#260 / Issue #71`；7/7 tool；seq `1–1159`；archive 89,037 B；commit null | `#261 / Issue #72`；14/14 tool；seq `1–858`；archive 89,640 B；commit null | pass（两边 0/0、clean workspace、唯一 `run.completed`） |
-| 19 | 失败后公共 delivery：第一轮保留失败证据，后续修复/重试成功 delivery，顺序可追溯 | —；场景 11/17 的 recovery 不重复计入 | —；场景 20 的 `#267/#269 → #270` 不重复计入 | pending |
+| 19 | 失败后公共 delivery：第一轮保留失败证据，后续修复/重试成功 delivery，顺序可追溯 | `#277 → #279 / Issue #82`；Pi `#277` delivery failure、`#279` 5/5 tool、seq `1–69`、commit `d1cfaa02…`、archive `7,582 / 13,440 B` | `#278 → #280 / Issue #83`；OpenCode `#278` 稳定态取消、`#280` 4/4 tool、seq `1–48`、commit `571aabc5…`、archive `7,552 / 15,078 B` | pass（独立 Issue/lineage；两边 failure→public delivery 顺序、单文件内容和清理均成立） |
 | 20 | 高 token 生成：明确的长输出/多文件生成，记录 usage、耗时和 delivery | `#266 / Issue #75`；9/9 tool；seq `1–188`；in 375 / cached 6,366 / out 2,391；commit `7b1cc8f7…` | `#267/#269 / Issue #76` 保留失败；最终 `#270 / Issue #77`；5/5 tool；seq `1–1233`；in 74 / cached 9,373 / out 2,906；commit `0f43822c…` | pass（独立 OpenCode #270 公共 delivery 成功；#267/#269 failure chain 保留） |
 
 ## Execution ledger
@@ -567,7 +605,7 @@ Task ID 追溯，不把凭据写入文档。
 | 16 | `#258 / Issue #69` — completed；9/9 tool；seq 1–122；136.028s；in 53 / cached 4,698 / out 335；archive 26,551 B；commit `bca2afde…` | `#259 / Issue #70` — completed；11/11 tool；seq 1–269；196.349s；in 77 / cached 11,040 / out 371；archive 41,822 B；commit `d573243b…` | frozen Provider `7 / openrouter-free`, same two-file refactor prompt | pass（两边 test/delivery 成立；finalization diff 0/0 因模型已先 commit） |
 | 17 | `#262 → #265 / Issue #73` — seed/fix completed；archives 86,938 / 51,513 B；commits `9cf57ccb…` / `ad238760…` | `#263/#264 → #268 / Issue #74` — #263/#264 protocol failure，#268 completed；archives 73,758 / 36,667 / 41,081 B；commit `5148732c…` | frozen Provider `7 / openrouter-free`, same single-file bug fixture | pass（最终目标文件修复和 delivery 成立；原始 failures 保留） |
 | 18 | `#260 / Issue #71` — completed；7/7 tool；seq 1–1159；244.734s；in 179 / cached 4,462 / out 2,149；archive 89,037 B；无 commit | `#261 / Issue #72` — completed；14/14 tool；seq 1–858；249.124s；in 216 / cached 13,389 / out 1,702；archive 89,640 B；无 commit | frozen Provider `7 / openrouter-free`, read-only analysis | pass（0/0、clean workspace、terminal/delivery/finalization 完整） |
-| 19 | — | — | 场景 11/17/20 的 failure→recovery 不能重复计数 | pending |
+| 19 | `#277 → #279 / Issue #82` — 首轮 delivery failure 保留；recovery completed；Pi Bundle `134`；5/5 tool；seq `1–69`；133.059s；in 165 / cached 2,437 / out 272；archives 7,582 / 13,440 B；MR !78；commit `d1cfaa02…` | `#278 → #280 / Issue #83` — 首轮稳定态取消保留；recovery completed；OpenCode Bundle `133`；4/4 tool；seq `1–48`；135.217s；in 110 / cached 8,582 / out 214 / reasoning 0；archives 7,552 / 15,078 B；MR !79；commit `571aabc5…` | frozen Provider `7 / openrouter-free`, `execute`, same failure→recovery semantics, fresh recovery session | pass（两条独立 lineage 均以 canonical delivery commit、唯一 marker 文件和清理闭合；#277/#278 failures 保留） |
 | 20 | `#266 / Issue #75` — completed；9/9 tool；seq 1–188；184.220s；in 375 / cached 6,366 / out 2,391；archive 44,397 B；commit `7b1cc8f7…` | `#267/#269 / Issue #76` failures 保留；独立 `#270 / Issue #77` — completed；5/5 tool；seq 1–1233；234.985s；in 74 / cached 9,373 / out 2,906；archive 109,974 B；commit `0f43822c…` | frozen Provider `7 / openrouter-free`, high-token three-file prompt | pass（#270 `delivery.completed` + finalization 240/0；#267/#269 failures 保留） |
 
 ## Current stop boundary

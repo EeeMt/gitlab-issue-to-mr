@@ -196,14 +196,15 @@ R2 本轮已完成以下闭环项：
   单文件修复、测试和 delivery；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
 - [x] 已完成场景 18 纯分析：Pi `#260 / Issue #71` 与 OpenCode `#261 / Issue #72` 均只读完成，
   `commit_sha=null`、delivery/finalization `0/0`、workspace clean；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
-- [ ] 场景 19 的独立 failure→public delivery cohort 尚未执行；场景 11、17、20 的 failure/recovery
-  lineage 已分别计入固定场景，不重复计数；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
+- [x] 已完成场景 19 的独立 failure→public delivery cohort：Pi `#277 → #279 / Issue #82`、OpenCode
+  `#278 → #280 / Issue #83` 均在同一 Issue/lineage 中保留首轮 failure，再由 fresh recovery 任务完成
+  唯一 marker 文件的公共 commit、MR、canonical terminal、archive 和 Worker 清理；`#277` 的 delivery
+  failure 与 `#278` 的稳定态取消均保留，不与场景 11、17、20 重复计数；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)。
 - [x] 已完成场景 20 高 token 生成：Pi `#266 / Issue #75` 成功；OpenCode `#267/#269 / Issue #76`
   的 protocol/delivery failures 保留，独立 `#270 / Issue #77` 完成三个 80 行文件、报告和公共 delivery，
   finalization diff `240/0`；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
 - [ ] 当前 R3 剩余退出项为：场景 11 的 OpenCode 外部 compaction fixture recovery、场景 13 的真实 401
-  fixture、场景 14 的真实 network/invalid-session fixture，以及场景 19 的独立 failure→public delivery
-  cohort；
+  fixture，以及场景 14 的真实 network/invalid-session fixture；
   在这些项完成前不关闭 R3，也不进入 R4；
 - [ ] 在冻结 cohort 上分别执行 Pi 与 OpenCode 的 20 个同场景样本（需要 fresh/continue 或
   failure→delivery 的场景按一个场景登记多个 Task）；
