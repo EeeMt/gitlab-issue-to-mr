@@ -190,7 +190,11 @@ R2 本轮已完成以下闭环项：
   `#300` 的 fixture 命令还因遗漏输出重定向退出 `2`，不能作为有效长上下文样本；Provider `3` 的 `#299`
   与 Provider `4` 的 `#301` 在进入 Harness 前均为真实 `rate_limited`。这些结果排除了 marker 权限障碍，
   但未提供 OpenCode compaction event/fixture；Scenario 11 继续保持 `blocked_external_fixture`，不再
-  叠加 alternate-provider 探针；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
+  叠加 alternate-provider 探针。随后在同一冻结 Provider `7`、Bundle `138` 上完成最后一轮 idle-window
+  诊断：`#302` 因 frozen Worker image 没有 `jq` 导致 watcher 超时后取消；`#303` 使用 grep-only watcher，
+  但因 `session.idle with active tool parts` 以 `protocol_error` 失败；`#304` 使用修正后的最小 fixture
+  probe 仍以同一 `protocol_error` 失败。三者均没有可验证的 canonical/raw compaction event，故不改变
+  `blocked_external_fixture` 状态；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
 - [x] 已执行场景 12 的两轮正式 Pi/OpenCode retry probe：`254/255` 与 `256/257` 均成功完成并交付，
   但四个任务都没有 `provider.retry`；`250/251` 中同一冻结 Provider 的真实 `rate_limited` 事件作为
   场景 11 关联诊断保留，不重复计入场景 12，因此场景 12 登记为 `not_triggered`；详见
