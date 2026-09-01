@@ -1726,6 +1726,12 @@ def test_opencode_prepare_config_writes_snapshot_endpoint(tmp_path):
     assert config.exists()
     content = json.loads(config.read_text(encoding="utf-8"))
     provider = content["provider"]["codify"]
+    # The container boundary makes Task-local /tmp scratch files safe to use,
+    # while every other external directory still requires an interactive
+    # response that the first-release bridge deliberately cannot provide.
+    assert content["permission"] == {
+        "external_directory": {"*": "ask", "/tmp/**": "allow"}
+    }
     # Snapshot base URL wins, normalized to the /v1 root so @ai-sdk/anthropic
     # (which appends /messages) hits /v1/messages; credential referenced by env
     # name, never inlined.

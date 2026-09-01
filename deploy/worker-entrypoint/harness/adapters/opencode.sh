@@ -257,7 +257,8 @@ opencode_adapter_prepare_config() {
             --arg model "${model}" \
             --arg api_base "${api_base}" \
             --arg npm "${provider_npm}" \
-            '{provider:{codify:{npm:$npm,options:{baseURL:$api_base,apiKey:"{env:OPENCODE_SNAPSHOT_KEY}"},models:{($model):{id:$model,provider:{id:"codify"}}}}}}')"
+            '{permission:{external_directory:{"*":"ask","/tmp/**":"allow"}},
+              provider:{codify:{npm:$npm,options:{baseURL:$api_base,apiKey:"{env:OPENCODE_SNAPSHOT_KEY}"},models:{($model):{id:$model,provider:{id:"codify"}}}}}}')"
         if [ -n "${option_command}" ]; then
             config_json="$(printf '%s' "${config_json}" | jq \
                 --arg command "${option_command}" \
