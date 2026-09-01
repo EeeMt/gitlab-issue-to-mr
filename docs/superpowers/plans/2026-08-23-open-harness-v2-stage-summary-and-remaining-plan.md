@@ -178,6 +178,12 @@ R2 本轮已完成以下闭环项：
   [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
 - [ ] 当前 R3 登记册的未执行场景为 12–20；场景 09 和 11 的 OpenCode 半边仍需在不改变冻结 Provider
   的前提下恢复外部 fixture 后补跑；
+- [ ] 已执行场景 12 的两轮正式 Pi/OpenCode retry probe：`254/255` 与 `256/257` 均成功完成并交付，
+  但四个任务都没有 `provider.retry`；`250/251` 中同一冻结 Provider 的真实 `rate_limited` 事件作为
+  场景 11 关联诊断保留，不重复计入场景 12，因此场景 12 登记为 `not_triggered`；详见
+  [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
+- [ ] 当前 R3 登记册的未执行场景为 13–20；场景 09 和 11 的 OpenCode 半边仍需在不改变冻结 Provider
+  的前提下恢复外部 fixture 后补跑；
 - [ ] 在冻结 cohort 上分别执行 Pi 与 OpenCode 的 20 个同场景样本（需要 fresh/continue 或
   failure→delivery 的场景按一个场景登记多个 Task）；
 - 每个样本记录验收结论、failure taxonomy、耗时、token、工具调用、archive 和 delivery；修复后可重跑，
