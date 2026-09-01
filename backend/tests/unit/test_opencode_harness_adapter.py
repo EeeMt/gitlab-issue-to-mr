@@ -360,6 +360,20 @@ def test_opencode_tool_snapshots_map_to_one_canonical_lifecycle(tmp_path):
             exit_code=0,
         ),
         _tool_part_record(
+            call_id="call-fail",
+            tool="bash",
+            status="running",
+            input_value={"command": "sh -c 'exit 7'"},
+        ),
+        _tool_part_record(
+            call_id="call-fail",
+            tool="bash",
+            status="completed",
+            input_value={"command": "sh -c 'exit 7'"},
+            output="",
+            exit_code=7,
+        ),
+        _tool_part_record(
             call_id="call-write",
             tool="write",
             status="running",
@@ -389,8 +403,8 @@ def test_opencode_tool_snapshots_map_to_one_canonical_lifecycle(tmp_path):
         assert validate_event_v2(event)["schema"] == CANONICAL_EVENT_SCHEMA_V2
     tool_started = [event for event in translated if event["type"] == "tool.started"]
     tool_completed = [event for event in translated if event["type"] == "tool.completed"]
-    assert len(tool_started) == 2
-    assert len(tool_completed) == 2
+    assert len(tool_started) == 3
+    assert len(tool_completed) == 3
     assert tool_started[0]["payload"] == {
         "tool_id": "call-bash",
         "name": "Bash",
@@ -403,12 +417,19 @@ def test_opencode_tool_snapshots_map_to_one_canonical_lifecycle(tmp_path):
         "error": False,
         "exit_code": 0,
     }
-    assert tool_started[1]["payload"]["name"] == "Write"
-    assert tool_started[1]["payload"]["input"] == {
+    assert tool_completed[1]["payload"] == {
+        "tool_id": "call-fail",
+        "name": "Bash",
+        "output": "",
+        "error": True,
+        "exit_code": 7,
+    }
+    assert tool_started[2]["payload"]["name"] == "Write"
+    assert tool_started[2]["payload"]["input"] == {
         "content": "done",
         "file_path": "/workspace/result.txt",
     }
-    assert tool_completed[1]["payload"]["error"] is True
+    assert tool_completed[2]["payload"]["error"] is True
     assert [event["type"] for event in translated].count("harness.completed") == 1
 
 
@@ -456,6 +477,26 @@ def test_opencode_durable_events_map_text_tool_usage_and_compaction(tmp_path):
                 },
             ),
             _durable_record(
+                "session.next.tool.called",
+                {
+                    "sessionID": "ses-next",
+                    "assistantMessageID": "msg-next",
+                    "callID": "call-fail-next",
+                    "tool": "bash",
+                    "input": {"command": "sh -c 'exit 7'"},
+                },
+            ),
+            _durable_record(
+                "session.next.tool.success",
+                {
+                    "sessionID": "ses-next",
+                    "assistantMessageID": "msg-next",
+                    "callID": "call-fail-next",
+                    "content": [],
+                    "result": {"exitCode": 7},
+                },
+            ),
+            _durable_record(
                 "session.next.text.delta",
                 {"sessionID": "ses-next", "assistantMessageID": "msg-next", "textID": "txt-next", "delta": "done"},
             ),
@@ -486,8 +527,8 @@ def test_opencode_durable_events_map_text_tool_usage_and_compaction(tmp_path):
     )
 
     events = _events(runtime_dir)
-    assert [event["type"] for event in events].count("tool.started") == 1
-    assert [event["type"] for event in events].count("tool.completed") == 1
+    assert [event["type"] for event in events].count("tool.started") == 2
+    assert [event["type"] for event in events].count("tool.completed") == 2
     tool_started = next(event for event in events if event["type"] == "tool.started")
     assert tool_started["payload"] == {
         "tool_id": "call-next",
@@ -500,6 +541,14 @@ def test_opencode_durable_events_map_text_tool_usage_and_compaction(tmp_path):
         "name": "Bash",
         "output": "ok",
         "error": False,
+    }
+    failed_tool = [event for event in events if event["type"] == "tool.completed"][1]
+    assert failed_tool["payload"] == {
+        "tool_id": "call-fail-next",
+        "name": "Bash",
+        "output": "{\"exitCode\":7}",
+        "error": True,
+        "exit_code": 7,
     }
     assert any(event["type"] == "message.delta" and event["payload"]["content"] == "done" for event in events)
     assert any(event["type"] == "usage.updated" for event in events)

@@ -583,7 +583,18 @@ def _durable_tool_lifecycle(
     error_message = None
     if error_value is not None:
         error_message, _ = _error_message(error_value, "OpenCode tool failed")
-    failed = terminal in {"failed", "error"} or error_value is not None
+    result_source = output_data if isinstance(output_data, dict) else data
+    result = result_source.get("result")
+    exit_code = None
+    if isinstance(result, dict):
+        exit_code = result.get("exitCode")
+        if exit_code is None:
+            exit_code = result.get("exit_code")
+    failed = (
+        terminal in {"failed", "error"}
+        or error_value is not None
+        or (isinstance(exit_code, int) and not isinstance(exit_code, bool) and exit_code != 0)
+    )
     payload = {
         "tool_id": tool_id,
         "name": display_name,
@@ -592,12 +603,7 @@ def _durable_tool_lifecycle(
     }
     if error_message:
         payload["error_message"] = error_message
-    result_source = output_data if isinstance(output_data, dict) else data
-    result = result_source.get("result")
     if isinstance(result, dict):
-        exit_code = result.get("exitCode")
-        if exit_code is None:
-            exit_code = result.get("exit_code")
         if isinstance(exit_code, int) and not isinstance(exit_code, bool):
             payload["exit_code"] = exit_code
     _emit("tool.completed", payload, raw_line)
@@ -905,7 +911,15 @@ def _handle_tool_part(properties: dict, raw_line: int) -> None:
         error_message = None
         if error_value:
             error_message, _ = _error_message(error_value, "OpenCode tool failed")
-        error = status != "completed" or error_value is not None
+        metadata = state.get("metadata") if isinstance(state.get("metadata"), dict) else {}
+        exit_code = metadata.get("exit")
+        if exit_code is None:
+            exit_code = metadata.get("exit_code")
+        error = (
+            status != "completed"
+            or error_value is not None
+            or (isinstance(exit_code, int) and not isinstance(exit_code, bool) and exit_code != 0)
+        )
         payload = {
             "tool_id": tool_id,
             "name": name,
@@ -914,8 +928,6 @@ def _handle_tool_part(properties: dict, raw_line: int) -> None:
         }
         if error_message:
             payload["error_message"] = error_message
-        metadata = state.get("metadata") if isinstance(state.get("metadata"), dict) else {}
-        exit_code = metadata.get("exit")
         if isinstance(exit_code, int) and not isinstance(exit_code, bool):
             payload["exit_code"] = exit_code
         _emit("tool.completed", payload, raw_line)
