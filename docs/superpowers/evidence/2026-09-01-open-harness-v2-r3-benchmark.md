@@ -364,6 +364,127 @@ canonical payload 中确认 `failure_kind=rate_limited`；不通过伪造响应�
 rate-limit acceptance 已闭合；#250/#251 的真实分类证据保留为关联诊断。后续若冻结 Provider 自然返回
 新的 rate limit，可追加 Task；不改变已有成功样本，也不制造人工 429。
 
+### Scenario 13 authentication failure
+
+场景 13 只接受真实的 401 / `authentication_error`，不读取或修改 Provider secret，也不通过临时错误配置
+伪造认证失败。开发环境当前只读 Provider 元数据显示 Provider `3–12` 均为 enabled，没有专门的 401
+fixture；已有任务中的 `engine_error`、`protocol_error` 和 `rate_limited` 也不等价于认证失败。因此本场景
+登记为 `blocked_external_fixture`，待提供不改变冻结 Provider 的真实认证失败 fixture 后再补跑。
+
+### Scenario 14 network interruption / invalid session
+
+当前没有可安全、可重复的网络断线或非法 Session fixture。场景 09/11/17/20 中保留的 OpenCode
+`protocol_error`、Provider/TLS 和 delivery failure 均有各自的 failure taxonomy，不能改写为
+`invalid_session` 或网络恢复证据；因此场景 14 登记为 `not_triggered`，不把已有错误样本重复计入。
+
+### Scenario 15 longest-context
+
+场景 15 的验收是保留长输入/多轮只读任务的 usage、工具量、compaction 边界、唯一 terminal 和 0/0
+delivery。首次独立 probe 为 `#271 / Issue #79`（OpenCode，attempt
+`task-271-attempt-1-b93c2e993401`）和 `#272 / Issue #78`（Pi，attempt
+`task-272-attempt-1-e5cbd9677abe`）：两边均 `run.completed`、delivery/finalization 0/0；#271 为
+239.999s、5/5 tool、in 42 / cached 10,167 / out 3,437、seq `1–156`，archive
+`38b343f9ff6d72407e75b152d7c1784b1df935d52ececf46eddf8de0790f0cfc` / `43,447 B`；#272 为
+286.319s、2/2 tool、in 1,380 / cached 2,090 / out 3,831、seq `1–1724`，archive
+`8ae0e8a97feb96f4f66d229de27588c44f6d5b6b6ae70bbe4a7e573fe8c5e8a3` / `119,938 B`。首次 probe 的
+50-call 指令没有被模型完整执行，且没有 `context.compacted`，所以不单独作为正式阈值通过。
+
+随后在独立 Issue 上用长输入和 `Implementation + require_changes=false + fresh` 重跑：OpenCode
+`#273 / Issue #81`（attempt `task-273-attempt-1-f2198b783d53`）为 281.968s、21/21 tool、1 次
+`provider.retry`、in 161 / cached 20,822 / out 908、seq `1–165`，archive
+`bb0a542e5be434b5dc5c0e0b2fa6749f7dfdbdf6f551954ae20b99366137f0f6` / `37,704 B`；Pi
+`#274 / Issue #80`（attempt `task-274-attempt-1-8a6a40024905`）为 191.327s、24/24 tool、in 34 /
+cached 18,006 / out 1,363、seq `1–265`，archive
+`ff52d9011e5deed247b2e387478e74a71badee792363f265da3b63773cb78d50` / `54,696 B`。两边均有
+`harness.completed` → `delivery.completed` → `worker.finalization(exit_code=0,diff=0/0)` → 唯一
+`run.completed`，container 已清理；重跑仍没有 `context.compacted`，该事实作为 compaction 边界
+`not_triggered` 记录，而不是伪造事件。因此场景 15 以长任务 usage/性能和只读交付验收通过，
+compaction 事件本身仍只由场景 11 负责。
+
+### Scenario 16 multi-file refactor
+
+固定验收为在小型 fixture 中只交付 `r3_s16.py` 与 `r3_s16_test.py`，实现 `normalize_pair`，测试通过，
+并且 Git delivery 可追溯。Pi `#258 / Issue #69`（Bundle 134，attempt
+`task-258-attempt-1-a0e5d4cf952d`）耗时 136.028s，9/9 tool，seq `1–122`，in 53 / cached 4,698 /
+out 335，commit `bca2afdef31cc48cfaba9c1af0cbc977d95d1b77`，archive
+`47d596a754a5303b23aa97769601108c8cbfac3520a8dc1d67ff1085caecef72` / `26,551 B`。OpenCode
+`#259 / Issue #70`（Bundle 133，attempt `task-259-attempt-1-a3d4ab86e61a`）耗时 196.349s，11/11
+tool，seq `1–269`，in 77 / cached 11,040 / out 371，commit
+`d573243bc103b8336d7c5d9edbce89463c87b163`，archive
+`d5ba0363b41cbce14b69b57abee9a4148621d0521d840a5c997e7d2d18801957` / `41,822 B`。两边均有
+`harness.completed`、delivery、`worker.finalization(exit_code=0)` 和唯一 `run.completed`；模型在
+Worker finalization 前已完成 commit，所以公共 finalization 的 diff 均为 0/0，commit SHA 以
+delivery/finalization canonical payload 为准。人工验收确认两文件、测试和无 Python cache，场景 16
+登记为 `pass`。
+
+### Scenario 17 single-file bug fix
+
+该场景采用 seed → fix/recovery lineages，验收只允许修复 `r3_s17.py` 的周边空白解析 bug，并保留所有
+失败样本。Pi seed `#262 / Issue #73`（attempt `task-262-attempt-1-9f66f720164c`）耗时 215.669s，
+18/18 tool，seq `1–843`，in 90 / cached 8,322 / out 477，commit
+`9cf57ccb191c740871f47db67f69121bec4bf723`，archive
+`cb4e064ba32f4e34d1ab3bd0a20fc0142ad1e4d3a31fe3288c27e1e3661425a3` / `86,938 B`；Pi fix
+`#265 / Issue #73`（attempt `task-265-attempt-1-324cfd345594`）耗时 179.233s，20/20 tool，seq
+`1–507`，in 206 / cached 5,723 / out 392，commit `ad238760fb06d405098570c58b7214fc1b2b3b08`，
+archive `f6ef00baf67620bb39ba47fe23bb50b4331131fbb5391ccea58af35d95ad70a9` / `51,513 B`。
+
+OpenCode seed `#263 / Issue #74`（attempt `task-263-attempt-1-94f5d6ee80ba`）有 18/18 tool、seq
+`1–530`，耗时 244.452s，in 190 / cached 13,489 / out 277，archive
+`8146af37792ae56664a08e440e1d1cf9be43f7f53eea550f8aa43e1983f8f092` / `73,758 B`；OpenCode 首轮
+fix `#264`（attempt `task-264-attempt-1-a066e6dc0fac`）有 10/9 tool start/complete、seq `1–197`，
+耗时 169.260s，archive `877c8f1ef2502c0d0f7443a02a969368334efda6846b16a0c68d6908c88a072c` /
+`36,667 B`。两者均以唯一 `harness.failed(protocol_error: OpenCode protocol failure: session.idle
+with active tool parts)` → `worker.finalization(exit_code=1)` → `run.failed` 收敛。随后 OpenCode
+recovery `#268 / Issue #74`（attempt `task-268-attempt-1-4db54528a28f`）耗时 147.441s，7/7 tool，
+seq `1–329`，in 119 / cached 9,292 / out 322，commit
+`5148732cc90766cb1c4b2a8a8b04b528d5ebaf92`，archive
+`60277d482cf5cc2e13964cf5e5c5fbfbbcee69224d6b730ec238bb48857b5cf1` / `41,081 B`，完成同一
+目标文件的修复、验证和 delivery。各任务的模型 commit 均使公共 finalization diff 为 0/0；最终只含
+目标 fixture，场景 17 登记为 `pass`，#263/#264 的真实协议失败不删除也不改写。
+
+### Scenario 18 pure analysis
+
+固定验收为只读仓库并输出分析，不写入、commit 或 delivery。Pi `#260 / Issue #71`（attempt
+`task-260-attempt-1-4c61d4e92eef`）耗时 244.734s，7/7 tool，seq `1–1159`，in 179 / cached 4,462 /
+out 2,149，archive `8f7f57a0b3302af953ab63a8d9f14bbaf86b12ab21fac09fc378b610dd174245` /
+`89,037 B`；OpenCode `#261 / Issue #72`（attempt `task-261-attempt-1-3a6e6c4ba23b`）耗时 249.124s，
+14/14 tool，seq `1–858`，in 216 / cached 13,389 / out 1,702，archive
+`cf4ff276453702bf9b095405839c84f4320bc88c4eee721a4da84397d762a350` / `89,640 B`。两边均有
+`harness.completed`、`delivery.completed(commit_sha=null)`、`worker.finalization(diff=0/0)` 和唯一
+`run.completed`，workspace clean，场景 18 登记为 `pass`。
+
+### Scenario 19 failure followed by public delivery
+
+本轮没有新增一组独立的、两种 Harness 均可比的 failure → public delivery 样本。场景 11 的
+`#251 → #252`、场景 17 的 `#263/#264 → #268` 和场景 20 的 `#267/#269 → #270` 分别归属于各自
+固定场景，不能重复计入场景 19；因此场景 19 保持 `pending`，待专门 lineage 补跑后再判定。
+
+### Scenario 20 high-token generation
+
+固定验收为生成三个各 80 行的确定性文件和 1,200+ 字报告，并记录 usage、耗时及 delivery。Pi
+`#266 / Issue #75`（attempt `task-266-attempt-1-812f7d9370f4`）耗时 184.220s，9/9 tool，seq
+`1–188`，in 375 / cached 6,366 / out 2,391，commit
+`7b1cc8f71744ce1a403d4ed640390eb60070b0dd`，archive
+`8081861c85b5b5cfce122454839ce9e1583185997824d251ad1aa62d134803fc` / `44,397 B`；模型已先 commit，
+因此公共 finalization diff 为 0/0，但三文件 80/80/80 行和报告验收成立。
+
+OpenCode 首轮 `#267 / Issue #76`（attempt `task-267-attempt-1-13335d83c06d`）耗时 211.601s，
+22/22 tool，seq `1–226`，in 194 / cached 14,509 / out 3,271，archive
+`7fb7f8c0e7577b583090d167eaaecdf25c41f87a6ff0522e33cd152235e3ec4f` / `61,461 B`，以
+`protocol_error: session.idle with active tool parts` 失败；recovery `#269 / Issue #76` 耗时 162.580s，
+6/6 tool，seq `1–446`，in 338 / cached 9,152 / out 962，archive
+`992da0a78111a7dc75ee745aab1a536879f8b7c96ff4c0a3819fc835bef879fb` / `47,152 B`，虽有
+`harness.completed` 和三文件/报告验收，但因已有 commit `1acf2a50d3d593cee99b9c6141d79d19f1de186f` 不再有待交付 diff，公共
+`delivery.failed`、`worker.finalization(exit_code=1)` 和 `run.failed`；该失败链路保留。
+
+为避免把已有分支 commit 当成公共 delivery，另建独立 Issue 77 做最终 OpenCode probe：`#270`（attempt
+`task-270-attempt-1-643bf245c509`）耗时 234.985s，5/5 tool，seq `1–1233`，in 74 / cached 9,373 /
+out 2,906，`harness.completed` → `delivery.completed(exit_code=0, commit_sha=0f43822cf62ce6d4afedf1a6883d3786f201ed1a)`
+→ `worker.finalization(diff=240/0)` → 唯一 `run.completed`，archive
+`794f60109b457a0f17ba95edb160965942cd221bb087b2b062b08fc61e794fe2` / `109,974 B`，container
+已清理。人工验收确认三个 80 行文件、1,200+ 字报告和只包含目标变更，场景 20 登记为 `pass`，
+`#267/#269` 不从历史中删除。
+
 ## Acceptance and evidence contract
 
 每个 Task 完成或进入 terminal 后，登记以下字段：Task/Issue ID、Harness、Bundle/attempt、task mode、
@@ -395,14 +516,14 @@ Task ID 留空表示尚未执行；正式执行过程中只追加结果，不改
 | 10 | timeout/SIGKILL：临时使用最小可保存 timeout，任务阻塞并由 runner 收敛，恢复配置 | `#245 / Issue #59`；Bundle `134`；attempt `task-245-attempt-1-078f64dfad02`；`execute/fresh`；`require_changes=true`；seq `1–22`，`tool.started(sleep 180)` → `harness.failed(timeout)` → `worker.finalization(exit 143)` → `run.failed(timeout)`；archive 5,447 B；无 commit | `#246 / Issue #60`；Bundle `133`；attempt `task-246-attempt-1-2d40ba54e123`；`execute/fresh`；`require_changes=true`；seq `1–18`，`tool.started(sleep 180)` → `harness.failed(timeout)` → `worker.finalization(exit 143)` → `run.failed(timeout)`；archive 7,682 B；无 commit | pass（两边均由临时 60s runner timeout 真实收敛，配置恢复为 1800s，container/workspace 清理成立） |
 | 11 | context compaction：长上下文任务必须产生 `context.compacted`，其后仍有唯一 terminal | `#251 → #252 / Issue #63`；Bundle `134`；5 次 compaction，`#251` seq `1–929` 失败后 `#252` 完成 recovery delivery；archives `1,778,253 / 35,934 B`；最终 commit `38f3a610…` | `#253 / Issue #64`；Bundle `133`；41/41 tool，seq `1–391`，4 次 `provider.retry`，无 compaction，`engine_error(unknown certificate verification error)`；archive `220,592 B`；无 commit | blocked_external_fixture（Pi 半边 compaction/唯一 terminal/recovery 成立；OpenCode 被 Provider/TLS fixture 阻塞） |
 | 12 | rate limit：使用已有受限 Provider，记录 `provider.retry` 与 `rate_limited` 分类 | `#254 / Issue #65`、`#256 / Issue #67`；Bundle `134`；13/13、26/26 tool；seq `1–427` / `1–592`；archives `44,906 / 57,578 B`；commits `d10ab625…` / `f16e80eb…` | `#255 / Issue #66`、`#257 / Issue #68`；Bundle `133`；8/8、26/26 tool；seq `1–318` / `1–309`；archives `42,300 / 49,189 B`；commits `29a3181a…` / `7b63cdc5…` | not_triggered（正式 probe 均无 retry；#250/#251 的真实 `rate_limited` 只作为场景 11 关联诊断保留） |
-| 13 | authentication failure：只接受真实 401/`authentication_error`；无 401 fixture 不得伪造 | — | — | pending |
-| 14 | network/invalid session：真实断线或非法 Session，记录 retry/engine 或 invalid-session 分类 | — | — | pending |
-| 15 | longest-context：长输入/多轮任务记录 usage、compaction 边界和完成/失败结果 | — | — | pending |
-| 16 | 多文件重构：小型 fixture 的多文件一致性改造，测试、commit、push/MR | — | — | pending |
-| 17 | 单文件 bug fix：只改目标文件，测试/验收通过并 delivery | — | — | pending |
-| 18 | 纯分析：只读仓库并输出分析，无写入、commit 或 delivery | — | — | pending |
-| 19 | 失败后公共 delivery：第一轮保留失败证据，后续修复/重试成功 delivery，顺序可追溯 | — | — | pending |
-| 20 | 高 token 生成：明确的长输出/多文件生成，记录 usage、耗时和 delivery | — | — | pending |
+| 13 | authentication failure：只接受真实 401/`authentication_error`；无 401 fixture 不得伪造 | 无任务；Provider `3–12` enabled，未发现专用 401 fixture | 无任务；同左 | blocked_external_fixture |
+| 14 | network/invalid session：真实断线或非法 Session，记录 retry/engine 或 invalid-session 分类 | 已有 protocol/TLS 错误不属于本场景；无专用 fixture | 同左；无专用 fixture | not_triggered |
+| 15 | longest-context：长输入/多轮任务记录 usage、compaction 边界和完成/失败结果 | formal retry `#274 / Issue #80`；24/24 tool；seq `1–265`；191.327s；in 34 / cached 18,006 / out 1,363；archive 54,696 B | formal retry `#273 / Issue #81`；21/21 tool；seq `1–165`；281.968s；in 161 / cached 20,822 / out 908；1 retry；archive 37,704 B | pass（两边 0/0、唯一 `run.completed`；未触发 `context.compacted`，按边界事实记录） |
+| 16 | 多文件重构：小型 fixture 的多文件一致性改造，测试、commit、push/MR | `#258 / Issue #69`；9/9 tool；seq `1–122`；commit `bca2afde…`；archive 26,551 B | `#259 / Issue #70`；11/11 tool；seq `1–269`；commit `d573243b…`；archive 41,822 B | pass（两边完成两文件测试和 delivery；模型先 commit，finalization diff 0/0） |
+| 17 | 单文件 bug fix：只改目标文件，测试/验收通过并 delivery | `#262 → #265 / Issue #73`；seed/fix；18/18、20/20 tool；commits `9cf57ccb…` / `ad238760…` | `#263/#264 → #268 / Issue #74`；两次 protocol failure 后 recovery；7/7 tool；commit `5148732c…` | pass（最终只改目标文件并 delivery；原始 OpenCode failures 保留） |
+| 18 | 纯分析：只读仓库并输出分析，无写入、commit 或 delivery | `#260 / Issue #71`；7/7 tool；seq `1–1159`；archive 89,037 B；commit null | `#261 / Issue #72`；14/14 tool；seq `1–858`；archive 89,640 B；commit null | pass（两边 0/0、clean workspace、唯一 `run.completed`） |
+| 19 | 失败后公共 delivery：第一轮保留失败证据，后续修复/重试成功 delivery，顺序可追溯 | —；场景 11/17 的 recovery 不重复计入 | —；场景 20 的 `#267/#269 → #270` 不重复计入 | pending |
+| 20 | 高 token 生成：明确的长输出/多文件生成，记录 usage、耗时和 delivery | `#266 / Issue #75`；9/9 tool；seq `1–188`；in 375 / cached 6,366 / out 2,391；commit `7b1cc8f7…` | `#267/#269 / Issue #76` 保留失败；最终 `#270 / Issue #77`；5/5 tool；seq `1–1233`；in 74 / cached 9,373 / out 2,906；commit `0f43822c…` | pass（独立 OpenCode #270 公共 delivery 成功；#267/#269 failure chain 保留） |
 
 ## Execution ledger
 
@@ -423,7 +544,14 @@ Task ID 追溯，不把凭据写入文档。
 | 10 | `#245 / Issue #59` — failed(timeout)；Pi Bundle `134`；1,713/128/47；144.750s；1/1 tool；seq 1–22；archive 5,447 B；无 commit；container 已清理 | `#246 / Issue #60` — failed(timeout)；OpenCode Bundle `133`；0/0/0；144.617s；1/1 tool；seq 1–18；archive 7,682 B；无 commit；container 已清理 | frozen Provider `7 / openrouter-free`, `execute/fresh`, `require_changes=true`, same `sleep 180` prompt；global timeout temporarily 60s then restored 1800s | pass（两边均在 tool started 后由 runner 以 timeout/exit 143 收敛，队列为空且配置已恢复） |
 | 11 | `#251 → #252 / Issue #63` — compaction/失败→delivery recovery；Bundle `134`；#251 5 次 compaction、seq `1–929`、archive 1,778,253 B；#252 seq `1–305`、commit `38f3a610…`、archive 35,934 B | `#253 / Issue #64` — Bundle `133`；41/41 tool、seq `1–391`、4 次 retry、无 compaction；archive 220,592 B；engine_error，无 commit | blocked_external_fixture（Pi compaction 和 recovery 可验收；OpenCode unknown certificate verification error，待外部 fixture 恢复） |
 | 12 | `#254 / Issue #65` + `#256 / Issue #67` — completed；Bundle `134`；13/13、26/26 tool；seq `1–427` / `1–592`；archives 44,906 / 57,578 B；commits `d10ab625…` / `f16e80eb…` | `#255 / Issue #66` + `#257 / Issue #68` — completed；Bundle `133`；8/8、26/26 tool；seq `1–318` / `1–309`；archives 42,300 / 49,189 B；commits `29a3181a…` / `7b63cdc5…` | not_triggered（两轮正式 probe 无 `provider.retry`；#250/#251 的 rate_limited 不重复计入） |
-| 13–20 | pending | pending | frozen above | cohort execution not complete; scenarios 09 and 11 have OpenCode external-fixture recovery remaining |
+| 13 | 无任务；Provider `3–12` enabled，无专用 401 fixture | 无任务；同左 | frozen Provider metadata；不读取 secret | blocked_external_fixture |
+| 14 | 未形成专用 network/invalid-session fixture | 未形成专用 network/invalid-session fixture | 既有 protocol/TLS 错误不改写为 invalid session | not_triggered |
+| 15 | `#271/#272` 初次 probe；formal `#274 / Issue #80` — completed；24/24 tool；seq 1–265；0/0；archive 54,696 B；无 compaction | `#271/#272` 初次 probe；formal `#273 / Issue #81` — completed；21/21 tool；seq 1–165；1 retry；0/0；archive 37,704 B；无 compaction | frozen Provider `7 / openrouter-free`, long-input `Implementation/fresh`, `require_changes=false` | pass（usage/长任务边界记录完整；compaction `not_triggered`） |
+| 16 | `#258 / Issue #69` — completed；9/9 tool；seq 1–122；136.028s；in 53 / cached 4,698 / out 335；archive 26,551 B；commit `bca2afde…` | `#259 / Issue #70` — completed；11/11 tool；seq 1–269；196.349s；in 77 / cached 11,040 / out 371；archive 41,822 B；commit `d573243b…` | frozen Provider `7 / openrouter-free`, same two-file refactor prompt | pass（两边 test/delivery 成立；finalization diff 0/0 因模型已先 commit） |
+| 17 | `#262 → #265 / Issue #73` — seed/fix completed；archives 86,938 / 51,513 B；commits `9cf57ccb…` / `ad238760…` | `#263/#264 → #268 / Issue #74` — #263/#264 protocol failure，#268 completed；archives 73,758 / 36,667 / 41,081 B；commit `5148732c…` | frozen Provider `7 / openrouter-free`, same single-file bug fixture | pass（最终目标文件修复和 delivery 成立；原始 failures 保留） |
+| 18 | `#260 / Issue #71` — completed；7/7 tool；seq 1–1159；244.734s；in 179 / cached 4,462 / out 2,149；archive 89,037 B；无 commit | `#261 / Issue #72` — completed；14/14 tool；seq 1–858；249.124s；in 216 / cached 13,389 / out 1,702；archive 89,640 B；无 commit | frozen Provider `7 / openrouter-free`, read-only analysis | pass（0/0、clean workspace、terminal/delivery/finalization 完整） |
+| 19 | — | — | 场景 11/17/20 的 failure→recovery 不能重复计数 | pending |
+| 20 | `#266 / Issue #75` — completed；9/9 tool；seq 1–188；184.220s；in 375 / cached 6,366 / out 2,391；archive 44,397 B；commit `7b1cc8f7…` | `#267/#269 / Issue #76` failures 保留；独立 `#270 / Issue #77` — completed；5/5 tool；seq 1–1233；234.985s；in 74 / cached 9,373 / out 2,906；archive 109,974 B；commit `0f43822c…` | frozen Provider `7 / openrouter-free`, high-token three-file prompt | pass（#270 `delivery.completed` + finalization 240/0；#267/#269 failures 保留） |
 
 ## Current stop boundary
 

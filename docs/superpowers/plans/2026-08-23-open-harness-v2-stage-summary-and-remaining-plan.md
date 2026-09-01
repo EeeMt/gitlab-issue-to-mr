@@ -142,10 +142,10 @@ R2 本轮已完成以下闭环项：
   [R3 benchmark cohort evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
 - [x] 已完成场景 01–03 的 Pi/OpenCode 正式配对：场景 02 的 OpenCode 首次停滞取消（Task `203`）保留为失败
   证据，独立 fresh retry（Task `204`）成功；场景 03 的 `freeform/fresh`（Task `205`/`206`）也已成功；当前
-  登记册已更新，场景 04–20 仍待执行；
+  登记册已更新；
 - [x] 已完成场景 04 `execute/fresh` 工具成功配对（Task `207`/`208`）：两边均有成功只读 shell 检查、完整
   tool start/complete 配对和 marker delivery；无害路径探测错误保留在 TaskLog；当前登记册已更新，场景
- 05、07–20 仍待执行；
+  已同步更新；
 - [x] 已完成场景 05 的严格工具失败配对：Pi Task `228` / Issue `48` 与修复后 OpenCode Task `231` / Issue
   `50` 均产生 standalone `exit 7` 的 canonical `tool.completed(error=true)`，随后继续完成 marker delivery；
   初次掩盖退出样本 `226`/`227` 和暴露 `exit_code=7,error=false` 的 OpenCode 样本 `229` 均保留，且已用
@@ -176,14 +176,34 @@ R2 本轮已完成以下闭环项：
   `253` 产生 41/41 tool 和 4 次 retry，但没有 compaction，最终为 `engine_error: unknown certificate
   verification error`，因此场景 11 登记为 `blocked_external_fixture`，不把 Pi 半边追认为完整通过；详见
   [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
-- [ ] 当前 R3 登记册的未执行场景为 12–20；场景 09 和 11 的 OpenCode 半边仍需在不改变冻结 Provider
-  的前提下恢复外部 fixture 后补跑；
-- [ ] 已执行场景 12 的两轮正式 Pi/OpenCode retry probe：`254/255` 与 `256/257` 均成功完成并交付，
+- [x] 已执行场景 12 的两轮正式 Pi/OpenCode retry probe：`254/255` 与 `256/257` 均成功完成并交付，
   但四个任务都没有 `provider.retry`；`250/251` 中同一冻结 Provider 的真实 `rate_limited` 事件作为
   场景 11 关联诊断保留，不重复计入场景 12，因此场景 12 登记为 `not_triggered`；详见
   [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
-- [ ] 当前 R3 登记册的未执行场景为 13–20；场景 09 和 11 的 OpenCode 半边仍需在不改变冻结 Provider
-  的前提下恢复外部 fixture 后补跑；
+- [ ] 场景 13 的认证失败仍为 `blocked_external_fixture`：只读复核 Provider `3–12` 均 enabled，开发环境
+  没有专用 401 fixture；未读取或修改 Provider secret，不伪造认证错误；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
+- [ ] 场景 14 的 network/invalid-session 仍为 `not_triggered`：当前没有可安全、可重复的专用断线或非法
+  Session fixture，已有 protocol/TLS 错误不改写为 invalid-session；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
+- [x] 已完成场景 15 的 longest-context 正式重跑：初次 `#271/#272` 保留为未达 50-call 指令的 probe，
+  独立长输入重跑 `#273 / Issue #81`（OpenCode）与 `#274 / Issue #80`（Pi）分别完成 21/21、24/24
+  tool，cached input `20,822` / `18,006`，唯一 `run.completed`、0/0 delivery；两边没有
+  `context.compacted`，按 `not_triggered` 记录该边界，不伪造压缩事件；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
+- [x] 已完成场景 16 多文件重构：Pi `#258 / Issue #69` 与 OpenCode `#259 / Issue #70` 均完成
+  `r3_s16.py` + `r3_s16_test.py` 的测试、commit、delivery；模型先 commit 导致公共 finalization diff 为
+  `0/0`，canonical delivery/finalization SHA 已登记；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
+- [x] 已完成场景 17 单文件 bug fix：Pi `#262 → #265 / Issue #73`，OpenCode `#263/#264 → #268 /
+  Issue #74`；OpenCode 两次真实 `session.idle with active tool parts` 失败保留，最终 recovery 完成
+  单文件修复、测试和 delivery；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
+- [x] 已完成场景 18 纯分析：Pi `#260 / Issue #71` 与 OpenCode `#261 / Issue #72` 均只读完成，
+  `commit_sha=null`、delivery/finalization `0/0`、workspace clean；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
+- [ ] 场景 19 的独立 failure→public delivery cohort 尚未执行；场景 11、17、20 的 failure/recovery
+  lineage 已分别计入固定场景，不重复计数；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
+- [x] 已完成场景 20 高 token 生成：Pi `#266 / Issue #75` 成功；OpenCode `#267/#269 / Issue #76`
+  的 protocol/delivery failures 保留，独立 `#270 / Issue #77` 完成三个 80 行文件、报告和公共 delivery，
+  finalization diff `240/0`；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
+- [ ] 当前 R3 剩余退出项为：场景 09 和 11 的 OpenCode 外部 fixture recovery、场景 13 的真实 401 fixture、
+  场景 14 的真实 network/invalid-session fixture，以及场景 19 的独立 failure→public delivery cohort；
+  在这些项完成前不关闭 R3，也不进入 R4；
 - [ ] 在冻结 cohort 上分别执行 Pi 与 OpenCode 的 20 个同场景样本（需要 fresh/continue 或
   failure→delivery 的场景按一个场景登记多个 Task）；
 - 每个样本记录验收结论、failure taxonomy、耗时、token、工具调用、archive 和 delivery；修复后可重跑，
