@@ -140,8 +140,9 @@ R2 本轮已完成以下闭环项：
   冻结的 20 个多样化场景、成功标准、可比 Endpoint/model 和统计方法；
 - [x] 开始前冻结 candidate、Provider/model、协议映射、人工验收口径和独立 Issue/lineage 隔离策略；详见
   [R3 benchmark cohort evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
-- [x] 已完成场景 01–02 的 Pi/OpenCode 正式配对：场景 02 的 OpenCode 首次停滞取消（Task `203`）保留为失败
-  证据，独立 fresh retry（Task `204`）成功；当前登记册已更新，场景 03–20 仍待执行；
+- [x] 已完成场景 01–03 的 Pi/OpenCode 正式配对：场景 02 的 OpenCode 首次停滞取消（Task `203`）保留为失败
+  证据，独立 fresh retry（Task `204`）成功；场景 03 的 `freeform/fresh`（Task `205`/`206`）也已成功；当前
+  登记册已更新，场景 04–20 仍待执行；
 - [ ] 在冻结 cohort 上分别执行 Pi 与 OpenCode 的 20 个同场景样本（需要 fresh/continue 或
   failure→delivery 的场景按一个场景登记多个 Task）；
 - 每个样本记录验收结论、failure taxonomy、耗时、token、工具调用、archive 和 delivery；修复后可重跑，
