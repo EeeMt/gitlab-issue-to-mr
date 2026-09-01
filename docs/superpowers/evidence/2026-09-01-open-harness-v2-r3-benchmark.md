@@ -412,9 +412,9 @@ Scenario 11 的追加失败/未触发证据，不覆盖前述失败样本：
 
 因此 #293 和 #295 证明当前冻结 Provider 7 已能完成真实高上下文任务，之前的 TLS engine error 本轮未再
 复现；但在最高约 `316,034` cached input 的直接输出样本中仍没有结构化 compaction 事件。模型最终文本、
-日志中出现的 `context.compacted` 字样不能替代 raw/canonical event。Scenario 11 仍未满足“压缩后继续并
-唯一 terminal”的硬验收，状态保持 `blocked_external_fixture`，不把三次成功 delivery 追认为 compaction
-通过。
+日志中出现的 `context.compacted` 字样不能替代 raw/canonical event。当时 Scenario 11 尚未满足“压缩后
+继续并唯一 terminal”的硬验收，状态保持 `blocked_external_fixture`，不把三次成功 delivery 追认为
+compaction 通过；后续受控 legacy compatibility route 的最新结果见下文。
 
 为排除“OpenCode 没有执行足够多的有效上下文输入”这一独立变量，2026-09-02 又在独立 Issue `88`
 上使用已有但非冻结的 Provider `12 / openrouter-minimax-responses`（model
@@ -505,6 +505,64 @@ OpenCode `1.18.19` 的本地 `/doc` 明确暴露 `POST /api/session/{sessionID}/
 clean-idle route 和 idle fail-closed 边界的追加诊断，不是新的正式 cohort 通过样本；七次任务的 Worker
 container 均已由调度器清理。
 
+#### 2026-09-02 real Provider long-read tasks and legacy summarize route
+
+在同一远端开发 Host 上使用已有 Provider `7 / openrouter-free`、Profile `4`、Bundle `138` 和独立
+Issue `#92` 追加了两次真实 Task，目的分别是确认正常 continuation lineage 和在不依赖 watcher 的情况下
+增加长上下文/有效文件读取压力：
+
+- `#309` 为 `plan/continue`，completed，耗时 `139.560s`，canonical tool `6/6`，input/output
+  token `1,943/1,857`，delivery `0/0`，archive `task-309-runtime-archive.tar.gz` /
+  `2d1c02b7559a1f31d3e100fb090b593bd662078728f270deff6bbe945f887bc7` / `31,348 B`。
+  raw OpenCode 只有 1 个 `session.idle`，canonical 没有 `context.compacted`。
+- `#310` 为 `freeform/continue`，沿用 `#309` 的同一 session lineage，completed，耗时 `307.743s`，
+  按任务指令完成 12,000 行 Task-local fixture 的 80 次有效 direct file read；canonical tool
+  `82/82`，input/output token `34/214`，delivery `0/0`，archive `task-310-runtime-archive.tar.gz` /
+  `9dd420a15614fc0a308431e0383e3a3b113dfafc5fc7723d0bc8e901affa7eb0` / `211,918 B`。raw 中有 80 个
+  `file` 事件和 1 个 `session.idle`，没有
+  `session.compacted` 或 `session.next.compaction.ended`；canonical `context.compacted=0`。
+
+两次任务都使用真实 Provider 完成并由 Worker 正常清理，但没有产生 OpenCode compaction event，因此不
+改变 Scenario 11 的 `blocked_external_fixture`。本轮一个外部 observer 因启动竞态得到 HTTP `000`；随后
+在 Task 容器外不带 Task-private Server Basic Auth 请求 legacy summarize route 得到 `401`。这两个结果都
+不能作为 Provider authentication failure 或 compaction 证据。
+
+对固定 OpenCode `1.18.19` 的 exact-tag source 继续核对后，确认 legacy `POST /session/:sessionID/summarize`
+与 V2 `POST /api/session/:sessionID/compact` 是两条不同路径：官方
+[`session.ts` handler](https://raw.githubusercontent.com/anomalyco/opencode/v1.18.19/packages/opencode/src/server/routes/instance/httpapi/handlers/session.ts)
+要求 `providerID`、`modelID` 和可选的 `auto`，当前 App 的
+[`server-compat.ts`](https://github.com/anomalyco/opencode/blob/dev/packages/app/src/utils/server-compat.ts)
+也通过该 legacy route 兼容 compact。Codify 本轮为 Bridge 增加了该请求的 URL/payload/audit transport
+映射，但没有改变默认执行路径，也没有把外部未认证请求追认为有效调用；受控 in-process 认证验证见下文
+`#314/#315`。
+
+随后将该诊断收敛为默认关闭的 Task-local opt-in：只有任务在 `CODIFY_RUNTIME_DIR` 写入精确 marker
+`codify.opencode.legacy-summarize/v1` 时，Bridge 才会在没有 active tool part 的第一次 `session.idle`
+内用当前 Task-private Basic Auth 调用 legacy summarize；非 opt-in 任务完全不改变，active-tool idle 仍
+fail-closed。远端先重新验证 Profile `4`，随后生成 Bundle `139`（`542,720 B`，digest
+`838586bb9871501a39f27d665f207567aa61639ef2725ac536ec1b0c096092f5`），并确认 Task 容器中的 Bridge
+摘要与本地测试版本一致。
+
+- `#313` 使用 Provider `7`、Profile `4`、Bundle `139`、`freeform/continue`，但沿用过大的既有
+  session lineage 后在 `1800s` runner timeout 收敛；archive `task-313-runtime-archive.tar.gz` /
+  `17d45e2caa90e78f5be281e1f65f2f0cba674fbb9aea332fd5c7d73c7a56eed2` / `8,979 B`。raw 只有
+  `session.error` 和持续 heartbeat，没有 `session.idle` 或 `session.summarize`；该失败保留为
+  continuation 停滞证据，不计入 compaction。
+- `#314` 改用同一 Provider/Profile/Bundle 的 `freeform/fresh` 短任务，`136.428s` 完成，usage 为
+  input/output `658/352`，tool `1/1`；archive `task-314-runtime-archive.tar.gz` /
+  `23507c96a5b7169879cf1ea396a6d7bbec925022a7debf3a6b8852603b009cc4` / `18,230 B`。HTTP audit
+  为 `session.summarize: 200 / success`；raw 有 `session.compacted=1`、`session.idle=1`，canonical
+  有 `context.compacted=2`，并且 `harness.completed=1`、`run.completed=1`，证明认证 legacy route
+  能进入 Codify 的 compaction event 链路并在后续 idle 唯一收敛。
+- `#315` 再用同一固定身份执行 `freeform/fresh` 长上下文任务：Task-local 12,000 行 fixture、37/37
+  个有效 direct-read tool、耗时 `171.667s`，usage 为 input/output `36,499/975`；archive
+  `task-315-runtime-archive.tar.gz` / `450bac375f75019924a14901f1ea496a9c0450584ffc536db4efa5b6ac987778` /
+  `117,822 B`。HTTP audit 同样为 `session.summarize: 200 / success`；raw
+  `session.compacted=1`（line `745`）后有 `session.idle=1`（line `748`），canonical 有
+  `context.compacted=3`（lines `171/503/504`），之后才是 `harness.completed`（line `509`）和
+  唯一 `run.completed`（line `513`）。这满足场景 11 的长上下文、真实 compaction event 和唯一
+  terminal 硬条件；Task 为只读 probe，delivery/finalization 为 `0/0`，Worker container 已清理。
+
 #### Pinned OpenCode upstream capability boundary
 
 2026-09-02 对冻结 Kit 中 OpenCode `1.18.19` exact tag 的
@@ -516,22 +574,24 @@ compaction producer。官方上游 issue
 `POST /api/session/{sessionID}/compact` 的真实 `503`：它是固定 OpenCode build 的上游能力边界，
 不是 Codify adapter 的 event-order 缺陷。
 
-因此在获得支持 manual compaction 的新 Kit/固定 build，或获得可验证的 automatic-compaction fixture
-之前，不再叠加同类 route probe；也不放宽 `session.idle` 存在 active tool parts 时的 fail-closed 规则。
+因此 V2 `/api/session/:sessionID/compact` 仍记录为固定 OpenCode build 的上游 `503` 能力边界，
+不再重复同类 V2 route probe；legacy `/session/:sessionID/summarize` 则由默认关闭的 exact-marker
+Bridge 诊断钩子完成了受控认证验证。该钩子只在 clean idle 且没有 active tool part 时调用一次，并
+保留 `session.idle` active-tool 的 fail-closed 规则。
 
-这组探针证明了 route 存在、marker 权限问题已排除，以及冻结 Provider `7` 在两次真实 native POST 中
-返回 `503`；它没有产生结构化 `context.compacted` / `session.compacted` / durable compaction event。
-由于该 POST 是 Task 内对 Server route 的外部控制请求，不会出现在 adapter 的 HTTP audit
-`session.compact` 操作中；验收仍以 TaskLog、raw OpenCode archive 和 canonical event 为准。Provider `3`
-与 `4` 的额度限制也没有提供可比的成功样本，因此不改变 Scenario 11 的 blocker。
+这组结果区分了两条路径：V2 native compact 的 `503` 仍不能作为 Codify adapter 缺陷；而 `#314/#315`
+的 Bridge 内 legacy summarize 均在 HTTP audit 中记录 `session.summarize: 200 / success`，并在 raw
+OpenCode 与 canonical stream 产生 compaction event。Provider `3` 与 `4` 的额度限制仍不提供可比
+的认证样本，不改变 Scenario 13 的 blocker。
 
-因此场景 11 登记为 `blocked_external_fixture`：Pi 半边已证明 compaction、唯一 terminal 和同 lineage
-recovery delivery；OpenCode `#253/#276` 的 TLS engine error 本轮未在 `#293/#295` 重现，
-`#293/#295`、`#298/#300` 以及最后的 `#302/#303/#304/#305/#306/#307/#308` 都没有可验证的
-`context.compacted`，`#294` 还是 count-only 探针。
-后续只有在不改变冻结 Provider 的前提下获得可验证的 OpenCode compaction event/fixture，才能补跑并关闭
-该场景；在固定 OpenCode build 的 manual-compaction capability、Provider 额度或外部 fixture 不变化前，
-不再叠加 alternate-provider 或同类 route probe。
+因此场景 11 现登记为 `pass`：Pi 半边保留正式 compaction、唯一 terminal 和同 lineage recovery
+delivery；OpenCode 长上下文 Task `#315` 在冻结 Provider `7`、Profile `4`、Bundle `139` 上真实
+产生 `context.compacted=3`，并在其后以唯一 `run.completed` 收敛。OpenCode `#253/#276` 的 TLS
+engine error、`#293/#295` 的无 compaction、`#298/#300` 的 V2 `503`、`#302/#303/#304/#305/#306/
+#307/#308` 的 watcher 边界以及 `#313` 的 continuation timeout 均作为历史失败/边界证据保留，
+不覆盖最新成功样本。`#314/#315` 验证的是 legacy compatibility route 的 canonical event 链路，
+不是 V2 native compact endpoint 或自然 automatic/overflow producer 的能力证明；后者仍受固定
+OpenCode `1.18.19` 上游边界约束。
 
 ### Scenario 12 provider rate limit
 
@@ -569,9 +629,9 @@ rate-limit acceptance 已闭合；#250/#251 的真实分类证据保留为关联
 
 场景 13 只接受真实的 401 / `authentication_error`，不读取或修改 Provider secret，也不通过临时错误配置
 伪造认证失败。开发环境当前只读 Provider 元数据显示 Provider `3–12` 均为 enabled，没有专门的 401
-fixture；本轮 #296 的无凭据 `401` 已确认是 OpenCode Server Basic Auth，不能冒充 Provider 401；#299/#301
-的 `rate_limited` 也不等价于认证失败。因此本场景登记为 `blocked_external_fixture`，待提供不改变冻结
-Provider 的真实认证失败 fixture 后再补跑。
+fixture；本轮 #296 与 #310 的无凭据请求得到的 `401` 都是 OpenCode Server Basic Auth，不能冒充 Provider
+401；#299/#301 的 `rate_limited` 也不等价于认证失败。因此本场景登记为 `blocked_external_fixture`，待
+提供不改变冻结 Provider 的真实认证失败 fixture 后再补跑。
 
 ### Scenario 14 network interruption / invalid session
 
@@ -774,9 +834,9 @@ Task ID 留空表示尚未执行；正式执行过程中只追加结果，不改
 | 8 | resume/continue：fresh seed 后在同一 Issue/lineage continue，两个 Task 均可追溯 | `#238 → #239 / Issue #55`；Bundle `134`；fresh/continue；seq `1–375` / `1–304`；11/11、8/8 tool；archive 35,026 B / 28,552 B；commits `5bb6f09…` / `344f3e79…`；MR !51 | `#236 → #237 / Issue #54`；Bundle `133`；fresh/continue；seq `1–145` / `1–133`；5/5、4/4 tool；archive 22,667 B / 20,741 B；commits `94fc3a7…` / `05432842…`；MR !50 | pass（两边均同 Issue/lineage 完成 fresh→continue；input session 可追溯，最终各只含 seed + continuation 文件，workspace clean） |
 | 9 | 稳定态取消：确认 attempt/container/tool 已初始化后取消；`cancelled`、SIGTERM、清理 | `#240 / Issue #56`；Bundle `134`；attempt `task-240-attempt-1-093430781533`；`execute/fresh`；require_changes=true；seq `1–19`；tool started 后取消；archive 5,114 B；无 commit | 历史 `#241 → #242 → #243`、`#244` 首工具前 protocol failure 保留；最终 `#275 / Issue #57`；seq `1–12`，tool started 后取消；archive 7,148 B；无 commit | pass（#240/#275 均满足稳定态取消、exit 143、唯一 terminal 和清理） |
 | 10 | timeout/SIGKILL：临时使用最小可保存 timeout，任务阻塞并由 runner 收敛，恢复配置 | `#245 / Issue #59`；Bundle `134`；attempt `task-245-attempt-1-078f64dfad02`；`execute/fresh`；`require_changes=true`；seq `1–22`，`tool.started(sleep 180)` → `harness.failed(timeout)` → `worker.finalization(exit 143)` → `run.failed(timeout)`；archive 5,447 B；无 commit | `#246 / Issue #60`；Bundle `133`；attempt `task-246-attempt-1-2d40ba54e123`；`execute/fresh`；`require_changes=true`；seq `1–18`，`tool.started(sleep 180)` → `harness.failed(timeout)` → `worker.finalization(exit 143)` → `run.failed(timeout)`；archive 7,682 B；无 commit | pass（两边均由临时 60s runner timeout 真实收敛，配置恢复为 1800s，container/workspace 清理成立） |
-| 11 | context compaction：长上下文任务必须产生 `context.compacted`，其后仍有唯一 terminal | `#251 → #252 / Issue #63`；Bundle `134`；5 次 compaction，`#251` seq `1–929` 失败后 `#252` 完成 recovery delivery；archives `1,778,253 / 35,934 B`；最终 commit `38f3a610…` | `#253 + #276 / Issue #64`；#276 37/37 tool、seq `1–307`、3 次 retry、cached 436,138、无 compaction、engine_error；追加 `#293/#295` 成功 delivery 但无 compaction，`#298/#300` native POST 为 `503`，`#302` watcher 超时取消，`#303/#304` idle active-tool `protocol_error`，`#305/#306` clean-idle watcher 未捕获状态，`#307/#308` Task/Host watcher 均未形成 route/event 闭环；archive 205,787 B；无 commit | blocked_external_fixture（Pi compaction/唯一 terminal/recovery 成立；固定 OpenCode 1.18.19 的 V2 manual compact 上游不可用，仍无 OpenCode compaction event） |
+| 11 | context compaction：长上下文任务必须产生 `context.compacted`，其后仍有唯一 terminal | `#251 → #252 / Issue #63`；Bundle `134`；5 次 compaction，`#251` seq `1–929` 失败后 `#252` 完成 recovery delivery；archives `1,778,253 / 35,934 B`；最终 commit `38f3a610…` | `#253 + #276 / Issue #64`；#276 37/37 tool、seq `1–307`、3 次 retry、cached 436,138、无 compaction、engine_error；追加 `#293/#295` 成功 delivery 但无 compaction，`#298/#300` native POST 为 `503`，`#302` watcher 超时取消，`#303/#304` idle active-tool `protocol_error`，`#305/#306` clean-idle watcher 未捕获状态，`#307/#308` Task/Host watcher 均未形成 route/event 闭环；追加 `#309/#310`（Provider `7` / Profile `4` / Bundle `138`，6/6 与 82/82 tool，均无 compaction）；追加 `#313` continuation timeout、`#314` legacy route 短任务 compaction、`#315` Bundle `139` 长上下文 37/37 tool 和 3 次 canonical compaction；archives 205,787 / 8,979 / 18,230 / 117,822 B；无 commit | pass（Pi compaction/recovery 与 OpenCode 长上下文 legacy compatibility route 均有 raw/canonical compaction 和唯一 terminal；V2 native compact `503` 保留为上游能力边界） |
 | 12 | rate limit：使用已有受限 Provider，记录 `provider.retry` 与 `rate_limited` 分类 | `#254 / Issue #65`、`#256 / Issue #67`；Bundle `134`；13/13、26/26 tool；seq `1–427` / `1–592`；archives `44,906 / 57,578 B`；commits `d10ab625…` / `f16e80eb…` | `#255 / Issue #66`、`#257 / Issue #68`；Bundle `133`；8/8、26/26 tool；seq `1–318` / `1–309`；archives `42,300 / 49,189 B`；commits `29a3181a…` / `7b63cdc5…` | not_triggered（正式 probe 均无 retry；#250/#251 的真实 `rate_limited` 只作为场景 11 关联诊断保留） |
-| 13 | authentication failure：只接受真实 401/`authentication_error`；无 401 fixture 不得伪造 | 无任务；Provider `3–12` enabled，未发现专用 401 fixture | 无任务；同左 | blocked_external_fixture |
+| 13 | authentication failure：只接受真实 401/`authentication_error`；无 401 fixture 不得伪造 | 无任务；Provider `3–12` enabled，未发现专用 401 fixture | `#296/#310` 的无凭据 Server Basic Auth `401` 不计入 Provider 401；仍无专用 Provider 401 fixture | blocked_external_fixture |
 | 14 | network/invalid session：真实断线或非法 Session，记录 retry/engine 或 invalid-session 分类 | `#289 / Issue #87`；Bundle `136`；`plan/continue`；attempt `task-289-attempt-1-b5cdfed0c915`；seq `1–4`；archive `2,788 B`；无 output session；container 已清理 | `#281 / Issue #84`；Bundle `133`；`plan/continue`；attempt `task-281-attempt-1-b8c96260cd74`；seq `1–4`；archive `2,835 B`；engine_error；无 output session；container 已清理 | pass（invalid-session 分支真实触发；network interruption 保留为 not_triggered；两种 Harness 各自 taxonomy、唯一 terminal、archive 和清理成立） |
 | 15 | longest-context：长输入/多轮任务记录 usage、compaction 边界和完成/失败结果 | formal retry `#274 / Issue #80`；24/24 tool；seq `1–265`；191.327s；in 34 / cached 18,006 / out 1,363；archive 54,696 B | formal retry `#273 / Issue #81`；21/21 tool；seq `1–165`；281.968s；in 161 / cached 20,822 / out 908；1 retry；archive 37,704 B | pass（两边 0/0、唯一 `run.completed`；未触发 `context.compacted`，按边界事实记录） |
 | 16 | 多文件重构：小型 fixture 的多文件一致性改造，测试、commit、push/MR | `#258 / Issue #69`；9/9 tool；seq `1–122`；commit `bca2afde…`；archive 26,551 B | `#259 / Issue #70`；11/11 tool；seq `1–269`；commit `d573243b…`；archive 41,822 B | pass（两边完成两文件测试和 delivery；模型先 commit，finalization diff 0/0） |
@@ -791,8 +851,13 @@ Task ID 留空表示尚未执行；正式执行过程中只追加结果，不改
 Task ID 追溯，不把凭据写入文档。
 
 > Scenario 11 行的 OpenCode 原始 cohort 摘要保留了 `#253/#276` 的 TLS failure 记录；后续正式追加的
-> `#293/#294/#295` 结果以本文件的 Scenario 11 章节为准：TLS error 未再复现，但没有结构化
-> `context.compacted`，因此状态仍为 `blocked_external_fixture`。
+> `#293/#294/#295` 结果以本文件的 Scenario 11 章节为准：TLS error 未再复现，但当时没有结构化
+> `context.compacted`，因此当时状态为 `blocked_external_fixture`；最新 #315 已满足硬条件，当前状态见
+> 下方更新。
+
+> 随后的受控 legacy compatibility route 已在 `#314/#315` 的 Bridge 内认证调用中产生 raw/canonical
+> compaction；其中 `#315` 是满足长上下文硬条件的最新样本。因此 Scenario 11 当前状态为 `pass`；
+> `#253/#276/#293/#294/#295` 的历史 blocker 与 `#313` timeout 继续保留，不被新样本覆盖。
 
 | Pair | Pi | OpenCode | Same prompt/Provider | Result / note |
 |---:|---|---|---|---|
@@ -806,7 +871,7 @@ Task ID 追溯，不把凭据写入文档。
 | 8 | `#238 → #239 / Issue #55` — completed；Pi Bundle `134`；fresh/continue；seq 1–375 / 1–304；archive 35,026 / 28,552 B；commits `5bb6f09…` / `344f3e79…` | `#236 → #237 / Issue #54` — completed；OpenCode Bundle `133`；fresh/continue；seq 1–145 / 1–133；archive 22,667 / 20,741 B；commits `94fc3a7…` / `05432842…` | frozen Provider `7 / openrouter-free`, same Issue/lineage, `require_changes=true` | pass（session lineage、seed/continuation delivery 和 clean workspace 均成立） |
 | 9 | `#240 / Issue #56` — cancelled；Pi Bundle `134`；`execute/fresh`；150.515s；seq 1–19；`tool.started` 后取消；archive 5,114 B；无 commit；container 已清理 | 历史 `#241/#242/#243 / Issue #57` 与 `#244 / Issue #58` 首工具前 protocol failure 保留；最终 `#275 / Issue #57` — cancelled；157.670s；seq 1–12；`tool.started` 后取消；archive 7,148 B；无 commit；container 已清理 | frozen Provider `7 / openrouter-free`, `execute/fresh`, `require_changes=true`, same cancellation prompt | pass（#240/#275 均稳定态取消并以 exit 143/唯一 terminal 收敛） |
 | 10 | `#245 / Issue #59` — failed(timeout)；Pi Bundle `134`；1,713/128/47；144.750s；1/1 tool；seq 1–22；archive 5,447 B；无 commit；container 已清理 | `#246 / Issue #60` — failed(timeout)；OpenCode Bundle `133`；0/0/0；144.617s；1/1 tool；seq 1–18；archive 7,682 B；无 commit；container 已清理 | frozen Provider `7 / openrouter-free`, `execute/fresh`, `require_changes=true`, same `sleep 180` prompt；global timeout temporarily 60s then restored 1800s | pass（两边均在 tool started 后由 runner 以 timeout/exit 143 收敛，队列为空且配置已恢复） |
-| 11 | `#251 → #252 / Issue #63` — compaction/失败→delivery recovery；Bundle `134`；#251 5 次 compaction、seq `1–929`、archive 1,778,253 B；#252 seq `1–305`、commit `38f3a610…`、archive 35,934 B | `#253 + #276 / Issue #64` — #276 37/37 tool、seq `1–307`、3 次 retry、cached 436,138、无 compaction；追加 `#293/#295` 成功 delivery 但无 compaction，`#298/#300` native POST 为 `503`，`#302` watcher 超时取消，`#303/#304` idle active-tool `protocol_error`，`#305/#306` clean-idle watcher timeout，`#307/#308` 未捕获 route 状态；archive 205,787 B；unknown certificate verification error；无 commit | blocked_external_fixture（Pi compaction 和 recovery 可验收；固定 OpenCode 1.18.19 的 V2 manual compact 上游不可用，OpenCode 仍无 compaction event） |
+| 11 | `#251 → #252 / Issue #63` — compaction/失败→delivery recovery；Bundle `134`；#251 5 次 compaction、seq `1–929`、archive 1,778,253 B；#252 seq `1–305`、commit `38f3a610…`、archive 35,934 B | `#253 + #276 / Issue #64` — #276 37/37 tool、seq `1–307`、3 次 retry、cached 436,138、无 compaction；追加 `#293/#295` 成功 delivery 但无 compaction，`#298/#300` native POST 为 `503`，`#302` watcher 超时取消，`#303/#304` idle active-tool `protocol_error`，`#305/#306` clean-idle watcher timeout，`#307/#308` 未捕获 route 状态；archive 205,787 B；unknown certificate verification error；无 commit | pass（Pi compaction/recovery 与 OpenCode #315 长上下文 legacy route 均有 raw/canonical compaction 和唯一 terminal；V2 native compact 503 保留为上游能力边界） |
 | 12 | `#254 / Issue #65` + `#256 / Issue #67` — completed；Bundle `134`；13/13、26/26 tool；seq `1–427` / `1–592`；archives 44,906 / 57,578 B；commits `d10ab625…` / `f16e80eb…` | `#255 / Issue #66` + `#257 / Issue #68` — completed；Bundle `133`；8/8、26/26 tool；seq `1–318` / `1–309`；archives 42,300 / 49,189 B；commits `29a3181a…` / `7b63cdc5…` | not_triggered（两轮正式 probe 无 `provider.retry`；#250/#251 的 rate_limited 不重复计入） |
 | 13 | 无任务；Provider `3–12` enabled，无专用 401 fixture | 无任务；同左 | frozen Provider metadata；不读取 secret | blocked_external_fixture |
 | 14 | 未形成专用 network/invalid-session fixture | 未形成专用 network/invalid-session fixture | 既有 protocol/TLS 错误不改写为 invalid session | not_triggered |

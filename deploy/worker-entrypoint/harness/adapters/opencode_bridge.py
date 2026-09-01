@@ -71,6 +71,8 @@ MODEL_VARIANT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
 SESSION_FILE_ENV = "CODIFY_OPENCODE_SESSION_FILE"
 HTTP_AUDIT_FILE_ENV = "CODIFY_OPENCODE_HTTP_AUDIT_FILE"
 HTTP_AUDIT_SCHEMA = "codify.opencode.http-audit/v1"
+LEGACY_SUMMARIZE_MARKER_FILE = "opencode-legacy-summarize.request"
+LEGACY_SUMMARIZE_MARKER_VALUE = "codify.opencode.legacy-summarize/v1"
 _HTTP_FAILURE_MESSAGE_MAX_CHARS = 500
 
 
@@ -88,6 +90,7 @@ def _http_path_template(path: str) -> str:
         "abort",
         "command",
         "prompt_async",
+        "summarize",
         "status",
     }:
         return f"/session/{{session_id}}/{parts[2]}"
@@ -102,6 +105,7 @@ def _http_operation(method: str, path_template: str) -> str:
         ("GET", "/session/{session_id}"): "session.get",
         ("POST", "/session/{session_id}/prompt_async"): "session.prompt_async",
         ("POST", "/session/{session_id}/command"): "session.command",
+        ("POST", "/session/{session_id}/summarize"): "session.summarize",
         ("POST", "/session/{session_id}/abort"): "session.abort",
         ("GET", "/session/{session_id}/status"): "session.status",
     }
@@ -112,6 +116,52 @@ def _http_outcome(status_code: int | None) -> str:
     if status_code is None:
         return "transport_error"
     return "success" if 200 <= status_code < 300 else "http_error"
+
+
+def _legacy_summarize_requested() -> bool:
+    """Return whether this Task explicitly opted into the one-shot probe."""
+    runtime_dir = os.environ.get("CODIFY_RUNTIME_DIR", "").strip()
+    if not runtime_dir:
+        return False
+    marker = Path(runtime_dir) / LEGACY_SUMMARIZE_MARKER_FILE
+    try:
+        return marker.is_file() and marker.read_text(encoding="utf-8") == (
+            LEGACY_SUMMARIZE_MARKER_VALUE + "\n"
+        )
+    except OSError:
+        return False
+
+
+def _opencode_tool_id(properties: dict, part: dict) -> str | None:
+    """Mirror the translator's tool identity rule for the idle safety gate."""
+    for source, keys in (
+        (part, ("callID", "callId", "toolCallID", "toolCallId", "id")),
+        (properties, ("callID", "callId", "toolCallID", "toolCallId", "partID", "partId")),
+    ):
+        for key in keys:
+            value = source.get(key)
+            if value is not None and str(value).strip():
+                return str(value).strip()
+    return None
+
+
+def _update_active_tool_ids(record: dict, active_tool_ids: set[str]) -> None:
+    """Track enough tool lifecycle state to preserve idle fail-closed behavior."""
+    if record.get("type") != "message.part.updated":
+        return
+    properties = record.get("properties") if isinstance(record.get("properties"), dict) else {}
+    part = properties.get("part") if isinstance(properties.get("part"), dict) else {}
+    if part.get("type") != "tool":
+        return
+    state = part.get("state") if isinstance(part.get("state"), dict) else {}
+    tool_id = _opencode_tool_id(properties, part)
+    if not tool_id:
+        return
+    status = state.get("status")
+    if status in {"pending", "running"}:
+        active_tool_ids.add(tool_id)
+    elif status in {"completed", "error", "failed"}:
+        active_tool_ids.discard(tool_id)
 
 
 def _safe_http_failure_message(value: object, default: str) -> str:
@@ -485,6 +535,26 @@ class OpenCodeServerClient:
     def status(self, session_id: str) -> tuple[int, dict]:
         return self._request(
             "GET", f"/session/{urllib.parse.quote(session_id, safe='')}/status"
+        )
+
+    def summarize(
+        self,
+        session_id: str,
+        provider_id: str,
+        model_id: str,
+        *,
+        auto: bool = False,
+    ) -> tuple[int, dict]:
+        """Request the legacy OpenCode session summarization route.
+
+        OpenCode 1.18.19 exposes this route separately from the V2 compact
+        endpoint. Keep the provider/model identity explicit so a diagnostic
+        caller cannot accidentally summarize with a different model.
+        """
+        return self._request(
+            "POST",
+            f"/session/{urllib.parse.quote(session_id, safe='')}/summarize",
+            {"providerID": provider_id, "modelID": model_id, "auto": auto},
         )
 
     def event_stream(self) -> Iterator[dict]:
@@ -966,8 +1036,46 @@ def _run_attempt() -> int:
         #    GET /session/status to recover a terminal state (best-effort).
         saw_terminal_signal = False
         stream_ended = False
+        active_tool_ids: set[str] = set()
+        legacy_summarize_attempted = False
         try:
             for record in stream:
+                _update_active_tool_ids(record, active_tool_ids)
+                if (
+                    record.get("type") == "session.idle"
+                    and not active_tool_ids
+                    and not legacy_summarize_attempted
+                    and _legacy_summarize_requested()
+                ):
+                    legacy_summarize_attempted = True
+                    try:
+                        summarize_status, _ = client.summarize(
+                            session_id,
+                            provider_id,
+                            model_id,
+                            auto=False,
+                        )
+                    except (ConnectionError, OSError, TimeoutError):
+                        # Preserve the normal idle path if the diagnostic
+                        # request cannot reach the Task-local Server.
+                        print(
+                            "OpenCode legacy summarize probe failed: transport error",
+                            file=sys.stderr,
+                        )
+                    else:
+                        if summarize_status in (200, 202, 204):
+                            print(
+                                f"OpenCode legacy summarize probe acknowledged: HTTP {summarize_status}",
+                                file=sys.stderr,
+                            )
+                            # The successful legacy route starts a new server
+                            # turn and will publish a later idle event. Do not
+                            # let this first clean idle close the translator.
+                            continue
+                        print(
+                            f"OpenCode legacy summarize probe failed: HTTP {summarize_status}",
+                            file=sys.stderr,
+                        )
                 if record.get("type") in {"session.idle", "session.error"}:
                     saw_terminal_signal = True
                 if not _forward(record, proc) or proc.poll() is not None:

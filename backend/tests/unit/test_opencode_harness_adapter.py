@@ -1281,6 +1281,7 @@ def test_opencode_client_maps_agent_variant_and_command_payloads(monkeypatch):
 
     client.prompt_async("ses/one", "prompt", agent="plan", variant="auto")
     client.command("ses/one", "codify", "prompt", agent="plan", variant="auto")
+    client.summarize("ses/one", "provider", "model", auto=True)
 
     assert calls == [
         (
@@ -1292,6 +1293,11 @@ def test_opencode_client_maps_agent_variant_and_command_payloads(monkeypatch):
             "POST",
             "/session/ses%2Fone/command",
             {"command": "codify", "arguments": "prompt", "agent": "plan", "variant": "auto"},
+        ),
+        (
+            "POST",
+            "/session/ses%2Fone/summarize",
+            {"providerID": "provider", "modelID": "model", "auto": True},
         ),
     ]
 
@@ -1363,6 +1369,147 @@ class _OrderedFakeClient:
     def status(self, session_id: str):
         self.calls.append("status")
         return 200, {"info": {"status": {"type": "idle"}}}
+
+
+def test_opencode_legacy_summarize_marker_requires_exact_value(tmp_path, monkeypatch):
+    bridge = _load_bridge()
+    marker = tmp_path / bridge.LEGACY_SUMMARIZE_MARKER_FILE
+    monkeypatch.setenv("CODIFY_RUNTIME_DIR", str(tmp_path))
+
+    assert bridge._legacy_summarize_requested() is False
+    marker.write_text(bridge.LEGACY_SUMMARIZE_MARKER_VALUE + "\n", encoding="utf-8")
+    assert bridge._legacy_summarize_requested() is True
+    marker.write_text(bridge.LEGACY_SUMMARIZE_MARKER_VALUE, encoding="utf-8")
+    assert bridge._legacy_summarize_requested() is False
+
+
+def test_opencode_run_attempt_legacy_summarize_probe_waits_for_followup_idle(
+    tmp_path, monkeypatch, capsys
+):
+    bridge = _load_bridge()
+    calls: list[tuple] = []
+
+    class _LegacySummarizeClient:
+        def create_session(self, model_id: str, provider_id: str):
+            return 200, {"info": {"id": "ses-oc-legacy"}}
+
+        def event_stream(self):
+            yield {"id": "e1", "type": "server.connected", "properties": {}}
+            yield {
+                "id": "e2",
+                "type": "session.status",
+                "properties": {"sessionID": "ses-oc-legacy", "status": {"type": "busy"}},
+            }
+            yield {
+                "id": "e3",
+                "type": "message.part.updated",
+                "properties": {
+                    "sessionID": "ses-oc-legacy",
+                    "part": {"type": "text", "id": "p1", "messageID": "m1", "text": "done"},
+                },
+            }
+            yield {
+                "id": "e4",
+                "type": "message.updated",
+                "properties": {
+                    "sessionID": "ses-oc-legacy",
+                    "info": {"id": "m1", "role": "assistant"},
+                },
+            }
+            # The opt-in probe is issued at this clean idle. A successful
+            # legacy route must leave the translator open for the next turn.
+            yield {"id": "e5", "type": "session.idle", "properties": {"sessionID": "ses-oc-legacy"}}
+            yield {
+                "id": "e6",
+                "type": "session.compacted",
+                "properties": {"sessionID": "ses-oc-legacy"},
+            }
+            yield {"id": "e7", "type": "session.idle", "properties": {"sessionID": "ses-oc-legacy"}}
+
+        def prompt_async(self, session_id: str, text: str):
+            return 204, {}
+
+        def summarize(self, session_id: str, provider_id: str, model_id: str, *, auto: bool = False):
+            calls.append((session_id, provider_id, model_id, auto))
+            return 204, {}
+
+    monkeypatch.setattr(bridge, "OpenCodeServerClient", lambda **_kwargs: _LegacySummarizeClient())
+    for key, value in _run_attempt_env(tmp_path).items():
+        monkeypatch.setenv(key, value)
+    marker = tmp_path / bridge.LEGACY_SUMMARIZE_MARKER_FILE
+    marker.write_text(bridge.LEGACY_SUMMARIZE_MARKER_VALUE + "\n", encoding="utf-8")
+    _emit(tmp_path, "run.started", {"runtime_bundle_digest": "d" * 64})
+
+    assert bridge._run_attempt() == 0
+    assert calls == [("ses-oc-legacy", "codify", "deepseek-v4-flash", False)]
+    raw_types = [
+        json.loads(line)["type"]
+        for line in (tmp_path / "harness-events/opencode.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert raw_types == [
+        "server.connected",
+        "session.status",
+        "message.part.updated",
+        "message.updated",
+        "session.compacted",
+        "session.idle",
+    ]
+    event_types = [event["type"] for event in _events(tmp_path)]
+    assert event_types.count("context.compacted") == 1
+    assert event_types.count("harness.completed") == 1
+    assert "harness.failed" not in event_types
+    result = json.loads((tmp_path / "harness-result.json").read_text(encoding="utf-8"))
+    assert result["status"] == "completed"
+    assert "OpenCode legacy summarize probe acknowledged: HTTP 204" in capsys.readouterr().err
+
+
+def test_opencode_run_attempt_legacy_summarize_probe_preserves_active_tool_fail_closed(
+    tmp_path, monkeypatch
+):
+    bridge = _load_bridge()
+    calls: list[tuple] = []
+
+    class _ActiveToolClient:
+        def create_session(self, model_id: str, provider_id: str):
+            return 200, {"info": {"id": "ses-oc-active-tool"}}
+
+        def event_stream(self):
+            yield {"id": "e1", "type": "server.connected", "properties": {}}
+            yield {
+                "id": "e2",
+                "type": "message.part.updated",
+                "properties": {
+                    "sessionID": "ses-oc-active-tool",
+                    "part": {
+                        "type": "tool",
+                        "callID": "call-1",
+                        "tool": "bash",
+                        "state": {"status": "running"},
+                    },
+                },
+            }
+            yield {"id": "e3", "type": "session.idle", "properties": {"sessionID": "ses-oc-active-tool"}}
+
+        def prompt_async(self, session_id: str, text: str):
+            return 204, {}
+
+        def summarize(self, *args, **kwargs):
+            calls.append((args, kwargs))
+            return 204, {}
+
+    monkeypatch.setattr(bridge, "OpenCodeServerClient", lambda **_kwargs: _ActiveToolClient())
+    for key, value in _run_attempt_env(tmp_path).items():
+        monkeypatch.setenv(key, value)
+    marker = tmp_path / bridge.LEGACY_SUMMARIZE_MARKER_FILE
+    marker.write_text(bridge.LEGACY_SUMMARIZE_MARKER_VALUE + "\n", encoding="utf-8")
+    _emit(tmp_path, "run.started", {"runtime_bundle_digest": "d" * 64})
+
+    assert bridge._run_attempt() == 0
+    assert calls == []
+    result = json.loads((tmp_path / "harness-result.json").read_text(encoding="utf-8"))
+    assert result["status"] == "protocol_error"
+    assert result["failure"]["kind"] == "protocol_error"
+    assert "active tool parts" in result["failure"]["message"]
 
 
 def test_opencode_run_attempt_subscribes_before_prompt(tmp_path, monkeypatch):
