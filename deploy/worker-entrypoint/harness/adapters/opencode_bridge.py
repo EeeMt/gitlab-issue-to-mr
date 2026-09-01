@@ -560,7 +560,14 @@ class OpenCodeServerClient:
 
 
 def _persist_session_id(session_id: str) -> None:
-    """Publish the active session to the Task-local cancellation path."""
+    """Publish the active session to Task-local cancellation and probe paths.
+
+    The OpenCode Server and its repository tools may run as an unprivileged
+    user while this bridge is root-owned. The marker contains only the
+    non-secret session ID, so the task's other process user must be able to
+    read it for native Server operations such as a controlled compaction
+    probe. The outer adapter still owns deletion during cleanup.
+    """
     session_file = os.environ.get(SESSION_FILE_ENV, "").strip()
     if not session_file:
         return
@@ -568,7 +575,7 @@ def _persist_session_id(session_id: str) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(session_id + "\n", encoding="utf-8")
-        os.chmod(path, 0o600)
+        os.chmod(path, 0o644)
     except OSError as exc:
         # Native abort is best-effort during process cancellation. The normal
         # canonical cancellation path remains authoritative if this marker

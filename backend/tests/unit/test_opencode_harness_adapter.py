@@ -17,6 +17,7 @@ import io
 import json
 import os
 import signal
+import stat
 import subprocess
 import time
 from pathlib import Path
@@ -877,6 +878,20 @@ def _load_bridge():
     if adapters_dir not in sys.path:
         sys.path.insert(0, adapters_dir)
     return importlib.import_module("opencode_bridge")
+
+
+def test_opencode_session_marker_is_readable_by_task_process_user(tmp_path, monkeypatch):
+    bridge = _load_bridge()
+    session_file = tmp_path / "runtime" / "opencode-session.id"
+    session_file.parent.mkdir()
+    session_file.write_text("stale-session\n", encoding="utf-8")
+    session_file.chmod(0o600)
+    monkeypatch.setenv("CODIFY_OPENCODE_SESSION_FILE", str(session_file))
+
+    bridge._persist_session_id("ses-native-probe")
+
+    assert session_file.read_text(encoding="utf-8") == "ses-native-probe\n"
+    assert stat.S_IMODE(session_file.stat().st_mode) == 0o644
 
 
 def test_opencode_bridge_rejects_disabled_gate(tmp_path):
