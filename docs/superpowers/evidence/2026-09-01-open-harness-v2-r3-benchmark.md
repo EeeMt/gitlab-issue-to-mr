@@ -678,6 +678,11 @@ canonical payload 中确认 `failure_kind=rate_limited`；不通过伪造响应�
   `failure_kind=engine_error`，随后以唯一 `run.completed` 收敛并产生 1 个提交
   `c4e820a3fa2a0df1c5739f74ef65c9bb2c9f622f`。
 
+对 `#337` 的归档 `harness-events/opencode.jsonl` 做了不输出正文的字段审计：两条 retry 对应的原始
+`session.status` 均为 `type=retry`，字段只有 `attempt/message/next/type`，没有数值 `statusCode`，
+`reason`/`action` 也不存在；消息长度分别为 23，且不含 `429`、限流或认证标记。因此 canonical 的
+`engine_error` 是对现有原始证据的保守分类，不是把隐藏的 Provider `429/401` 误分流。
+
 这轮确认了真实 OpenCode retry 的 `engine_error` 边界，但没有 Provider `429` 或
 `failure_kind=rate_limited`，因此不改变场景 12 的 `not_triggered` 状态；两个 Worker container 均已
 清理。另在同一轮复核中发现 Profile Verify 的严格探针耗时约 38 秒，而前端共享 Axios 超时为 30 秒，

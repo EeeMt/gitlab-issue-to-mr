@@ -220,7 +220,9 @@ R2 本轮已完成以下闭环项：
   保留，不重复计入 formal 配对。随后在 Profile 4 generation `65` 的 Verify 后追加受控高频读取
   探针 `#336/#337`：Pi 53/53 tool、无 retry；OpenCode 68/68 tool，2 次 `provider.retry`，但均为
   `engine_error`，两项都没有 `rate_limited`，因此场景 12 仍登记为 `not_triggered`；详见
-  [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
+  [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)。对 #337 原始
+  `session.status` 的不输出正文字段审计确认两条 retry 只有 `attempt/message/next/type`，无数值
+  `statusCode`、`reason`/`action` 或 429/认证标记，因此 `engine_error` 分类符合证据边界；
 - [ ] 场景 13 的认证失败仍为 `blocked_external_fixture`：只读复核 Provider `3–12` 均 enabled，开发环境
   没有专用 401 fixture；#296/#310 的无凭据请求是 OpenCode Server Basic Auth，不是 Provider 401；历史
   `#150/#151` 的 `authentication_error` 实为 `404` HTML，不能计入；后续 #316 是 certificate
