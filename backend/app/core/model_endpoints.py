@@ -39,7 +39,6 @@ class ModelEndpoint:
     provider_kind: str
     model_protocol: str
     compat_profile: str | None = None
-    provider_driver: str | None = None
     provider_options: dict[str, Any] = field(default_factory=dict)
     credential_ref: str | None = None
     # These provider execution controls are frozen with the endpoint.  They
@@ -62,7 +61,6 @@ class ModelEndpoint:
             "provider_kind": self.provider_kind,
             "model_protocol": self.model_protocol,
             "compat_profile": self.compat_profile,
-            "provider_driver": self.provider_driver,
             "provider_options": self.provider_options,
             "credential_ref": self.credential_ref,
             "max_turns": self.max_turns,
@@ -108,7 +106,6 @@ def normalize_endpoint(provider: Any) -> ModelEndpoint:
         provider_kind=_attr_str(provider, "provider_kind", "anthropic_compatible"),
         model_protocol=_attr_str(provider, "model_protocol", "anthropic_messages"),
         compat_profile=compat_profile,
-        provider_driver=_attr_str(provider, "provider_driver", None),
         provider_options=provider_options,
         credential_ref=credential_ref,
         max_turns=max_turns,
@@ -127,7 +124,6 @@ def endpoint_fingerprint(endpoint: ModelEndpoint) -> str:
         "provider_kind": endpoint.provider_kind,
         "model_protocol": endpoint.model_protocol,
         "compat_profile": endpoint.compat_profile,
-        "provider_driver": endpoint.provider_driver,
         "base_url": endpoint.base_url,
         "model": endpoint.model,
         "provider_options": endpoint.provider_options,
@@ -162,7 +158,6 @@ def endpoint_transport_fingerprint(endpoint: ModelEndpoint) -> str:
         "provider_kind": endpoint.provider_kind,
         "model_protocol": endpoint.model_protocol,
         "compat_profile": endpoint.compat_profile,
-        "provider_driver": endpoint.provider_driver,
         "base_url": endpoint.base_url,
         "model": endpoint.model,
         "provider_options": endpoint.provider_options,

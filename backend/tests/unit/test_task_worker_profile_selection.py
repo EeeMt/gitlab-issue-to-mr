@@ -793,7 +793,6 @@ def _provider_mock(id_, model_protocol, base_url="https://api.example", model="t
     )
     provider.model_protocol = model_protocol
     provider.compat_profile = None
-    provider.provider_driver = None
     provider.provider_options = {}
     provider.credential_ref = None
     return provider

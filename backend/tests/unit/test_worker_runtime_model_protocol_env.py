@@ -146,7 +146,6 @@ def _endpoint_provider(**overrides):
         "provider_kind": "openai_compatible",
         "model_protocol": "openai_responses",
         "compat_profile": None,
-        "provider_driver": None,
         "provider_options": {},
         "credential_ref": "cred-frozen",
         "api_key": "live-key",

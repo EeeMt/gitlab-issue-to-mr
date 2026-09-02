@@ -54,6 +54,6 @@ def test_077_heads_the_migration_chain():
     cfg = Config()
     cfg.set_main_option("script_location", str(repo_root / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert set(script.get_heads()) == {"077_v2_worker_kit_identity"}
+    assert set(script.get_heads()) == {"078_remove_provider_driver"}
     revision = script.get_revision("077_v2_worker_kit_identity")
     assert revision.down_revision == "076_v2_worker_image_identity"

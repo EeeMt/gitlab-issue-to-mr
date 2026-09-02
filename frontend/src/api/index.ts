@@ -192,7 +192,6 @@ export interface AIProvider {
   model_protocol?: string
   compat_profile?: string | null
   compatible_harnesses?: string[]
-  provider_driver?: string | null
   provider_options?: Record<string, unknown>
   credential_ref?: string | null
   credential_status?: string | null
@@ -229,7 +228,6 @@ export interface UpdateProviderRequest {
   clear_system_prompt?: boolean
   provider_kind?: string
   model_protocol?: string
-  provider_driver?: string | null
   compat_profile?: string | null
   is_disabled?: boolean
 }

@@ -148,9 +148,6 @@ def _model_endpoint_from_snapshot(
     compat_profile = raw_snapshot.get("compat_profile")
     if compat_profile is not None and not isinstance(compat_profile, str):
         raise RuntimeError(f"Task {task.id} has an invalid frozen compatibility profile")
-    provider_driver = raw_snapshot.get("provider_driver")
-    if provider_driver is not None and not isinstance(provider_driver, str):
-        raise RuntimeError(f"Task {task.id} has an invalid frozen provider driver")
     provider_options = raw_snapshot.get("provider_options", {})
     if not isinstance(provider_options, dict):
         raise RuntimeError(f"Task {task.id} has invalid frozen provider options")
@@ -181,7 +178,6 @@ def _model_endpoint_from_snapshot(
         provider_kind=provider_kind.strip(),
         model_protocol=protocol,
         compat_profile=compat_profile.strip() if isinstance(compat_profile, str) else None,
-        provider_driver=provider_driver.strip() if isinstance(provider_driver, str) else None,
         provider_options=dict(provider_options),
         credential_ref=credential_ref,
         max_turns=max_turns,
@@ -294,7 +290,6 @@ async def _resolve_frozen_provider(
         provider_kind=endpoint.provider_kind,
         model_protocol=endpoint.model_protocol,
         compat_profile=endpoint.compat_profile,
-        provider_driver=endpoint.provider_driver,
         provider_options=dict(endpoint.provider_options),
         credential_ref=credential_ref,
         endpoint_fingerprint=endpoint.fingerprint,

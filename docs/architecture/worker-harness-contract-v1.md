@@ -70,7 +70,7 @@ version. Two inputs the original design listed are intentionally covered elsewhe
   per-issue workspace); hashing it into the namespace would duplicate the isolation the lookup key
   already provides.
 - **authentication domain** is captured by the Endpoint fingerprint's non-sensitive auth-scheme
-  fields (`provider_kind`, `wire_protocol`, `provider_driver`). The volatile credential (ref or
+  fields (`provider_kind`, `model_protocol`). The volatile credential (ref or
   secret) is deliberately excluded so credential rotation does not reset a long-lived issue
   conversation — a session transcript is not bound to a specific credential instance.
 

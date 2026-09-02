@@ -112,7 +112,6 @@ async def _seed_provider(db) -> AIProvider:
         model="claude-sonnet-4-6",
         provider_kind="anthropic_compatible",
         model_protocol="anthropic_messages",
-        provider_driver=None,
         provider_options={},
         credential_ref="mc-1",
     )

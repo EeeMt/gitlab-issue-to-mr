@@ -154,21 +154,6 @@
             </n-form-item>
           </div>
 
-          <div class="ai-provider-modal__status">
-            <n-form-item :label="t('config.providers.status')" path="is_disabled">
-              <n-switch
-                :value="!formValue.is_disabled"
-                :disabled="editingProvider?.is_default"
-                @update:value="handleStatusSwitchChange"
-              >
-                <template #checked>{{ t('config.providers.enabled') }}</template>
-                <template #unchecked>{{ t('config.providers.disabled') }}</template>
-              </n-switch>
-              <template #feedback>
-                {{ t('config.providers.disabledHint') }}
-              </template>
-            </n-form-item>
-          </div>
         </n-form>
       </div>
 
@@ -198,7 +183,6 @@ import {
   NPopconfirm,
   NSelect,
   NSpace,
-  NSwitch,
   NTag,
   useMessage,
   type DataTableColumns,
@@ -256,8 +240,7 @@ const formValue = ref({
   api_key: '',
   system_prompt: '',
   provider_kind: 'anthropic_compatible',
-  model_protocol: 'anthropic_messages',
-  is_disabled: false
+  model_protocol: 'anthropic_messages'
 })
 
 const providerKindOptions = computed(() => [
@@ -266,7 +249,9 @@ const providerKindOptions = computed(() => [
 ])
 
 const wireProtocolOptions = computed(() => {
-  return Object.keys(MODEL_PROTOCOL_PROVIDER_KIND).map(protocol => ({
+  const protocols = PROVIDER_KIND_PROTOCOLS[formValue.value.provider_kind] ?? []
+
+  return protocols.map(protocol => ({
     label: protocol === 'anthropic_messages'
       ? t('config.providers.wireProtocolAnthropicMessages')
       : protocol === 'openai_responses'
@@ -456,8 +441,7 @@ function resetForm() {
     api_key: '',
     system_prompt: '',
     provider_kind: 'anthropic_compatible',
-    model_protocol: 'anthropic_messages',
-    is_disabled: false
+    model_protocol: 'anthropic_messages'
   }
 }
 
@@ -497,15 +481,10 @@ function openEdit(provider: AIProvider) {
     api_key: '',
     system_prompt: provider.system_prompt || '',
     provider_kind: provider.provider_kind || 'anthropic_compatible',
-    model_protocol: provider.model_protocol || 'anthropic_messages',
-    is_disabled: provider.is_disabled
+    model_protocol: provider.model_protocol || 'anthropic_messages'
   }
   modalVisible.value = true
   clearFormValidation()
-}
-
-function handleStatusSwitchChange(isEnabled: boolean) {
-  formValue.value.is_disabled = !isEnabled
 }
 
 function handleProviderKindChange(kind: string) {
@@ -543,9 +522,7 @@ async function handleSave() {
         model: formValue.value.model.trim(),
         max_turns: formValue.value.max_turns,
         provider_kind: formValue.value.provider_kind,
-        model_protocol: formValue.value.model_protocol,
-        provider_driver: editingProvider.value.provider_driver,
-        is_disabled: formValue.value.is_disabled
+        model_protocol: formValue.value.model_protocol
       }
       if (formValue.value.api_key.trim()) {
         req.api_key = formValue.value.api_key.trim()
@@ -565,8 +542,7 @@ async function handleSave() {
         model: formValue.value.model.trim(),
         max_turns: formValue.value.max_turns,
         provider_kind: formValue.value.provider_kind,
-        model_protocol: formValue.value.model_protocol,
-        is_disabled: formValue.value.is_disabled
+        model_protocol: formValue.value.model_protocol
       }
       if (formValue.value.api_key.trim()) {
         req.api_key = formValue.value.api_key.trim()
@@ -674,11 +650,6 @@ onMounted(() => {
   border-top: 1px solid rgba(148, 163, 184, 0.18);
 }
 
-.ai-provider-modal__status {
-  padding-top: 16px;
-  border-top: 1px solid rgba(148, 163, 184, 0.18);
-}
-
 .ai-provider-modal__form :deep(.n-form-item) {
   margin-bottom: 0;
 }
@@ -696,10 +667,6 @@ onMounted(() => {
 .ai-provider-modal__form :deep(.n-form-item-feedback-wrapper) {
   min-height: auto;
   padding-top: 6px;
-}
-
-.ai-provider-modal__status :deep(.n-form-item-blank) {
-  min-height: auto;
 }
 
 .ai-provider-modal__textarea :deep(textarea) {

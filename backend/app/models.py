@@ -273,7 +273,6 @@ class AIProvider(Base):
     # Describes known differences of an OpenAI-compatible service; backend
     # allowlist, unknown values rejected at Task creation.
     compat_profile: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    provider_driver: Mapped[str | None] = mapped_column(String(64), nullable=True)
     provider_options: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     credential_ref: Mapped[str | None] = mapped_column(String(128), nullable=True)
 

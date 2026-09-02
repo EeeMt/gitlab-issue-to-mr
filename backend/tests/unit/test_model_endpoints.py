@@ -26,7 +26,6 @@ def _provider(**overrides):
         "provider_kind": "anthropic_compatible",
         "model_protocol": "anthropic_messages",
         "compat_profile": None,
-        "provider_driver": None,
         "provider_options": {"temperature": 0.2},
         "credential_ref": "cred-abc",
         "api_key": "encrypted-secret",

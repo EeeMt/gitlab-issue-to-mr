@@ -42,27 +42,18 @@ KIND_PROTOCOLS: dict[str, frozenset[str]] = {
         {"openai_responses", "openai_chat_completions"}
     ),
 }
-PROVIDER_DRIVER_PROTOCOLS: dict[str, frozenset[str]] = {
-    # OpenRouter exposes the same model through all three supported wire
-    # protocols. Keep this exception explicit instead of widening every
-    # OpenAI-compatible endpoint to an unverified Anthropic Messages path.
-    "openrouter": frozenset(VALID_MODEL_PROTOCOLS),
-}
 
 
 def _validate_kind_protocol(
     provider_kind: str,
     model_protocol: str,
     provider_options: dict,
-    provider_driver: str | None = None,
 ) -> None:
     if provider_kind not in VALID_PROVIDER_KINDS:
         raise ValueError(f"unknown provider_kind: {provider_kind!r}")
     if model_protocol not in VALID_MODEL_PROTOCOLS:
         raise ValueError(f"unknown model_protocol: {model_protocol!r}")
     allowed_protocols = KIND_PROTOCOLS[provider_kind]
-    if provider_driver in PROVIDER_DRIVER_PROTOCOLS:
-        allowed_protocols = PROVIDER_DRIVER_PROTOCOLS[provider_driver]
     if model_protocol not in allowed_protocols:
         raise ValueError(
             f"provider_kind {provider_kind!r} cannot consume model_protocol "
@@ -85,7 +76,6 @@ class ProviderResponse(BaseModel):
     provider_kind: str
     model_protocol: str
     compat_profile: str | None
-    provider_driver: str | None
     provider_options: dict
     credential_ref: str | None
     credential_status: str | None
@@ -105,7 +95,6 @@ class CreateProviderRequest(BaseModel):
     provider_kind: str = "anthropic_compatible"
     model_protocol: str = "anthropic_messages"
     compat_profile: str | None = None
-    provider_driver: str | None = None
     provider_options: dict = {}
     is_disabled: bool = False
 
@@ -115,7 +104,6 @@ class CreateProviderRequest(BaseModel):
             self.provider_kind,
             self.model_protocol,
             self.provider_options,
-            self.provider_driver,
         )
         return self
 
@@ -178,7 +166,6 @@ class UpdateProviderRequest(BaseModel):
     model_protocol: str | None = None
     compat_profile: str | None = None
     clear_compat_profile: bool = False
-    provider_driver: str | None = None
     provider_options: dict | None = None
     is_disabled: bool | None = None
 
@@ -189,7 +176,6 @@ class UpdateProviderRequest(BaseModel):
                 self.provider_kind,
                 self.model_protocol,
                 self.provider_options or {},
-                self.provider_driver,
             )
         elif self.provider_kind is not None and self.provider_kind not in VALID_PROVIDER_KINDS:
             raise ValueError(f"unknown provider_kind: {self.provider_kind!r}")
@@ -274,7 +260,6 @@ def _serialize_provider(
         "compatible_harnesses": compatible_harness_keys(
             getattr(provider, "model_protocol", "anthropic_messages")
         ),
-        "provider_driver": getattr(provider, "provider_driver", None),
         "provider_options": getattr(provider, "provider_options", None) or {},
         "credential_ref": getattr(provider, "credential_ref", None),
         "credential_status": credential_status,
@@ -382,7 +367,6 @@ async def create_provider(
         provider_kind=request.provider_kind,
         model_protocol=request.model_protocol,
         compat_profile=request.compat_profile,
-        provider_driver=request.provider_driver,
         provider_options=request.provider_options,
         credential_ref=credential_ref,
         is_default=is_first,
@@ -431,15 +415,11 @@ async def update_provider(
         if request.provider_options is not None
         else current_provider_options
     )
-    next_provider_driver = request.provider_driver or getattr(
-        provider, "provider_driver", None
-    )
     try:
         _validate_kind_protocol(
             next_provider_kind,
             next_model_protocol,
             next_provider_options,
-            next_provider_driver,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -482,8 +462,6 @@ async def update_provider(
         provider.compat_profile = request.compat_profile
     elif request.clear_compat_profile:
         provider.compat_profile = None
-    if request.provider_driver is not None:
-        provider.provider_driver = request.provider_driver
     if request.provider_options is not None:
         provider.provider_options = request.provider_options
 
