@@ -631,10 +631,25 @@ canonical payload 中确认 `failure_kind=rate_limited`；不通过伪造响应�
   Provider 请求正文或状态；Worker container 已清理。该任务证明了真实 Provider-side `429` 与终态
   taxonomy，但不是冻结的 Pi/OpenCode 配对 formal sample，因此场景 12 仍保持 `not_triggered`，不覆盖
   已有成功样本，也不制造人工 429。
+- 2026-09-02 在再次完成 Profile 4 readiness verify（generation `57`，verified at
+  `2026-09-02 01:05:30.678336`）后，用冻结 Provider `7 / openrouter-free` 做了当前候选的 Pi
+  控制诊断 `#318 / Issue #92`：Provider snapshot 为 `openai_chat_completions`、model
+  `minimax/minimax-m3:free`，Bundle `142`，runtime bundle digest
+  `fce7b89a9e5ddde76c2ae2376ed56fb799e86a16ae89da404abb5e79e51e4a6e`，attempt
+  `task-318-attempt-1-7f36990dc314`，`freeform/fresh`，耗时 `104.515s`。canonical seq `1–72`，raw
+  Pi archive 有 4 个 response、1 对 tool start/complete，最终 usage `83/1,659/103`
+  （input/cached/output），唯一终态为 `harness.completed` → `delivery.completed(exit_code=0)` →
+  `worker.finalization(exit_code=0,diff=0/0)` → `run.completed(success=true)`；没有
+  `provider.retry` 或 `context.compacted`。runtime archive 为
+  `3788e40f5393529a899b616993de6ae7d7624d046ac0e7b506cee0a008d8de2e` / `8,190 B`，Worker
+  container 已清理。启动早期出现的短暂 `control_owner_unreachable` gate warning 没有升级为
+  terminal rejection，实际 Pi response 已进入归档；该任务是当前 Provider 7/Pi 的真实成功控制样本，
+  不是冻结的 formal rate-limit pair，故不改变场景 12 的 `not_triggered` 状态。
 
-因此场景 12 当前登记为 `not_triggered`：两轮正式配对均成功且没有触发 retry，不能据此声称本场景的
-rate-limit acceptance 已闭合；#250/#251 与 #317 的真实分类证据保留为关联诊断。后续若冻结 Provider
-自然返回新的 rate limit，可追加正式配对 Task；不改变已有成功样本，也不制造人工 429。
+因此场景 12 当前登记为 `not_triggered`：两轮正式配对均成功且没有触发 retry，#318 也只补充了当前
+Provider 7/Pi 的成功控制样本，不能据此声称本场景的 rate-limit acceptance 已闭合；#250/#251 与
+#317 的真实分类证据保留为关联诊断。后续若冻结 Provider 自然返回新的 rate limit，可追加正式配对
+Task；不改变已有成功样本，也不制造人工 429。
 
 ### Scenario 13 authentication failure
 
@@ -866,7 +881,7 @@ Task ID 留空表示尚未执行；正式执行过程中只追加结果，不改
 | 9 | 稳定态取消：确认 attempt/container/tool 已初始化后取消；`cancelled`、SIGTERM、清理 | `#240 / Issue #56`；Bundle `134`；attempt `task-240-attempt-1-093430781533`；`execute/fresh`；require_changes=true；seq `1–19`；tool started 后取消；archive 5,114 B；无 commit | 历史 `#241 → #242 → #243`、`#244` 首工具前 protocol failure 保留；最终 `#275 / Issue #57`；seq `1–12`，tool started 后取消；archive 7,148 B；无 commit | pass（#240/#275 均满足稳定态取消、exit 143、唯一 terminal 和清理） |
 | 10 | timeout/SIGKILL：临时使用最小可保存 timeout，任务阻塞并由 runner 收敛，恢复配置 | `#245 / Issue #59`；Bundle `134`；attempt `task-245-attempt-1-078f64dfad02`；`execute/fresh`；`require_changes=true`；seq `1–22`，`tool.started(sleep 180)` → `harness.failed(timeout)` → `worker.finalization(exit 143)` → `run.failed(timeout)`；archive 5,447 B；无 commit | `#246 / Issue #60`；Bundle `133`；attempt `task-246-attempt-1-2d40ba54e123`；`execute/fresh`；`require_changes=true`；seq `1–18`，`tool.started(sleep 180)` → `harness.failed(timeout)` → `worker.finalization(exit 143)` → `run.failed(timeout)`；archive 7,682 B；无 commit | pass（两边均由临时 60s runner timeout 真实收敛，配置恢复为 1800s，container/workspace 清理成立） |
 | 11 | context compaction：长上下文任务必须产生 `context.compacted`，其后仍有唯一 terminal | `#251 → #252 / Issue #63`；Bundle `134`；5 次 compaction，`#251` seq `1–929` 失败后 `#252` 完成 recovery delivery；archives `1,778,253 / 35,934 B`；最终 commit `38f3a610…` | `#253 + #276 / Issue #64`；#276 37/37 tool、seq `1–307`、3 次 retry、cached 436,138、无 compaction、engine_error；追加 `#293/#295` 成功 delivery 但无 compaction，`#298/#300` native POST 为 `503`，`#302` watcher 超时取消，`#303/#304` idle active-tool `protocol_error`，`#305/#306` clean-idle watcher 未捕获状态，`#307/#308` Task/Host watcher 均未形成 route/event 闭环；追加 `#309/#310`（Provider `7` / Profile `4` / Bundle `138`，6/6 与 82/82 tool，均无 compaction）；追加 `#313` continuation timeout、`#314` legacy route 短任务 compaction、`#315` Bundle `139` 长上下文 37/37 tool 和 3 次 canonical compaction；archives 205,787 / 8,979 / 18,230 / 117,822 B；无 commit | pass（Pi compaction/recovery 与 OpenCode 长上下文 legacy compatibility route 均有 raw/canonical compaction 和唯一 terminal；V2 native compact `503` 保留为上游能力边界） |
-| 12 | rate limit：使用已有受限 Provider，记录 `provider.retry` 与 `rate_limited` 分类 | `#254 / Issue #65`、`#256 / Issue #67`；Bundle `134`；13/13、26/26 tool；seq `1–427` / `1–592`；archives `44,906 / 57,578 B`；commits `d10ab625…` / `f16e80eb…` | `#255 / Issue #66`、`#257 / Issue #68`；Bundle `133`；8/8、26/26 tool；seq `1–318` / `1–309`；archives `42,300 / 49,189 B`；commits `29a3181a…` / `7b63cdc5…`；关联真实诊断 `#317` 为 Provider 9 / Bundle `141` | not_triggered（正式 probe 均无 retry；#250/#251/#317 的真实 `rate_limited` 只作为关联诊断保留） |
+| 12 | rate limit：使用已有受限 Provider，记录 `provider.retry` 与 `rate_limited` 分类 | `#254 / Issue #65`、`#256 / Issue #67`；Bundle `134`；13/13、26/26 tool；seq `1–427` / `1–592`；archives `44,906 / 57,578 B`；commits `d10ab625…` / `f16e80eb…`；关联当前 Provider 7/Pi 控制样本 `#318 / Issue #92`，Bundle `142`，seq `1–72`，无 retry，archive `8,190 B` | `#255 / Issue #66`、`#257 / Issue #68`；Bundle `133`；8/8、26/26 tool；seq `1–318` / `1–309`；archives `42,300 / 49,189 B`；commits `29a3181a…` / `7b63cdc5…`；关联真实诊断 `#317` 为 Provider 9 / Bundle `141` | not_triggered（正式 probe 与 #318 均无 retry；#250/#251/#317 的真实 `rate_limited` 只作为关联诊断保留） |
 | 13 | authentication failure：只接受真实 401/`authentication_error`；无 401 fixture 不得伪造 | 无任务；Provider `3–12` enabled，未发现专用 401 fixture | `#296/#310` 的无凭据 Server Basic Auth `401` 不计入 Provider 401；历史 `#150/#151` 的 `authentication_error` 实为 `404` HTML；`#316` 为 Provider 11 的真实 `engine_error` / certificate failure；`#317` 为真实 Provider `429`，均无 401；仍无专用 401 fixture | blocked_external_fixture |
 | 14 | network/invalid session：真实断线或非法 Session，记录 retry/engine 或 invalid-session 分类 | `#289 / Issue #87`；Bundle `136`；`plan/continue`；attempt `task-289-attempt-1-b5cdfed0c915`；seq `1–4`；archive `2,788 B`；无 output session；container 已清理 | `#281 / Issue #84`；Bundle `133`；`plan/continue`；attempt `task-281-attempt-1-b8c96260cd74`；seq `1–4`；archive `2,835 B`；engine_error；无 output session；container 已清理 | pass（invalid-session 分支真实触发；network interruption 保留为 not_triggered；两种 Harness 各自 taxonomy、唯一 terminal、archive 和清理成立） |
 | 15 | longest-context：长输入/多轮任务记录 usage、compaction 边界和完成/失败结果 | formal retry `#274 / Issue #80`；24/24 tool；seq `1–265`；191.327s；in 34 / cached 18,006 / out 1,363；archive 54,696 B | formal retry `#273 / Issue #81`；21/21 tool；seq `1–165`；281.968s；in 161 / cached 20,822 / out 908；1 retry；archive 37,704 B | pass（两边 0/0、唯一 `run.completed`；未触发 `context.compacted`，按边界事实记录） |

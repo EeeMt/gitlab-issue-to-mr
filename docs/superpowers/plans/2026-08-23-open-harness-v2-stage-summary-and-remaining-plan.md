@@ -253,7 +253,9 @@ R2 本轮已完成以下闭环项：
 - [ ] 当前 R3 剩余退出项为：场景 13 的真实 401 fixture；本轮用已有 Provider 11 追加的真实
   OpenCode 任务 `#316` 只得到 `engine_error: unknown certificate verification error`，没有 Provider HTTP 401，
   不能替代 fixture；随后用已有 Provider 9 追加的真实 OpenCode `#317` 由 raw
-  `APIError.data.statusCode=429` 证实为 `rate_limited`，也不能替代认证 fixture；历史 `#150/#151` 的旧
+  `APIError.data.statusCode=429` 证实为 `rate_limited`，也不能替代认证 fixture；随后在 Profile 4
+  generation `57`、Provider 7、Pi 上追加的真实控制任务 `#318` 成功完成但没有 `provider.retry`，也不
+  能替代认证 fixture；历史 `#150/#151` 的旧
   `authentication_error` 由 raw `404` HTML 证实为无效样本，当前 `ab869c67` 的 Pi 回归测试已防止裸词
   `authentication` 再次误分类；Provider 7 的 TLS error 本轮未再复现，
   `#313` 的过大 continuation 以 `1800s` timeout 保留为失败证据。`#314/#315` 在新生成的 Bundle `139`
