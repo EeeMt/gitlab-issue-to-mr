@@ -36,6 +36,12 @@ def _v2_harness_evidence() -> dict[str, object]:
         "harness_key": "claude",
         "contract_version": "codify.worker.harness/v2",
         "adapter": {"version": "1.0.0", "digest": "4" * 64},
+        "cli": {
+            "source": "host_mount",
+            "executable_path": "/usr/local/bin/claude",
+            "version": "2.1.200",
+            "binary_digest": "b" * 64,
+        },
         "verification_input_digest": "5" * 64,
         "image_identity": dict(_V2_WORKER_IMAGE_IDENTITY),
         "generation": 1,

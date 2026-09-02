@@ -686,15 +686,20 @@ async def create_task_record(
             orchestration_version = getattr(bundle, "orchestration_version", None)
             if isinstance(orchestration_version, str):
                 snapshot.orchestration_version = orchestration_version
-            cli_runtime = getattr(worker_profile, "harness_runtimes", None) or {}
-            if not isinstance(cli_runtime, dict):
-                cli_runtime = {}
-            cli_runtime = cli_runtime.get(harness_key)
-            if isinstance(cli_runtime, dict):
-                snapshot.cli_source = cli_runtime.get("source")
-                snapshot.cli_executable_path = cli_runtime.get("executable_path")
-                snapshot.cli_version = cli_runtime.get("version")
-                snapshot.cli_binary_digest = cli_runtime.get("binary_digest")
+            # V2 snapshot_from_profile already copied the selected CLI from
+            # the verified per-Harness evidence.  Never re-read editable
+            # Profile runtime configuration here: doing so would allow a
+            # post-verification CLI path/digest change to enter a Task.
+            if contract_version != HARNESS_CONTRACT_VERSION_V2:
+                cli_runtime = getattr(worker_profile, "harness_runtimes", None) or {}
+                if not isinstance(cli_runtime, dict):
+                    cli_runtime = {}
+                cli_runtime = cli_runtime.get(harness_key)
+                if isinstance(cli_runtime, dict):
+                    snapshot.cli_source = cli_runtime.get("source")
+                    snapshot.cli_executable_path = cli_runtime.get("executable_path")
+                    snapshot.cli_version = cli_runtime.get("version")
+                    snapshot.cli_binary_digest = cli_runtime.get("binary_digest")
             # The snapshot helper normally attaches this relationship, but
             # keep the writer boundary explicit for alternate/test services.
             task.worker_profile_snapshot = snapshot

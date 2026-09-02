@@ -84,6 +84,12 @@ def _make_v2_runtime_bundle():
         "harness_key": "claude",
         "contract_version": "codify.worker.harness/v2",
         "adapter": {"version": "1.0.0"},
+        "cli": {
+            "source": "host_mount",
+            "executable_path": "/usr/local/bin/claude",
+            "version": "2.1.200",
+            "binary_digest": "b" * 64,
+        },
         "verification_input_digest": "d" * 64,
         "image_identity": _V2_IMAGE_IDENTITY,
         "generation": 1,

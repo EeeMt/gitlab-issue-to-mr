@@ -47,6 +47,7 @@ from app.core.worker_kit import KIT_CONTAINER_PATH
 
 INVENTORY_SCHEMA = "codify.worker.kit-inventory/v1"
 KIT_IDENTITY_SCHEMA = "codify.worker.kit-identity/v1"
+INSTALL_RECEIPT_SCHEMA = "codify.worker.kit-install-receipt/v1"
 _HEX_DIGITS = frozenset("0123456789abcdef")
 _PLATFORM_RE = re.compile(r"^linux/[A-Za-z0-9][A-Za-z0-9_.-]*$")
 AVAILABILITY_PRESENT = "present"
@@ -334,6 +335,79 @@ def kit_identity_from_manifest_bytes(
         "kit_version": kit_version,
         "platform": platform,
         "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+    }
+
+
+def validate_installer_managed_kit_provenance(
+    worker_kit_path: str,
+    manifest_bytes: bytes,
+    receipt_bytes: bytes,
+) -> dict[str, Any]:
+    """Validate the immutable install boundary for a V2 Worker Kit.
+
+    The installer is the authority that publishes a Kit.  A normal Task does
+    not repeat the full archive/content scan, so the administrative probe must
+    establish that the selected host path is the installer's exact
+    content-addressed directory and that its receipt agrees with the manifest.
+    The archive digest in the receipt is evidence of the install operation;
+    the manifest digest, path suffix, version, platform, and inventory digest
+    are independently checked here.
+    """
+    if not isinstance(worker_kit_path, str) or not worker_kit_path.startswith("/"):
+        raise HarnessInventoryError("Worker Kit install path must be absolute")
+    normalized_path = posixpath.normpath(worker_kit_path)
+    if normalized_path != worker_kit_path or normalized_path == "/":
+        raise HarnessInventoryError("Worker Kit install path is not a canonical directory")
+
+    identity = kit_identity_from_manifest_bytes(
+        manifest_bytes,
+        require_content_inventory=True,
+    )
+    expected_name = (
+        f"{identity['kit_version']}-"
+        f"{identity['platform'].replace('/', '-')}-"
+        f"{identity['manifest_sha256'][:12]}"
+    )
+    if posixpath.basename(normalized_path) != expected_name:
+        raise HarnessInventoryError(
+            "Worker Kit path is not the content-addressed installer directory"
+        )
+
+    try:
+        receipt = json.loads(receipt_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise HarnessInventoryError("Worker Kit install receipt is not valid JSON") from exc
+    if not isinstance(receipt, Mapping) or receipt.get("schema") != INSTALL_RECEIPT_SCHEMA:
+        raise HarnessInventoryError("Worker Kit install receipt has an unsupported schema")
+
+    required = (
+        "archive",
+        "archive_sha256",
+        "manifest_sha256",
+        "content_inventory_sha256",
+        "kit_version",
+        "platform",
+        "installed_at",
+    )
+    if not all(isinstance(receipt.get(key), str) and receipt[key] for key in required):
+        raise HarnessInventoryError("Worker Kit install receipt is incomplete")
+    for key in ("archive_sha256", "manifest_sha256", "content_inventory_sha256"):
+        if not _is_sha256(receipt[key]):
+            raise HarnessInventoryError(f"Worker Kit install receipt has an invalid {key}")
+
+    expected_archive = f"codify-worker-kit-{expected_name}.tar.gz"
+    manifest = json.loads(manifest_bytes.decode("utf-8"))
+    if (
+        receipt["archive"] != expected_archive
+        or receipt["manifest_sha256"] != identity["manifest_sha256"]
+        or receipt["content_inventory_sha256"] != manifest.get("content_inventory_sha256")
+        or receipt["kit_version"] != identity["kit_version"]
+        or receipt["platform"] != identity["platform"]
+    ):
+        raise HarnessInventoryError("Worker Kit install receipt does not match its manifest or path")
+    return {
+        "schema": INSTALL_RECEIPT_SCHEMA,
+        **{key: receipt[key] for key in required},
     }
 
 

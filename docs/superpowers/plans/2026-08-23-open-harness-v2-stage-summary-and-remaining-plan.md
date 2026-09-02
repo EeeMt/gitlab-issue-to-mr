@@ -13,13 +13,14 @@
 | R1：Internal Preview candidate | **完成** | 四 Harness 的 `linux/amd64` Image、Kit、Profile、Bundle 与真实 Host identity 已形成可追溯 candidate |
 | R2：四 Harness hard-cut conformance | **完成** | 8 个适用 Harness×protocol 行及 fresh/continue/cancel/timeout、command/recovery、隔离与失败分类已闭合 |
 | R3：正式 20-scenario benchmark | **完成** | Pi/OpenCode 20/20 formal pair 通过，失败样本保留，Pi 非劣性门槛通过 |
-| R4：L5 UI、运维与发布评审 | **未完成** | Worker Kit 启动校验边界已接受但尚未实现/验收；正式交互、运维、安全与 go/no-go 尚未签署 |
+| R4：L5 UI、运维与发布评审 | **未完成** | R4.1 已实现并通过当前 Host 验收，R4.2 当前 candidate identity 已冻结；R4.3–R4.6 的正式交互、运维、安全与 go/no-go 尚未签署 |
 | R5：L6 `v2_only` hard cut | **未执行** | 只有 R4 批准后才可进入独立维护窗口 |
 
-因此，Open-Harness V2 的原 candidate、适用协议 conformance 和正式 benchmark 已经完成；尚未完成的是
-最终发布 candidate、生产发布验收与 hard cut。2026-09-03 已接受
+因此，Open-Harness V2 的原 candidate、适用协议 conformance 和正式 benchmark 已经完成；当前 R4
+candidate 的 Kit/CLI 启动边界也已实现并完成首轮 Host evidence，尚未完成的是 L5 正式发布验收与
+hard cut。2026-09-03 已接受
 [Worker Kit 可信安装与 Task 启动校验边界设计](../specs/2026-09-03-worker-kit-validation-boundary-design.md)，
-它不重新打开 R1–R3 的历史结论，但会生成新的最终 Kit identity，并在 R4 内补齐受影响的 L2/L3/L4
+它不重新打开 R1–R3 的历史结论；本轮已生成当前 candidate Kit identity，并在 R4 内补齐受影响的 L2/L3/L4
 启动证据。当前运行模式继续保持 `dual_canary`，Pi 的 Profile-local 选择不等于系统全局默认，也不等于
 `v2_only`。
 
@@ -34,10 +35,10 @@
 | 层级 | 状态 | 已证明 | 未证明或待办 |
 | --- | --- | --- | --- |
 | L1 架构/合同 | **通过（已更新）** | ownership、schema、协议矩阵、identity、roll-forward-only 与可信 Kit 校验边界已冻结 | 合同变化时重新评审 |
-| L2 源码/测试 | **最终 candidate 待更新** | 原 candidate 的公共地基、四 Adapter、execution policy、command plane、归档与回归已证明 | 实现 Kit 校验边界并通过聚焦回归 |
-| L3 不可变 composition | **原 candidate 通过；最终 identity 待冻结** | 当前 Image、Kit、Profile、Bundle 和数据库 identity 可追溯 | 生成新 Kit、完整安装并重新 Verify 最终 identity |
-| L4 真实 Host/Task | **原 candidate 通过；启动补证待完成** | 协议矩阵、主要生命周期、command/recovery、隔离、失败分类及 20-scenario benchmark 有真实证据 | warm-start cohort、四 Harness 最小 smoke 与受控 Kit 失败样本 |
-| L5 发布验收 | **未完成** | 基础 UI spot-check、启动延迟根因与验收面已定义 | R4 的启动性能、真实交互、运维、安全、阻断指标与签署 |
+| L2 源码/测试 | **当前 candidate 通过** | Kit provenance、Snapshot CLI identity、Scheduler/Worker/launcher 热路径边界与聚焦回归已证明；全量单元测试通过 | 若 R4.3–R4.5 发现源码变化，按影响面重开 |
+| L3 不可变 composition | **当前 candidate 通过** | 新 Kit 已完整安装，Profile 4 管理员 Verify 四 Harness，Image/Kit/Profile/Bundle identity 可追溯 | R4 签署前保持 identity 不漂移 |
+| L4 真实 Host/Task | **R4.1 scope 通过** | 新 Kit、四 Harness admin/launcher smoke、5 条 warm-start 成功 Task、TTL 过期后的成功路径与受控 selected-CLI 失败均有证据 | 各 Harness 的正式 L5 交互/运维审阅与签署 |
+| L5 发布验收 | **未完成** | 桌面真实任务创建/详情与 390×844 基础任务详情导航 spot-check、启动性能样本和基础运行证据已形成 | 移动键盘/安全区、完整交互/运维/安全阻断清单与签署 |
 | L6 hard cut | **未执行** | `v2_only`、Pi 默认值和 V1 只读已有实现与 Runbook 路径 | R5 维护窗口及切换后 evidence |
 
 正式 benchmark 的当前汇总如下；详细任务与失败链只在 R3 evidence 中维护：
@@ -66,6 +67,7 @@
 - [R2 conformance evidence](../evidence/2026-09-01-open-harness-v2-r2-candidate.md)
 - [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)
 - [Task #348 启动延迟 evidence](../evidence/2026-09-02-task-348-startup-delay.md)
+- [R4.1/R4.2 Kit boundary candidate evidence](../evidence/2026-09-03-open-harness-v2-r4.1-kit-boundary.md)
 - [Worker Kit 校验边界设计决策](../specs/2026-09-03-worker-kit-validation-boundary-design.md)
 - [V2 schema 与 benchmark 口径](../../architecture/open-harness-v2-schemas.md)
 - [dual-canary 与生产验收 Runbook](../../runbooks/multi-harness-rollout.md)
@@ -99,15 +101,15 @@ R4 是当前唯一可推进工作包。以下六项必须在同一最终 candida
 
 | 编号 | 工作项 | 必须形成的结果 |
 | --- | --- | --- |
-| R4.1 | 实现并验收 Worker Kit 校验边界：V2 只接受 installer-managed content-addressed 路径；完整校验只留在 build/install/admin Verify；Snapshot 冻结 selected-Harness identity；Scheduler/Worker/launcher 成功热路径不扫描完整 Kit | 聚焦测试；新 Kit identity；至少 5 个 Task 的 warm-start cohort；中位 `created_at -> run.started` ≤30s、单个 ≤45s；四 Harness smoke 与受控失败 evidence |
-| R4.2 | 冻结最终发布 identity，审计 R3 关闭后的源码与 composition 变化；对实际受影响项补测试、Bundle/Kit 和真实 Host evidence | 最终 Image/Kit/Profile/Bundle/Adapter/Host 清单；影响面与补证记录；管理员完整 Verify |
+| R4.1 | **完成（当前 candidate）**：V2 只接受 installer-managed content-addressed 路径；完整校验留在 build/install/admin Verify；Snapshot 冻结 selected-Harness identity；Scheduler/Worker/launcher 成功热路径不扫描完整 Kit | 聚焦回归、Kit 0.6.12、新 Kit 安装与四 Harness Verify/smoke、5 条 warm-start（中位 1.834s、最大 4.137s）、TTL 过期成功路径与 selected-CLI digest 受控失败；见 [R4.1/R4.2 evidence](../evidence/2026-09-03-open-harness-v2-r4.1-kit-boundary.md) |
+| R4.2 | **当前 candidate 已冻结（待 R4 签署）**：完成 R3 后源码/组合影响面审计，生成新 Kit/Bundle，并在目标 Host 完整 Verify | Image/Kit/Profile/Bundle/Adapter/Host identity、Profile generation 71、管理员四 Harness Verify 与真实 Task evidence 已记录；签署前不得漂移 |
 | R4.3 | 完成 390×844 与桌面真实交互验收：移动键盘/安全区、长文本、断线重连、command history、ACK 文案、过渡态、四 Harness 选择与 `v2_only` 下的 V1 只读展示 | 可复核的浏览器验收记录；无阻断交互缺陷 |
 | R4.4 | 按 Harness/Profile/Host 审阅 startup phases、success/failure taxonomy、protocol error、command latency、usage、terminal、archive、delivery、队列与告警 | 启动与运行基线、阻断指标清单；错误成功、串线、凭据泄漏、无法取消、重复 terminal/seq 缺口均为 0 |
 | R4.5 | 完成最终 secret scan、Provider/GitLab 最小授权与轮换核对、release notes、旧 Kit/Image 保留与退役时点、维护窗口和责任人确认 | 安全与发布清单通过；P0/P1 为 0；不存在未接受的发布例外 |
 | R4.6 | 汇总 R1–R4 evidence，记录已知上游能力边界和停止条件，召开独立 hard-cut go/no-go | 明确签署 `GO` 或 `NO-GO`；`GO` 必须绑定 exact identity、目标 Host、R5 窗口与 owner |
 
 **R4 退出条件：** R4.1–R4.6 全部有当前 evidence，阻断项为零，并由独立发布评审明确批准进入 R5。
-没有签署即保持 `dual_canary`，不以“测试大多通过”代替批准。
+当前仅 R4.1/R4.2 有本轮 candidate evidence；没有签署即保持 `dual_canary`，不以“测试大多通过”代替批准。
 
 ### R5 — 在独立维护窗口执行 L6
 

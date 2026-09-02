@@ -22,7 +22,6 @@ from app.core.worker_task_lifecycle import (
     _persist_created_container_reference,
     _remove_created_container,
     _start_created_container,
-    _verify_v2_kit_before_start,
     create_execute_container,
     prepare_container_inputs,
 )
@@ -60,6 +59,12 @@ _V2_HARNESS_EVIDENCE = {
     "harness_key": "claude",
     "contract_version": "codify.worker.harness/v2",
     "adapter": {"version": "1.0.0"},
+    "cli": {
+        "source": "worker_kit",
+        "executable_path": "/opt/codify-kit/harness/claude/bin/claude",
+        "version": "1.0.0",
+        "binary_digest": "f" * 64,
+    },
     "verification_input_digest": "d" * 64,
     "image_identity": _V2_WORKER_IMAGE_IDENTITY,
     "generation": 1,
@@ -133,6 +138,10 @@ def _bind_v2_runtime(task, db):
     task.runtime_bundle_id = _V2_RUNTIME_BUNDLE.id
     task.worker_profile_snapshot = SimpleNamespace(
         harness_key="claude",
+        cli_source="worker_kit",
+        cli_executable_path=_V2_HARNESS_EVIDENCE["cli"]["executable_path"],
+        cli_version=_V2_HARNESS_EVIDENCE["cli"]["version"],
+        cli_binary_digest=_V2_HARNESS_EVIDENCE["cli"]["binary_digest"],
         harness_config_snapshot={
             "requested_runtime_contract_version": "codify.worker.harness/v2",
             "v2_worker_image_identity": _V2_WORKER_IMAGE_IDENTITY,
@@ -188,35 +197,6 @@ def _bind_v2_runtime(task, db):
     )
 
 
-def _ready_kit_probe_outcome(*, kit_identity=None, harness_inventory=None):
-    from app.core.worker_runtime_readiness import (
-        READINESS_READY,
-        RuntimeProbeOutcome,
-        RuntimeReadiness,
-    )
-
-    return RuntimeProbeOutcome(
-        readiness=RuntimeReadiness(
-            status=READINESS_READY,
-            worker_kit_version="0.4.0",
-            worker_kit_path="/opt/codify/worker-kits/0.4.0-linux-amd64",
-            harness_inventory=harness_inventory or _V2_KIT_HARNESS_INVENTORY,
-            kit_identity=kit_identity or _V2_WORKER_KIT_IDENTITY,
-        ),
-        committed=True,
-    )
-
-
-def _ready_kit_check(*, kit_identity=None, harness_inventory=None):
-    from app.core.worker_runtime_readiness import READINESS_READY, RuntimeCheckResult
-
-    return RuntimeCheckResult(
-        status=READINESS_READY,
-        harness_inventory=harness_inventory or _V2_KIT_HARNESS_INVENTORY,
-        kit_identity=kit_identity or _V2_WORKER_KIT_IDENTITY,
-    )
-
-
 @pytest.fixture(autouse=True)
 def _stub_v2_image_inspection():
     """Keep daemon inspection external while exercising bundle verification."""
@@ -225,24 +205,6 @@ def _stub_v2_image_inspection():
         return_value=_V2_WORKER_IMAGE_IDENTITY,
     ):
         yield
-
-
-@pytest.fixture(autouse=True)
-def _stub_v2_kit_probe():
-    with patch(
-        "app.core.worker_task_lifecycle.run_deterministic_kit_probe",
-        new=AsyncMock(return_value=_ready_kit_probe_outcome()),
-    ) as probe:
-        yield probe
-
-
-@pytest.fixture(autouse=True)
-def _stub_v2_final_kit_probe():
-    with patch(
-        "app.core.worker_task_lifecycle.inspect_mounted_kit_container",
-        return_value=_ready_kit_check(),
-    ) as probe:
-        yield probe
 
 
 def test_build_container_volumes_uses_snapshot_mounts_last(tmp_path):
@@ -415,10 +377,6 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
             "app.core.worker_task_lifecycle.create_task_attempt",
             new=AsyncMock(return_value=attempt),
         ),
-        patch(
-            "app.core.worker_task_lifecycle.inspect_mounted_kit_container",
-            return_value=_ready_kit_check(),
-        ) as final_kit_probe,
     ):
         container = await create_execute_container(
             worker,
@@ -458,7 +416,14 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
     assert worker.docker.create_container.call_args.kwargs["start"] is False
     assert worker.docker.put_archive.call_count == 2
     worker.docker.start_container.assert_called_once_with(container)
-    final_kit_probe.assert_called_once()
+    # V2 execution uses the frozen snapshot and leaves full Kit verification to
+    # Profile/admin verification; there is no stopped-container full scan here.
+    assert worker.docker.create_container.call_args.kwargs["environment"][
+        "CODIFY_CLI_SOURCE"
+    ] == "worker_kit"
+    assert worker.docker.create_container.call_args.kwargs["environment"][
+        "CODIFY_CLI_BINARY_DIGEST"
+    ] == "f" * 64
     assert db.commit.await_count == 2
     assert (
         worker.docker.create_container.call_args.kwargs["image"]
@@ -472,35 +437,6 @@ async def test_create_execute_container_uses_snapshot_runtime(tmp_path):
     assert worker.docker.create_container.call_args.kwargs["volumes"][
         "/opt/codify/worker-kits/0.1.0-linux-amd64/nix/store"
     ] == {"bind": "/nix/store", "mode": "ro"}
-
-
-@pytest.mark.asyncio
-async def test_v2_final_kit_check_removes_container_on_identity_change():
-    worker = MagicMock()
-    db = MagicMock()
-    db.commit = AsyncMock()
-    task = SimpleNamespace(id=12, container_id="container-1", raw_logs_finalized_at=None)
-    container = SimpleNamespace(id="container-1")
-    changed_identity = {**_V2_WORKER_KIT_IDENTITY, "manifest_sha256": "5" * 64}
-
-    with patch(
-        "app.core.worker_task_lifecycle.inspect_mounted_kit_container",
-        return_value=_ready_kit_check(kit_identity=changed_identity),
-    ):
-        with pytest.raises(RuntimeError, match="before container start"):
-            await _verify_v2_kit_before_start(
-                worker,
-                db,
-                task,
-                container,
-                worker_kit_version="0.4.0",
-                worker_kit_path="/opt/codify/worker-kits/0.4.0-linux-amd64",
-                snapshot_kit_identity=_V2_WORKER_KIT_IDENTITY,
-            )
-
-    worker.docker.remove_container.assert_called_once_with(container, force=True)
-    db.commit.assert_awaited_once()
-    assert task.container_id is None
 
 
 @pytest.mark.asyncio
@@ -644,7 +580,16 @@ async def test_v2_execution_rejects_daemon_image_identity_mismatch_before_contai
         status=TaskStatus.RUNNING,
         cancel_requested_at=None,
         worker_profile_snapshot=SimpleNamespace(
-            harness_config_snapshot={"v2_worker_image_identity": identity}, harness_key="pi"
+            runtime_contract_version="codify.worker.harness/v2",
+            cli_source="worker_kit",
+            cli_executable_path=_V2_HARNESS_EVIDENCE["cli"]["executable_path"],
+            cli_version=_V2_HARNESS_EVIDENCE["cli"]["version"],
+            cli_binary_digest=_V2_HARNESS_EVIDENCE["cli"]["binary_digest"],
+            harness_config_snapshot={
+                "v2_worker_image_identity": identity,
+                "v2_harness_verification_evidence": _V2_HARNESS_EVIDENCE,
+            },
+            harness_key="claude",
         ),
     )
     issue = SimpleNamespace(id=1, merge_request_iid=None, merge_request_url=None, target_branch="main")
@@ -664,7 +609,10 @@ async def test_v2_execution_rejects_daemon_image_identity_mismatch_before_contai
     db.commit = AsyncMock()
     bundle = SimpleNamespace(
         contract_version="codify.worker.harness/v2",
-        manifest={"worker_image_identity": identity},
+        manifest={
+            "worker_image_identity": identity,
+            "harness_verification_evidence": _V2_HARNESS_EVIDENCE,
+        },
     )
     observed = {**identity, "image_id": "sha256:" + "d" * 64}
     settings = SimpleNamespace(worker_skip_image_pull=True, worker_network="bridge")
@@ -878,9 +826,7 @@ def _kit_failure_execute_fixtures(runtime, settings, tmp_path):
 async def test_create_execute_container_missing_bind_source_raises_structured_kit_error(
     tmp_path,
 ):
-    """F2 §13.4: a create-time bind-source-missing error re-probes the Kit and,
-    when the Kit is gone, fails with a structured unavailable error."""
-    from app.core.worker_runtime_readiness import WorkerRuntimeUnavailableError
+    """A create-time mount error propagates without a hot-path full probe."""
 
     runtime, settings = _kit_runtime_and_settings()
     worker, db, task, issue, attempt = _kit_failure_execute_fixtures(
@@ -890,13 +836,6 @@ async def test_create_execute_container_missing_bind_source_raises_structured_ki
         "Error response from daemon: create command failed: "
         "bind source path does not exist: /opt/codify/worker-kits/0.1.0-linux-amd64"
     )
-    recheck = AsyncMock(
-        return_value=WorkerRuntimeUnavailableError(
-            failure_code="worker_kit_not_found",
-            failure_message="Worker Kit directory does not exist on the Docker host",
-        )
-    )
-
     with (
         patch(
             "app.core.worker_task_lifecycle.load_task_worker_runtime",
@@ -909,62 +848,6 @@ async def test_create_execute_container_missing_bind_source_raises_structured_ki
         patch(
             "app.core.worker_task_lifecycle.create_task_attempt",
             new=AsyncMock(return_value=attempt),
-        ),
-        patch(
-            "app.core.worker_task_lifecycle.recheck_runtime_on_container_error",
-            new=recheck,
-        ),
-    ):
-        with pytest.raises(WorkerRuntimeUnavailableError) as exc_info:
-            await create_execute_container(
-                worker,
-                db,
-                settings=settings,
-                task=task,
-                issue=issue,
-                sudo_gl=None,
-            )
-
-    assert exc_info.value.failure_code == "worker_kit_not_found"
-    recheck.assert_awaited_once()
-    assert recheck.await_args.kwargs["worker_kit_path"] == (
-        "/opt/codify/worker-kits/0.1.0-linux-amd64"
-    )
-
-
-@pytest.mark.asyncio
-async def test_create_execute_container_kit_error_recheck_ready_keeps_original_error(
-    tmp_path,
-):
-    """F2 §13.4: when the re-probe keeps ready, the original create error is kept
-    as a Profile/image runtime error instead of a structured Kit error."""
-    runtime, settings = _kit_runtime_and_settings()
-    worker, db, task, issue, attempt = _kit_failure_execute_fixtures(
-        runtime, settings, tmp_path
-    )
-    original_error = RuntimeError(
-        "Error response from daemon: create command failed: "
-        "bind source path does not exist: /opt/codify/worker-kits/0.1.0-linux-amd64"
-    )
-    worker.docker.create_container.side_effect = original_error
-    recheck = AsyncMock(return_value=original_error)
-
-    with (
-        patch(
-            "app.core.worker_task_lifecycle.load_task_worker_runtime",
-            new=AsyncMock(return_value=runtime),
-        ),
-        patch(
-            "app.core.worker_task_lifecycle.build_issue_workspace_paths",
-            return_value=SimpleNamespace(issue_root=str(tmp_path)),
-        ),
-        patch(
-            "app.core.worker_task_lifecycle.create_task_attempt",
-            new=AsyncMock(return_value=attempt),
-        ),
-        patch(
-            "app.core.worker_task_lifecycle.recheck_runtime_on_container_error",
-            new=recheck,
         ),
     ):
         with pytest.raises(RuntimeError, match="bind source path does not exist"):
@@ -977,22 +860,22 @@ async def test_create_execute_container_kit_error_recheck_ready_keeps_original_e
                 sudo_gl=None,
             )
 
-    recheck.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_create_execute_container_non_kit_error_does_not_recheck(tmp_path):
-    """F2: an unrelated create error (image/network) must not trigger the Kit
-    re-probe and must propagate unchanged."""
+async def test_create_execute_container_kit_error_recheck_ready_keeps_original_error(
+    tmp_path,
+):
+    """A Kit create error remains a Docker/runtime error without re-probing."""
     runtime, settings = _kit_runtime_and_settings()
     worker, db, task, issue, attempt = _kit_failure_execute_fixtures(
         runtime, settings, tmp_path
     )
-    worker.docker.create_container.side_effect = RuntimeError(
-        "Error response from daemon: image 'custom-worker:latest' not found"
+    original_error = RuntimeError(
+        "Error response from daemon: create command failed: "
+        "bind source path does not exist: /opt/codify/worker-kits/0.1.0-linux-amd64"
     )
-    recheck = AsyncMock()
-
+    worker.docker.create_container.side_effect = original_error
     with (
         patch(
             "app.core.worker_task_lifecycle.load_task_worker_runtime",
@@ -1006,9 +889,40 @@ async def test_create_execute_container_non_kit_error_does_not_recheck(tmp_path)
             "app.core.worker_task_lifecycle.create_task_attempt",
             new=AsyncMock(return_value=attempt),
         ),
+    ):
+        with pytest.raises(RuntimeError, match="bind source path does not exist"):
+            await create_execute_container(
+                worker,
+                db,
+                settings=settings,
+                task=task,
+                issue=issue,
+                sudo_gl=None,
+            )
+
+
+@pytest.mark.asyncio
+async def test_create_execute_container_non_kit_error_does_not_recheck(tmp_path):
+    """An unrelated create error propagates unchanged."""
+    runtime, settings = _kit_runtime_and_settings()
+    worker, db, task, issue, attempt = _kit_failure_execute_fixtures(
+        runtime, settings, tmp_path
+    )
+    worker.docker.create_container.side_effect = RuntimeError(
+        "Error response from daemon: image 'custom-worker:latest' not found"
+    )
+    with (
         patch(
-            "app.core.worker_task_lifecycle.recheck_runtime_on_container_error",
-            new=recheck,
+            "app.core.worker_task_lifecycle.load_task_worker_runtime",
+            new=AsyncMock(return_value=runtime),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.build_issue_workspace_paths",
+            return_value=SimpleNamespace(issue_root=str(tmp_path)),
+        ),
+        patch(
+            "app.core.worker_task_lifecycle.create_task_attempt",
+            new=AsyncMock(return_value=attempt),
         ),
     ):
         with pytest.raises(RuntimeError, match="image 'custom-worker:latest' not found"):
@@ -1020,138 +934,6 @@ async def test_create_execute_container_non_kit_error_does_not_recheck(tmp_path)
                 issue=issue,
                 sudo_gl=None,
             )
-
-    recheck.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_v2_execution_rejects_kit_identity_change_between_verification_and_execution(
-    tmp_path,
-):
-    """A mounted Kit replacement between verification and execution fails
-    closed instead of silently running against different Kit bytes."""
-    runtime, settings = _kit_runtime_and_settings()
-    worker, db, task, issue, attempt = _kit_failure_execute_fixtures(
-        runtime, settings, tmp_path
-    )
-    # The cached readiness row still reports the frozen build, but the live
-    # execution probe observes a replacement before container creation.
-    changed_kit = {**_V2_WORKER_KIT_IDENTITY, "manifest_sha256": "9" * 64}
-    db.get = AsyncMock(
-        return_value=SimpleNamespace(
-            status="ready",
-            docker_daemon_key=None,
-            runtime_mode="mounted_kit",
-            worker_kit_version="0.4.0",
-            worker_kit_path="/opt/codify/worker-kits/0.4.0-linux-amd64",
-            failure_code=None,
-            failure_message=None,
-            checked_at=None,
-            ready_until=utcnow() + timedelta(seconds=900),
-            check_generation=0,
-            check_started_at=None,
-            updated_at=None,
-            harness_inventory=_V2_KIT_HARNESS_INVENTORY,
-            kit_identity=_V2_WORKER_KIT_IDENTITY,
-        )
-    )
-
-    with (
-        patch(
-            "app.core.worker_task_lifecycle.load_task_worker_runtime",
-            new=AsyncMock(return_value=runtime),
-        ),
-        patch(
-            "app.core.worker_task_lifecycle.build_issue_workspace_paths",
-            return_value=SimpleNamespace(issue_root=str(tmp_path)),
-        ),
-        patch(
-            "app.core.worker_task_lifecycle.create_task_attempt",
-            new=AsyncMock(return_value=attempt),
-        ),
-        patch(
-            "app.core.worker_task_lifecycle.run_deterministic_kit_probe",
-            new=AsyncMock(return_value=_ready_kit_probe_outcome(kit_identity=changed_kit)),
-        ),
-    ):
-        with pytest.raises(RuntimeError, match="Worker Kit identity changed"):
-            await create_execute_container(
-                worker,
-                db,
-                settings=settings,
-                task=task,
-                issue=issue,
-                sudo_gl=None,
-            )
-
-    worker.docker.create_container.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_v2_execution_rejects_absent_harness_with_harness_cli_unavailable(tmp_path):
-    """A Task selecting a Harness absent from the frozen Kit inventory fails
-    with the stable harness_cli_unavailable rejection (§11.3)."""
-    from app.core.worker_runtime_readiness import HarnessCliUnavailableError
-
-    runtime, settings = _kit_runtime_and_settings()
-    worker, db, task, issue, attempt = _kit_failure_execute_fixtures(
-        runtime, settings, tmp_path
-    )
-    inventory = {
-        key: {"availability": "absent", "reason_code": "not_selected"}
-        for key in ("pi", "opencode", "claude", "codex")
-    }
-    db.get = AsyncMock(
-        return_value=SimpleNamespace(
-            status="ready",
-            docker_daemon_key=None,
-            runtime_mode="mounted_kit",
-            worker_kit_version="0.4.0",
-            worker_kit_path="/opt/codify/worker-kits/0.4.0-linux-amd64",
-            failure_code=None,
-            failure_message=None,
-            checked_at=None,
-            ready_until=utcnow() + timedelta(seconds=900),
-            check_generation=0,
-            check_started_at=None,
-            updated_at=None,
-            harness_inventory=inventory,
-            kit_identity=_V2_WORKER_KIT_IDENTITY,
-        )
-    )
-
-    with (
-        patch(
-            "app.core.worker_task_lifecycle.load_task_worker_runtime",
-            new=AsyncMock(return_value=runtime),
-        ),
-        patch(
-            "app.core.worker_task_lifecycle.build_issue_workspace_paths",
-            return_value=SimpleNamespace(issue_root=str(tmp_path)),
-        ),
-        patch(
-            "app.core.worker_task_lifecycle.create_task_attempt",
-            new=AsyncMock(return_value=attempt),
-        ),
-        patch(
-            "app.core.worker_task_lifecycle.run_deterministic_kit_probe",
-            new=AsyncMock(return_value=_ready_kit_probe_outcome(harness_inventory=inventory)),
-        ),
-    ):
-        with pytest.raises(HarnessCliUnavailableError) as exc_info:
-            await create_execute_container(
-                worker,
-                db,
-                settings=settings,
-                task=task,
-                issue=issue,
-                sudo_gl=None,
-            )
-
-    assert exc_info.value.harness_key == "claude"
-    assert exc_info.value.reason_code == "not_selected"
-    assert exc_info.value.kit_version == "0.4.0"
-    worker.docker.create_container.assert_not_called()
 
 
 @pytest.mark.asyncio

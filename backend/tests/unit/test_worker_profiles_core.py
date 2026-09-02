@@ -291,6 +291,12 @@ def test_snapshot_explicitly_freezes_requested_v2_contract_from_harness_runtime(
                 "harness_key": "pi",
                 "contract_version": "codify.worker.harness/v2",
                 "adapter": {"version": "test", "digest": "d" * 64},
+                "cli": {
+                    "source": "worker_kit",
+                    "executable_path": "/opt/codify-kit/harness/pi/bin/pi",
+                    "version": "0.84.2",
+                    "binary_digest": "e" * 64,
+                },
                 "verification_input_digest": "verified",
                 "image_identity": {
                     "schema": "codify.worker-image-identity/v1",
@@ -322,6 +328,10 @@ def test_snapshot_explicitly_freezes_requested_v2_contract_from_harness_runtime(
     # + kit_identity + bundle_digest).
     assert snapshot.harness_config_snapshot["worker_kit_identity"] == profile.worker_kit_identity
     assert snapshot.harness_config_snapshot["v2_harness_verification_evidence"]["harness_key"] == "pi"
+    assert snapshot.cli_source == "worker_kit"
+    assert snapshot.cli_executable_path == "/opt/codify-kit/harness/pi/bin/pi"
+    assert snapshot.cli_version == "0.84.2"
+    assert snapshot.cli_binary_digest == "e" * 64
 
     profile.v2_harness_verification_evidence = {}
     with pytest.raises(WorkerProfileValidationError, match="no verified evidence"):

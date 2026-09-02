@@ -21,7 +21,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from app.core.utcnow import utcnow
-from app.core.worker_kit_inventory import content_inventory_digest
+from app.core.worker_kit_inventory import (
+    content_inventory_digest,
+)
 from app.core.worker_runtime_readiness import (
     FAILURE_WORKER_KIT_INVALID,
     FAILURE_WORKER_KIT_NOT_FOUND,
@@ -150,7 +152,12 @@ def _tar_tree_with_chained_symlink_bytes() -> bytes:
     return buffer.getvalue()
 
 
-def _make_probe_client(*, manifest: bytes | None = None, content_overrides: dict[str, bytes] | None = None):
+def _make_probe_client(
+    *,
+    manifest: bytes | None = None,
+    receipt: bytes | None = None,
+    content_overrides: dict[str, bytes] | None = None,
+):
     """Return a DockerClientWrapper stand-in for probe_worker_kit.
 
     ``manifest=None`` simulates a missing manifest.json (NotFound).
@@ -171,6 +178,10 @@ def _make_probe_client(*, manifest: bytes | None = None, content_overrides: dict
             if manifest is None:
                 raise docker.errors.NotFound("manifest not found")
             return (iter([_tar_bytes("manifest.json", manifest)]), {})
+        if path.endswith(".install-receipt.json"):
+            if receipt is None:
+                raise docker.errors.NotFound("install receipt not found")
+            return (iter([_tar_bytes(".install-receipt.json", receipt)]), {})
         if path.endswith("nix/store"):
             return (iter([_tar_bytes("store", b"")]), {})
         name = path.rsplit("/", 1)[-1]
@@ -211,6 +222,26 @@ def _valid_manifest(version: str = "0.3.5") -> bytes:
             },
             "content_inventory": content_inventory,
             "content_inventory_sha256": content_inventory_digest(content_inventory),
+        }
+    ).encode()
+
+
+def _valid_install_receipt(manifest: bytes) -> bytes:
+    identity_path = (
+        "/opt/codify/worker-kits/0.3.5-linux-amd64-"
+        f"{hashlib.sha256(manifest).hexdigest()[:12]}"
+    )
+    manifest_data = json.loads(manifest)
+    return json.dumps(
+        {
+            "schema": "codify.worker.kit-install-receipt/v1",
+            "archive": f"codify-worker-kit-{identity_path.rsplit('/', 1)[-1]}.tar.gz",
+            "archive_sha256": "a" * 64,
+            "manifest_sha256": hashlib.sha256(manifest).hexdigest(),
+            "content_inventory_sha256": manifest_data["content_inventory_sha256"],
+            "kit_version": manifest_data["kit_version"],
+            "platform": manifest_data["platform"],
+            "installed_at": "2026-09-03T00:00:00Z",
         }
     ).encode()
 
@@ -522,6 +553,62 @@ def test_probe_keeps_legacy_v1_manifest_compatible_but_v2_requires_inventory():
         )
     assert v2_result.status == READINESS_UNAVAILABLE
     assert v2_result.failure_code == FAILURE_WORKER_KIT_INVALID
+
+
+def test_v2_probe_accepts_only_installer_managed_content_addressed_path():
+    manifest = _valid_manifest()
+    receipt = _valid_install_receipt(manifest)
+    client = _make_probe_client(manifest=manifest, receipt=receipt)
+    manifest_sha = hashlib.sha256(manifest).hexdigest()
+    kit_path = f"/opt/codify/worker-kits/0.3.5-linux-amd64-{manifest_sha[:12]}"
+    with patch(
+        "app.core.worker_runtime_readiness.DockerClientWrapper", return_value=client
+    ):
+        result = probe_worker_kit(
+            SimpleNamespace(host="tcp://worker:2376", tls_ca=None),
+            image="worker:latest",
+            runtime_mode="mounted_kit",
+            worker_kit_version="0.3.5",
+            worker_kit_path=kit_path,
+            require_content_inventory=True,
+        )
+    assert result.status == READINESS_READY
+    assert result.kit_identity["manifest_sha256"] == manifest_sha
+
+
+@pytest.mark.parametrize(
+    "kit_path,receipt_change",
+    [
+        ("/opt/codify/worker-kits/current", {}),
+        (None, {"manifest_sha256": "b" * 64}),
+    ],
+)
+def test_v2_probe_rejects_mutable_alias_or_mismatched_install_receipt(
+    kit_path: str | None, receipt_change: dict[str, str]
+):
+    manifest = _valid_manifest()
+    receipt_data = json.loads(_valid_install_receipt(manifest))
+    receipt_data.update(receipt_change)
+    receipt = json.dumps(receipt_data).encode()
+    client = _make_probe_client(manifest=manifest, receipt=receipt)
+    manifest_sha = hashlib.sha256(manifest).hexdigest()
+    actual_path = kit_path or (
+        f"/opt/codify/worker-kits/0.3.5-linux-amd64-{manifest_sha[:12]}"
+    )
+    with patch(
+        "app.core.worker_runtime_readiness.DockerClientWrapper", return_value=client
+    ):
+        result = probe_worker_kit(
+            SimpleNamespace(host="tcp://worker:2376", tls_ca=None),
+            image="worker:latest",
+            runtime_mode="mounted_kit",
+            worker_kit_version="0.3.5",
+            worker_kit_path=actual_path,
+            require_content_inventory=True,
+        )
+    assert result.status == READINESS_UNAVAILABLE
+    assert result.failure_code == FAILURE_WORKER_KIT_INVALID
+    assert "installer" in result.failure_message or "receipt" in result.failure_message
 
 
 def test_probe_rejects_tampered_non_harness_kit_content():

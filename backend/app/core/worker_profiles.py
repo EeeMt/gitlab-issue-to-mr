@@ -49,6 +49,7 @@ from app.core.worker_environment_variables import (
 )
 from app.core.worker_kit import (
     BAKED_IMAGE_MODE,
+    KIT_CONTAINER_PATH,
     KIT_CONTAINER_USER,
     KIT_ENTRYPOINT,
     MOUNTED_KIT_MODE,
@@ -94,6 +95,7 @@ _LINUX_PLATFORM_RE = re.compile(r"^linux/[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _IMAGE_REFERENCE_RE = re.compile(r"^[^@\s]+@sha256:[0-9a-f]{64}$")
 _IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_V2_CLI_SOURCES = frozenset({"worker_kit", "host_mount"})
 
 
 def _linux_platform(value: object) -> bool:
@@ -134,6 +136,44 @@ def validate_v2_worker_kit_identity(identity: object) -> dict[str, str]:
         raise WorkerProfileValidationError(
             f"explicit V2 Profile has no verified Worker Kit identity: {exc}"
         ) from exc
+
+
+def validate_v2_cli_identity(identity: object, *, harness_key: str) -> dict[str, str]:
+    """Validate the selected V2 Harness CLI identity frozen by verification."""
+    if not isinstance(identity, Mapping):
+        raise WorkerProfileValidationError(
+            f"explicit V2 Profile has no verified CLI identity for Harness {harness_key!r}"
+        )
+    required = ("source", "executable_path", "version", "binary_digest")
+    normalized = {key: identity.get(key) for key in required}
+    if not all(isinstance(value, str) and value for value in normalized.values()):
+        raise WorkerProfileValidationError(
+            f"explicit V2 Profile has an incomplete CLI identity for Harness {harness_key!r}"
+        )
+    if normalized["source"] not in _V2_CLI_SOURCES:
+        raise WorkerProfileValidationError(
+            f"explicit V2 Profile has an invalid CLI source for Harness {harness_key!r}"
+        )
+    executable_path = normalized["executable_path"]
+    if (
+        not executable_path.startswith("/")
+        or "\\" in executable_path
+        or str(PurePosixPath(executable_path)) != executable_path
+    ):
+        raise WorkerProfileValidationError(
+            f"explicit V2 Profile has an unsafe CLI path for Harness {harness_key!r}"
+        )
+    if normalized["source"] == "worker_kit" and not executable_path.startswith(
+        f"{KIT_CONTAINER_PATH}/"
+    ):
+        raise WorkerProfileValidationError(
+            f"explicit V2 Worker Kit CLI for Harness {harness_key!r} is outside the Kit"
+        )
+    if _SHA256_RE.fullmatch(normalized["binary_digest"]) is None:
+        raise WorkerProfileValidationError(
+            f"explicit V2 Profile has an invalid CLI digest for Harness {harness_key!r}"
+        )
+    return normalized
 
 
 def current_runtime_verification_digest(
@@ -206,7 +246,10 @@ def validate_v2_harness_evidence(
         raise WorkerProfileValidationError("explicit V2 Profile verification evidence has an invalid Adapter identity")
     if not isinstance(evidence.get("verified_at"), str) or not evidence["verified_at"]:
         raise WorkerProfileValidationError("explicit V2 Profile verification evidence has no verification time")
-    return dict(evidence)
+    cli = validate_v2_cli_identity(evidence.get("cli"), harness_key=harness_key)
+    normalized = dict(evidence)
+    normalized["cli"] = cli
+    return normalized
 
 
 def inspect_v2_worker_image_identity(connection: DockerConnectionConfig, image: str) -> dict[str, str]:
@@ -880,9 +923,11 @@ def snapshot_from_profile(
             image_identity=v2_image_identity,
             generation=int(getattr(profile, "v2_worker_image_identity_generation", 0) or 0),
         )
+        v2_cli_identity = dict(v2_harness_evidence["cli"])
     else:
         v2_harness_evidence = None
         v2_kit_identity = None
+        v2_cli_identity = None
     runtime_locator_fingerprint = fingerprint_from_docker_target(
         settings or get_effective_settings(),
         docker_host=getattr(profile, "docker_host", None),
@@ -940,6 +985,10 @@ def snapshot_from_profile(
             "options": _freeze_harness_options(profile, task_harness_options),
         },
         image_digest=getattr(profile, "image_digest", None),
+        cli_source=(v2_cli_identity or {}).get("source"),
+        cli_executable_path=(v2_cli_identity or {}).get("executable_path"),
+        cli_version=(v2_cli_identity or {}).get("version"),
+        cli_binary_digest=(v2_cli_identity or {}).get("binary_digest"),
         model_endpoint_snapshot=endpoint.as_snapshot() if endpoint is not None else None,
         credential_ref=(
             endpoint.credential_ref

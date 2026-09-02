@@ -39,10 +39,47 @@ def _inventory(present: set[str]) -> dict:
 
 
 def _snapshot(*, cli_source: str | None, harness_key: str = "codex") -> SimpleNamespace:
+    source = cli_source or "worker_kit"
+    path = (
+        f"/opt/codify-kit/harness/{harness_key}/bin/{harness_key}"
+        if source == "worker_kit"
+        else f"/usr/local/bin/{harness_key}"
+    )
+    cli = {
+        "source": source,
+        "executable_path": path,
+        "version": "1.0.0",
+        "binary_digest": _SHA,
+    }
+    image_identity = {
+        "schema": "codify.worker-image-identity/v1",
+        "daemon_key": "scheduler-gate-tests",
+        "image_reference": "registry.example/worker@sha256:" + _SHA,
+        "image_id": "sha256:" + _SHA,
+        "runtime_platform": "linux/amd64",
+    }
     return SimpleNamespace(
         harness_key=harness_key,
+        runtime_mode="mounted_kit",
+        runtime_contract_version="codify.worker.harness/v2",
         cli_source=cli_source,
-        harness_config_snapshot={"requested_runtime_contract_version": "codify.worker.harness/v2"},
+        cli_executable_path=path,
+        cli_version="1.0.0",
+        cli_binary_digest=_SHA,
+        harness_config_snapshot={
+            "requested_runtime_contract_version": "codify.worker.harness/v2",
+            "v2_worker_image_identity": image_identity,
+            "worker_kit_identity": {
+                "schema": "codify.worker.kit-identity/v1",
+                "kit_version": "0.4.0",
+                "platform": "linux/amd64",
+                "manifest_sha256": _SHA,
+            },
+            "v2_harness_verification_evidence": {
+                "image_identity": image_identity,
+                "cli": cli,
+            },
+        },
     )
 
 

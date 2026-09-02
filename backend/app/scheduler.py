@@ -10,6 +10,7 @@ import os
 import re
 import time
 import uuid
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
@@ -62,6 +63,12 @@ from app.core.worker_docker_targets import (
     find_task_container,
     list_known_docker_targets,
 )
+from app.core.worker_profiles import (
+    WorkerProfileValidationError,
+    validate_v2_cli_identity,
+    validate_v2_worker_image_identity,
+    validate_v2_worker_kit_identity,
+)
 from app.core.worker_runtime_readiness import (
     RuntimeProbeTransientError,
     RuntimeReadiness,
@@ -106,6 +113,42 @@ _QUIESCENT_CONTAINER_STATUSES = {"created", "exited", "dead", "removing"}
 
 # Thread pool for running worker tasks (to avoid blocking the event loop)
 _worker_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="worker-")
+
+
+def _frozen_v2_snapshot_is_complete(snapshot: TaskWorkerProfileSnapshot | None) -> bool:
+    """Return whether a V2 snapshot contains the verified execution identity."""
+    config = getattr(snapshot, "harness_config_snapshot", None)
+    if snapshot is None or not isinstance(config, Mapping):
+        return False
+    try:
+        image_identity = validate_v2_worker_image_identity(
+            config.get("v2_worker_image_identity")
+        )
+        evidence = config.get("v2_harness_verification_evidence")
+        if not isinstance(evidence, Mapping):
+            return False
+        cli_identity = validate_v2_cli_identity(
+            evidence.get("cli"),
+            harness_key=getattr(snapshot, "harness_key", None) or "",
+        )
+    except WorkerProfileValidationError:
+        return False
+    if evidence.get("image_identity") != image_identity:
+        return False
+    frozen_cli = {
+        "source": getattr(snapshot, "cli_source", None),
+        "executable_path": getattr(snapshot, "cli_executable_path", None),
+        "version": getattr(snapshot, "cli_version", None),
+        "binary_digest": getattr(snapshot, "cli_binary_digest", None),
+    }
+    if frozen_cli != cli_identity:
+        return False
+    if getattr(snapshot, "runtime_mode", None) == "mounted_kit":
+        try:
+            validate_v2_worker_kit_identity(config.get("worker_kit_identity"))
+        except WorkerProfileValidationError:
+            return False
+    return True
 
 
 def _get_container_pattern() -> re.Pattern:
@@ -1581,15 +1624,28 @@ class Scheduler:
                 require_content_inventory=requires_full_content_identity,
             )
             return True
+        if requires_full_content_identity:
+            # A V2 Task carries the result of the explicit Profile verification
+            # (including the selected CLI bytes).  Unknown/expired readiness is
+            # not a reason to repeat the full Kit scan; the launcher performs a
+            # lightweight manifest + selected-CLI check in the execution
+            # container.  A partial snapshot is never allowed through.
+            if not _frozen_v2_snapshot_is_complete(snapshot):
+                await self._fail_task_for_execution_identity(
+                    db,
+                    task,
+                    "V2 Task snapshot has no complete verified Worker Kit/CLI identity",
+                )
+                return True
+            return await self._harness_availability_gate(db, task, snapshot, readiness)
         if readiness.is_ready and not requires_full_content_identity:
             # V1 dual-canary keeps the legacy cached-ready path. Old V1 Kits do
             # not carry the V2 full-content inventory and must remain runnable
             # while the migration is in progress.
             return await self._harness_availability_gate(db, task, snapshot, readiness)
-        # A cached ready row is not sufficient for V2 execution: the locator
-        # fingerprint identifies where the Kit lives, not its current bytes.
-        # Re-probe the full content inventory so an in-place replacement cannot
-        # pass the gate during the readiness TTL (§13.4).
+        # V1 dual-canary retains the historical probe-on-unknown path.  V2 has
+        # already returned above using its frozen identity and never reaches
+        # this full-content probe from the normal Scheduler hot path.
         settings = get_settings()
         connection = connection_from_snapshot(snapshot, settings)
         try:
@@ -1663,8 +1719,8 @@ class Scheduler:
         The Kit is ready but the Task's selected Harness may still be absent
         from the inventory: the Task then fails deterministically with the
         stable ``harness_cli_unavailable`` error instead of starting a worker
-        container. Unknown inventory evidence never rejects — a stale ready
-        row predating inventory re-probes through the readiness service.
+        container. Unknown or expired readiness uses the frozen selected-CLI
+        identity and never triggers a full Kit probe.
         Returns True when the task must not be claimed this cycle.
         """
         config = (
@@ -1674,19 +1730,31 @@ class Scheduler:
         )
         requested_contract = (
             config.get("requested_runtime_contract_version")
-            if isinstance(config, dict)
+            if isinstance(config, Mapping)
             else None
-        )
+        ) or getattr(snapshot, "runtime_contract_version", None)
         if requested_contract != "codify.worker.harness/v2":
             return False
+        if not _frozen_v2_snapshot_is_complete(snapshot):
+            await self._fail_task_for_execution_identity(
+                db,
+                task,
+                "V2 Task snapshot has no complete verified Harness CLI identity",
+            )
+            return True
         harness_key = getattr(snapshot, "harness_key", None) or ""
         # An explicitly authorized host_mount break-glass provides the CLI
         # outside the Kit inventory: the availability gate only applies to
         # worker_kit-sourced Harnesses (no image/PATH fallback exists).
         if getattr(snapshot, "cli_source", None) == "host_mount":
             return False
+        # Only a currently valid READY record is authoritative for a known
+        # absent Harness.  UNKNOWN includes an expired READY row and must use
+        # the frozen Profile/Task CLI identity instead of forcing a full scan.
+        if not readiness.is_ready:
+            return False
         available = is_harness_available(readiness, harness_key)
-        if available is True:
+        if available is True or available is None:
             return False
         if available is False:
             detail = harness_cli_unavailable_detail(readiness, harness_key)
@@ -1704,47 +1772,6 @@ class Scheduler:
             )
             await maybe_update_issue_status(db, task.issue_id)
             return True
-        # available is None: the committed probe predates Kit inventory
-        # evidence. Re-probe through the readiness service and evaluate the
-        # fresh conclusion.
-        settings = get_settings()
-        connection = connection_from_snapshot(snapshot, settings)
-        try:
-            outcome = await run_deterministic_kit_probe(
-                db,
-                connection=connection,
-                image=snapshot.image,
-                runtime_mode=snapshot.runtime_mode,
-                worker_kit_version=snapshot.worker_kit_version or "",
-                worker_kit_path=snapshot.worker_kit_path or "",
-                ttl_seconds=settings.worker_runtime_readiness_ttl_seconds,
-                require_content_inventory=requested_contract == HARNESS_CONTRACT_VERSION_V2,
-            )
-        except RuntimeProbeTransientError:
-            return True
-        if outcome.is_ready:
-            fresh_available = is_harness_available(outcome.readiness, harness_key)
-            if fresh_available is True:
-                return False
-            if fresh_available is False:
-                detail = harness_cli_unavailable_detail(outcome.readiness, harness_key)
-                task.status = TaskStatus.FAILED
-                task.error_message = json.dumps(detail, ensure_ascii=False)[:1000]
-                if task.completed_at is None:
-                    task.completed_at = utcnow()
-                await db.commit()
-                self._emit_event(
-                    "harness_cli_unavailable",
-                    reason="harness_cli_unavailable",
-                    issue_id=task.issue_id,
-                    task_id=task.id,
-                    message=detail["message"],
-                )
-                await maybe_update_issue_status(db, task.issue_id)
-                return True
-            return True
-        if outcome.is_unavailable and outcome.committed:
-            await self._fail_task_for_runtime_check(db, task, outcome.readiness)
         return True
 
     async def _load_task_snapshot(
@@ -1863,6 +1890,33 @@ class Scheduler:
             "Task %s failed worker runtime check (%s)",
             task.id,
             readiness.failure_code,
+        )
+        await maybe_update_issue_status(db, task.issue_id)
+
+    async def _fail_task_for_execution_identity(
+        self,
+        db: AsyncSession,
+        task: Task,
+        message: str,
+    ) -> None:
+        """Fail a queued Task whose immutable V2 identity is incomplete."""
+        task.status = TaskStatus.FAILED
+        task.error_message = json.dumps(
+            {
+                "code": "execution_contract_mismatch",
+                "message": message,
+            },
+            ensure_ascii=False,
+        )
+        task.completed_at = utcnow()
+        task.raw_logs_finalized_at = getattr(task, "raw_logs_finalized_at", None) or utcnow()
+        await db.commit()
+        self._emit_event(
+            "execution_contract_mismatch",
+            reason="execution_contract_mismatch",
+            issue_id=task.issue_id,
+            task_id=task.id,
+            message=message,
         )
         await maybe_update_issue_status(db, task.issue_id)
 

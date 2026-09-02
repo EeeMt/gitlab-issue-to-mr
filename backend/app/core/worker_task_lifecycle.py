@@ -43,7 +43,9 @@ from app.core.worker_docker_targets import (
 from app.core.worker_profiles import (
     inspect_v2_worker_image_identity,
     load_task_worker_runtime,
+    validate_v2_cli_identity,
     validate_v2_worker_image_identity,
+    validate_v2_worker_kit_identity,
 )
 from app.core.worker_runtime import (
     TASK_SKILLS_CONTAINER_PATH,
@@ -57,14 +59,7 @@ from app.core.worker_runtime_bundle import (
     load_bound_runtime_bundle,
 )
 from app.core.worker_runtime_readiness import (
-    READINESS_READY,
     HarnessCliUnavailableError,
-    RuntimeProbeTransientError,
-    WorkerRuntimeUnavailableError,
-    inspect_mounted_kit_container,
-    is_kit_mount_error,
-    recheck_runtime_on_container_error,
-    run_deterministic_kit_probe,
 )
 from app.core.worker_task_artifacts import (
     _stop_artifact_poller,
@@ -356,6 +351,7 @@ async def create_execute_container(
     # fall through with an unbound local.
     frozen_snapshot = None
     snapshot_kit_identity = None
+    snapshot_cli_identity = None
     if runtime_bundle.contract_version == "codify.worker.harness/v2":
         frozen_snapshot = task.worker_profile_snapshot
         frozen_config = getattr(frozen_snapshot, "harness_config_snapshot", None)
@@ -376,49 +372,37 @@ async def create_execute_container(
         snapshot_kit_identity = (
             frozen_config.get("worker_kit_identity") if isinstance(frozen_config, dict) else None
         )
+        if snapshot_kit_identity is not None:
+            snapshot_kit_identity = validate_v2_worker_kit_identity(snapshot_kit_identity)
         bundle_kit_identity = runtime_bundle.manifest.get("worker_kit_identity")
         if snapshot_kit_identity is not None and bundle_kit_identity != snapshot_kit_identity:
             raise RuntimeError("V2 Runtime Bundle Worker Kit identity does not match Task Snapshot")
-        # The mounted Kit observed by the readiness probe must match the frozen
-        # identity: a Kit replacement between verification and execution fails
-        # closed instead of silently running against different bytes.
-        kit_fingerprint = getattr(frozen_snapshot, "runtime_locator_fingerprint", None)
-        observed_readiness = None
-        if snapshot_kit_identity is not None and kit_fingerprint:
-            # The scheduler gate also performs a live probe, but the Kit can be
-            # replaced after that gate and before this container is created.
-            # Never use the TTL-cached row as the final execution check: probe
-            # the frozen locator immediately before image/container work.
-            try:
-                probe_outcome = await run_deterministic_kit_probe(
-                    db,
-                    connection=worker_runtime.docker_connection(settings),
-                    image=expected_identity["image_reference"],
-                    runtime_mode=worker_runtime.runtime_mode,
-                    worker_kit_version=worker_runtime.worker_kit_version or "",
-                    worker_kit_path=worker_runtime.worker_kit_path or "",
-                    ttl_seconds=settings.worker_runtime_readiness_ttl_seconds,
-                    require_content_inventory=True,
-                )
-            except RuntimeProbeTransientError as exc:
-                raise WorkerRuntimeUnavailableError(
-                    failure_code="worker_kit_probe_transient",
-                    failure_message=(
-                        "Worker Kit could not be verified immediately before execution; "
-                        "retry the task"
-                    ),
-                ) from exc
-            observed_readiness = probe_outcome.readiness
-            if not observed_readiness.is_ready:
-                raise WorkerRuntimeUnavailableError(
-                    failure_code=observed_readiness.failure_code,
-                    failure_message=observed_readiness.failure_message,
-                )
-            if observed_readiness.kit_identity != snapshot_kit_identity:
-                raise RuntimeError(
-                    "Worker Kit identity changed since the Task snapshot; "
-                    "re-verify the Profile before executing"
-                )
+        snapshot_harness_key = getattr(frozen_snapshot, "harness_key", None) or ""
+        evidence = (
+            frozen_config.get("v2_harness_verification_evidence")
+            if isinstance(frozen_config, dict)
+            else None
+        )
+        try:
+            snapshot_cli_identity = validate_v2_cli_identity(
+                evidence.get("cli") if isinstance(evidence, Mapping) else None,
+                harness_key=snapshot_harness_key,
+            )
+        except ValueError as exc:
+            raise HarnessCliUnavailableError(
+                harness_key=snapshot_harness_key,
+                reason_code="missing_verified_identity",
+                kit_version=(snapshot_kit_identity or {}).get("kit_version"),
+                message=str(exc),
+            ) from exc
+        frozen_cli = {
+            "source": getattr(frozen_snapshot, "cli_source", None),
+            "executable_path": getattr(frozen_snapshot, "cli_executable_path", None),
+            "version": getattr(frozen_snapshot, "cli_version", None),
+            "binary_digest": getattr(frozen_snapshot, "cli_binary_digest", None),
+        }
+        if frozen_cli != snapshot_cli_identity:
+            raise RuntimeError("V2 Task Snapshot CLI identity does not match its verification evidence")
         worker_image = expected_identity["image_reference"]
         if not settings.worker_skip_image_pull:
             try:
@@ -489,8 +473,12 @@ async def create_execute_container(
     # Task selecting a Harness that is absent from the Kit inventory is
     # rejected with the stable harness_cli_unavailable error (§11.3).
     harness_cli_bin: str | None = None
-    frozen_cli_source = getattr(frozen_snapshot, "cli_source", None)
-    frozen_cli_path = getattr(frozen_snapshot, "cli_executable_path", None)
+    frozen_cli_source = (
+        snapshot_cli_identity.get("source") if snapshot_cli_identity is not None else None
+    )
+    frozen_cli_path = (
+        snapshot_cli_identity.get("executable_path") if snapshot_cli_identity is not None else None
+    )
     if runtime_bundle.contract_version == "codify.worker.harness/v2":
         if frozen_cli_source == "host_mount":
             if not isinstance(frozen_cli_path, str) or not frozen_cli_path.startswith("/"):
@@ -499,26 +487,15 @@ async def create_execute_container(
                 )
             harness_cli_bin = frozen_cli_path
         else:
-            inventory = (getattr(observed_readiness, "harness_inventory", None) or {})
-            entry = inventory.get(harness_key)
-            inventory_path = entry.get("path") if isinstance(entry, Mapping) else None
-            if (
-                not isinstance(entry, Mapping)
-                or entry.get("availability") != "present"
-                or not isinstance(inventory_path, str)
-                or not inventory_path.startswith("/")
+            if not isinstance(frozen_cli_path, str) or not frozen_cli_path.startswith(
+                "/"
             ):
                 raise HarnessCliUnavailableError(
                     harness_key=harness_key,
-                    reason_code=(
-                        entry.get("reason_code")
-                        if isinstance(entry, Mapping)
-                        and entry.get("availability") == "absent"
-                        else None
-                    ),
-                    kit_version=getattr(observed_readiness, "worker_kit_version", None),
+                    reason_code="missing_verified_identity",
+                    kit_version=(snapshot_kit_identity or {}).get("kit_version"),
                 )
-            harness_cli_bin = inventory_path
+            harness_cli_bin = frozen_cli_path
 
     if worker_custom_scripts_configured(settings):
         logger.debug(
@@ -666,6 +643,11 @@ async def create_execute_container(
     environment.update(container_overrides["environment"])
     if snapshot_kit_identity is not None:
         environment["CODIFY_KIT_MANIFEST_SHA256"] = snapshot_kit_identity["manifest_sha256"]
+    if snapshot_cli_identity is not None:
+        # Set the frozen V2 binding after profile/runtime environment merges so
+        # editable custom variables cannot override the selected CLI identity.
+        environment["CODIFY_CLI_SOURCE"] = snapshot_cli_identity["source"]
+        environment["CODIFY_CLI_BINARY_DIGEST"] = snapshot_cli_identity["binary_digest"]
     volumes = worker._build_container_volumes(
         settings,
         issue,
@@ -714,79 +696,13 @@ async def create_execute_container(
         except Exception:
             await _remove_created_container(worker, db, task, container)
             raise
-        if runtime_bundle.contract_version == "codify.worker.harness/v2" and snapshot_kit_identity:
-            await _verify_v2_kit_before_start(
-                worker,
-                db,
-                task,
-                container,
-                worker_kit_version=worker_runtime.worker_kit_version or "",
-                worker_kit_path=worker_runtime.worker_kit_path or "",
-                snapshot_kit_identity=snapshot_kit_identity,
-            )
         await _start_created_container(worker, db, task, container)
     except (DockerConnectionsUnavailableError, TaskContainerLookupError):
         # Ambiguous/inconclusive Docker view: deferred recovery owns the outcome.
         raise
-    except Exception as exc:
-        # §13.4: a Kit mount/entrypoint error must trigger the same strict probe
-        # used by the scheduler gate. A deterministically missing Kit becomes a
-        # structured unavailable error; any other outcome keeps the original
-        # error classified as a Profile/image runtime error.
-        if is_kit_mount_error(exc, worker_runtime.worker_kit_path):
-            raise await recheck_runtime_on_container_error(
-                db,
-                connection=worker_runtime.docker_connection(settings),
-                image=worker_image,
-                runtime_mode=worker_runtime.runtime_mode,
-                worker_kit_version=worker_runtime.worker_kit_version or "",
-                worker_kit_path=worker_runtime.worker_kit_path or "",
-                ttl_seconds=settings.worker_runtime_readiness_ttl_seconds,
-                original_error=exc,
-                require_content_inventory=(
-                    runtime_bundle.contract_version == "codify.worker.harness/v2"
-                ),
-            )
+    except Exception:
         raise
     return container
-
-
-async def _verify_v2_kit_before_start(
-    worker,
-    db: AsyncSession,
-    task: Task,
-    container: Any,
-    *,
-    worker_kit_version: str,
-    worker_kit_path: str,
-    snapshot_kit_identity: Mapping[str, Any],
-) -> None:
-    """Verify the actual stopped container's Kit immediately before ``start``."""
-    try:
-        final_kit_result = await asyncio.to_thread(
-            inspect_mounted_kit_container,
-            worker.docker,
-            container,
-            worker_kit_version=worker_kit_version,
-            worker_kit_path=worker_kit_path,
-        )
-    except RuntimeProbeTransientError as exc:
-        await _remove_created_container(worker, db, task, container)
-        raise WorkerRuntimeUnavailableError(
-            failure_code="worker_kit_final_probe_transient",
-            failure_message=(
-                "Worker Kit could not be verified before container start; retry the task"
-            ),
-        ) from exc
-    if final_kit_result.status != READINESS_READY:
-        await _remove_created_container(worker, db, task, container)
-        raise WorkerRuntimeUnavailableError(
-            failure_code=final_kit_result.failure_code,
-            failure_message=final_kit_result.failure_message,
-        )
-    if final_kit_result.kit_identity != snapshot_kit_identity:
-        await _remove_created_container(worker, db, task, container)
-        raise RuntimeError("Worker Kit identity changed before container start; refusing to execute")
 
 
 def _create_stopped_container(

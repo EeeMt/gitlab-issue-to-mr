@@ -1291,28 +1291,58 @@ class RuntimeReadinessGateTests(unittest.IsolatedAsyncioTestCase):
             require_content_inventory=False,
         )
 
-    async def test_v2_cached_ready_runtime_requires_full_content_probe(self) -> None:
-        from app.core.worker_runtime_readiness import (
-            READINESS_READY,
-            RuntimeProbeOutcome,
-            RuntimeReadiness,
-        )
+    async def test_v2_cached_runtime_uses_frozen_identity_without_probe(self) -> None:
+        from app.core.worker_runtime_readiness import READINESS_READY, RuntimeReadiness
         from app.scheduler import Scheduler
 
         scheduler = Scheduler()
         task = _claimable_task(5, 20)
         snapshot_result, _ = self._snapshot_db()
-        snapshot_result.scalar_one_or_none.return_value.runtime_contract_version = (
-            "codify.worker.harness/v2"
-        )
+        snapshot = snapshot_result.scalar_one_or_none.return_value
+        image_identity = {
+            "schema": "codify.worker-image-identity/v1",
+            "daemon_key": "scheduler-tests",
+            "image_reference": "registry.example/worker@sha256:" + "a" * 64,
+            "image_id": "sha256:" + "b" * 64,
+            "runtime_platform": "linux/amd64",
+        }
+        cli_identity = {
+            "source": "worker_kit",
+            "executable_path": "/opt/codify-kit/harness/claude/bin/claude",
+            "version": "1.0.0",
+            "binary_digest": "c" * 64,
+        }
+        snapshot.runtime_contract_version = "codify.worker.harness/v2"
+        snapshot.harness_key = "claude"
+        snapshot.cli_source = cli_identity["source"]
+        snapshot.cli_executable_path = cli_identity["executable_path"]
+        snapshot.cli_version = cli_identity["version"]
+        snapshot.cli_binary_digest = cli_identity["binary_digest"]
+        snapshot.harness_config_snapshot = {
+            "requested_runtime_contract_version": "codify.worker.harness/v2",
+            "v2_worker_image_identity": image_identity,
+            "worker_kit_identity": {
+                "schema": "codify.worker.kit-identity/v1",
+                "kit_version": "0.3.5",
+                "platform": "linux/amd64",
+                "manifest_sha256": "d" * 64,
+            },
+            "v2_harness_verification_evidence": {
+                "schema": "codify.worker-harness-verification/v1",
+                "harness_key": "claude",
+                "contract_version": "codify.worker.harness/v2",
+                "adapter": {"version": "1.0.0", "digest": "e" * 64},
+                "cli": cli_identity,
+                "verification_input_digest": "f" * 64,
+                "image_identity": image_identity,
+                "generation": 1,
+                "verified_at": "2026-08-24T00:00:00+00:00",
+            },
+        }
         db = MagicMock()
         db.execute = AsyncMock(side_effect=[snapshot_result])
         db.commit = AsyncMock()
-        probe = AsyncMock(
-            return_value=RuntimeProbeOutcome(
-                readiness=RuntimeReadiness(status=READINESS_READY), committed=True
-            )
-        )
+        probe = AsyncMock()
 
         with patch(
             "app.scheduler.read_runtime_readiness",
@@ -1321,7 +1351,7 @@ class RuntimeReadinessGateTests(unittest.IsolatedAsyncioTestCase):
             blocked = await scheduler._apply_runtime_readiness_gate(db, task)
 
         self.assertFalse(blocked)
-        self.assertTrue(probe.await_args.kwargs["require_content_inventory"])
+        probe.assert_not_awaited()
 
     async def test_ready_runtime_does_not_block(self) -> None:
         from app.core.worker_runtime_readiness import (

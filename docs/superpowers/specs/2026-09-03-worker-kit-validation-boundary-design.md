@@ -2,11 +2,13 @@
 
 **Date:** 2026-09-03
 
-**Status:** Accepted — implementation pending
+**Status:** Accepted — implementation complete; R4/L5 acceptance pending
 
 **Scope:** Open-Harness V2、`mounted_kit`、Worker Kit 构建/安装、Profile Verify、Task Snapshot、Scheduler claim、Worker container start
 
 **Related:** [Task #348 启动前延迟调查](../evidence/2026-09-02-task-348-startup-delay.md)、[Worker Profile 共享配置与运行时就绪设计](2026-08-14-worker-profile-shared-configuration-design.md)、[Worker Kits](../../worker-kits.md)、[Open-Harness V2 阶段结论与剩余验收计划](../plans/2026-08-23-open-harness-v2-stage-summary-and-remaining-plan.md)
+
+Implementation and current Host evidence: [R4.1/R4.2 Kit boundary candidate evidence](../evidence/2026-09-03-open-harness-v2-r4.1-kit-boundary.md).
 
 ## 1. 决策
 

@@ -103,6 +103,39 @@ func verifyKitContent(kitHome, runtimeBin string) {
 	}
 }
 
+func verifySelectedCLI(kitHome string) {
+	path := os.Getenv("CODIFY_HARNESS_CLI_BIN")
+	expectedDigest := os.Getenv("CODIFY_CLI_BINARY_DIGEST")
+	source := os.Getenv("CODIFY_CLI_SOURCE")
+	if path == "" || expectedDigest == "" || source == "" {
+		fail("selected Harness CLI identity binding is missing")
+	}
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		fail("selected Harness CLI path is not an absolute canonical path")
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		fail("selected Harness CLI is unavailable: %v", err)
+	}
+	if source == "worker_kit" {
+		relative, err := filepath.Rel(filepath.Clean(kitHome), path)
+		if err != nil || relative == "." || filepath.IsAbs(relative) ||
+			strings.HasPrefix(relative, ".."+string(os.PathSeparator)) ||
+			relative == ".." || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			fail("selected Worker Kit CLI is outside the mounted Kit or is not a regular file")
+		}
+	} else if source != "host_mount" {
+		fail("selected Harness CLI source is unsupported: %s", source)
+	}
+	if info.Mode()&0111 == 0 {
+		fail("selected Harness CLI is not executable")
+	}
+	actualDigest, _, err := fileDigest(path)
+	if err != nil || actualDigest != expectedDigest {
+		fail("selected Harness CLI digest mismatch")
+	}
+}
+
 func verifyRuntimeBundle(kit manifest, allowMissing bool) string {
 	runtimeRoot := "/tmp/codify-runtime/orchestration"
 	manifestPath := filepath.Join(runtimeRoot, "manifest.json")
@@ -212,6 +245,7 @@ func main() {
 	os.Setenv("LANG", "C.UTF-8")
 	os.Unsetenv("LANGUAGE")
 
+	verifyOnly := len(os.Args) > 1 && os.Args[1] == "--verify"
 	expectedKitManifestDigest := os.Getenv("CODIFY_KIT_MANIFEST_SHA256")
 	if expectedKitManifestDigest != "" {
 		actualKitManifestDigest, _, err := fileDigest(filepath.Join(kitHome, "manifest.json"))
@@ -219,8 +253,13 @@ func main() {
 			fail("Worker Kit manifest digest mismatch")
 		}
 	}
-	if len(m.ContentInventory) > 0 || expectedKitManifestDigest != "" {
+	if verifyOnly {
 		verifyKitContent(kitHome, m.RuntimeBin)
+	} else if expectedKitManifestDigest != "" {
+		// Normal V2 execution checks only the selected CLI bytes. The full Kit
+		// inventory/Nix closure scan belongs to install-time and --verify admin
+		// operations, not the Task startup hot path.
+		verifySelectedCLI(kitHome)
 	}
 
 	if len(os.Args) > 1 && os.Args[1] == "--maintenance-shell" {
@@ -232,7 +271,6 @@ func main() {
 		}
 	}
 
-	verifyOnly := len(os.Args) > 1 && os.Args[1] == "--verify"
 	entrypoint := verifyRuntimeBundle(m, verifyOnly)
 	argv := []string{m.Bash, entrypoint}
 	argv = append(argv, os.Args[1:]...)

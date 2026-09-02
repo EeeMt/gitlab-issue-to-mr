@@ -57,6 +57,7 @@ from app.core.worker_profiles import (
     serialize_worker_profile_for_api,
     set_default_worker_profile,
     validate_profile_templates,
+    validate_v2_cli_identity,
     validate_worker_profile_docker_target,
     validate_worker_profile_mount_masks,
 )
@@ -648,13 +649,15 @@ def _profile_explicitly_requests_v2(profile: WorkerProfile) -> bool:
 
 def _v2_harness_evidence(
     profile: WorkerProfile, *, harness_key: str, verification_digest: str,
-    image_identity: dict[str, str], adapter_identity: dict[str, str], generation: int, verified_at,
+    image_identity: dict[str, str], adapter_identity: dict[str, str],
+    cli_identity: Mapping[str, str], generation: int, verified_at,
 ) -> dict[str, Any]:
     return {
         "schema": "codify.worker-harness-verification/v1",
         "harness_key": harness_key,
         "contract_version": "codify.worker.harness/v2",
         "adapter": dict(adapter_identity),
+        "cli": dict(cli_identity),
         "verification_input_digest": verification_digest,
         "image_identity": dict(image_identity),
         "generation": generation,
@@ -668,17 +671,26 @@ def _v2_harness_evidence(
     }
 
 
-def _verification_cli_bin(
+def _verification_cli_identity(
     readiness: Any, profile: WorkerProfile, harness_key: str,
-) -> str:
+) -> dict[str, str]:
     """Resolve the exact container CLI path for one verification container.
 
-    ``worker_kit`` (the implicit default) resolves the executable from the
-    frozen Kit manifest's harness inventory observed by the strict probe;
+    ``worker_kit`` (the implicit default) resolves the executable/version/digest
+    from the frozen Kit manifest's harness inventory observed by the strict probe;
     ``host_mount`` is the explicit per-Harness break-glass and uses the
     declared executable path. An absent Kit entry is a deterministic
     ``harness_cli_unavailable`` rejection — there is no image/PATH fallback.
     """
+    def validate(identity: Mapping[str, Any]) -> dict[str, str]:
+        try:
+            return validate_v2_cli_identity(identity, harness_key=harness_key)
+        except WorkerProfileValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={"code": "harness_cli_unavailable", "message": str(exc)},
+            ) from exc
+
     runtime = (getattr(profile, "harness_runtimes", None) or {}).get(harness_key)
     source = runtime.get("source") if isinstance(runtime, Mapping) else None
     if source == "host_mount":
@@ -692,6 +704,64 @@ def _verification_cli_bin(
                         f"host_mount runtime for {harness_key!r} has no absolute "
                         "executable_path"
                     ),
+                },
+            )
+        return validate(
+            {
+                "source": "host_mount",
+                "executable_path": executable_path,
+                "version": runtime.get("version"),
+                "binary_digest": runtime.get("binary_digest"),
+            }
+        )
+    inventory = getattr(readiness, "harness_inventory", None) or {}
+    entry = inventory.get(harness_key)
+    path = entry.get("path") if isinstance(entry, Mapping) else None
+    if (
+        not isinstance(entry, Mapping)
+        or entry.get("availability") != "present"
+        or not isinstance(path, str)
+        or not path.startswith("/")
+    ):
+        reason = (
+            entry.get("reason_code")
+            if isinstance(entry, Mapping) and entry.get("availability") == "absent"
+            else None
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "harness_cli_unavailable",
+                "message": (
+                    f"Harness {harness_key!r} is not available in Worker Kit "
+                    f"{getattr(readiness, 'worker_kit_version', None)!r}"
+                ),
+                "reason_code": reason,
+            },
+        )
+    return validate(
+        {
+            "source": "worker_kit",
+            "executable_path": path,
+            "version": entry.get("version"),
+            "binary_digest": entry.get("sha256"),
+        }
+    )
+
+
+def _verification_cli_bin(
+    readiness: Any, profile: WorkerProfile, harness_key: str,
+) -> str:
+    """Return the selected CLI path for V1 and compatibility callers."""
+    runtime = (getattr(profile, "harness_runtimes", None) or {}).get(harness_key)
+    if isinstance(runtime, Mapping) and runtime.get("source") == "host_mount":
+        executable_path = runtime.get("executable_path")
+        if not isinstance(executable_path, str) or not executable_path.startswith("/"):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "code": "harness_cli_unavailable",
+                    "message": f"host_mount runtime for {harness_key!r} has no absolute executable_path",
                 },
             )
         return executable_path
@@ -868,6 +938,11 @@ async def verify_worker_profile_runtime(
             for harness_key in keys:
                 candidate_evidence = None
                 candidate_archive = None
+                cli_identity = (
+                    _verification_cli_identity(outcome.readiness, profile, harness_key)
+                    if requires_v2_identity
+                    else None
+                )
                 if requires_v2_identity:
                     adapter_identity = frozen_v2_adapter_identity(
                         harness_key,
@@ -879,6 +954,7 @@ async def verify_worker_profile_runtime(
                         verification_digest=current_runtime_verification_digest(
                             profile, effective, settings, harness_key=harness_key
                         ), image_identity=image_identity, adapter_identity=adapter_identity,
+                        cli_identity=cli_identity,
                         generation=identity_generation, verified_at=candidate_verified_at,
                     )
                     candidate_evidence_by_key[harness_key] = candidate_evidence
@@ -888,8 +964,10 @@ async def verify_worker_profile_runtime(
                         worker_kit_identity=worker_kit_identity,
                         harness_verification_evidence=candidate_evidence,
                     )
-                cli_bin = _verification_cli_bin(
-                    outcome.readiness, profile, harness_key
+                cli_bin = (
+                    cli_identity["executable_path"]
+                    if cli_identity is not None
+                    else _verification_cli_bin(outcome.readiness, profile, harness_key)
                 )
                 candidate_bindings: dict[str, str] = {}
                 if candidate_archive is not None:
@@ -927,6 +1005,14 @@ async def verify_worker_profile_runtime(
                         **runtime.environment, **overrides["environment"],
                         "CODIFY_HARNESS_KEY": harness_key, "CODIFY_RUNTIME_IMAGE": runtime.image,
                         "CODIFY_HARNESS_CLI_BIN": cli_bin,
+                        **(
+                            {
+                                "CODIFY_CLI_SOURCE": cli_identity["source"],
+                                "CODIFY_CLI_BINARY_DIGEST": cli_identity["binary_digest"],
+                            }
+                            if cli_identity is not None
+                            else {}
+                        ),
                         **candidate_bindings,
                         **(
                             {

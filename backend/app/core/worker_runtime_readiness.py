@@ -46,7 +46,7 @@ from app.core.docker_client import (
 )
 from app.core.harness_protocol import HARNESS_CONTRACT_VERSION_V2
 from app.core.utcnow import utcnow
-from app.core.worker_kit import BAKED_IMAGE_MODE, KIT_CONTAINER_PATH, MOUNTED_KIT_MODE
+from app.core.worker_kit import BAKED_IMAGE_MODE, MOUNTED_KIT_MODE
 from app.core.worker_kit_inventory import (
     AVAILABILITY_PRESENT,
     HarnessInventoryError,
@@ -55,6 +55,7 @@ from app.core.worker_kit_inventory import (
     kit_relative_path,
     validate_content_inventory,
     validate_harness_inventory,
+    validate_installer_managed_kit_provenance,
 )
 from app.models import WorkerRuntimeReadiness
 
@@ -993,11 +994,34 @@ def _inspect_kit_contents(
                 f"Worker Kit nix/store directory is missing under {worker_kit_path!r}"
             ),
         )
+    receipt_bytes: bytes | None = None
+    if require_content_inventory:
+        try:
+            receipt_bytes = _read_archive_file(
+                client,
+                container,
+                f"{root}/.install-receipt.json",
+            )
+        except docker.errors.NotFound:
+            return RuntimeCheckResult(
+                status=READINESS_UNAVAILABLE,
+                failure_code=FAILURE_WORKER_KIT_INVALID,
+                failure_message=(
+                    "Worker Kit install receipt is missing under "
+                    f"{worker_kit_path!r}"
+                ),
+            )
     try:
         kit_identity = kit_identity_from_manifest_bytes(
             manifest_bytes,
             require_content_inventory=require_content_inventory,
         )
+        if receipt_bytes is not None:
+            validate_installer_managed_kit_provenance(
+                worker_kit_path,
+                manifest_bytes,
+                receipt_bytes,
+            )
         inventory = validate_harness_inventory(manifest.get("harness_inventory"))
         if require_content_inventory or "content_inventory" in manifest:
             content_inventory = validate_content_inventory(manifest.get("content_inventory"))
@@ -1066,32 +1090,46 @@ def _inspect_kit_contents(
     )
 
 
-def inspect_mounted_kit_container(
-    client: DockerClientWrapper,
-    container: Any,
-    *,
-    worker_kit_version: str,
-    worker_kit_path: str,
-) -> RuntimeCheckResult:
-    """Verify the Kit mounted in the actual stopped Worker container.
-
-    This is the final V2 check immediately before ``start``. It reads the
-    container's own ``/opt/codify-kit`` mount rather than a separate probe
-    container, closing the probe-to-worker bind gap as far as Docker's stopped
-    container API permits.
-    """
-    return _inspect_kit_contents(
-        client,
-        container,
-        worker_kit_version=worker_kit_version,
-        worker_kit_path=worker_kit_path,
-        root=KIT_CONTAINER_PATH,
-        require_content_inventory=True,
-    )
-
-
 def _missing_bind_source(exc: Exception) -> bool:
     return _MISSING_BIND_SOURCE_HINT in str(exc).lower()
+
+
+def _validate_probe_mount_metadata(container: Any, worker_kit_path: str) -> None:
+    """Check Docker's reported bind source and read-only flag when available."""
+    reload_container = getattr(container, "reload", None)
+    if callable(reload_container):
+        try:
+            reload_container()
+        except Exception as exc:  # noqa: BLE001 - Docker view is inconclusive
+            raise RuntimeProbeTransientError(
+                f"Could not inspect probe container mount metadata: {exc}"
+            ) from exc
+    attrs = getattr(container, "attrs", None)
+    mounts = attrs.get("Mounts") if isinstance(attrs, Mapping) else None
+    # Some Docker SDK test doubles do not expose inspect metadata. The bind
+    # source itself is still validated by container creation and archive reads.
+    if mounts is None:
+        return
+    if not isinstance(mounts, list):
+        raise HarnessInventoryError("Docker probe mount metadata is malformed")
+    kit_mount = next(
+        (
+            mount
+            for mount in mounts
+            if isinstance(mount, Mapping)
+            and mount.get("Destination") == KIT_PROBE_CONTAINER_PATH
+        ),
+        None,
+    )
+    if (
+        not isinstance(kit_mount, Mapping)
+        or kit_mount.get("Type") != "bind"
+        or kit_mount.get("Source") != worker_kit_path
+        or bool(kit_mount.get("RW"))
+    ):
+        raise HarnessInventoryError(
+            "Docker probe mount is not the exact read-only Worker Kit bind"
+        )
 
 
 def probe_worker_kit(
@@ -1156,6 +1194,14 @@ def probe_worker_kit(
                     ),
                 )
             raise RuntimeProbeTransientError(f"Could not create probe container: {exc}") from exc
+        try:
+            _validate_probe_mount_metadata(container, worker_kit_path)
+        except HarnessInventoryError as exc:
+            return RuntimeCheckResult(
+                status=READINESS_UNAVAILABLE,
+                failure_code=FAILURE_WORKER_KIT_INVALID,
+                failure_message=f"Worker Kit mount metadata is invalid: {exc}",
+            )
         return _inspect_kit_contents(
             client,
             container,
