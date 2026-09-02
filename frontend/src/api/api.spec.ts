@@ -57,7 +57,8 @@ import {
   getAuthStatus,
   downloadTaskArchive,
   downloadSkill,
-  cleanupSystemData
+  cleanupSystemData,
+  verifyWorkerProfileRuntime
 } from './index'
 import * as apiModule from './index'
 
@@ -255,6 +256,22 @@ describe('API functions', () => {
         target_branch: 'main',
         user_prompt: ''
       })).rejects.toEqual(error)
+    })
+  })
+
+  describe('verifyWorkerProfileRuntime', () => {
+    it('allows the long-running verification endpoint to return its result', async () => {
+      const response = { verified_at: '2026-09-02T04:30:03Z' }
+      mockAxiosPost.mockResolvedValue({ data: response })
+
+      const result = await verifyWorkerProfileRuntime(4)
+
+      expect(result).toEqual(response)
+      expect(mockAxiosPost).toHaveBeenCalledWith(
+        '/worker-profiles/4/verify-runtime',
+        {},
+        { timeout: 240000 }
+      )
     })
   })
 

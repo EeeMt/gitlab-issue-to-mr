@@ -217,7 +217,9 @@ R2 本轮已完成以下闭环项：
   但四个任务都没有 `provider.retry`；在 readiness generation `62` 上追加的当前 Provider 7 formal
   acceptance re-probe `#332/#333` 也分别以 60/60、51/51 tool 成功完成、没有 `provider.retry` 或
   `rate_limited`；`250/251` 以及后续 Provider 9 真实诊断 `#317` 的 `rate_limited` 事件作为关联诊断
-  保留，不重复计入 formal 配对，因此场景 12 登记为 `not_triggered`；详见
+  保留，不重复计入 formal 配对。随后在 Profile 4 generation `65` 的 Verify 后追加受控高频读取
+  探针 `#336/#337`：Pi 53/53 tool、无 retry；OpenCode 68/68 tool，2 次 `provider.retry`，但均为
+  `engine_error`，两项都没有 `rate_limited`，因此场景 12 仍登记为 `not_triggered`；详见
   [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
 - [ ] 场景 13 的认证失败仍为 `blocked_external_fixture`：只读复核 Provider `3–12` 均 enabled，开发环境
   没有专用 401 fixture；#296/#310 的无凭据请求是 OpenCode Server Basic Auth，不是 Provider 401；历史
@@ -274,7 +276,10 @@ R2 本轮已完成以下闭环项：
   仍是固定 OpenCode `1.18.19` 的上游能力边界，未追认为 adapter 缺陷；场景 13 仍因没有真实
   Provider 401 fixture 保持 blocker；场景 14 的 invalid-session 与 network interruption 子场景已闭合，
   #320–#331 的 bridge/过期 readiness probe 作为历史边界证据保留，#334/#335 的有效 generation `64`
-  canary 不改变 frozen pair 分母；当前冻结 cohort 已登记 19/20 个场景的 formal Pi/OpenCode pair，
+  canary 不改变 frozen pair 分母；随后 generation `65` 的 #336/#337 也只作为 rate-limit/engine-error
+  边界诊断保留，不改变 formal pair 分母；本轮同时修复了前端 runtime Verify 30s 超时与后端最长 200s
+  操作不匹配的问题（该调用改为 240s，并有 API 回归测试），并部署到开发环境；随后 Profile 4 generation `66`
+  Verify 在浏览器显示 `Verified/Ready`；当前冻结 cohort 已登记 19/20 个场景的 formal Pi/OpenCode pair，
   场景级 rollup 为 18 个 full pass、0 个 partial、1 个 `not_triggered`、1 个
   `blocked_external_fixture`；在这些未闭合项完成前不关闭 R3，也不进入 R4；
 - [ ] 在冻结 cohort 上分别执行 Pi 与 OpenCode 的 20 个同场景样本（当前已完成 `#1–12`、`#14–20` 的

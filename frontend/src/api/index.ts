@@ -1614,7 +1614,15 @@ export async function duplicateWorkerProfile(profileId: number): Promise<WorkerP
 export async function verifyWorkerProfileRuntime(
   profileId: number
 ): Promise<WorkerRuntimeVerificationResult> {
-  const { data } = await api.post(`/worker-profiles/${profileId}/verify-runtime`, {})
+  // The backend runs a strict Kit probe plus one verification container per
+  // enabled V2 Harness and allows up to 200s for the complete operation.
+  // Keep this request alive long enough to receive the authoritative result;
+  // the shared client timeout is intentionally shorter for ordinary API calls.
+  const { data } = await api.post(
+    `/worker-profiles/${profileId}/verify-runtime`,
+    {},
+    { timeout: 240000 }
+  )
   return data
 }
 
