@@ -226,8 +226,11 @@ R2 本轮已完成以下闭环项：
 - [x] 已完成场景 14 的 invalid-session 子场景：OpenCode `#281 / Issue #84` 的真实不存在 Session
   以 `engine_error` 收敛，当前 Pi `#289 / Issue #87` 的真实 bogus lineage 以 Adapter-side
   `protocol_error: Pi parent session is not available` fail-closed；两边均有唯一 terminal、archive、无
-  output session 和 Worker 清理证据。网络断线分支本轮仍为 `not_triggered`，不把既有 TLS/protocol
-  错误改写为网络或 invalid-session 证据；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
+  output session 和 Worker 清理证据。随后在 `192.168.50.129` 用已有 Provider 7 / Profile 4 做了
+  Pi `#320/#321` 与 OpenCode `#322/#323` 的 bridge 断网探索；网络恢复后任务可继续或安全收敛，但均未
+  产生可接受的 `provider.retry` / `session.next.retried` / network `engine_error`，故网络断线分支仍为
+  `not_triggered`，不把既有 TLS/protocol 错误改写为网络或 invalid-session 证据；详见
+  [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
 - [x] 已完成 Pi 原生 session persistence 影响面修复与真实控制：修复 `e33df7e6` 通过 63 个 Pi
   focused tests；Profile 4 generation `52` / Bundle `136` 下 `#287 → #288 / Issue #86` 完成
   fresh→continue，DB output 与 Host JSONL header 一致，child header 含原生 `parentSession`；修复前
@@ -265,8 +268,8 @@ R2 本轮已完成以下闭环项：
   是 12,000 行长上下文、37/37 tool，raw `session.compacted=1`、canonical `context.compacted=3`，
   其后为唯一 `run.completed`；因此场景 11 已闭合。V2 `/api/session/:sessionID/compact` 的 `503`
   仍是固定 OpenCode `1.18.19` 的上游能力边界，未追认为 adapter 缺陷；场景 13 仍因没有真实
-  Provider 401 fixture 保持 blocker；场景 14 的 invalid-session 子场景已闭合，network interruption
-  明确保持 `not_triggered`，不把已有 TLS/protocol 样本重复计入；当前冻结 cohort 已登记 19/20 个场景的
+  Provider 401 fixture 保持 blocker；场景 14 的 invalid-session 子场景已闭合，#320–#323 的 bridge
+  interruption probe 未产生可接受事件，明确保持 `not_triggered`，不把已有 TLS/protocol 样本重复计入；当前冻结 cohort 已登记 19/20 个场景的
   formal Pi/OpenCode pair，场景级 rollup 为 17 个 full pass、1 个 partial、1 个 `not_triggered`、1 个
   `blocked_external_fixture`；在这些未闭合项完成前不关闭 R3，也不进入 R4；
 - [ ] 在冻结 cohort 上分别执行 Pi 与 OpenCode 的 20 个同场景样本（当前已完成 `#1–12`、`#14–20` 的
