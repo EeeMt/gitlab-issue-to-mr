@@ -48,6 +48,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -842,9 +843,14 @@ def _run_attempt() -> int:
     adapter; this runs against an already-listening Server. It spawns the event
     translator (opencode_events.py) as a subprocess, forwards every parsed SSE
     record to it, sends either the frozen startup ``command`` or ``prompt_async``,
-    and waits for the translator to
-    converge the single harness terminal (it exits once ``session.idle``/error/
-    EOF settles — see opencode_events.py).
+    and waits for the translator to converge the single harness terminal (it
+    exits once ``session.idle``/error/EOF settles — see opencode_events.py).
+
+    OpenCode's native ``/command`` endpoint is synchronous and returns the
+    completed message, unlike ``/prompt_async``. The command request therefore
+    runs in a background thread while this process drains the already-open SSE
+    stream; otherwise a long-running command can block the server's event
+    delivery and falsely end as a protocol error.
 
     Subscribe-before-prompt (design §3.1): the ``GET /event`` subscription is
     established first and ``server.connected`` awaited, so no early prompt event
@@ -1000,16 +1006,96 @@ def _run_attempt() -> int:
             )
             return 1
 
-        # 2. Now prompt (an async 204/202/200 ack); early events arrive on the
-        #    already-established stream and are drained in step 3.
-        if command is not None:
-            status, response = client.command(
-                session_id,
-                command,
-                prompt_text,
-                agent=agent,
-                variant=variant,
+        # 2. Now prompt. The native command route is synchronous (it returns
+        # the completed message), so issue it concurrently with the SSE drain.
+        # Keep its request timeout at least as wide as the outer Task timeout;
+        # successful OpenCode tasks can legitimately run longer than the
+        # ordinary 30-second control request timeout.
+        command_thread: threading.Thread | None = None
+        command_done = threading.Event()
+        command_state: dict[str, object] = {
+            "result": None,
+            "error": None,
+            "consumed": False,
+        }
+        command_failed = False
+        original_client_timeout = getattr(client, "timeout", None)
+        stream_disconnected = False
+
+        def invoke_command() -> None:
+            try:
+                command_state["result"] = client.command(
+                    session_id,
+                    command,
+                    prompt_text,
+                    agent=agent,
+                    variant=variant,
+                )
+            except Exception as exc:  # noqa: BLE001 - report through the typed event path
+                command_state["error"] = exc
+            finally:
+                command_done.set()
+
+        def report_command_failure() -> bool:
+            """Project a completed native-command request failure exactly once."""
+            if command is None or not command_done.is_set() or command_state["consumed"]:
+                return False
+            command_state["consumed"] = True
+            error = command_state["error"]
+            if error is not None:
+                print(
+                    f"OpenCode session command request failed: {type(error).__name__}",
+                    file=sys.stderr,
+                )
+                _forward(
+                    _http_failure_record(
+                        "session command",
+                        message="OpenCode session command transport failed",
+                    ),
+                    proc,
+                )
+                return True
+            result = command_state["result"]
+            if not isinstance(result, tuple) or len(result) != 2:
+                print("OpenCode session command returned no response", file=sys.stderr)
+                _forward(
+                    _http_failure_record(
+                        "session command",
+                        message="OpenCode session command returned no response",
+                    ),
+                    proc,
+                )
+                return True
+            status, response = result
+            if status in (200, 202, 204):
+                return False
+            print(f"OpenCode command failed: status={status}", file=sys.stderr)
+            _forward(
+                _http_failure_record(
+                    "command",
+                    status_code=status,
+                    body=response,
+                ),
+                proc,
             )
+            return True
+
+        if command is not None:
+            if isinstance(original_client_timeout, (int, float)) and not isinstance(
+                original_client_timeout, bool
+            ):
+                try:
+                    task_timeout = float(os.environ.get("TASK_TIMEOUT", ""))
+                except (TypeError, ValueError):
+                    task_timeout = 0.0
+                if task_timeout > original_client_timeout:
+                    client.timeout = task_timeout
+            command_thread = threading.Thread(
+                target=invoke_command,
+                name="opencode-command",
+                daemon=True,
+            )
+            command_thread.start()
         elif agent is not None or variant is not None:
             status, response = client.prompt_async(
                 session_id,
@@ -1019,7 +1105,7 @@ def _run_attempt() -> int:
             )
         else:
             status, response = client.prompt_async(session_id, prompt_text)
-        if status not in (200, 202, 204):
+        if command is None and status not in (200, 202, 204):
             operation = "command" if command is not None else "prompt_async"
             print(f"OpenCode {operation} failed: status={status}", file=sys.stderr)
             _forward(
@@ -1081,10 +1167,29 @@ def _run_attempt() -> int:
                 if not _forward(record, proc) or proc.poll() is not None:
                     stream.close()
                     break
+                if report_command_failure():
+                    command_failed = True
+                    stream.close()
+                    break
             else:
                 stream_ended = True
         except ConnectionError as exc:
             print(f"OpenCode SSE stream closed: {exc}", file=sys.stderr)
+            stream_disconnected = True
+        finally:
+            if command_thread is not None:
+                # A terminal SSE event is authoritative; do not hold Task
+                # shutdown hostage to a server response that is still
+                # unwinding. If no terminal exists, join fully so a native
+                # command response can be classified before status recovery.
+                command_thread.join(timeout=5 if command_failed or proc.poll() is not None else None)
+                if report_command_failure():
+                    command_failed = True
+                if original_client_timeout is not None:
+                    client.timeout = original_client_timeout
+        if command_failed:
+            return 1
+        if stream_disconnected and proc.poll() is None:
             _recover_status(client, session_id, proc)
         if stream_ended and not saw_terminal_signal and proc.poll() is None:
             _recover_status(client, session_id, proc)

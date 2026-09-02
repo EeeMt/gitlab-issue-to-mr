@@ -19,6 +19,7 @@ import os
 import signal
 import stat
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -1680,6 +1681,71 @@ def test_opencode_run_attempt_uses_frozen_native_command_options(tmp_path, monke
         "do the thing",
         {"agent": "plan", "variant": "auto"},
     )
+    result = json.loads((tmp_path / "harness-result.json").read_text(encoding="utf-8"))
+    assert result["status"] == "completed"
+
+
+def test_opencode_run_attempt_drains_sse_while_native_command_waits(tmp_path, monkeypatch):
+    """The synchronous native command must not block the SSE terminal path."""
+    bridge = _load_bridge()
+    calls: list[str] = []
+
+    class _BlockingCommandClient:
+        def __init__(self):
+            self.sse_resumed = threading.Event()
+
+        def create_session(self, model_id: str, provider_id: str):
+            calls.append("create_session")
+            return 200, {"info": {"id": "ses-oc-command-concurrent"}}
+
+        def event_stream(self):
+            calls.append("stream_established")
+            yield {"id": "e1", "type": "server.connected", "properties": {}}
+            # The command request is waiting in another thread. Reaching the
+            # next SSE record proves the bridge is draining both paths.
+            self.sse_resumed.set()
+            yield {
+                "id": "e2",
+                "type": "message.part.updated",
+                "properties": {
+                    "sessionID": "ses-oc-command-concurrent",
+                    "part": {
+                        "type": "text",
+                        "text": "command result",
+                        "messageID": "m1",
+                    },
+                },
+            }
+            yield {
+                "id": "e3",
+                "type": "message.updated",
+                "properties": {
+                    "sessionID": "ses-oc-command-concurrent",
+                    "info": {"id": "m1", "role": "assistant"},
+                },
+            }
+            yield {
+                "id": "e4",
+                "type": "session.idle",
+                "properties": {"sessionID": "ses-oc-command-concurrent"},
+            }
+
+        def command(self, session_id: str, command: str, arguments: str, **kwargs):
+            calls.append("command")
+            if not self.sse_resumed.wait(timeout=0.5):
+                return 503, {"error": {"message": "SSE was not drained"}}
+            return 200, {"info": {"id": "m1"}, "parts": []}
+
+    fake = _BlockingCommandClient()
+    monkeypatch.setattr(bridge, "OpenCodeServerClient", lambda **_kwargs: fake)
+    for key, value in _run_attempt_env(tmp_path).items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("CODIFY_OPENCODE_AGENT", "plan")
+    monkeypatch.setenv("CODIFY_OPENCODE_COMMAND", "codify")
+    _emit(tmp_path, "run.started", {"runtime_bundle_digest": "d" * 64})
+
+    assert bridge._run_attempt() == 0
+    assert calls.count("command") == 1
     result = json.loads((tmp_path / "harness-result.json").read_text(encoding="utf-8"))
     assert result["status"] == "completed"
 

@@ -229,6 +229,17 @@ R2 本轮已完成以下闭环项：
   `engine_error`，#317 是 Provider 9 的 `429/rate_limited`，#319 是 Provider 6 的 `429/rate_limited`，
   均不是 401；未读取或修改 Provider secret，
   不伪造认证错误；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
+- [x] 已完成 OpenCode native `Command` 的并发边界修复与开发环境真实回归：旧实现的 Provider 5
+  `#339` 在同步 `/command` 阻塞 SSE 消费后以 `protocol_error` 失败；`opencode_bridge.py` 现由后台线程
+  发起同步 Command，同时持续 drain SSE，并在结果完成后按 typed failure 投影；新增并发回归测试，OpenCode
+  adapter focused suite `76 passed`、`make lint-backend` 通过，修复已部署到远端 backend/scheduler。
+  Provider 5 的 Pi `#338` 是 `404` HTML / `engine_error`，OpenCode `#340/#341` 分别是
+  `prompt_async` 与 native Command 的真实 monthly `rate_limited`；Provider 4 的 Command `#342` 也因
+  额度限制收敛为 `rate_limited`。随后使用现有 Provider 7 / Profile 4 的 OpenCode native Command
+  `#343` 成功完成，HTTP audit 观察到 `session.command=200`、SSE `busy→idle`、canonical
+  `harness.completed→run.completed`、usage `74/25` 和 UI/归档/Worker 清理闭环。上述均为修复与
+  Provider 访问的关联诊断，不改变场景 12 的 formal `not_triggered` 或场景 13 的真实 401
+  `blocked_external_fixture`；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
 - [x] 已完成场景 14 的 invalid-session 与 network interruption 子场景：OpenCode `#281 / Issue #84`
   的真实不存在 Session 以 `engine_error` 收敛，当前 Pi `#289 / Issue #87` 的真实 bogus lineage 以
   Adapter-side `protocol_error: Pi parent session is not available` fail-closed；两边均有唯一 terminal、

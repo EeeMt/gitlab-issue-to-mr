@@ -734,6 +734,55 @@ runtime archive 为 `d6571e8214b8aeb7a2f5ee24e3bbffe640c98de6a435a9fc0fadbf7a094
 Worker container 已清理。该任务到达了 Provider 但仍没有 HTTP 401，因此不能替代认证 fixture，也不改变
 本场景的 `blocked_external_fixture` 状态。待提供不改变冻结 Provider 的真实认证失败 fixture 后再补跑。
 
+### OpenCode native Command 并发回归与 Provider 访问诊断
+
+这一组 Task 是本轮修复和 Provider 访问的关联诊断，不加入 Scenario 12/13 的 formal pair 分母。它们都
+使用开发环境 `192.168.50.129`、Profile `4`、Kit `0.6.11` 和同一固定 Worker image；Issue `#98` 的
+诊断 prompt 文案沿用了早期的 Provider 5 描述，实际 Provider identity 以每个 Task 冻结的 snapshot 和
+任务详情页为准。所有 Task 的 Worker container 均在终态后清理。
+
+- OpenCode native `Command` 的旧实现先同步等待 `/command`，再消费 SSE。Provider 5 / Profile 4 的
+  `#339`（`OpenCode/codify`, `freeform/fresh`）因此在 `session.command` 等待约 `30.031s` 后以
+  `transport_error` 结束，`event.subscribe` 随后约 `30.187s` 才关闭；raw OpenCode 只有
+  `server.connected`，canonical seq `1–4` 为 `protocol_error` failure 链。archive 为
+  `62c3b20c7330df54032d17a31c6cbd8a48d13ef779fdf268fc7e024bf029ace8` / `4,002 B`。
+- `opencode_bridge.py` 已改为后台线程发起同步 native Command，并发 drain 已建立的 SSE；Command
+  request timeout 至少覆盖 Task timeout，完成后按 typed failure 投影，保留既有唯一 terminal 和
+  disconnect recovery。新增 `test_opencode_run_attempt_drains_sse_while_native_command_waits`；
+  `backend/tests/unit/test_opencode_harness_adapter.py` 为 `76 passed`，`make lint-backend` 通过，
+  修复已部署至远端 backend/scheduler。
+- Provider 5 的 Pi `#338` 真实返回 `404` HTML，canonical 终态为 `harness.failed(engine_error)` →
+  `run.failed(engine_error)`，archive 为
+  `0d96a824fc934b09f216ccf59332a48fcf43af6c6cac2c323b6fe0584f231ea5` / `5,600 B`；该结果是无效
+  endpoint/model 访问边界，不是认证 401。
+- Provider 5 的 OpenCode `#340`（`prompt_async`）真实收敛为 `rate_limited`，HTTP audit 为
+  `session.create=200`、`session.prompt_async=204`、`event.subscribe=200/closed`，canonical seq
+  `1–9` 含一次 `provider.retry` 和唯一 `run.failed(rate_limited)`；archive 为
+  `133835faa8146593f4eb1b4ab81209ca29ab4b94e33b9e4a4cf9999d17e4d1c8` / `5,872 B`。修复后的 native
+  Command `#341` 也收到同一 Provider monthly `rate_limited`，canonical seq `1–9` 正确收敛；其在
+  Task 终止前没有形成 `session.command` 完成审计，因此只作为 Provider 限流与 terminal 证据，不作为
+  成功 Command 响应证据。archive 为
+  `c2998a87ec2c7da287eac192a3cfee7887bf84d62a1eb9cadd0210ce5674b955` / `5,803 B`。
+- Provider 4 / `opencode-luna` 的 native Command `#342` 同样真实收敛为 `rate_limited`，canonical
+  seq `1–9` 与 `harness-result.json` 的 failure taxonomy 一致；HTTP audit 有 `session.create=200`
+  和 `event.subscribe=200/closed`，没有完成的 Command status。archive 为
+  `cf36f26019a3526357499e4c2941668cc067b0c7a4d4d42a64e5860f6aeceacd` / `5,811 B`。
+- 随后以现有 Provider `7 / openrouter-free` 做成功回归 `#343`（`OpenCode/codify`, `freeform/fresh`）。
+  Task snapshot 固定为 Provider `7`、model `minimax/minimax-m3:free`、Profile `4`、Kit `0.6.11`、
+  Worker image digest `sha256:234582c692d1ebb00ba8e882160618c2258463149d968009ac81c545e63a538b`、
+  Runtime Bundle digest `279b7d1b675eaf5d22f7469c1eaa59a70cd09835fab872e6c97d0e319268e69c`，Adapter
+  `2.0.0`；任务详情页显示 Provider `openrouter-free`、Harness `OpenCode`、Fresh session 和
+  `Completed`。HTTP audit 为 `session.create=200/61ms`、`session.command=200/16072ms`、
+  `event.subscribe=200/closed/20342ms`。raw OpenCode 有 `109` 条记录，包含 `session.status` 的
+  `busy` 与 `idle`；canonical seq `1–38` 为 `harness.completed` → `delivery.completed` →
+  `worker.finalization` → `run.completed(success=true)`，有 1 对 tool start/complete、usage
+  `74/25`（input/output）和 UI AI Delivery Summary。archive 为
+  `a6e85f251503ab63d93902cb95ad52b7f01fd8381c8c5c507d1542b7603cd68a` / `9,465 B`。
+
+这组证据证明 native Command 的同步响应与 SSE 消费已能在真实 Provider 7 上并行收敛，同时保留 Provider
+限流时的 `rate_limited` 分类；它不把 Provider 5/4 的额度限制改写为认证失败，也不改变 Scenario 12 的
+`not_triggered` 或 Scenario 13 的 `blocked_external_fixture`。
+
 ### Scenario 14 network interruption / invalid session
 
 invalid-session 分支已使用隔离 fixture 真实执行；network interruption 分支先经过四次 bridge
@@ -1092,16 +1141,16 @@ Task ID 追溯，不把凭据写入文档。
 ## Current stop boundary
 
 - 2026-09-02 远端复核：`pending/queued/running=0`，`#320=completed`、`#321=cancelled`、
-  `#322/#323=completed`、`#334=failed(engine_error)`、`#335=completed`、`#336/#337=completed`；
-  #336/#337 使用 generation `65` 的有效 Verify 窗口启动。随后前端修复部署后，Profile 4 已完成
-  generation `66` 的 Verify，`verified_at=2026-09-02 04:55:51.124731+00`；严格 readiness generation
-  `569` 于 `04:56:34.298912+00` 检查通过，有效至 `05:11:34.298316+00`，浏览器显示 `Verified/Ready`。
-  下一次 canary 若超过 TTL 必须重新 Verify。
-- 最新 `docker --context remote system df` 显示 Images `67`（active `8`，size `8.194GB`，reclaimable
-  `2.488GB`）、Containers `9` active（`40.37MB`，reclaimable `0B`）、Local Volumes `11`
-  （active `4`，`1.635GB`，reclaimable `1.309GB`）和 Build Cache `513`（reclaimable `6.611GB`）；
-  目标机未满，#334/#335/#336/#337 Worker container 已清理，仅更新 nginx 前端镜像，不执行 broad prune，
-  保留 active image ancestry、固定 Worker composition 和现有 cache。
+  `#322/#323=completed`、`#334=failed(engine_error)`、`#335=completed`、`#336/#337=completed`；本轮
+  关联诊断 `#338=failed(engine_error)`、`#339=failed(protocol_error)`、`#340/#341/#342=failed(rate_limited)`、
+  `#343=completed`。#343 的 UI、raw/canonical、HTTP audit、usage 和 delivery summary 均已核对，所有
+  #338–#343 Worker container 均已清理。修复部署后 Profile 4 最新 readiness 为 generation `583`，
+  `checked_at=2026-09-02 06:09:41.256404+00`，有效至 `06:24:41.255817+00`，状态为 `ready`；下一次
+  canary 若超过 TTL 必须重新 Verify。
+- 最新 `docker --context remote system df` 显示 Images `68`（active `8`，size `8.195GB`，reclaimable
+  `2.489GB`）、Containers `9` active（`5.966MB`，reclaimable `0B`）、Local Volumes `11`
+  （active `4`，`1.636GB`，reclaimable `1.309GB`）和 Build Cache `515`（reclaimable `6.611GB`）；
+  目标机未满，本轮不执行 broad prune，保留 active image ancestry、固定 Worker composition 和现有 cache。
 - 远端磁盘当前未满；镜像、容器和 BuildKit cache 只在确有空间压力且逐项核对 container ancestry 后清理，
   不执行 broad prune。
 - 当前没有运行中的任务时才切换全局 timeout；每次 timeout/cancel 样本结束后恢复 `1,800s`，并复核
