@@ -248,7 +248,9 @@ R2 本轮已完成以下闭环项：
 - [x] 已完成场景 20 高 token 生成：Pi `#266 / Issue #75` 成功；OpenCode `#267/#269 / Issue #76`
   的 protocol/delivery failures 保留，独立 `#270 / Issue #77` 完成三个 80 行文件、报告和公共 delivery，
   finalization diff `240/0`；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
-- [ ] 当前 R3 剩余退出项为：场景 13 的真实 401 fixture；Provider 7 的 TLS error 本轮未再复现，
+- [ ] 当前 R3 剩余退出项为：场景 13 的真实 401 fixture；本轮用已有 Provider 11 追加的真实
+  OpenCode 任务 `#316` 只得到 `engine_error: unknown certificate verification error`，没有 Provider HTTP 401，
+  不能替代 fixture；Provider 7 的 TLS error 本轮未再复现，
   `#313` 的过大 continuation 以 `1800s` timeout 保留为失败证据。`#314/#315` 在新生成的 Bundle `139`
   上通过默认关闭、exact-marker 的 legacy `/session/:sessionID/summarize` Bridge hook：其中 `#315`
   是 12,000 行长上下文、37/37 tool，raw `session.compacted=1`、canonical `context.compacted=3`，
