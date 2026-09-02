@@ -214,12 +214,14 @@ R2 本轮已完成以下闭环项：
   probe，也不放宽 `session.idle` active-tool 的 fail-closed 规则；详见
   [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
 - [x] 已执行场景 12 的两轮正式 Pi/OpenCode retry probe：`254/255` 与 `256/257` 均成功完成并交付，
-  但四个任务都没有 `provider.retry`；`250/251` 中同一冻结 Provider 的真实 `rate_limited` 事件作为
-  场景 11 关联诊断保留，不重复计入场景 12，因此场景 12 登记为 `not_triggered`；详见
+  但四个任务都没有 `provider.retry`；`250/251` 以及后续 Provider 9 真实诊断 `#317` 的
+  `rate_limited` 事件作为关联诊断保留，不重复计入 formal 配对，因此场景 12 登记为 `not_triggered`；详见
   [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
 - [ ] 场景 13 的认证失败仍为 `blocked_external_fixture`：只读复核 Provider `3–12` 均 enabled，开发环境
-  没有专用 401 fixture；#296/#310 的无凭据请求是 OpenCode Server Basic Auth，不是 Provider 401；未读取
-  或修改 Provider secret，不伪造认证错误；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
+  没有专用 401 fixture；#296/#310 的无凭据请求是 OpenCode Server Basic Auth，不是 Provider 401；历史
+  `#150/#151` 的 `authentication_error` 实为 `404` HTML，不能计入；后续 #316 是 certificate
+  `engine_error`，#317 是 Provider-side `429/rate_limited`，两者都不是 401；未读取或修改 Provider secret，
+  不伪造认证错误；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
 - [x] 已完成场景 14 的 invalid-session 子场景：OpenCode `#281 / Issue #84` 的真实不存在 Session
   以 `engine_error` 收敛，当前 Pi `#289 / Issue #87` 的真实 bogus lineage 以 Adapter-side
   `protocol_error: Pi parent session is not available` fail-closed；两边均有唯一 terminal、archive、无
@@ -250,7 +252,10 @@ R2 本轮已完成以下闭环项：
   finalization diff `240/0`；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
 - [ ] 当前 R3 剩余退出项为：场景 13 的真实 401 fixture；本轮用已有 Provider 11 追加的真实
   OpenCode 任务 `#316` 只得到 `engine_error: unknown certificate verification error`，没有 Provider HTTP 401，
-  不能替代 fixture；Provider 7 的 TLS error 本轮未再复现，
+  不能替代 fixture；随后用已有 Provider 9 追加的真实 OpenCode `#317` 由 raw
+  `APIError.data.statusCode=429` 证实为 `rate_limited`，也不能替代认证 fixture；历史 `#150/#151` 的旧
+  `authentication_error` 由 raw `404` HTML 证实为无效样本，当前 `ab869c67` 的 Pi 回归测试已防止裸词
+  `authentication` 再次误分类；Provider 7 的 TLS error 本轮未再复现，
   `#313` 的过大 continuation 以 `1800s` timeout 保留为失败证据。`#314/#315` 在新生成的 Bundle `139`
   上通过默认关闭、exact-marker 的 legacy `/session/:sessionID/summarize` Bridge hook：其中 `#315`
   是 12,000 行长上下文、37/37 tool，raw `session.compacted=1`、canonical `context.compacted=3`，
