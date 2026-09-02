@@ -251,7 +251,8 @@ R2 本轮已完成以下闭环项：
 - [x] 已完成场景 20 高 token 生成：Pi `#266 / Issue #75` 成功；OpenCode `#267/#269 / Issue #76`
   的 protocol/delivery failures 保留，独立 `#270 / Issue #77` 完成三个 80 行文件、报告和公共 delivery，
   finalization diff `240/0`；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
-- [ ] 当前 R3 剩余退出项为：场景 13 的真实 401 fixture；本轮用已有 Provider 11 追加的真实
+- [ ] 当前 R3 未闭合项包括：场景 12 的 formal `provider.retry` 仍为 `not_triggered`、场景 13 的真实 401 fixture，
+  以及场景 14 的 network interruption 子分支；本轮用已有 Provider 11 追加的真实
   OpenCode 任务 `#316` 只得到 `engine_error: unknown certificate verification error`，没有 Provider HTTP 401，
   不能替代 fixture；随后用已有 Provider 9 追加的真实 OpenCode `#317` 由 raw
   `APIError.data.statusCode=429` 证实为 `rate_limited`，也不能替代认证 fixture；随后在 Profile 4
@@ -265,9 +266,11 @@ R2 本轮已完成以下闭环项：
   其后为唯一 `run.completed`；因此场景 11 已闭合。V2 `/api/session/:sessionID/compact` 的 `503`
   仍是固定 OpenCode `1.18.19` 的上游能力边界，未追认为 adapter 缺陷；场景 13 仍因没有真实
   Provider 401 fixture 保持 blocker；场景 14 的 invalid-session 子场景已闭合，network interruption
-  明确保持 `not_triggered`，不把已有 TLS/protocol 样本重复计入；在场景 13 完成前不关闭 R3，也不进入 R4；
-- [ ] 在冻结 cohort 上分别执行 Pi 与 OpenCode 的 20 个同场景样本（需要 fresh/continue 或
-  failure→delivery 的场景按一个场景登记多个 Task）；
+  明确保持 `not_triggered`，不把已有 TLS/protocol 样本重复计入；当前冻结 cohort 已登记 19/20 个场景的
+  formal Pi/OpenCode pair，场景级 rollup 为 17 个 full pass、1 个 partial、1 个 `not_triggered`、1 个
+  `blocked_external_fixture`；在这些未闭合项完成前不关闭 R3，也不进入 R4；
+- [ ] 在冻结 cohort 上分别执行 Pi 与 OpenCode 的 20 个同场景样本（当前已完成 `#1–12`、`#14–20` 的
+  formal pair；场景 13 尚无可接受 pair；需要 fresh/continue 或 failure→delivery 的场景按一个场景登记多个 Task）；
 - 每个样本记录验收结论、failure taxonomy、耗时、token、工具调用、archive 和 delivery；修复后可重跑，
   但不得删除失败样本或把探索性 canary 追认成 benchmark；
 - [现有 benchmark shell](../../../scripts/harness-probes/v2/benchmark.sh) 只重复生命周期诊断 prompt，
