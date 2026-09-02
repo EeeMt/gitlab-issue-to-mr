@@ -646,10 +646,25 @@ canonical payload 中确认 `failure_kind=rate_limited`；不通过伪造响应�
   terminal rejection，实际 Pi response 已进入归档；该任务是当前 Provider 7/Pi 的真实成功控制样本，
   不是冻结的 formal rate-limit pair，故不改变场景 12 的 `not_triggered` 状态。
 
-因此场景 12 当前登记为 `not_triggered`：两轮正式配对均成功且没有触发 retry，#318 也只补充了当前
-Provider 7/Pi 的成功控制样本，不能据此声称本场景的 rate-limit acceptance 已闭合；#250/#251 与
-#317 的真实分类证据保留为关联诊断。后续若冻结 Provider 自然返回新的 rate limit，可追加正式配对
-Task；不改变已有成功样本，也不制造人工 429。
+- 随后在 Profile 4 readiness generation `62`（verified at `2026-09-02 03:45:48.497974`）上，使用同一
+  Provider `7 / openrouter-free` 做了两项 formal acceptance re-probe：Pi `#332 / Issue #65` 使用
+  Bundle `148`（digest `0a25b854d5dd42318232968ee67b7463b8cd77782d8d52f37bb381025452c376`）、
+  attempt `task-332-attempt-1-a6874f751f40`、`Implementation/fresh`，耗时 `340.002s`，canonical
+  seq `1–972`、60/60 tool、usage `165/857`（input/output），commit
+  `29a746e80f46b6a2685d5fda39ff2f29667b4b62`，archive
+  `e5ebadfd058ff24ffb4d7f18a94b01fe4e07d4d3de6ba20a147c9a63497e9e11` / `87,639 B`；OpenCode
+  `#333 / Issue #66` 使用 Bundle `149`（digest
+  `ed249c6be8627d354365a1402bd11bdf7a2ad2200e3300231069dea1562ebe3e`）、attempt
+  `task-333-attempt-1-9b6d1a9656c1`、`Implementation/fresh`，耗时 `346.913s`，canonical seq
+  `1–817`、51/51 tool、usage `67/683`，commit `2ca9bc1b6fc8aecff6dbf6a7909519893961fbe9`，
+  archive `9ed5f710ca18aad114630c1645ecf009eab6fdfdbbc74d4bb873186943412f3c` / `106,104 B`。
+  两项均 completed、无 `provider.retry`/`rate_limited`，无额外 container 残留；它们补强了当前
+  Provider 的成功控制和正式验收重跑，但没有制造或替代自然发生的 rate-limit 事件。
+
+因此场景 12 当前登记为 `not_triggered`：两轮正式配对与 #332/#333 formal acceptance re-probe
+均成功且没有触发 retry，#318 也只补充了当前 Provider 7/Pi 的成功控制样本，不能据此声称本场景的
+rate-limit acceptance 已闭合；#250/#251 与 #317 的真实分类证据保留为关联诊断。后续若冻结 Provider
+自然返回新的 rate limit，可追加正式配对 Task；不改变已有成功样本，也不制造人工 429。
 
 ### Scenario 13 authentication failure
 
@@ -693,9 +708,9 @@ Worker container 已清理。该任务到达了 Provider 但仍没有 HTTP 401�
 
 ### Scenario 14 network interruption / invalid session
 
-网络断线分支经过本轮四次远端受控 probe 仍没有产生可接受的 retry/断线终态，继续登记为
-`not_triggered`；invalid-session 分支已使用隔离 fixture 真实执行，且没有读取或修改任何 Provider
-secret：
+invalid-session 分支已使用隔离 fixture 真实执行；network interruption 分支先经过四次 bridge
+断开探索，随后又用容器 network namespace 的 443 egress 阻断做了窄范围受控 probe。所有 probe
+均使用已有 Provider，不读取或修改任何 Provider secret：
 
 - OpenCode #281 / Issue #84 使用 Bundle `133`、attempt `task-281-attempt-1-b8c96260cd74`，
   `continue` 输入为不存在的 session ID，canonical seq `1–4` 以唯一
@@ -745,14 +760,50 @@ V2 image 做了四次探索性网络控制；这些 Task 不追认进冻结 form
   `072cfa946fa994769036ac351140c0a61e422f562776428b932cd656ad2ba320` / `10,267 B`，container
   已清理。
 
-四次 probe 都证明了网络恢复后任务可以继续或安全收敛，但没有形成 raw stream disconnect、
-`provider.retry` 或 `engine_error` 的可接受 canonical 证据；因此不能把“bridge 断开后请求等待/继续”
-改写成网络中断恢复通过，Scenario 14 仍为 `pass (invalid-session branch)` + network interruption
-`not_triggered`。
+- 随后的隔离探索仍不追认进冻结 formal cohort：`#324/#325/#328`（OpenCode，沿用同一 Issue 的
+  inherited `continue` session）因模型拒绝继承上下文中的 prompt，均无 tool；`#326` 在首个工具后
+  断开 bridge 但仍以 5/5 tool 正常完成、没有 retry；`#327` 在 OpenCode 首个工具后将容器 namespace 的
+  `eth0` 下线 75 秒，任务挂起后由外部取消，canonical 为 1/1 tool 的 `cancelled`；`#329` 虽为
+  fresh OpenCode 且执行了 443 egress 阻断，但先遇到真实 `permission.asked` / `sandbox_error`，
+  未形成可单独归因的 network failure，因此全部保留为探索性边界证据。
+- 在旧 readiness generation `61`（verified at `2026-09-02 02:33:35.288051`，任务启动时已过期）
+  上，`#330 / Issue #97`（OpenCode，Bundle `146`，attempt `task-330-attempt-1-b21f5c9efb53`）
+  和 `#331 / Issue #93`（Pi，Bundle `147`，attempt `task-331-attempt-1-3fe240005be8`）改用首次
+  `tool.completed` 后的一次性容器 namespace `OUTPUT tcp/443 REJECT`。#330 为 1/1 tool、seq
+  `1–28`，5 次 `provider.retry`（全部 `engine_error`），最终 `harness.failed(engine_error)` →
+  `run.failed(engine_error)`，archive `9604a0dbd5780f3c7cc09b9f7820a0e128bfe351e99d9b819b79e6becf5de6a0` /
+  `8,476 B`；#331 为 2/2 tool、seq `1–51`，3 次 `provider.retry`（全部 `engine_error`），最终同类
+  `engine_error` failure，archive `ba8ecac03099059fc073d59024ed23353234c314011ca03d866b6e495fc71a70` /
+  `7,782 B`。#330 的观察器曾错误地重复开启一次短窗口；两项因 readiness 已过期不作为正式 canary，
+  但保留为真实网络错误分类证据。
+- 重新 Verify 后，Profile 4 readiness generation `64`（verified at `2026-09-02 04:08:33.825663`）
+  的有效窗口内完成了正式 network interruption re-probe。Pi `#334 / Issue #93` 使用 Bundle `150`
+  （digest `9ce9e05fee17e176caddf730279d81db232350fbe87b6fcdc7e47979388914e7`）、attempt
+  `task-334-attempt-1-84a1c86de323`、`freeform/fresh`，耗时 `138.222s`；首次工具完成后施加一次
+  容器 namespace 443 egress REJECT，canonical seq `1–52`、4/4 tool，随后 3 次
+  `provider.retry`（seq `44–46`，均 `failure_kind=engine_error`），唯一终态为
+  `harness.failed(engine_error: Connection error.)` → `worker.finalization(exit_code=1,diff=0/0)`
+  → `run.failed(engine_error)`，无 commit/delivery；archive
+  `9383afe0713cedcaa3b7018eaa318c4e4be7e5656c4181b41dd53ffc6a7533c2` / `12,296 B`。
+  OpenCode `#335 / Issue #96` 使用 Bundle `151`（digest
+  `192911896de9f68de75bbb1ade2b5ef1802d28577e96e7550f83dea0be1057a2`）、attempt
+  `task-335-attempt-1-22384655ba76`、`freeform/fresh`，耗时 `233.849s`；同样在首个工具后施加
+  443 egress REJECT，canonical seq `1–232`、9/9 tool，阻断窗口内出现 5 次 `provider.retry`
+  （seq `17/19/21/23/25`，全部 `engine_error`），窗口结束后继续执行并以唯一
+  `harness.completed` → `worker.finalization(exit_code=0,diff=0/0)` → `run.completed` 收敛，
+  usage `664/335`（input/output），无 commit/delivery；archive
+  `7e471120007c5e2b6db31bab82e6d07fab130b35487cfa1a4890f826368cb285` / `35,904 B`。两项 Bundle
+  manifest 都固定记录 generation `64` 和 Kit `0.6.11`；目标 Worker container 已清理，当前队列为空。
 
-因此场景 14 登记为 `pass (invalid-session branch)`，并明确保留 network interruption 为
-`not_triggered`；OpenCode 的 engine-level session-not-found 与 Pi 的 adapter-side protocol error 是各自正确的
-failure taxonomy，不能合并成同一错误字符串，也不能把既有 TLS/protocol 样本改写为本场景证据。
+四次 bridge 探索本身仍只证明恢复后任务可继续或安全收敛；#330/#331 首次形成了真实 egress 阻断后的
+`engine_error` retry，但因 readiness 过期不作正式 canary；#334/#335 则在有效 generation `64`
+窗口内形成了两种 Harness 的 raw/canonical retry 与终态证据。因此 Scenario 14 的 network
+interruption 子分支现可接受，不能与既有 TLS/protocol 样本混写。
+
+因此场景 14 登记为 `pass`：invalid-session 分支保留 OpenCode 的 engine-level session-not-found 与
+Pi 的 adapter-side protocol error；network interruption 分支由 #334/#335 的有效 readiness
+canary 闭合。两种 Harness 的 failure taxonomy、唯一 terminal、archive 和 Worker 清理均符合预期，
+不能合并成同一错误字符串，也不能把既有 TLS/protocol 样本改写为本场景证据。
 
 ### Scenario 15 longest-context
 
@@ -923,8 +974,8 @@ formal benchmark 样本。场景级 `pass` 代表人工验收、canonical termin
 |---|---:|---|
 | 冻结场景 | 20 | 场景定义不变；需要多阶段 lineage 的场景仍只计一个场景样本 |
 | 已有 formal Pi/OpenCode pair 的场景 | 19/20 | `#1–12`、`#14–20` 已有配对记录；场景 13 尚无可接受的 Provider 401 formal pair |
-| 场景级 full `pass` | 17/20（85%） | `#1–11`、`#15–20` |
-| 场景级 partial | 1/20 | 场景 14 的 invalid-session 分支通过；#320–#323 的网络 probe 未产生可接受的 interruption/retry，仍 `not_triggered` |
+| 场景级 full `pass` | 18/20（90%） | `#1–11`、`#14–20` |
+| 场景级 partial | 0/20 | 场景 14 的 invalid-session 与 network interruption 两个子分支均已闭合 |
 | `not_triggered` | 1/20 | 场景 12 的 formal pair 均未自然触发 `provider.retry` |
 | `blocked_external_fixture` | 1/20 | 场景 13 仍缺真实 Provider-side HTTP 401 fixture |
 
@@ -943,8 +994,8 @@ formal benchmark 样本。场景级 `pass` 代表人工验收、canonical termin
 
 Pi representative Task 为 `#201,#202,#205,#207,#228,#223,#232,#239,#274,#258,#265,#260,#279,#266`；
 OpenCode representative Task 为 `#200,#204,#206,#208,#231,#225,#233,#237,#273,#259,#268,#261,#280,#270`。
-该子集没有出现“耗时和 Token 同时恶化超过 25%”，但它不是完整 R3 gate 结果：场景 12、场景 13 和场景
-14 的 network interruption 子分支仍未闭合，故不能据此关闭 R3。
+该子集没有出现“耗时和 Token 同时恶化超过 25%”，但它不是完整 R3 gate 结果：场景 12 与场景 13
+仍未闭合，故不能据此关闭 R3。
 
 ## Frozen 20 scenarios
 
@@ -965,7 +1016,7 @@ Task ID 留空表示尚未执行；正式执行过程中只追加结果，不改
 | 11 | context compaction：长上下文任务必须产生 `context.compacted`，其后仍有唯一 terminal | `#251 → #252 / Issue #63`；Bundle `134`；5 次 compaction，`#251` seq `1–929` 失败后 `#252` 完成 recovery delivery；archives `1,778,253 / 35,934 B`；最终 commit `38f3a610…` | `#253 + #276 / Issue #64`；#276 37/37 tool、seq `1–307`、3 次 retry、cached 436,138、无 compaction、engine_error；追加 `#293/#295` 成功 delivery 但无 compaction，`#298/#300` native POST 为 `503`，`#302` watcher 超时取消，`#303/#304` idle active-tool `protocol_error`，`#305/#306` clean-idle watcher 未捕获状态，`#307/#308` Task/Host watcher 均未形成 route/event 闭环；追加 `#309/#310`（Provider `7` / Profile `4` / Bundle `138`，6/6 与 82/82 tool，均无 compaction）；追加 `#313` continuation timeout、`#314` legacy route 短任务 compaction、`#315` Bundle `139` 长上下文 37/37 tool 和 3 次 canonical compaction；archives 205,787 / 8,979 / 18,230 / 117,822 B；无 commit | pass（Pi compaction/recovery 与 OpenCode 长上下文 legacy compatibility route 均有 raw/canonical compaction 和唯一 terminal；V2 native compact `503` 保留为上游能力边界） |
 | 12 | rate limit：使用已有受限 Provider，记录 `provider.retry` 与 `rate_limited` 分类 | `#254 / Issue #65`、`#256 / Issue #67`；Bundle `134`；13/13、26/26 tool；seq `1–427` / `1–592`；archives `44,906 / 57,578 B`；commits `d10ab625…` / `f16e80eb…`；关联当前 Provider 7/Pi 控制样本 `#318 / Issue #92`，Bundle `142`，seq `1–72`，无 retry，archive `8,190 B` | `#255 / Issue #66`、`#257 / Issue #68`；Bundle `133`；8/8、26/26 tool；seq `1–318` / `1–309`；archives `42,300 / 49,189 B`；commits `29a3181a…` / `7b63cdc5…`；关联真实诊断 `#317` 为 Provider 9 / Bundle `141` | not_triggered（正式 probe 与 #318 均无 retry；#250/#251/#317 的真实 `rate_limited` 只作为关联诊断保留） |
 | 13 | authentication failure：只接受真实 401/`authentication_error`；无 401 fixture 不得伪造 | 关联真实诊断 `#319 / Issue #92`：Provider 6 / Pi，Bundle `143`，`rate_limited` / 429，无 401 | `#296/#310` 的无凭据 Server Basic Auth `401` 不计入 Provider 401；历史 `#150/#151` 的 `authentication_error` 实为 `404` HTML；`#316` 为 Provider 11 的真实 `engine_error` / certificate failure；`#317` 为 Provider 9 的真实 429；`#319` 为 Provider 6 的真实 429；均无 401，仍无专用 401 fixture | blocked_external_fixture |
-| 14 | network/invalid session：真实断线或非法 Session，记录 retry/engine 或 invalid-session 分类 | `#289 / Issue #87`；Bundle `136`；`plan/continue`；attempt `task-289-attempt-1-b5cdfed0c915`；seq `1–4`；archive `2,788 B`；无 output session；container 已清理；探索 `#320/#321 / Issue #93/#94`（Bundle `144`，bridge 断开后均无 `provider.retry`） | `#281 / Issue #84`；Bundle `133`；`plan/continue`；attempt `task-281-attempt-1-b8c96260cd74`；seq `1–4`；archive `2,835 B`；engine_error；无 output session；container 已清理；探索 `#322/#323 / Issue #95/#96`（Bundle `145/146`，bridge 断开后均无 `session.next.retried`） | partial（invalid-session 分支真实触发；network interruption 保留为 not_triggered；两种 Harness 各自 taxonomy、唯一 terminal、archive 和清理成立） |
+| 14 | network/invalid session：真实断线或非法 Session，记录 retry/engine 或 invalid-session 分类 | `#289 / Issue #87`；Bundle `136`；`plan/continue`；attempt `task-289-attempt-1-b5cdfed0c915`；seq `1–4`；archive `2,788 B`；无 output session；container 已清理；有效 network re-probe `#334 / Issue #93`，Bundle `150`，attempt `task-334-attempt-1-84a1c86de323`，`freeform/fresh`，4/4 tool，seq `1–52`，3 次 `engine_error` retry，最终 `run.failed(engine_error)`，archive `12,296 B` | `#281 / Issue #84`；Bundle `133`；`plan/continue`；attempt `task-281-attempt-1-b8c96260cd74`；seq `1–4`；archive `2,835 B`；engine_error；无 output session；container 已清理；有效 network re-probe `#335 / Issue #96`，Bundle `151`，attempt `task-335-attempt-1-22384655ba76`，`freeform/fresh`，9/9 tool，seq `1–232`，5 次 `engine_error` retry 后 `run.completed`，archive `35,904 B` | pass（invalid-session 与 network interruption 均有有效 canonical taxonomy、唯一 terminal、archive 和清理；#320–#331 的 bridge/过期 readiness 探针保留为历史边界证据） |
 | 15 | longest-context：长输入/多轮任务记录 usage、compaction 边界和完成/失败结果 | formal retry `#274 / Issue #80`；24/24 tool；seq `1–265`；191.327s；in 34 / cached 18,006 / out 1,363；archive 54,696 B | formal retry `#273 / Issue #81`；21/21 tool；seq `1–165`；281.968s；in 161 / cached 20,822 / out 908；1 retry；archive 37,704 B | pass（两边 0/0、唯一 `run.completed`；未触发 `context.compacted`，按边界事实记录） |
 | 16 | 多文件重构：小型 fixture 的多文件一致性改造，测试、commit、push/MR | `#258 / Issue #69`；9/9 tool；seq `1–122`；commit `bca2afde…`；archive 26,551 B | `#259 / Issue #70`；11/11 tool；seq `1–269`；commit `d573243b…`；archive 41,822 B | pass（两边完成两文件测试和 delivery；模型先 commit，finalization diff 0/0） |
 | 17 | 单文件 bug fix：只改目标文件，测试/验收通过并 delivery | `#262 → #265 / Issue #73`；seed/fix；18/18、20/20 tool；commits `9cf57ccb…` / `ad238760…` | `#263/#264 → #268 / Issue #74`；两次 protocol failure 后 recovery；7/7 tool；commit `5148732c…` | pass（最终只改目标文件并 delivery；原始 OpenCode failures 保留） |
@@ -1002,7 +1053,7 @@ Task ID 追溯，不把凭据写入文档。
 | 11 | `#251 → #252 / Issue #63` — compaction/失败→delivery recovery；Bundle `134`；#251 5 次 compaction、seq `1–929`、archive 1,778,253 B；#252 seq `1–305`、commit `38f3a610…`、archive 35,934 B | `#253 + #276 / Issue #64` — #276 37/37 tool、seq `1–307`、3 次 retry、cached 436,138、无 compaction；追加 `#293/#295` 成功 delivery 但无 compaction，`#298/#300` native POST 为 `503`，`#302` watcher 超时取消，`#303/#304` idle active-tool `protocol_error`，`#305/#306` clean-idle watcher timeout，`#307/#308` 未捕获 route 状态；archive 205,787 B；unknown certificate verification error；无 commit | pass（Pi compaction/recovery 与 OpenCode #315 长上下文 legacy route 均有 raw/canonical compaction 和唯一 terminal；V2 native compact 503 保留为上游能力边界） |
 | 12 | `#254 / Issue #65` + `#256 / Issue #67` — completed；Bundle `134`；13/13、26/26 tool；seq `1–427` / `1–592`；archives 44,906 / 57,578 B；commits `d10ab625…` / `f16e80eb…` | `#255 / Issue #66` + `#257 / Issue #68` — completed；Bundle `133`；8/8、26/26 tool；seq `1–318` / `1–309`；archives 42,300 / 49,189 B；commits `29a3181a…` / `7b63cdc5…` | not_triggered（两轮正式 probe 无 `provider.retry`；#250/#251 的 rate_limited 不重复计入） |
 | 13 | 关联诊断 `#319 / Issue #92`；Provider 6 / Pi；Bundle `143`；`rate_limited` / 429；无 401 | 无 formal task；`#296/#310` 的 401 是 Server Basic Auth，`#150/#151` 是 404 HTML，`#316` 是 certificate error，`#317` 是 Provider 9 的 429；仍无专用 401 fixture | frozen Provider metadata；不读取 secret | blocked_external_fixture |
-| 14 | 未形成专用 network/invalid-session fixture | 未形成专用 network/invalid-session fixture | invalid-session 分支已由 `#289` 真实触发；network interruption 未触发，不改写既有 protocol/TLS 错误 | partial（invalid-session pass；network interruption `not_triggered`） |
+| 14 | invalid-session `#289`；有效 network re-probe `#334 / Issue #93`，Bundle `150`，4/4 tool，seq `1–52`，3 次 `engine_error` retry，archive `12,296 B` | invalid-session `#281`；有效 network re-probe `#335 / Issue #96`，Bundle `151`，9/9 tool，seq `1–232`，5 次 `engine_error` retry 后完成，archive `35,904 B` | Provider `7 / openrouter-free`、Profile `4`；#334/#335 均绑定 readiness generation `64`，旧 bridge/过期 readiness 探针不计入 formal canary | pass（invalid-session 与 network interruption 子分支均闭合） |
 | 15 | `#271/#272` 初次 probe；formal `#274 / Issue #80` — completed；24/24 tool；seq 1–265；0/0；archive 54,696 B；无 compaction | `#271/#272` 初次 probe；formal `#273 / Issue #81` — completed；21/21 tool；seq 1–165；1 retry；0/0；archive 37,704 B；无 compaction | frozen Provider `7 / openrouter-free`, long-input `Implementation/fresh`, `require_changes=false` | pass（usage/长任务边界记录完整；compaction `not_triggered`） |
 | 16 | `#258 / Issue #69` — completed；9/9 tool；seq 1–122；136.028s；in 53 / cached 4,698 / out 335；archive 26,551 B；commit `bca2afde…` | `#259 / Issue #70` — completed；11/11 tool；seq 1–269；196.349s；in 77 / cached 11,040 / out 371；archive 41,822 B；commit `d573243b…` | frozen Provider `7 / openrouter-free`, same two-file refactor prompt | pass（两边 test/delivery 成立；finalization diff 0/0 因模型已先 commit） |
 | 17 | `#262 → #265 / Issue #73` — seed/fix completed；archives 86,938 / 51,513 B；commits `9cf57ccb…` / `ad238760…` | `#263/#264 → #268 / Issue #74` — #263/#264 protocol failure，#268 completed；archives 73,758 / 36,667 / 41,081 B；commit `5148732c…` | frozen Provider `7 / openrouter-free`, same single-file bug fixture | pass（最终目标文件修复和 delivery 成立；原始 failures 保留） |
@@ -1013,12 +1064,15 @@ Task ID 追溯，不把凭据写入文档。
 ## Current stop boundary
 
 - 2026-09-02 远端复核：`pending/queued/running=0`，`#320=completed`、`#321=cancelled`、
-  `#322/#323=completed`；Profile 4 为 generation `61`，最近一次 Verify 为
-  `2026-09-02 02:33:35+00`。四次网络 probe 都在 readiness 有效期间启动；按 900s readiness TTL，下一次
-  canary 若超过该窗口必须重新 Verify。
+  `#322/#323=completed`、`#334=failed(engine_error)`、`#335=completed`；Profile 4 当前为
+  generation `64`，最近一次 Verify 为 `2026-09-02 04:08:33.825663+00`。#334/#335 分别于
+  `04:11:50` / `04:12:43+00` 启动，均落在 900s readiness TTL 内；下一次 canary 若超过该窗口必须
+  重新 Verify。
 - 最新 `docker --context remote system df` 显示 Images `66`（active `8`，size `8.187GB`，reclaimable
-  `2.481GB`）、Containers `9` active 和 Build Cache reclaimable `6.908GB`；目标机未满，不执行 broad
-  prune，保留 active image ancestry、固定 Worker composition 和现有 cache。
+  `2.481GB`）、Containers `9` active（`38.45MB`，reclaimable `0B`）、Local Volumes `11`
+  （active `4`，`1.632GB`，reclaimable `1.309GB`）和 Build Cache `552`（reclaimable `6.908GB`）；
+  目标机未满，#334/#335 Worker container 已清理，不执行 broad prune，保留 active image ancestry、
+  固定 Worker composition 和现有 cache。
 - 远端磁盘当前未满；镜像、容器和 BuildKit cache 只在确有空间压力且逐项核对 container ancestry 后清理，
   不执行 broad prune。
 - 当前没有运行中的任务时才切换全局 timeout；每次 timeout/cancel 样本结束后恢复 `1,800s`，并复核

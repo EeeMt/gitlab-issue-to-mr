@@ -214,8 +214,10 @@ R2 本轮已完成以下闭环项：
   probe，也不放宽 `session.idle` active-tool 的 fail-closed 规则；详见
   [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
 - [x] 已执行场景 12 的两轮正式 Pi/OpenCode retry probe：`254/255` 与 `256/257` 均成功完成并交付，
-  但四个任务都没有 `provider.retry`；`250/251` 以及后续 Provider 9 真实诊断 `#317` 的
-  `rate_limited` 事件作为关联诊断保留，不重复计入 formal 配对，因此场景 12 登记为 `not_triggered`；详见
+  但四个任务都没有 `provider.retry`；在 readiness generation `62` 上追加的当前 Provider 7 formal
+  acceptance re-probe `#332/#333` 也分别以 60/60、51/51 tool 成功完成、没有 `provider.retry` 或
+  `rate_limited`；`250/251` 以及后续 Provider 9 真实诊断 `#317` 的 `rate_limited` 事件作为关联诊断
+  保留，不重复计入 formal 配对，因此场景 12 登记为 `not_triggered`；详见
   [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
 - [ ] 场景 13 的认证失败仍为 `blocked_external_fixture`：只读复核 Provider `3–12` 均 enabled，开发环境
   没有专用 401 fixture；#296/#310 的无凭据请求是 OpenCode Server Basic Auth，不是 Provider 401；历史
@@ -223,14 +225,16 @@ R2 本轮已完成以下闭环项：
   `engine_error`，#317 是 Provider 9 的 `429/rate_limited`，#319 是 Provider 6 的 `429/rate_limited`，
   均不是 401；未读取或修改 Provider secret，
   不伪造认证错误；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
-- [x] 已完成场景 14 的 invalid-session 子场景：OpenCode `#281 / Issue #84` 的真实不存在 Session
-  以 `engine_error` 收敛，当前 Pi `#289 / Issue #87` 的真实 bogus lineage 以 Adapter-side
-  `protocol_error: Pi parent session is not available` fail-closed；两边均有唯一 terminal、archive、无
-  output session 和 Worker 清理证据。随后在 `192.168.50.129` 用已有 Provider 7 / Profile 4 做了
-  Pi `#320/#321` 与 OpenCode `#322/#323` 的 bridge 断网探索；网络恢复后任务可继续或安全收敛，但均未
-  产生可接受的 `provider.retry` / `session.next.retried` / network `engine_error`，故网络断线分支仍为
-  `not_triggered`，不把既有 TLS/protocol 错误改写为网络或 invalid-session 证据；详见
-  [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
+- [x] 已完成场景 14 的 invalid-session 与 network interruption 子场景：OpenCode `#281 / Issue #84`
+  的真实不存在 Session 以 `engine_error` 收敛，当前 Pi `#289 / Issue #87` 的真实 bogus lineage 以
+  Adapter-side `protocol_error: Pi parent session is not available` fail-closed；两边均有唯一 terminal、
+  archive、无 output session 和 Worker 清理证据。随后在 `192.168.50.129` 用已有 Provider 7 / Profile 4
+  做了 Pi `#320/#321` 与 OpenCode `#322/#323` 的 bridge 断网探索，以及 #330/#331 的过期 readiness
+  namespace egress probe；前者恢复后可继续或安全收敛，后者产生了真实 `engine_error` retry 但不计入正式
+  canary。Profile 4 readiness generation `64`（`2026-09-02 04:08:33.825663`）有效窗口内，Pi
+  `#334` 与 OpenCode `#335` 在首次工具后施加一次 443 egress 阻断，分别产生 3/5 次 `engine_error`
+  `provider.retry`，并以预期的 `run.failed(engine_error)` / 恢复后的 `run.completed` 唯一终态收敛；
+  network interruption 子分支现已闭合，详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
 - [x] 已完成 Pi 原生 session persistence 影响面修复与真实控制：修复 `e33df7e6` 通过 63 个 Pi
   focused tests；Profile 4 generation `52` / Bundle `136` 下 `#287 → #288 / Issue #86` 完成
   fresh→continue，DB output 与 Host JSONL header 一致，child header 含原生 `parentSession`；修复前
@@ -254,8 +258,8 @@ R2 本轮已完成以下闭环项：
 - [x] 已完成场景 20 高 token 生成：Pi `#266 / Issue #75` 成功；OpenCode `#267/#269 / Issue #76`
   的 protocol/delivery failures 保留，独立 `#270 / Issue #77` 完成三个 80 行文件、报告和公共 delivery，
   finalization diff `240/0`；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
-- [ ] 当前 R3 未闭合项包括：场景 12 的 formal `provider.retry` 仍为 `not_triggered`、场景 13 的真实 401 fixture，
-  以及场景 14 的 network interruption 子分支；本轮用已有 Provider 11 追加的真实
+- [ ] 当前 R3 未闭合项包括：场景 12 的 formal `provider.retry` 仍为 `not_triggered`、场景 13 的真实 401 fixture；
+  本轮用已有 Provider 11 追加的真实
   OpenCode 任务 `#316` 只得到 `engine_error: unknown certificate verification error`，没有 Provider HTTP 401，
   不能替代 fixture；随后用已有 Provider 9 追加的真实 OpenCode `#317` 由 raw
   `APIError.data.statusCode=429` 证实为 `rate_limited`，也不能替代认证 fixture；随后在 Profile 4
@@ -268,9 +272,10 @@ R2 本轮已完成以下闭环项：
   是 12,000 行长上下文、37/37 tool，raw `session.compacted=1`、canonical `context.compacted=3`，
   其后为唯一 `run.completed`；因此场景 11 已闭合。V2 `/api/session/:sessionID/compact` 的 `503`
   仍是固定 OpenCode `1.18.19` 的上游能力边界，未追认为 adapter 缺陷；场景 13 仍因没有真实
-  Provider 401 fixture 保持 blocker；场景 14 的 invalid-session 子场景已闭合，#320–#323 的 bridge
-  interruption probe 未产生可接受事件，明确保持 `not_triggered`，不把已有 TLS/protocol 样本重复计入；当前冻结 cohort 已登记 19/20 个场景的
-  formal Pi/OpenCode pair，场景级 rollup 为 17 个 full pass、1 个 partial、1 个 `not_triggered`、1 个
+  Provider 401 fixture 保持 blocker；场景 14 的 invalid-session 与 network interruption 子场景已闭合，
+  #320–#331 的 bridge/过期 readiness probe 作为历史边界证据保留，#334/#335 的有效 generation `64`
+  canary 不改变 frozen pair 分母；当前冻结 cohort 已登记 19/20 个场景的 formal Pi/OpenCode pair，
+  场景级 rollup 为 18 个 full pass、0 个 partial、1 个 `not_triggered`、1 个
   `blocked_external_fixture`；在这些未闭合项完成前不关闭 R3，也不进入 R4；
 - [ ] 在冻结 cohort 上分别执行 Pi 与 OpenCode 的 20 个同场景样本（当前已完成 `#1–12`、`#14–20` 的
   formal pair；场景 13 尚无可接受 pair；需要 fresh/continue 或 failure→delivery 的场景按一个场景登记多个 Task）；
