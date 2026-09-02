@@ -220,7 +220,8 @@ R2 本轮已完成以下闭环项：
 - [ ] 场景 13 的认证失败仍为 `blocked_external_fixture`：只读复核 Provider `3–12` 均 enabled，开发环境
   没有专用 401 fixture；#296/#310 的无凭据请求是 OpenCode Server Basic Auth，不是 Provider 401；历史
   `#150/#151` 的 `authentication_error` 实为 `404` HTML，不能计入；后续 #316 是 certificate
-  `engine_error`，#317 是 Provider-side `429/rate_limited`，两者都不是 401；未读取或修改 Provider secret，
+  `engine_error`，#317 是 Provider 9 的 `429/rate_limited`，#319 是 Provider 6 的 `429/rate_limited`，
+  均不是 401；未读取或修改 Provider secret，
   不伪造认证错误；详见 [R3 benchmark evidence](../evidence/2026-09-01-open-harness-v2-r3-benchmark.md)；
 - [x] 已完成场景 14 的 invalid-session 子场景：OpenCode `#281 / Issue #84` 的真实不存在 Session
   以 `engine_error` 收敛，当前 Pi `#289 / Issue #87` 的真实 bogus lineage 以 Adapter-side
