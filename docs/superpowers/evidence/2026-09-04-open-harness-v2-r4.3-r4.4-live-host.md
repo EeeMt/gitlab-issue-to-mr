@@ -235,6 +235,11 @@ It does not yet sign the full gate because:
   callbacks from a previous EventSource after reconnect; the focused race
   tests and the full frontend suite pass. This closes a source-level lifecycle
   race, but not the required real Host network disconnect/reconnect proof.
+- The V1 read-only source boundary was also rechecked without changing the
+  Host mode: the backend `v2_only`/legacy-contract selection passed 9 tests,
+  and the TaskView legacy read-only group passed 4 tests. These checks cover
+  pending/failed/running rendering and API rejection semantics, but the Host
+  was not switched to `v2_only` and therefore still lacks L5 runtime evidence.
 - The live Task #358 remained Pi-locked. On existing Issue #99, the drawer
   kept the current OpenCode Harness and displayed the continuation lock hint;
   enabling “use new session” allowed a temporary switch to Claude and the
