@@ -26,7 +26,7 @@ reconnect or release-safety pass.
 | Frontend unit suite | passed, 80 files / 1691 tests | Includes structured SSE stale-source lifecycle regression coverage |
 | Frontend production build | passed | Vite emitted only the existing large-chunk warning |
 | Backend lint | passed | `make lint-backend` |
-| Remote Docker state | not under disk pressure | `docker system df` after the nginx-only redeploy: Images 12.4GB / 6.683GB reclaimable; containers 6.681MB; volumes 1.639GB; BuildKit 5.594GB |
+| Remote Docker state | near capacity, not full | After the latest nginx-only redeploy, `df -h /` reported 61G total / 57G used / 4.2G available (94%); `docker system df` reported Images 12.4GB / 6.691GB reclaimable; containers 6.818MB; volumes 1.639GB; BuildKit 6.06GB. No cleanup was performed because the disk was not full. |
 | Profile re-verification and live post-fix smoke | passed | Profile 4 generation 72 completed four-Harness Verify; Task 368 completed on Bundle 163 with the expected model field |
 | Remote execution mode | unchanged | `HARNESS_EXECUTION_MODE=dual_canary`; no `v2_only` switch was attempted |
 
