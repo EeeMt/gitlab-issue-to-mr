@@ -307,6 +307,7 @@ async def _serialize_issue_detail(
             "output_tokens": t.output_tokens,
             "model_name": t.model_name,
             "commit_message": t.commit_message,
+            "task_mode": t.task_mode or "execute",
             "created_at": t.created_at.isoformat(),
             "updated_at": t.updated_at.isoformat(),
             "started_at": t.started_at.isoformat() if t.started_at else None,

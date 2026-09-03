@@ -98,6 +98,7 @@ def _make_task(
     output_tokens=None,
     model_name=None,
     commit_message=None,
+    task_mode="execute",
     created_at=None,
     updated_at=None,
     started_at=None,
@@ -126,6 +127,7 @@ def _make_task(
     task.output_tokens = output_tokens
     task.model_name = model_name
     task.commit_message = commit_message
+    task.task_mode = task_mode
     task.created_at = created_at or datetime(2025, 1, 1, 13, 0, 0)
     task.updated_at = updated_at or datetime(2025, 1, 1, 13, 0, 0)
     task.started_at = started_at
@@ -382,8 +384,8 @@ class GetIssueTests(unittest.IsolatedAsyncioTestCase):
         from app.api.issues import get_issue
         from app.dependencies.project_access import ProjectAccessScope
 
-        task1 = _make_task(id=100, user_prompt="Fix bug")
-        task2 = _make_task(id=101, user_prompt="Add tests")
+        task1 = _make_task(id=100, user_prompt="Fix bug", task_mode="freeform")
+        task2 = _make_task(id=101, user_prompt="Add tests", task_mode="plan")
         issue = _make_issue(id=5, title="Feature Y", tasks=[task1, task2])
 
         result_mock = MagicMock()
@@ -402,6 +404,8 @@ class GetIssueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result["tasks"]), 2)
         self.assertEqual(result["tasks"][0]["id"], 100)
         self.assertEqual(result["tasks"][1]["id"], 101)
+        self.assertEqual(result["tasks"][0]["task_mode"], "freeform")
+        self.assertEqual(result["tasks"][1]["task_mode"], "plan")
 
     async def test_get_issue_tasks_include_queue_context(self):
         """Issue detail tasks should carry ordered-turn queue context (§8.1)."""
