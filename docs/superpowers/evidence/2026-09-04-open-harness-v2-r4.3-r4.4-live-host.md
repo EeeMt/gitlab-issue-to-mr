@@ -38,6 +38,22 @@ and independent review gates are signed.
   returned healthy. The scheduler and the long-lived GitLab services remained
   running.
 
+## Current operational snapshot
+
+The read-only snapshot taken after Task 364 converged showed zero active Tasks
+(`pending`, `queued`, or `running`) and zero `issue_execution_locks`. Tasks
+357–364 each had exactly one canonical terminal event, contiguous sequence
+numbers starting at 1, and zero matches for the repository's GitLab/Provider
+token-shaped patterns in both canonical event JSON and raw-log chunks. Raw-log
+storage was finalized for all eight tasks: 3/2444 bytes, 4/2740 bytes,
+5/2331 bytes, 3/3857 bytes, 4/2041 bytes, 4/3773 bytes, 4/2021 bytes,
+and 3/3845 bytes respectively.
+
+Task 358's one live `steer` command was `delivered` with one delivery attempt;
+the other four smoke tasks had no control command. The remote database had no
+Mattermost notification profile or delivery record, so live alert delivery was
+not exercised and is not treated as passing evidence.
+
 ## Real Task and command-plane evidence
 
 Both tasks used Profile 4, the current V2 mounted-Kit composition, Pi, and a
@@ -57,18 +73,25 @@ created at `16:11:43.465 UTC`, native ACK/delivery at `16:11:44.699 UTC`
 (approximately 1.234s).
 
 Additional current-candidate Harness coverage used the same Profile 4 and
-read-only prompt. No task was retried after the upstream rate-limit failures.
+read-only prompt. No failed task was retried; the following were separate
+Provider selections used to distinguish Provider availability from Harness
+behavior.
 
 | Task | Harness / Provider | Result and canonical evidence |
 | ---: | --- | --- |
 | 359 | OpenCode / Provider 7 `openrouter-free` | `completed`; CLI `1.18.19`, Adapter `2.0.0`, canonical seq 1–34 with 34 distinct receipts, archive 8783 bytes, raw-log 5 chunks / 2331 bytes |
 | 360 | Claude / Provider 3 `opencode-minimax` | `failed`; CLI `2.1.153`, Adapter `1.0.1`, canonical seq 1–7 with terminal `run.failed(failure.kind=rate_limited)`, archive 4095 bytes, raw-log 3 chunks / 3857 bytes; upstream reported HTTP 429 monthly usage limit |
 | 361 | Codex / Provider 9 `openrouter-glm52-responses` | `failed`; CLI `0.146.0`, Adapter `1.0.0`, canonical seq 1–8 with terminal `run.failed(failure.kind=rate_limited)`, archive 2915 bytes, raw-log 4 chunks / 2041 bytes; upstream exhausted retries with HTTP 429 |
+| 362 | Claude / Provider 8 `openrouter-glm52-anthropic` | `failed`; CLI `2.1.153`, Adapter `1.0.1`, canonical seq 1–7 with terminal `run.failed(failure.kind=engine_error)`, archive 4032 bytes, raw-log 4 chunks / 3773 bytes; the selected model was unavailable to the Provider |
+| 363 | Codex / Provider 4 `opencode-luna` | `failed`; CLI `0.146.0`, Adapter `1.0.0`, canonical seq 1–7 with terminal `run.failed(failure.kind=rate_limited)`, archive 2743 bytes, raw-log 4 chunks / 2021 bytes; upstream exhausted retries with HTTP 429 |
+| 364 | Claude / Provider 6 `opencode-pi` | `failed`; CLI `2.1.153`, Adapter `1.0.1`, canonical seq 1–7 with terminal `run.failed(failure.kind=rate_limited)`, archive 4084 bytes, raw-log 3 chunks / 3845 bytes; upstream reported HTTP 429 monthly usage limit |
 
 Together with Tasks 357/358, the current live set now covers Pi, OpenCode,
-Claude, and Codex. The Claude/Codex outcomes are bounded upstream failures,
-not success claims; they remain useful evidence that the failure classifier and
-single terminal path reject rate-limited execution.
+Claude, and Codex across multiple compatible Provider selections. The
+Claude/Codex non-success outcomes are bounded upstream Provider availability
+failures, not success claims; they remain useful evidence that the failure
+classifier and single terminal path reject rate-limited or unavailable-model
+execution.
 
 ## Browser interaction evidence
 
@@ -100,6 +123,9 @@ at a physical `390x844` viewport (the extension reported a CSS viewport of
   Claude/Codex `失败原因 · rate_limited` outcomes, with the run-archive and
   raw-log controls visible. No retry action was clicked for the known upstream
   429 failures.
+- Task detail pages for #362–#364 rendered the selected Harness and terminal
+  failure state. No retry action was clicked for these separate Provider
+  probes.
 
 ## R4.3/R4.4 boundary after this run
 
@@ -122,12 +148,13 @@ wording, and reload continuity. It does not yet sign the full gate because:
 
 ### R4.4 — partial evidence, not signed
 
-Tasks 357–361 plus the prior five-task warm-start cohort provide all four
+Tasks 357–364 plus the prior five-task warm-start cohort provide all four
 Harness selections, real success and bounded upstream failure classification,
-command latency, usage, canonical terminal, archive, raw-log finalization, and
-delivery samples. A complete
-Harness/Profile/Host operational review of queue/alert behavior and a formal
-zero-P0/P1 sign-off are still required.
+command latency, usage, canonical terminal, archive, raw-log finalization,
+delivery samples, and the current queue/lock/secret-scan snapshot. A complete
+Harness/Profile/Host operational review of alert behavior and a formal
+zero-P0/P1 sign-off are still required; no notification profile was configured
+on this development Host for a live alert delivery test.
 
 R4.5 security/release sign-off and R4.6 independent hard-cut go/no-go remain
 open. No R5 maintenance window or `v2_only` cutover was performed.
