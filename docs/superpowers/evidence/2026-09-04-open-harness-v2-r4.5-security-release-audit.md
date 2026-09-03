@@ -34,6 +34,13 @@ The remote image/cache state was inspected before and after the live smoke.
 The disk was not full, so no image, volume, or BuildKit cleanup was performed.
 No protected service or unrelated image was touched.
 
+The current development-Host Provider inventory was checked without reading
+credentials or URL paths: enabled Providers 3–6 resolve to `opencode.ai`, and
+enabled Providers 7–12 resolve to `openrouter.ai`; the only fixture entry,
+Provider 13, is disabled. No enabled local-only Provider is available. This is
+an endpoint inventory for the release audit, not a least-privilege approval or
+authorization to send another repository task to either external destination.
+
 The current live evidence covers Pi, OpenCode, Claude, and Codex on Profile 4,
 including the post-fix Codex Task 368 and the negative restart probes 369/370;
 the known non-success outcomes were correctly bounded as upstream/provider
