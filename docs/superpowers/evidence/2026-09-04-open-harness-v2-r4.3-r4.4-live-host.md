@@ -25,6 +25,7 @@ and independent review gates are signed.
   | --- | --- |
   | `backend/.venv/bin/python -m pytest backend/tests/unit/test_issues_api.py -q` | 39 passed |
   | `backend/.venv/bin/python -m pytest backend/tests/unit/test_harness_execution_policy.py backend/tests/unit/test_task_override_status.py -q` | 33 passed |
+  | `backend/.venv/bin/python -m pytest backend/tests/mock_e2e/test_mattermost_e2e.py -q` | 96 passed |
   | `frontend/npx vitest run` | 79 files / 1688 tests passed |
   | `frontend/npx vitest run src/views/TaskView.spec.ts src/components/TaskFormDrawer.spec.ts` | 2 files / 234 tests passed |
   | `frontend/npm run build` | passed |
@@ -157,7 +158,10 @@ It does not yet sign the full gate because:
 Tasks 357–364 plus the prior five-task warm-start cohort provide all four
 Harness selections, real success and bounded upstream failure classification,
 command latency, usage, canonical terminal, archive, raw-log finalization,
-delivery samples, and the current queue/lock/secret-scan snapshot. A complete
+delivery samples, and the current queue/lock/secret-scan snapshot. The local
+Mattermost mock E2E suite also passed 96 tests, covering profile CRUD, config
+validation, connection-test outcomes, event filtering, and delivery result
+recording without contacting a real notification service. A complete
 Harness/Profile/Host operational review of alert behavior and a formal
 zero-P0/P1 sign-off are still required; no notification profile was configured
 on this development Host for a live alert delivery test.
