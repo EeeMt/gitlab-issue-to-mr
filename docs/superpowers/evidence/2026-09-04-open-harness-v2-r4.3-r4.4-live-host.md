@@ -3,8 +3,8 @@
 **Date:** 2026-09-04
 
 **Scope:** Current R4 candidate on `192.168.50.129`, mobile/desktop browser
-interaction checks, one live command-plane run, and the resulting Host/Task
-runtime evidence.
+interaction checks, four-Harness live smoke attempts, one live command-plane
+run, and the resulting Host/Task runtime evidence.
 
 This is candidate evidence, not an L5 go/no-go decision. R4.3–R4.6 remain
 partially open until the complete acceptance, operational, security/release,
@@ -56,6 +56,20 @@ For Task 358, canonical receipts had 78 rows with `first_seq=1`,
 created at `16:11:43.465 UTC`, native ACK/delivery at `16:11:44.699 UTC`
 (approximately 1.234s).
 
+Additional current-candidate Harness coverage used the same Profile 4 and
+read-only prompt. No task was retried after the upstream rate-limit failures.
+
+| Task | Harness / Provider | Result and canonical evidence |
+| ---: | --- | --- |
+| 359 | OpenCode / Provider 7 `openrouter-free` | `completed`; CLI `1.18.19`, Adapter `2.0.0`, canonical seq 1–34 with 34 distinct receipts, archive 8783 bytes, raw-log 5 chunks / 2331 bytes |
+| 360 | Claude / Provider 3 `opencode-minimax` | `failed`; CLI `2.1.153`, Adapter `1.0.1`, canonical seq 1–7 with terminal `run.failed(failure.kind=rate_limited)`, archive 4095 bytes, raw-log 3 chunks / 3857 bytes; upstream reported HTTP 429 monthly usage limit |
+| 361 | Codex / Provider 9 `openrouter-glm52-responses` | `failed`; CLI `0.146.0`, Adapter `1.0.0`, canonical seq 1–8 with terminal `run.failed(failure.kind=rate_limited)`, archive 2915 bytes, raw-log 4 chunks / 2041 bytes; upstream exhausted retries with HTTP 429 |
+
+Together with Tasks 357/358, the current live set now covers Pi, OpenCode,
+Claude, and Codex. The Claude/Codex outcomes are bounded upstream failures,
+not success claims; they remain useful evidence that the failure classifier and
+single terminal path reject rate-limited execution.
+
 ## Browser interaction evidence
 
 The deployed frontend was checked in Chrome against `http://192.168.50.129:8880`
@@ -69,6 +83,9 @@ at a physical `390x844` viewport (the extension reported a CSS viewport of
   search is outside the `project_id` validation field, and the bottom action
   area was reachable and visible after scrolling without horizontal overflow.
   No Issue was submitted from this page.
+- On the same Create Issue form, the default Harness selector successfully
+  switched `Claude → Codex → OpenCode → Pi` and was restored to Pi. This was a
+  form-level selection check; no additional Issue was submitted for that check.
 - The Create Task drawer automatically opened the execution environment on
   entering the create form. The current issue correctly kept its Pi Harness
   fixed while showing the four-Harness verification status rows.
@@ -94,15 +111,17 @@ wording, and reload continuity. It does not yet sign the full gate because:
   zero computed inset in the emulated viewport.
 - Reload continuity is a browser-level reconnect spot-check, not a controlled
   network disconnect/reconnect test.
-- The live Issue was intentionally Pi-locked. Four-Harness switching and
+- The live Task #358 remained Pi-locked. The form-level four-Harness selector
+  was exercised, but cross-Harness switching on an existing Issue and
   `v2_only` V1 read-only presentation were not exercised; the Host remains
   `dual_canary`.
 
 ### R4.4 — partial evidence, not signed
 
-Tasks 357/358 plus the prior five-task warm-start cohort provide real success
-and failure classification, command latency, usage, canonical terminal,
-archive, raw-log finalization, and delivery samples. A complete
+Tasks 357–361 plus the prior five-task warm-start cohort provide all four
+Harness selections, real success and bounded upstream failure classification,
+command latency, usage, canonical terminal, archive, raw-log finalization, and
+delivery samples. A complete
 Harness/Profile/Host operational review of queue/alert behavior and a formal
 zero-P0/P1 sign-off are still required.
 
