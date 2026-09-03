@@ -230,10 +230,10 @@ It does not yet sign the full gate because:
 - The two backend-restart probes (#369/#370) are also inconclusive: their
   persisted `run.failed` payloads are upstream `rate_limited`, and no probe
   reached the delayed command needed to establish event-stream continuity.
-- The structured-log client now rejects stale `error`/`done` callbacks from a
-  previous EventSource after reconnect; the focused race tests and the full
-  frontend suite pass. This closes a source-level lifecycle race, but not the
-  required real Host network disconnect/reconnect proof.
+- The structured-log client now rejects stale `error`/`done`/`batch`/`update`
+  callbacks from a previous EventSource after reconnect; the focused race
+  tests and the full frontend suite pass. This closes a source-level lifecycle
+  race, but not the required real Host network disconnect/reconnect proof.
 - The live Task #358 remained Pi-locked. On existing Issue #99, the drawer
   kept the current OpenCode Harness and displayed the continuation lock hint;
   enabling “use new session” allowed a temporary switch to Claude and the
