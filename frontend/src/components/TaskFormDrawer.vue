@@ -1893,11 +1893,13 @@ async function focusFullForm() {
 }
 
 async function selectTaskMode(mode: TaskMode) {
+  const enteringCreateForm = props.mode === 'create' && taskMode.value === null
   taskModeDetailTransitionEnabled.value = false
   saveCurrentTaskModeDraft()
   taskMode.value = mode
   restoreTaskModeDraft(mode)
   runInstructionExpanded.value = false
+  if (enteringCreateForm) executionEnvironmentExpanded.value = true
   drawerView.value = 'full-form'
   await nextTick()
   taskModeDetailTransitionEnabled.value = true
@@ -2380,7 +2382,8 @@ onBeforeUnmount(() => {
   opacity: 0.72;
 }
 
-.task-form-drawer__form :deep(.variable-editor__codemirror .cm-editor) {
+.task-form-drawer__form :deep(.variable-editor__codemirror .cm-editor),
+.task-form-drawer__form :deep(.variable-editor__codemirror .cm-content) {
   min-height: 200px;
 }
 

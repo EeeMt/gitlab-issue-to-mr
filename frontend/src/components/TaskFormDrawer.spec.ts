@@ -641,6 +641,18 @@ describe('TaskFormDrawer', () => {
       expect(document.activeElement).toBe(wrapper.get('.variable-editor-mock').element)
     })
 
+    it('expands the execution environment when entering the create form', async () => {
+      await mountDrawer()
+      await openDrawer()
+
+      await wrapper.get('[data-testid="task-mode-option-execute"]').trigger('click')
+      await nextTick()
+
+      const environmentSummary = wrapper.get('.execution-environment__summary')
+      expect(environmentSummary.attributes('aria-expanded')).toBe('true')
+      expect(wrapper.find('.execution-environment__detail').exists()).toBe(true)
+    })
+
     it('uses one non-layout view animation and disables it for reduced motion', async () => {
       await mountDrawer()
       await openDrawer()

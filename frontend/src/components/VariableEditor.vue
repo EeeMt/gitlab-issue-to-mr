@@ -307,6 +307,13 @@ watch(() => props.modelValue, (newVal) => {
   display: block;
 }
 
+/* CodeMirror installs its mouse handlers on the content element. Keep it
+   covering the editor's empty area so clicking below the last line still
+   focuses the prompt. */
+.variable-editor__codemirror :deep(.cm-content) {
+  min-height: 120px;
+}
+
 .variable-editor__codemirror :deep(.cm-scroller) {
   overflow-x: auto;
 }
