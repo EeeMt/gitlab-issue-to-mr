@@ -36,7 +36,7 @@ hard cut。2026-09-03 已接受
 | 层级 | 状态 | 已证明 | 未证明或待办 |
 | --- | --- | --- | --- |
 | L1 架构/合同 | **通过（已更新）** | ownership、schema、协议矩阵、identity、roll-forward-only 与可信 Kit 校验边界已冻结 | 合同变化时重新评审 |
-| L2 源码/测试 | **当前 candidate 通过** | Kit provenance、Snapshot CLI identity、Scheduler/Worker/launcher 热路径边界与聚焦回归已证明；全量单元测试通过；`8110afa0` 的 Codex `OPENAI_MODEL` 投影修复定向测试 33 passed、lint/secret scan 通过 | 若 R4.3–R4.5 发现源码变化，按影响面重开 |
+| L2 源码/测试 | **当前 candidate 通过** | Kit provenance、Snapshot CLI identity、Scheduler/Worker/launcher 热路径边界与聚焦回归已证明；全量单元测试有 3247 passed 基线；`8110afa0` 的 Codex `OPENAI_MODEL` 投影修复及受影响 Bundle/Profile/Scheduler/notification/freeform 回归 227 passed、lint/secret scan 通过 | 若 R4.3–R4.5 发现源码变化，按影响面重开 |
 | L3 不可变 composition | **当前 candidate 通过** | 新 Kit 已完整安装，Profile 4 generation 72 管理员 Verify 四 Harness，Bundle 163 及 Image/Kit/Profile/Adapter identity 可追溯 | R4 签署前保持 identity 不漂移 |
 | L4 真实 Host/Task | **R4.1 scope 通过** | 新 Kit、四 Harness admin/launcher smoke、5 条 warm-start 成功 Task、TTL 过期后的成功路径、受控 selected-CLI 失败，以及修复后 Codex Task 368 均有证据 | 各 Harness 的正式 L5 交互/运维审阅与签署 |
 | L5 发布验收 | **未完成** | 已补充 390×844 创建/详情、长文本、编辑器焦点、底部操作区、创建表单与已有 Issue 的四 Harness 选择、真实运行态 command/ACK/刷新连续性与模式显示修复；见 [R4.3/R4.4 live Host evidence](../evidence/2026-09-04-open-harness-v2-r4.3-r4.4-live-host.md) | 移动键盘/安全区、真实断线重连、`v2_only` V1 只读展示、完整交互/运维/安全阻断清单与签署 |
