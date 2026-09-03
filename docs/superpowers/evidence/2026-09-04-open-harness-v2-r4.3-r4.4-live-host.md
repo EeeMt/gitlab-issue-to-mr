@@ -189,6 +189,17 @@ at a physical `390x844` viewport (the extension reported a CSS viewport of
   bounded upstream `rate_limited` failures before the requested delay; this is
   not a successful disconnect/reconnect result.
 
+After the restart probes, the frontend structured-log lifecycle was tightened
+at the source level: `useTaskLogStreams` now checks EventSource identity in both
+the `error` handler and the structured `done` callback before closing the
+current stream or reporting completion. This prevents a late callback from an
+old stream from closing a newer reconnect stream. Two focused regression tests
+cover the stale-error and stale-done races, and the full frontend suite passed
+80 files / 1690 tests; `npm run build` also passed with only the existing
+large-chunk warning. This is source/test evidence only: it does not turn the
+inconclusive #369/#370 probes into a valid real network disconnect/reconnect
+acceptance result, and it did not change the frozen Bundle/Provider identity.
+
 ## R4.3/R4.4 boundary after this run
 
 ### R4.3 — partial evidence, not signed
@@ -208,6 +219,10 @@ It does not yet sign the full gate because:
 - The two backend-restart probes (#369/#370) are also inconclusive: their
   persisted `run.failed` payloads are upstream `rate_limited`, and no probe
   reached the delayed command needed to establish event-stream continuity.
+- The structured-log client now rejects stale `error`/`done` callbacks from a
+  previous EventSource after reconnect; the focused race tests and the full
+  frontend suite pass. This closes a source-level lifecycle race, but not the
+  required real Host network disconnect/reconnect proof.
 - The live Task #358 remained Pi-locked. On existing Issue #99, the drawer
   kept the current OpenCode Harness and displayed the continuation lock hint;
   enabling “use new session” allowed a temporary switch to Claude and the

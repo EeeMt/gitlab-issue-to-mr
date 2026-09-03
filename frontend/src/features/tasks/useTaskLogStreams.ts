@@ -110,7 +110,8 @@ export function useTaskLogStreams(options: TaskLogStreamOptions) {
       options.taskLogs.value = updated
     }
 
-    structuredLogSource = streamTaskLogs(
+    let source: EventSource | null = null
+    source = streamTaskLogs(
       options.taskId.value,
       sinceId,
       (log) => {
@@ -131,13 +132,16 @@ export function useTaskLogStreams(options: TaskLogStreamOptions) {
         })
       },
       () => {
+        if (structuredLogSource !== source) return
         closeStructuredLogStream()
         options.onStructuredDone()
       },
       mergeLogUpdate,
     )
+    structuredLogSource = source
 
-    structuredLogSource.onerror = () => {
+    source.onerror = () => {
+      if (structuredLogSource !== source) return
       closeStructuredLogStream()
     }
   }

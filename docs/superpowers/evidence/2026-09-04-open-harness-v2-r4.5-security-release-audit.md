@@ -23,7 +23,7 @@ reconnect or release-safety pass.
 | `backend/.venv/bin/python -m pytest backend/tests/unit/test_codex_harness_adapter.py -q` | passed, 33 tests | Covers the post-fix Codex `OPENAI_MODEL` projection and V2 envelope/result mapping |
 | Affected Bundle/Profile/Scheduler/notification/freeform regression set | passed, 227 tests | Re-checks the source/binding/runtime paths affected by the post-fix candidate |
 | Backend focused regression | passed, 39 `test_issues_api.py` tests | Covers the current `task_mode` serialization fix |
-| Frontend unit suite | passed, 79 files / 1688 tests | Current frontend candidate |
+| Frontend unit suite | passed, 80 files / 1690 tests | Includes structured SSE stale-source lifecycle regression coverage |
 | Frontend production build | passed | Vite emitted only the existing large-chunk warning |
 | Backend lint | passed | `make lint-backend` |
 | Remote Docker state | not under disk pressure | `docker system df` after Tasks 369/370: Images 12.39GB / 6.675GB reclaimable; containers 6.371MB; volumes 1.639GB; BuildKit 5.128GB |
