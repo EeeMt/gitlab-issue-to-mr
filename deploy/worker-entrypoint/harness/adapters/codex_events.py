@@ -32,6 +32,14 @@ _STATE: dict = {
 }
 
 
+def _configured_model() -> str | None:
+    """Return the model injected for Codex's OpenAI-compatible transport."""
+    model = os.environ.get("OPENAI_MODEL")
+    if not isinstance(model, str):
+        return None
+    return model.strip() or None
+
+
 def _capture_real_thread_id(raw_text: str) -> None:
     """Persist the unmasked thread id from the raw (pre-sanitize) line.
 
@@ -128,7 +136,7 @@ def _write_result(
         "success": success,
         "result": result,
         "session_id": _STATE["thread_id"] or None,
-        "model": os.environ.get("ANTHROPIC_MODEL") or None,
+        "model": _configured_model(),
         "usage": usage,
         "failure": failure,
         "capability_warnings": [],
@@ -174,7 +182,7 @@ def translate(record: dict, raw_line: int) -> None:
             _STATE["model_resolved"] = True
             _emit(
                 "model.resolved",
-                {"model": os.environ.get("ANTHROPIC_MODEL") or None, "session_id": _thread_id(record)},
+                {"model": _configured_model(), "session_id": _thread_id(record)},
                 raw_line,
             )
         else:

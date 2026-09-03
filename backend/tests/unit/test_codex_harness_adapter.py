@@ -48,7 +48,8 @@ def _environment(runtime_dir: Path) -> dict[str, str]:
         "CODIFY_CLI_VERSION": "0.146.0-alpha.3.1",
         "CODIFY_CANONICAL_EVENT_WRITER": str(EVENT_WRITER),
         "CODIFY_HARNESS_RESULT_FILE": str(runtime_dir / "harness-result.json"),
-        "ANTHROPIC_MODEL": "deepseek-v4-flash",
+        "OPENAI_MODEL": "deepseek-v4-flash",
+        "ANTHROPIC_MODEL": "wrong-transport-model",
     }
 
 
@@ -116,6 +117,7 @@ def test_codex_stream_maps_to_canonical_events(tmp_path):
         "run.completed",
     ]
     model_resolved = events[1]
+    assert model_resolved["payload"]["model"] == "deepseek-v4-flash"
     assert model_resolved["payload"]["session_id"] == "6ad6e4f5-6205-8e2a-9b3c-1a2b3c4d5e6f"
     tool_completed = events[3]["payload"]
     assert tool_completed["exit_code"] == 0
@@ -524,8 +526,9 @@ def test_codex_v2_contract_emits_v2_envelope_and_result(tmp_path):
 
     # Session / usage / model mapping is preserved in V2 mode (scope: retain
     # the Session/usage/model/failure projection, only the envelope contract
-    # changes). Codex resolves the model from ANTHROPIC_MODEL at first record.
+    # changes). Codex resolves the model from OPENAI_MODEL at first record.
     by_type = {e["type"]: e for e in events}
+    assert by_type["model.resolved"]["payload"]["model"] == "deepseek-v4-flash"
     assert by_type["model.resolved"]["payload"]["session_id"] == "6ad6e4f5-6205-8e2a-9b3c-1a2b3c4d5e6f"
     usage = by_type["usage.final"]["payload"]["usage"]
     assert usage["input_tokens"] == 10
