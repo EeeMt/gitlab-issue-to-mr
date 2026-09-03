@@ -33,8 +33,9 @@ No protected service or unrelated image was touched.
 
 The current live evidence covers Pi, OpenCode, Claude, and Codex on Profile 4,
 including the post-fix Codex Task 368;
-the two non-success outcomes were correctly classified upstream
-`rate_limited` failures. The detailed task, identity, archive, raw-log, and
+the known non-success outcomes were correctly bounded as upstream/provider
+availability failures (`rate_limited`, selected-model `engine_error`, or the
+earlier real upstream 404). The detailed task, identity, archive, raw-log, and
 canonical-sequence evidence is in the
 [R4.3/R4.4 live Host evidence](2026-09-04-open-harness-v2-r4.3-r4.4-live-host.md).
 
