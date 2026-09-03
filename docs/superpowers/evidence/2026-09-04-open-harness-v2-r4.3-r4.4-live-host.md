@@ -56,7 +56,8 @@ and independent review gates are signed.
   | `python3 -m py_compile deploy/worker-entrypoint/harness/adapters/codex_events.py` | passed |
   | `python3 scripts/harness-probes/v2/secret-scan.py` | passed, `findings=0` |
   | `git diff --check` | passed |
-  | `frontend/npx vitest run` | 79 files / 1688 tests passed |
+  | `frontend/npx vitest run` | 80 files / 1691 tests passed |
+  | `frontend/npx vitest run src/features/tasks/useTaskLogStreams.spec.ts` | 3 tests passed; stale structured-source callback races covered |
   | `frontend/npx vitest run src/views/TaskView.spec.ts src/components/TaskFormDrawer.spec.ts` | 2 files / 234 tests passed |
   | `frontend/npm run build` | passed |
 
