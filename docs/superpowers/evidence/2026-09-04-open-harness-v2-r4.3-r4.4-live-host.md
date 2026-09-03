@@ -192,10 +192,11 @@ at a physical `390x844` viewport (the extension reported a CSS viewport of
 After the restart probes, the frontend structured-log lifecycle was tightened
 at the source level: `useTaskLogStreams` now checks EventSource identity in both
 the `error` handler and the structured `done` callback before closing the
-current stream or reporting completion. This prevents a late callback from an
-old stream from closing a newer reconnect stream. Two focused regression tests
-cover the stale-error and stale-done races, and the full frontend suite passed
-80 files / 1690 tests; `npm run build` also passed with only the existing
+current stream or reporting completion. The same identity check now also
+rejects stale `batch` and `update` callbacks from the old source before they
+enter the shared pending queue or merge into current task logs. Three focused
+regression tests cover the stale-error, stale-done, and stale-batch/update
+races, and the full frontend suite passed 80 files / 1691 tests; `npm run build` also passed with only the existing
 large-chunk warning. This is source/test evidence only: it does not turn the
 inconclusive #369/#370 probes into a valid real network disconnect/reconnect
 acceptance result, and it did not change the frozen Bundle/Provider identity.

@@ -115,6 +115,7 @@ export function useTaskLogStreams(options: TaskLogStreamOptions) {
       options.taskId.value,
       sinceId,
       (log) => {
+        if (structuredLogSource !== source) return
         pendingStructuredLogs.push(log)
         if (structuredFlushScheduled) return
         structuredFlushScheduled = true
@@ -136,7 +137,10 @@ export function useTaskLogStreams(options: TaskLogStreamOptions) {
         closeStructuredLogStream()
         options.onStructuredDone()
       },
-      mergeLogUpdate,
+      (log) => {
+        if (structuredLogSource !== source) return
+        mergeLogUpdate(log)
+      },
     )
     structuredLogSource = source
 

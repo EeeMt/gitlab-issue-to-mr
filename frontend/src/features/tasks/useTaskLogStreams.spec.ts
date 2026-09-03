@@ -17,7 +17,9 @@ import { useTaskLogStreams } from './useTaskLogStreams'
 class FakeEventSource {
   onerror: ((event: Event) => void) | null = null
   closed = false
+  logCallback: ((log: any) => void) | undefined
   doneCallback: (() => void) | undefined
+  updateCallback: ((log: any) => void) | undefined
 
   close() {
     this.closed = true
@@ -29,6 +31,14 @@ class FakeEventSource {
 
   emitDone() {
     this.doneCallback?.()
+  }
+
+  emitLog(log: any) {
+    this.logCallback?.(log)
+  }
+
+  emitUpdate(log: any) {
+    this.updateCallback?.(log)
   }
 }
 
@@ -50,9 +60,11 @@ describe('useTaskLogStreams structured stream lifecycle', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockSources.length = 0
-    mockStreamTaskLogs.mockImplementation((_id, _sinceId, _onLog, onDone) => {
+    mockStreamTaskLogs.mockImplementation((_id, _sinceId, onLog, onDone, onUpdate) => {
       const source = new FakeEventSource()
+      source.logCallback = onLog
       source.doneCallback = onDone
+      source.updateCallback = onUpdate
       mockSources.push(source)
       return source
     })
@@ -95,5 +107,25 @@ describe('useTaskLogStreams structured stream lifecycle', () => {
     expect(second.closed).toBe(false)
     expect(streams.hasStructuredLogStream()).toBe(true)
     expect(state.onStructuredDone).not.toHaveBeenCalled()
+  })
+
+  it('ignores stale batch and update callbacks from a previous source after reconnect', async () => {
+    const state = createStreamState()
+    state.taskLogs.value = [{ id: 7, message: 'current' }] as any
+    const streams = useTaskLogStreams(state)
+
+    streams.connectStructuredLogStream()
+    const first = mockSources[0]
+    first.emitError()
+    streams.connectStructuredLogStream()
+    const second = mockSources[1]
+
+    first.emitLog({ id: 8, message: 'stale batch' })
+    first.emitUpdate({ id: 7, message: 'stale update' })
+    await Promise.resolve()
+
+    expect(state.taskLogs.value).toEqual([{ id: 7, message: 'current' }])
+    expect(second.closed).toBe(false)
+    expect(streams.hasStructuredLogStream()).toBe(true)
   })
 })
