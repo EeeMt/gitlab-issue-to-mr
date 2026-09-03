@@ -111,7 +111,8 @@ R4 是当前唯一可推进工作包。以下六项必须在同一最终 candida
 | R4.6 | 汇总 R1–R4 evidence，记录已知上游能力边界和停止条件，召开独立 hard-cut go/no-go | 明确签署 `GO` 或 `NO-GO`；`GO` 必须绑定 exact identity、目标 Host、R5 窗口与 owner |
 
 **R4 退出条件：** R4.1–R4.6 全部有当前 evidence，阻断项为零，并由独立发布评审明确批准进入 R5。
-当前仅 R4.1/R4.2 有本轮 candidate evidence；没有签署即保持 `dual_canary`，不以“测试大多通过”代替批准。
+当前 R4.1/R4.2 有 candidate evidence，R4.3/R4.4 仍只有部分 evidence；没有签署即保持
+`dual_canary`，不以“测试大多通过”代替批准。
 
 ### R5 — 在独立维护窗口执行 L6
 
