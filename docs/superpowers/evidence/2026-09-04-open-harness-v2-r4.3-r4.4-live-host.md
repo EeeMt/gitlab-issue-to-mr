@@ -124,6 +124,8 @@ prove the Codex model projection fixed by `8110afa0`.
 | 365 | Claude / Provider 11 `openrouter-minimax-anthropic` | `completed`; CLI `2.1.153`, Adapter `1.0.1`, canonical seq 1–15, archive 5815 bytes, raw-log 6 chunks / 6373 bytes, usage 2608 input / 272 output, 0 changes |
 | 366 | Codex / Provider 12 `openrouter-minimax-responses` | `completed`; CLI `0.146.0`, Adapter `1.0.0`, canonical seq 1–14, archive 3908 bytes, raw-log 5 chunks / 2690 bytes, usage 20986 input / 123 output, 0 changes |
 | 368 | Codex / Provider 12 `openrouter-minimax-responses` | `completed` on current Bundle 163; CLI `0.146.0`, Adapter `1.0.0`, canonical seq 1–14 with 14 distinct receipts, terminal `run.completed`, archive 4020 bytes, raw-log 4 chunks / 2683 bytes, usage 21017 input / 177 output, 0 changes; `model.resolved` and Task/UI execution model both `minimax/minimax-m3:free` |
+| 369 | Codex / Provider 12 `openrouter-minimax-responses` | `failed` on current Bundle 163; CLI `0.146.0`, Adapter `1.0.0`, canonical seq 1–8 with terminal `run.failed(failure.kind=rate_limited)`, archive 3085 bytes, raw-log 4 chunks / 2486 bytes; the controlled backend-restart probe reached the upstream retry limit with HTTP 429 before the requested delay |
+| 370 | Codex / Provider 4 `opencode-luna` | `failed` on current Bundle 163; CLI `0.146.0`, Adapter `1.0.0`, canonical seq 1–7 with terminal `run.failed(failure.kind=rate_limited)`, archive 2935 bytes, raw-log 4 chunks / 2503 bytes; the second controlled backend-restart probe reached the upstream retry limit with HTTP 429 before the requested delay |
 
 Together with Tasks 357/358, the live set now covers Pi, OpenCode, Claude, and
 Codex across multiple compatible Provider selections. The
@@ -131,6 +133,16 @@ Claude/Codex non-success outcomes are bounded upstream Provider availability
 failures, not success claims; they remain useful evidence that the failure
 classifier and single terminal path reject rate-limited or unavailable-model
 execution.
+
+Tasks 369 and 370 were two isolated probes in which only the remote
+`codify-backend` container was restarted while the task page remained open. The
+frontend stayed on Issue #99, but both persisted terminal payloads identify the
+failure as upstream `rate_limited`; neither reached the requested long-running
+read-only command. They therefore do not prove worker continuation or SSE
+disconnect/reconnect continuity and are retained as negative, inconclusive
+evidence only. A further real-Provider attempt was not submitted because the
+selected external Provider destination requires explicit authorization for
+repository-context transfer.
 
 ## Browser interaction evidence
 
@@ -172,6 +184,10 @@ at a physical `390x844` viewport (the extension reported a CSS viewport of
   fresh-session context, zero-change result, `执行模型: minimax/minimax-m3:free`,
   usage, and the run-archive control. The model was visible both during the
   live run and after completion.
+- Tasks #369 and #370 were controlled backend-only restart probes while the
+  Issue page remained open. The page stayed mounted, but both tasks ended in
+  bounded upstream `rate_limited` failures before the requested delay; this is
+  not a successful disconnect/reconnect result.
 
 ## R4.3/R4.4 boundary after this run
 
@@ -189,6 +205,9 @@ It does not yet sign the full gate because:
   zero computed inset in the emulated viewport.
 - Reload continuity is a browser-level reconnect spot-check, not a controlled
   network disconnect/reconnect test.
+- The two backend-restart probes (#369/#370) are also inconclusive: their
+  persisted `run.failed` payloads are upstream `rate_limited`, and no probe
+  reached the delayed command needed to establish event-stream continuity.
 - The live Task #358 remained Pi-locked. On existing Issue #99, the drawer
   kept the current OpenCode Harness and displayed the continuation lock hint;
   enabling “use new session” allowed a temporary switch to Claude and the
@@ -199,7 +218,7 @@ It does not yet sign the full gate because:
 
 ### R4.4 — partial evidence, not signed
 
-Tasks 357–366 and 368 plus the prior five-task warm-start cohort provide all
+Tasks 357–366 and 368–370 plus the prior five-task warm-start cohort provide all
 four Harness selections with real success samples for each Harness and bounded
 upstream failure classification,
 command latency, usage, canonical terminal, archive, raw-log finalization,

@@ -11,6 +11,9 @@ the Codex Adapter's model projection. The current candidate is Profile 4
 generation `72` with Runtime Bundle 163; the exact identity and Task 368
 validation are recorded in the
 [R4.3/R4.4 live Host evidence](2026-09-04-open-harness-v2-r4.3-r4.4-live-host.md).
+Tasks 369 and 370 were additional negative backend-restart probes on the same
+Bundle; both were bounded as upstream `rate_limited` and do not constitute a
+reconnect or release-safety pass.
 
 ## Checks completed
 
@@ -23,7 +26,7 @@ validation are recorded in the
 | Frontend unit suite | passed, 79 files / 1688 tests | Current frontend candidate |
 | Frontend production build | passed | Vite emitted only the existing large-chunk warning |
 | Backend lint | passed | `make lint-backend` |
-| Remote Docker state | not under disk pressure | `docker system df` after Task 368: Images 12.39GB / 6.675GB reclaimable; containers 5.098MB; volumes 1.639GB; BuildKit 5.128GB |
+| Remote Docker state | not under disk pressure | `docker system df` after Tasks 369/370: Images 12.39GB / 6.675GB reclaimable; containers 6.371MB; volumes 1.639GB; BuildKit 5.128GB |
 | Profile re-verification and live post-fix smoke | passed | Profile 4 generation 72 completed four-Harness Verify; Task 368 completed on Bundle 163 with the expected model field |
 | Remote execution mode | unchanged | `HARNESS_EXECUTION_MODE=dual_canary`; no `v2_only` switch was attempted |
 
@@ -32,7 +35,7 @@ The disk was not full, so no image, volume, or BuildKit cleanup was performed.
 No protected service or unrelated image was touched.
 
 The current live evidence covers Pi, OpenCode, Claude, and Codex on Profile 4,
-including the post-fix Codex Task 368;
+including the post-fix Codex Task 368 and the negative restart probes 369/370;
 the known non-success outcomes were correctly bounded as upstream/provider
 availability failures (`rate_limited`, selected-model `engine_error`, or the
 earlier real upstream 404). The detailed task, identity, archive, raw-log, and
