@@ -200,6 +200,13 @@ large-chunk warning. This is source/test evidence only: it does not turn the
 inconclusive #369/#370 probes into a valid real network disconnect/reconnect
 acceptance result, and it did not change the frozen Bundle/Provider identity.
 
+After commit `120d79ba`, the target Host was redeployed through the `remote`
+Docker context with an nginx-only rebuild/recreate. `docker compose ps` showed
+`codify-nginx` started, while `codify-backend` remained healthy and
+`codify-scheduler`/Postgres were not recreated; the public frontend endpoint
+returned HTTP 200. This verifies the static frontend deployment path, not a
+live authenticated SSE reconnect.
+
 ## R4.3/R4.4 boundary after this run
 
 ### R4.3 — partial evidence, not signed
