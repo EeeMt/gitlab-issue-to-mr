@@ -1079,6 +1079,7 @@ const zhCN = {
     branchNameInvalidSequence: '分支名不能包含".."、"@{"或"//"',
     branchNameInvalidComponent: '分支名的各路径段不能以"."开头',
     targetBranch: '合并目标',
+    useBaseBranchAsTarget: '使用起始分支',
     selectTargetBranch: '选择合并目标分支',
     targetBranchHint: 'AI 完成开发后，工作分支将通过 Merge Request 合并入此分支（通常为 main / master / dev / develop）。',
     branchFlowWorkBranch: 'AI 工作分支（自动生成）',

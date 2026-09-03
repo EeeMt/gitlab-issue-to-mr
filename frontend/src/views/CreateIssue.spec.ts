@@ -6,7 +6,7 @@ import CreateIssue from './CreateIssue.vue'
 import { createMockProject, createMockBranch, createMockPromptTemplate } from '../test/mocks/api'
 
 // Use hoisted to ensure proper initialization order
-const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
+const { mockApi, resetMockApi, mockMessage, mockFormItemRestoreValidation } = vi.hoisted(() => {
   const mock = {
     getProjects: vi.fn<() => Promise<any[]>>(),
     getProjectCIAutoRepairAvailability: vi.fn<(projectId: number) => Promise<any>>(),
@@ -24,7 +24,8 @@ const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
     })
   }
   const mockMsg = { error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn() }
-  return { mockApi: mock, resetMockApi, mockMessage: mockMsg }
+  const mockFormItemRestoreValidation = vi.fn()
+  return { mockApi: mock, resetMockApi, mockMessage: mockMsg, mockFormItemRestoreValidation }
 })
 
 // Mock i18n module that datetime.ts imports
@@ -81,8 +82,9 @@ vi.mock('naive-ui', () => ({
   NFormItem: {
     name: 'NFormItem',
     props: ['path', 'label', 'show-label'],
-    setup(_props: any, { slots }: any) {
-      return () => h('div', { class: 'n-form-item' }, [slots.default?.(), slots.feedback?.()])
+    setup(_props: any, { slots, expose }: any) {
+      expose({ restoreValidation: mockFormItemRestoreValidation })
+      return () => h('div', { class: 'n-form-item' }, [slots.label?.(), slots.default?.(), slots.feedback?.()])
     }
   },
   NSelect: {
@@ -105,9 +107,10 @@ vi.mock('naive-ui', () => ({
   NInput: {
     name: 'NInput',
     props: ['placeholder', 'disabled', 'value', 'type', 'rows'],
-    setup(props: any, { emit }: any) {
+    setup(props: any, { emit, attrs }: any) {
       return () => h('input', {
-        class: 'n-input',
+        ...attrs,
+        class: ['n-input', attrs.class],
         type: 'text',
         placeholder: props.placeholder,
         disabled: props.disabled,
@@ -543,6 +546,26 @@ describe('CreateIssue', () => {
       expect(controls.find('[data-testid="branch-strategy-control-mr"]').exists()).toBe(true)
       expect(controls.find('[data-form-path="base_branch"]').exists()).toBe(true)
     })
+
+    it('should render a shortcut for using the starting branch as the merge target', async () => {
+      await mountComponent()
+
+      const shortcut = wrapper.get('[data-testid="target-branch-same-as-base"]')
+      expect(shortcut.attributes('disabled')).toBeDefined()
+
+      wrapper.vm.formValue.base_branch = 'feature/base'
+      wrapper.vm.formValue.target_branch = 'develop'
+      await nextTick()
+
+      expect(shortcut.attributes('disabled')).toBeUndefined()
+      await shortcut.trigger('click')
+
+      expect(wrapper.vm.formValue.target_branch).toBe('feature/base')
+
+      wrapper.vm.formValue.create_mr = false
+      await nextTick()
+      expect(shortcut.attributes('disabled')).toBeDefined()
+    })
   })
 
   // ── Fetching on Mount ─────────────────────────────────────────
@@ -585,6 +608,23 @@ describe('CreateIssue', () => {
   // ── Project Selection & Branch Loading ────────────────────────
 
   describe('project selection', () => {
+    it('should keep project search outside the project validation field', async () => {
+      await mountComponent()
+
+      const projectField = wrapper.get('[data-form-path="project_id"]')
+
+      expect(wrapper.find('.project-picker > .project-picker__search').exists()).toBe(true)
+      expect(projectField.find('.project-picker__search').exists()).toBe(false)
+    })
+
+    it('should clear the project validation state when a project is selected', async () => {
+      await mountComponent()
+
+      wrapper.vm.selectProject(mockProjects[0])
+
+      expect(mockFormItemRestoreValidation).toHaveBeenCalledTimes(1)
+    })
+
     it('should call fetchBranches when project is selected', async () => {
       await mountComponent()
 

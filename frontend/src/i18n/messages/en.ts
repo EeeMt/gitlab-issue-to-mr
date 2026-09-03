@@ -1094,6 +1094,7 @@ const en = {
     branchNameInvalidSequence: 'Branch name cannot contain "..", "@{" or "//".',
     branchNameInvalidComponent: 'No path component in a branch name can start with ".".',
     targetBranch: 'Merge Target',
+    useBaseBranchAsTarget: 'Use starting branch',
     selectTargetBranch: 'Select merge target branch',
     targetBranchHint: "After development, the AI's working branch will be merged into this branch via MR (typically main / master / dev / develop).",
     branchFlowWorkBranch: 'AI Working Branch (auto-generated)',

@@ -32,24 +32,26 @@
           >
             <div class="create-issue-form__section">
               <div class="create-issue-form__section-title">{{ t('issue.field.project') }}</div>
-              <n-form-item
-                path="project_id"
-                :show-label="false"
-                data-form-path="project_id"
-              >
-                <!-- Search box -->
-                <div class="project-picker">
-                  <n-input
-                    v-model:value="projectSearch"
-                    :placeholder="t('createTask.searchProjects')"
-                    clearable
-                    class="project-picker__search"
-                  >
-                    <template #prefix>
-                      <n-icon :component="SearchOutline" size="15" style="opacity: 0.45" />
-                    </template>
-                  </n-input>
+              <div class="project-picker">
+                <!-- Keep search outside the project_id validation scope. -->
+                <n-input
+                  v-model:value="projectSearch"
+                  :placeholder="t('createTask.searchProjects')"
+                  clearable
+                  class="project-picker__search"
+                >
+                  <template #prefix>
+                    <n-icon :component="SearchOutline" size="15" style="opacity: 0.45" />
+                  </template>
+                </n-input>
 
+                <n-form-item
+                  ref="projectFormItemRef"
+                  path="project_id"
+                  :show-label="false"
+                  data-form-path="project_id"
+                  class="project-picker__field"
+                >
                   <!-- Loading skeleton -->
                   <div v-if="projectsLoading" class="project-picker__scroll-wrap">
                     <div class="project-picker__grid">
@@ -103,8 +105,8 @@
                       </div>
                     </div>
                   </div>
-                </div>
-              </n-form-item>
+                </n-form-item>
+              </div>
             </div>
 
             <div class="create-issue-form__section">
@@ -262,7 +264,22 @@
                           'branch-strategy-controls__target--inactive': !formValue.create_mr,
                         }"
                       >
-                        <n-form-item :label="t('issue.field.targetBranch')" path="target_branch">
+                        <n-form-item path="target_branch">
+                          <template #label>
+                            <div class="branch-strategy-controls__target-label">
+                              <span>{{ t('issue.field.targetBranch') }}</span>
+                              <n-button
+                                type="primary"
+                                ghost
+                                size="tiny"
+                                :disabled="!formValue.create_mr || !formValue.base_branch"
+                                data-testid="target-branch-same-as-base"
+                                @click="useBaseBranchAsTarget"
+                              >
+                                {{ t('createTask.useBaseBranchAsTarget') }}
+                              </n-button>
+                            </div>
+                          </template>
                           <n-select
                             v-model:value="formValue.target_branch"
                             :options="branchOptions"
@@ -671,6 +688,7 @@ import {
   NTag,
   useMessage,
   type FormInst,
+  type FormItemInst,
   type FormRules,
 } from 'naive-ui'
 import { DocumentTextOutline, WarningOutline, CloseOutline, GitBranchOutline, SparklesOutline, GitMergeOutline, SearchOutline, CheckmarkOutline } from '@vicons/ionicons5'
@@ -751,6 +769,7 @@ const unreplacedVariables = computed(() => {
 
 // Form
 const formRef = ref<FormInst | null>(null)
+const projectFormItemRef = ref<FormItemInst | null>(null)
 const createIssuePageRef = ref<HTMLElement | null>(null)
 const advancedSettingsRef = ref<HTMLDetailsElement | null>(null)
 const formFieldPaths = new Set([
@@ -1171,6 +1190,7 @@ function saveRecentTitle(title: string) {
 
 function selectProject(project: Project) {
   formValue.value.project_id = project.id
+  projectFormItemRef.value?.restoreValidation?.()
   handleProjectChange(project.id)
 }
 
@@ -1251,6 +1271,12 @@ function handleProjectChange(projectId: number) {
     fetchBranches(projectId)
     fetchCIAutoRepairAvailability(projectId)
   }
+}
+
+function useBaseBranchAsTarget() {
+  const baseBranch = formValue.value.base_branch
+  if (!formValue.value.create_mr || !baseBranch) return
+  formValue.value.target_branch = baseBranch
 }
 
 // When MR toggle is switched on, auto-fill target_branch with project default
@@ -2016,6 +2042,24 @@ onMounted(() => {
   font-size: 13px;
 }
 
+.branch-strategy-controls__target-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-width: 0;
+  gap: 8px;
+}
+
+.branch-strategy-controls__target-label > span {
+  min-width: 0;
+}
+
+.branch-strategy-controls__target-label :deep(.n-button) {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .branch-strategy-controls__target,
 .branch-flow-viz__node,
 .branch-flow-viz__connector {
@@ -2151,6 +2195,16 @@ onMounted(() => {
 }
 
 .project-picker__search {
+  width: 100%;
+}
+
+.project-picker__field {
+  width: 100%;
+  margin-bottom: 0;
+}
+
+.project-picker__field :deep(.n-form-item-blank) {
+  display: block;
   width: 100%;
 }
 
