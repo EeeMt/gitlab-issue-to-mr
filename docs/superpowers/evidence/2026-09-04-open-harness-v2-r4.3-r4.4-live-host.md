@@ -96,6 +96,10 @@ at a physical `390x844` viewport (the extension reported a CSS viewport of
   transitioned to the completed state with usage and terminal evidence.
 - After the backend deployment, the Issue current-execution card showed
   `模式 · 自由模式` for Task 358 instead of `模式 · Unknown`.
+- Task detail pages for #359–#361 rendered the OpenCode completion and the
+  Claude/Codex `失败原因 · rate_limited` outcomes, with the run-archive and
+  raw-log controls visible. No retry action was clicked for the known upstream
+  429 failures.
 
 ## R4.3/R4.4 boundary after this run
 
