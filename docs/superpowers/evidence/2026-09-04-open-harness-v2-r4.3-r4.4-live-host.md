@@ -24,7 +24,9 @@ and independent review gates are signed.
   | Check | Result |
   | --- | --- |
   | `backend/.venv/bin/python -m pytest backend/tests/unit/test_issues_api.py -q` | 39 passed |
+  | `backend/.venv/bin/python -m pytest backend/tests/unit/test_harness_execution_policy.py backend/tests/unit/test_task_override_status.py -q` | 33 passed |
   | `frontend/npx vitest run` | 79 files / 1688 tests passed |
+  | `frontend/npx vitest run src/views/TaskView.spec.ts src/components/TaskFormDrawer.spec.ts` | 2 files / 234 tests passed |
   | `frontend/npm run build` | passed |
 
 ## Remote Host state
@@ -132,8 +134,9 @@ at a physical `390x844` viewport (the extension reported a CSS viewport of
 ### R4.3 — partial evidence, not signed
 
 The run covers long-text layout, mobile task/create navigation, editor focus,
-bottom-action reachability, a real running/completed transition, command ACK
-wording, and reload continuity. It does not yet sign the full gate because:
+bottom-action reachability, form-level and existing-Issue Harness selection, a
+real running/completed transition, command ACK wording, and reload continuity.
+It does not yet sign the full gate because:
 
 - Chrome's desktop extension viewport cannot prove behavior with a real mobile
   soft keyboard, IME resize, or notched-device safe-area inset. The Task drawer
@@ -141,10 +144,13 @@ wording, and reload continuity. It does not yet sign the full gate because:
   zero computed inset in the emulated viewport.
 - Reload continuity is a browser-level reconnect spot-check, not a controlled
   network disconnect/reconnect test.
-- The live Task #358 remained Pi-locked. The form-level four-Harness selector
-  was exercised, but cross-Harness switching on an existing Issue and
-  `v2_only` V1 read-only presentation were not exercised; the Host remains
-  `dual_canary`.
+- The live Task #358 remained Pi-locked. On existing Issue #99, the drawer
+  kept the current OpenCode Harness and displayed the continuation lock hint;
+  enabling “use new session” allowed a temporary switch to Claude and the
+  form was restored to OpenCode without submitting a task. `v2_only` V1
+  read-only presentation was not exercised on the Host; the source suite does
+  cover pending/failed/running V1 read-only rendering, including a 390px case.
+  The Host remains `dual_canary`.
 
 ### R4.4 — partial evidence, not signed
 
