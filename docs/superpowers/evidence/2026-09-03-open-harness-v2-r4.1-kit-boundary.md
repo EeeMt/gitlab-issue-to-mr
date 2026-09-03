@@ -5,8 +5,13 @@
 **Scope:** Worker Kit trusted-install boundary, V2 selected-Harness identity freezing,
 and the first real Host warm-start cohort after implementation.
 
-This is evidence for the current R4 candidate, not an L5 go/no-go decision. R4.3–R4.6
-remain open in the stage tracker.
+This records the first R4 candidate, not an L5 go/no-go decision. Its Kit-boundary
+and warm-start observations remain valid structural evidence, but the exact
+candidate identity (Profile generation 71 and the then-bound Bundles) was
+superseded on 2026-09-04 after the Codex Adapter model-projection fix. The
+post-fix identity and Task evidence are recorded in the
+[R4.3/R4.4 live Host evidence](2026-09-04-open-harness-v2-r4.3-r4.4-live-host.md).
+R4.3–R4.6 remain open in the stage tracker.
 
 ## Candidate composition
 

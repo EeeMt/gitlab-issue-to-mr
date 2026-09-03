@@ -2,27 +2,36 @@
 
 **Date:** 2026-09-04
 
-**Scope:** Current development Host `192.168.50.129`, the frozen R4
+**Scope:** Current development Host `192.168.50.129`, the post-fix frozen R4
 candidate, and repository-side release checks. This is an audit record, not a
 security approval or an independent R4.6 go/no-go decision.
+
+The prior Profile-4 candidate was superseded after commit `8110afa0` changed
+the Codex Adapter's model projection. The current candidate is Profile 4
+generation `72` with Runtime Bundle 163; the exact identity and Task 368
+validation are recorded in the
+[R4.3/R4.4 live Host evidence](2026-09-04-open-harness-v2-r4.3-r4.4-live-host.md).
 
 ## Checks completed
 
 | Check | Result | Boundary |
 | --- | --- | --- |
 | `python3 scripts/harness-probes/v2/secret-scan.py` | passed, `findings=0` | Repository candidate only; it does not replace a Provider/GitLab access audit |
+| `backend/.venv/bin/python -m pytest backend/tests/unit/test_codex_harness_adapter.py -q` | passed, 33 tests | Covers the post-fix Codex `OPENAI_MODEL` projection and V2 envelope/result mapping |
 | Backend focused regression | passed, 39 `test_issues_api.py` tests | Covers the current `task_mode` serialization fix |
 | Frontend unit suite | passed, 79 files / 1688 tests | Current frontend candidate |
 | Frontend production build | passed | Vite emitted only the existing large-chunk warning |
 | Backend lint | passed | `make lint-backend` |
-| Remote Docker state | not under disk pressure | `docker system df`: Images 12.38GB / 6.669GB reclaimable; containers 31.69MB; volumes 1.638GB; BuildKit 5.128GB |
+| Remote Docker state | not under disk pressure | `docker system df` after Task 368: Images 12.39GB / 6.675GB reclaimable; containers 5.098MB; volumes 1.639GB; BuildKit 5.128GB |
+| Profile re-verification and live post-fix smoke | passed | Profile 4 generation 72 completed four-Harness Verify; Task 368 completed on Bundle 163 with the expected model field |
 | Remote execution mode | unchanged | `HARNESS_EXECUTION_MODE=dual_canary`; no `v2_only` switch was attempted |
 
 The remote image/cache state was inspected before and after the live smoke.
 The disk was not full, so no image, volume, or BuildKit cleanup was performed.
 No protected service or unrelated image was touched.
 
-The current live evidence covers Pi, OpenCode, Claude, and Codex on Profile 4;
+The current live evidence covers Pi, OpenCode, Claude, and Codex on Profile 4,
+including the post-fix Codex Task 368;
 the two non-success outcomes were correctly classified upstream
 `rate_limited` failures. The detailed task, identity, archive, raw-log, and
 canonical-sequence evidence is in the
