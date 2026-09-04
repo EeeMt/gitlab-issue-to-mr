@@ -303,6 +303,14 @@ codify_finalize_on_exit() {
     if declare -F repo_finalize_preparation_on_exit >/dev/null 2>&1; then
         repo_finalize_preparation_on_exit "${exit_code}" || true
     fi
+    # Preserve local Git delivery facts (commits/diff only; never a new commit
+    # or push) before the canonical finalizer emits worker.finalization. Runs
+    # on any failed exit whose normal delivery path never produced a snapshot.
+    if [ "${exit_code}" -ne 0 ]; then
+        if declare -F repo_delivery_collect_facts_on_exit >/dev/null 2>&1; then
+            repo_delivery_collect_facts_on_exit || true
+        fi
+    fi
     if declare -F codify_harness_finalize_attempt >/dev/null 2>&1 \
         && [ -n "${CODIFY_ATTEMPT_ID:-}" ]; then
         codify_harness_finalize_attempt "${exit_code}" || true

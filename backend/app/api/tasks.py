@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import re
 import time
 from datetime import datetime, timedelta
 
@@ -619,6 +620,31 @@ async def get_task(
     metadata = await get_project_metadata(task.project_id)
     t3 = time.time()
     result_data = _serialize_task(task, metadata, include_prompt_details=True)
+    # Normalized git_delivery (commits, recovered commits, net diff, push
+    # outcome) is detail-only: list endpoints must not batch-carry commit
+    # arrays into poll responses.
+    worker_metadata = task.worker_metadata
+    git_delivery = worker_metadata.get("git_delivery") if isinstance(worker_metadata, dict) else None
+    if isinstance(git_delivery, dict):
+        # Only a confirmed remote state earns a commit link; unconfirmed local
+        # facts keep SHA copy instead of a link that may not exist remotely.
+        push = git_delivery.get("push") if isinstance(git_delivery.get("push"), dict) else None
+        confirmed = bool(push) and push.get("status") in ("pushed", "already_present")
+        head_sha = git_delivery.get("head_sha")
+        commits = git_delivery.get("commits")
+        recovered = git_delivery.get("recovered_commits")
+        content = bool(
+            (isinstance(commits, list) and commits)
+            or (isinstance(recovered, list) and recovered)
+        )
+        git_delivery = dict(git_delivery)
+        git_delivery["commit_url"] = None
+        if confirmed and content and head_sha and task.issue:
+            merge_request_url = str(getattr(task.issue, "merge_request_url", None) or "")
+            project_base = re.sub(r"/-/merge_requests/\d+$", "", merge_request_url)
+            if project_base and project_base != merge_request_url:
+                git_delivery["commit_url"] = f"{project_base}/-/commit/{head_sha}"
+    result_data["git_delivery"] = git_delivery if isinstance(git_delivery, dict) else None
     archived_failure_detail = None
     if task.status in (TaskStatus.FAILED, TaskStatus.CANCELLED):
         from app.core.task_failure_details import read_archived_harness_failure_detail

@@ -347,8 +347,9 @@ build_overall_summary_prompt() {
     local previous_summary_file="$1"
     local current_summary_text="$2"
     local commit_message_text="$3"
-    local diff_stats_text="$4"
-    local current_user_prompt="$5"
+    local commit_list_text="$4"
+    local diff_stats_text="$5"
+    local current_user_prompt="$6"
     local previous_summary_text="暂无前序任务摘要。"
 
     if [ -f "${previous_summary_file}" ]; then
@@ -374,13 +375,17 @@ ${current_user_prompt}
 当前任务提交说明：
 ${commit_message_text}
 
-当前任务 Diff 统计：
+当前任务提交列表：
+${commit_list_text}
+
+当前任务净变更统计：
 ${diff_stats_text}
 
 当前任务执行摘要：
 ${current_summary_text}
 EOF
 }
+
 
 normalize_model_overall_summary() {
     local raw_summary="$1"

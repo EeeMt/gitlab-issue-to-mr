@@ -10,39 +10,14 @@ if ! codify_harness_initialize; then
     exit "${HARNESS_INITIALIZATION_RESULT}"
 fi
 
-write_existing_commit_delivery_metadata() {
-    COMMIT_SHA=$(codify_run_shell 'cd /workspace && git rev-parse HEAD')
-    FINAL_COMMIT_MESSAGE=$(codify_run_shell 'cd /workspace && git log -1 --pretty=%B')
-    echo "Delivered existing local commit: ${COMMIT_SHA}"
-
-    local summary_truncated task_metadata
-    summary_truncated="${FINAL_SUMMARY_CONTENT:0:3000}"
-    task_metadata=$(jq -nc \
-        --argjson task_id "${TASK_ID:-0}" \
-        --arg prompt "${USER_PROMPT:-}" \
-        --arg commit_sha "${COMMIT_SHA}" \
-        --arg commit_message "${FINAL_COMMIT_MESSAGE}" \
-        --arg overall_summary "${FINAL_OVERALL_SUMMARY:-}" \
-        --arg execution_summary "${summary_truncated}" \
-        --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-        '{
-            task_id: $task_id,
-            prompt: $prompt,
-            commit_sha: $commit_sha,
-            commit_message: $commit_message,
-            overall_summary: $overall_summary,
-            execution_summary: $execution_summary,
-            new_files: [],
-            modified_files: [],
-            deleted_files: [],
-            additions: 0,
-            deletions: 0,
-            reused_local_commit: true,
-            timestamp: $timestamp
-        }')
-    printf '%s\n' "${task_metadata}" > "${CODIFY_RUNTIME_DIR}/task-metadata.json"
-    echo "Task metadata written to ${CODIFY_RUNTIME_DIR}/task-metadata.json for existing local commit"
-}
+# Fix the repository start point (S = local task-branch HEAD, R0 = confirmed
+# remote work-branch HEAD at preparation, B0 = confirmed base HEAD) before any
+# pre-script or harness code can move the workspace. Delivery attribution and
+# safe publishing depend on these immutable pins.
+if ! repo_pin_delivery_start; then
+    echo "ERROR: Could not pin the repository start commit for delivery attribution"
+    exit 1
+fi
 
 run_worker_script "pre" "${CODIFY_WORKER_PRE_SCRIPT_FILE}"
 
@@ -67,9 +42,7 @@ RESULT=${SCRIPT_RESULT}
 if [ -f "${CODIFY_HARNESS_OUTPUT_FILE}" ] && [ -s "${CODIFY_HARNESS_OUTPUT_FILE}" ]; then
     SUMMARY_CONTENT=$(jq -r '.result // ""' "${CODIFY_HARNESS_OUTPUT_FILE}" 2>/dev/null || true)
     if [ ${#SUMMARY_CONTENT} -gt 45000 ]; then
-        SUMMARY_CONTENT="${SUMMARY_CONTENT:0:45000}
-
-...(内容已截断)"
+        SUMMARY_CONTENT="${SUMMARY_CONTENT:0:45000}"
     fi
     FINAL_SUMMARY_CONTENT="$(sanitize_summary_content "${SUMMARY_CONTENT}")"
 
@@ -99,39 +72,25 @@ if [ "${TASK_MODE}" = "plan" ]; then
     exit 0
 fi
 
-# Now commit and push the changes
-# Python-based validation commonly leaves untracked bytecode beside the source
-# files. It is a runtime artifact, not task delivery; remove only untracked
-# cache files before calculating and staging the workspace diff.
-codify_run_shell 'cd /workspace && git clean -fd -- "**/__pycache__" "**/*.pyc" "**/*.pyo"' || true
+# ---------------------------------------------------------------------------
+# Unified Git delivery. Every successful task converges on the same sequence:
+#   cleanup -> worker commit (only when a real staged diff exists) -> collect
+#   local facts S..H + inherited pending commits -> publish H as a verified
+#   fast-forward -> generate the MR summary -> persist metadata.
+# Harness-made commits are never re-committed, squashed or amended.
+# ---------------------------------------------------------------------------
 
-# Check if any changes were made (excluding result.md)
-CHANGES=$(codify_run_shell 'cd /workspace && git status --porcelain' || true)
-if [ -n "$CHANGES" ]; then
-    echo "Changes detected:"
-    while IFS= read -r line; do
-        [ -z "$line" ] && continue
-        status=$(printf '%s' "$line" | cut -c1-2)
-        filepath=$(printf '%s' "$line" | cut -c4-)
-        case "$status" in
-            "??") echo "  [new] ${filepath}" ;;
-            " M"|"M "|"MM") echo "  [modified] ${filepath}" ;;
-            " D"|"D ") echo "  [deleted] ${filepath}" ;;
-            "A "|" A") echo "  [added] ${filepath}" ;;
-            "R "|" R") echo "  [renamed] ${filepath}" ;;
-            *) echo "  [${status}] ${filepath}" ;;
-        esac
-    done <<< "$CHANGES"
+repo_commit_remaining_workspace_changes() {
+    # Stages and commits the leftover workspace changes with a model-generated
+    # message. Returns 0 when nothing needed committing.
+    if codify_run_shell 'cd /workspace && git diff --cached --quiet'; then
+        echo "No staged changes; skipping the worker commit"
+        return 0
+    fi
+
     echo "Changes detected, committing..."
 
-    # Remove result.md if it exists from prior runs
-    rm -f /workspace/result.md
-    codify_run_shell 'cd /workspace && git rm -f result.md' 2>/dev/null || true
-
-    # Add all changed files
-    codify_run_shell 'cd /workspace && git add -A'
-
-    # Calculate change statistics from staged changes before committing.
+    # Calculate change statistics from staged changes for the commit message.
     echo "Calculating change statistics..."
     DIFF_STATS=$(codify_run_shell 'cd /workspace && git diff --cached --stat' || echo "0 files changed")
     echo "Diff stats: ${DIFF_STATS}"
@@ -156,6 +115,8 @@ if [ -n "$CHANGES" ]; then
     echo "Changes: +${ADDITIONS} -${DELETIONS} (${TOTAL_CHANGES} total)"
 
     # Collect changed file lists from the staged diff before committing.
+    # These feed only the worker commit-message prompt; the authoritative task
+    # statistics come from the net S..H diff collected afterwards.
     NEW_FILES=""
     MODIFIED_FILES=""
     DELETED_FILES=""
@@ -172,10 +133,8 @@ if [ -n "$CHANGES" ]; then
     done <<< "${STAGED_NAME_STATUS}"
 
     # Remove trailing commas.
-    # NOTE: files with commas in their names will be split incorrectly when
-    # task-metadata.json is parsed on the backend (split(",")). This is an
-    # inherent limitation of the comma-delimiter approach; such filenames are
-    # extremely rare in practice.
+    # NOTE: files with commas in their names will be split incorrectly here;
+    # this only affects the model prompt text, never the task statistics.
     NEW_FILES="${NEW_FILES%,}"
     MODIFIED_FILES="${MODIFIED_FILES%,}"
     DELETED_FILES="${DELETED_FILES%,}"
@@ -183,7 +142,6 @@ if [ -n "$CHANGES" ]; then
     CHANGED_FILES_TEXT="新增: ${NEW_FILES:-无}
 修改: ${MODIFIED_FILES:-无}
 删除: ${DELETED_FILES:-无}"
-    FINAL_CHANGED_FILES_TEXT="$(build_changed_files_table "${NEW_FILES}" "${MODIFIED_FILES}" "${DELETED_FILES}" "${FINAL_SUMMARY_CONTENT}")"
 
     COMMIT_DIFF_STATS=$(codify_run_shell 'cd /workspace && git diff --cached --stat' || echo "0 files changed")
     echo "Generating commit message with the harness model..."
@@ -223,6 +181,26 @@ AI-Generated: true"
 AI-Generated: true"
     fi
 
+    {
+        printf '%s\n' "${FINAL_COMMIT_MESSAGE}"
+        printf '\nCo-authored-by: %s <%s>\n' "${CODIFY_COAUTHOR_NAME_VALUE}" "${CODIFY_COAUTHOR_EMAIL_VALUE}"
+    } > /tmp/commit_message.txt
+    echo "Commit message written to /tmp/commit_message.txt"
+    echo "Final commit message:"
+    sed 's/^/  /' /tmp/commit_message.txt
+
+    # Create commit
+    GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME_VALUE}" \
+    GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL_VALUE}" \
+    codify_run_shell 'cd /workspace && git commit -F /tmp/commit_message.txt'
+
+    echo "Worker commit created: $(codify_run_shell 'cd /workspace && git rev-parse HEAD')"
+    return 0
+}
+
+repo_delivery_generate_overall_summary() {
+    # Task/MR summary generation covers the whole task result (full commit list
+    # and the net S..H diff), not just the worker's last commit message.
     echo "Generating overall MR summary with the harness model..."
     PREVIOUS_SUMMARY_FILE="${CODIFY_RUNTIME_DIR}/previous-task-summaries.md"
     if [ -f "${PREVIOUS_SUMMARY_FILE}" ]; then
@@ -231,7 +209,23 @@ AI-Generated: true"
     else
         echo "Previous task summaries not found at ${PREVIOUS_SUMMARY_FILE}; using empty history"
     fi
-    OVERALL_SUMMARY_PROMPT=$(build_overall_summary_prompt "${PREVIOUS_SUMMARY_FILE}" "${FINAL_SUMMARY_CONTENT}" "${FINAL_COMMIT_MESSAGE}" "${COMMIT_DIFF_STATS}" "${USER_PROMPT}")
+
+    local commit_list_text diff_stats_text head_subject
+    commit_list_text=$(jq -r \
+        '.git_delivery.commits[]? | "- `" + .sha[0:8] + "` " + .subject' \
+        "${GIT_DELIVERY_SNAPSHOT_FILE}" 2>/dev/null || true)
+    diff_stats_text=$(jq -r \
+        '"+" + ((.git_delivery.diff // {}).additions // 0 | tostring) + " -" + ((.git_delivery.diff // {}).deletions // 0 | tostring)' \
+        "${GIT_DELIVERY_SNAPSHOT_FILE}" 2>/dev/null || true)
+    head_subject=$(codify_run_shell 'cd /workspace && git log -1 --format=%s' 2>/dev/null || true)
+
+    OVERALL_SUMMARY_PROMPT=$(build_overall_summary_prompt \
+        "${PREVIOUS_SUMMARY_FILE}" \
+        "${FINAL_SUMMARY_CONTENT}" \
+        "${FINAL_COMMIT_MESSAGE:-${head_subject:-}}" \
+        "${commit_list_text:-无}" \
+        "${diff_stats_text:-无}" \
+        "${USER_PROMPT}")
     printf '%s\n' "${OVERALL_SUMMARY_PROMPT}" > /tmp/overall_summary_prompt.txt
     chmod 644 /tmp/overall_summary_prompt.txt
     codify_chown /tmp/overall_summary_prompt.txt
@@ -253,125 +247,91 @@ AI-Generated: true"
     else
         echo "Harness overall summary generation failed with exit code ${OVERALL_SUMMARY_RESULT}; keeping previous MR summary"
     fi
+    return 0
+}
 
-    {
-        printf '%s\n' "${FINAL_COMMIT_MESSAGE}"
-        printf '\nCo-authored-by: %s <%s>\n' "${CODIFY_COAUTHOR_NAME_VALUE}" "${CODIFY_COAUTHOR_EMAIL_VALUE}"
-    } > /tmp/commit_message.txt
-    echo "Commit message written to /tmp/commit_message.txt"
-    echo "Final commit message:"
-    sed 's/^/  /' /tmp/commit_message.txt
+# Python-based validation commonly leaves untracked bytecode beside the source
+# files. It is a runtime artifact, not task delivery; remove only untracked
+# cache files before calculating and staging the workspace diff.
+codify_run_shell 'cd /workspace && git clean -fd -- "**/__pycache__" "**/*.pyc" "**/*.pyo"' || true
 
-    # Create commit
-    GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME_VALUE}" \
-    GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL_VALUE}" \
-    codify_run_shell 'cd /workspace && git commit -F /tmp/commit_message.txt'
+# Remove result.md if it exists from prior runs
+rm -f /workspace/result.md
+codify_run_shell 'cd /workspace && git rm -f result.md' 2>/dev/null || true
 
-    # Push to remote using the exact branch tip observed during repository preparation.
-    repo_push_work_branch_with_lease
+# Stage all remaining workspace changes; the worker commit below is skipped
+# when the stage stays empty so a clean tree never produces an empty commit.
+codify_run_shell 'cd /workspace && git add -A'
 
-    # Get commit SHA
-    COMMIT_SHA=$(codify_run_shell 'cd /workspace && git rev-parse HEAD')
-    echo "Committed: ${COMMIT_SHA}"
+WORKSPACE_STATUS=$(codify_run_shell 'cd /workspace && git status --porcelain' || true)
+if [ -n "$WORKSPACE_STATUS" ]; then
+    echo "Changes detected:"
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        status=$(printf '%s' "$line" | cut -c1-2)
+        filepath=$(printf '%s' "$line" | cut -c4-)
+        case "$status" in
+            "??") echo "  [new] ${filepath}" ;;
+            " M"|"M "|"MM") echo "  [modified] ${filepath}" ;;
+            " D"|"D ") echo "  [deleted] ${filepath}" ;;
+            "A "|" A") echo "  [added] ${filepath}" ;;
+            "R "|" R") echo "  [renamed] ${filepath}" ;;
+            *) echo "  [${status}] ${filepath}" ;;
+        esac
+    done <<< "${WORKSPACE_STATUS}"
+fi
 
-    # MR was already created by backend before worker started.
-    # In no-MR mode (TARGET_BRANCH is empty), skip all MR operations.
-    MR_WEB_URL=""
-    if [ -z "${TARGET_BRANCH:-}" ]; then
-        echo "No-MR mode: skipping MR lookup and update"
-    elif [ -n "${MR_IID}" ]; then
-        echo "Using existing MR: !${MR_IID}"
-        MR_WEB_URL=$(curl -sS -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
-            "${GITLAB_URL}/api/v4/projects/${PROJECT_ID}/merge_requests/${MR_IID}" | \
-            grep -o '"web_url":"[^"]*"' | cut -d'"' -f4)
-    else
-        # Fallback: check if MR already exists for this branch
-        echo "Checking for existing MR..."
-        EXISTING_MR=$(curl -sS -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
-            "${GITLAB_URL}/api/v4/projects/${PROJECT_ID}/merge_requests?state=opened&source_branch=${BRANCH_NAME}" | \
-            grep -o '"iid":[0-9]*' | head -1 | cut -d':' -f2)
-        if [ -n "$EXISTING_MR" ]; then
-            MR_IID="${EXISTING_MR}"
-            MR_WEB_URL=$(curl -sS -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
-                "${GITLAB_URL}/api/v4/projects/${PROJECT_ID}/merge_requests/${EXISTING_MR}" | \
-                grep -o '"web_url":"[^"]*"' | cut -d'"' -f4)
+if ! repo_commit_remaining_workspace_changes; then
+    echo "ERROR: Could not commit the remaining workspace changes"
+    exit 1
+fi
+
+# Collect local facts into the delivery snapshot: this task's commits S..H,
+# inherited pending commits and the net diff. The snapshot is written once and
+# only ever updated by record_push, so metadata and canonical events agree.
+if ! repo_delivery_collect; then
+    echo "ERROR: Could not collect Git delivery facts; refusing to declare a delivery result"
+    exit 1
+fi
+
+DELIVERY_COLLECT_ERROR=$(jq -r '.error.code // empty' "${GIT_DELIVERY_SNAPSHOT_FILE}" 2>/dev/null || true)
+if [ -n "${DELIVERY_COLLECT_ERROR}" ]; then
+    DELIVERY_COLLECT_MESSAGE=$(jq -r '.error.message // "Delivery facts could not be collected"' "${GIT_DELIVERY_SNAPSHOT_FILE}")
+    echo "ERROR: ${DELIVERY_COLLECT_MESSAGE}"
+    repo_delivery_record "failed" "" "${DELIVERY_COLLECT_ERROR}" "${DELIVERY_COLLECT_MESSAGE}" || true
+    repo_delivery_write_metadata || true
+    exit 1
+fi
+
+if repo_delivery_has_content; then
+    if repo_delivery_publish; then
+        # The model-generated MR summary runs only for genuinely new commits;
+        # recovered-only deliveries keep the previous overall summary.
+        if repo_delivery_commits_present; then
+            repo_delivery_generate_overall_summary || true
         fi
-    fi
-
-    if [ -z "${TARGET_BRANCH:-}" ]; then
-        echo "No-MR mode: branch pushed, no MR created"
-    else
-        if [ -z "$MR_WEB_URL" ]; then
-            MR_WEB_URL=$(cat /workspace/mr_response.json 2>/dev/null | grep -o '"web_url":"[^"]*"' | cut -d'"' -f4)
-        fi
-        echo "MR: ${MR_WEB_URL:-none}"
-    fi
-
-    if [ -n "${MR_IID}" ]; then
-        echo "MR IID: ${MR_IID}"
-    fi
-
-    # Write per-task metadata for MR description aggregation across tasks.
-    # FINAL_SUMMARY_CONTENT is the harness execution narrative (truncated to 3000 chars).
-    SUMMARY_TRUNCATED="${FINAL_SUMMARY_CONTENT:0:3000}"
-    TASK_METADATA=$(jq -nc \
-        --argjson task_id "${TASK_ID:-0}" \
-        --arg prompt "${USER_PROMPT:-}" \
-        --arg commit_sha "${COMMIT_SHA:-}" \
-        --arg commit_message "${FINAL_COMMIT_MESSAGE:-}" \
-        --arg overall_summary "${FINAL_OVERALL_SUMMARY:-}" \
-        --arg execution_summary "${SUMMARY_TRUNCATED}" \
-        --arg new_files "${NEW_FILES:-}" \
-        --arg modified_files "${MODIFIED_FILES:-}" \
-        --arg deleted_files "${DELETED_FILES:-}" \
-        --argjson additions "${ADDITIONS:-0}" \
-        --argjson deletions "${DELETIONS:-0}" \
-        --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-        '{
-            task_id: $task_id,
-            prompt: $prompt,
-            commit_sha: $commit_sha,
-            commit_message: $commit_message,
-            overall_summary: $overall_summary,
-            execution_summary: $execution_summary,
-            new_files: (if $new_files == "" then [] else ($new_files | split(",")) end),
-            modified_files: (if $modified_files == "" then [] else ($modified_files | split(",")) end),
-            deleted_files: (if $deleted_files == "" then [] else ($deleted_files | split(",")) end),
-            additions: $additions,
-            deletions: $deletions,
-            timestamp: $timestamp
-        }')
-    printf '%s\n' "${TASK_METADATA}" > "${CODIFY_RUNTIME_DIR}/task-metadata.json"
-    echo "Task metadata written to ${CODIFY_RUNTIME_DIR}/task-metadata.json (overall_summary_chars=${#FINAL_OVERALL_SUMMARY})"
-
-    echo "========================================"
-    echo "Task completed successfully!"
-    echo "========================================"
-elif repo_has_unpublished_local_head; then
-    echo "No new workspace changes; publishing the preserved local commit"
-    repo_log "delivery work_branch=${BRANCH_NAME} relation=${REPO_WORK_BRANCH_RELATION} action=push_existing_head"
-    repo_push_work_branch_with_lease
-    write_existing_commit_delivery_metadata
-    echo "========================================"
-    echo "Task completed successfully!"
-    echo "========================================"
-elif repo_work_branch_ahead_of_base; then
-    echo "Publishing the harness-created commit"
-    repo_log "delivery work_branch=${BRANCH_NAME} action=push_harness_commit"
-    repo_push_work_branch_with_lease || true
-    write_existing_commit_delivery_metadata
-    echo "========================================"
-    echo "Task completed successfully!"
-    echo "========================================"
-    exit 0
-else
-    echo "No changes made by Harness"
-    if [ "${REQUIRE_CHANGES:-true}" = "false" ]; then
-        echo "require_changes disabled: task completed without code changes"
+        repo_delivery_write_metadata || true
         echo "========================================"
         echo "Task completed successfully!"
         echo "========================================"
         exit 0
     fi
+    repo_delivery_write_metadata || true
+    echo "ERROR: Code delivery was not confirmed; the task ends failed with the local commits preserved"
     exit 1
 fi
+
+echo "No changes made by Harness"
+# No delivery content: no remote query, no publish.
+repo_delivery_record "not_needed" || true
+if [ "${REQUIRE_CHANGES:-true}" = "false" ]; then
+    echo "require_changes disabled: task completed without code changes"
+    repo_delivery_write_metadata || true
+    echo "========================================"
+    echo "Task completed successfully!"
+    echo "========================================"
+    exit 0
+fi
+repo_delivery_write_metadata || true
+echo "ERROR: No changes were delivered and require_changes is enabled"
+exit 1
