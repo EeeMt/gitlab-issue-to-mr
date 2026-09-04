@@ -169,3 +169,21 @@ database override. The effective encrypted credential was not read or
 printed. The release owner must reconcile the effective credential source,
 reduce GitLab/OAuth permissions, enable the required account controls, and
 record a verifiable rotation/revocation plan before R4.5 can be signed.
+
+## Schema alignment check
+
+The target database is currently at Alembic revision
+`077_v2_worker_kit_identity`. Both the Backend and Scheduler images contain
+`078_remove_provider_driver`, but both services are intentionally configured
+with `AUTO_MIGRATE=false`; the Scheduler log records that auto-migration was
+skipped. The live database still has the `provider_driver` column and one
+`openai_compatible` + `anthropic_messages` Provider row, which is exactly the
+legacy row that 078 would delete before dropping the column.
+
+The 078 migration tests and focused lint pass (`6 passed`, Ruff clean). No
+migration was run on the development Host. Before any `v2_only` cutover, the
+maintenance owner must back up the database, execute the reviewed target
+revision once, confirm the expected Provider cleanup, and repeat Profile,
+Bundle, and relevant Task verification; the current generation-73 evidence
+was recorded against revision 077 and cannot silently be reused as post-
+migration proof.
