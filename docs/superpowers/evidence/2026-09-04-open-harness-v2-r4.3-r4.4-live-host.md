@@ -22,37 +22,60 @@ and independent review gates are signed.
 - Commit `84ab6422` fixes an API-only omission: Issue detail serialization now
   includes `task_mode`, so valid `freeform` and `plan` tasks are not rendered as
   `Unknown`.
-- Commit `8110afa0` fixes the Codex Adapter's model projection to read the
+- Commit `8110afa0` fixed the Codex Adapter's model projection to read the
   OpenAI-compatible `OPENAI_MODEL` variable instead of the Anthropic-only
-  variable. This is runtime code, so the old Profile-4 evidence was not reused:
-  the Backend was rebuilt, Profile 4 was re-verified across all four Harnesses,
-  and a new Bundle was bound before the post-fix live Task.
-- Current post-fix identity: Profile 4 generation `72`; Worker Kit readiness
-  `ready`; Runtime Bundle 163, digest
-  `4aa9c7c894657aaeb1f075041d5221a250bca9ed648c12483f50e2c068ffa021`, archive
-  SHA-256 `559e0de9a92ee7d76d7c006a2d74bb4b773e5438a6c6798cec43b3fc37de3539`.
-  Its Adapter identities are Claude `1.0.1` /
-  `8ba6df5bf27b03699eb4bdad343d2de1ff1e06f6a42a94b5287821782631a71c`, Codex
-  `1.0.0` /
-  `ec77bd633d7258c460133aeab70bbbdc02c0870dd138cb0c5dc310ef0468b21d`,
+  variable. Commit `810f9fcb` fixes the Pi Adapter's startup-session projection:
+  when Pi emits an unsolicited `get_state` before the owner's `new_session`
+  acknowledgement, `model.resolved` is deferred until the negotiated active
+  session is known. Direct/no-handshake streams remain supported. Both changes
+  are runtime code, so the prior Profile-4 evidence was not reused: the Backend
+  was rebuilt, Profile 4 was re-verified across all four Harnesses, and new
+  content-addressed Bundles were bound before the current live Tasks.
+- Current post-fix identity: Profile 4 generation `73`; Worker Kit `0.6.12`
+  readiness `ready`; Worker Image ID
+  `sha256:b07ac48b129c35876c044079f8e9cd7aa7558dbb0ade2e50e856d4ab980f5e71`,
+  repo reference
+  `127.0.0.1:5000/codify-worker/java21-maven@sha256:234582c692d1ebb00ba8e882160618c2258463149d968009ac81c545e63a538b`.
+  The selected-Harness Bundle variants are:
+
+  | Bundle | Selected Harness | Bundle digest | Archive SHA-256 |
+  | ---: | --- | --- | --- |
+  | 166 | Pi | `c9e2365944e6abc6d3b2776ca8021c29b2beadc7fd4d4463fca348cc67e01acb` | `145112a5a53b7c31cf3b0ae45cbdbb375604e70941663decf879bb4775f67ce8` |
+  | 167 | Claude | `2bb41470c068be1d3a15bbd4c066ad9ceac20b8d61f3cea9f37e9bb81e883f69` | `fc5dbaa35b724f1b6589b56c17727cf8831290683557c864d9240e03758410ed` |
+  | 168 | OpenCode | `c1da73de15ad9eb8bd50875edf28fc820c46c548ef78739027c95009ea7c3edf` | `11645205edb5ea058a419457e9b4c96def1119c2d06fc7495480c04a02cf8006` |
+  | 169 | Codex | `1ed47a89c3f1936ba8a59c8b6560ca8d0318e15da03db7217f67b5af106e0410` | `8441ba42badd6a109896eb7a3a9c21d79989e90c2455c5fa2f3010b1523159d4` |
+
+  All four Bundles are 552,960 bytes. Their selected Adapter identities are
+  Pi `2.0.0` / `c317284b37970e87b0ac41d4bb364f18dc7a501615aacd5375f7afddbe543080`,
+  Claude `1.0.1` /
+  `8ba6df5bf27b03699eb4bdad343d2de1ff1e06f6a42a94b5287821782631a71c`,
   OpenCode `2.0.0` /
   `a6bec9ac5df76a9de2824216628781ccaa46ad0efefd13a6ca1d677b9558887b`, and
-  Pi `2.0.0` /
-  `984154bf0bd473c26666877a0e13090cd2e58f0a7c37572d1df196ebf8150586`.
-- Runtime Bundle identity is selected-Harness scoped. Task 371's OpenCode
-  selection on the same Profile 4 generation `72` bound Bundle 164, digest
-  `7be14593c3f01ad12c0045647e5deb881a34a0c485ae0cd718a24284738ded2e`, archive
-  SHA-256
-  `402a9472a6dd844d44f12815cb9ae7d8238c2a1ae716379c88eed2a44b862789`.
-  A DB manifest comparison found Bundle 163 and 164 have identical controlled
+  Codex `1.0.0` /
+  `ec77bd633d7258c460133aeab70bbbdc02c0870dd138cb0c5dc310ef0468b21d`.
+  The selected CLI identities remain Pi `0.84.2` /
+  `9a2d20fab3caacbe3517d91e59d495ccc49fd4b51a1a72dcec6e8c1f4b7d6ab2`,
+  Claude `2.1.153` /
+  `214f603f31942162dac9a65f18d43b3ac646ae215240fad481c4aad6c60f2e38`,
+  OpenCode `1.18.19` /
+  `fd4cfd76ca65a706d0138886dd23094dd07e35460080024b1467baaf32dcee2e`, and
+  Codex `0.146.0` /
+  `2e863156ed35ecc5253b1e2f907a9143077b9f7cb51942070c61996471ff6e04`.
+- Bundle 165 was the Pi-specific pre-`810f9fcb` diagnostic. Task 373 completed
+  on it, but its `model.resolved` session differed from both
+  `harness.completed` and the Task output session; it is retained as
+  superseded defect evidence and is excluded from the current candidate.
+- Runtime Bundle identity is selected-Harness scoped. As with the earlier
+  Bundle 163/164 pair, the generation-73 variants have identical controlled
   files, Worker Image identity, Worker Kit identity, and all four Adapter
-  identities; only the selected `harness_verification_evidence` differs. This
-  is the expected OpenCode-specific identity variant, not runtime source/Image/
-  Kit/Adapter drift.
-- The first post-deployment append attempt was rejected because the old
-  Profile evidence still carried the prior Codex Adapter digest. No Task was
-  bound from that attempt. This is recorded as fail-closed behavior; the
-  re-verified Profile then accepted Task 368.
+  identities; only selected-Harness evidence and the content-addressed source
+  digest differ. This is an expected scoped identity variant, not runtime
+  Image/Kit/Adapter drift.
+- The first post-`8110afa0` append attempt was rejected because the old Profile
+  evidence still carried the prior Codex Adapter digest. No Task was bound from
+  that attempt. This is recorded as fail-closed behavior; the re-verified
+  generation-72 Profile then accepted Task 368. The later Pi fix generated the
+  current generation-73 Profile and Bundles recorded above.
 - Local validation for the change and current frontend candidate:
 
   | Check | Result |
@@ -63,6 +86,8 @@ and independent review gates are signed.
   | `backend/.venv/bin/python -m pytest backend/tests/unit -q` | 3247 passed / 4 skipped / 96 subtests (pre-fix baseline) |
   | affected Bundle/Profile/Scheduler/notification/freeform regression set | 227 passed |
   | `backend/.venv/bin/python -m pytest backend/tests/unit/test_codex_harness_adapter.py -q` | 33 passed |
+  | `backend/.venv/bin/python -m pytest backend/tests/unit/test_pi_harness_adapter.py -q` | 50 passed; covers active-session projection after startup `get_state` |
+  | `backend/.venv/bin/python -m ruff check deploy/worker-entrypoint/harness/adapters/pi_events.py backend/tests/unit/test_pi_harness_adapter.py` | passed |
   | `make lint-backend` | passed |
   | `python3 -m py_compile deploy/worker-entrypoint/harness/adapters/codex_events.py` | passed |
   | `python3 scripts/harness-probes/v2/secret-scan.py` | passed, `findings=0` |
@@ -76,16 +101,19 @@ and independent review gates are signed.
 
 - Docker target: `192.168.50.129`, `linux/amd64`; execution mode remains
   `dual_canary`.
-- The final nginx-only frontend deployment snapshot: Images `12.41GB` with
-  `6.698GB` reclaimable; containers `29.3MB`; local volumes `1.639GB`; and
-  BuildKit cache `6.526GB`. The filesystem was `61GB` total / `58GB` used /
-  `3.6GB` available (`95%`), with `22%` inode use. It was not full, so no
-  image or cache cleanup was performed.
-- The Backend was rebuilt/restarted for commit `8110afa0` and returned healthy
-  with image ID `sha256:d65c19ee4dff3398fba6917b2fe60b037b5835437df3bec6ea6f2c2eb4d17089`.
-  The scheduler and long-lived GitLab services remained running.
+- After the generation-73 live Tasks, the Docker snapshot reports Images
+  `12.41GB` with `6.706GB` reclaimable (81 total / 8 active), containers
+  `7.123MB`, local volumes `1.641GB`, and BuildKit cache `6.526GB`. The
+  filesystem is `61GB` total / `57GB` used / `4.1GB` available (`94%`), with
+  `19%` inode use. It is not full, so no image, volume, or BuildKit cleanup
+  was performed.
+- The Backend was rebuilt/restarted for commit `810f9fcb` and returned healthy
+  with image ID
+  `sha256:9584b350d54afbbeae42847c0e52554570eb1a7535b60c4614823d2d09da31d1`.
+  The scheduler, nginx, Postgres, and long-lived GitLab services remained
+  healthy/running; Scheduler health also reports `dual_canary`.
 - Profile 4's administrator Verify completed all four enabled Harness checks;
-  the new Profile generation is `72`, and the readiness row is `ready`.
+  the current Profile generation is `73`, and the readiness row is `ready`.
 
 - The frontend-only commit `a6be3f8b` opts the served app into
   `viewport-fit=cover`, applies the top safe-area inset to the mobile shell and
@@ -99,29 +127,30 @@ and independent review gates are signed.
 
 ## Current operational snapshot
 
-The read-only snapshot taken after Task 368 converged showed zero active Tasks
-(`pending`, `queued`, or `running`) and zero `issue_execution_locks`. Tasks
-357–366 and 368 each had exactly one canonical terminal event, contiguous
-sequence numbers starting at 1, and zero matches for the repository's
-GitLab/Provider token-shaped patterns in both canonical event JSON and raw-log
-chunks. Raw-log storage was finalized for all eleven tasks: 3/2444 bytes,
-4/2740 bytes, 5/2331 bytes, 3/3857 bytes, 4/2041 bytes, 4/3773 bytes,
-4/2021 bytes, 3/3845 bytes, 6/6373 bytes, 5/2690 bytes, and 4/2683 bytes
-respectively.
+The read-only snapshot taken after Task 378 converged showed zero active Tasks
+(`pending`, `queued`, or `running`) and zero `issue_execution_locks`; the
+database contained 347 Tasks. Tasks 374–378 each had exactly one canonical
+terminal event, contiguous sequence numbers starting at 1, and finalized
+raw-log storage. Their raw-log totals were 5/2701 bytes, 7/6117 bytes,
+5/2711 bytes, 4/2420 bytes, and 4/2426 bytes respectively. The five current
+generation-73 attempts contain 111 receipts and 111 distinct event IDs; the
+task and Harness terminal counts are both five. Token-shaped secret scanning
+for the complete current cohort remains zero as recorded below.
 
 Task 358's one live `steer` command was `delivered` with one delivery attempt;
-the other ten live smoke tasks had no control command. The remote database had
+the other recorded smoke tasks had no control command. The remote database had
 no Mattermost notification profile or delivery record, so live alert delivery
 was not exercised and is not treated as passing evidence.
 
-A fresh read-only integrity query scoped to the frozen Runtime Bundle 163 found
-the three current-candidate attempts (Tasks 368–370): all three have exactly
-one terminal event, 29 receipts total, and contiguous sequences beginning at
-1, with no duplicate terminal event IDs. The full database also retains twelve
-older attempt rows without `terminal_event_id`; only Tasks 166 and 181 have
-non-terminal receipts, and both predate Bundle 163. These historical rows were
-not rewritten or backfilled, so this check is a current-candidate pass rather
-than a claim that every historical V2 row is complete.
+A fresh read-only integrity query scoped to the generation-73 Runtime Bundles
+166–169 found the five current-candidate attempts (Tasks 374–378): all five
+have exactly one terminal event, 111 receipts total, and contiguous sequences
+beginning at 1, with no duplicate terminal event IDs. The full database still
+retains twelve older attempt rows without `terminal_event_id`; only Tasks 166
+and 181 have non-terminal receipts, and both predate Bundle 163. These
+historical rows were not rewritten or backfilled, so this check is a
+current-candidate pass rather than a claim that every historical V2 row is
+complete.
 
 A second read-only query over the recorded live cohort (Tasks 357–366 and
 368–370, thirteen tasks/attempts) found zero task-status/terminal-type
@@ -148,8 +177,9 @@ does not override the canonical cancellation payload.
 
 ## Real Task and command-plane evidence
 
-Both tasks used Profile 4, the current V2 mounted-Kit composition, Pi, and a
-fresh session. The prompts were read-only diagnostics and produced no code
+The current additions used Profile 4, the generation-73 V2 mounted-Kit
+composition, the selected Harness/Provider combinations shown below, and a
+fresh session. All prompts were read-only diagnostics and produced no code
 changes.
 
 | Task | Provider / result | Runtime evidence |
@@ -179,18 +209,26 @@ prove the Codex model projection fixed by `8110afa0`.
 | 364 | Claude / Provider 6 `opencode-pi` | `failed`; CLI `2.1.153`, Adapter `1.0.1`, canonical seq 1–7 with terminal `run.failed(failure.kind=rate_limited)`, archive 4084 bytes, raw-log 3 chunks / 3845 bytes; upstream reported HTTP 429 monthly usage limit |
 | 365 | Claude / Provider 11 `openrouter-minimax-anthropic` | `completed`; CLI `2.1.153`, Adapter `1.0.1`, canonical seq 1–15, archive 5815 bytes, raw-log 6 chunks / 6373 bytes, usage 2608 input / 272 output, 0 changes |
 | 366 | Codex / Provider 12 `openrouter-minimax-responses` | `completed`; CLI `0.146.0`, Adapter `1.0.0`, canonical seq 1–14, archive 3908 bytes, raw-log 5 chunks / 2690 bytes, usage 20986 input / 123 output, 0 changes |
-| 368 | Codex / Provider 12 `openrouter-minimax-responses` | `completed` on current Bundle 163; CLI `0.146.0`, Adapter `1.0.0`, canonical seq 1–14 with 14 distinct receipts, terminal `run.completed`, archive 4020 bytes, raw-log 4 chunks / 2683 bytes, usage 21017 input / 177 output, 0 changes; `model.resolved` and Task/UI execution model both `minimax/minimax-m3:free` |
-| 369 | Codex / Provider 12 `openrouter-minimax-responses` | `failed` on current Bundle 163; CLI `0.146.0`, Adapter `1.0.0`, canonical seq 1–8 with terminal `run.failed(failure.kind=rate_limited)`, archive 3085 bytes, raw-log 4 chunks / 2486 bytes; the controlled backend-restart probe reached the upstream retry limit with HTTP 429 before the requested delay |
-| 370 | Codex / Provider 4 `opencode-luna` | `failed` on current Bundle 163; CLI `0.146.0`, Adapter `1.0.0`, canonical seq 1–7 with terminal `run.failed(failure.kind=rate_limited)`, archive 2935 bytes, raw-log 4 chunks / 2503 bytes; the second controlled backend-restart probe reached the upstream retry limit with HTTP 429 before the requested delay |
-| 371 | OpenCode / Provider 7 `openrouter-free` | `completed` on OpenCode-specific Bundle 164; CLI `1.18.19`, Adapter `2.0.0`, fresh session, three read-only Bash commands (`pwd`, `git status --short`, `sleep 180`) all exited `0`, canonical seq 1–26 with 26 distinct receipts and terminal `run.completed`, archive 8719 bytes, raw-log 5 chunks / 2782 bytes, usage 51 input / 7 output, 0 changes |
-| 372 | OpenCode / Provider 7 `openrouter-free` | `cancelled` on OpenCode-specific Bundle 164; CLI `1.18.19`, Adapter `2.0.0`, fresh session, operator cancelled after `tool.started(Bash: sleep 180)`, canonical seq 1–15 with the chain `harness.failed(cancelled)` → `worker.finalization(exit_code=143)` → unique `run.failed(status=cancelled, failure.kind=cancelled)`, archive 6867 bytes, raw-log 4 chunks / 2532 bytes, 0 usage / 0 changes, container cleaned |
+| 368 | Codex / Provider 12 `openrouter-minimax-responses` | `completed` on preceding generation-72 Bundle 163; CLI `0.146.0`, Adapter `1.0.0`, canonical seq 1–14 with 14 distinct receipts, terminal `run.completed`, archive 4020 bytes, raw-log 4 chunks / 2683 bytes, usage 21017 input / 177 output, 0 changes; `model.resolved` and Task/UI execution model both `minimax/minimax-m3:free` |
+| 369 | Codex / Provider 12 `openrouter-minimax-responses` | `failed` on preceding generation-72 Bundle 163; CLI `0.146.0`, Adapter `1.0.0`, canonical seq 1–8 with terminal `run.failed(failure.kind=rate_limited)`, archive 3085 bytes, raw-log 4 chunks / 2486 bytes; the controlled backend-restart probe reached the upstream retry limit with HTTP 429 before the requested delay |
+| 370 | Codex / Provider 4 `opencode-luna` | `failed` on preceding generation-72 Bundle 163; CLI `0.146.0`, Adapter `1.0.0`, canonical seq 1–7 with terminal `run.failed(failure.kind=rate_limited)`, archive 2935 bytes, raw-log 4 chunks / 2503 bytes; the second controlled backend-restart probe reached the upstream retry limit with HTTP 429 before the requested delay |
+| 371 | OpenCode / Provider 7 `openrouter-free` | `completed` on preceding generation-72 OpenCode-specific Bundle 164; CLI `1.18.19`, Adapter `2.0.0`, fresh session, three read-only Bash commands (`pwd`, `git status --short`, `sleep 180`) all exited `0`, canonical seq 1–26 with 26 distinct receipts and terminal `run.completed`, archive 8719 bytes, raw-log 5 chunks / 2782 bytes, usage 51 input / 7 output, 0 changes |
+| 372 | OpenCode / Provider 7 `openrouter-free` | `cancelled` on preceding generation-72 OpenCode-specific Bundle 164; CLI `1.18.19`, Adapter `2.0.0`, fresh session, operator cancelled after `tool.started(Bash: sleep 180)`, canonical seq 1–15 with the chain `harness.failed(cancelled)` → `worker.finalization(exit_code=143)` → unique `run.failed(status=cancelled, failure.kind=cancelled)`, archive 6867 bytes, raw-log 4 chunks / 2532 bytes, 0 usage / 0 changes, container cleaned |
+| 373 | Pi / Provider 7 `openrouter-free` | `completed` on superseded Bundle 165; CLI `0.84.2`, Adapter `2.0.0`, canonical seq 1–36, archive 5950 bytes, raw-log 4 chunks / 2692 bytes, 0 changes; excluded because `model.resolved` used a startup throwaway session while `harness.completed` and Task output used the active session |
+| 374 | Pi / Provider 7 `openrouter-free` | `completed` on current Bundle 166; CLI `0.84.2`, Adapter `2.0.0`, fresh session, canonical seq 1–47, archive 6536 bytes, raw-log 5 chunks / 2701 bytes, 0 changes; `model.resolved`, `harness.completed`, and output session all `01a06cc4-9e66-78bf-8e99-75a0149f2e75` |
+| 375 | Claude / Provider 11 `openrouter-minimax-anthropic` | `completed` on current Bundle 167; CLI `2.1.153`, Adapter `1.0.1`, fresh session, canonical seq 1–15, archive 5675 bytes, raw-log 7 chunks / 6117 bytes, usage 2576 input / 208 output, 0 changes |
+| 376 | OpenCode / Provider 7 `openrouter-free` | `completed` on current Bundle 168; CLI `1.18.19`, Adapter `2.0.0`, fresh session, canonical seq 1–24, archive 7980 bytes, raw-log 5 chunks / 2711 bytes, usage 75 input / 5 output, 0 changes; canonical result `Workspace left unchanged.` |
+| 377 | Codex / Provider 12 `openrouter-minimax-responses` | `failed` on current Bundle 169; CLI `0.146.0`, Adapter `1.0.0`, canonical seq 1–13, archive 3549 bytes, raw-log 4 chunks / 2420 bytes; reached both requested shell commands, then upstream retry exhaustion returned HTTP 429 and canonical `run.failed(failure.kind=rate_limited)` |
+| 378 | Codex / Provider 4 `opencode-luna` | `failed` on current Bundle 169; CLI `0.146.0`, Adapter `1.0.0`, canonical seq 1–12, archive 3342 bytes, raw-log 4 chunks / 2426 bytes; upstream returned HTTP 403 `unsupported_country_region_territory`, classified as `engine_error` and not retried |
 
-Together with Tasks 357/358, the live set now covers Pi, OpenCode, Claude, and
-Codex across multiple compatible Provider selections. The
-Claude/Codex non-success outcomes are bounded upstream Provider availability
-failures, not success claims; they remain useful evidence that the failure
-classifier and single terminal path reject rate-limited or unavailable-model
-execution.
+Together with Tasks 357/358, the live set covers Pi, OpenCode, Claude, and
+Codex across multiple compatible Provider selections. The generation-73
+additions provide current-Bundle success samples for Pi, Claude, and OpenCode;
+Codex success remains represented by Task 368 on the preceding Bundle 163,
+whose Codex Adapter identity is unchanged, while current-Bundle Tasks 377/378
+are bounded upstream Provider availability failures rather than success claims.
+They remain useful evidence that the failure classifier and single terminal
+path reject rate-limited or region-blocked execution.
 
 Tasks 369 and 370 were two isolated probes in which only the remote
 `codify-backend` container was restarted while the task page remained open. The
@@ -221,6 +259,17 @@ all failed/cancelled Task terminals, with `status=cancelled` and
 `failure.kind=cancelled` providing the cancellation semantics. This validates
 stable-state cancellation on OpenCode with `exit_code=143`; it is not a code
 delivery sample.
+
+Tasks 374–378 then added the generation-73 post-`810f9fcb` smoke cohort. Task
+374's Pi `model.resolved`, `harness.completed`, and Task output session all
+match, demonstrating the `810f9fcb` fix against the real startup stream. Task
+375 completed Claude and Task 376 completed OpenCode with clean workspaces.
+Task 377 reached the Codex Adapter and both read-only shell commands before
+Provider 12 became `rate_limited` after HTTP 429 retry exhaustion. Task 378
+reached the Codex Adapter but its Provider 4 failed before the model turn with
+`engine_error` for upstream 403 `unsupported_country_region_territory`.
+Both failures have one canonical terminal, finalized raw logs, and retained
+archives; neither is counted as a Codex success sample.
 
 ## Browser interaction evidence
 
@@ -271,6 +320,18 @@ at a physical `390x844` viewport (the extension reported a CSS viewport of
   command records, then displayed the completion message and completed state
   after the delayed command. The persisted event sequence has 26 unique,
   contiguous receipts spanning the restart window.
+- On the refreshed Issue #99 create-task drawer, enabling “use new session” made
+  the Harness selector editable. The browser selected OpenCode with the default
+  Provider 7 for Task 376, then selected Codex with Provider 12 for Task 377
+  and Provider 4 for Task 378. The three tasks were submitted in freeform mode;
+  the UI showed the expected completed or bounded failure states after reload.
+- Task #374's detail page exposed the post-fix Pi completion with zero changes;
+  the persisted session identity matched across `model.resolved`,
+  `harness.completed`, and the Task output. Task #375/#376 exposed the Claude
+  and OpenCode completions with their selected Provider, fresh-session context,
+  usage, archive, and zero-change result. Tasks #377/#378 exposed Codex's
+  `rate_limited` and `engine_error` reasons respectively; no retry was clicked
+  after the bounded upstream failures.
 
 After the restart probes, the frontend structured-log lifecycle was tightened
 at the source level: `useTaskLogStreams` now checks EventSource identity in both
@@ -347,17 +408,23 @@ It does not yet sign the full gate because:
 
 ### R4.4 — partial evidence, not signed
 
-Tasks 357–366 and 368–371 plus the prior five-task warm-start cohort provide all
-four Harness selections with real success samples for each Harness and bounded
-upstream failure classification,
-command latency, usage, canonical terminal, archive, raw-log finalization,
-delivery samples, and the current queue/lock/secret-scan snapshot. The local
-Mattermost mock E2E suite also passed 96 tests, covering profile CRUD, config
-validation, connection-test outcomes, event filtering, and delivery result
-recording without contacting a real notification service. A complete
-Harness/Profile/Host operational review of alert behavior and a formal
-zero-P0/P1 sign-off are still required; no notification profile was configured
-on this development Host for a live alert delivery test.
+Tasks 357–366 and 368–378 plus the prior five-task warm-start cohort provide all
+four Harness selections with real success samples across the evidence set and
+bounded upstream failure classification, command latency, usage, canonical
+terminal, archive, raw-log finalization, delivery samples, and the current
+queue/lock/secret-scan snapshot. The generation-73 current candidate adds
+successful Pi/Claude/OpenCode samples (#374–#376) and two correctly bounded
+Codex Provider failures (#377/#378); the current-Bundle Codex success sample
+is still open because these two current-generation attempts were blocked by
+upstream 429 and 403 responses. Task 368 on Bundle 163 remains a valid Codex success for
+the unchanged Codex Adapter identity, but does not replace that missing exact
+generation-73 Codex success. The local Mattermost mock E2E suite also passed
+96 tests, covering profile CRUD, config validation, connection-test outcomes,
+event filtering, and delivery result recording without contacting a real
+notification service. A complete Harness/Profile/Host operational review of
+alert behavior and a formal zero-P0/P1 sign-off are still required; no
+notification profile was configured on this development Host for a live alert
+delivery test.
 
 The backend notification path was also exercised on the target Host with a
 temporary channel profile and a mock Mattermost HTTP service attached only to
@@ -367,19 +434,17 @@ mock container were removed immediately afterward. This proves the Host
 container/DB/HTTP delivery path, but not authorization, a real Mattermost
 server, or external alert routing.
 
-The current Bundle 163 receipt recheck above supports the zero-duplicate-terminal
-and zero-sequence-gap claim for the frozen Codex-selected candidate. Task 371's
-and Task 372's OpenCode-specific Bundle 164 attempts have 41 contiguous receipts
-in total, each with one terminal and no sequence gap; Task 371 ends in
-`run.completed`, while Task 372 ends in the cancellation-classified
-`run.failed` described above. The Bundle 163/164 manifest comparison shows
-that this is a selected-Harness evidence variant over the same files,
-Image/Kit identity, and Adapter identities. The pre-Bundle-163 historical rows
-remain an evidence boundary and are not silently counted as a current-candidate
-pass. The expanded fifteen-task cohort query also passes the frozen
-status/terminal mapping, duplicate-terminal, sequence, and secret-like checks,
-while still leaving live alert delivery to a real Mattermost service and the
-formal zero-P0/P1 review open.
+The generation-73 Bundle 166–169 receipt recheck supports the
+zero-duplicate-terminal and zero-sequence-gap claim for the current candidate:
+five attempts (#374–#378) contain 111 contiguous receipts in total, each with
+one Harness terminal and one Task terminal. Bundle 166/167/168/169 remain
+selected-Harness evidence variants over the same Image/Kit and Adapter
+identities. Bundle 163/164 and Task 368/371/372 are retained as historical
+generation-72 evidence; Bundle 165 and Task 373 are explicitly superseded by
+the Pi session-projection defect. The expanded current cohort still passes the
+frozen status/terminal mapping, duplicate-terminal, sequence, and secret-like
+checks, while leaving the exact generation-73 Codex success, live alert
+delivery to a real Mattermost service, and the formal zero-P0/P1 review open.
 
 R4.5 security/release sign-off and R4.6 independent hard-cut go/no-go remain
 open. No R5 maintenance window or `v2_only` cutover was performed.

@@ -6,18 +6,19 @@
 candidate, and repository-side release checks. This is an audit record, not a
 security approval or an independent R4.6 go/no-go decision.
 
-The prior Profile-4 candidate was superseded after commit `8110afa0` changed
-the Codex Adapter's model projection. The current candidate is Profile 4
-generation `72`, with Bundle 163 for the Codex selection and the
-Harness-scoped OpenCode Bundle 164; the exact identities and Tasks 368/371/372
-validation are recorded in the
+The prior Profile-4 candidate was superseded after runtime commits `8110afa0`
+and `810f9fcb` changed the Codex and Pi Adapter projections. The current
+candidate is Profile 4 generation `73`, with selected-Harness Bundles 166
+(Pi), 167 (Claude), 168 (OpenCode), and 169 (Codex); the exact identities and
+Tasks 374–378 validation are recorded in the
 [R4.3/R4.4 live Host evidence](2026-09-04-open-harness-v2-r4.3-r4.4-live-host.md).
-Tasks 369 and 370 were additional negative backend-restart probes on the same
-Codex-selected Bundle; both were bounded as upstream `rate_limited`. Task 371
-then completed on the OpenCode-specific Bundle 164 during a controlled
-nginx-only disconnect/reconnect spot-check, and Task 372 completed a
-stable-state cancellation on that same Bundle; these are Host evidence, not a
-security or release-owner approval.
+Tasks 369 and 370 were additional negative backend-restart probes on the
+preceding Codex-selected Bundle; both were bounded as upstream `rate_limited`.
+Task 371 then completed on the preceding OpenCode-specific Bundle 164 during a
+controlled nginx-only disconnect/reconnect spot-check, and Task 372 completed
+a stable-state cancellation on that same Bundle. Current Task 377 was an
+upstream 429 and Task 378 an upstream 403 region restriction; these are Host
+evidence, not a security or release-owner approval.
 
 ## Checks completed
 
@@ -25,14 +26,16 @@ security or release-owner approval.
 | --- | --- | --- |
 | `python3 scripts/harness-probes/v2/secret-scan.py` | passed, `findings=0` | Repository candidate only; it does not replace a Provider/GitLab access audit |
 | `backend/.venv/bin/python -m pytest backend/tests/unit/test_codex_harness_adapter.py -q` | passed, 33 tests | Covers the post-fix Codex `OPENAI_MODEL` projection and V2 envelope/result mapping |
+| `backend/.venv/bin/python -m pytest backend/tests/unit/test_pi_harness_adapter.py -q` | passed, 50 tests | Covers active-session projection when Pi emits startup `get_state` before `new_session` acknowledgement |
+| `backend/.venv/bin/python -m ruff check deploy/worker-entrypoint/harness/adapters/pi_events.py backend/tests/unit/test_pi_harness_adapter.py` | passed | Focused lint for the Pi runtime fix |
 | Affected Bundle/Profile/Scheduler/notification/freeform regression set | passed, 227 tests | Re-checks the source/binding/runtime paths affected by the post-fix candidate |
 | Backend focused regression | passed, 39 `test_issues_api.py` tests | Covers the current `task_mode` serialization fix |
 | Frontend unit suite | passed, 80 files / 1692 tests | Includes structured SSE stale-source and mobile safe-area regression coverage |
 | Frontend production build | passed | Vite emitted only the existing large-chunk warning |
 | Backend lint | passed | `make lint-backend` |
-| Remote Docker state | near capacity, not full | The post-Task-371 recheck reports `df -h /` at 61G total / 58G used / 3.6G available (95%) and `df -ih /` at 22% inode use; `docker system df` reports Images 12.41GB / 6.698GB reclaimable, containers 29.3MB, volumes 1.639GB, and BuildKit 6.526GB. No cleanup was performed because the disk was not full. |
+| Remote Docker state | near capacity, not full | The post-generation-73 recheck reports `df -h /` at 61G total / 57G used / 4.1G available (94%) and `df -ih /` at 19% inode use; `docker system df` reports 81 Images / 12.41GB / 6.706GB reclaimable, 7.123MB containers, 1.641GB volumes, and 6.526GB BuildKit. No cleanup was performed because the disk was not full. |
 | Current Kit archive reconstruction and V2 release preflight | passed, not signed | The installed `0.6.12-linux-amd64-c33dbf86951b` Kit was streamed into a temporary `518M` archive; archive SHA-256 `2d3ee7f81525d465731344571cbf5bd93a0cd94bb6cf16f5a4d5512d5c0a25a6`, manifest SHA-256 `c33dbf86951bed6e3b4de1897313725f14f00006dc51fb300e7b821bb47e17bd`, content inventory `7630f086800c95f851db8c9351638868ab60ac33fb3bfe22f9f2f5c8dcdc98a1`; `deploy/scripts/preflight-v2-release.sh` passed against the target daemon and Worker image repo digest `127.0.0.1:5000/codify-worker/java21-maven@sha256:234582c692d1ebb00ba8e882160618c2258463149d968009ac81c545e63a538b`. The temporary archive is not a release-owner-signed package and is not committed. |
-| Profile re-verification and live post-fix smoke | passed | Profile 4 generation 72 completed four-Harness Verify; Task 368 completed on Bundle 163 with the expected model field, Task 371 completed OpenCode on the scoped Bundle 164 through the controlled nginx-only reconnect probe, and Task 372 demonstrated stable-state cancellation on that Bundle |
+| Profile re-verification and live post-fix smoke | passed with bounded Provider negatives | Profile 4 generation 73 completed four-Harness Verify; Tasks 374–376 completed Pi/Claude/OpenCode on Bundles 166–168, while Codex Tasks 377/378 reached the Adapter and were correctly bounded as upstream `rate_limited`/`engine_error`; Task 368 remains the preceding-generation Codex success |
 | GitLab integration connectivity | passed, not a permission sign-off | The authenticated admin UI read-only connection test reached `http://192.168.50.129:8080`, authenticated as `ai-bot`, and reported GitLab `18.5.5-ee`; the Webhook overview currently returned zero projects. This proves application connectivity/identity only, not token scope, least privilege, or rotation. |
 | Remote execution mode | unchanged | `HARNESS_EXECUTION_MODE=dual_canary`; no `v2_only` switch was attempted |
 
@@ -57,7 +60,7 @@ inventory, and Worker image platform/repo digest were all verified. This is
 reproducibility evidence for the frozen Kit, not release-owner approval: the
 archive is temporary and there is no signed package or approved release note
 attached to this audit.
-The database snapshot has 341 Tasks, zero `pending`/`queued`/`running` Tasks,
+The database snapshot has 347 Tasks, zero `pending`/`queued`/`running` Tasks,
 zero `issue_execution_locks`, zero Mattermost notification profiles, and zero
 notification deliveries. These are current Host observations; they do not
 replace the missing live alert delivery or independent release sign-off.
@@ -78,11 +81,13 @@ observation only; the release owner still must provide the least-privilege and
 rotation record.
 
 The current live evidence covers Pi, OpenCode, Claude, and Codex on Profile 4,
-including the post-fix Codex Task 368, the OpenCode reconnect Task 371, the
-stable-state cancellation Task 372, and the negative restart probes 369/370;
-the known non-success outcomes were correctly bounded as upstream/provider
-availability failures (`rate_limited`, selected-model `engine_error`, or the
-earlier real upstream 404). The detailed task, identity, archive, raw-log, and
+including generation-73 successful Tasks 374–376, the current-generation
+Codex negative Tasks 377/378, the preceding-generation Codex success Task 368,
+the OpenCode reconnect Task 371, the stable-state cancellation Task 372, and
+the negative restart probes 369/370. The known non-success outcomes were
+correctly bounded as upstream/provider availability failures (`rate_limited`,
+selected-model `engine_error`, region-blocked `engine_error`, or the earlier
+real upstream 404). The detailed task, identity, archive, raw-log, and
 canonical-sequence evidence is in the
 [R4.3/R4.4 live Host evidence](2026-09-04-open-harness-v2-r4.3-r4.4-live-host.md).
 
