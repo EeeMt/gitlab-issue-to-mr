@@ -246,7 +246,6 @@ def _gd_finalization(*, head_sha: str | None, push_status: str | None = "pushed"
 
 def _parse(task, finalization_meta, run_meta=None, exit_code: int = 0):
     import asyncio
-
     from unittest.mock import MagicMock
 
     run_meta = run_meta or {"type": "run.completed", "status": "completed", "success": True}

@@ -147,7 +147,7 @@ def _snapshot(root: Path) -> dict:
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 def delivery_env(tmp_path: Path):
     """(remote, branch_name, previous_sha, workspace) with a fresh work clone."""
     remote, branch_name, previous = _create_remote_with_work_branch(tmp_path)
