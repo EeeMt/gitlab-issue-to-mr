@@ -91,6 +91,15 @@ the other ten live smoke tasks had no control command. The remote database had
 no Mattermost notification profile or delivery record, so live alert delivery
 was not exercised and is not treated as passing evidence.
 
+A fresh read-only integrity query scoped to the frozen Runtime Bundle 163 found
+the three current-candidate attempts (Tasks 368–370): all three have exactly
+one terminal event, 29 receipts total, and contiguous sequences beginning at
+1, with no duplicate terminal event IDs. The full database also retains twelve
+older attempt rows without `terminal_event_id`; only Tasks 166 and 181 have
+non-terminal receipts, and both predate Bundle 163. These historical rows were
+not rewritten or backfilled, so this check is a current-candidate pass rather
+than a claim that every historical V2 row is complete.
+
 ## Real Task and command-plane evidence
 
 Both tasks used Profile 4, the current V2 mounted-Kit composition, Pi, and a
@@ -261,6 +270,11 @@ recording without contacting a real notification service. A complete
 Harness/Profile/Host operational review of alert behavior and a formal
 zero-P0/P1 sign-off are still required; no notification profile was configured
 on this development Host for a live alert delivery test.
+
+The current Bundle 163 receipt recheck above supports the zero-duplicate-terminal
+and zero-sequence-gap claim for the frozen candidate only. The pre-Bundle-163
+historical rows remain an evidence boundary and are not silently counted as a
+current-candidate pass.
 
 R4.5 security/release sign-off and R4.6 independent hard-cut go/no-go remain
 open. No R5 maintenance window or `v2_only` cutover was performed.
