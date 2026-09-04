@@ -44,7 +44,11 @@
         </n-layout-sider>
 
         <n-drawer v-if="isMobile" v-model:show="showDrawer" :width="288" placement="left">
-          <n-drawer-content :native-scrollbar="false" body-content-style="padding: 18px 14px;" closable>
+          <n-drawer-content
+            :native-scrollbar="false"
+            body-content-style="padding: 18px 14px max(18px, env(safe-area-inset-bottom));"
+            closable
+          >
             <template #header>
               <div class="mobile-drawer-header">
                 <div class="mobile-drawer-header__brand">
@@ -1160,6 +1164,7 @@ body {
   justify-content: space-between;
   gap: 10px;
   margin: 10px 12px 0;
+  margin-top: max(10px, env(safe-area-inset-top));
   padding: 10px 12px;
   border-radius: 16px;
   border: 1px solid rgba(15, 23, 42, 0.06);
@@ -1245,6 +1250,7 @@ body {
 
 .mobile-drawer-header {
   padding: 2px 0 10px;
+  padding-top: max(2px, env(safe-area-inset-top));
   border-bottom: 1px solid rgba(15, 23, 42, 0.06);
 }
 

@@ -4,6 +4,7 @@ import { h } from 'vue'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import App from './App.vue'
 import appSource from './App.vue?raw'
+import indexHtml from '../index.html?raw'
 
 function makeUsageSummary(overrides: Partial<Record<string, any>> = {}) {
   return {
@@ -33,6 +34,13 @@ function makeUsageSummary(overrides: Partial<Record<string, any>> = {}) {
 describe('App layout stability', () => {
   it('reserves the root scrollbar gutter so teleported overlays do not shift the page', () => {
     expect(appSource).toContain('html {\n  scrollbar-gutter: stable;\n}')
+  })
+
+  it('opts into device safe areas and keeps mobile shell surfaces clear of them', () => {
+    expect(indexHtml).toContain('viewport-fit=cover')
+    expect(appSource).toContain('margin-top: max(10px, env(safe-area-inset-top));')
+    expect(appSource).toContain('padding-top: max(2px, env(safe-area-inset-top));')
+    expect(appSource).toContain('env(safe-area-inset-bottom)')
   })
 })
 
