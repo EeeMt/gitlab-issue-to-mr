@@ -100,6 +100,11 @@ non-terminal receipts, and both predate Bundle 163. These historical rows were
 not rewritten or backfilled, so this check is a current-candidate pass rather
 than a claim that every historical V2 row is complete.
 
+A second read-only query over the recorded live cohort (Tasks 357–366 and
+368–370, thirteen tasks/attempts) found zero task-status/terminal-type
+mismatches, zero attempts with multiple terminal receipts, zero sequence gaps,
+and zero secret-like matches in canonical event JSON or raw-log chunks.
+
 ## Real Task and command-plane evidence
 
 Both tasks used Profile 4, the current V2 mounted-Kit composition, Pi, and a
@@ -274,7 +279,9 @@ on this development Host for a live alert delivery test.
 The current Bundle 163 receipt recheck above supports the zero-duplicate-terminal
 and zero-sequence-gap claim for the frozen candidate only. The pre-Bundle-163
 historical rows remain an evidence boundary and are not silently counted as a
-current-candidate pass.
+current-candidate pass. The broader thirteen-task cohort query also passes
+those integrity and secret-like checks, while still leaving live alert delivery
+and the formal zero-P0/P1 review open.
 
 R4.5 security/release sign-off and R4.6 independent hard-cut go/no-go remain
 open. No R5 maintenance window or `v2_only` cutover was performed.
