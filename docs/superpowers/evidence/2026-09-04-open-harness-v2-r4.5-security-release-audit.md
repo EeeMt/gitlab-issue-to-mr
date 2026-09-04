@@ -128,3 +128,23 @@ the system must remain in `dual_canary`.
 
 No `v2_only` cutover, maintenance-window action, or broad Docker prune was
 performed as part of this audit.
+
+## Latest read-only recheck
+
+At `2026-09-04T15:03:49Z`, the target Host still reported a healthy Backend,
+`dual_canary`, and no new task after the generation-73 smoke cohort. The
+enabled Provider inventory was unchanged: the Codex-legal
+`openai_responses` entries remain Providers 4, 9, and 12; Provider 4 is the
+known region-blocked endpoint, Provider 9 has a prior rate-limit result, and
+Provider 12 has the current generation-73 429 result. No new legal Provider
+was available, so no additional Codex Task was created against a known
+restricted endpoint.
+
+The same recheck found Tasks 374–376 `completed` and 377–378 `failed`. The
+generation-73 cohort still contains five attempts and 111 receipts, with 111
+unique event IDs and exactly one `run.completed` or `run.failed` receipt per
+attempt; every attempt's `last_seq` equals its receipt count. Host disk usage
+was 57G/61G (94%) with 4.1G available and 19% inode usage. Docker reported
+81 images, 8 active images, and 6.706GB reclaimable BuildKit/image space;
+because the filesystem is not full, no Codify image/cache cleanup was
+performed.
