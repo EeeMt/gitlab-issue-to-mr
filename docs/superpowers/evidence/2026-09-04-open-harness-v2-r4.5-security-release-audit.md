@@ -148,3 +148,24 @@ was 57G/61G (94%) with 4.1G available and 19% inode usage. Docker reported
 81 images, 8 active images, and 6.706GB reclaimable BuildKit/image space;
 because the filesystem is not full, no Codify image/cache cleanup was
 performed.
+
+## Permission and rotation recheck
+
+At `2026-09-04T15:12:48Z`, a read-only GitLab administration review found the
+`ai-bot` account at highest role `Maintainer`, with top-level group creation
+enabled and two-factor authentication disabled. The `GIMR` OAuth application
+used by the development integration also advertises `api`,
+`write_repository`, and `write_virtual_registry` scopes (along with its read
+and OIDC scopes). These observations are stronger than an application
+connectivity check, but they do not satisfy least privilege and must not be
+treated as a release approval.
+
+All enabled Provider rows currently have an active `credential_ref`, but the
+associated credential records have no `version_metadata`; the stored
+creation/update timestamps therefore do not constitute a rotation record. A
+direct self-token check using the container's legacy `GITLAB_BOT_TOKEN`
+environment value returned HTTP 401, while the effective GitLab URL is a
+database override. The effective encrypted credential was not read or
+printed. The release owner must reconcile the effective credential source,
+reduce GitLab/OAuth permissions, enable the required account controls, and
+record a verifiable rotation/revocation plan before R4.5 can be signed.
