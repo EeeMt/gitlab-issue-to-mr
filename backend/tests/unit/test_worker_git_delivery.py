@@ -1055,3 +1055,28 @@ codify_harness_finalize_attempt 0
     assert "git_delivery" not in finalization["payload"]
     assert finalization["payload"]["commit_sha"] is None
     assert finalization["payload"]["diff"] == {"additions": 0, "deletions": 0, "total": 0}
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="helpers require jq")
+def test_finalizer_runs_failure_fact_preservation_before_events(tmp_path: Path):
+    """On failed exits the finalizer preserves facts before emitting events."""
+    marker = tmp_path / "collected.marker"
+    scenario = f"""
+codify_chown() {{
+    :
+}}
+repo_delivery_collect_facts_on_exit() {{
+    touch "{marker}"
+    return 0
+}}
+codify_emit_event "run.started" '{{}}'
+codify_emit_event "harness.failed" '{{"failure":{{"kind":"engine_error","message":"boom"}}}}'
+codify_harness_finalize_attempt 1
+"""
+    result = _run_finalize_scenario(tmp_path, scenario)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert marker.exists()
+    events = _read_events(tmp_path / "runtime")
+    types = [event["type"] for event in events]
+    assert "worker.finalization" in types
+    assert types[-1] == "run.failed"
