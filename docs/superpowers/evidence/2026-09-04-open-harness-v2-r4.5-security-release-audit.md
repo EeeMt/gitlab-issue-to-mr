@@ -27,6 +27,7 @@ reconnect or release-safety pass.
 | Frontend production build | passed | Vite emitted only the existing large-chunk warning |
 | Backend lint | passed | `make lint-backend` |
 | Remote Docker state | near capacity, not full | The final nginx-only deployment recheck reports `df -h /` at 61G total / 58G used / 3.6G available (95%) and `df -ih /` at 22% inode use; `docker system df` reports Images 12.41GB / 6.698GB reclaimable, containers 28.27MB, volumes 1.639GB, and BuildKit 6.526GB. No cleanup was performed because the disk was not full. |
+| Current Kit archive reconstruction and V2 release preflight | passed, not signed | The installed `0.6.12-linux-amd64-c33dbf86951b` Kit was streamed into a temporary `518M` archive; archive SHA-256 `2d3ee7f81525d465731344571cbf5bd93a0cd94bb6cf16f5a4d5512d5c0a25a6`, manifest SHA-256 `c33dbf86951bed6e3b4de1897313725f14f00006dc51fb300e7b821bb47e17bd`, content inventory `7630f086800c95f851db8c9351638868ab60ac33fb3bfe22f9f2f5c8dcdc98a1`; `deploy/scripts/preflight-v2-release.sh` passed against the target daemon and Worker image repo digest `127.0.0.1:5000/codify-worker/java21-maven@sha256:234582c692d1ebb00ba8e882160618c2258463149d968009ac81c545e63a538b`. The temporary archive is not a release-owner-signed package and is not committed. |
 | Profile re-verification and live post-fix smoke | passed | Profile 4 generation 72 completed four-Harness Verify; Task 368 completed on Bundle 163 with the expected model field |
 | Remote execution mode | unchanged | `HARNESS_EXECUTION_MODE=dual_canary`; no `v2_only` switch was attempted |
 
@@ -43,6 +44,14 @@ context with nginx-only rebuild/recreate; the served `index.html` contains
 not recreated. The authenticated browser page loaded the mobile safe-area
 rules, but its desktop viewport cannot establish real mobile keyboard or notch
 behavior.
+
+The current installed Kit was also streamed without modifying the Host into a
+temporary content-addressed archive and passed the repository's V2 release
+preflight against the remote daemon. The archive checksum, manifest/content
+inventory, and Worker image platform/repo digest were all verified. This is
+reproducibility evidence for the frozen Kit, not release-owner approval: the
+archive is temporary and there is no signed package or approved release note
+attached to this audit.
 The database snapshot has 339 Tasks, zero `pending`/`queued`/`running` Tasks,
 zero `issue_execution_locks`, zero Mattermost notification profiles, and zero
 notification deliveries. These are current Host observations; they do not
