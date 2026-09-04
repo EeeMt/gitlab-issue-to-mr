@@ -844,6 +844,8 @@ def test_pi_real_session_id_tracks_active_session_after_startup_state(tmp_path):
 
     result = json.loads((runtime_dir / "harness-result.json").read_text(encoding="utf-8"))
     assert result["session_id"] == active_session_id
+    resolved = next(event for event in _events(runtime_dir) if event["type"] == "model.resolved")
+    assert resolved["payload"]["session_id"] == active_session_id
     completed = next(event for event in _events(runtime_dir) if event["type"] == "harness.completed")
     assert completed["payload"]["session_id"] == active_session_id
 
@@ -1029,6 +1031,8 @@ def _reset_pi_state():
 
     pi_events._STATE = {
         "model_resolved": False,
+        "session_negotiated": False,
+        "pending_model_resolved_line": None,
         "model_id": None,
         "session_id": None,
         "aborted": False,
@@ -1046,6 +1050,7 @@ def _reset_pi_state():
         "thinking_start_line": None,
         "message_completed_emitted": False,
     }
+    pi_events._REAL_SESSION_ID = ""
 
 
 def test_pi_tool_start_maps_to_tool_started_with_sanitized_input():

@@ -139,6 +139,8 @@ def _lenient_agent_end(text: str) -> object | None:
 # Per-stream in-memory state. The terminal is decided at EOF.
 _STATE: dict = {
     "model_resolved": False,
+    "session_negotiated": False,
+    "pending_model_resolved_line": None,
     "model_id": None,
     "session_id": None,
     "thinking": [],
@@ -203,6 +205,26 @@ def _session_id(value: object = None) -> str | None:
         return _REAL_SESSION_ID
     fallback = value if value is not None else _STATE.get("session_id")
     return fallback if isinstance(fallback, str) and fallback else None
+
+
+def _emit_model_resolved(raw_line: int) -> None:
+    """Emit the model/session pair once the active Pi session is known."""
+    if _STATE["model_resolved"]:
+        return
+    _STATE["model_resolved"] = True
+    _STATE["pending_model_resolved_line"] = None
+    _emit(
+        "model.resolved",
+        {"model": _STATE["model_id"], "session_id": _session_id()},
+        raw_line,
+    )
+
+
+def _flush_pending_model_resolved() -> None:
+    """Resolve a direct/legacy stream that has no explicit new_session ACK."""
+    pending_line = _STATE.get("pending_model_resolved_line")
+    if pending_line is not None and not _STATE["model_resolved"]:
+        _emit_model_resolved(pending_line)
 
 
 def _failure_kind(message: str) -> str:
@@ -508,18 +530,28 @@ def _handle_response(record: dict, raw_line: int) -> None:
     """Map a native ``response`` record (control command ACK/data)."""
     command = record.get("command")
     success = bool(record.get("success"))
+    if command == "new_session" and success:
+        # Pi may deliver an unsolicited startup get_state before this ACK.  Do
+        # not resolve model.resolved from that throwaway session; the next
+        # get_state after this handshake is the session used by the turn.
+        _STATE["session_negotiated"] = True
+        return
     if command == "get_state" and success:
         data = record.get("data") if isinstance(record.get("data"), dict) else {}
         model = data.get("model") if isinstance(data.get("model"), dict) else {}
         _STATE["model_id"] = model.get("id") or _STATE["model_id"]
         _STATE["session_id"] = _session_id(data.get("sessionId") or _STATE["session_id"])
         if not _STATE["model_resolved"]:
-            _STATE["model_resolved"] = True
-            _emit(
-                "model.resolved",
-                {"model": _STATE["model_id"], "session_id": _session_id()},
-                raw_line,
-            )
+            if _STATE.get("session_negotiated"):
+                _emit_model_resolved(raw_line)
+            else:
+                # Keep the first state pending.  If this is a direct fixture
+                # or older stream without new_session, translate() flushes it
+                # before the first turn event.  If new_session arrives next,
+                # the pending state is replaced by the active get_state above.
+                _STATE["pending_model_resolved_line"] = (
+                    _STATE.get("pending_model_resolved_line") or raw_line
+                )
         else:
             _emit(
                 "diagnostic",
@@ -980,6 +1012,12 @@ def _handle_agent_settled(record: dict, raw_line: int) -> None:
 def translate(record: dict, raw_line: int) -> None:
     _STATE["last_raw_line"] = raw_line
     record_type = record.get("type")
+    is_response = record_type == "response"
+    command = record.get("command") if is_response else None
+    if command == "new_session" and record.get("success"):
+        _STATE["session_negotiated"] = True
+    elif not (is_response and command == "get_state"):
+        _flush_pending_model_resolved()
     reopen = record.get("__pi_reopen_after")
     if isinstance(reopen, dict):
         _emit(
