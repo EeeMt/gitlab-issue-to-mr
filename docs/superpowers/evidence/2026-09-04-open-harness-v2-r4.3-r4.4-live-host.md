@@ -107,10 +107,18 @@ and independent review gates are signed.
   filesystem is `61GB` total / `57GB` used / `4.1GB` available (`94%`), with
   `19%` inode use. It is not full, so no image, volume, or BuildKit cleanup
   was performed.
-- The Backend was rebuilt/restarted for commit `810f9fcb` and returned healthy
-  with image ID
+- The target Backend image was re-inspected at `2026-09-04T15:35:05Z` and
+  returned healthy with image ID
   `sha256:9584b350d54afbbeae42847c0e52554570eb1a7535b60c4614823d2d09da31d1`.
-  The scheduler, nginx, Postgres, and long-lived GitLab services remained
+  The image has no Git revision OCI label. Its `/app` backend files match the
+  `9bbcf43` source, while `runtime-source` contains the active-session Pi
+  projection patch used by Task 374 but not represented by one committed tree
+  (the Runtime source `pi_events.py` SHA-256 is
+  `2bec6d963f50d6d1eb58e88f7bd6c850320169d93fc94a567a6e9494a822b56b`).
+  Therefore Task 374 is valid behavior evidence and Bundles 166–169 remain
+  immutable by digest, but this Host image is a mixed, non-reproducible
+  composition and must not be treated as a clean release build. The
+  scheduler, nginx, Postgres, and long-lived GitLab services remained
   healthy/running; Scheduler health also reports `dual_canary`.
 - Profile 4's administrator Verify completed all four enabled Harness checks;
   the current Profile generation is `73`, and the readiness row is `ready`.

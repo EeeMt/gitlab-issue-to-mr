@@ -118,13 +118,23 @@ claims inferred from tests or a development Host:
    P0/P1 evidence by themselves, but they also do not constitute a formal
    zero-blocker sign-off.
 
+The current Host image also has a provenance gap that must be closed before a
+release claim: the Backend `/app` files match the `9bbcf43` source, while the
+Runtime source contains the active-session Pi patch used by Task 374 without a
+single committed tree or OCI Git-revision label. The exact Bundle digests are
+still immutable and the behavior evidence remains valid, but the composition
+cannot currently be reproduced from one reviewed commit. The release owner
+must rebuild the exact Image/Runtime Bundle from committed source, or record a
+reviewed artifact-level exception tied to the immutable digests.
+
 ## R4.5 conclusion
 
 **Partial evidence, not signed.** Repository secret scanning, local regression,
 and remote-state checks pass. Provider/GitLab authorization and rotation,
-release notes, retention/retirement, maintenance ownership, and independent
-zero-P0/P1 approval remain open. R4.6 therefore has no recorded decision, and
-the system must remain in `dual_canary`.
+clean exact composition provenance, release notes, retention/retirement,
+maintenance ownership, and independent zero-P0/P1 approval remain open. R4.6
+therefore has no recorded decision, and the system must remain in
+`dual_canary`.
 
 No `v2_only` cutover, maintenance-window action, or broad Docker prune was
 performed as part of this audit.
