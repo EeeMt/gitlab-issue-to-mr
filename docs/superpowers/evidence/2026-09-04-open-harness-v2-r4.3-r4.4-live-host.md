@@ -4,7 +4,8 @@
 
 **Scope:** Current R4 candidate on `192.168.50.129`, mobile/desktop browser
 interaction checks, four-Harness live smoke attempts, one live command-plane
-run, and the resulting Host/Task runtime evidence.
+run, one controlled nginx-only disconnect/reconnect, and the resulting
+Host/Task runtime evidence.
 
 This is candidate evidence, not an L5 go/no-go decision. R4.3–R4.6 remain
 partially open until the complete acceptance, operational, security/release,
@@ -38,6 +39,16 @@ and independent review gates are signed.
   `a6bec9ac5df76a9de2824216628781ccaa46ad0efefd13a6ca1d677b9558887b`, and
   Pi `2.0.0` /
   `984154bf0bd473c26666877a0e13090cd2e58f0a7c37572d1df196ebf8150586`.
+- Runtime Bundle identity is selected-Harness scoped. Task 371's OpenCode
+  selection on the same Profile 4 generation `72` bound Bundle 164, digest
+  `7be14593c3f01ad12c0045647e5deb881a34a0c485ae0cd718a24284738ded2e`, archive
+  SHA-256
+  `402a9472a6dd844d44f12815cb9ae7d8238c2a1ae716379c88eed2a44b862789`.
+  A DB manifest comparison found Bundle 163 and 164 have identical controlled
+  files, Worker Image identity, Worker Kit identity, and all four Adapter
+  identities; only the selected `harness_verification_evidence` differs. This
+  is the expected OpenCode-specific identity variant, not runtime source/Image/
+  Kit/Adapter drift.
 - The first post-deployment append attempt was rejected because the old
   Profile evidence still carried the prior Codex Adapter digest. No Task was
   bound from that attempt. This is recorded as fail-closed behavior; the
@@ -66,7 +77,7 @@ and independent review gates are signed.
 - Docker target: `192.168.50.129`, `linux/amd64`; execution mode remains
   `dual_canary`.
 - The final nginx-only frontend deployment snapshot: Images `12.41GB` with
-  `6.698GB` reclaimable; containers `28.27MB`; local volumes `1.639GB`; and
+  `6.698GB` reclaimable; containers `29.3MB`; local volumes `1.639GB`; and
   BuildKit cache `6.526GB`. The filesystem was `61GB` total / `58GB` used /
   `3.6GB` available (`95%`), with `22%` inode use. It was not full, so no
   image or cache cleanup was performed.
@@ -80,6 +91,11 @@ and independent review gates are signed.
   `viewport-fit=cover`, applies the top safe-area inset to the mobile shell and
   drawer header, and reserves the bottom inset in the navigation drawer body.
   It does not change the frozen Bundle, Provider, Harness, or event contract.
+- During Task 371, only `codify-nginx` was restarted at
+  `2026-09-04T13:23:35.570939Z`. `codify-backend` remained running from
+  `2026-09-03T17:53:43.412872Z`; `codify-scheduler` and Postgres were not
+  restarted. The Worker continued through the frontend-entrypoint
+  interruption and completed the task.
 
 ## Current operational snapshot
 
@@ -111,6 +127,12 @@ A second read-only query over the recorded live cohort (Tasks 357–366 and
 368–370, thirteen tasks/attempts) found zero task-status/terminal-type
 mismatches, zero attempts with multiple terminal receipts, zero sequence gaps,
 and zero secret-like matches in canonical event JSON or raw-log chunks.
+
+After Task 371 converged, the expanded fourteen-task cohort (Tasks 357–366 and
+368–371) still had zero task-status/terminal-type mismatches, zero attempts with
+multiple terminal receipts, zero sequence gaps, and zero secret-like matches in
+canonical event JSON or raw-log chunks. All fourteen tasks had finalized raw
+logs; the target Host had zero active Tasks and zero Issue execution locks.
 
 ## Real Task and command-plane evidence
 
@@ -148,6 +170,7 @@ prove the Codex model projection fixed by `8110afa0`.
 | 368 | Codex / Provider 12 `openrouter-minimax-responses` | `completed` on current Bundle 163; CLI `0.146.0`, Adapter `1.0.0`, canonical seq 1–14 with 14 distinct receipts, terminal `run.completed`, archive 4020 bytes, raw-log 4 chunks / 2683 bytes, usage 21017 input / 177 output, 0 changes; `model.resolved` and Task/UI execution model both `minimax/minimax-m3:free` |
 | 369 | Codex / Provider 12 `openrouter-minimax-responses` | `failed` on current Bundle 163; CLI `0.146.0`, Adapter `1.0.0`, canonical seq 1–8 with terminal `run.failed(failure.kind=rate_limited)`, archive 3085 bytes, raw-log 4 chunks / 2486 bytes; the controlled backend-restart probe reached the upstream retry limit with HTTP 429 before the requested delay |
 | 370 | Codex / Provider 4 `opencode-luna` | `failed` on current Bundle 163; CLI `0.146.0`, Adapter `1.0.0`, canonical seq 1–7 with terminal `run.failed(failure.kind=rate_limited)`, archive 2935 bytes, raw-log 4 chunks / 2503 bytes; the second controlled backend-restart probe reached the upstream retry limit with HTTP 429 before the requested delay |
+| 371 | OpenCode / Provider 7 `openrouter-free` | `completed` on OpenCode-specific Bundle 164; CLI `1.18.19`, Adapter `2.0.0`, fresh session, three read-only Bash commands (`pwd`, `git status --short`, `sleep 180`) all exited `0`, canonical seq 1–26 with 26 distinct receipts and terminal `run.completed`, archive 8719 bytes, raw-log 5 chunks / 2782 bytes, usage 51 input / 7 output, 0 changes |
 
 Together with Tasks 357/358, the live set now covers Pi, OpenCode, Claude, and
 Codex across multiple compatible Provider selections. The
@@ -160,11 +183,19 @@ Tasks 369 and 370 were two isolated probes in which only the remote
 `codify-backend` container was restarted while the task page remained open. The
 frontend stayed on Issue #99, but both persisted terminal payloads identify the
 failure as upstream `rate_limited`; neither reached the requested long-running
-read-only command. They therefore do not prove worker continuation or SSE
-disconnect/reconnect continuity and are retained as negative, inconclusive
-evidence only. A further real-Provider attempt was not submitted because the
-selected external Provider destination requires explicit authorization for
-repository-context transfer.
+read-only command. They remain negative, inconclusive evidence only.
+
+Task 371 was a separately authorized real-Provider OpenCode run using the known
+successful Provider 7 selection. It entered `sleep 180` before the controlled
+nginx restart. The browser stayed on `/tasks/371` with the three existing
+commands visible and no error state; after the nginx interruption, the UI
+continued to receive the post-delay AI result and completed the task. Persisted
+event timestamps put seq 1–9 before the nginx restart and seq 10–26 after it:
+the latter includes `tool.completed` for `sleep`, `message.completed`,
+`delivery.completed`, `worker.finalization`, and `run.completed`. This is the
+first valid real Host frontend-entrypoint disconnect/reconnect spot-check in
+this evidence set. It does not prove mobile keyboard/safe-area behavior or a
+broader disruption matrix.
 
 ## Browser interaction evidence
 
@@ -210,6 +241,11 @@ at a physical `390x844` viewport (the extension reported a CSS viewport of
   Issue page remained open. The page stayed mounted, but both tasks ended in
   bounded upstream `rate_limited` failures before the requested delay; this is
   not a successful disconnect/reconnect result.
+- Task #371 was a real Provider 7/OpenCode read-only diagnostic. The task detail
+  page remained open while only `codify-nginx` restarted; it retained the three
+  command records, then displayed the completion message and completed state
+  after the delayed command. The persisted event sequence has 26 unique,
+  contiguous receipts spanning the restart window.
 
 After the restart probes, the frontend structured-log lifecycle was tightened
 at the source level: `useTaskLogStreams` now checks EventSource identity in both
@@ -248,8 +284,9 @@ keyboard, IME resize, notch, or home-indicator measurement.
 
 The run covers long-text layout, mobile task/create navigation, editor focus,
 bottom-action reachability, form-level and existing-Issue Harness selection, a
-real running/completed transition, command ACK wording, reload continuity, and
-the post-fix Codex execution-model display.
+real running/completed transition, command ACK wording, reload continuity, a
+controlled real frontend-entrypoint disconnect/reconnect, and the post-fix
+Codex execution-model display.
 It does not yet sign the full gate because:
 
 - Chrome's desktop extension viewport cannot prove behavior with a real mobile
@@ -257,15 +294,19 @@ It does not yet sign the full gate because:
   opts into `viewport-fit=cover` and the served stylesheet places the mobile
   shell/drawer content around the top and bottom `safe-area-inset-*` values, but
   this run still observed a zero computed inset in the desktop viewport.
-- Reload continuity is a browser-level reconnect spot-check, not a controlled
-  network disconnect/reconnect test.
+- Task 371 supplies a controlled real disconnect/reconnect spot-check: the
+  browser task page stayed mounted through the nginx restart, and persisted
+  events continued from seq 9 before the restart through seq 10–26 after it,
+  ending in `run.completed` with zero changes. This is one Host-level sample,
+  not a broad network-disruption matrix.
 - The two backend-restart probes (#369/#370) are also inconclusive: their
   persisted `run.failed` payloads are upstream `rate_limited`, and no probe
   reached the delayed command needed to establish event-stream continuity.
 - The structured-log client now rejects stale `error`/`done`/`batch`/`update`
   callbacks from a previous EventSource after reconnect; the focused race
-  tests and the full frontend suite pass. This closes a source-level lifecycle
-  race, but not the required real Host network disconnect/reconnect proof.
+  tests and the full frontend suite pass. Together with Task 371, this closes
+  the current source-level and single-sample Host reconnect check, but not the
+  remaining mobile-device and acceptance review gates.
 - The V1 read-only source boundary was also rechecked without changing the
   Host mode: the backend `v2_only`/legacy-contract selection passed 9 tests,
   and the TaskView legacy read-only group passed 4 tests. These checks cover
@@ -281,7 +322,7 @@ It does not yet sign the full gate because:
 
 ### R4.4 — partial evidence, not signed
 
-Tasks 357–366 and 368–370 plus the prior five-task warm-start cohort provide all
+Tasks 357–366 and 368–371 plus the prior five-task warm-start cohort provide all
 four Harness selections with real success samples for each Harness and bounded
 upstream failure classification,
 command latency, usage, canonical terminal, archive, raw-log finalization,
@@ -302,11 +343,15 @@ container/DB/HTTP delivery path, but not authorization, a real Mattermost
 server, or external alert routing.
 
 The current Bundle 163 receipt recheck above supports the zero-duplicate-terminal
-and zero-sequence-gap claim for the frozen candidate only. The pre-Bundle-163
-historical rows remain an evidence boundary and are not silently counted as a
-current-candidate pass. The broader thirteen-task cohort query also passes
-those integrity and secret-like checks, while still leaving live alert delivery
-to a real Mattermost service and the formal zero-P0/P1 review open.
+and zero-sequence-gap claim for the frozen Codex-selected candidate. Task 371's
+OpenCode-specific Bundle 164 has one attempt and 26 contiguous receipts with a
+single `run.completed` terminal. The Bundle 163/164 manifest comparison shows
+that this is a selected-Harness evidence variant over the same files,
+Image/Kit identity, and Adapter identities. The pre-Bundle-163 historical rows
+remain an evidence boundary and are not silently counted as a current-candidate
+pass. The expanded fourteen-task cohort query also passes those integrity and
+secret-like checks, while still leaving live alert delivery to a real Mattermost
+service and the formal zero-P0/P1 review open.
 
 R4.5 security/release sign-off and R4.6 independent hard-cut go/no-go remain
 open. No R5 maintenance window or `v2_only` cutover was performed.

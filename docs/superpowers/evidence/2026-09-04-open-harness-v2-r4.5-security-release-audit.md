@@ -8,12 +8,15 @@ security approval or an independent R4.6 go/no-go decision.
 
 The prior Profile-4 candidate was superseded after commit `8110afa0` changed
 the Codex Adapter's model projection. The current candidate is Profile 4
-generation `72` with Runtime Bundle 163; the exact identity and Task 368
+generation `72`, with Bundle 163 for the Codex selection and the
+Harness-scoped OpenCode Bundle 164; the exact identities and Tasks 368/371
 validation are recorded in the
 [R4.3/R4.4 live Host evidence](2026-09-04-open-harness-v2-r4.3-r4.4-live-host.md).
 Tasks 369 and 370 were additional negative backend-restart probes on the same
-Bundle; both were bounded as upstream `rate_limited` and do not constitute a
-reconnect or release-safety pass.
+Codex-selected Bundle; both were bounded as upstream `rate_limited`. Task 371
+then completed on the OpenCode-specific Bundle 164 during a controlled
+nginx-only disconnect/reconnect spot-check; this is Host evidence, not a
+security or release-owner approval.
 
 ## Checks completed
 
@@ -26,9 +29,9 @@ reconnect or release-safety pass.
 | Frontend unit suite | passed, 80 files / 1692 tests | Includes structured SSE stale-source and mobile safe-area regression coverage |
 | Frontend production build | passed | Vite emitted only the existing large-chunk warning |
 | Backend lint | passed | `make lint-backend` |
-| Remote Docker state | near capacity, not full | The final nginx-only deployment recheck reports `df -h /` at 61G total / 58G used / 3.6G available (95%) and `df -ih /` at 22% inode use; `docker system df` reports Images 12.41GB / 6.698GB reclaimable, containers 28.27MB, volumes 1.639GB, and BuildKit 6.526GB. No cleanup was performed because the disk was not full. |
+| Remote Docker state | near capacity, not full | The post-Task-371 recheck reports `df -h /` at 61G total / 58G used / 3.6G available (95%) and `df -ih /` at 22% inode use; `docker system df` reports Images 12.41GB / 6.698GB reclaimable, containers 29.3MB, volumes 1.639GB, and BuildKit 6.526GB. No cleanup was performed because the disk was not full. |
 | Current Kit archive reconstruction and V2 release preflight | passed, not signed | The installed `0.6.12-linux-amd64-c33dbf86951b` Kit was streamed into a temporary `518M` archive; archive SHA-256 `2d3ee7f81525d465731344571cbf5bd93a0cd94bb6cf16f5a4d5512d5c0a25a6`, manifest SHA-256 `c33dbf86951bed6e3b4de1897313725f14f00006dc51fb300e7b821bb47e17bd`, content inventory `7630f086800c95f851db8c9351638868ab60ac33fb3bfe22f9f2f5c8dcdc98a1`; `deploy/scripts/preflight-v2-release.sh` passed against the target daemon and Worker image repo digest `127.0.0.1:5000/codify-worker/java21-maven@sha256:234582c692d1ebb00ba8e882160618c2258463149d968009ac81c545e63a538b`. The temporary archive is not a release-owner-signed package and is not committed. |
-| Profile re-verification and live post-fix smoke | passed | Profile 4 generation 72 completed four-Harness Verify; Task 368 completed on Bundle 163 with the expected model field |
+| Profile re-verification and live post-fix smoke | passed | Profile 4 generation 72 completed four-Harness Verify; Task 368 completed on Bundle 163 with the expected model field, and Task 371 completed OpenCode on the scoped Bundle 164 through the controlled nginx-only reconnect probe |
 | Remote execution mode | unchanged | `HARNESS_EXECUTION_MODE=dual_canary`; no `v2_only` switch was attempted |
 
 The remote image/cache state was inspected before and after the live smoke and
@@ -52,7 +55,7 @@ inventory, and Worker image platform/repo digest were all verified. This is
 reproducibility evidence for the frozen Kit, not release-owner approval: the
 archive is temporary and there is no signed package or approved release note
 attached to this audit.
-The database snapshot has 339 Tasks, zero `pending`/`queued`/`running` Tasks,
+The database snapshot has 340 Tasks, zero `pending`/`queued`/`running` Tasks,
 zero `issue_execution_locks`, zero Mattermost notification profiles, and zero
 notification deliveries. These are current Host observations; they do not
 replace the missing live alert delivery or independent release sign-off.
@@ -61,11 +64,14 @@ The current development-Host Provider inventory was checked without reading
 credentials or URL paths: enabled Providers 3–6 resolve to `opencode.ai`, and
 enabled Providers 7–12 resolve to `openrouter.ai`; the only fixture entry,
 Provider 13, is disabled. No enabled local-only Provider is available. This is
-an endpoint inventory for the release audit, not a least-privilege approval or
-authorization to send another repository task to either external destination.
+an endpoint inventory for the release audit, not a least-privilege approval.
+Task 371 used Provider 7 only as an explicitly authorized development
+diagnostic; it does not establish production authorization, rotation, or
+external destination approval.
 
 The current live evidence covers Pi, OpenCode, Claude, and Codex on Profile 4,
-including the post-fix Codex Task 368 and the negative restart probes 369/370;
+including the post-fix Codex Task 368, the OpenCode reconnect Task 371, and the
+negative restart probes 369/370;
 the known non-success outcomes were correctly bounded as upstream/provider
 availability failures (`rate_limited`, selected-model `engine_error`, or the
 earlier real upstream 404). The detailed task, identity, archive, raw-log, and
