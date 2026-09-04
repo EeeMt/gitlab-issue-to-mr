@@ -56,6 +56,8 @@
                     :expanded-text="getExpandedText(asTextRow(row).textEntry)"
                     :loading="hasTextPayloadLoading(asTextRow(row).textEntry)"
                     :show-content="shouldShowTextContent(asTextRow(row).textEntry)"
+                    :now-ms="nowMs"
+                    :task-active="props.isActive"
                     @collapse-change="(names) => onCollapseChange(names, index)"
                   />
                   <TaskProcessToolRow
@@ -178,6 +180,7 @@ const scrollPositions = reactive<Record<ProcessTab, ScrollPosition>>({
   raw: { atTop: true, atBottom: true },
 })
 const elapsedMs = ref(0)
+const nowMs = ref(Date.now())
 const expandedRowIndex = ref<number | null>(null)
 
 const {
@@ -301,8 +304,14 @@ function updateElapsed() {
 
 watch(() => props.isActive, (active) => {
   if (active) {
+    // Refresh the shared clock once on activation, then each tick — rows with
+    // in_progress thinking records derive their elapsed time from nowMs only.
+    nowMs.value = Date.now()
     updateElapsed()
-    elapsedTimer = setInterval(updateElapsed, 1000)
+    elapsedTimer = setInterval(() => {
+      nowMs.value = Date.now()
+      updateElapsed()
+    }, 1000)
   } else {
     if (elapsedTimer) {
       clearInterval(elapsedTimer)

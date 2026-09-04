@@ -76,6 +76,7 @@ KNOWN_EVENT_TYPES = frozenset(
         "message.completed",
         "reasoning_summary.delta",
         "reasoning_summary.completed",
+        "reasoning_summary.started",
         "tool.started",
         "tool.completed",
         "context.compacted",
@@ -218,6 +219,14 @@ def _validate_event_payload(event_type: str, payload: Mapping[str, Any]) -> None
     if event_type == "run.completed":
         if payload.get("status") != "completed" or payload.get("success") is not True:
             raise HarnessProtocolError("run.completed requires completed/success payload")
+    elif event_type == "reasoning_summary.started":
+        # The placeholder pairing key; a start without one could never be
+        # completed in place, so fail closed instead of degrading it.
+        reasoning_id = payload.get("reasoning_id")
+        if not isinstance(reasoning_id, str) or not reasoning_id.strip():
+            raise HarnessProtocolError(
+                "reasoning_summary.started requires a non-empty reasoning_id"
+            )
     elif event_type == "run.failed":
         if payload.get("status") not in {"failed", "cancelled", "protocol_error"}:
             raise HarnessProtocolError("run.failed requires a known failure status")

@@ -661,6 +661,7 @@ import { useTaskScheduleContext } from '../features/tasks/useTaskScheduleContext
 import {
   RAW_LOG_WINDOW_MAX_CHARS,
   isActiveTaskStatus,
+  mergeTaskLogState,
   useTaskLogStreams,
 } from '../features/tasks/useTaskLogStreams'
 import {
@@ -1242,8 +1243,9 @@ async function fetchLogs(): Promise<boolean> {
     if (requestGeneration !== logRequestGeneration || requestedTaskId !== taskId.value) {
       return false
     }
-    taskLogs.value = logEntries
-    logs.value = logEntries.map(l => `[${l.created_at}] [${l.log_level}] ${l.message}`).join('\n')
+    const mergedLogs = mergeTaskLogState(taskLogs.value, logEntries)
+    taskLogs.value = mergedLogs
+    logs.value = mergedLogs.map(l => `[${l.created_at}] [${l.log_level}] ${l.message}`).join('\n')
     return true
   } catch {
     if (requestGeneration === logRequestGeneration && requestedTaskId === taskId.value) {

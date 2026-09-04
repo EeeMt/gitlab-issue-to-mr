@@ -23,6 +23,7 @@ KNOWN_TYPES = {
     "message.completed",
     "reasoning_summary.delta",
     "reasoning_summary.completed",
+    "reasoning_summary.started",
     "tool.started",
     "tool.completed",
     "context.compacted",

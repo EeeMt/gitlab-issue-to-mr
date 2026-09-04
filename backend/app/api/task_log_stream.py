@@ -42,6 +42,7 @@ async def generate_task_log_events(
     """Yield batched log and in-place update events without holding DB sessions."""
     cursor = since_id
     pending_tool_calls: set[int] = set()
+    pending_thinking_rows: set[int] = set()
     stream_start = monotonic()
     total_events_sent = 0
     poll_cycle = 0
@@ -93,6 +94,14 @@ async def generate_task_log_events(
                         metadata = event_data["metadata"] or {}
                         if not metadata.get("output_payload_id"):
                             pending_tool_calls.add(log.id)
+                    elif log.log_type == "thinking":
+                        # Track placeholder rows so their final status reaches
+                        # the page as an in-place update. Status decides the
+                        # end (never payload_id): an empty thinking block also
+                        # completes normally.
+                        metadata = event_data["metadata"] or {}
+                        if metadata.get("status") == "in_progress":
+                            pending_thinking_rows.add(log.id)
                     cycle_log_data.append(event_data)
 
                 if new_log_count == BATCH_SIZE:
@@ -118,6 +127,33 @@ async def generate_task_log_events(
                                     f"{json.dumps(task_log_event_data(log))}\n\n"
                                 )
                                 pending_tool_calls.discard(log.id)
+                                total_events_sent += 1
+
+                    if pending_thinking_rows:
+                        update_start = monotonic()
+                        thinking_result = await poll_db.execute(
+                            select(TaskLog).where(
+                                TaskLog.task_id == task_id,
+                                TaskLog.id.in_(pending_thinking_rows),
+                            )
+                        )
+                        update_ms = (monotonic() - update_start) * 1000
+                        if update_ms > SLOW_QUERY_THRESHOLD_S * 1000:
+                            logger.warning(
+                                f"[Task {task_id}] log-stream slow thinking update query "
+                                f"cycle={poll_cycle} pending={len(pending_thinking_rows)} "
+                                f"query_ms={update_ms:.1f}"
+                            )
+                        for log in thinking_result.scalars().all():
+                            metadata = json.loads(log.log_metadata) if log.log_metadata else {}
+                            # Finalize by status, never by payload_id: an empty
+                            # thinking block still completes the placeholder.
+                            if metadata.get("status") in ("completed", "interrupted"):
+                                cycle_update_events.append(
+                                    f"event: update\ndata: "
+                                    f"{json.dumps(task_log_event_data(log))}\n\n"
+                                )
+                                pending_thinking_rows.discard(log.id)
                                 total_events_sent += 1
 
                     status_start = monotonic()

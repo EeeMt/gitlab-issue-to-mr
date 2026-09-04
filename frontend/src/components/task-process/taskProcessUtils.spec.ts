@@ -4,7 +4,7 @@ import { mount } from '@vue/test-utils'
 import type { TaskLog } from '../../api'
 import TaskProcessPanel from '../TaskProcessPanel.vue'
 import TaskProcessToolRow from './TaskProcessToolRow.vue'
-import { formatInput, getInputSummary, normalizeTaskProcessRows, summarizeSkillUsage } from './taskProcessUtils'
+import { formatInput, getInputSummary, normalizeTaskProcessRows, parseTextEntry, summarizeSkillUsage } from './taskProcessUtils'
 
 vi.mock('vue-i18n', () => ({
   createI18n: () => ({ global: { locale: { value: 'zh-CN' } } }),
@@ -64,6 +64,7 @@ vi.mock('naive-ui', () => {
 
 vi.mock('../utils/format', () => ({
   formatDurationMs: (value: number) => `${value}ms`,
+  formatDurationSec: (value: number) => `${value}s`,
 }))
 
 vi.mock('../api', async () => {
@@ -245,13 +246,83 @@ describe('taskProcessUtils', () => {
     ])
   })
 
-  it('returns an empty list when no skill usage metadata exists', () => {
-    const logs: TaskLog[] = [
-      createTaskLog({ id: 1, log_type: 'system_init', metadata: JSON.stringify({ skills: ['available-only'] }) }),
-      createTaskLog({ id: 2, log_type: 'tool_call', metadata: JSON.stringify({ name: 'Bash', input: { command: 'pwd' } }) }),
-    ]
+  it('maps thinking lifecycle keys from object metadata onto ParsedTextEntry', () => {
+    const entry = parseTextEntry({
+      attempt_id: 'task-1-attempt-1',
+      reasoning_id: 'pi-thinking-42',
+      status: 'completed',
+      started_at: '2026-09-04T01:00:00Z',
+      ended_at: '2026-09-04T01:00:48Z',
+      duration_ms: 48000,
+      payload_id: 7,
+      preview: 'final summary',
+      char_count: 13,
+      truncated: false,
+    })
 
-    expect(summarizeSkillUsage(logs)).toEqual([])
+    expect(entry.thinkingStatus).toBe('completed')
+    expect(entry.startedAt).toBe('2026-09-04T01:00:00Z')
+    expect(entry.endedAt).toBe('2026-09-04T01:00:48Z')
+    expect(entry.durationMs).toBe(48000)
+    expect(entry.payloadId).toBe(7)
+    expect(entry.preview).toBe('final summary')
+    expect(entry.text).toBe('')
+  })
+
+  it('maps in_progress lifecycle keys from JSON-string metadata', () => {
+    const entry = parseTextEntry(JSON.stringify({
+      attempt_id: 'task-1-attempt-1',
+      reasoning_id: 'pi-thinking-42',
+      status: 'in_progress',
+      started_at: '2026-09-04T01:00:00Z',
+      ended_at: null,
+      duration_ms: null,
+      payload_id: null,
+      preview: '',
+      char_count: 0,
+      truncated: false,
+    }))
+
+    expect(entry.thinkingStatus).toBe('in_progress')
+    expect(entry.startedAt).toBe('2026-09-04T01:00:00Z')
+    expect(entry.endedAt).toBeNull()
+    expect(entry.durationMs).toBeNull()
+    expect(entry.payloadId).toBeNull()
+  })
+
+  it('maps interrupted status and never coerces invalid duration values', () => {
+    const entry = parseTextEntry(JSON.stringify({
+      status: 'interrupted',
+      started_at: '2026-09-04T01:00:00Z',
+      ended_at: '2026-09-04T02:00:00Z',
+      duration_ms: 'not-a-number',
+    }))
+
+    expect(entry.thinkingStatus).toBe('interrupted')
+    expect(entry.startedAt).toBe('2026-09-04T01:00:00Z')
+    expect(entry.endedAt).toBe('2026-09-04T02:00:00Z')
+    expect(entry.durationMs).toBeNull()
+
+    // Unknown status strings fall back to null rather than an invalid value.
+    expect(parseTextEntry(JSON.stringify({ status: 'paused' })).thinkingStatus).toBeNull()
+  })
+
+  it('keeps lifecycle fields null when metadata has no lifecycle keys', () => {
+    const entry = parseTextEntry(JSON.stringify({
+      text: 'static body',
+      preview: 'static preview',
+      payload_id: 3,
+      char_count: 5,
+      truncated: false,
+    }))
+
+    expect(entry.thinkingStatus).toBeNull()
+    expect(entry.startedAt).toBeNull()
+    expect(entry.endedAt).toBeNull()
+    expect(entry.durationMs).toBeNull()
+    // Existing content fields are untouched for legacy static rows.
+    expect(entry.text).toBe('static body')
+    expect(entry.payloadId).toBe(3)
   })
 })
 

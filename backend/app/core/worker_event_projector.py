@@ -40,6 +40,13 @@ _CONTAINER_RUNTIME_DIR = "/tmp/codify-runtime"
 _CONTAINER_EVENT_JSONL = f"{_CONTAINER_RUNTIME_DIR}/event.jsonl"
 _CONTAINER_CONSOLE_LOG = f"{_CONTAINER_RUNTIME_DIR}/console.log"
 _PREVIEW_LIMIT = 120
+# Thinking placeholder lifecycle stored in TaskLog.log_metadata (plan
+# 2026-09-04-thinking-event-placeholder). The row is created on
+# reasoning_summary.started and finalized in place by the paired completed
+# event; interrupted is only ever written by the projector itself.
+_THINKING_STATUS_IN_PROGRESS = "in_progress"
+_THINKING_STATUS_COMPLETED = "completed"
+_THINKING_STATUS_INTERRUPTED = "interrupted"
 
 
 def _dumps(value: Any) -> str:
@@ -57,6 +64,27 @@ def _text(value: Any) -> str:
     if value is None:
         return ""
     return _dumps(value)
+
+
+def _parse_canonical_time(value: str) -> datetime:
+    """Parse an RFC3339 canonical timestamp (``Z`` suffix accepted)."""
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _duration_ms(started_at: str, ended_at: str) -> int | None:
+    """Trusted elapsed time from two canonical occurred_at values.
+
+    Returns None when a start is unparsable or the pair is out of order;
+    never fabricates a zero for an unknown duration.
+    """
+    try:
+        start = _parse_canonical_time(started_at)
+        end = _parse_canonical_time(ended_at)
+    except (TypeError, ValueError):
+        return None
+    if end < start:
+        return None
+    return int((end - start).total_seconds() * 1000)
 
 
 class WorkerEventProjector:
@@ -113,6 +141,124 @@ class WorkerEventProjector:
                 ),
             )
         )
+
+    async def _thinking_logs(self, *, db: AsyncSession, task_id: int) -> list[TaskLog]:
+        """All thinking rows of a task, oldest first (DB is the recovery truth)."""
+        result = await db.execute(
+            select(TaskLog)
+            .where(TaskLog.task_id == task_id, TaskLog.log_type == "thinking")
+            .order_by(TaskLog.id.asc())
+        )
+        return list(result.scalars().all())
+
+    @staticmethod
+    def _thinking_metadata(log: TaskLog) -> dict:
+        try:
+            metadata = json.loads(log.log_metadata or "{}")
+        except json.JSONDecodeError:
+            metadata = {}
+        return metadata if isinstance(metadata, dict) else {}
+
+    async def _find_thinking_row(
+        self,
+        *,
+        db: AsyncSession,
+        task_id: int,
+        attempt_id: str,
+        reasoning_id: str,
+    ) -> TaskLog | None:
+        """Recover the started placeholder across projector rebuilds."""
+        for log in await self._thinking_logs(db=db, task_id=task_id):
+            metadata = self._thinking_metadata(log)
+            if (
+                metadata.get("attempt_id") == attempt_id
+                and metadata.get("reasoning_id") == reasoning_id
+            ):
+                return log
+        return None
+
+    async def _interrupt_thinking_rows(
+        self,
+        *,
+        db: AsyncSession,
+        task_id: int,
+        attempt_id: str,
+        observed_at: str,
+    ) -> None:
+        """Close the attempt's open placeholders as interrupted.
+
+        Triggered when a new thinking block starts before the previous block's
+        completion, and when the harness terminal is observed. Completed rows
+        are never changed. ``observed_at`` records when the projector learned
+        the block ended; ``duration_ms`` stays null because the harness end is
+        not a precise thinking duration.
+        """
+        for log in await self._thinking_logs(db=db, task_id=task_id):
+            metadata = self._thinking_metadata(log)
+            if metadata.get("attempt_id") != attempt_id:
+                continue
+            if metadata.get("status") != _THINKING_STATUS_IN_PROGRESS:
+                continue
+            metadata.update(
+                {
+                    "status": _THINKING_STATUS_INTERRUPTED,
+                    "ended_at": observed_at,
+                    "duration_ms": None,
+                }
+            )
+            log.log_metadata = _dumps(metadata)
+
+    async def _finalize_thinking_row(
+        self,
+        *,
+        db: AsyncSession,
+        task_id: int,
+        log: TaskLog,
+        text: str,
+        occurred_at: str,
+    ) -> None:
+        """Complete a started placeholder in place (one payload at most)."""
+        sanitized = self._sanitize_sensitive_data(text)
+        metadata = self._thinking_metadata(log)
+        started_at = metadata.get("started_at")
+        if sanitized:
+            payload = await create_payload(
+                db,
+                task_id=task_id,
+                payload_kind="thinking",
+                text=sanitized,
+            )
+            preview, truncated = _preview(sanitized)
+            metadata.update(
+                {
+                    "payload_id": payload.id,
+                    "preview": preview,
+                    "truncated": truncated,
+                    "char_count": len(sanitized),
+                }
+            )
+        else:
+            metadata.update(
+                {
+                    "payload_id": None,
+                    "preview": "",
+                    "truncated": False,
+                    "char_count": 0,
+                }
+            )
+        duration = (
+            _duration_ms(started_at, occurred_at)
+            if isinstance(started_at, str)
+            else None
+        )
+        metadata.update(
+            {
+                "status": _THINKING_STATUS_COMPLETED,
+                "ended_at": occurred_at,
+                "duration_ms": duration,
+            }
+        )
+        log.log_metadata = _dumps(metadata)
 
     async def _project_tool_started(
         self,
@@ -271,16 +417,73 @@ class WorkerEventProjector:
             )
         elif event_type == "reasoning_summary.delta":
             self._reasoning_parts.append(_text(payload.get("text")))
-        elif event_type == "reasoning_summary.completed":
-            text = _text(payload.get("text")) or "".join(self._reasoning_parts)
-            self._reasoning_parts.clear()
-            await self._payload_log(
+        elif event_type == "reasoning_summary.started":
+            # A fresh block opens a placeholder row immediately. If the attempt
+            # still has an open row from an earlier block whose completion was
+            # never observed, close that row as interrupted first so it cannot
+            # keep counting on the page.
+            await self._interrupt_thinking_rows(
                 db=db,
                 task_id=task_id,
-                payload_kind="thinking",
-                log_type="thinking",
-                text=text,
+                attempt_id=ingest.attempt.attempt_id,
+                observed_at=normalized["occurred_at"],
             )
+            db.add(
+                TaskLog(
+                    task_id=task_id,
+                    log_level="INFO",
+                    message="",
+                    log_type="thinking",
+                    log_metadata=_dumps(
+                        {
+                            "attempt_id": ingest.attempt.attempt_id,
+                            "reasoning_id": str(payload.get("reasoning_id") or ""),
+                            "status": _THINKING_STATUS_IN_PROGRESS,
+                            "started_at": normalized["occurred_at"],
+                            "ended_at": None,
+                            "duration_ms": None,
+                            "payload_id": None,
+                            "preview": "",
+                            "char_count": 0,
+                            "truncated": False,
+                        }
+                    ),
+                )
+            )
+        elif event_type == "reasoning_summary.completed":
+            reasoning_id = payload.get("reasoning_id")
+            paired_row = None
+            if isinstance(reasoning_id, str) and reasoning_id.strip():
+                paired_row = await self._find_thinking_row(
+                    db=db,
+                    task_id=task_id,
+                    attempt_id=ingest.attempt.attempt_id,
+                    reasoning_id=reasoning_id,
+                )
+            if paired_row is not None:
+                # Finalize the started placeholder in place: same TaskLog row,
+                # payload created once for non-empty content, empty content
+                # still closes the row (no payload_id).
+                await self._finalize_thinking_row(
+                    db=db,
+                    task_id=task_id,
+                    log=paired_row,
+                    text=_text(payload.get("text")),
+                    occurred_at=normalized["occurred_at"],
+                )
+            else:
+                # No observed start (standalone completion / replay that never
+                # saw the start): static content row, no lifecycle fields, and
+                # no fabricated duration.
+                text = _text(payload.get("text")) or "".join(self._reasoning_parts)
+                self._reasoning_parts.clear()
+                await self._payload_log(
+                    db=db,
+                    task_id=task_id,
+                    payload_kind="thinking",
+                    log_type="thinking",
+                    text=text,
+                )
         elif event_type == "tool.started":
             await self._project_tool_started(task_id=task_id, payload=payload, db=db)
         elif event_type == "tool.completed":
@@ -312,6 +515,15 @@ class WorkerEventProjector:
                 )
             )
         elif event_type in {"harness.completed", "harness.failed"}:
+            # The attempt ended: close any open thinking placeholders of this
+            # attempt so the page stops counting; already-completed rows are
+            # untouched and the harness end never becomes a thinking duration.
+            await self._interrupt_thinking_rows(
+                db=db,
+                task_id=task_id,
+                attempt_id=ingest.attempt.attempt_id,
+                observed_at=normalized["occurred_at"],
+            )
             db.add(
                 TaskLog(
                     task_id=task_id,

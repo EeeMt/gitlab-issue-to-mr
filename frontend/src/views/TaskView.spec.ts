@@ -580,8 +580,8 @@ describe('TaskView', () => {
     const mockTask = createMockTaskWithStatus('pending', taskOverrides)
     ;(mockApi.getTask as Mock).mockResolvedValue(mockTask)
     ;(mockApi.getTaskLogs as Mock).mockResolvedValue([
-      createMockTaskLog({ task_id: 1, message: 'Log entry 1', log_level: 'info' }),
-      createMockTaskLog({ task_id: 1, message: 'Log entry 2', log_level: 'info' })
+      createMockTaskLog({ task_id: 1, id: 1, message: 'Log entry 1', log_level: 'info' }),
+      createMockTaskLog({ task_id: 1, id: 2, message: 'Log entry 2', log_level: 'info' })
     ])
     ;(mockApi.getTaskContainerLogs as Mock).mockResolvedValue({
       container_id: 'container-123',
@@ -1749,6 +1749,52 @@ describe('TaskView', () => {
       const logContent = wrapper.find('.log-content')
       expect(logContent.exists()).toBe(true)
     })
+
+    it('merges fetchLogs snapshots into taskLogs instead of clobbering an in-progress thinking row', async () => {
+      await mountComponent({ status: 'completed' })
+
+      const inProgress = createMockTaskLog({
+        task_id: 1,
+        log_type: 'thinking',
+        message: 'Weighing approaches',
+        metadata: JSON.stringify({ status: 'in_progress' })
+      })
+      // Seed the client with the in-progress snapshot the SSE stream would hold.
+      wrapper.vm.taskLogs = [inProgress]
+      ;(mockApi.getTaskLogs as Mock).mockResolvedValue([
+        {
+          ...inProgress,
+          metadata: JSON.stringify({ status: 'completed' })
+        }
+      ])
+
+      await wrapper.vm.fetchLogs()
+      await flushPromises()
+
+      expect(wrapper.vm.taskLogs).toHaveLength(1)
+      expect(wrapper.vm.taskLogs[0].id).toBe(inProgress.id)
+      expect(wrapper.vm.taskLogs[0].log_type).toBe('thinking')
+      expect(JSON.parse(wrapper.vm.taskLogs[0].metadata).status).toBe('completed')
+      expect(wrapper.vm.logs).toContain('Weighing approaches')
+    })
+
+    it('fully replaces no-status rows when fetchLogs returns fresh snapshots', async () => {
+      await mountComponent({ status: 'completed' })
+
+      wrapper.vm.taskLogs = [
+        createMockTaskLog({ task_id: 1, id: 1, message: 'stale entry', log_level: 'info' })
+      ]
+      ;(mockApi.getTaskLogs as Mock).mockResolvedValue([
+        createMockTaskLog({ task_id: 1, id: 1, message: 'fresh entry', log_level: 'info' })
+      ])
+
+      await wrapper.vm.fetchLogs()
+      await flushPromises()
+
+      expect(wrapper.vm.taskLogs).toHaveLength(1)
+      expect(wrapper.vm.taskLogs[0].message).toBe('fresh entry')
+      expect(wrapper.vm.logs).toContain('fresh entry')
+    })
   })
 
   describe('auto-refresh', () => {
@@ -2009,10 +2055,10 @@ describe('TaskView', () => {
 
       // Override logs after mounting so mountComponent's default setup doesn't win
       ;(mockApi.getTaskLogs as Mock).mockResolvedValue([
-        createMockTaskLog({ log_type: 'assistant_text', message: 'First summary' }),
-        createMockTaskLog({ log_type: 'context_compact' }),
-        createMockTaskLog({ log_type: 'context_compact' }),
-        createMockTaskLog({ log_type: 'assistant_text', message: 'Last summary' })
+        createMockTaskLog({ id: 1, log_type: 'assistant_text', message: 'First summary' }),
+        createMockTaskLog({ id: 2, log_type: 'context_compact' }),
+        createMockTaskLog({ id: 3, log_type: 'context_compact' }),
+        createMockTaskLog({ id: 4, log_type: 'assistant_text', message: 'Last summary' })
       ])
 
       await wrapper.vm.refreshTask()
@@ -2028,9 +2074,9 @@ describe('TaskView', () => {
       await mountComponent({ status: 'completed' })
 
       ;(mockApi.getTaskLogs as Mock).mockResolvedValue([
-        createMockTaskLog({ log_type: 'delivery_summary', message: 'Old delivery summary' }),
-        createMockTaskLog({ log_type: 'assistant_text', message: 'Raw assistant summary' }),
-        createMockTaskLog({ log_type: 'delivery_summary', message: 'Final delivery summary' })
+        createMockTaskLog({ id: 1, log_type: 'delivery_summary', message: 'Old delivery summary' }),
+        createMockTaskLog({ id: 2, log_type: 'assistant_text', message: 'Raw assistant summary' }),
+        createMockTaskLog({ id: 3, log_type: 'delivery_summary', message: 'Final delivery summary' })
       ])
 
       await wrapper.vm.refreshTask()

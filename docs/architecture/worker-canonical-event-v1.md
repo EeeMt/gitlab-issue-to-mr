@@ -20,7 +20,7 @@ The stable types are:
 ```text
 run.started model.resolved
 message.delta message.completed
-reasoning_summary.delta reasoning_summary.completed
+reasoning_summary.delta reasoning_summary.completed reasoning_summary.started
 tool.started tool.completed context.compacted provider.retry
 usage.updated usage.final
 harness.completed harness.failed

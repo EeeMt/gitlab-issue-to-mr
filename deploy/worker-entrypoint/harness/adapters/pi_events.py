@@ -142,6 +142,11 @@ _STATE: dict = {
     "model_id": None,
     "session_id": None,
     "thinking": [],
+    # Pairing key for the current thinking block: set on thinking_start from
+    # the raw stream line number, reused by the matching thinking_end so the
+    # projector can complete the same placeholder row in place.
+    "thinking_reasoning_id": None,
+    "thinking_start_line": None,
     "text_parts": [],
     "tool_starts": {},
     "message_completed_emitted": False,
@@ -666,18 +671,33 @@ def _handle_message_update(record: dict, raw_line: int) -> None:
     event = record.get("assistantMessageEvent") if isinstance(record.get("assistantMessageEvent"), dict) else {}
     etype = event.get("type")
     if etype == "thinking_start":
+        # A real start signal opens the page placeholder immediately. The id
+        # derives from the stream-wide line number (contentIndex repeats per
+        # message) and is reused by the matching thinking_end below. A start
+        # without a preceding end (lost/damaged stream) simply opens a new
+        # block: the projector interrupts the previous open row on receipt.
         _STATE["thinking"] = []
+        reasoning_id = f"pi-thinking-{raw_line}"
+        _STATE["thinking_reasoning_id"] = reasoning_id
+        _STATE["thinking_start_line"] = raw_line
+        _emit("reasoning_summary.started", {"reasoning_id": reasoning_id}, raw_line)
     elif etype == "thinking_delta":
         _STATE["thinking"].append(event.get("delta") or "")
     elif etype == "thinking_end":
         thinking = "".join(_STATE["thinking"])
+        reasoning_id = _STATE.get("thinking_reasoning_id")
+        payload: dict = {"client": "pi"}
+        if reasoning_id:
+            payload["reasoning_id"] = reasoning_id
         if thinking:
-            _emit(
-                "reasoning_summary.completed",
-                {"text": thinking, "client": "pi"},
-                raw_line,
-            )
+            payload["text"] = thinking
+        # Completed fires even for an empty block so a started placeholder can
+        # always close. When no start was observed the payload carries no
+        # reasoning_id and the projector shows static content with no duration.
+        _emit("reasoning_summary.completed", payload, raw_line)
         _STATE["thinking"] = []
+        _STATE["thinking_reasoning_id"] = None
+        _STATE["thinking_start_line"] = None
     elif etype == "text_start":
         _STATE["text_parts"] = []
         _STATE["message_completed_emitted"] = False

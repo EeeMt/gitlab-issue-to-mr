@@ -3,6 +3,7 @@ import { mount } from '@vue/test-utils'
 import { h, nextTick } from 'vue'
 import type { Task, TaskLog } from '../api'
 import TaskProcessPanel from './TaskProcessPanel.vue'
+import TaskProcessTextRow from './task-process/TaskProcessTextRow.vue'
 import taskProcessPanelSource from './TaskProcessPanel.vue?raw'
 
 // Use vi.hoisted so the mock factory runs before vi.mock hoisting
@@ -650,5 +651,83 @@ describe('TaskProcessPanel', () => {
     await flushAnimationFrame()
 
     expect(wrapper.text()).toContain('taskView.failedToLoadPayload')
+  })
+
+  it('ticks the shared nowMs clock every second while active and stops when inactive', async () => {
+    vi.useFakeTimers()
+    const wrapper = mount(TaskProcessPanel, {
+      props: {
+        task: createTask('running'),
+        taskLogs: [],
+        isActive: true,
+        terminalHtml: '',
+        taskStatus: 'running',
+      },
+    })
+
+    // nowMs is not part of defineExpose; vue-test-utils types cannot see it.
+    const panelVm = wrapper.vm as unknown as { nowMs: number }
+    const initialNow = panelVm.nowMs
+    expect(initialNow).toBeGreaterThan(0)
+
+    // The existing per-second interval also advances the shared clock.
+    await vi.advanceTimersByTimeAsync(2500)
+    expect(panelVm.nowMs).toBe(initialNow + 2000)
+
+    // Deactivating clears the interval; the clock stops where it froze.
+    await wrapper.setProps({ isActive: false })
+    const frozenNow = panelVm.nowMs
+    vi.advanceTimersByTime(5000)
+    expect(panelVm.nowMs).toBe(frozenNow)
+  })
+
+  it('passes nowMs and taskActive to text rows and ticks them live', async () => {
+    vi.useFakeTimers()
+    const thinkingLog: TaskLog = {
+      id: 7,
+      task_id: 1,
+      log_level: 'info',
+      log_type: 'thinking',
+      metadata: JSON.stringify({
+        attempt_id: 'task-1-attempt-1',
+        reasoning_id: 'pi-thinking-7',
+        status: 'in_progress',
+        started_at: '2026-04-23T10:00:00Z',
+        ended_at: null,
+        duration_ms: null,
+        payload_id: null,
+        preview: '',
+        char_count: 0,
+        truncated: false,
+      }),
+      message: '',
+      created_at: '2026-04-23T10:00:00Z',
+    }
+
+    const wrapper = mount(TaskProcessPanel, {
+      props: {
+        task: createTask('running'),
+        taskLogs: [thinkingLog],
+        isActive: true,
+        terminalHtml: '',
+        taskStatus: 'running',
+      },
+    })
+
+    const textRow = wrapper.findComponent(TaskProcessTextRow)
+    expect(textRow.exists()).toBe(true)
+    // nowMs is not part of defineExpose; vue-test-utils types cannot see it.
+    const panelVm = wrapper.vm as unknown as { nowMs: number }
+    expect(textRow.props('nowMs')).toBe(panelVm.nowMs)
+    expect(textRow.props('taskActive')).toBe(true)
+
+    // Ticks flow into the row via the prop without touching logs/scroll.
+    const initialNow = panelVm.nowMs
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(panelVm.nowMs).toBe(initialNow + 3000)
+    expect(textRow.props('nowMs')).toBe(panelVm.nowMs)
+
+    await wrapper.setProps({ isActive: false })
+    expect(textRow.props('taskActive')).toBe(false)
   })
 })

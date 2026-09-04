@@ -1042,6 +1042,8 @@ def _reset_pi_state():
         "last_raw_line": 0,
         "text_parts": [],
         "thinking": [],
+        "thinking_reasoning_id": None,
+        "thinking_start_line": None,
         "message_completed_emitted": False,
     }
 
@@ -1423,7 +1425,9 @@ def test_pi_documented_special_events_do_not_become_unknown_raw_events():
     assert [event_type for event_type, _, _ in writer.events].count("provider.retry") == 2
 
 
-def test_pi_thinking_end_is_a_completed_reasoning_summary():
+def test_pi_thinking_start_opens_placeholder_paired_with_completed():
+    """thinking_start emits reasoning_summary.started immediately; the same
+    reasoning_id (raw stream line) is reused by the block's completed event."""
     import pi_events
 
     _reset_pi_state()
@@ -1441,8 +1445,123 @@ def test_pi_thinking_end_is_a_completed_reasoning_summary():
         {"type": "message_update", "assistantMessageEvent": {"type": "thinking_end"}},
         3,
     )
-    summaries = [p for t, p, _ in writer.events if t == "reasoning_summary.completed"]
-    assert summaries == [{"text": "plan", "client": "pi"}]
+    assert [(t, p) for t, p, _ in writer.events] == [
+        ("reasoning_summary.started", {"reasoning_id": "pi-thinking-1"}),
+        (
+            "reasoning_summary.completed",
+            {"reasoning_id": "pi-thinking-1", "text": "plan", "client": "pi"},
+        ),
+    ]
+
+
+def test_pi_empty_thinking_end_still_closes_started_placeholder():
+    """An empty block completes the started placeholder: the completed event
+    fires even with no text so the page never keeps a hanging spinner."""
+    import pi_events
+
+    _reset_pi_state()
+    writer = _FakeWriter()
+    pi_events._emit = writer
+    pi_events.translate(
+        {"type": "message_update", "assistantMessageEvent": {"type": "thinking_start"}},
+        1,
+    )
+    pi_events.translate(
+        {"type": "message_update", "assistantMessageEvent": {"type": "thinking_end"}},
+        2,
+    )
+    assert [(t, p) for t, p, _ in writer.events] == [
+        ("reasoning_summary.started", {"reasoning_id": "pi-thinking-1"}),
+        ("reasoning_summary.completed", {"reasoning_id": "pi-thinking-1", "client": "pi"}),
+    ]
+
+
+def test_pi_multiple_thinking_blocks_keep_distinct_pairing_ids():
+    """Each thinking_start gets its own stream-wide line id; the matching end
+    reuses it, so two blocks (even across turns) never share a placeholder."""
+    import pi_events
+
+    _reset_pi_state()
+    writer = _FakeWriter()
+    pi_events._emit = writer
+    pi_events.translate(
+        {"type": "message_update", "assistantMessageEvent": {"type": "thinking_start"}},
+        1,
+    )
+    pi_events.translate(
+        {"type": "message_update", "assistantMessageEvent": {"type": "thinking_delta", "delta": "first"}},
+        2,
+    )
+    pi_events.translate(
+        {"type": "message_update", "assistantMessageEvent": {"type": "thinking_end"}},
+        3,
+    )
+    # A later turn opens a second block with a fresh id.
+    pi_events.translate(
+        {"type": "message_update", "assistantMessageEvent": {"type": "thinking_start"}},
+        4,
+    )
+    pi_events.translate(
+        {"type": "message_update", "assistantMessageEvent": {"type": "thinking_delta", "delta": "second"}},
+        5,
+    )
+    pi_events.translate(
+        {"type": "message_update", "assistantMessageEvent": {"type": "thinking_end"}},
+        6,
+    )
+    started = [(p, l) for t, p, l in writer.events if t == "reasoning_summary.started"]
+    completed = [p for t, p, _ in writer.events if t == "reasoning_summary.completed"]
+    assert started == [
+        ({"reasoning_id": "pi-thinking-1"}, 1),
+        ({"reasoning_id": "pi-thinking-4"}, 4),
+    ]
+    assert completed == [
+        {"reasoning_id": "pi-thinking-1", "text": "first", "client": "pi"},
+        {"reasoning_id": "pi-thinking-4", "text": "second", "client": "pi"},
+    ]
+
+
+def test_pi_thinking_end_without_start_carries_no_reasoning_id():
+    """Deltas observed without a start still surface as a standalone static
+    summary on end, with no fabricated reasoning_id/start time."""
+    import pi_events
+
+    _reset_pi_state()
+    writer = _FakeWriter()
+    pi_events._emit = writer
+    pi_events.translate(
+        {"type": "message_update", "assistantMessageEvent": {"type": "thinking_delta", "delta": "orphan"}},
+        1,
+    )
+    pi_events.translate(
+        {"type": "message_update", "assistantMessageEvent": {"type": "thinking_end"}},
+        2,
+    )
+    assert [(t, p) for t, p, _ in writer.events] == [
+        ("reasoning_summary.completed", {"text": "orphan", "client": "pi"}),
+    ]
+
+
+def test_writer_and_backend_validator_keep_reasoning_summary_started(tmp_path):
+    """The canonical writer registers the new type (no diagnostic downgrade)
+    and the V2 validator preserves it with its payload."""
+    runtime_dir = tmp_path / "started"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started", {"runtime_bundle_digest": "d" * 64})
+    _emit(runtime_dir, "reasoning_summary.started", {"reasoning_id": "pi-thinking-7"})
+    _emit(
+        runtime_dir,
+        "reasoning_summary.completed",
+        {"reasoning_id": "pi-thinking-7", "text": "ok", "client": "pi"},
+    )
+    events = _events(runtime_dir)
+    types = [event["type"] for event in events]
+    assert types.count("reasoning_summary.started") == 1
+    started = next(e for e in events if e["type"] == "reasoning_summary.started")
+    normalized = validate_event_v2(started)
+    assert normalized["type"] == "reasoning_summary.started"
+    assert normalized["payload"] == {"reasoning_id": "pi-thinking-7"}
+    assert normalized["seq"] == 2
 
 
 def test_pi_unknown_raw_type_emits_unknown_raw_event():

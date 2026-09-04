@@ -70,6 +70,12 @@ export interface ParsedTextEntry {
   payloadId: number | null
   charCount: number | null
   truncated: boolean
+  // Lifecycle fields for thinking blocks projected from canonical start/completed
+  // events. Rows without these keys keep null and render as static entries.
+  thinkingStatus?: 'in_progress' | 'completed' | 'interrupted' | null
+  startedAt?: string | null
+  endedAt?: string | null
+  durationMs?: number | null
 }
 
 export interface NormalizedTextEventRow {
@@ -359,14 +365,22 @@ export function parseToolCall(log: TaskLog): ToolCall {
 export function parseTextEntry(metadata: unknown): ParsedTextEntry {
   const parsedMetadata = parseJsonMetadata(metadata)
   if (!parsedMetadata || typeof parsedMetadata !== 'object' || Array.isArray(parsedMetadata))
-    return { text: '', preview: '', payloadId: null, charCount: null, truncated: false }
+    return { text: '', preview: '', payloadId: null, charCount: null, truncated: false, thinkingStatus: null, startedAt: null, endedAt: null, durationMs: null }
   const obj = parsedMetadata as Record<string, unknown>
   const text = typeof obj.text === 'string' ? obj.text : ''
   const preview = typeof obj.preview === 'string' ? obj.preview : ''
   const payloadId = typeof obj.payload_id === 'number' ? obj.payload_id : null
   const charCount = typeof obj.char_count === 'number' ? obj.char_count : null
   const truncated = obj.truncated === true
-  return { text, preview, payloadId, charCount, truncated }
+  const status = obj.status
+  const thinkingStatus = status === 'in_progress' || status === 'completed' || status === 'interrupted'
+    ? status
+    : null
+  const startedAt = typeof obj.started_at === 'string' ? obj.started_at : null
+  const endedAt = typeof obj.ended_at === 'string' ? obj.ended_at : null
+  const durationValue = obj.duration_ms
+  const durationMs = typeof durationValue === 'number' && Number.isFinite(durationValue) ? durationValue : null
+  return { text, preview, payloadId, charCount, truncated, thinkingStatus, startedAt, endedAt, durationMs }
 }
 
 export function parseSystemInitEntry(taskLogs: TaskLog[]) {

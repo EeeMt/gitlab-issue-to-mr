@@ -12,6 +12,77 @@ export const RAW_LOG_WINDOW_MAX_CHARS = 500_000
 export function isActiveTaskStatus(status?: string | null): boolean {
   return status === 'running' || status === 'pending' || status === 'queued'
 }
+export function parseLogMetadata(metadata: unknown): Record<string, unknown> {
+  if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
+    return metadata as Record<string, unknown>
+  }
+  if (typeof metadata === 'string') {
+    try {
+      const parsed: unknown = JSON.parse(metadata)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>
+      }
+    } catch {
+      // Garbage string metadata falls back to an empty record.
+    }
+  }
+  return {}
+}
+
+export function getThinkingStatus(
+  log: TaskLog,
+): 'in_progress' | 'completed' | 'interrupted' | null {
+  if (log.log_type !== 'thinking') return null
+  const status = parseLogMetadata(log.metadata).status
+  if (status === 'in_progress' || status === 'completed' || status === 'interrupted') {
+    return status
+  }
+  return null
+}
+
+export function computeStructuredStreamSinceId(logs: TaskLog[]): number {
+  let maxId = 0
+  const pendingIds: number[] = []
+  for (const log of logs) {
+    if (log.id > maxId) maxId = log.id
+    if (getThinkingStatus(log) === 'in_progress') pendingIds.push(log.id)
+  }
+  if (pendingIds.length === 0) return maxId
+  return Math.max(0, Math.min(...pendingIds) - 1)
+}
+
+const THINKING_STATUS_RANK: Record<string, number> = {
+  completed: 2,
+  interrupted: 1,
+  in_progress: 0,
+}
+
+function thinkingStatusRank(log: TaskLog): number {
+  const status = getThinkingStatus(log)
+  if (status === null) return -1
+  return THINKING_STATUS_RANK[status]
+}
+
+export function mergeTaskLogState(current: TaskLog[], incoming: TaskLog[]): TaskLog[] {
+  const merged: TaskLog[] = []
+  const indexById = new Map<number, number>()
+  for (const log of current) {
+    indexById.set(log.id, merged.length)
+    merged.push(log)
+  }
+  for (const log of incoming) {
+    const existingIndex = indexById.get(log.id)
+    if (existingIndex === undefined) {
+      indexById.set(log.id, merged.length)
+      merged.push(log)
+      continue
+    }
+    if (thinkingStatusRank(log) >= thinkingStatusRank(merged[existingIndex])) {
+      merged[existingIndex] = log
+    }
+  }
+  return merged
+}
 
 interface TaskLogStreamOptions {
   taskId: ComputedRef<number>
@@ -98,16 +169,10 @@ export function useTaskLogStreams(options: TaskLogStreamOptions) {
     if (!isActiveTaskStatus(options.task.value?.status)) return
     if (structuredLogSource) return
 
-    const sinceId = options.taskLogs.value.length > 0
-      ? Math.max(...options.taskLogs.value.map(log => log.id ?? 0))
-      : 0
+    const sinceId = computeStructuredStreamSinceId(options.taskLogs.value)
 
     const mergeLogUpdate = (log: TaskLog) => {
-      const index = options.taskLogs.value.findIndex(current => current.id === log.id)
-      if (index === -1) return
-      const updated = [...options.taskLogs.value]
-      updated[index] = log
-      options.taskLogs.value = updated
+      options.taskLogs.value = mergeTaskLogState(options.taskLogs.value, [log])
     }
 
     let source: EventSource | null = null
@@ -123,13 +188,7 @@ export function useTaskLogStreams(options: TaskLogStreamOptions) {
           structuredFlushScheduled = false
           if (pendingStructuredLogs.length === 0) return
           const incoming = pendingStructuredLogs.splice(0)
-          const current = options.taskLogs.value
-          const ids = new Set(current.map(log => log.id))
-          const additions = incoming.filter(log => !ids.has(log.id))
-          if (additions.length > 0) {
-            options.taskLogs.value = [...current, ...additions]
-          }
-          incoming.filter(log => ids.has(log.id)).forEach(mergeLogUpdate)
+          options.taskLogs.value = mergeTaskLogState(options.taskLogs.value, incoming)
         })
       },
       () => {
