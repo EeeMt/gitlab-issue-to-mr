@@ -26,13 +26,20 @@ reconnect or release-safety pass.
 | Frontend unit suite | passed, 80 files / 1691 tests | Includes structured SSE stale-source lifecycle regression coverage |
 | Frontend production build | passed | Vite emitted only the existing large-chunk warning |
 | Backend lint | passed | `make lint-backend` |
-| Remote Docker state | near capacity, not full | After the latest nginx-only redeploy, `df -h /` reported 61G total / 57G used / 4.2G available (94%); `docker system df` reported Images 12.4GB / 6.691GB reclaimable; containers 6.818MB; volumes 1.639GB; BuildKit 6.06GB. No cleanup was performed because the disk was not full. |
+| Remote Docker state | near capacity, not full | The current recheck reports `df -h /` at 61G total / 57G used / 4.1G available (94%) and `df -ih /` at 19% inode use; `docker system df` reports Images 12.4GB / 6.691GB reclaimable, containers 27.53MB, volumes 1.639GB, and BuildKit 6.06GB. No cleanup was performed because the disk was not full. |
 | Profile re-verification and live post-fix smoke | passed | Profile 4 generation 72 completed four-Harness Verify; Task 368 completed on Bundle 163 with the expected model field |
 | Remote execution mode | unchanged | `HARNESS_EXECUTION_MODE=dual_canary`; no `v2_only` switch was attempted |
 
 The remote image/cache state was inspected before and after the live smoke.
 The disk was not full, so no image, volume, or BuildKit cleanup was performed.
 No protected service or unrelated image was touched.
+
+The current remote recheck also returned Backend health `healthy` with database
+and Docker checks `ok`, and confirmed `HARNESS_EXECUTION_MODE=dual_canary`.
+The database snapshot has 339 Tasks, zero `pending`/`queued`/`running` Tasks,
+zero `issue_execution_locks`, zero Mattermost notification profiles, and zero
+notification deliveries. These are current Host observations; they do not
+replace the missing live alert delivery or independent release sign-off.
 
 The current development-Host Provider inventory was checked without reading
 credentials or URL paths: enabled Providers 3–6 resolve to `opencode.ai`, and
