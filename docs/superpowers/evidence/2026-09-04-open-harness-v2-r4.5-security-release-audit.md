@@ -26,7 +26,7 @@ evidence, not a security or release-owner approval.
 | --- | --- | --- |
 | `python3 scripts/harness-probes/v2/secret-scan.py` | passed, `findings=0` | Repository candidate only; it does not replace a Provider/GitLab access audit |
 | `backend/.venv/bin/python -m pytest backend/tests/unit/test_codex_harness_adapter.py -q` | passed, 33 tests | Covers the post-fix Codex `OPENAI_MODEL` projection and V2 envelope/result mapping |
-| `backend/.venv/bin/python -m pytest backend/tests/unit/test_pi_harness_adapter.py -q` | passed, 50 tests | Covers active-session projection when Pi emits startup `get_state` before `new_session` acknowledgement |
+| `backend/.venv/bin/python -m pytest backend/tests/unit/test_pi_harness_adapter.py -q` | passed, 54 tests | Covers active-session projection when Pi emits startup `get_state` before `new_session` acknowledgement |
 | `backend/.venv/bin/python -m ruff check deploy/worker-entrypoint/harness/adapters/pi_events.py backend/tests/unit/test_pi_harness_adapter.py` | passed | Focused lint for the Pi runtime fix |
 | Affected Bundle/Profile/Scheduler/notification/freeform regression set | passed, 227 tests | Re-checks the source/binding/runtime paths affected by the post-fix candidate |
 | Backend focused regression | passed, 39 `test_issues_api.py` tests | Covers the current `task_mode` serialization fix |

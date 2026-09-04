@@ -86,7 +86,7 @@ and independent review gates are signed.
   | `backend/.venv/bin/python -m pytest backend/tests/unit -q` | 3247 passed / 4 skipped / 96 subtests (pre-fix baseline) |
   | affected Bundle/Profile/Scheduler/notification/freeform regression set | 227 passed |
   | `backend/.venv/bin/python -m pytest backend/tests/unit/test_codex_harness_adapter.py -q` | 33 passed |
-  | `backend/.venv/bin/python -m pytest backend/tests/unit/test_pi_harness_adapter.py -q` | 50 passed; covers active-session projection after startup `get_state` |
+  | `backend/.venv/bin/python -m pytest backend/tests/unit/test_pi_harness_adapter.py -q` | 54 passed; covers active-session projection after startup `get_state` |
   | `backend/.venv/bin/python -m ruff check deploy/worker-entrypoint/harness/adapters/pi_events.py backend/tests/unit/test_pi_harness_adapter.py` | passed |
   | `make lint-backend` | passed |
   | `python3 -m py_compile deploy/worker-entrypoint/harness/adapters/codex_events.py` | passed |
