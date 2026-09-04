@@ -1144,7 +1144,14 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertEqual(result.returncode, 23, result.stderr)
         self.assertEqual(
             loaded_modules,
-            ["bootstrap", "repository-helpers", "repository", "gitlab", "delivery"],
+            [
+                "bootstrap",
+                "repository-helpers",
+                "git-delivery",
+                "repository",
+                "gitlab",
+                "delivery",
+            ],
         )
 
     def test_runtime_worker_image_delegates_codify_tools_to_worker_kit(self):

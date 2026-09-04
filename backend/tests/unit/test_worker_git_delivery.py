@@ -19,7 +19,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 HELPERS_SCRIPT = REPO_ROOT / "deploy" / "worker-entrypoint" / "repository-helpers.sh"
-GIT_DELIVERY_PY = REPO_ROOT / "deploy" / "worker-entrypoint" / "git-delivery.py"
+GIT_DELIVERY_SH = REPO_ROOT / "deploy" / "worker-entrypoint" / "git-delivery.sh"
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -91,7 +91,9 @@ def _run_delivery_scenario(
     # the real module runs without root or host mutation.
     rendered_script = root / "delivery-under-test.sh"
     rendered_script.write_text(
-        HELPERS_SCRIPT.read_text().replace("/workspace", str(workspace))
+        (
+            HELPERS_SCRIPT.read_text() + "\n" + GIT_DELIVERY_SH.read_text()
+        ).replace("/workspace", str(workspace))
     )
 
     env = {
