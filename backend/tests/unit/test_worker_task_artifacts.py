@@ -44,3 +44,97 @@ async def test_flush_uses_archive_when_stopped_container_rejects_final_exec():
         task_id=17,
         db=artifact_db,
     )
+
+
+# ---------------------------------------------------------------------------
+# task-metadata.json persistence: canonical git_delivery merge (design §7.2.3)
+# ---------------------------------------------------------------------------
+
+
+def _metadata_worker(container_payload: dict):
+    worker = SimpleNamespace(
+        docker=SimpleNamespace(
+            read_file_from_container=MagicMock(
+                return_value=__import__("json").dumps(container_payload)
+            )
+        ),
+    )
+    return worker
+
+
+def test_container_metadata_never_overwrites_canonical_git_delivery():
+    """The canonical finalization object wins over the stale container copy."""
+    import json
+
+    from app.core.worker_task_artifacts import save_task_metadata_from_container
+
+    stale_git_delivery = {
+        "schema": "codify.git-delivery.v1",
+        "attempt_id": "task-1-attempt-1",
+        "branch": "codify/issue-1",
+        "head_sha": "a" * 40,
+        "commits": [{"sha": "a" * 40, "subject": "stale"}],
+        "recovered_commits": [],
+        "diff": {"additions": 1, "deletions": 0, "total": 1, "new_files": [], "modified_files": [], "deleted_files": []},
+        "push": {"status": "failed", "remote_sha": None,
+                 "error": {"code": "push_failed", "message": "stale failure"}},
+    }
+    canonical_git_delivery = {
+        "schema": "codify.git-delivery.v1",
+        "attempt_id": "task-1-attempt-1",
+        "branch": "codify/issue-1",
+        "head_sha": "b" * 40,
+        "commits": [{"sha": "b" * 40, "subject": "confirmed"}],
+        "recovered_commits": [],
+        "diff": {"additions": 9, "deletions": 0, "total": 9, "new_files": [], "modified_files": [], "deleted_files": []},
+        "push": {"status": "pushed", "remote_sha": "b" * 40, "error": None},
+    }
+    task = SimpleNamespace(
+        id=1,
+        _canonical_git_delivery=canonical_git_delivery,
+        worker_metadata=None,
+    )
+    container_payload = {
+        "task_id": 1,
+        "commit_sha": None,
+        "commit_message": None,
+        "overall_summary": "fresh summary",
+        "execution_summary": "…",
+        "git_delivery": stale_git_delivery,
+    }
+    worker = _metadata_worker(container_payload)
+    save_task_metadata_from_container(worker, container=object(), task=task, issue=None)
+
+    assert task.worker_metadata["git_delivery"] == canonical_git_delivery
+    assert task.worker_metadata["overall_summary"] == "fresh summary"
+    assert json.dumps(container_payload["git_delivery"]) != json.dumps(
+        task.worker_metadata["git_delivery"]
+    )
+
+
+def test_invalid_artifact_only_git_delivery_is_dropped():
+    """No canonical parse (ingestion gap): unvalidated artifact objects never persist."""
+    from app.core.worker_task_artifacts import save_task_metadata_from_container
+
+    task = SimpleNamespace(id=1, _canonical_git_delivery=None, worker_metadata=None)
+    container_payload = {
+        "task_id": 1,
+        "overall_summary": "s",
+        "git_delivery": {"schema": "codify.git-delivery.v1", "head_sha": "short"},
+    }
+    save_task_metadata_from_container(
+        _metadata_worker(container_payload), container=object(), task=task, issue=None
+    )
+    assert "git_delivery" not in task.worker_metadata
+    assert task.worker_metadata["overall_summary"] == "s"
+
+
+def test_absent_metadata_file_leaves_worker_metadata_untouched():
+    from app.core.worker_task_artifacts import save_task_metadata_from_container
+
+    worker = SimpleNamespace(
+        docker=SimpleNamespace(read_file_from_container=MagicMock(return_value=None))
+    )
+    task = SimpleNamespace(id=1, _canonical_git_delivery=None, worker_metadata=None)
+    save_task_metadata_from_container(worker, container=object(), task=task, issue=None)
+    assert task.worker_metadata is None

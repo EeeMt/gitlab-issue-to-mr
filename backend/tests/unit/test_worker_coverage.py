@@ -184,6 +184,7 @@ def _stub_runtime_bundle_and_attempt():
 _WORKER_ENTRYPOINT_MODULES = (
     "bootstrap",
     "repository-helpers",
+    "git-delivery",
     "repository",
     "gitlab",
     "delivery",
@@ -1369,9 +1370,10 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn('FINAL_OVERALL_SUMMARY=""', content)
         self.assertIn('PREVIOUS_SUMMARY_FILE="${CODIFY_RUNTIME_DIR}/previous-task-summaries.md"', content)
         self.assertIn(
-            'build_overall_summary_prompt "${PREVIOUS_SUMMARY_FILE}"',
+            'OVERALL_SUMMARY_PROMPT=$(build_overall_summary_prompt \\',
             content,
         )
+        self.assertIn('repo_delivery_generate_overall_summary', content)
         self.assertIn('echo "Previous task summaries found:', content)
         self.assertIn('echo "Previous task summaries not found at', content)
         self.assertIn(
@@ -1599,15 +1601,20 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         )
         self.assertIn('relation=diverged', content)
         self.assertIn('reason=remote_changed', content)
-        self.assertIn('reason=local_history_rewritten', content)
-        self.assertIn('push_recovered result=remote_matches_local', content)
-        self.assertIn('elif repo_has_unpublished_local_head; then', content)
-        self.assertIn('action=push_existing_head', content)
-        self.assertIn('write_existing_commit_delivery_metadata', content)
+        self.assertIn('reason=remote_deleted', content)
+        self.assertIn('reason=remote_unobservable', content)
+        self.assertIn('git_delivery', content)
+        self.assertIn('repo_delivery_publish', content)
+        self.assertIn('repo_pin_delivery_start', content)
+        self.assertIn('repo_delivery_collect', content)
+        self.assertIn('repo_delivery_record "not_needed"', content)
         self.assertIn(
-            '--force-with-lease="refs/heads/${BRANCH_NAME}:${REPO_REMOTE_WORK_SHA}"',
+            '--force-with-lease="refs/heads/${BRANCH_NAME}:${REPO_DELIVERY_LEASE}"',
             content,
         )
+        self.assertIn('codify.unpublishedPushSha', content)
+        self.assertIn('record_push', content)
+        self.assertIn('already_present', content)
         self.assertIn(
             "export REPO_REMOTE_WORK_SHA REPO_PREVIOUS_REMOTE_WORK_SHA",
             content,
@@ -1671,7 +1678,7 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         claude_index = content.index('echo "Starting Harness Adapter (streaming mode)..."')
         post_index = content.index('run_worker_script "post" "${CODIFY_WORKER_POST_SCRIPT_FILE}"')
         changes_index = content.index(
-            "CHANGES=$(codify_run_shell 'cd /workspace && git status --porcelain' || true)"
+            "WORKSPACE_STATUS=$(codify_run_shell 'cd /workspace && git status --porcelain' || true)"
         )
 
         self.assertLess(pre_index, claude_index)

@@ -112,6 +112,7 @@ fi
 for module in \
     bootstrap \
     repository-helpers \
+    git-delivery \
     repository \
     gitlab \
     delivery \

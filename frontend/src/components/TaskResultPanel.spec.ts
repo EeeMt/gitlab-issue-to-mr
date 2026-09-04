@@ -370,6 +370,9 @@ describe('TaskResultPanel', () => {
     expect(summaryMermaidSvg).toContain('width: 100%;')
     expect(summaryMermaidSvg).toContain('max-width: 100%;')
     expect(summaryMermaidSvg).toContain('height: auto;')
+    expect(mermaidModalViewport).toContain('height: 0;')
+  })
+
   it('renders the git delivery block with honest stats, push chips, and copyable commit rows', () => {
     const gitDelivery = cssBlock('.git-delivery')
     const pushOk = cssBlock('.git-delivery__push--ok')
@@ -388,5 +391,4 @@ describe('TaskResultPanel', () => {
     expect(commitSubject).toContain('overflow-wrap: anywhere;')
     expect(commitSubject).toContain('text-overflow: ellipsis;')
   })
-})
 })

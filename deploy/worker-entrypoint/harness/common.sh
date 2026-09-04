@@ -160,6 +160,14 @@ codify_harness_ensure_result() {
 codify_harness_finalize_attempt() {
     local exit_code="${1:-1}"
     local delivery_payload finalization_payload terminal_payload git_snapshot
+    # Preserve local Git delivery facts (commits/diff only; never a new commit
+    # or push) before this attempt's canonical events are emitted. Runs on any
+    # failed exit whose normal delivery path never produced a snapshot.
+    if [ "${exit_code}" -ne 0 ]; then
+        if declare -F repo_delivery_collect_facts_on_exit >/dev/null 2>&1; then
+            repo_delivery_collect_facts_on_exit || true
+        fi
+    fi
     # The delivery snapshot written by main.sh is the single source for the
     # finalization projection; the legacy env fallback only covers attempts
     # that never reached the Git delivery path (e.g. harness init failure).
