@@ -32,6 +32,7 @@ security or release-owner approval.
 | Remote Docker state | near capacity, not full | The post-Task-371 recheck reports `df -h /` at 61G total / 58G used / 3.6G available (95%) and `df -ih /` at 22% inode use; `docker system df` reports Images 12.41GB / 6.698GB reclaimable, containers 29.3MB, volumes 1.639GB, and BuildKit 6.526GB. No cleanup was performed because the disk was not full. |
 | Current Kit archive reconstruction and V2 release preflight | passed, not signed | The installed `0.6.12-linux-amd64-c33dbf86951b` Kit was streamed into a temporary `518M` archive; archive SHA-256 `2d3ee7f81525d465731344571cbf5bd93a0cd94bb6cf16f5a4d5512d5c0a25a6`, manifest SHA-256 `c33dbf86951bed6e3b4de1897313725f14f00006dc51fb300e7b821bb47e17bd`, content inventory `7630f086800c95f851db8c9351638868ab60ac33fb3bfe22f9f2f5c8dcdc98a1`; `deploy/scripts/preflight-v2-release.sh` passed against the target daemon and Worker image repo digest `127.0.0.1:5000/codify-worker/java21-maven@sha256:234582c692d1ebb00ba8e882160618c2258463149d968009ac81c545e63a538b`. The temporary archive is not a release-owner-signed package and is not committed. |
 | Profile re-verification and live post-fix smoke | passed | Profile 4 generation 72 completed four-Harness Verify; Task 368 completed on Bundle 163 with the expected model field, and Task 371 completed OpenCode on the scoped Bundle 164 through the controlled nginx-only reconnect probe |
+| GitLab integration connectivity | passed, not a permission sign-off | The authenticated admin UI read-only connection test reached `http://192.168.50.129:8080`, authenticated as `ai-bot`, and reported GitLab `18.5.5-ee`; the Webhook overview currently returned zero projects. This proves application connectivity/identity only, not token scope, least privilege, or rotation. |
 | Remote execution mode | unchanged | `HARNESS_EXECUTION_MODE=dual_canary`; no `v2_only` switch was attempted |
 
 The remote image/cache state was inspected before and after the live smoke and
@@ -68,6 +69,12 @@ an endpoint inventory for the release audit, not a least-privilege approval.
 Task 371 used Provider 7 only as an explicitly authorized development
 diagnostic; it does not establish production authorization, rotation, or
 external destination approval.
+
+The application-level GitLab connection test succeeded with the effective
+stored configuration, but no token scope or rotation metadata is exposed by
+that test. The successful identity check therefore remains a connectivity
+observation only; the release owner still must provide the least-privilege and
+rotation record.
 
 The current live evidence covers Pi, OpenCode, Claude, and Codex on Profile 4,
 including the post-fix Codex Task 368, the OpenCode reconnect Task 371, and the
