@@ -23,19 +23,26 @@ reconnect or release-safety pass.
 | `backend/.venv/bin/python -m pytest backend/tests/unit/test_codex_harness_adapter.py -q` | passed, 33 tests | Covers the post-fix Codex `OPENAI_MODEL` projection and V2 envelope/result mapping |
 | Affected Bundle/Profile/Scheduler/notification/freeform regression set | passed, 227 tests | Re-checks the source/binding/runtime paths affected by the post-fix candidate |
 | Backend focused regression | passed, 39 `test_issues_api.py` tests | Covers the current `task_mode` serialization fix |
-| Frontend unit suite | passed, 80 files / 1691 tests | Includes structured SSE stale-source lifecycle regression coverage |
+| Frontend unit suite | passed, 80 files / 1692 tests | Includes structured SSE stale-source and mobile safe-area regression coverage |
 | Frontend production build | passed | Vite emitted only the existing large-chunk warning |
 | Backend lint | passed | `make lint-backend` |
-| Remote Docker state | near capacity, not full | The current recheck reports `df -h /` at 61G total / 57G used / 4.1G available (94%) and `df -ih /` at 19% inode use; `docker system df` reports Images 12.4GB / 6.691GB reclaimable, containers 27.53MB, volumes 1.639GB, and BuildKit 6.06GB. No cleanup was performed because the disk was not full. |
+| Remote Docker state | near capacity, not full | The final nginx-only deployment recheck reports `df -h /` at 61G total / 58G used / 3.6G available (95%) and `df -ih /` at 22% inode use; `docker system df` reports Images 12.41GB / 6.698GB reclaimable, containers 28.27MB, volumes 1.639GB, and BuildKit 6.526GB. No cleanup was performed because the disk was not full. |
 | Profile re-verification and live post-fix smoke | passed | Profile 4 generation 72 completed four-Harness Verify; Task 368 completed on Bundle 163 with the expected model field |
 | Remote execution mode | unchanged | `HARNESS_EXECUTION_MODE=dual_canary`; no `v2_only` switch was attempted |
 
-The remote image/cache state was inspected before and after the live smoke.
-The disk was not full, so no image, volume, or BuildKit cleanup was performed.
-No protected service or unrelated image was touched.
+The remote image/cache state was inspected before and after the live smoke and
+again after the frontend nginx-only deployment. The disk was not full, so no
+image, volume, or BuildKit cleanup was performed. No protected service or
+unrelated image was touched.
 
 The current remote recheck also returned Backend health `healthy` with database
 and Docker checks `ok`, and confirmed `HARNESS_EXECUTION_MODE=dual_canary`.
+The frontend-only commit `a6be3f8b` was deployed through the `remote` Docker
+context with nginx-only rebuild/recreate; the served `index.html` contains
+`viewport-fit=cover`, while backend, scheduler, and database containers were
+not recreated. The authenticated browser page loaded the mobile safe-area
+rules, but its desktop viewport cannot establish real mobile keyboard or notch
+behavior.
 The database snapshot has 339 Tasks, zero `pending`/`queued`/`running` Tasks,
 zero `issue_execution_locks`, zero Mattermost notification profiles, and zero
 notification deliveries. These are current Host observations; they do not

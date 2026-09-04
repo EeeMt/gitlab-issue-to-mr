@@ -56,23 +56,30 @@ and independent review gates are signed.
   | `python3 -m py_compile deploy/worker-entrypoint/harness/adapters/codex_events.py` | passed |
   | `python3 scripts/harness-probes/v2/secret-scan.py` | passed, `findings=0` |
   | `git diff --check` | passed |
-  | `frontend/npx vitest run` | 80 files / 1691 tests passed |
+  | `frontend/npx vitest run` | 80 files / 1692 tests passed |
   | `frontend/npx vitest run src/features/tasks/useTaskLogStreams.spec.ts` | 3 tests passed; stale structured-source callback races covered |
   | `frontend/npx vitest run src/views/TaskView.spec.ts src/components/TaskFormDrawer.spec.ts` | 2 files / 234 tests passed |
-  | `frontend/npm run build` | passed |
+  | `frontend/npm run build` | passed; includes the safe-area viewport metadata |
 
 ## Remote Host state
 
 - Docker target: `192.168.50.129`, `linux/amd64`; execution mode remains
   `dual_canary`.
-- `docker system df` after Task 368: Images `12.39GB` with `6.675GB`
-  reclaimable; containers `5.098MB`; local volumes `1.639GB`; BuildKit cache
-  `5.128GB`. The disk was not full, so no image or cache cleanup was performed.
+- The final nginx-only frontend deployment snapshot: Images `12.41GB` with
+  `6.698GB` reclaimable; containers `28.27MB`; local volumes `1.639GB`; and
+  BuildKit cache `6.526GB`. The filesystem was `61GB` total / `58GB` used /
+  `3.6GB` available (`95%`), with `22%` inode use. It was not full, so no
+  image or cache cleanup was performed.
 - The Backend was rebuilt/restarted for commit `8110afa0` and returned healthy
   with image ID `sha256:d65c19ee4dff3398fba6917b2fe60b037b5835437df3bec6ea6f2c2eb4d17089`.
   The scheduler and long-lived GitLab services remained running.
 - Profile 4's administrator Verify completed all four enabled Harness checks;
   the new Profile generation is `72`, and the readiness row is `ready`.
+
+- The frontend-only commit `a6be3f8b` opts the served app into
+  `viewport-fit=cover`, applies the top safe-area inset to the mobile shell and
+  drawer header, and reserves the bottom inset in the navigation drawer body.
+  It does not change the frozen Bundle, Provider, Harness, or event contract.
 
 ## Current operational snapshot
 
@@ -211,7 +218,7 @@ current stream or reporting completion. The same identity check now also
 rejects stale `batch` and `update` callbacks from the old source before they
 enter the shared pending queue or merge into current task logs. Three focused
 regression tests cover the stale-error, stale-done, and stale-batch/update
-races, and the full frontend suite passed 80 files / 1691 tests; `npm run build` also passed with only the existing
+races, and the full frontend suite passed 80 files / 1692 tests; `npm run build` also passed with only the existing
 large-chunk warning. This is source/test evidence only: it does not turn the
 inconclusive #369/#370 probes into a valid real network disconnect/reconnect
 acceptance result, and it did not change the frozen Bundle/Provider identity.
@@ -224,7 +231,16 @@ rebuild/recreate. `docker compose ps` showed
 returned HTTP 200. This verifies the static frontend deployment path, not a
 live authenticated SSE reconnect. The host filesystem was at 94% usage with
 4.2GB available; it was not full, so no Codify image or cache cleanup was
-performed.
+performed. The subsequent nginx-only build increased the final snapshot to the
+values recorded above; no protected service or unrelated image was touched.
+
+The follow-up frontend-only commit `a6be3f8b` was deployed through the `remote`
+Docker context with the same nginx-only rebuild/recreate boundary. The actual
+served `index.html` contains `viewport-fit=cover`, and the authenticated target
+Host page at the desktop viewport exposed the mobile top-inset and drawer
+bottom-inset rules in its loaded stylesheets. This verifies the built artifact
+and deployment path; the desktop viewport still cannot prove a real iOS
+keyboard, IME resize, notch, or home-indicator measurement.
 
 ## R4.3/R4.4 boundary after this run
 
@@ -237,9 +253,10 @@ the post-fix Codex execution-model display.
 It does not yet sign the full gate because:
 
 - Chrome's desktop extension viewport cannot prove behavior with a real mobile
-  soft keyboard, IME resize, or notched-device safe-area inset. The Task drawer
-  footer retains the `env(safe-area-inset-bottom)` rule, but this run observed a
-  zero computed inset in the emulated viewport.
+  soft keyboard, IME resize, or notched-device safe-area inset. The frontend now
+  opts into `viewport-fit=cover` and the served stylesheet places the mobile
+  shell/drawer content around the top and bottom `safe-area-inset-*` values, but
+  this run still observed a zero computed inset in the desktop viewport.
 - Reload continuity is a browser-level reconnect spot-check, not a controlled
   network disconnect/reconnect test.
 - The two backend-restart probes (#369/#370) are also inconclusive: their
