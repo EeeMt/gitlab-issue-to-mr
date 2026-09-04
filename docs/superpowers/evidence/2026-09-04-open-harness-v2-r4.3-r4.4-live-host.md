@@ -4,8 +4,8 @@
 
 **Scope:** Current R4 candidate on `192.168.50.129`, mobile/desktop browser
 interaction checks, four-Harness live smoke attempts, one live command-plane
-run, one controlled nginx-only disconnect/reconnect, and the resulting
-Host/Task runtime evidence.
+run, one stable-state cancellation, one controlled nginx-only
+disconnect/reconnect, and the resulting Host/Task runtime evidence.
 
 This is candidate evidence, not an L5 go/no-go decision. R4.3–R4.6 remain
 partially open until the complete acceptance, operational, security/release,
@@ -134,6 +134,18 @@ multiple terminal receipts, zero sequence gaps, and zero secret-like matches in
 canonical event JSON or raw-log chunks. All fourteen tasks had finalized raw
 logs; the target Host had zero active Tasks and zero Issue execution locks.
 
+Task 372 then expanded the live cohort with a stable-state OpenCode
+cancellation. The operator cancelled only after the Worker had persisted the
+first `pwd` completion and `tool.started(Bash: sleep 180)`. Its 15 contiguous
+receipts ended with `harness.failed(failure.kind=cancelled)`,
+`worker.finalization(exit_code=143)`, and the unique Task terminal
+`run.failed(status=cancelled, failure.kind=cancelled, exit_code=143)`;
+`cancel_requested_at` was persisted, raw logs were finalized, the 6,867-byte
+runtime archive was retained, and the Worker container was removed. Under the
+frozen status/terminal mapping, this is a cancellation match rather than a
+terminal mismatch; the database `error_message` (`MessageAbortedError: Aborted`)
+does not override the canonical cancellation payload.
+
 ## Real Task and command-plane evidence
 
 Both tasks used Profile 4, the current V2 mounted-Kit composition, Pi, and a
@@ -171,6 +183,7 @@ prove the Codex model projection fixed by `8110afa0`.
 | 369 | Codex / Provider 12 `openrouter-minimax-responses` | `failed` on current Bundle 163; CLI `0.146.0`, Adapter `1.0.0`, canonical seq 1–8 with terminal `run.failed(failure.kind=rate_limited)`, archive 3085 bytes, raw-log 4 chunks / 2486 bytes; the controlled backend-restart probe reached the upstream retry limit with HTTP 429 before the requested delay |
 | 370 | Codex / Provider 4 `opencode-luna` | `failed` on current Bundle 163; CLI `0.146.0`, Adapter `1.0.0`, canonical seq 1–7 with terminal `run.failed(failure.kind=rate_limited)`, archive 2935 bytes, raw-log 4 chunks / 2503 bytes; the second controlled backend-restart probe reached the upstream retry limit with HTTP 429 before the requested delay |
 | 371 | OpenCode / Provider 7 `openrouter-free` | `completed` on OpenCode-specific Bundle 164; CLI `1.18.19`, Adapter `2.0.0`, fresh session, three read-only Bash commands (`pwd`, `git status --short`, `sleep 180`) all exited `0`, canonical seq 1–26 with 26 distinct receipts and terminal `run.completed`, archive 8719 bytes, raw-log 5 chunks / 2782 bytes, usage 51 input / 7 output, 0 changes |
+| 372 | OpenCode / Provider 7 `openrouter-free` | `cancelled` on OpenCode-specific Bundle 164; CLI `1.18.19`, Adapter `2.0.0`, fresh session, operator cancelled after `tool.started(Bash: sleep 180)`, canonical seq 1–15 with the chain `harness.failed(cancelled)` → `worker.finalization(exit_code=143)` → unique `run.failed(status=cancelled, failure.kind=cancelled)`, archive 6867 bytes, raw-log 4 chunks / 2532 bytes, 0 usage / 0 changes, container cleaned |
 
 Together with Tasks 357/358, the live set now covers Pi, OpenCode, Claude, and
 Codex across multiple compatible Provider selections. The
@@ -196,6 +209,18 @@ the latter includes `tool.completed` for `sleep`, `message.completed`,
 first valid real Host frontend-entrypoint disconnect/reconnect spot-check in
 this evidence set. It does not prove mobile keyboard/safe-area behavior or a
 broader disruption matrix.
+
+Task 372 was a separately authorized real-Provider OpenCode cancellation
+diagnostic on the same OpenCode-specific Bundle 164 and Provider 7. The task
+page showed the Worker initialized and the `sleep 180` command in progress
+before the operator clicked cancel. The UI converged to `已取消` while
+retaining the command/log history. The persisted attempt had `last_seq=15`,
+`control_state=closed`, and no duplicate or missing sequence; its canonical
+terminal is intentionally `run.failed` because V2 reserves that event type for
+all failed/cancelled Task terminals, with `status=cancelled` and
+`failure.kind=cancelled` providing the cancellation semantics. This validates
+stable-state cancellation on OpenCode with `exit_code=143`; it is not a code
+delivery sample.
 
 ## Browser interaction evidence
 
@@ -344,14 +369,17 @@ server, or external alert routing.
 
 The current Bundle 163 receipt recheck above supports the zero-duplicate-terminal
 and zero-sequence-gap claim for the frozen Codex-selected candidate. Task 371's
-OpenCode-specific Bundle 164 has one attempt and 26 contiguous receipts with a
-single `run.completed` terminal. The Bundle 163/164 manifest comparison shows
+and Task 372's OpenCode-specific Bundle 164 attempts have 41 contiguous receipts
+in total, each with one terminal and no sequence gap; Task 371 ends in
+`run.completed`, while Task 372 ends in the cancellation-classified
+`run.failed` described above. The Bundle 163/164 manifest comparison shows
 that this is a selected-Harness evidence variant over the same files,
 Image/Kit identity, and Adapter identities. The pre-Bundle-163 historical rows
 remain an evidence boundary and are not silently counted as a current-candidate
-pass. The expanded fourteen-task cohort query also passes those integrity and
-secret-like checks, while still leaving live alert delivery to a real Mattermost
-service and the formal zero-P0/P1 review open.
+pass. The expanded fifteen-task cohort query also passes the frozen
+status/terminal mapping, duplicate-terminal, sequence, and secret-like checks,
+while still leaving live alert delivery to a real Mattermost service and the
+formal zero-P0/P1 review open.
 
 R4.5 security/release sign-off and R4.6 independent hard-cut go/no-go remain
 open. No R5 maintenance window or `v2_only` cutover was performed.
