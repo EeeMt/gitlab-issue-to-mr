@@ -276,12 +276,20 @@ Harness/Profile/Host operational review of alert behavior and a formal
 zero-P0/P1 sign-off are still required; no notification profile was configured
 on this development Host for a live alert delivery test.
 
+The backend notification path was also exercised on the target Host with a
+temporary channel profile and a mock Mattermost HTTP service attached only to
+the Compose Docker network. Task 368 produced one real `POST /api/v4/posts`
+and one recorded `success` delivery; the temporary profile, delivery row, and
+mock container were removed immediately afterward. This proves the Host
+container/DB/HTTP delivery path, but not authorization, a real Mattermost
+server, or external alert routing.
+
 The current Bundle 163 receipt recheck above supports the zero-duplicate-terminal
 and zero-sequence-gap claim for the frozen candidate only. The pre-Bundle-163
 historical rows remain an evidence boundary and are not silently counted as a
 current-candidate pass. The broader thirteen-task cohort query also passes
 those integrity and secret-like checks, while still leaving live alert delivery
-and the formal zero-P0/P1 review open.
+to a real Mattermost service and the formal zero-P0/P1 review open.
 
 R4.5 security/release sign-off and R4.6 independent hard-cut go/no-go remain
 open. No R5 maintenance window or `v2_only` cutover was performed.
