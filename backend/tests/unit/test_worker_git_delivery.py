@@ -887,3 +887,171 @@ repo_delivery_publish || exit 8
     assert (
         _git(remote, "rev-parse", f"refs/heads/{branch}") == gd["head_sha"]
     )
+
+
+# ---------------------------------------------------------------------------
+# Canonical finalizer integration: worker.finalization/delivery events must be
+# built from the same delivery snapshot that main.sh persisted.
+# ---------------------------------------------------------------------------
+
+
+def _run_finalize_scenario(tmp_path: Path, scenario: str) -> subprocess.CompletedProcess[str]:
+    runtime = tmp_path / "runtime"
+    runtime.mkdir(exist_ok=True)
+    env = {
+        **os.environ,
+        "PATH": os.environ["PATH"],
+        "HOME": str(tmp_path / "home"),
+        "ENTRYPOINT_LIB_DIR": str(REPO_ROOT / "deploy/worker-entrypoint"),
+        "CODIFY_ORCHESTRATION_DIR": str(REPO_ROOT / "deploy"),
+        "CODIFY_RUNTIME_DIR": str(runtime),
+        "TASK_ID": "42",
+        "CODIFY_ATTEMPT_ID": "task-42-attempt-1",
+        "CODIFY_HARNESS_KEY": "claude",
+        "CODIFY_ADAPTER_VERSION": "1.0.0",
+        "CODIFY_CLI_VERSION": "2.1.0",
+        "GIT_DELIVERY_SNAPSHOT_FILE": str(runtime / "git-delivery.json"),
+    }
+    (tmp_path / "home").mkdir(exist_ok=True)
+    harness = f"""
+set -e
+codify_chown() {{
+    :
+}}
+export CODIFY_RUNTIME_DIR TASK_ID CODIFY_ATTEMPT_ID CODIFY_HARNESS_KEY
+export CODIFY_ADAPTER_VERSION CODIFY_CLI_VERSION GIT_DELIVERY_SNAPSHOT_FILE
+source "{REPO_ROOT / "deploy/worker-entrypoint/harness/common.sh"}"
+{scenario}
+"""
+    return subprocess.run(
+        ["bash", "-c", harness], env=env, text=True, capture_output=True, check=False
+    )
+
+
+def _read_events(runtime: Path) -> list[dict]:
+    return [
+        json.loads(line)
+        for line in (runtime / "event.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="helpers require jq")
+def test_finalizer_carries_git_delivery_snapshot_into_events(tmp_path: Path):
+    head = "a" * 40
+    snapshot = {
+        "commit_sha": head,
+        "commit_message": "harness commit\n\nbody",
+        "diff": {"additions": 7, "deletions": 3, "total": 10},
+        "git_delivery": {
+            "schema": "codify.git-delivery.v1",
+            "attempt_id": "task-42-attempt-1",
+            "branch": "codify/issue-42",
+            "start_sha": "b" * 40,
+            "start_remote_sha": "c" * 40,
+            "head_sha": head,
+            "commits": [{"sha": head, "subject": "harness commit"}],
+            "recovered_commits": [],
+            "diff": {"additions": 7, "deletions": 3, "total": 10, "new_files": [], "modified_files": [], "deleted_files": []},
+            "push": {"status": "pushed", "remote_sha": head, "error": None},
+        },
+    }
+    (tmp_path / "runtime").mkdir(exist_ok=True)
+    (tmp_path / "runtime" / "git-delivery.json").write_text(
+        json.dumps(snapshot), encoding="utf-8"
+    )
+    scenario = """
+codify_emit_event "run.started" '{}'
+codify_emit_event "harness.completed" '{}'
+codify_harness_mark_delivery_started
+codify_harness_finalize_attempt 0
+"""
+    result = _run_finalize_scenario(tmp_path, scenario)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    events = _read_events(tmp_path / "runtime")
+    types = [event["type"] for event in events]
+    assert types == [
+        "run.started",
+        "harness.completed",
+        "delivery.started",
+        "delivery.completed",
+        "worker.finalization",
+        "run.completed",
+    ]
+    delivery = next(event for event in events if event["type"] == "delivery.completed")
+    assert delivery["payload"]["commit_sha"] == head
+    finalization = next(event for event in events if event["type"] == "worker.finalization")
+    payload = finalization["payload"]
+    assert payload["commit_sha"] == head
+    assert payload["commit_message"].startswith("harness commit")
+    assert payload["diff"]["additions"] == 7
+    assert payload["git_delivery"]["push"]["status"] == "pushed"
+    assert payload["git_delivery"]["commits"][0]["sha"] == head
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="helpers require jq")
+def test_finalizer_reports_delivery_failure_reason_in_run_failed(tmp_path: Path):
+    snapshot = {
+        "commit_sha": None,
+        "commit_message": None,
+        "diff": None,
+        "git_delivery": {
+            "schema": "codify.git-delivery.v1",
+            "attempt_id": "task-42-attempt-1",
+            "branch": "codify/issue-42",
+            "start_sha": "b" * 40,
+            "start_remote_sha": "c" * 40,
+            "head_sha": "a" * 40,
+            "commits": [{"sha": "a" * 40, "subject": "harness commit"}],
+            "recovered_commits": [],
+            "diff": None,
+            "push": {
+                "status": "failed",
+                "remote_sha": None,
+                "error": {
+                    "code": "remote_diverged",
+                    "message": "The remote task branch and the local head have diverged",
+                },
+            },
+        },
+    }
+    (tmp_path / "runtime").mkdir(exist_ok=True)
+    (tmp_path / "runtime").mkdir(exist_ok=True)
+    (tmp_path / "runtime" / "git-delivery.json").write_text(
+        json.dumps(snapshot), encoding="utf-8"
+    )
+    scenario = """
+codify_emit_event "run.started" '{}'
+codify_emit_event "harness.completed" '{}'
+codify_harness_mark_delivery_started
+codify_harness_finalize_attempt 1
+"""
+    result = _run_finalize_scenario(tmp_path, scenario)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    events = _read_events(tmp_path / "runtime")
+    failed = next(event for event in events if event["type"] == "delivery.failed")
+    assert failed["payload"]["commit_sha"] is None
+    assert failed["payload"]["failure"]["code"] == "remote_diverged"
+    run_failed = next(event for event in events if event["type"] == "run.failed")
+    message = run_failed["payload"]["failure"]["message"]
+    assert "have diverged" in message
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="helpers require jq")
+def test_finalizer_legacy_fallback_without_snapshot(tmp_path: Path):
+    """Attempts that never reached Git delivery keep the legacy payload shape."""
+    scenario = """
+codify_emit_event "run.started" '{}'
+codify_emit_event "harness.completed" '{}'
+CODIFY_DELIVERY_STARTED=1
+codify_harness_finalize_attempt 0
+"""
+    result = _run_finalize_scenario(tmp_path, scenario)
+    assert result.returncode == 0, result.stdout + result.stderr
+    events = _read_events(tmp_path / "runtime")
+    finalization = next(event for event in events if event["type"] == "worker.finalization")
+    assert "git_delivery" not in finalization["payload"]
+    assert finalization["payload"]["commit_sha"] is None
+    assert finalization["payload"]["diff"] == {"additions": 0, "deletions": 0, "total": 0}
