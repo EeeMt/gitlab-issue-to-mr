@@ -317,7 +317,6 @@ def test_recovered_commits_are_separate_and_pushed(delivery_env: dict):
     (workspace / "legacy.txt").write_text("older work\n")
     _git(workspace, "add", "-A")
     _git(workspace, "commit", "-qm", "previous unpushed commit")
-    previous = _git(workspace, "rev-parse", "HEAD")
     scenario = """
 repo_pin_delivery_start
 printf 'new\\n' > fresh.txt
@@ -330,7 +329,7 @@ repo_delivery_publish || exit 8
         remote=delivery_env["remote"],
         branch_name=delivery_env["branch"],
         workspace=workspace,
-        previous=previous,
+        previous=delivery_env["previous"],
         scenario=scenario,
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -361,7 +360,6 @@ def test_recovered_only_delivery_confirms_without_new_commits(delivery_env: dict
     (workspace / "legacy.txt").write_text("older work\n")
     _git(workspace, "add", "-A")
     _git(workspace, "commit", "-qm", "previous unpushed commit")
-    previous = _git(workspace, "rev-parse", "HEAD")
     scenario = """
 repo_pin_delivery_start
 repo_delivery_collect || exit 9
@@ -373,7 +371,7 @@ repo_delivery_publish || exit 8
         remote=delivery_env["remote"],
         branch_name=delivery_env["branch"],
         workspace=workspace,
-        previous=previous,
+        previous=delivery_env["previous"],
         scenario=scenario,
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -486,21 +484,23 @@ def test_diverged_remote_fails_and_preserves_remote(delivery_env: dict):
 repo_pin_delivery_start
 printf 'x\\n' > a.txt
 git add a.txt && git commit -qm "harness commit"
-# A concurrent writer replaces the remote branch with unrelated history.
-other=$(mktemp -d)/other
-git clone -q "%REMOTE%" "$other"
-git -C "$other" checkout -qb %BRANCH%
-printf 'evil\\n' > evil.txt
-git -C "$other" add -A
-git -C "$other" -c user.name=t -c user.email=t@t commit -qm "concurrent work"
-git -C "$other" push -q origin %BRANCH%
 repo_delivery_collect || exit 9
 if repo_delivery_publish; then echo "expected refusal"; exit 8; fi
 """
-    scenario = (
-        scenario.replace("%REMOTE%", delivery_env["remote"].as_uri())
-        .replace("%BRANCH%", delivery_env["branch"])
+    # A concurrent writer replaces the remote branch with unrelated history.
+    other = root / "concurrent"
+    subprocess.run(
+        ["git", "clone", "-q", delivery_env["remote"].as_uri(), str(other)],
+        text=True,
+        capture_output=True,
+        check=True,
     )
+    _git(other, "checkout", "-q", "-b", delivery_env["branch"])
+    (other / "evil.txt").write_text("evil\n")
+    _git(other, "add", "-A")
+    _git(other, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "concurrent work")
+    # Hostile concurrent overwrite: replace the remote branch with unrelated history.
+    _git(other, "push", "-q", "--force", "origin", delivery_env["branch"])
     result = _run_delivery_scenario(
         root,
         remote=delivery_env["remote"],
@@ -739,7 +739,8 @@ repo_delivery_collect || exit 9
     assert result.returncode == 0, result.stdout + result.stderr
     gd = _snapshot(root)["git_delivery"]
     assert gd["push"]["status"] == "not_attempted"
-    assert gd["head_sha"] is None
+    assert gd["commits"] is None
+    assert gd["diff"] is None
 
 
 @pytest.mark.skipif(shutil.which("jq") is None, reason="helpers require jq")
