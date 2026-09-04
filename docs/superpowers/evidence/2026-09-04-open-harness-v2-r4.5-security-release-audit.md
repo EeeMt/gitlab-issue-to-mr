@@ -179,6 +179,11 @@ with `AUTO_MIGRATE=false`; the Scheduler log records that auto-migration was
 skipped. The live database still has the `provider_driver` column and one
 `openai_compatible` + `anthropic_messages` Provider row, which is exactly the
 legacy row that 078 would delete before dropping the column.
+That row is Provider 11; it is referenced by 19 historical Tasks and their
+Profile Snapshots, while no Issue currently selects it as a default Provider.
+The existing foreign keys use `SET NULL`, so the migration would preserve the
+Tasks but clear their editable `provider_id` association; the immutable
+Snapshot evidence must be checked again after the migration.
 
 The 078 migration tests and focused lint pass (`6 passed`, Ruff clean); the
 combined Provider/Endpoint/Runtime/migration regression set also passes (`81
