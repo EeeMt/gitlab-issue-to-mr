@@ -26,6 +26,19 @@ committed tree at `40235196` and deployed through the `remote` Docker context:
 | Database/runtime mode | Alembic revision remains `077_v2_worker_kit_identity`; `AUTO_MIGRATE=false`; execution mode remains `dual_canary`; no `v2_only` cutover or migration was attempted |
 | Host capacity | Remote `/` is `57G/61G` used with `4.2G` available and `18%` inode use; Docker reports 82 images, 12.42GB images with 6.707GB reclaimable, and 6.526GB BuildKit cache. The filesystem is not full, so no Codify image/cache cleanup was performed. |
 
+As a Host-level `v2_only` preflight, Backend and Scheduler were temporarily
+recreated with `HARNESS_EXECUTION_MODE=v2_only` at `2026-09-05T01:04:26Z`.
+Backend health returned `healthy` with `harness_execution_mode=v2_only`,
+Scheduler health returned `running` with the same mode, auto-migration remained
+disabled, and the authenticated browser loaded the real V2 Task #380 detail
+without creating or mutating a Task. The database had zero active Tasks and
+zero Issue locks. The services were restored to `dual_canary` at
+`2026-09-05T01:05:13Z`; final health reports `dual_canary` and crash recovery
+reported zero resumed/awaiting/failed Tasks. The database contains no V1 Task
+(`legacy_tasks=0`), so this probe does not constitute live V1 read-only
+acceptance; that acceptance remains open and is not fabricated from the V2
+detail page.
+
 The exact-composition positive cohort is:
 
 | Task | Harness / Provider | Bundle | Result | Attempt evidence |
@@ -453,8 +466,10 @@ It does not yet sign the full gate because:
 - The V1 read-only source boundary was also rechecked without changing the
   Host mode: the backend `v2_only`/legacy-contract selection passed 9 tests,
   and the TaskView legacy read-only group passed 4 tests. These checks cover
-  pending/failed/running rendering and API rejection semantics, but the Host
-  was not switched to `v2_only` and therefore still lacks L5 runtime evidence.
+  pending/failed/running rendering and API rejection semantics. A temporary
+  Host `v2_only` preflight then confirmed mode health and real V2 detail
+  loading, but no V1 Task exists in the development database, so it did not
+  produce live V1 read-only evidence; the Host was restored to `dual_canary`.
 - The live Task #358 remained Pi-locked. On existing Issue #99, the drawer
   kept the current OpenCode Harness and displayed the continuation lock hint;
   enabling “use new session” allowed a temporary switch to Claude and the
