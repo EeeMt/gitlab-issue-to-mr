@@ -1270,3 +1270,40 @@ the L2/L4 credential-reference evidence. It does not close R4.5: the resolved
 secret is still delivered to the Worker environment, and the external
 GitLab/OAuth least-privilege, account-control, rotation, and revocation record
 remain owner/security decisions.
+
+## 2026-09-05 continuation: generation 81 delivery-summary regression recheck
+
+The generation-78 owner handoff identity above is superseded as a technical
+candidate snapshot by the later source fixes and Profile 4 Verify. It remains
+unsigned and must not be used as release authorization. The active
+Backend/Scheduler image is now
+`sha256:568be7a9cebd150ed925078b93df4baff88f6b2cd4913730151cb3463a0229f4`,
+built for commits `be8a2d9f` and `818b99d0`. Profile 4
+`v2-canary-0.6.11-four-harness` was re-verified at generation 81 for both image
+and Kit identity. The Kit remains
+`0.6.14-linux-amd64-d461d040694b`, with the previously recorded manifest,
+archive, and Worker image identities. The four Harness evidence set is Pi,
+OpenCode, Claude, and Codex; the successful readiness observation was checked
+at `2026-09-05 14:19:08.024164Z`, with generation 5 and a 15-minute TTL.
+
+The two source fixes addressed a real delivery-summary regression boundary:
+`be8a2d9f` makes the delivery path prefer the canonical V2 result file while
+retaining the legacy output fallback, and `818b99d0` preserves terminal
+Mermaid fences and normalizes one-line `flowchart`/`graph` declarations. The
+final focused delivery-summary suite passed 5 tests, both entrypoints passed
+`bash -n`, and `git diff --check` passed. Task #439 then exercised the current
+candidate with the existing Provider 7, OpenCode, `plan/fresh`, runtime Bundle
+187. It completed with attempt
+`task-439-attempt-1-1c059789d0f8`, `codify.worker.event/v2`, adapter 2.0.0,
+CLI 1.18.19, `last_seq=699`, `run.completed`, and `control_state=closed`.
+Its archive contains an independent 5811-byte `delivery-summary.md` and
+validation result `ok=true`, one diagram, zero errors, and zero repair
+attempts. Mattermost delivery 30 is `task_completed/success`; the development
+Mattermost 10.9.1 service and its database are healthy.
+
+This addendum closes the observed delivery-summary persistence and terminal
+Mermaid normalization defect for the tested OpenCode path. It does not close
+R4.5: provider/GitLab least privilege and rotation, signed release material,
+retention ownership, maintenance ownership, independent review, R4.6
+go/no-go, migration 078, `v2_only`, R5/L6, and the user-deferred real mobile
+acceptance remain open. The Host remains in `dual_canary`.
