@@ -1437,3 +1437,58 @@ UI evidence for Task detail, event/raw-log navigation, context display, and
 redaction; it does not claim real mobile keyboard/IME/notch/gesture-area
 acceptance, formal R4.3/R4.4 sign-off, R4.5 owner/security approval, R4.6
 go/no-go, migration 078, or R5/L6.
+
+## 2026-09-05 continuation: Mermaid summary normalization and Task 421
+
+Task 420 was a real Pi/Provider 12 read-only analysis task. The task completed,
+but its generated delivery summary contained the Mermaid token `@{u}` inside a
+fenced diagram. The summary validator correctly kept the task successful while
+reporting `ok=false`; the two automatic repair attempts also failed. The defect
+was isolated to delivery-summary normalization, not the Provider or Harness
+terminal path.
+
+Commit `59d55585` fixes that boundary by scanning only Mermaid fenced blocks and
+escaping the no-colon Git-ref form while preserving valid `@{ shape: ... }`
+syntax and text outside Mermaid. The delivery/worker focused regression set
+passed `136` tests. A new `linux/amd64` Worker Kit `0.6.14` was then built on
+the local `desktop-linux` Docker daemon, with manifest SHA-256
+`d461d040694b20b88944a88de47b5ad78188f91d74d528421cdef44b68274035`, and
+archive SHA-256 `bd6debd99c411cb6a50d1628f09d1fbe3127fffac11038ea8d58f5b512668251`
+(`543487461` bytes),
+installed atomically on the target Host at
+`/opt/codify/worker-kits/0.6.14-linux-amd64-d461d040694b`.
+
+Profile 4 was updated and re-verified through the normal UI/API path. The
+current profile record is generation `77`, Kit `0.6.14`, platform
+`linux/amd64`, and the same manifest identity. Bundle 177 records digest
+`20634962827d632e003fe0d5b87b974af22b66c0ad7c785ac6c407dfb60d51e1` and the
+Kit identity. The selected Worker image remained
+`127.0.0.1:5000/codify-worker/java21-maven@sha256:234582c692d1ebb00ba8e882160618c2258463149d968009ac81c545e63a538b`.
+
+Task 421 was created from Issue #99 through the authenticated Dashboard using
+existing Provider 12 `openrouter-minimax-responses` /
+`minimax/minimax-m3:free`, legal `openai_responses`, Pi, `plan` mode, and a
+fresh session. It started at `2026-09-05T11:16:15Z`, completed at
+`2026-09-05T11:18:13Z`, and made zero repository changes. The served
+`/tasks/421` page displayed the completed state, Provider/Worker/Pi context,
+analysis mode, fresh-session mode, delivery summary, event stream, zero-change
+record, and runtime statistics; the Worker environment modal showed Kit
+`0.6.14` and the installer-managed path.
+
+| Item | Result |
+| --- | --- |
+| Task snapshot | Task 421, `completed`, Provider 12, Profile 4, Bundle 177, projected Harness `pi`, `plan`, `fresh`, `total_changes=0`, model `minimax/minimax-m3:free`, input/output tokens `917/2393` |
+| Attempt | `task-421-attempt-1-39ec65925f1d`, `codify.worker.event/v2`, Pi Adapter `2.1.0`, CLI `0.84.2`, `last_seq=1158`, terminal `run.completed`, `control_state=closed` |
+| Canonical persistence | 1158 receipts / 1158 distinct event IDs, contiguous seq 1–1158; one each of `harness.completed`, `worker.finalization`, and `run.completed`; 3 `tool.started` / 3 `tool.completed` pairs |
+| Raw/archive | 5 raw-log chunks / 2713 bytes; `task-421-runtime-archive.tar.gz` is 87419 bytes with SHA-256 `c3d30a461b035db790c9755261a48af3364da15a803588c1d6e643a3c7744819` |
+| Delivery summary | `delivery-summary-validation.json`: `ok=true`, `diagramCount=2`, `repairAttempts=0`, `repaired=false`, zero errors; `console.log` reports `Delivery summary Mermaid validation passed` |
+| Archive safety | Targeted scan across all archive files returned zero `glpat-*`, `sk-ant-*`, `ANTHROPIC_API_KEY=`, and `OPENAI_API_KEY=` matches |
+| Mattermost | `mattermost_notification_deliveries.id=14`, `task_completed/success`, target `channel:aaz68niiuff3txfot5wjrgj33e`; Mattermost 10.9.1 and its Postgres remained healthy |
+| Post-run Host | Worker container removed; Backend/Scheduler/nginx healthy, Scheduler `dual_canary`; root filesystem about 2.0GB available / 97%; Docker BuildKit cache 0 |
+
+This is additional current-candidate desktop/real-provider and delivery-summary
+evidence. It is not a new member of the frozen Task-ID 380–394 integrity cohort
+and does not sign R4.3/R4.4, R4.5, R4.6, or R5/L6. The full interaction,
+operations, security, release-owner, and independent go/no-go review remains
+open. Real mobile keyboard/IME/notch/gesture-area acceptance remains explicitly
+deferred by the user; migration 078 and `v2_only` were not executed.

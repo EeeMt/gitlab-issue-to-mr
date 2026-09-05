@@ -12,12 +12,13 @@ composition was initially rebuilt from committed tree `40235196` and deployed
 as Backend/Scheduler image `sha256:0ea2d9832fc0c7b3ca893b62f52a4f75fc54c56ed0bc80d732b08c95f5628c20`.
 Commit `48b16fdc` then fixed Scheduler cancellation log classification; the
 current Backend/Scheduler image is
-`sha256:334c674db035dd9e5ab63d96918c0af19a680387db4afcecef52a8b2f4d575bb`.
+`sha256:2cff3fd7eb27d21625614785cf6d5f37bc538f6851775253a9a379b6b6360161`.
 It exposes no Git revision OCI label, so the current image provenance is the
-committed tree plus the remote build/deploy record. Profile 4 remains
-generation `74`, and its exact-composition selected-Harness Bundles are 170
-(Pi), 171 (Claude), 172 (OpenCode), and 173 (Codex); Tasks 380–383 and post-fix Tasks 388–394
-validation are recorded in the
+committed tree plus the remote build/deploy record. Profile 4 is now at
+generation `77` with Kit `0.6.14`; the current additional Pi Bundle is 177,
+while the exact-composition selected-Harness Bundles 170 (Pi), 171 (Claude),
+172 (OpenCode), and 173 (Codex) remain the frozen cohort identities. Tasks
+380–383 and post-fix Tasks 388–394 validation are recorded in the
 [R4.3/R4.4 live Host evidence](2026-09-04-open-harness-v2-r4.3-r4.4-live-host.md).
 The generation-73 Bundles 166–169 and Tasks 374–379 remain historical evidence
 for the preceding image composition. Tasks 369 and 370 were additional negative backend-restart probes on the
@@ -962,3 +963,58 @@ the disk reaches the cleanup trigger. Credential/least-privilege and rotation
 records, release package/signatures, retention/maintenance ownership, migration
 078, independent zero-P0/P1 approval, R4.6, R5/L6, and the user-deferred
 real-mobile-device acceptance remain open.
+
+## 2026-09-05 continuation: Kit 0.6.14 and delivery-summary regression audit
+
+Task 420 supplied a real-provider defect sample: the Task completed, but the
+delivery-summary validator reported `ok=false` because a Mermaid fenced block
+contained the parser-sensitive token `@{u}`. Two summary repair attempts failed
+without changing the Task terminal state. Commit `59d55585` now escapes only
+the no-colon Git-ref form inside Mermaid fenced blocks, preserves valid Mermaid
+shape syntax, and leaves outside text unchanged. The focused delivery/worker
+regression set passed `136` tests.
+
+The repaired runtime was packaged on the local `desktop-linux` Docker daemon as
+the `linux/amd64` Worker Kit `0.6.14`; manifest SHA-256 is
+`d461d040694b20b88944a88de47b5ad78188f91d74d528421cdef44b68274035`; the
+export archive SHA-256 is
+`bd6debd99c411cb6a50d1628f09d1fbe3127fffac11038ea8d58f5b512668251`
+(`543487461` bytes). It was
+installed through the content-addressed installer at
+`/opt/codify/worker-kits/0.6.14-linux-amd64-d461d040694b` and passed the
+Profile-specific four-Harness Verify. The direct launcher/content check also
+passed when run with the Kit's `/nix/store` closure and the Worker verification
+container's `/workspace` tmpfs. Profile 4 records generation `77`; Bundle 177
+records digest
+`20634962827d632e003fe0d5b87b974af22b66c0ad7c785ac6c407dfb60d51e1`. No
+Provider credential or protocol configuration was changed.
+
+Task 421 used existing Provider 12 `openrouter-minimax-responses` /
+`minimax/minimax-m3:free`, legal `openai_responses`, Profile 4, Pi, `plan`,
+and a fresh session. It completed at `2026-09-05T11:18:13Z` with zero changes.
+The attempt `task-421-attempt-1-39ec65925f1d` closed with `run.completed` at
+seq 1158; all 1158 receipts and event IDs were contiguous and unique. The
+five raw-log chunks totaled 2713 bytes. The 87419-byte runtime archive has
+SHA-256
+`c3d30a461b035db790c9755261a48af3364da15a803588c1d6e643a3c7744819`.
+Its delivery-summary validation is `ok=true` with two diagrams, zero errors,
+and zero repair attempts; the targeted archive secret-pattern scan returned
+zero matches. Mattermost delivery row 14 is `task_completed/success` on the
+10.9.1 debug service.
+
+The authenticated served `/tasks/421` detail showed the completed Provider,
+Worker, Pi, plan/fresh context, zero changes, summary, event stream, and
+runtime statistics; its Worker modal showed Kit `0.6.14` and the immutable
+host path. After the task, the remote Host had about 2.0GB available on `/`
+(97%), Docker BuildKit cache `0`, and only the expected services plus the
+retained unlabelled `quirky_allen` probe. The earlier full-disk response was
+scoped to verified Codify debug build images/cache; Mattermost, GitLab,
+databases, Redis, volumes, and active/unknown Worker images were not touched.
+
+This strengthens current L2/L3/L4 and R4.5 evidence but is not a security
+approval or release-owner sign-off. The frozen Task-ID 380–394 cohort is
+unchanged. Credential/least-privilege and rotation ownership, migration 078,
+release package/signatures, retention and maintenance ownership, independent
+zero-P0/P1 approval, R4.6, R5/L6, and real mobile-device keyboard/IME/notch/
+gesture-area acceptance remain open; the mobile-device item is explicitly
+deferred by the user.
