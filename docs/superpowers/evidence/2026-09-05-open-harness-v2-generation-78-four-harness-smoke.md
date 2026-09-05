@@ -96,3 +96,44 @@ coverage. It does not close R4.3, R4.4, R4.5, or R4.6; it does not authorize
 R5/L6, migration 078, or `v2_only`; and it does not claim real mobile
 keyboard/IME/notch/gesture-area acceptance, which remains deferred by the
 user.
+
+## 2026-09-05 continuation: expired-readiness execution and cancellation Tasks 429–431
+
+The `ready_until` recorded above had passed before the next three Tasks were
+created. Under the V2 contract the stored row therefore derived to
+`unknown`; no second Verify was run, so generation 78 and its exact identity
+were preserved. The three Tasks used the same complete frozen Profile 4
+snapshot and Kit `0.6.14`. This is evidence for the post-TTL V2 execution
+path with lightweight runtime validation, not evidence that the readiness row
+remained currently `ready` or that a new full Kit probe ran.
+
+Tasks 429 and 430 were deliberately created in `plan` mode to check the
+current-generation OpenCode and Pi paths. Both models inspected the
+repository and ignored the requested `sleep 180`, so they are successful
+execution evidence but not cancellation evidence. Task 431 repeated the
+same current-generation Pi/Provider combination in `freeform` mode. The
+remote `docker top` output showed the real `sleep 180` process before the
+authenticated Dashboard Cancel action; the Worker container then disappeared
+and the served task page displayed `cancelled`.
+
+| Task | Runtime and lifecycle | Persistence / delivery |
+| ---: | --- | --- |
+| 429 | OpenCode / Provider 12 `openrouter-minimax-responses` / `minimax/minimax-m3:free` / `openai_responses`; Bundle 182, `f2382aedd3f7d022dc63a6c2c9be3b3831a1b6d54990d446a738c858e334c892`; `plan/fresh`; 0 changes; `completed`; input/output `2497/1499`; Adapter `2.0.0` / CLI `1.18.19` | Attempt `task-429-attempt-1-d03d62846b79`, `run.completed`, `last_seq=742`; 742 unique contiguous receipts; raw logs 5 chunks / 2848 bytes; archive 73483 bytes, SHA-256 `a53251b323e4c193ce847cbf0f8ba4b16b8fef055cd7fe2c260b131585c557d`; Mattermost delivery 22 `task_completed/success` |
+| 430 | Pi / Provider 12 `openrouter-minimax-responses` / `minimax/minimax-m3:free` / `openai_responses`; Bundle 181, `f970c87e0175c2b78c7ba494c18d6e1fb9fdabf68b68c9eeb953ecd6bdfdb8e7`; `plan/fresh`; 0 changes; `completed`; input/output `913/1625`; Adapter `2.1.0` / CLI `0.84.2` | Attempt `task-430-attempt-1-aeae0e947ef7`, `run.completed`, `last_seq=116`; 116 unique contiguous receipts; raw logs 4 chunks / 2766 bytes; archive 30419 bytes, SHA-256 `90937e88a4b67f720830e4299c1a116432ad07760a3988e53f90b6f5d76d55d7`; Mattermost delivery 23 `task_completed/success` |
+| 431 | Pi / Provider 12 / `openai_responses`; Bundle 181; `freeform/fresh`; 0 changes; `cancelled` after `sleep 180` was observed; Adapter `2.1.0` / CLI `0.84.2` | Attempt `task-431-attempt-1-5e2884bb12e1`, `run.failed` terminal at `last_seq=14` as the canonical stop record; 14 unique contiguous receipts; raw logs 3 chunks / 2447 bytes; archive 4122 bytes, SHA-256 `e257e2e1e7a55a92715603a1cac6606a2de1e4b84eea4a0d43d4a083e9006a37`; Mattermost delivery 24 `task_cancelled/success` |
+
+The three task snapshots all retained Profile
+`v2-canary-0.6.11-four-harness`, Kit `0.6.14`, the same Worker image digest
+`sha256:234582c692d1ebb00ba8e882160618c2258463149d968009ac81c545e63a538b`,
+and `codify.worker.harness/v2`. Targeted scans of all three archives returned
+zero matches for `glpat-*`, `sk-ant-*`, `ANTHROPIC_API_KEY=`, and
+`OPENAI_API_KEY=`. The post-run Host still had healthy Backend, Scheduler,
+Mattermost `10.9.1`, both Postgres services, GitLab, Redis, and no active
+Task or Issue lock. Root usage remained about `97%` with `2.0GB` available;
+the disk-full cleanup trigger was not reached, so no image or volume cleanup
+was performed and the active/unknown `quirky_allen` Worker was retained.
+
+This closes the current-generation desktop cancellation smoke only. It does
+not close R4.3–R4.6, release-owner/security/rotation/signature gates, or
+authorize migration 078, `v2_only`, R5/L6, or the user-deferred real mobile
+device acceptance.

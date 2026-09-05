@@ -1092,3 +1092,33 @@ release-owner least-privilege/rotation record, signed package/release notes,
 retention/retirement plan, maintenance ownership, independent zero-P0/P1
 approval, R4.3–R4.6, R5/L6, migration 078, `v2_only`, and user-deferred mobile
 acceptance open.
+
+## 2026-09-05 current-generation expiry and cancellation recheck
+
+After the generation 78 four-Harness smoke, the stored readiness row passed
+its `ready_until` (`2026-09-05 12:18:31Z`) and therefore derived to
+`unknown`. Without re-running Verify, Tasks 429 and 430 completed on the
+frozen generation 78 snapshot through OpenCode and Pi. Both were `plan/fresh`
+read-only runs, with 742 and 116 contiguous unique V2 receipts respectively,
+and Mattermost deliveries 22 and 23 succeeded. The models ignored the
+requested `sleep 180`, so these runs are not counted as cancellation evidence.
+
+Task 431 then used the same current Pi/Provider 12 legal path as
+`freeform/fresh`. Remote process inspection confirmed the actual `sleep 180`
+process before the served `/tasks/431` Cancel action. The Worker container was
+removed, the task page showed `cancelled`, the attempt closed with canonical
+`run.failed` at seq 14, all 14 receipt IDs/seqs were unique and contiguous,
+and Mattermost delivery 24 was `task_cancelled/success`. Its 4122-byte archive
+has SHA-256
+`e257e2e1e7a55a92715603a1cac6606a2de1e4b84eea4a0d43d4a083e9006a37`.
+Targeted scans of the 429–431 archives returned no `glpat-*`, `sk-ant-*`,
+`ANTHROPIC_API_KEY=`, or `OPENAI_API_KEY=` matches.
+
+The post-run development Host remained healthy in `dual_canary`, with no
+active Tasks or Issue locks, Mattermost `10.9.1` and its Postgres healthy, and
+about `2.0GB` free on the 97%-used root filesystem. The full-disk cleanup
+trigger was not reached, so no cleanup was performed and the active/unknown
+`quirky_allen` Worker was retained. This is current-generation desktop
+cancellation evidence only; it does not constitute R4.5 security approval,
+release-owner sign-off, R4.6/R5/L6 approval, migration 078 or `v2_only`
+authorization, or real mobile-device acceptance.

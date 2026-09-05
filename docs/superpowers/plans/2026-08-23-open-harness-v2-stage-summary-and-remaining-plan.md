@@ -721,3 +721,30 @@ delivery-summary validation 为 `ok=false`，Task 426 未写入独立 `delivery_
 migration 078、`v2_only` 或 R5/L6；磁盘约 97% 使用但尚未达到满盘清理触发条件，未执行新的清理。
 真实移动设备键盘/IME/刘海/手势区验收继续按用户指示暂缓；R4.3–R4.6 与 release-owner/安全/权限/
 轮换/签名包/独立 go/no-go 仍是剩余项。
+
+## 2026-09-05 continuation: expired-readiness execution and Task 431 cancellation
+
+generation 78 的 readiness `ready_until=2026-09-05 12:18:31Z` 在后续任务创建前已经过期；按既定语义该行派生为
+`unknown`。本轮没有再次 Verify，因此没有无必要地改变 Profile generation 或 exact identity。Task 429/430/431
+都沿用了完整的 generation 78 / Kit `0.6.14` / Worker image snapshot，证明了 V2 在过期 readiness 下仍可基于冻结
+snapshot 进入轻量执行校验路径；这不表示 readiness 仍为当前 `ready`，也不表示 Scheduler 重新执行了完整 Kit probe。
+
+Task 429 使用 OpenCode、Provider 12、`openai_responses`、`plan/fresh`，Bundle 182，`run.completed`，742 条
+连续唯一 receipt，Mattermost delivery 22 成功；Task 430 使用 Pi、Provider 12、`openai_responses`、`plan/fresh`，
+Bundle 181，`run.completed`，116 条连续唯一 receipt，Mattermost delivery 23 成功。两条任务中的模型都忽略了
+`sleep 180` 并完成仓库检查，因此不作为取消证据。
+
+为补齐当前代的真实取消路径，Task 431 改用同一合法 Pi/Provider 12/Bundle 181 组合，但使用 `freeform/fresh`。
+在远端 `docker top codify-431-issue99` 明确看到 `/bin/... sleep 180` 后，通过已认证的 `/tasks/431` 页面点击取消。
+容器随后消失，页面显示 `任务已取消`，数据库状态为 `cancelled`，`cancel_requested_at` 与完成时间均已记录。
+Attempt `task-431-attempt-1-5e2884bb12e1` 以 `run.failed` 作为 canonical stop record 收尾，14 条 receipt 的 seq
+为 1–14 且 event ID 唯一，archive 为 4122 bytes，SHA-256 为
+`e257e2e1e7a55a92715603a1cac6606a2de1e4b84eea4a0d43d4a083e9006a37`，Mattermost delivery 24 为
+`task_cancelled/success`。429–431 三个归档的 targeted secret-pattern scan 均为 0。
+
+本轮结果详见 [generation 78 evidence](../evidence/2026-09-05-open-harness-v2-generation-78-four-harness-smoke.md)。
+远端 Backend/Scheduler/nginx、Mattermost `10.9.1`、Mattermost Postgres、GitLab、Redis 和 Codify Postgres 仍健康，
+无 active Task、无 Issue lock；根盘约 97% 使用、可用 2.0GB，未达到满盘清理条件，未执行新的 image/volume 清理，
+`quirky_allen` active/unknown Worker 继续保留。该结果只关闭当前 generation 的桌面取消 smoke，不关闭 R4.3–R4.6、
+release-owner/安全/权限/轮换/签名包/独立 go/no-go，也不授权 migration 078、`v2_only`、R5/L6；真实移动设备验收
+继续按用户指示暂缓。
