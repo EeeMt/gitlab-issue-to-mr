@@ -4,8 +4,9 @@
 
 **Scope:** Current R4 candidate on `192.168.50.129`, mobile/desktop browser
 interaction checks, four-Harness live smoke attempts, one live command-plane
-run, three current exact-composition cancellation samples, one controlled nginx-only
-disconnect/reconnect, and the resulting Host/Task runtime evidence.
+run, four current exact Worker/Kit/Bundle-composition cancellation samples,
+one controlled nginx-only disconnect/reconnect, and the resulting Host/Task
+runtime evidence.
 
 This is candidate evidence, not an L5 go/no-go decision. R4.3–R4.6 remain
 partially open until the complete acceptance, operational, security/release,
@@ -13,18 +14,23 @@ and independent review gates are signed.
 
 ## Exact committed composition recheck
 
-The mixed-provenance Host image recorded below is historical generation-73
-evidence. On 2026-09-05 the Backend/Scheduler image was rebuilt from the clean
-committed tree at `40235196` and deployed through the `remote` Docker context:
+The mixed-provenance Host image recorded in the historical sections below is
+not the current candidate. On 2026-09-05 the Backend/Scheduler image was first
+rebuilt from committed tree `40235196` and deployed through the `remote` Docker
+context. After the live cancellation samples exposed a Scheduler log
+classification defect, commit `48b16fdc` changed only the final cancellation
+log branch, and Backend/Scheduler were rebuilt and recreated again. The current
+post-fix image is:
 
 | Item | Result |
 | --- | --- |
-| Backend/Scheduler image | `sha256:0ea2d9832fc0c7b3ca893b62f52a4f75fc54c56ed0bc80d732b08c95f5628c20`; OCI `org.opencontainers.image.revision=40235196` |
+| Backend/Scheduler image | `sha256:334c674db035dd9e5ab63d96918c0af19a680387db4afcecef52a8b2f4d575bb`; built from committed tree `48b16fdc`; the image exposes `org.opencontainers.image.version=22.04` and no Git revision OCI label |
+| Previous exact Backend/Scheduler image | `sha256:0ea2d9832fc0c7b3ca893b62f52a4f75fc54c56ed0bc80d732b08c95f5628c20`, committed tree `40235196`; historical for Tasks 380–386 |
 | Running services | `codify-backend` and `codify-scheduler` both use the image above; Backend health is `healthy`, Scheduler reports `dual_canary` |
 | Profile 4 | administrator Verify returned 200; `verified_at=2026-09-05T00:45:09Z`, V2 verification generation `74`, Kit `0.6.12` manifest `c33dbf86951bed6e3b4de1897313725f14f00006dc51fb300e7b821bb47e17bd` |
-| Source composition | Backend and Runtime source hashes in the image match the local committed tree for the reviewed app/runtime files, including `worker_event_projector.py`, `worker_log_stream.py`, `providers.py`, `078_remove_provider_driver.py`, `harness/events.py`, `pi_events.py`, and `codex_events.py` |
+| Source/composition boundary | The post-fix change is limited to Scheduler cancellation-status logging; Worker image, Kit `0.6.12`, Profile 4 generation `74`, Bundles 170/171/172, selected Adapter/CLI identities, Provider protocols, and event contract remain unchanged. The current image's provenance is recorded by the committed tree and remote build/deploy command because no Git revision OCI label is present |
 | Database/runtime mode | Alembic revision remains `077_v2_worker_kit_identity`; `AUTO_MIGRATE=false`; execution mode remains `dual_canary`; no `v2_only` cutover or migration was attempted |
-| Host capacity | Remote `/` is `57G/61G` used with `4.2G` available and `18%` inode use; Docker reports 82 images, 12.42GB images with 6.707GB reclaimable, and 6.526GB BuildKit cache. The filesystem is not full, so no Codify image/cache cleanup was performed. |
+| Host capacity | Remote `/` is `57G/61G` used with `4.2G` available and `94%` full; Docker reports 83 images, 12.42GB images with 6.713GB reclaimable, 5.054MB containers, 1.642GB volumes with 1.309GB reclaimable, and 6.526GB BuildKit cache. The filesystem is not full, so no Codify image/cache cleanup was performed. |
 
 As a Host-level `v2_only` preflight, Backend and Scheduler were temporarily
 recreated with `HARNESS_EXECUTION_MODE=v2_only` at `2026-09-05T01:04:26Z`.
@@ -106,6 +112,26 @@ The Scheduler also emitted its generic `Task 386 failed` error log after
 cancellation; it did not change the database or canonical terminal state and
 remains an alert-classification item for the R4.4 operational review.
 
+Task #387 is the post-fix current-composition cancellation sample for Claude.
+It used the same Provider 11 (`openrouter-minimax-anthropic` /
+`minimax/minimax-m3:free`), Bundle 171, fresh session, Adapter `1.0.1`, and
+CLI `2.1.153` as Task #386, but ran after the Scheduler image was rebuilt from
+`48b16fdc`. The operator cancelled while the real `sleep 180` command was
+running; the task ended `cancelled` with `Cancelled by user`, zero changes,
+and no Issue lock. Attempt
+`task-387-attempt-1-a3e1b350ae78` persisted 9 unique contiguous receipts
+(seq 1–9), ending in the same
+`harness.failed(failure.kind=cancelled)` →
+`worker.finalization(exit_code=143)` →
+`run.failed(status=cancelled, failure.kind=cancelled)` chain. The runtime
+archive was finalized at 4594 bytes with SHA-256
+`69e8a1df9a6c7ffce572b92c414ae9d1b38b5eb1cd057726425d28dce7a9427e`, raw-log
+persistence has 6 chunks / 5117 bytes, and the Worker container was removed.
+The expected post-exit canonical-tail 409 was non-blocking because the
+canonical cancellation receipts and archive were already persisted. The
+post-fix Scheduler emitted exactly one `Task 387 cancelled` INFO line and no
+`Task 387 failed` line.
+
 ## Candidate and validation boundary
 
 - The Worker runtime image, Worker Kit `0.6.12`, and frozen CLI identities remain
@@ -114,6 +140,12 @@ remains an alert-classification item for the R4.4 operational review.
   The exact candidate identity in that document was superseded after the
   Codex Adapter fix below; its Kit-boundary evidence remains historical
   structural evidence.
+- Commit `48b16fdc` is a Scheduler-only post-fix change: unsuccessful Worker
+  outcomes are logged after the final Task row is loaded, so a final
+  `cancelled` status produces an INFO cancellation line rather than a generic
+  failure ERROR. The remote Backend/Scheduler image for Task #387 is
+  `sha256:334c674d…`; the Worker/Kit/Profile/Bundle/Adapter/CLI composition is
+  unchanged from Tasks 380–386.
 - Commit `84ab6422` fixes an API-only omission: Issue detail serialization now
   includes `task_mode`, so valid `freeform` and `plan` tasks are not rendered as
   `Unknown`.
@@ -183,6 +215,8 @@ remains an alert-classification item for the R4.4 operational review.
   | `backend/.venv/bin/python -m pytest backend/tests/mock_e2e/test_mattermost_e2e.py -q` | 96 passed |
   | `backend/.venv/bin/python -m pytest backend/tests/unit -q` | 3247 passed / 4 skipped / 96 subtests (pre-fix baseline) |
   | affected Bundle/Profile/Scheduler/notification/freeform regression set | 227 passed |
+  | `backend/.venv/bin/python -m pytest backend/tests/unit/test_scheduler_coverage.py -q` | 64 passed; includes post-fix cancellation log classification |
+  | focused Ruff for Scheduler change | passed |
   | `backend/.venv/bin/python -m pytest backend/tests/unit/test_codex_harness_adapter.py -q` | 33 passed |
   | `backend/.venv/bin/python -m pytest backend/tests/unit/test_pi_harness_adapter.py -q` | 54 passed; covers active-session projection after startup `get_state` |
   | `backend/.venv/bin/python -m ruff check deploy/worker-entrypoint/harness/adapters/pi_events.py backend/tests/unit/test_pi_harness_adapter.py` | passed |
@@ -195,7 +229,12 @@ remains an alert-classification item for the R4.4 operational review.
   | `frontend/npx vitest run src/views/TaskView.spec.ts src/components/TaskFormDrawer.spec.ts` | 2 files / 234 tests passed |
   | `frontend/npm run build` | passed; includes the safe-area viewport metadata |
 
-## Remote Host state
+## Historical remote Host state (before the post-fix image)
+
+The generation-73 and mixed-provenance snapshots in this section are retained
+for traceability only. The current Backend/Scheduler image, capacity snapshot,
+and post-fix Task #387 evidence are recorded in the exact-composition section
+above.
 
 - Docker target: `192.168.50.129`, `linux/amd64`; execution mode remains
   `dual_canary`.
@@ -231,7 +270,7 @@ remains an alert-classification item for the R4.4 operational review.
   restarted. The Worker continued through the frontend-entrypoint
   interruption and completed the task.
 
-## Current operational snapshot
+## Historical operational snapshot (before post-fix Task #387)
 
 The read-only snapshot taken after Task 379 converged showed zero active Tasks
 (`pending`, `queued`, or `running`) and zero `issue_execution_locks`; the
@@ -284,10 +323,11 @@ does not override the canonical cancellation payload.
 
 ## Real Task and command-plane evidence
 
-The current additions used Profile 4, the generation-73 V2 mounted-Kit
-composition, the selected Harness/Provider combinations shown below, and a
-fresh session. All prompts were read-only diagnostics and produced no code
-changes.
+The historical additions below used Profile 4, the generation-73 V2
+mounted-Kit composition, the selected Harness/Provider combinations shown
+below, and a fresh session. All prompts were read-only diagnostics and
+produced no code changes. The post-fix current-composition Task #387 is
+recorded above.
 
 | Task | Provider / result | Runtime evidence |
 | ---: | --- | --- |
@@ -539,9 +579,11 @@ classification, command latency, usage, canonical terminal, archive, raw-log
 finalization, delivery samples, and the current queue/lock/secret-scan
 snapshot. The exact-composition candidate adds successful Pi/Claude/OpenCode/Pi
 samples (#380–#383) on Bundles 170/171/172; Task 383 reuses the Pi Bundle 170
-variant with Provider 6 over `anthropic_messages`. The separate current exact
-OpenCode, Pi, and Claude cancellation samples are Tasks 384, 385, and 386 on
-Bundles 172, 170, and 171. The generation-73 samples
+variant with Provider 6 over `anthropic_messages`. The pre-fix Backend image's
+current exact OpenCode, Pi, and Claude cancellation samples are Tasks 384,
+385, and 386 on Bundles 172, 170, and 171; post-fix Task #387 repeats the
+Claude cancellation path on Bundle 171 and verifies the corrected Scheduler
+log classification. The generation-73 samples
 (#374–#376) and three correctly bounded Codex Provider failures (#377–#379)
 remain historical. A current-composition Codex success sample is still open
 because the available current-generation attempts were blocked by upstream 429
@@ -571,7 +613,8 @@ unique receipts and one `run.completed` terminal per attempt. Bundle 163/164
 and Task 368/371/372 are retained as historical generation-72 evidence;
 Bundle 165 and Task 373 are explicitly superseded by the Pi session-projection
 defect. Tasks 384, 385, and 386 add separate 15-, 40-, and 8-receipt
-current-composition cancellation chains ending in `run.failed(status=cancelled)`.
+pre-fix current-composition cancellation chains, while Task #387 adds a
+post-fix 9-receipt chain, all ending in `run.failed(status=cancelled)`.
 The expanded cohorts pass the frozen status/terminal mapping,
 duplicate-terminal, sequence, and secret-like checks, while leaving the exact
 composition Codex success, live alert delivery to a real Mattermost service,
