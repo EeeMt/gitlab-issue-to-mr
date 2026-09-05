@@ -504,6 +504,19 @@ gesture-area acceptance remains explicitly deferred; credential/least-
 privilege and rotation evidence, release package/owner sign-off, migration 078,
 independent go/no-go, R5/L6, and formal R4 gates remain open.
 
+At the subsequent `remote` Docker recheck, Backend remained healthy on the
+post-fix image, Scheduler remained in `dual_canary`, Mattermost 10.9.1 and its
+Postgres remained healthy, and the database still reported zero active Tasks,
+zero Issue locks, and revision `077_v2_worker_kit_identity`. The Host had
+`2.1GB` available (`97%`) with `4.76GB` reclaimable images and `1.796GB`
+reclaimable BuildKit cache, so the full-disk cleanup trigger was not reached.
+One unrelated-looking long-running `quirky_allen` container was identified as
+an unlabelled OpenCode API-schema probe using an active/unknown Worker image;
+it was retained and is not counted as a Codify Task. If cleanup is later
+required, recheck this container separately before touching it. This recheck
+adds operational evidence only; it does not close R4.5/R4.6 or authorize
+migration 078/R5, and real mobile-device acceptance remains deferred.
+
 ### R5 — 在独立维护窗口执行 L6
 
 R5 不是 R4 的默认延续，必须获得单独执行批准。批准后按 Runbook：

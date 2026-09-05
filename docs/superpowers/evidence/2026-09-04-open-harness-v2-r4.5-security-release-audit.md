@@ -901,3 +901,33 @@ Credential/least-privilege and rotation ownership, release package/signatures,
 retention/maintenance ownership, migration 078, independent zero-P0/P1
 approval, R4.6, R5/L6, and the user-deferred real-mobile-device acceptance
 remain open.
+
+## 2026-09-05 continuation: post-Task-418 Host recheck
+
+At `2026-09-05T10:00Z`, a read-only recheck through the `remote` Docker
+context confirmed that `codify-backend` remained healthy on image
+`sha256:2cff3fd7…`, `codify-scheduler` was running in `dual_canary`, and both
+`codify-mattermost` (`mattermost/mattermost-team-edition:10.9.1`, repo digest
+`sha256:445ef983…`) and its Postgres were healthy. Backend/Scheduler still
+reported `FRONTEND_URL=http://192.168.50.129:8880` and
+`AUTO_MIGRATE=false`. The database reported zero pending/queued/running Tasks,
+zero `issue_execution_locks`, and revision `077_v2_worker_kit_identity`.
+
+The remote root filesystem was `61G` total / `59G` used / `2.1G` available
+(`97%`). Docker reported 29 images, 11 active containers, 1.796GB reclaimable
+BuildKit cache, and 4.76GB reclaimable images. This is high pressure but not
+the agreed full-disk trigger, so no cleanup was performed; GitLab, databases,
+Redis, Mattermost, volumes, and active or unknown Worker images were not
+touched. The Scheduler's current startup/crash-recovery log reported
+`0 resumed`, `0 awaiting Docker`, and `0 marked failed`, with no new selected
+Task-417/418 failure or traceback signal.
+
+The same snapshot found one long-running, non-Compose container named
+`quirky_allen`, created on `2026-09-01`, using the content-addressed Worker
+image and Kit `0.6.11` only to inspect the OpenCode API schema. It has no
+Codify task labels, no active Task or Issue lock exists, and its process is
+stalled in that one-off probe. It was intentionally retained because the Host
+is not full and the image is an active/unknown Worker image; if a full-disk
+cleanup becomes necessary, it must be rechecked and handled separately from
+the protected service/image cleanup. This is an operational observation, not
+an R4.5 approval or permission to remove it now.
