@@ -1073,3 +1073,30 @@ The V2 frozen integrity cohort remains unchanged. Formal zero-P0/P1 review,
 R4.5 owner/security/release evidence, R4.6 independent go/no-go, migration 078,
 R5/L6, and real mobile-device keyboard/IME/notch/gesture-area acceptance remain
 open; mobile-device acceptance is explicitly deferred by the user.
+
+## 2026-09-05 continuation: remote four-Harness Kit verify
+
+The installed current candidate was verified directly on the Docker daemon
+Host, without creating a Codify Task or changing the database. The command
+used the exact installed Kit
+`/opt/codify/worker-kits/0.6.12-linux-amd64-c33dbf86951b`, the Worker image
+repo digest
+`127.0.0.1:5000/codify-worker/java21-maven@sha256:234582c692d1ebb00ba8e882160618c2258463149d968009ac81c545e63a538b`,
+and the Kit's trusted `verify-kit-content.py` verifier. The no-runtime-manifest
+path enumerated all four present Kit inventory keys.
+
+| Harness | CLI version | Result |
+| --- | --- | --- |
+| Claude | `2.1.153` | `Worker kit verification passed` |
+| Codex | `0.146.0` | `Worker kit verification passed` |
+| OpenCode | `1.18.19` | `Worker kit verification passed` |
+| Pi | `0.84.2` | `Worker kit verification passed` |
+
+Every run reported content inventory
+`7630f086800c95f851db8c9351638868ab60ac33fb3bfe22f9f2f5c8dcdc98a1` and the
+remote image was `linux/amd64` with image ID
+`sha256:b07ac48b129c35876c044079f8e9cd7aa7558dbb0ade2e50e856d4ab980f5e71`.
+The single all-present invocation exited 0. Its temporary `docker run`
+containers were removed by `--rm`; no Codify service or Task container was
+changed. The Host remains in `dual_canary`; this strengthens current L3/R4.2
+evidence but does not provide release-owner or independent R4.6 approval.

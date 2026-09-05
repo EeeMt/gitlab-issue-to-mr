@@ -641,3 +641,28 @@ The existing migration, credential/least-privilege, release-package,
 retention, maintenance-owner, independent approval, R4.6, and R5/L6 gates
 remain unchanged. The Host remains in `dual_canary`, and no `v2_only` cutover
 or migration 078 was performed.
+
+## 2026-09-05 continuation: remote four-Harness Kit verify
+
+The current installed candidate was verified directly on the target Docker
+daemon with the Kit's trusted content verifier. The command used Kit
+`0.6.12-linux-amd64-c33dbf86951b` and Worker image
+`127.0.0.1:5000/codify-worker/java21-maven@sha256:234582c692d1ebb00ba8e882160618c2258463149d968009ac81c545e63a538b`.
+The no-runtime-manifest path enumerated all four present harnesses and exited
+0:
+
+| Harness | CLI version | Result |
+| --- | --- | --- |
+| Claude | `2.1.153` | `Worker kit verification passed` |
+| Codex | `0.146.0` | `Worker kit verification passed` |
+| OpenCode | `1.18.19` | `Worker kit verification passed` |
+| Pi | `0.84.2` | `Worker kit verification passed` |
+
+The content inventory was
+`7630f086800c95f851db8c9351638868ab60ac33fb3bfe22f9f2f5c8dcdc98a1`; the
+remote image ID was
+`sha256:b07ac48b129c35876c044079f8e9cd7aa7558dbb0ade2e50e856d4ab980f5e71`
+and its platform was `linux/amd64`. This is direct L3/R4.2 composition and
+launcher evidence, not a signed release package or owner approval. The
+verification containers were temporary `--rm` containers and no service,
+Task, database revision, or execution mode was changed.

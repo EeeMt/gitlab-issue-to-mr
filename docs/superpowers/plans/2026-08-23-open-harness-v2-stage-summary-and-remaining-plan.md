@@ -236,6 +236,16 @@ deployment's real frontend URL explicitly. Formal zero-P0/P1 review, R4.5
 owner/security/release evidence, R4.6 independent go/no-go, migration 078,
 R5/L6, and real mobile-device acceptance remain open.
 
+### 2026-09-05 continuation: direct remote four-Harness verify
+
+The exact installed `0.6.12-linux-amd64-c33dbf86951b` Kit was independently
+verified on the target Docker daemon against the frozen Worker image digest.
+The all-present Kit path passed for Claude `2.1.153`, Codex `0.146.0`, OpenCode
+`1.18.19`, and Pi `0.84.2`; every run reported the expected content inventory
+`7630f086800c95f851db8c9351638868ab60ac33fb3bfe22f9f2f5c8dcdc98a1` and the
+single invocation exited 0. This adds direct current L3/R4.2 evidence only;
+it does not alter the frozen V2 cohort or close release-owner/R4.6/R5 gates.
+
 ### R5 — 在独立维护窗口执行 L6
 
 R5 不是 R4 的默认延续，必须获得单独执行批准。批准后按 Runbook：
