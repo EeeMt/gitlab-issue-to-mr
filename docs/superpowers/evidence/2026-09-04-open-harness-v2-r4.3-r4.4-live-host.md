@@ -1521,3 +1521,56 @@ and `v2_only` were not executed. Post-run inspection still showed about `2.0GB`
 available on `/` (97%) and Docker BuildKit cache `0`; no new cleanup was
 triggered, and Mattermost/GitLab/databases/volumes plus the active/unknown
 `quirky_allen` Worker were retained.
+
+## 2026-09-05 continuation: served desktop detail for Tasks 422–424
+
+The authenticated served pages `/tasks/422`, `/tasks/423`, and `/tasks/424`
+were opened after completion. Each page rendered the completed state, Issue #99
+source, analysis/plan mode, fresh-session mode, the `main` baseline and
+`codify/issue-99` work branch, the selected Provider/Harness context, and the
+zero-change submission summary (`+0/-0`). The pages also rendered the AI
+delivery summary, execution input, event-stream/raw-log switch, execution
+statistics, and the “download runtime archive” control.
+
+The raw-log view provided a second served-browser check of the protocol and
+redaction boundary:
+
+| Task | Served context | Raw-log evidence |
+| --- | --- | --- |
+| 422 | OpenCode, Provider `openrouter-minimax-responses`, model `minimax/minimax-m3:free`, fresh analysis session | `Model Protocol: openai_responses`; GitLab repository URL showed `[TOKEN]` instead of credential material |
+| 423 | Claude, Provider `opencode-pi`, model `deepseek-v4-flash`, fresh analysis session | `Model Protocol: anthropic_messages`; GitLab repository URL showed `[TOKEN]` instead of credential material |
+| 424 | Codex, Provider `openrouter-minimax-responses`, model `minimax/minimax-m3:free`, fresh analysis session | `Model Protocol: openai_responses`; GitLab repository URL showed `[TOKEN]` instead of credential material |
+
+This is current served desktop L5 evidence for the additional four-Harness
+candidate runs and complements the database/archive integrity checks. It does
+not prove real mobile keyboard/IME/notch/gesture-area acceptance, full
+operations/security/release-owner sign-off, R4.6 independent go/no-go, or
+permission to execute migration 078, `v2_only`, or R5/L6. The mobile-device
+item remains explicitly deferred by the user.
+
+## 2026-09-05 continuation: current Host operational boundary after served check
+
+Task 424's served Worker modal showed Profile 4 (`#4`), mounted Kit `0.6.14`,
+the immutable host path
+`/opt/codify/worker-kits/0.6.14-linux-amd64-d461d040694b`, the selected Worker
+image digest, and read-only `/opt/codify-kit` and `/nix/store` mounts. The
+current non-secret service settings remained `HARNESS_EXECUTION_MODE=dual_canary`,
+`FRONTEND_URL=http://192.168.50.129:8880`, and `AUTO_MIGRATE=false`. The
+database was still at revision `077_v2_worker_kit_identity`; task-state counts
+had no pending/queued/running rows and `issue_execution_locks` was zero.
+
+The `worker_runtime_readiness` row for Kit `0.6.14` had an earlier
+`ready_until` that was already past at this recheck. Under the frozen readiness
+contract, an expired `ready` is derived as `unknown`; it is not current release
+permission. No new Verify was run because refreshing it would create a new
+Profile generation/identity and invalidate the exact-candidate boundary being
+audited. The completed Tasks 422–424 remain valid execution evidence: Task 424
+Scheduler logs show the container completed with exit code 0, the archive
+fallback persisted 2716 bytes of raw log and the canonical archive replay
+completed, and the task/delivery finalized successfully. The expected
+post-exit canonical-tail Docker 409 warning was non-blocking and did not alter
+the persisted `run.completed` result.
+
+This records the current operational gate rather than signing it: a fresh
+administrator Verify is still required before treating Kit `0.6.14` readiness
+as current for a release decision. R4.4, R4.5, R4.6 and R5/L6 remain open.

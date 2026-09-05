@@ -1047,3 +1047,14 @@ keyboard/IME/notch/gesture-area acceptance remain open; no migration or
 was not full, no new cleanup was performed, and protected Mattermost/GitLab/
 database/volume resources plus the active/unknown `quirky_allen` Worker were
 retained.
+
+The served Task 424 Worker modal independently showed the Profile 4 snapshot,
+Kit `0.6.14` content-addressed path, selected Worker image digest, and read-only
+Kit/Nix mounts. The Host remained in `dual_canary` with `AUTO_MIGRATE=false`,
+database revision `077_v2_worker_kit_identity`, and zero execution locks. The
+stored Kit `0.6.14` readiness row was already past `ready_until` at the recheck;
+under the documented contract this is derived `unknown`, not a current release
+approval. No Verify was repeated because it would change the Profile generation
+and exact identity. This is an explicit operational/release gate, not a failure
+of the completed real-provider tasks; their archive fallback, canonical replay,
+redaction scan, and successful Mattermost delivery remain intact.
