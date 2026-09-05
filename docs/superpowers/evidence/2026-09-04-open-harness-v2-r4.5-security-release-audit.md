@@ -666,3 +666,30 @@ and its platform was `linux/amd64`. This is direct L3/R4.2 composition and
 launcher evidence, not a signed release package or owner approval. The
 verification containers were temporary `--rm` containers and no service,
 Task, database revision, or execution mode was changed.
+
+## 2026-09-05 continuation: real cancellation notification after lifecycle fix
+
+The live-host evidence now also includes the post-fix cancellation path. Code
+commit `594bf67a` sends `task_cancelled` after Worker finalization persists the
+terminal state, while keeping the API-side notification only for the direct
+PENDING/QUEUED path. The focused regression suite passed with 114 tests and 19
+subtests, and focused Ruff checks passed. The rebuilt Backend/Scheduler image
+was `sha256:92321ff20bda74088b44a9c1410d5688399c44f15d78007b58e0068aaf07d7a3`.
+
+Task 409 used the existing Provider 12/OpenCode/`openai_responses` legal
+combination and was cancelled while a controlled `sleep 180` command was
+running. The Task converged to `cancelled`; Codify recorded
+`mattermost_notification_deliveries.id=4` with
+`task_cancelled/success`, and Mattermost received the card linking to
+`http://192.168.50.129:8880/tasks/409`. This closes the verified real
+completion/cancellation notification gap, but it does not establish the live
+`task_failed` path or R4.4 sign-off.
+
+At the final check the Host had 377 Tasks, zero active Tasks, zero Issue locks,
+healthy Backend/Scheduler services, `dual_canary` execution mode, and database
+revision `077_v2_worker_kit_identity`. Disk pressure was approximately `61G`
+total / `60G` used / `1.4G` available (`98%`); Docker reported 27 images, 11
+containers, and 6.992GB reclaimable BuildKit cache. No cleanup was performed
+because the disk was not full. Migration 078, release package/signatures,
+owner approval, R4.6, R5/L6, and real mobile-device acceptance remain open;
+mobile-device acceptance is explicitly deferred by the user.

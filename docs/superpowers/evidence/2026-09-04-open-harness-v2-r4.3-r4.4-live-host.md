@@ -1100,3 +1100,70 @@ The single all-present invocation exited 0. Its temporary `docker run`
 containers were removed by `--rm`; no Codify service or Task container was
 changed. The Host remains in `dual_canary`; this strengthens current L3/R4.2
 evidence but does not provide release-owner or independent R4.6 approval.
+
+## 2026-09-05 continuation: post-fix real cancellation notification
+
+The real Mattermost stack was kept in place and a second notification profile
+was created through the Codify admin UI:
+
+| Item | Result |
+| --- | --- |
+| Profile | `V2 failure/cancel notifications` (profile 3), enabled, channel target `codifydebug/notifications` |
+| Events | `task_failed` and `task_cancelled` only; completion remained subscribed only by the existing profile 2 |
+| Backend/Scheduler | Rebuilt from commit `594bf67a` as image `sha256:92321ff20bda74088b44a9c1410d5688399c44f15d78007b58e0068aaf07d7a3`, `dual_canary`, `AUTO_MIGRATE=false`, database revision `077_v2_worker_kit_identity` |
+
+### Task 408 exposed the lifecycle gap
+
+Task 408 was created from Issue #99 with the existing legal Provider 12
+`openrouter-minimax-responses`, OpenCode, a fresh session, freeform mode, and
+the controlled `sleep 180` prompt. The operator cancelled while the Bash
+command was running. The task ended `cancelled`, but the cancellation API's
+Phase B re-read still saw `RUNNING` with the Worker container present; the
+Worker finalizer converged the row afterwards. The existing route-side
+notification condition therefore did not run, and Task 408 had no delivery
+row. This was classified as a lifecycle gap, not a Mattermost transport
+failure.
+
+Commit `594bf67a` fixes the ownership boundary: PENDING/QUEUED cancellations
+remain notified by the API, while a RUNNING cancellation is notified once by
+the Worker finalizer after it persists the terminal state. The API no longer
+duplicates the notification if the Worker wins the Phase B race. The focused
+regression run passed 114 tests with 19 subtests, and focused Ruff passed.
+
+### Task 409 post-fix live cancellation
+
+Task 409 repeated the same controlled real task after the new Backend/Scheduler
+image was deployed. It used Provider 12 `openrouter-minimax-responses`
+(`minimax/minimax-m3:free`), OpenCode with `openai_responses`, a fresh session,
+and freeform mode. The operator cancelled after the real `sleep 180` command
+had started:
+
+| Item | Result |
+| --- | --- |
+| Task/runtime | Task 409, `cancelled`, `MessageAbortedError: Aborted`, zero changes, 0 input / 0 output tokens |
+| Attempt | `task-409-attempt-1-19c54ef331b9`, `codify.worker.event/v2`, OpenCode Adapter `2.0.0`, CLI `1.18.19`, `last_seq=9`, terminal `run.failed`, `control_state=closed` |
+| Receipts | 9 receipts, seq 1–9 contiguous, 9 distinct event IDs |
+| Persistence | 4 raw-log chunks / 2550 bytes; no `codify-409-issue99` container remained; no Issue lock remained |
+| Codify delivery row | `mattermost_notification_deliveries.id=4`, `event_type=task_cancelled`, `status=success`, target `channel:aaz68niiuff3txfot5wjrgj33e` |
+| Mattermost delivery | Bot post `ughpc5bd63dz8y9fz7exdc4kee` appeared in `codifydebug/notifications` as `@root 🛑 任务已取消 · [任务 409](http://192.168.50.129:8880/tasks/409)` |
+
+The delivery query found exactly one successful `task_cancelled` row and the
+Mattermost channel query found one matching post. The post therefore proves
+the real API → Codify delivery log → Mattermost 10.9.1 path after Worker
+finalization, including the corrected development Host URL. Task 409 is an
+additional R4.4 operational sample and is not added to the frozen Task-ID
+380–394 integrity cohort.
+
+The final Host recheck reported 377 total Tasks, zero pending/queued/running
+Tasks, zero Issue locks, no Task 409 container, healthy Backend/Scheduler, and
+`dual_canary`. The root filesystem was approximately `61G` total / `60G` used /
+`1.4G` available (`98%`); Docker reported 27 images, 11 containers, and
+6.992GB reclaimable BuildKit cache. The Host had not reached the full-disk
+cleanup trigger, so no further Codify image/cache cleanup was performed and
+active/unknown Worker images and protected services were not touched.
+
+This closes the real completion and cancellation notification evidence gap, but
+does not claim a live `task_failed` notification, R4.4 sign-off, R4.5 owner or
+security approval, R4.6 independent go/no-go, migration 078, R5/L6, or the
+real mobile-device keyboard/IME/notch/gesture-area acceptance that remains
+explicitly deferred by the user.
