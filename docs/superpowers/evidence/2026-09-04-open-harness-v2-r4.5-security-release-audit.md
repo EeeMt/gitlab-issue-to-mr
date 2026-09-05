@@ -1018,3 +1018,32 @@ release package/signatures, retention and maintenance ownership, independent
 zero-P0/P1 approval, R4.6, R5/L6, and real mobile-device keyboard/IME/notch/
 gesture-area acceptance remain open; the mobile-device item is explicitly
 deferred by the user.
+
+## 2026-09-05 continuation: four-Harness real-provider audit on Kit 0.6.14
+
+The current development candidate was exercised through the existing AI
+Providers on the target Host after the Kit `0.6.14` install. Tasks 422, 423,
+and 424 were fresh `plan` sessions from Issue #99 using Profile 4 and made zero
+repository changes. They add OpenCode, Claude, and Codex real-provider evidence
+to Task 421's Pi run without changing Provider configuration or the frozen
+cohort.
+
+| Task | Runtime evidence | Security/notification evidence |
+| --- | --- | --- |
+| 422 | Provider 12 `openrouter-minimax-responses` / `minimax/minimax-m3:free`, OpenCode / `openai_responses`, Bundle 178; 123 unique contiguous V2 receipts; Adapter `2.0.0` / CLI `1.18.19`; archive 32790 bytes; summary validation `ok=true` | Mattermost delivery 15 `task_completed/success`; targeted archive scan found no `glpat-*`, `sk-ant-*`, `ANTHROPIC_API_KEY=`, or `OPENAI_API_KEY=` |
+| 423 | Provider 6 `opencode-pi` / `deepseek-v4-flash`, Claude / `anthropic_messages`, Bundle 179; 48 unique contiguous V2 receipts; Adapter `1.0.1` / CLI `2.1.153`; archive 81963 bytes; summary validation `ok=true` | Mattermost delivery 16 `task_completed/success`; targeted archive scan found no credential-like matches |
+| 424 | Provider 12 `openrouter-minimax-responses` / `minimax/minimax-m3:free`, Codex / `openai_responses`, Bundle 180; 19 unique contiguous V2 receipts; Adapter `1.0.0` / CLI `0.146.0`; archive 14382 bytes; summary validation `ok=true` | Mattermost delivery 17 `task_completed/success`; targeted archive scan found no credential-like matches |
+
+The three tasks all ended with `run.completed`, closed control state, zero
+changes, and no summary repair attempts. This strengthens current candidate
+L4/runtime-integrity and redaction evidence, but it is not an R4.5 security
+approval or release-owner sign-off. The frozen Task-ID 380–394 integrity cohort
+is unchanged. Credential least-privilege/rotation ownership, migration 078,
+release package/signatures, retention and maintenance ownership, independent
+zero-P0/P1 approval, R4.6, R5/L6, and the user-deferred real mobile-device
+keyboard/IME/notch/gesture-area acceptance remain open; no migration or
+`v2_only` switch was executed. Post-run Host inspection still showed about
+`2.0GB` available on `/` (97%) and Docker BuildKit cache `0`; because the disk
+was not full, no new cleanup was performed, and protected Mattermost/GitLab/
+database/volume resources plus the active/unknown `quirky_allen` Worker were
+retained.

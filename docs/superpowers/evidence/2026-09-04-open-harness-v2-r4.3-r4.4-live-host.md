@@ -1492,3 +1492,32 @@ and does not sign R4.3/R4.4, R4.5, R4.6, or R5/L6. The full interaction,
 operations, security, release-owner, and independent go/no-go review remains
 open. Real mobile keyboard/IME/notch/gesture-area acceptance remains explicitly
 deferred by the user; migration 078 and `v2_only` were not executed.
+
+## 2026-09-05 continuation: current Kit four-Harness real-provider Tasks 422–424
+
+After Task 421, the authenticated target-Host Dashboard was used to create three
+additional read-only analysis tasks from Issue #99. Each used Profile 4 with the
+current Worker Kit `0.6.14`, a fresh session, and `plan` mode. The tasks made no
+repository changes and completed through the real Provider path rather than a
+mock or protocol conversion.
+
+| Item | Result |
+| --- | --- |
+| Task 422 | Provider 12 `openrouter-minimax-responses` / `minimax/minimax-m3:free`, OpenCode / `openai_responses`, Bundle 178, completed with `1664/1809` input/output tokens and `total_changes=0`; attempt `task-422-attempt-1-8ecf00598bda`, Adapter `2.0.0`, CLI `1.18.19`, `last_seq=123`, `run.completed`, `control_state=closed` |
+| Task 423 | Provider 6 `opencode-pi` / `deepseek-v4-flash`, Claude / `anthropic_messages`, Bundle 179, completed with `26500/9339` input/output tokens and `total_changes=0`; attempt `task-423-attempt-1-18b469be4cdd`, Adapter `1.0.1`, CLI `2.1.153`, `last_seq=48`, `run.completed`, `control_state=closed` |
+| Task 424 | Provider 12 `openrouter-minimax-responses` / `minimax/minimax-m3:free`, Codex / `openai_responses`, Bundle 180, completed with `46774/1536` input/output tokens and `total_changes=0`; attempt `task-424-attempt-1-d161af31ce2a`, Adapter `1.0.0`, CLI `0.146.0`, `last_seq=19`, `run.completed`, `control_state=closed` |
+| Canonical receipts | Tasks 422/423/424 had respectively 123/48/19 receipts, all with distinct event IDs and contiguous seq ranges 1–123, 1–48, and 1–19; each included one `harness.completed`, `worker.finalization`, and `run.completed` |
+| Raw/archive | Raw-log chunks were 5/2716 bytes, 17/52302 bytes, and 6/2716 bytes; runtime archives were 32790, 81963, and 14382 bytes. All three `delivery-summary-validation.json` files reported `ok=true`, zero errors, zero repair attempts; diagram counts were 0, 1, and 1 |
+| Mattermost | `mattermost_notification_deliveries.id=15`, `16`, and `17` were each `task_completed/success` on `channel:aaz68niiuff3txfot5wjrgj33e`; Mattermost `10.9.1` and its Postgres remained healthy |
+| Archive safety | Targeted scans across all three archives returned zero `glpat-*`, `sk-ant-*`, `ANTHROPIC_API_KEY=`, and `OPENAI_API_KEY=` matches |
+
+This is additional current-candidate L4 real-provider and runtime-integrity
+evidence that complements Task 421's Pi run. It is not a new member of the
+frozen Task-ID 380–394 integrity cohort and does not sign R4.3/R4.4, R4.5,
+R4.6, or R5/L6. The full interaction, operations, security, release-owner,
+and independent go/no-go review remains open. Real mobile keyboard/IME/notch/
+gesture-area acceptance remains explicitly deferred by the user; migration 078
+and `v2_only` were not executed. Post-run inspection still showed about `2.0GB`
+available on `/` (97%) and Docker BuildKit cache `0`; no new cleanup was
+triggered, and Mattermost/GitLab/databases/volumes plus the active/unknown
+`quirky_allen` Worker were retained.
