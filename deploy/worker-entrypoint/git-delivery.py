@@ -698,7 +698,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "record_push":
             return cmd_record_push(args)
         raise RuntimeError(f"unknown command: {args.command}")
-    except (GitFailed, ValueError, RuntimeError) as exc:
+    except (OSError, ValueError, RuntimeError) as exc:
         print(f"git-delivery: {exc}", file=sys.stderr)
         return 2
 
