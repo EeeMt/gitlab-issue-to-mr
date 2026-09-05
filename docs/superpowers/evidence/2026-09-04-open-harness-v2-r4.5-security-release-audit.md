@@ -326,17 +326,21 @@ with `AUTO_MIGRATE=false`; the Scheduler log records that auto-migration was
 skipped. The live database still has the `provider_driver` column and one
 `openai_compatible` + `anthropic_messages` Provider row, which is exactly the
 legacy row that 078 would delete before dropping the column.
-That row is Provider 11; it is referenced by 19 historical Tasks and their
-Profile Snapshots, while no Issue currently selects it as a default Provider.
-The existing foreign keys use `SET NULL`, so the migration would preserve the
-Tasks but clear their editable `provider_id` association; the immutable
-Snapshot evidence must be checked again after the migration.
+That row is Provider 11; it is referenced by 23 Tasks and 23 immutable Profile
+Snapshots, including the current successful Task 388, while no Issue currently
+selects it as a default Provider. The existing foreign keys use `SET NULL`, so
+the migration would preserve those Tasks but clear their editable `provider_id`
+association; the frozen Snapshot evidence must be checked again after the
+migration.
 
-The 078 migration tests and focused lint pass (`6 passed`, Ruff clean); the
-combined Provider/Endpoint/Runtime/migration regression set also passes (`81
-passed`). No migration was run on the development Host. Before any `v2_only` cutover, the
-maintenance owner must back up the database, execute the reviewed target
-revision once, confirm the expected Provider cleanup, and repeat Profile,
-Bundle, and relevant Task verification; the current generation-73 evidence
-was recorded against revision 077 and cannot silently be reused as post-
-migration proof.
+A transaction-scoped rollback audit against the live database confirmed that
+078 would delete exactly Provider 11 and affect all 23 direct Task references;
+the transaction was rolled back. The database is approximately 116 MB, so a
+backup is practical but must precede the irreversible roll-forward-only
+migration. The dedicated 078/migration-owner tests pass (`16 passed`) and the
+focused Ruff check is clean; no migration was run on the development Host.
+Before any `v2_only` cutover, the maintenance owner must back up the database,
+execute the reviewed target revision once, confirm the expected Provider
+cleanup, and repeat Profile, Bundle, and relevant Task verification; the
+current generation-73 evidence was recorded against revision 077 and cannot
+silently be reused as post-migration proof.
