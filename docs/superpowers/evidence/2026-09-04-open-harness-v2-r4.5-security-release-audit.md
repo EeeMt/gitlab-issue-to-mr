@@ -187,6 +187,15 @@ temporarily deferred per user instruction. The desktop browser and served
 safe-area artifact remain evidence only; no device-level acceptance claim is
 recorded in this audit.
 
+At `2026-09-05T01:08:52Z`, a further read-only Provider/Host recheck found no
+new Codex-legal availability signal: enabled `openai_responses` rows remain
+Providers 4 (`opencode-luna`), 9 (`openrouter-glm52-responses`), and 12
+(`openrouter-minimax-responses`); Provider 13 remains a disabled fixture. The
+recent real outcomes for these endpoints remain the previously recorded
+region-blocked 403 or upstream 429 classifications, so no duplicate Codex
+Task was created. Backend/Scheduler stayed healthy in `dual_canary`; remote
+root remained at 4.2G available / 94% used with no cleanup trigger.
+
 ## Permission and rotation recheck
 
 At `2026-09-04T15:12:48Z`, a read-only GitLab administration review found the
