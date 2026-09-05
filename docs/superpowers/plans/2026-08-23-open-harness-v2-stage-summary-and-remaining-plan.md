@@ -335,6 +335,35 @@ formal R4.3/R4.4 sign-off. Real mobile-device keyboard/IME/notch/gesture-area
 acceptance remains explicitly deferred; R4.5 owner/security/release checks,
 R4.6 independent go/no-go, migration 078, and R5/L6 remain open.
 
+### 2026-09-05 continuation: Provider protocol boundary smoke (Tasks 411–412)
+
+A post-deploy read-only analysis task was run twice against the current Host to
+separate the existing OpenCode Provider/protocol behavior from a deployment
+regression. Task 411 used Provider 7 `openrouter-free` with
+`openai_chat_completions`; the OpenCode Adapter emitted a bounded
+`protocol_error` at `session.idle with active tool parts`. It persisted 1134
+contiguous, unique V2 receipts (`harness.failed` seq 1132 and `run.failed`
+seq 1134), zero changes, a 107313-byte runtime archive, and a successful
+`task_failed` Mattermost delivery. The served Task 411 page rendered the
+canonical protocol error. The task had no remaining container or Issue lock.
+
+Task 412 repeated the same read-only analysis shape with Provider 12
+`openrouter-minimax-responses` and `openai_responses`. It completed with zero
+changes, 885 contiguous unique V2 receipts, OpenCode Adapter `2.0.0` / CLI
+`1.18.19`, a 84474-byte archive, and a successful `task_completed` Mattermost
+delivery. The served Task 412 page showed the completed analysis result,
+Provider 12 context, six process records, and the corrected development Host
+URL. This pair adds real post-restart Provider/protocol evidence and keeps the
+known Provider 7 protocol failure bounded as a failure; it does not extend the
+frozen Task-ID 380–394 integrity cohort or provide R4.4/R4.6 approval.
+
+The final Host check reported 380 total Tasks, zero pending/queued/running
+Tasks, zero `issue_execution_locks`, healthy Backend and Mattermost 10.9.1,
+`dual_canary`, and 2.0GB available on `/` (97%). Real mobile-device
+keyboard/IME/notch/gesture-area acceptance remains explicitly deferred;
+R4.5 owner/security/release checks, R4.6 independent go/no-go, migration 078,
+and R5/L6 remain open.
+
 ### R5 — 在独立维护窗口执行 L6
 
 R5 不是 R4 的默认延续，必须获得单独执行批准。批准后按 Runbook：

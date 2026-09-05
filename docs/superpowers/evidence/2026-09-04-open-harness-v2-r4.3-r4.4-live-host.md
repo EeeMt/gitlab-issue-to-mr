@@ -1250,3 +1250,38 @@ including HTTP 403 and `unsupported_country_region_territory`; it no longer
 renders only the generic separator. This is additional L5/UI and operational
 evidence, not a formal R4.3/R4.4 sign-off. Real mobile-device keyboard/IME,
 notch, and gesture-area acceptance remains explicitly deferred by the user.
+
+## 2026-09-05 continuation: Provider protocol boundary smoke
+
+Task 411 was created after the nginx/Backend restart as a read-only analysis
+task with fresh session, OpenCode, and Provider 7
+`openrouter-free` (`openai_chat_completions`). It produced no repository
+changes, but the real OpenCode stream ended with a bounded protocol failure:
+
+| Item | Result |
+| --- | --- |
+| Task/runtime | Task 411, `failed`, `total_changes=0`, `plan` mode |
+| Attempt | `task-411-attempt-1-09cb6f1f585b`, `codify.worker.event/v2`, OpenCode Adapter `2.0.0`, CLI `1.18.19`, `last_seq=1134`, `run.failed`, `closed` |
+| Canonical failure | `harness.failed` seq 1132 and `run.failed` seq 1134; `protocol_error`: `OpenCode protocol failure: session.idle with active tool parts` |
+| Persistence | 1134 contiguous unique receipts, 4 raw-log chunks / 2477 bytes, runtime archive 107313 bytes, no Worker container or Issue lock remained |
+| Delivery | Mattermost delivery row 6, `task_failed`, `success`; the served `/tasks/411` page rendered the canonical protocol error |
+
+This is not an upstream HTTP success/failure misclassification: the Adapter
+failed closed on an incomplete OpenCode tool lifecycle and persisted the
+canonical failure. It is retained as a real Provider 7/chat-protocol boundary
+sample and is not added to the frozen Task-ID 380–394 integrity cohort.
+
+Task 412 then repeated the same read-only analysis shape with Provider 12
+`openrouter-minimax-responses` and `openai_responses`:
+
+| Item | Result |
+| --- | --- |
+| Task/runtime | Task 412, `completed`, `total_changes=0`, `plan` mode |
+| Attempt | `task-412-attempt-1-c4a78c532069`, `codify.worker.event/v2`, OpenCode Adapter `2.0.0`, CLI `1.18.19`, `last_seq=885`, `run.completed`, `closed` |
+| Persistence | 885 contiguous unique receipts, 4 raw-log chunks / 2700 bytes, runtime archive 84474 bytes, no Worker container or Issue lock remained |
+| Delivery | Mattermost delivery row 7, `task_completed`, `success`; the served `/tasks/412` page showed Provider 12, OpenCode, six process records, and the corrected Host URL |
+
+Together these tasks show that the current deployment and Responses path still
+complete a real OpenCode analysis task after restart, while the separate
+Provider 7 chat path remains bounded as a protocol failure. They add R4.4
+operational evidence but do not sign R4.4/R4.5 or establish R4.6 go/no-go.

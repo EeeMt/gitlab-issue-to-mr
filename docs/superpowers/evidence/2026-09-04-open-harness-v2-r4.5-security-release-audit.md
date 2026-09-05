@@ -764,3 +764,25 @@ renders the canonical upstream 403 failure detail. The UI change prefers
 25-test suite and frontend production build passed. This evidence does not
 close the open credential/least-privilege, migration 078, release-package,
 owner-signature, R4.6, R5/L6, or deferred real-mobile-device gates.
+
+## 2026-09-05 continuation: post-restart Provider boundary recheck
+
+Two additional real read-only analysis tasks were run after the current nginx,
+Backend, and Scheduler deployment was healthy. Task 411 used Provider 7
+`openrouter-free` / `openai_chat_completions` with OpenCode and ended as a
+bounded `protocol_error` (`session.idle with active tool parts`) after 1134
+contiguous unique V2 receipts; it persisted a 107313-byte archive, zero
+changes, and a successful `task_failed` Mattermost delivery. Task 412 used
+Provider 12 `openrouter-minimax-responses` / `openai_responses` with the same
+OpenCode analysis shape and completed with zero changes, 885 contiguous unique
+V2 receipts, an 84474-byte archive, and a successful `task_completed` delivery.
+Both tasks left no container or Issue lock, and the served Task 411/412 pages
+matched their canonical outcomes.
+
+The pair is operational evidence, not a permission or release approval. It
+shows the current deployment and Responses path remain healthy while the
+Provider 7 chat path produces a correctly bounded OpenCode protocol failure;
+no provider configuration was changed and neither task alters the frozen
+Task-ID 380–394 integrity cohort. R4.5 credential/least-privilege,
+release-package, retention, maintenance-owner, independent approval, R4.6,
+migration 078, R5/L6, and real-mobile-device gates remain open.
