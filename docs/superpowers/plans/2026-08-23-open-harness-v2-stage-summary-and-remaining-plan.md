@@ -785,3 +785,19 @@ SHA-256 为
 也不替代 release-owner 的权限/轮换、release notes、维护窗口、独立 P0/P1 与 R4.6 go/no-go 签署。
 本次没有改动远端服务、切换 `dual_canary`、执行 migration 078/`v2_only` 或运行 R5/L6；根盘约 97%
 使用且未触发满盘清理。真实移动设备键盘/IME/刘海/手势区验收继续按用户指示暂缓。
+
+## 2026-09-05 continuation: generation 78 database and delivery convergence
+
+对目标 Host 的当前数据库做了 schema-aligned 只读复核：Tasks 425–430 均为
+`run.completed`，Tasks 431–434 均为取消后的 `run.failed` canonical stop；10 个 attempt 全部
+`control_state=closed`，`codify.worker.event/v2`，receipt 数与 `last_seq` 相等，seq 从 1 连续且
+event ID 唯一。Mattermost delivery 18–27 全部为 `success`，其中 18/19/20/21/22/23 为
+`task_completed`，24/25/26/27 为 `task_cancelled`。当前启用的 Mattermost profiles 仍为
+`task_completed` 与 `task_failed`/`task_cancelled` 两组。
+
+数据库仍为 `077_v2_worker_kit_identity`，active Task 与 `issue_execution_locks` 均为 0；
+`0.6.14` readiness 的存储状态仍为 `ready`、generation 2，但 `ready_until` 已过期，实际派生为
+`unknown`。远端 Backend/Scheduler/nginx、Mattermost `10.9.1`、两套 Postgres、GitLab 与 Redis
+仍健康；根盘约 97% 使用、可用 2.0GB，未触发新的清理。这补强 R4.4 的当前 generation 数据库、
+通知和队列收敛证据，但不替代 R4.3–R4.6 正式签署、release-owner 材料、migration 078、
+`v2_only`、R5/L6 或用户暂缓的真实移动设备验收。

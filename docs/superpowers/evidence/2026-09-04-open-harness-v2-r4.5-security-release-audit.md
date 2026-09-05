@@ -1165,3 +1165,10 @@ SHA-256 为
 本次只读 preflight 未切换 `dual_canary`、未执行 migration 078/`v2_only`，也未修改远端服务。目标
 Host 仍保持健康、无 active Task/Issue lock，根盘约 97% 使用但未达到满盘清理条件，未执行新的 Codify
 image/cache 清理；真实移动设备验收继续按用户指示暂缓。
+
+同一轮 schema-aligned 数据库复核确认 generation 78 的 Tasks 425–434 全部已收敛：425–430 为
+`run.completed`，431–434 为取消后的 `run.failed`，10 个 attempt 均 `control_state=closed`，
+receipt/`last_seq`、连续 seq 和唯一 event ID 均一致；Mattermost delivery 18–27 全部
+`success`。当前 readiness 行仍为存储 `ready`/generation 2，但 `ready_until` 已过期，按合同为
+有效状态 `unknown`；数据库 revision 为 `077_v2_worker_kit_identity`，active Task 与 Issue lock
+均为 0。该复核补强 R4.4 的当前运维收敛证据，但不改变 R4.5 的安全/owner 签署边界。

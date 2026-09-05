@@ -191,3 +191,36 @@ Provider/protocol rows. This strengthens R4.4 runtime evidence but does not
 close R4.3–R4.6, release-owner/security/rotation/signature gates, or
 authorize migration 078, `v2_only`, R5/L6, or the user-deferred real
 mobile-device acceptance.
+
+## 2026-09-05 continuation: current-generation database and Host recheck
+
+After Tasks 431–434, a schema-aligned read-only query against the target
+Postgres confirmed the complete generation-78 follow-up set. Tasks 425–430
+were `completed` with `run.completed`; Tasks 431–434 were `cancelled` with
+`run.failed` as the canonical stop record. All ten attempts had
+`control_state=closed`, `codify.worker.event/v2`, and matching receipt/`last_seq`
+counts with sequence `1..last_seq` and unique event IDs:
+
+| Tasks | Harness / Bundle | terminal | receipts | Mattermost delivery |
+| --- | --- | --- | ---: | --- |
+| 425/430 | Pi / 181 | `run.completed` / `run.completed` | 813 / 116 | 18 / 23 `task_completed/success` |
+| 426/429/432 | OpenCode / 182 | `run.completed` / `run.completed` / `run.failed` | 118 / 742 / 9 | 19 / 22 `task_completed/success`; 25 `task_cancelled/success` |
+| 427/433 | Claude / 183 | `run.completed` / `run.failed` | 49 / 8 | 20 `task_completed/success`; 26 `task_cancelled/success` |
+| 428/434 | Codex / 184 | `run.completed` / `run.failed` | 20 / 9 | 21 `task_completed/success`; 27 `task_cancelled/success` |
+| 431 | Pi / 181 | `run.failed` | 14 | 24 `task_cancelled/success` |
+
+The enabled Mattermost profiles remain profile 2 (`task_completed`) and
+profile 3 (`task_failed`, `task_cancelled`), both targeting the configured
+channel. The database remains at `077_v2_worker_kit_identity`; active Tasks and
+`issue_execution_locks` are both zero. The current `0.6.14` readiness row is
+stored as `ready` with `check_generation=2`, but its
+`ready_until=2026-09-05 12:18:31.417926` is expired, so its effective state is
+`unknown` under the contract. Remote Backend, Scheduler, nginx, Mattermost
+`10.9.1`, both Postgres services, GitLab, and Redis remained up/healthy; root
+filesystem usage remained about 97% with 2.0GB available, so no cleanup was
+triggered.
+
+This closes the current-generation post-cancellation database, delivery, and
+queue convergence recheck for R4.4. It does not constitute R4.3–R4.6 formal
+sign-off, release-owner security/rotation/signature approval, migration 078,
+`v2_only`, R5/L6, or real mobile-device acceptance.
