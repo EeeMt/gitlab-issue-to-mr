@@ -517,6 +517,34 @@ required, recheck this container separately before touching it. This recheck
 adds operational evidence only; it does not close R4.5/R4.6 or authorize
 migration 078/R5, and real mobile-device acceptance remains deferred.
 
+### 2026-09-05 continuation: Task 419 real OpenCode Responses smoke
+
+通过已登录的目标 Host Dashboard `/issues/99` 创建并观察了一条新的真实只读
+analysis Task。Task 419 使用现有 Provider 12
+`openrouter-minimax-responses` / `minimax/minimax-m3:free`、合法的
+`openai_responses`、Worker Profile 4
+`v2-canary-0.6.11-four-harness`（generation 75，Worker Kit `0.6.12`，
+`mounted_kit`）、OpenCode、fresh session 和 `plan` mode。任务于
+`2026-09-05T10:11:34Z` 开始，`10:13:09Z` 完成，零仓库变更；浏览器页面随后
+显示 `Task #419 已完成`，Issue 总任务数变为 47。
+
+| Item | Result |
+| --- | --- |
+| Attempt | `task-419-attempt-1-aaced1cae60a`, `codify.worker.event/v2`, OpenCode Adapter `2.0.0`, CLI `1.18.19`, `last_seq=820`, terminal `run.completed`, `control_state=closed` |
+| Persistence | 820 receipts / 820 distinct event IDs, contiguous seq 1–820; raw logs 5 chunks / 2,716 bytes |
+| Archive safety | `task-419-runtime-archive.tar.gz`, 79,490 bytes, SHA-256 `d009a8600a3612b6857ff83b1d24a6853def97f56c7fc448d6a27362d40dd37c`; 820 parseable canonical records / 820 unique IDs; one each of `harness.completed`, `worker.finalization`, `run.completed`; 4 `tool.started` / 4 `tool.completed`; targeted scan across 9 archive files returned 0 credential-like matches |
+| Delivery | Mattermost delivery row 12, `task_completed/success`, target `channel:aaz68niiuff3txfot5wjrgj33e`; Mattermost 10.9.1 and its Postgres were healthy |
+| Host convergence | zero active Tasks and Issue locks; database `077_v2_worker_kit_identity`; Backend healthy, Scheduler `dual_canary`; root filesystem 2.1GB available / 97%; no cleanup triggered |
+
+Task 419 is additional post-restart real-provider and Mattermost evidence. It is
+not added to the frozen Task-ID 380–394 integrity cohort and does not sign
+R4.3/R4.4/R4.5/R4.6 or authorize migration 078/R5/L6. Credential/least-
+privilege and rotation ownership, release package/owner approval, independent
+go/no-go, and the user-deferred real-mobile-device acceptance remain open. The
+unlabelled `quirky_allen` OpenCode schema probe and its active/unknown Worker
+image were retained because the Host was not full; if cleanup is later needed,
+recheck it separately before touching it.
+
 ### R5 — 在独立维护窗口执行 L6
 
 R5 不是 R4 的默认延续，必须获得单独执行批准。批准后按 Runbook：

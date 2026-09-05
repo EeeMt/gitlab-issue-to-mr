@@ -931,3 +931,34 @@ is not full and the image is an active/unknown Worker image; if a full-disk
 cleanup becomes necessary, it must be rechecked and handled separately from
 the protected service/image cleanup. This is an operational observation, not
 an R4.5 approval or permission to remove it now.
+
+## 2026-09-05 continuation: real Task 419 and Mattermost delivery
+
+Using the authenticated target-Host Dashboard, a new read-only analysis Task 419
+was created from Issue 99 and executed after the post-fix Backend/Scheduler
+restart. It used existing Provider 12
+`openrouter-minimax-responses` / `minimax/minimax-m3:free` over legal
+`openai_responses`, Worker Profile 4
+`v2-canary-0.6.11-four-harness` at generation 75 with Worker Kit `0.6.12` and
+`mounted_kit`, OpenCode, a fresh session, and `plan` mode. The Task started at
+`2026-09-05T10:11:34Z`, completed at `10:13:09Z`, and made zero repository
+changes. The served Issue page then showed `Task #419` as completed and 47 total
+tasks.
+
+| Item | Result |
+| --- | --- |
+| Attempt | `task-419-attempt-1-aaced1cae60a`, `codify.worker.event/v2`, OpenCode Adapter `2.0.0`, CLI `1.18.19`, `last_seq=820`, terminal `run.completed`, `control_state=closed` |
+| Canonical persistence | 820 receipts, 820 distinct event IDs, contiguous seq 1–820; event counts included one each of `harness.completed`, `worker.finalization`, and `run.completed`, plus 4 `tool.started` / 4 `tool.completed` |
+| Raw/archive | 5 raw-log chunks / 2,716 bytes; `task-419-runtime-archive.tar.gz` is 79,490 bytes with SHA-256 `d009a8600a3612b6857ff83b1d24a6853def97f56c7fc448d6a27362d40dd37c`; its `event.jsonl` had 820 parseable records and 820 unique event IDs; a targeted scan across 9 archive files returned 0 credential-like matches |
+| Mattermost | `mattermost_notification_deliveries.id=12`, `task_completed/success`, target `channel:aaz68niiuff3txfot5wjrgj33e`; Mattermost 10.9.1 and its Postgres were healthy |
+| Post-run Host | zero active Tasks and zero Issue locks, database `077_v2_worker_kit_identity`, Scheduler `dual_canary`, Backend healthy, root filesystem 2.1GB available / 97%; Docker reported 29 images, 4.76GB reclaimable images, and 1.796GB reclaimable BuildKit cache |
+
+This is additional real-provider, archive-integrity, redaction, and completion-
+notification evidence. It is not a new member of the frozen Task-ID 380–394
+cohort and is not an R4.3/R4.4/R4.5/R4.6 sign-off. No full-disk cleanup was
+performed; the unlabelled `quirky_allen` OpenCode schema-probe container and its
+active/unknown Worker image remain intentionally retained for separate review if
+the disk reaches the cleanup trigger. Credential/least-privilege and rotation
+records, release package/signatures, retention/maintenance ownership, migration
+078, independent zero-P0/P1 approval, R4.6, R5/L6, and the user-deferred
+real-mobile-device acceptance remain open.
