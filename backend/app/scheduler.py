@@ -1957,6 +1957,9 @@ class Scheduler:
         """Run task in background thread pool."""
         self._active_worker_threads += 1
         defer_recovery = False
+        success: bool | None = None
+        elapsed = 0.0
+        task = None
         t_submit = time.time()
         logger.info(
             f"Task {task_id} submitted to thread pool "
@@ -1976,11 +1979,10 @@ class Scheduler:
                     f"Task {task_id} completed successfully (total={elapsed:.0f}s, "
                     f"active_threads={self._active_worker_threads})"
                 )
-            else:
-                logger.error(
-                    f"Task {task_id} failed (total={elapsed:.0f}s, "
-                    f"active_threads={self._active_worker_threads})"
-                )
+            # An unsuccessful WorkerExecutor result is logged after the final
+            # Task status is loaded below.  Cancellation intentionally returns
+            # False from the worker path, but must not be reported as a failed
+            # Scheduler error.
 
         except (DockerConnectionsUnavailableError, TaskContainerLookupError) as exc:
             defer_recovery = True
@@ -2014,6 +2016,17 @@ class Scheduler:
                         result = await db.execute(select(Task).where(Task.id == task_id))
                         task = result.scalar_one_or_none()
                         if task:
+                            if success is False:
+                                if task.status == TaskStatus.CANCELLED:
+                                    logger.info(
+                                        f"Task {task_id} cancelled (total={elapsed:.0f}s, "
+                                        f"active_threads={self._active_worker_threads})"
+                                    )
+                                else:
+                                    logger.error(
+                                        f"Task {task_id} failed (total={elapsed:.0f}s, "
+                                        f"active_threads={self._active_worker_threads})"
+                                    )
                             # Guard: only release the DB lock and in-memory slot if WE still hold it.
                             # If _reconcile_running_state already cleared us and a replacement task
                             # re-acquired the lock for this issue, releasing here would corrupt the
@@ -2043,6 +2056,11 @@ class Scheduler:
                                     await db.commit()
                                     # Auto-transition issue to COMPLETED if all tasks done
                                     await self._maybe_complete_issue(db, task.issue_id)
+                        elif success is False:
+                            logger.error(
+                                f"Task {task_id} failed (total={elapsed:.0f}s, "
+                                f"active_threads={self._active_worker_threads})"
+                            )
                 except Exception:
                     logger.exception("Failed to release lock for task %s", task_id)
 

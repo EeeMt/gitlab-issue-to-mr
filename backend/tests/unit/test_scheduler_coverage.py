@@ -228,6 +228,47 @@ class TestRunTaskBackground(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(7, scheduler._running_tasks)
         self.assertNotIn(10, scheduler._running_issues)
 
+    async def test_background_logs_cancellation_without_failure_error(self) -> None:
+        """A cancelled task must not be reported as a Scheduler failure."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        scheduler._running_tasks.add(71)
+        scheduler._running_issues.add(17)
+
+        cancelled_task = _make_mock_task(
+            task_id=71,
+            project_id=100,
+            issue_id=17,
+            status=TaskStatus.CANCELLED,
+        )
+        mock_db = MagicMock()
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
+        mock_db.commit = AsyncMock()
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.side_effect = [cancelled_task, None]
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        with (
+            patch("app.scheduler.AsyncSessionLocal", return_value=mock_db),
+            patch("app.scheduler._run_worker_task", return_value=False),
+            patch.object(
+                asyncio.get_event_loop(),
+                "run_in_executor",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            self.assertLogs("app.scheduler", level="INFO") as logs,
+        ):
+            await scheduler._run_task_background(71)
+
+        self.assertTrue(any("Task 71 cancelled" in message for message in logs.output))
+        self.assertFalse(any("Task 71 failed (total=" in message for message in logs.output))
+        self.assertNotIn(71, scheduler._running_tasks)
+        self.assertNotIn(17, scheduler._running_issues)
+
     async def test_background_keeps_issue_locked_for_retained_container(self) -> None:
         """A terminal worker cannot release its Issue before container reconciliation."""
         from app.scheduler import Scheduler
