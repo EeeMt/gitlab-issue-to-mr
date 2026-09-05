@@ -121,6 +121,7 @@ async def cancel_task(
     docker = None
     raw_console_log: bytes | None = None
     container_absent = False
+    notify_cancelled_in_route = False
 
     if task.status in (TaskStatus.PENDING, TaskStatus.QUEUED):
         # No active worker owns a container for a PENDING/QUEUED Task: finalize
@@ -132,6 +133,7 @@ async def cancel_task(
         task.error_message = "Cancelled by user"
         await db.commit()
         container_absent = True
+        notify_cancelled_in_route = True
         logger.info(
             "Cancelled PENDING/QUEUED task %s for issue %s",
             task_id,
@@ -330,7 +332,11 @@ async def cancel_task(
             )
         await db.commit()
         await db.refresh(task)
-        if task.status == TaskStatus.CANCELLED:
+        # A running task is notified by the worker finalizer after it has
+        # converged the cancellation request to a terminal state. Keeping the
+        # route-side notification for that race would send duplicate posts when
+        # the finalizer wins the Phase B re-read.
+        if task.status == TaskStatus.CANCELLED and notify_cancelled_in_route:
             await notify_task_cancelled(task)
         logger.info(
             "Committed cancellation for task %s after worker container convergence",

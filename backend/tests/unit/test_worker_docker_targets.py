@@ -977,6 +977,7 @@ async def test_worker_finalization_honors_persisted_cancellation_intent():
     container = MagicMock()
     worker = MagicMock()
     worker._session_factory = None
+    worker._send_cancelled_notifications = AsyncMock()
     worker._stream_logs_to_db = AsyncMock(return_value=(137, "stopped", 1, False))
     worker._parse_task_result = AsyncMock()
     worker.docker.remove_container = MagicMock()
@@ -1012,6 +1013,7 @@ async def test_worker_finalization_honors_persisted_cancellation_intent():
     assert task.error_message == "Cancelled by user"
     assert task.container_id is None
     assert db.commit.await_count == 2
+    worker._send_cancelled_notifications.assert_awaited_once_with(task)
     worker._parse_task_result.assert_awaited()
     worker.docker.remove_container.assert_called_once_with(container, force=True)
 

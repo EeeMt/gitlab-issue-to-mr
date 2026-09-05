@@ -12,6 +12,7 @@ from app.config import get_effective_settings as get_settings
 from app.core.docker_client import DockerClientWrapper, get_docker_client
 from app.core.gitlab_client import GitLabClient, get_gitlab_client
 from app.core.mattermost_notifications import (
+    MATTERMOST_EVENT_TASK_CANCELLED,
     MATTERMOST_EVENT_TASK_COMPLETED,
     MATTERMOST_EVENT_TASK_FAILED,
     MATTERMOST_EVENT_TASK_RETRY_SCHEDULED,
@@ -495,6 +496,16 @@ class WorkerExecutor:
             failed_event=MATTERMOST_EVENT_TASK_FAILED,
             session_factory=self._session_factory,
         )
+
+    async def _send_cancelled_notifications(self, task: Task) -> None:
+        try:
+            await notify_task_event(
+                task,
+                MATTERMOST_EVENT_TASK_CANCELLED,
+                session_factory=self._session_factory,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Failed to send Mattermost cancellation notification: {exc}")
 
     async def _try_upsert_usage_ledger(self, db: AsyncSession, task: Task) -> None:
         try:

@@ -304,6 +304,48 @@ class CancelTaskEndpointTests(unittest.TestCase):
         self.assertIsNotNone(task.cancel_requested_at)
         mock_release.assert_not_awaited()
 
+    def test_cancel_running_task_does_not_duplicate_worker_notification(self) -> None:
+        """A worker-converged RUNNING cancellation is notified by the worker only."""
+        from app.core.worker_docker_targets import TaskContainerNotFoundError
+
+        task = MagicMock()
+        task.id = 4
+        task.project_id = 1
+        task.issue_id = 33
+        task.status = TaskStatus.RUNNING
+        task.scheduled_at = None
+        task.container_id = "gone-container-4"
+        task.cancel_requested_at = None
+        task.raw_logs_finalized_at = None
+
+        client, app, mock_db = self._get_client(task)
+        refresh_count = 0
+
+        async def refresh_task(*_args, **_kwargs):
+            nonlocal refresh_count
+            refresh_count += 1
+            if refresh_count == 2:
+                task.status = TaskStatus.CANCELLED
+
+        mock_db.refresh = AsyncMock(side_effect=refresh_task)
+
+        with (
+            patch("app.api.task_action_routes.notify_task_cancelled", new=AsyncMock()) as mock_notify,
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch(
+                "app.api.task_action_routes.find_task_container",
+                new=AsyncMock(side_effect=TaskContainerNotFoundError("missing")),
+            ),
+            patch("app.api.task_action_routes.release_issue_execution_lock", new=AsyncMock()),
+        ):
+            response = client.post("/api/tasks/4/cancel")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(task.status, TaskStatus.CANCELLED)
+        mock_notify.assert_not_awaited()
+
     def test_cancel_running_task_does_not_downgrade_completed(self) -> None:
         """Cancel of a RUNNING task must not downgrade a run the finalizer
         already converged to COMPLETED while the cancel was in flight."""

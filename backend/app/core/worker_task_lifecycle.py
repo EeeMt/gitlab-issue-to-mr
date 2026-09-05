@@ -1250,6 +1250,7 @@ async def monitor_container_run(
                 "were not finalized"
             )
         await db.commit()
+        await worker._send_cancelled_notifications(task)
         return False
 
     if cancellation_requested:
