@@ -37,9 +37,9 @@ release-owner approval.
 | Frontend unit suite | passed, 80 files / 1692 tests | Includes structured SSE stale-source and mobile safe-area regression coverage |
 | Frontend production build | passed | Vite emitted only the existing large-chunk warning |
 | Backend lint | passed | `make lint-backend` |
-| Remote Docker state | near capacity, not full | The exact-composition recheck reports `df -h /` at 61G total / 57G used / 4.2G available (94%) and `df -ih /` at 18% inode use; `docker system df` reports 82 Images / 12.42GB / 6.707GB reclaimable, 5.327MB containers, 1.642GB volumes, and 6.526GB BuildKit. No cleanup was performed because the disk was not full. |
+| Remote Docker state | near capacity, not full | The exact-composition recheck reports `df -h /` at 61G total / 57G used / 4.2G available (94%) and `df -ih /` at 18% inode use; the post-Task-386 `docker system df` reports 82 Images / 12.42GB / 6.707GB reclaimable, 6.267MB containers, 1.642GB volumes, and 6.526GB BuildKit. No cleanup was performed because the disk was not full. |
 | Current Kit archive reconstruction and V2 release preflight | passed, not signed | The installed `0.6.12-linux-amd64-c33dbf86951b` Kit was streamed into a temporary `518M` archive; archive SHA-256 `2d3ee7f81525d465731344571cbf5bd93a0cd94bb6cf16f5a4d5512d5c0a25a6`, manifest SHA-256 `c33dbf86951bed6e3b4de1897313725f14f00006dc51fb300e7b821bb47e17bd`, content inventory `7630f086800c95f851db8c9351638868ab60ac33fb3bfe22f9f2f5c8dcdc98a1`; `deploy/scripts/preflight-v2-release.sh` passed against the target daemon and Worker image repo digest `127.0.0.1:5000/codify-worker/java21-maven@sha256:234582c692d1ebb00ba8e882160618c2258463149d968009ac81c545e63a538b`. The temporary archive is not a release-owner-signed package and is not committed. |
-| Exact committed image/Profile/Task recheck | passed with bounded Provider boundary | Backend/Scheduler both run image `sha256:0ea2d983…` with OCI revision `40235196`; Profile 4 generation 74 completed four-Harness Verify; Tasks 380–383 completed Pi/Claude/OpenCode/Pi on Bundles 170–172 with 397 unique contiguous receipts and zero changes. Task 383 reused the Pi Bundle 170 variant with Provider 6 over `anthropic_messages`; two early `control_owner_unreachable` gate-probe warnings self-recovered. Current exact OpenCode/Pi cancellation Tasks 384/385 on Bundles 172/170 added 15/40 receipts ending in the expected cancellation chains, zero changes, 7039/6547-byte runtime archives, and 4/3 raw-log chunks; both Worker containers were removed. No current-composition Codex success was claimed because the available Codex-legal Providers remain bounded by the recorded upstream 429/403 failures. |
+| Exact committed image/Profile/Task recheck | passed with bounded Provider boundary | Backend/Scheduler both run image `sha256:0ea2d983…` with OCI revision `40235196`; Profile 4 generation 74 completed four-Harness Verify; Tasks 380–383 completed Pi/Claude/OpenCode/Pi on Bundles 170–172 with 397 unique contiguous receipts and zero changes. Task 383 reused the Pi Bundle 170 variant with Provider 6 over `anthropic_messages`; two early `control_owner_unreachable` gate-probe warnings self-recovered. Current exact OpenCode/Pi/Claude cancellation Tasks 384–386 on Bundles 172/170/171 added 15/40/8 receipts ending in the expected cancellation chains, zero changes, 7039/6547/4980-byte runtime archives, and 4/3/5 raw-log chunks; all three Worker containers were removed. Task 386 also emitted the generic Scheduler `Task 386 failed` error after cancellation without changing the cancelled DB/canonical state; alert classification remains open. No current-composition Codex success was claimed because the available Codex-legal Providers remain bounded by the recorded upstream 429/403 failures. |
 | Profile re-verification and prior post-fix smoke | passed with bounded Provider negatives | Profile 4 generation 73 and Tasks 374–379 remain historical evidence for the superseded image composition; Tasks 374–376 completed Pi/Claude/OpenCode on Bundles 166–168, while Codex Tasks 377–379 reached the Adapter and were correctly bounded as upstream `rate_limited`/`engine_error`; Task 368 remains the preceding-generation Codex success |
 | GitLab integration connectivity | passed, not a permission sign-off | The authenticated admin UI read-only connection test reached `http://192.168.50.129:8080`, authenticated as `ai-bot`, and reported GitLab `18.5.5-ee`; the Webhook overview currently returned zero projects. This proves application connectivity/identity only, not token scope, least privilege, or rotation. |
 | Remote execution mode | restored and healthy | A temporary no-task `v2_only` mode-health/V2-detail preflight was run and then restored; final Backend/Scheduler health reports `HARNESS_EXECUTION_MODE=dual_canary`. No hard-cut, migration, or V1 Task mutation was attempted. |
@@ -234,6 +234,22 @@ raw-log chunks / 5659 bytes, and archive
 `task-385-runtime-archive.tar.gz` at 6547 bytes with SHA-256
 `b742525261e4cc6f75fb02b7308310e0dfd12f9c6cce0e33aaef8a70005d5f4d`.
 The container was removed and active attempt / Issue lock counts remained zero.
+
+At `2026-09-05T01:37:21Z`, the Claude cancellation sample Task 386 completed
+on Bundle 171 with Provider 11 (`openrouter-minimax-anthropic` /
+`minimax/minimax-m3:free`). The task row ended `cancelled` with `Cancelled by
+user`; its Adapter/CLI identity was `1.0.1`/`2.1.153`, and the attempt
+`task-386-attempt-1-7ab79696e2c1` closed with 8 unique contiguous receipts
+(seq 1–8) in the same cancellation chain. It produced zero changes, five
+raw-log chunks / 6904 bytes, and archive
+`task-386-runtime-archive.tar.gz` at 4980 bytes with SHA-256
+`a9dead4511a125904fd12e5bd960350cb8a72f2990251c6aff411d3082b8fa6a`.
+The container was removed and no active Task or Issue lock remained. The
+post-exit canonical-tail 409 was non-blocking because the persisted
+cancellation receipts and archive were complete. Scheduler emitted its
+generic `Task 386 failed` error after cancellation; this did not alter the
+database or canonical terminal state and remains an R4.4 alert-classification
+review item.
 
 ## Permission and rotation recheck
 

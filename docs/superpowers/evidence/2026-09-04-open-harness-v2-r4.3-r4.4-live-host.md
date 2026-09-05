@@ -4,7 +4,7 @@
 
 **Scope:** Current R4 candidate on `192.168.50.129`, mobile/desktop browser
 interaction checks, four-Harness live smoke attempts, one live command-plane
-run, one stable-state cancellation, one controlled nginx-only
+run, three current exact-composition cancellation samples, one controlled nginx-only
 disconnect/reconnect, and the resulting Host/Task runtime evidence.
 
 This is candidate evidence, not an L5 go/no-go decision. R4.3–R4.6 remain
@@ -85,6 +85,26 @@ raw-log persistence has 3 chunks / 5659 bytes, and the Worker container was
 removed. A transient `control_owner_unreachable` gate-probe retry warning and
 the expected post-exit canonical-tail 409 were non-blocking; the persisted
 cancellation receipts and archive remained complete.
+
+Task #386 is a third separate current-composition cancellation sample for
+Claude. It used Provider 11 (`openrouter-minimax-anthropic` /
+`minimax/minimax-m3:free`) on Bundle 171, with a fresh session and the same
+read-only `pwd` plus `sleep 180` prompt. The operator cancelled while the
+sleep was running; the task ended `cancelled` with `Cancelled by user`, zero
+changes, and no Issue lock. Its attempt was
+`task-386-attempt-1-7ab79696e2c1`, using Adapter `1.0.1` / CLI `2.1.153`, and
+persisted 8 unique contiguous receipts (seq 1–8):
+`harness.failed(failure.kind=cancelled)` →
+`worker.finalization(exit_code=143)` →
+`run.failed(status=cancelled, failure.kind=cancelled)`. The runtime archive
+was finalized at 4980 bytes
+(`a9dead4511a125904fd12e5bd960350cb8a72f2990251c6aff411d3082b8fa6a`),
+raw-log persistence has 5 chunks / 6904 bytes, and the Worker container was
+removed. The expected post-exit canonical-tail 409 was non-blocking because
+the canonical cancellation receipts and archive were already persisted.
+The Scheduler also emitted its generic `Task 386 failed` error log after
+cancellation; it did not change the database or canonical terminal state and
+remains an alert-classification item for the R4.4 operational review.
 
 ## Candidate and validation boundary
 
@@ -520,8 +540,8 @@ finalization, delivery samples, and the current queue/lock/secret-scan
 snapshot. The exact-composition candidate adds successful Pi/Claude/OpenCode/Pi
 samples (#380–#383) on Bundles 170/171/172; Task 383 reuses the Pi Bundle 170
 variant with Provider 6 over `anthropic_messages`. The separate current exact
-OpenCode and Pi cancellation samples are Tasks 384 and 385 on Bundles 172 and
-170. The generation-73 samples
+OpenCode, Pi, and Claude cancellation samples are Tasks 384, 385, and 386 on
+Bundles 172, 170, and 171. The generation-73 samples
 (#374–#376) and three correctly bounded Codex Provider failures (#377–#379)
 remain historical. A current-composition Codex success sample is still open
 because the available current-generation attempts were blocked by upstream 429
@@ -550,8 +570,9 @@ one Harness terminal and one Task terminal. The exact-composition Bundle
 unique receipts and one `run.completed` terminal per attempt. Bundle 163/164
 and Task 368/371/372 are retained as historical generation-72 evidence;
 Bundle 165 and Task 373 are explicitly superseded by the Pi session-projection
-defect. Tasks 384 and 385 add separate 15- and 40-receipt current-composition
-cancellation chains ending in `run.failed(status=cancelled)`. The expanded cohorts pass the frozen status/terminal mapping,
+defect. Tasks 384, 385, and 386 add separate 15-, 40-, and 8-receipt
+current-composition cancellation chains ending in `run.failed(status=cancelled)`.
+The expanded cohorts pass the frozen status/terminal mapping,
 duplicate-terminal, sequence, and secret-like checks, while leaving the exact
 composition Codex success, live alert delivery to a real Mattermost service,
 and the formal zero-P0/P1 review open.
