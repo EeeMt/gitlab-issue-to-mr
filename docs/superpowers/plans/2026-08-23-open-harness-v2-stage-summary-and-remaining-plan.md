@@ -119,6 +119,11 @@ R4 是当前唯一可推进工作包。以下六项必须在同一最终 candida
 当前 R4.1/R4.2 有 candidate evidence，R4.3/R4.4 仍只有部分 evidence；没有签署即保持
 `dual_canary`，不以“测试大多通过”代替批准。
 
+最新 exact-composition integrity recheck（Tasks 380–388）共 9 个 attempt、488 条
+唯一连续 receipt；每个 attempt 恰有一个 Harness terminal 和一个 Task terminal，完成/取消
+终态映射、序列/ID 不变量以及 canonical event/raw-log 的 constrained token-like scan 均为零失败。
+该结果补强 R4.4 evidence，但不替代 Codex Provider 边界、真实告警、发布 owner 签署或独立 GO/NO-GO。
+
 ### R5 — 在独立维护窗口执行 L6
 
 R5 不是 R4 的默认延续，必须获得单独执行批准。批准后按 Runbook：

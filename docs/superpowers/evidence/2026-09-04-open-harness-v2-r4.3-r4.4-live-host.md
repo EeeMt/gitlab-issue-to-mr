@@ -644,5 +644,15 @@ duplicate-terminal, sequence, and secret-like checks, while leaving the exact
 composition Codex success, live alert delivery to a real Mattermost service,
 and the formal zero-P0/P1 review open.
 
+At the current Host recheck (`2026-09-05T02:20:02Z` database clock), the
+current exact-composition Tasks 380–388 were audited together: 9 attempts,
+488 receipts, and 488 distinct event IDs; every attempt had exactly one
+Harness terminal and one Task terminal, all sequences were contiguous from
+seq 1, and the completed/cancelled-to-terminal mapping had zero failures.
+The constrained token-like scan found zero matches in both canonical event JSON
+and raw-log chunks. This strengthens the current R4.4 runtime-integrity
+evidence without changing the open Codex Provider, live-alert, or independent
+release-sign-off boundaries.
+
 R4.5 security/release sign-off and R4.6 independent hard-cut go/no-go remain
 open. No R5 maintenance window or `v2_only` cutover was performed.

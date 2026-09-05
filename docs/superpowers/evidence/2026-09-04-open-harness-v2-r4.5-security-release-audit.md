@@ -219,6 +219,13 @@ Backend health remained `healthy` with database/Docker
 checks `ok`, Scheduler remained in `dual_canary`, and no active Task or Issue
 lock remained.
 
+The later current-composition integrity recheck covered Tasks 380–388,
+including the cancellation attempts: 9 attempts contained 488 receipts and
+488 distinct event IDs, with zero sequence/ID failures, zero terminal-count
+failures, and zero task-status/terminal-type mapping failures. The constrained
+token-like scan returned zero matches in both canonical event JSON and raw-log
+chunks.
+
 At `2026-09-05T01:22:46Z`, the current exact-composition cancellation sample
 Task 384 (OpenCode / Provider 7 / Bundle 172) was cancelled while its read-only
 `sleep 180` command was running. The task row ended `cancelled` with
