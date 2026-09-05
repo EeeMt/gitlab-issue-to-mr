@@ -167,3 +167,27 @@ Task 432 strengthens current-generation desktop cancellation evidence for both
 Pi and OpenCode. It does not close R4.3–R4.6, release-owner/security/rotation/
 signature gates, or authorize migration 078, `v2_only`, R5/L6, or the
 user-deferred real mobile-device acceptance.
+
+## 2026-09-05 continuation: current-generation Claude and Codex cancellation Tasks 433–434
+
+The same controlled cancellation procedure was completed for the two
+remaining Harnesses in the frozen generation 78 matrix. Both tasks used the
+complete Profile 4 / Kit `0.6.14` / Worker image snapshot, a fresh `freeform`
+session, and the existing legal Provider/protocol combination. The remote
+process trees showed the real `sleep 180` before the Dashboard Cancel action;
+both Worker containers were then removed and both served task pages showed
+`任务已取消`.
+
+| Task | Runtime and lifecycle | Persistence / delivery |
+| ---: | --- | --- |
+| 433 | Claude / Provider 6 `opencode-pi` / `deepseek-v4-flash` / `anthropic_messages`; Bundle 183, `67d383486c63bcbefc6a68c7060bcfde114de820954b9b23d24e97b81dba64a5`; `freeform/fresh`; 0 changes; `cancelled`; Adapter `1.0.1` / CLI `2.1.153` | Attempt `task-433-attempt-1-f1b90d352c52`, `run.failed` canonical stop at `last_seq=8`; 8 unique contiguous receipts; raw logs 5 chunks / 4686 bytes; archive 4180 bytes, SHA-256 `7f40296df8be6ab1cc81d82b759b6ecaedbd77b0b9435e89dc1173a889293e4b`; Mattermost delivery 26 `task_cancelled/success` |
+| 434 | Codex / Provider 12 `openrouter-minimax-responses` / `minimax/minimax-m3:free` / `openai_responses`; Bundle 184, `d41b5bf957cb274dda82c402ae9b76b70a320de2ec910b1ce16dc4cc51bc992f`; `freeform/fresh`; 0 changes; `cancelled`; Adapter `1.0.0` / CLI `0.146.0` | Attempt `task-434-attempt-1-c41f85c5fe8a`, `run.failed` canonical stop at `last_seq=9`; 9 unique contiguous receipts; raw logs 4 chunks / 2456 bytes; archive 3214 bytes, SHA-256 `60f84d3629b999c34c52be5ef7c2d1ab6b287af05c110a67b468ca52b5645988`; Mattermost delivery 27 `task_cancelled/success` |
+
+Targeted scans of both archives returned zero matches for `glpat-*`,
+`sk-ant-*`, `ANTHROPIC_API_KEY=`, and `OPENAI_API_KEY=`. Together with Task
+431 (Pi) and Task 432 (OpenCode), Tasks 431–434 provide current-generation
+desktop cancellation evidence across all four Harnesses and all applicable
+Provider/protocol rows. This strengthens R4.4 runtime evidence but does not
+close R4.3–R4.6, release-owner/security/rotation/signature gates, or
+authorize migration 078, `v2_only`, R5/L6, or the user-deferred real
+mobile-device acceptance.

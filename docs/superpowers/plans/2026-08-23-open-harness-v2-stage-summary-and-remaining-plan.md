@@ -761,3 +761,10 @@ Task 432 继续在 readiness 已过 TTL 的 generation 78 exact snapshot 上验�
 取消；容器消失，页面显示 `任务已取消`，Attempt 以 `run.failed`/9 条连续唯一 receipt 收尾，archive 为 5878
 bytes，Mattermost delivery 25 为 `task_cancelled/success`，归档 secret-pattern scan 为 0。Task 432 与 Task 431
 共同补强当前代 Pi/OpenCode 取消证据，但仍不替代 R4.3/R4.4 正式审阅、R4.5 安全/owner 签署或 R4.6 go/no-go。
+
+随后补齐了当前代剩余两条 Harness：Task 433 使用 Claude/Provider 6、`anthropic_messages`、Bundle 183，
+Task 434 使用 Codex/Provider 12、`openai_responses`、Bundle 184；两条均为 `freeform/fresh`，均在远端确认
+真实 `sleep 180` 后通过 served task detail 取消。Task 433 为 8 条连续唯一 receipt、Mattermost delivery 26，
+Task 434 为 9 条连续唯一 receipt、Mattermost delivery 27；两份归档的 targeted secret-pattern scan 均为 0。
+至此 generation 78 的 Pi/OpenCode/Claude/Codex 四 Harness 桌面取消 smoke 均有当前 exact snapshot 证据，
+但仍不等于 R4.3/R4.4 正式签署或 R4.5/R4.6 owner/go-no-go 结论。

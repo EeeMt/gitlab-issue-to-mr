@@ -1132,3 +1132,16 @@ receipt IDs/seqs were unique and contiguous, and Mattermost delivery 25 was
 `7eef4692558f2fe59205c68882e7413c2668b76ab3d121c03e26466bd05c4aaf`; its
 targeted secret-pattern scan returned no matches. This is additional desktop
 runtime evidence only and does not change the open R4.5 security/owner gates.
+
+Tasks 433 and 434 completed the same current-generation cancellation procedure
+for Claude and Codex. Task 433 used Provider 6 / `anthropic_messages` / Bundle
+183 and closed with 8 contiguous receipts plus Mattermost delivery 26;
+Task 434 used Provider 12 / `openai_responses` / Bundle 184 and closed with 9
+contiguous receipts plus Mattermost delivery 27. Their 4180-byte and 3214-byte
+archives had SHA-256 values
+`7f40296df8be6ab1cc81d82b759b6ecaedbd77b0b9435e89dc1173a889293e4b` and
+`60f84d3629b999c34c52be5ef7c2d1ab6b287af05c110a67b468ca52b5645988`;
+both targeted secret scans returned no matches. Alongside Tasks 431 and 432,
+this gives all four current-generation Harnesses a real desktop cancellation
+sample, but it remains runtime evidence rather than R4.5 security approval or
+owner/go-no-go sign-off.
