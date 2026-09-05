@@ -1145,3 +1145,23 @@ both targeted secret scans returned no matches. Alongside Tasks 431 and 432,
 this gives all four current-generation Harnesses a real desktop cancellation
 sample, but it remains runtime evidence rather than R4.5 security approval or
 owner/go-no-go sign-off.
+
+## 2026-09-05 continuation: current Kit 0.6.14 release preflight
+
+为当前 Profile 4 generation 78 / Kit `0.6.14` exact candidate 重新执行了仓库提供的
+`deploy/scripts/preflight-v2-release.sh`。使用的临时归档为
+`codify-worker-kit-0.6.14-linux-amd64-d461d040694b.tar.gz`，sidecar 与归档 SHA-256
+均为
+`bd6debd99c411cb6a50d1628f09d1fbe3127fffac11038ea8d58f5b512668251`。在
+`DOCKER_CONTEXT=remote` 下，脚本针对目标 Host 当前 Worker image
+`127.0.0.1:5000/codify-worker/java21-maven@sha256:234582c692d1ebb00ba8e882160618c2258463149d968009ac81c545e63a538b`
+返回 `V2 release preflight OK`；manifest SHA-256 为
+`d461d040694b20b88944a88de47b5ad78188f91d74d528421cdef44b68274035`，content inventory
+SHA-256 为
+`3be8e2272dbc1f4e6d645bfa3403657e3986bcbbdb5f0fb278fee735b079d5f2`，退出码为 `0`。
+
+这是当前 exact candidate 的可复现归档、完整性和远端 image 绑定证据，补强 R4.1/R4.2 的技术门禁；
+临时归档未提交，也没有签名包、批准的 release notes 或 release-owner 签署，因此不关闭 R4.5。
+本次只读 preflight 未切换 `dual_canary`、未执行 migration 078/`v2_only`，也未修改远端服务。目标
+Host 仍保持健康、无 active Task/Issue lock，根盘约 97% 使用但未达到满盘清理条件，未执行新的 Codify
+image/cache 清理；真实移动设备验收继续按用户指示暂缓。

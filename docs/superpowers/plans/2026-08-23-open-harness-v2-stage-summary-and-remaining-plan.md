@@ -768,3 +768,20 @@ Task 434 使用 Codex/Provider 12、`openai_responses`、Bundle 184；两条均�
 Task 434 为 9 条连续唯一 receipt、Mattermost delivery 27；两份归档的 targeted secret-pattern scan 均为 0。
 至此 generation 78 的 Pi/OpenCode/Claude/Codex 四 Harness 桌面取消 smoke 均有当前 exact snapshot 证据，
 但仍不等于 R4.3/R4.4 正式签署或 R4.5/R4.6 owner/go-no-go 结论。
+
+## 2026-09-05 continuation: current candidate release preflight
+
+针对当前 Profile 4 generation 78 / Kit `0.6.14` exact candidate，使用仓库脚本
+`deploy/scripts/preflight-v2-release.sh` 对临时 Kit 归档及目标 Host Worker image 做了只读复核。
+归档与 sidecar SHA-256 均为
+`bd6debd99c411cb6a50d1628f09d1fbe3127fffac11038ea8d58f5b512668251`；远端 image 为
+`127.0.0.1:5000/codify-worker/java21-maven@sha256:234582c692d1ebb00ba8e882160618c2258463149d968009ac81c545e63a538b`；
+脚本返回 `V2 release preflight OK`，manifest SHA-256 为
+`d461d040694b20b88944a88de47b5ad78188f91d74d528421cdef44b68274035`，content inventory
+SHA-256 为
+`3be8e2272dbc1f4e6d645bfa3403657e3986bcbbdb5f0fb278fee735b079d5f2`，退出码 `0`。
+
+这关闭了当前 candidate 的一项技术可复现性/完整性检查，但不把临时归档当作签名 release package，
+也不替代 release-owner 的权限/轮换、release notes、维护窗口、独立 P0/P1 与 R4.6 go/no-go 签署。
+本次没有改动远端服务、切换 `dual_canary`、执行 migration 078/`v2_only` 或运行 R5/L6；根盘约 97%
+使用且未触发满盘清理。真实移动设备键盘/IME/刘海/手势区验收继续按用户指示暂缓。
