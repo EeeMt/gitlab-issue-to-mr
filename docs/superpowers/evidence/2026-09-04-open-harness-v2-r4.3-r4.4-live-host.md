@@ -46,9 +46,10 @@ The exact-composition positive cohort is:
 | 380 | Pi / Provider 7 `openrouter-free` | 170 (`e812376c…`) | `completed`, zero changes | Adapter `2.1.0`, CLI `0.84.2`, usage 171/117, raw-log 4 chunks, 44 receipts, seq 1–44, terminal `run.completed` |
 | 381 | Claude / Provider 11 `openrouter-minimax-anthropic` | 171 (`5a5bbd30…`) | `completed`, zero changes | Adapter `1.0.1`, CLI `2.1.153`, usage 2655/327, raw-log 6 chunks, 17 receipts, seq 1–17, terminal `run.completed` |
 | 382 | OpenCode / Provider 7 `openrouter-free` | 172 (`9ed188ca…`) | `completed`, zero changes | Adapter `2.0.0`, CLI `1.18.19`, usage 89/58, raw-log 4 chunks, 40 receipts, seq 1–40, terminal `run.completed` |
+| 383 | Pi / Provider 6 `opencode-pi` (`deepseek-v4-flash`) | 170 (`e812376c…`, reused Pi variant) | `completed`, zero changes | `anthropic_messages`; Adapter `2.1.0`, CLI `0.84.2`, usage 96/181, raw-log 4 chunks, 296 receipts, seq 1–296, terminal `run.completed`; two early `control_owner_unreachable` gate-probe warnings self-recovered |
 
-All three tasks used fresh sessions and the existing read-only smoke prompt.
-The three attempts contain 101 unique contiguous receipts and no active Task
+All four tasks used fresh sessions and the existing read-only smoke prompt.
+The four attempts contain 397 unique contiguous receipts and no active Task
 or Issue execution lock remains. The current exact composition has no Codex
 success sample because the currently available Codex-legal Providers remain
 bounded by the previously recorded upstream 429/403 availability failures;
@@ -480,13 +481,14 @@ It does not yet sign the full gate because:
 
 ### R4.4 — partial evidence, not signed
 
-Tasks 357–366, 368–379, and the exact-composition Tasks 380–382 plus the prior
+Tasks 357–366, 368–379, and the exact-composition Tasks 380–383 plus the prior
 five-task warm-start cohort provide all four Harness selections with real
 success samples across the evidence set and bounded upstream failure
 classification, command latency, usage, canonical terminal, archive, raw-log
 finalization, delivery samples, and the current queue/lock/secret-scan
-snapshot. The exact-composition candidate adds successful Pi/Claude/OpenCode
-samples (#380–#382) on Bundles 170/171/172; the generation-73 samples
+snapshot. The exact-composition candidate adds successful Pi/Claude/OpenCode/Pi
+samples (#380–#383) on Bundles 170/171/172; Task 383 reuses the Pi Bundle 170
+variant with Provider 6 over `anthropic_messages`. The generation-73 samples
 (#374–#376) and three correctly bounded Codex Provider failures (#377–#379)
 remain historical. A current-composition Codex success sample is still open
 because the available current-generation attempts were blocked by upstream 429
@@ -511,7 +513,7 @@ server, or external alert routing.
 The generation-73 Bundle 166–169 receipt recheck remains historical evidence:
 six attempts (#374–#379) contain 119 contiguous receipts in total, each with
 one Harness terminal and one Task terminal. The exact-composition Bundle
-170/171/172 recheck adds three attempts (#380–#382) with 101 contiguous,
+170/171/172 recheck adds four attempts (#380–#383) with 397 contiguous,
 unique receipts and one `run.completed` terminal per attempt. Bundle 163/164
 and Task 368/371/372 are retained as historical generation-72 evidence;
 Bundle 165 and Task 373 are explicitly superseded by the Pi session-projection

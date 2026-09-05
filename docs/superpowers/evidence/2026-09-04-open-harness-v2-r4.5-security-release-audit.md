@@ -11,7 +11,7 @@ and `810f9fcb` changed the Codex and Pi Adapter projections. The current
 candidate was rebuilt from committed tree `40235196`, deployed as Backend/
 Scheduler image `sha256:0ea2d9832fc0c7b3ca893b62f52a4f75fc54c56ed0bc80d732b08c95f5628c20`,
 and verified as Profile 4 generation `74`. Its exact-composition selected-
-Harness Bundles are 170 (Pi), 171 (Claude), and 172 (OpenCode); Tasks 380–382
+Harness Bundles are 170 (Pi), 171 (Claude), and 172 (OpenCode); Tasks 380–383
 validation is recorded in the
 [R4.3/R4.4 live Host evidence](2026-09-04-open-harness-v2-r4.3-r4.4-live-host.md).
 The generation-73 Bundles 166–169 and Tasks 374–379 remain historical evidence
@@ -39,7 +39,7 @@ release-owner approval.
 | Backend lint | passed | `make lint-backend` |
 | Remote Docker state | near capacity, not full | The exact-composition recheck reports `df -h /` at 61G total / 57G used / 4.2G available (94%) and `df -ih /` at 18% inode use; `docker system df` reports 82 Images / 12.42GB / 6.707GB reclaimable, 5.327MB containers, 1.642GB volumes, and 6.526GB BuildKit. No cleanup was performed because the disk was not full. |
 | Current Kit archive reconstruction and V2 release preflight | passed, not signed | The installed `0.6.12-linux-amd64-c33dbf86951b` Kit was streamed into a temporary `518M` archive; archive SHA-256 `2d3ee7f81525d465731344571cbf5bd93a0cd94bb6cf16f5a4d5512d5c0a25a6`, manifest SHA-256 `c33dbf86951bed6e3b4de1897313725f14f00006dc51fb300e7b821bb47e17bd`, content inventory `7630f086800c95f851db8c9351638868ab60ac33fb3bfe22f9f2f5c8dcdc98a1`; `deploy/scripts/preflight-v2-release.sh` passed against the target daemon and Worker image repo digest `127.0.0.1:5000/codify-worker/java21-maven@sha256:234582c692d1ebb00ba8e882160618c2258463149d968009ac81c545e63a538b`. The temporary archive is not a release-owner-signed package and is not committed. |
-| Exact committed image/Profile/Task recheck | passed with bounded Provider boundary | Backend/Scheduler both run image `sha256:0ea2d983…` with OCI revision `40235196`; Profile 4 generation 74 completed four-Harness Verify; Tasks 380–382 completed Pi/Claude/OpenCode on Bundles 170–172 with 101 unique contiguous receipts and zero changes. No current-composition Codex success was claimed because the available Codex-legal Providers remain bounded by the recorded upstream 429/403 failures. |
+| Exact committed image/Profile/Task recheck | passed with bounded Provider boundary | Backend/Scheduler both run image `sha256:0ea2d983…` with OCI revision `40235196`; Profile 4 generation 74 completed four-Harness Verify; Tasks 380–383 completed Pi/Claude/OpenCode/Pi on Bundles 170–172 with 397 unique contiguous receipts and zero changes. Task 383 reused the Pi Bundle 170 variant with Provider 6 over `anthropic_messages`; two early `control_owner_unreachable` gate-probe warnings self-recovered. No current-composition Codex success was claimed because the available Codex-legal Providers remain bounded by the recorded upstream 429/403 failures. |
 | Profile re-verification and prior post-fix smoke | passed with bounded Provider negatives | Profile 4 generation 73 and Tasks 374–379 remain historical evidence for the superseded image composition; Tasks 374–376 completed Pi/Claude/OpenCode on Bundles 166–168, while Codex Tasks 377–379 reached the Adapter and were correctly bounded as upstream `rate_limited`/`engine_error`; Task 368 remains the preceding-generation Codex success |
 | GitLab integration connectivity | passed, not a permission sign-off | The authenticated admin UI read-only connection test reached `http://192.168.50.129:8080`, authenticated as `ai-bot`, and reported GitLab `18.5.5-ee`; the Webhook overview currently returned zero projects. This proves application connectivity/identity only, not token scope, least privilege, or rotation. |
 | Remote execution mode | restored and healthy | A temporary no-task `v2_only` mode-health/V2-detail preflight was run and then restored; final Backend/Scheduler health reports `HARNESS_EXECUTION_MODE=dual_canary`. No hard-cut, migration, or V1 Task mutation was attempted. |
@@ -86,7 +86,7 @@ observation only; the release owner still must provide the least-privilege and
 rotation record.
 
 The current live evidence covers Pi, OpenCode, Claude, and Codex on Profile 4,
-including exact-composition successful Tasks 380–382, generation-73 successful
+including exact-composition successful Tasks 380–383, generation-73 successful
 Tasks 374–376, the generation-73 Codex negative Tasks 377–379, the
 preceding-generation Codex success Task 368, the OpenCode reconnect Task 371,
 the stable-state cancellation Task 372, and the negative restart probes
@@ -195,6 +195,19 @@ recent real outcomes for these endpoints remain the previously recorded
 region-blocked 403 or upstream 429 classifications, so no duplicate Codex
 Task was created. Backend/Scheduler stayed healthy in `dual_canary`; remote
 root remained at 4.2G available / 94% used with no cleanup trigger.
+
+At `2026-09-05T01:11:39Z`, the exact-composition smoke added Task 383 using
+Provider 6 (`opencode-pi` / `deepseek-v4-flash`) and Pi's
+`anthropic_messages` protocol. It completed on the existing Pi Bundle 170
+variant with Adapter `2.1.0`, CLI `0.84.2`, model `deepseek-v4-flash`, session
+`01a06f1e-924a-771a-b12b-46fa2a1a7389`, 96 input / 181 output tokens, four raw
+log chunks, zero changes, and 296 unique contiguous receipts (seq 1–296)
+ending in `run.completed`. The two early `control_owner_unreachable`
+gate-probe warnings self-recovered; the task and attempt remained successful.
+The exact-composition cohort now contains four attempts and 397 unique
+contiguous receipts. Backend health remained `healthy` with database/Docker
+checks `ok`, Scheduler remained in `dual_canary`, and no active Task or Issue
+lock remained.
 
 ## Permission and rotation recheck
 
