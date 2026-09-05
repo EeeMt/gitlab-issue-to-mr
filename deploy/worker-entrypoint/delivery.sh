@@ -30,8 +30,10 @@ text = sys.stdin.read()
 text = re.sub(r"\r$", "", text, flags=re.MULTILINE)
 text = re.sub(r"<think\b[^>]*>.*?</think>", "", text, flags=re.IGNORECASE | re.DOTALL)
 text = re.sub(r"</?think\b[^>]*>", "", text, flags=re.IGNORECASE)
-text = re.sub(r"^```(?:markdown)?\s*", "", text.strip(), flags=re.IGNORECASE)
-text = re.sub(r"\s*```$", "", text).strip()
+text = text.strip()
+if re.match(r"^```markdown(?:\s|\n|$)", text, flags=re.IGNORECASE):
+    text = re.sub(r"^```markdown\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s*```$", "", text).strip()
 
 # Mermaid 11 treats @{...} as a node-shape declaration. AI summaries often
 # include the Git upstream ref @{u} inside a node label, so encode only the
@@ -43,10 +45,18 @@ pattern = re.compile(
 )
 
 def normalize_mermaid(match):
+    # Some model outputs put the first graph node on the same line as the
+    # flowchart declaration (for example, `flowchart LR A[...]`). Mermaid
+    # expects a line break after the direction token.
+    body = re.sub(
+        r"(?m)^([ \t]*(?:flowchart|graph)[ \t]+(?:TB|TD|BT|RL|LR))[ \t]+(?=\S)",
+        r"\1\n",
+        match.group(4),
+    )
     body = re.sub(
         r"@\{([A-Za-z0-9][A-Za-z0-9._/-]*)\}",
         r"@&#123;\1&#125;",
-        match.group(4),
+        body,
     )
     return "".join(
         (match.group(1), match.group(2), match.group(3), body, "\n", match.group(2), match.group(5))

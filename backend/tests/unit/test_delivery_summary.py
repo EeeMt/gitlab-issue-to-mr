@@ -68,6 +68,35 @@ flowchart TD
     assert "普通文本中的 @{u} 不应被改写。" in normalized
 
 
+def test_mermaid_flowchart_declaration_is_split_from_first_node():
+    summary = """摘要
+
+```mermaid
+flowchart LR A[Prompt] --> B[Verify]
+    B --> C[Stop]
+```
+"""
+
+    normalized = _normalize(summary)
+
+    assert "flowchart LR\nA[Prompt] --> B[Verify]" in normalized
+
+
+def test_mermaid_at_end_of_summary_keeps_fence_for_normalization():
+    summary = """摘要
+
+```mermaid
+flowchart LR A[Prompt] --> B[Verify]
+    B --> C[Stop]
+```
+"""
+
+    normalized = _normalize(summary)
+
+    assert "flowchart LR\nA[Prompt] --> B[Verify]" in normalized
+    assert normalized.endswith("```")
+
+
 def test_canonical_harness_result_is_preferred_for_delivery_summary(tmp_path: Path):
     canonical = tmp_path / "harness-result.json"
     legacy = tmp_path / "adapter-output.json"
