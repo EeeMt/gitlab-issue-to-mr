@@ -1,6 +1,6 @@
 # Open-Harness V2 R4.5 Security and Release Audit
 
-**Date:** 2026-09-04
+**Date:** 2026-09-05
 
 **Scope:** Current development Host `192.168.50.129`, the post-fix frozen R4
 candidate, and repository-side release checks. This is an audit record, not a
@@ -10,15 +10,16 @@ The prior Profile-4 candidate was superseded after runtime commits `8110afa0`
 and `810f9fcb` changed the Codex and Pi Adapter projections. The current
 candidate is Profile 4 generation `73`, with selected-Harness Bundles 166
 (Pi), 167 (Claude), 168 (OpenCode), and 169 (Codex); the exact identities and
-Tasks 374–378 validation are recorded in the
+Tasks 374–379 validation are recorded in the
 [R4.3/R4.4 live Host evidence](2026-09-04-open-harness-v2-r4.3-r4.4-live-host.md).
 Tasks 369 and 370 were additional negative backend-restart probes on the
 preceding Codex-selected Bundle; both were bounded as upstream `rate_limited`.
 Task 371 then completed on the preceding OpenCode-specific Bundle 164 during a
 controlled nginx-only disconnect/reconnect spot-check, and Task 372 completed
 a stable-state cancellation on that same Bundle. Current Task 377 was an
-upstream 429 and Task 378 an upstream 403 region restriction; these are Host
-evidence, not a security or release-owner approval.
+upstream 429, Task 378 an upstream 403 region restriction, and follow-up Task
+379 again hit an upstream 429; these are Host evidence, not a security or
+release-owner approval.
 
 ## Checks completed
 
@@ -35,7 +36,7 @@ evidence, not a security or release-owner approval.
 | Backend lint | passed | `make lint-backend` |
 | Remote Docker state | near capacity, not full | The post-generation-73 recheck reports `df -h /` at 61G total / 57G used / 4.1G available (94%) and `df -ih /` at 19% inode use; `docker system df` reports 81 Images / 12.41GB / 6.706GB reclaimable, 7.123MB containers, 1.641GB volumes, and 6.526GB BuildKit. No cleanup was performed because the disk was not full. |
 | Current Kit archive reconstruction and V2 release preflight | passed, not signed | The installed `0.6.12-linux-amd64-c33dbf86951b` Kit was streamed into a temporary `518M` archive; archive SHA-256 `2d3ee7f81525d465731344571cbf5bd93a0cd94bb6cf16f5a4d5512d5c0a25a6`, manifest SHA-256 `c33dbf86951bed6e3b4de1897313725f14f00006dc51fb300e7b821bb47e17bd`, content inventory `7630f086800c95f851db8c9351638868ab60ac33fb3bfe22f9f2f5c8dcdc98a1`; `deploy/scripts/preflight-v2-release.sh` passed against the target daemon and Worker image repo digest `127.0.0.1:5000/codify-worker/java21-maven@sha256:234582c692d1ebb00ba8e882160618c2258463149d968009ac81c545e63a538b`. The temporary archive is not a release-owner-signed package and is not committed. |
-| Profile re-verification and live post-fix smoke | passed with bounded Provider negatives | Profile 4 generation 73 completed four-Harness Verify; Tasks 374–376 completed Pi/Claude/OpenCode on Bundles 166–168, while Codex Tasks 377/378 reached the Adapter and were correctly bounded as upstream `rate_limited`/`engine_error`; Task 368 remains the preceding-generation Codex success |
+| Profile re-verification and live post-fix smoke | passed with bounded Provider negatives | Profile 4 generation 73 completed four-Harness Verify; Tasks 374–376 completed Pi/Claude/OpenCode on Bundles 166–168, while Codex Tasks 377–379 reached the Adapter and were correctly bounded as upstream `rate_limited`/`engine_error`; Task 368 remains the preceding-generation Codex success |
 | GitLab integration connectivity | passed, not a permission sign-off | The authenticated admin UI read-only connection test reached `http://192.168.50.129:8080`, authenticated as `ai-bot`, and reported GitLab `18.5.5-ee`; the Webhook overview currently returned zero projects. This proves application connectivity/identity only, not token scope, least privilege, or rotation. |
 | Remote execution mode | unchanged | `HARNESS_EXECUTION_MODE=dual_canary`; no `v2_only` switch was attempted |
 
@@ -82,7 +83,7 @@ rotation record.
 
 The current live evidence covers Pi, OpenCode, Claude, and Codex on Profile 4,
 including generation-73 successful Tasks 374–376, the current-generation
-Codex negative Tasks 377/378, the preceding-generation Codex success Task 368,
+Codex negative Tasks 377–379, the preceding-generation Codex success Task 368,
 the OpenCode reconnect Task 371, the stable-state cancellation Task 372, and
 the negative restart probes 369/370. The known non-success outcomes were
 correctly bounded as upstream/provider availability failures (`rate_limited`,
@@ -114,7 +115,7 @@ claims inferred from tests or a development Host:
    owner, rollback owner, or observation window is recorded here. These values
    must not be invented from the development run.
 5. **P0/P1 and independent approval.** No independent reviewer has signed the
-   complete R4.3–R4.5 checklist. The two upstream rate-limit failures are not
+   complete R4.3–R4.5 checklist. The upstream availability failures are not
    P0/P1 evidence by themselves, but they also do not constitute a formal
    zero-blocker sign-off.
 
@@ -151,13 +152,22 @@ was available, so no additional Codex Task was created against a known
 restricted endpoint.
 
 The same recheck found Tasks 374–376 `completed` and 377–378 `failed`. The
-generation-73 cohort still contains five attempts and 111 receipts, with 111
+generation-73 cohort then contained five attempts and 111 receipts, with 111
 unique event IDs and exactly one `run.completed` or `run.failed` receipt per
 attempt; every attempt's `last_seq` equals its receipt count. Host disk usage
 was 57G/61G (94%) with 4.1G available and 19% inode usage. Docker reported
 81 images, 8 active images, and 6.706GB reclaimable BuildKit/image space;
 because the filesystem is not full, no Codify image/cache cleanup was
 performed.
+
+At `2026-09-05T00:30:29Z`, the controlled follow-up against the now-aged
+Provider 9 created Task 379 on Bundle 169. It resolved the selected Codex model,
+persisted eight contiguous canonical receipts, and ended with the expected
+upstream HTTP 429 `run.failed(failure.kind=rate_limited)` and zero changes.
+The generation-73 cohort now contains six attempts and 119 receipts: three
+completed (Tasks 374–376) and three bounded Provider failures (Tasks 377–379).
+Provider 4 remains region-blocked, and no additional Codex-legal Provider with
+a credible availability signal was available for another retry.
 
 ## Permission and rotation recheck
 

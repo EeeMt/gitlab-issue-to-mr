@@ -1,6 +1,6 @@
 # Open-Harness V2 R4.3/R4.4 Live Host Evidence
 
-**Date:** 2026-09-04
+**Date:** 2026-09-05
 
 **Scope:** Current R4 candidate on `192.168.50.129`, mobile/desktop browser
 interaction checks, four-Harness live smoke attempts, one live command-plane
@@ -135,14 +135,15 @@ and independent review gates are signed.
 
 ## Current operational snapshot
 
-The read-only snapshot taken after Task 378 converged showed zero active Tasks
+The read-only snapshot taken after Task 379 converged showed zero active Tasks
 (`pending`, `queued`, or `running`) and zero `issue_execution_locks`; the
-database contained 347 Tasks. Tasks 374–378 each had exactly one canonical
+database contained 347 Tasks. Tasks 374–379 each had exactly one canonical
 terminal event, contiguous sequence numbers starting at 1, and finalized
 raw-log storage. Their raw-log totals were 5/2701 bytes, 7/6117 bytes,
-5/2711 bytes, 4/2420 bytes, and 4/2426 bytes respectively. The five current
-generation-73 attempts contain 111 receipts and 111 distinct event IDs; the
-task and Harness terminal counts are both five. Token-shaped secret scanning
+5/2711 bytes, 4/2420 bytes, 4/2426 bytes, and 4/2397 bytes respectively. The
+six current generation-73 attempts contain 119 receipts and 119 distinct event
+IDs; the
+task and Harness terminal counts are both six. Token-shaped secret scanning
 for the complete current cohort remains zero as recorded below.
 
 Task 358's one live `steer` command was `delivered` with one delivery attempt;
@@ -151,8 +152,8 @@ no Mattermost notification profile or delivery record, so live alert delivery
 was not exercised and is not treated as passing evidence.
 
 A fresh read-only integrity query scoped to the generation-73 Runtime Bundles
-166–169 found the five current-candidate attempts (Tasks 374–378): all five
-have exactly one terminal event, 111 receipts total, and contiguous sequences
+166–169 found the six current-candidate attempts (Tasks 374–379): all six
+have exactly one terminal event, 119 receipts total, and contiguous sequences
 beginning at 1, with no duplicate terminal event IDs. The full database still
 retains twelve older attempt rows without `terminal_event_id`; only Tasks 166
 and 181 have non-terminal receipts, and both predate Bundle 163. These
@@ -228,15 +229,25 @@ prove the Codex model projection fixed by `8110afa0`.
 | 376 | OpenCode / Provider 7 `openrouter-free` | `completed` on current Bundle 168; CLI `1.18.19`, Adapter `2.0.0`, fresh session, canonical seq 1–24, archive 7980 bytes, raw-log 5 chunks / 2711 bytes, usage 75 input / 5 output, 0 changes; canonical result `Workspace left unchanged.` |
 | 377 | Codex / Provider 12 `openrouter-minimax-responses` | `failed` on current Bundle 169; CLI `0.146.0`, Adapter `1.0.0`, canonical seq 1–13, archive 3549 bytes, raw-log 4 chunks / 2420 bytes; reached both requested shell commands, then upstream retry exhaustion returned HTTP 429 and canonical `run.failed(failure.kind=rate_limited)` |
 | 378 | Codex / Provider 4 `opencode-luna` | `failed` on current Bundle 169; CLI `0.146.0`, Adapter `1.0.0`, canonical seq 1–12, archive 3342 bytes, raw-log 4 chunks / 2426 bytes; upstream returned HTTP 403 `unsupported_country_region_territory`, classified as `engine_error` and not retried |
+| 379 | Codex / Provider 9 `openrouter-glm52-responses` | `failed` on current Bundle 169; CLI `0.146.0`, Adapter `1.0.0`, canonical seq 1–8, raw-log 4 chunks / 2397 bytes, 0 changes; `model.resolved` and the Provider retry path were reached, but the upstream again exhausted HTTP 429 retries before a model turn, ending in `run.failed(failure.kind=rate_limited)` |
 
 Together with Tasks 357/358, the live set covers Pi, OpenCode, Claude, and
 Codex across multiple compatible Provider selections. The generation-73
 additions provide current-Bundle success samples for Pi, Claude, and OpenCode;
 Codex success remains represented by Task 368 on the preceding Bundle 163,
-whose Codex Adapter identity is unchanged, while current-Bundle Tasks 377/378
+whose Codex Adapter identity is unchanged, while current-Bundle Tasks 377–379
 are bounded upstream Provider availability failures rather than success claims.
 They remain useful evidence that the failure classifier and single terminal
 path reject rate-limited or region-blocked execution.
+
+Task 379 was a controlled follow-up against Provider 9 after the prior result
+was more than 24 hours old and no task was in flight. The Codex Adapter resolved
+`z-ai/glm-5.2:free`, emitted the expected `provider.retry` classification, and
+persisted the bounded upstream `rate_limited` failure with no requested command
+execution and no workspace changes. It therefore does not add a Codex success
+sample or reopen the Adapter/runtime diagnosis; it strengthens the current
+Provider-availability boundary. No additional Codex retry was created against
+the already-known region-blocked Provider 4.
 
 Tasks 369 and 370 were two isolated probes in which only the remote
 `codify-backend` container was restarted while the task page remained open. The
@@ -268,7 +279,7 @@ all failed/cancelled Task terminals, with `status=cancelled` and
 stable-state cancellation on OpenCode with `exit_code=143`; it is not a code
 delivery sample.
 
-Tasks 374–378 then added the generation-73 post-`810f9fcb` smoke cohort. Task
+Tasks 374–379 then added the generation-73 post-`810f9fcb` smoke cohort. Task
 374's Pi `model.resolved`, `harness.completed`, and Task output session all
 match, demonstrating the `810f9fcb` fix against the real startup stream. Task
 375 completed Claude and Task 376 completed OpenCode with clean workspaces.
@@ -276,8 +287,10 @@ Task 377 reached the Codex Adapter and both read-only shell commands before
 Provider 12 became `rate_limited` after HTTP 429 retry exhaustion. Task 378
 reached the Codex Adapter but its Provider 4 failed before the model turn with
 `engine_error` for upstream 403 `unsupported_country_region_territory`.
-Both failures have one canonical terminal, finalized raw logs, and retained
-archives; neither is counted as a Codex success sample.
+Task 379 reached the Codex Adapter and resolved Provider 9, but failed before
+the requested commands after another HTTP 429 retry exhaustion. All three
+failures have one canonical terminal and finalized raw logs; none is counted as
+a Codex success sample.
 
 ## Browser interaction evidence
 
@@ -416,14 +429,14 @@ It does not yet sign the full gate because:
 
 ### R4.4 — partial evidence, not signed
 
-Tasks 357–366 and 368–378 plus the prior five-task warm-start cohort provide all
+Tasks 357–366 and 368–379 plus the prior five-task warm-start cohort provide all
 four Harness selections with real success samples across the evidence set and
 bounded upstream failure classification, command latency, usage, canonical
 terminal, archive, raw-log finalization, delivery samples, and the current
 queue/lock/secret-scan snapshot. The generation-73 current candidate adds
-successful Pi/Claude/OpenCode samples (#374–#376) and two correctly bounded
-Codex Provider failures (#377/#378); the current-Bundle Codex success sample
-is still open because these two current-generation attempts were blocked by
+successful Pi/Claude/OpenCode samples (#374–#376) and three correctly bounded
+Codex Provider failures (#377–#379); the current-Bundle Codex success sample
+is still open because these current-generation attempts were blocked by
 upstream 429 and 403 responses. Task 368 on Bundle 163 remains a valid Codex success for
 the unchanged Codex Adapter identity, but does not replace that missing exact
 generation-73 Codex success. The local Mattermost mock E2E suite also passed
@@ -444,7 +457,7 @@ server, or external alert routing.
 
 The generation-73 Bundle 166–169 receipt recheck supports the
 zero-duplicate-terminal and zero-sequence-gap claim for the current candidate:
-five attempts (#374–#378) contain 111 contiguous receipts in total, each with
+six attempts (#374–#379) contain 119 contiguous receipts in total, each with
 one Harness terminal and one Task terminal. Bundle 166/167/168/169 remain
 selected-Harness evidence variants over the same Image/Kit and Adapter
 identities. Bundle 163/164 and Task 368/371/372 are retained as historical
