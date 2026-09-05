@@ -1202,3 +1202,22 @@ following without inferring them from the development smoke:
 No names, timestamps, signatures, or release decisions are invented here. A
 fresh administrator Verify, if required for a release decision, creates a new
 Profile generation and must update this identity record before anyone signs it.
+
+## 2026-09-05 continuation: remote image retention boundary recheck
+
+The named `remote` Docker daemon currently reports 26 images, 9 active image
+references, 11 containers, 18 volumes (11 active), zero BuildKit cache, and
+about `4.08GB` reclaimable image space. Ancestor checks showed:
+
+| Image | Referenced containers | Retention result |
+| --- | --- | --- |
+| `codify-backend:latest` / `sha256:2cff3fd7…` | `codify-backend`, `codify-scheduler` | retain |
+| `codify-nginx:latest` / `sha256:8b6fbfb9…` | `codify-nginx` | retain |
+| `127.0.0.1:5000/codify-worker/java21-maven@sha256:234582c6…` (listed locally as `<none>`) | active `quirky_allen` Worker | retain; digest-only/dangling display is not proof of unreferenced state |
+| Mattermost `10.9.1`, GitLab, Postgres and Redis images | corresponding protected services | retain |
+
+The filesystem remains about 97% used with 2.0GB available, not a full-disk
+condition. No image, volume, cache, or protected service was removed. This
+recheck closes the current cleanup-safety observation but does not supply the
+missing retention owner, retirement dates, or release approval required by
+R4.5.

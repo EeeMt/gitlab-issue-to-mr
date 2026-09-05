@@ -817,3 +817,8 @@ event ID 唯一。Mattermost delivery 18–27 全部为 `success`，其中 18/19
 Kit/Worker/Backend identity、数据库 revision 和 preflight 结果，并把凭据最小权限/轮换、078 迁移 owner、
 签名 package/release notes、retention/maintenance owner 及独立 R4.6 `GO`/`NO-GO` 作为待填写字段。
 该 snapshot 明确是 unsigned handoff，不改变 `dual_canary`，也不把过期 readiness 当作发布许可。
+
+远端 image retention recheck 还确认：`codify-backend`、Scheduler、nginx 和 Mattermost/GitLab/数据库/Redis
+均有保护边界；Worker image 虽在列表中显示 `<none>`，但 ancestor 检查命中 active `quirky_allen`，不得清理。
+当前 BuildKit cache 为 0、磁盘约 97% 使用且未满，因此没有执行 prune；retention owner、退役时间和维护窗口
+仍需 owner 填写。
