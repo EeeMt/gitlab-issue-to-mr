@@ -1221,3 +1221,23 @@ condition. No image, volume, cache, or protected service was removed. This
 recheck closes the current cleanup-safety observation but does not supply the
 missing retention owner, retirement dates, or release approval required by
 R4.5.
+
+## 2026-09-05 continuation: current GitLab/GIMR permission recheck
+
+The authenticated GitLab admin pages were rechecked without reading or
+renewing any secret. The `ai-bot` account still has highest role `Maintainer`,
+`Can create top-level groups: Yes`, and `Two-factor Authentication: Disabled`.
+Its current project memberships show `xiquan/kit-owned-l3` as `Maintainer` and
+`xiquan/121` as `Developer`.
+
+The GIMR OAuth application still shows `Trusted: Yes`, `Confidential: Yes`,
+callback URL `http://192.168.50.129:8880/api/auth/callback`, and scopes
+`api`, `read_api`, `read_user`, `read_repository`, `write_repository`,
+`read_virtual_registry`, `write_virtual_registry`, `openid`, `profile`, and
+`email`. The GitLab page explicitly keeps the secret unavailable except at
+application creation or secret renewal; neither action was taken.
+
+These current observations reinforce the existing R4.5 blocker: connectivity
+and identity are working, but least-privilege scopes, account controls, and
+credential rotation/revocation ownership are not proven or approved. No
+permission or credential state was changed on the development Host.

@@ -822,3 +822,7 @@ Kit/Worker/Backend identity、数据库 revision 和 preflight 结果，并把�
 均有保护边界；Worker image 虽在列表中显示 `<none>`，但 ancestor 检查命中 active `quirky_allen`，不得清理。
 当前 BuildKit cache 为 0、磁盘约 97% 使用且未满，因此没有执行 prune；retention owner、退役时间和维护窗口
 仍需 owner 填写。
+
+当前 GitLab/GIMR 只读复核还确认：`ai-bot` 在 `xiquan/kit-owned-l3` 为 Maintainer、允许创建顶层组且
+2FA Disabled；GIMR OAuth 仍包含 `api`、`write_repository`、`write_virtual_registry` 等 scope。未读取、
+renew 或修改任何 secret/权限；因此 R4.5 的最小权限、账户控制和轮换/撤销责任仍必须由 owner 签署。
