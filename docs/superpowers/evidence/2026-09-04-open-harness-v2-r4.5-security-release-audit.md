@@ -1058,3 +1058,37 @@ approval. No Verify was repeated because it would change the Profile generation
 and exact identity. This is an explicit operational/release gate, not a failure
 of the completed real-provider tasks; their archive fallback, canonical replay,
 redaction scan, and successful Mattermost delivery remain intact.
+
+## 2026-09-05 current candidate update: Profile 4 generation 78
+
+The normal administrator Verify was subsequently completed through the
+authenticated Dashboard. Profile 4 moved from generation `77` to generation
+`78` while retaining Kit `0.6.14`, the same Worker image digest, and the same
+legal Harness/protocol matrix. The Verify-time readiness row was
+`ready` through `2026-09-05 12:18:31.417926` with `check_generation=2`; after
+that TTL it is derived as `unknown` under the contract and is not a current
+release approval.
+
+Tasks 425–428 then exercised the current generation with existing Providers:
+Pi/Provider 12, OpenCode/Provider 12, Claude/Provider 6, and Codex/Provider 12.
+They bound Bundles 181/182/183/184, ended with `run.completed` and closed
+control state, preserved zero repository changes, passed canonical archive
+sequence/ID checks, and produced Mattermost deliveries 18/19/20/21 with
+`task_completed/success`. The legal protocol and `[TOKEN]` redaction checks
+matched the frozen matrix. Task 425's model-generated Mermaid still caused
+delivery-summary validation `ok=false`; Task 426 did not write an independent
+`delivery_summary` payload. These are recorded as delivery-summary boundaries,
+not execution failures or a blanket summary-validation pass. Full details are
+in the [generation 78 evidence](2026-09-05-open-harness-v2-generation-78-four-harness-smoke.md).
+
+The post-run Host remained healthy in `dual_canary`, with database revision
+`077_v2_worker_kit_identity`, `AUTO_MIGRATE=false`, zero active Tasks and zero
+Issue locks. Mattermost `10.9.1` and its Postgres remained healthy. Root disk
+usage was about 97% with roughly 2.0GB free, so the disk-full cleanup trigger
+was not reached; no new cleanup was performed and protected services,
+volumes, databases, and the active/unknown `quirky_allen` Worker were retained.
+This update strengthens current runtime and redaction evidence but leaves the
+release-owner least-privilege/rotation record, signed package/release notes,
+retention/retirement plan, maintenance ownership, independent zero-P0/P1
+approval, R4.3–R4.6, R5/L6, migration 078, `v2_only`, and user-deferred mobile
+acceptance open.
