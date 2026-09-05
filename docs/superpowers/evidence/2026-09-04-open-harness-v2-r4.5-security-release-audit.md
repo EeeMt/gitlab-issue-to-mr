@@ -75,7 +75,10 @@ attached to this audit.
 The latest database snapshot has 361 Tasks, zero `pending`/`queued`/`running` Tasks,
 zero `issue_execution_locks`, zero Mattermost notification profiles, and zero
 notification deliveries. These are current Host observations; they do not
-replace the missing live alert delivery or independent release sign-off.
+replace the missing live alert delivery or independent release sign-off. All
+361 Task Worker Profile Snapshots have
+`runtime_contract_version=codify.worker.harness/v2`; no legacy V1 Snapshot is
+currently bound to a Task.
 
 The current development-Host Provider inventory was checked without reading
 credentials or URL paths: enabled Providers 3–6 resolve to `opencode.ai`, and

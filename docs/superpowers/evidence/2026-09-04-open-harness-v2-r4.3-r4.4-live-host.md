@@ -56,7 +56,10 @@ rejected `POST /api/tasks` at `2026-09-05T03:35:34Z` with
 for Harness 'codex'`. The Issue remains open with zero Tasks; the database still
 has zero V1 Tasks and zero Issue locks. No database/profile bypass was used, so
 this is current creation-boundary evidence rather than live V1 execution
-evidence; V1 read-only acceptance remains open.
+evidence; V1 read-only acceptance remains open. The current database has 361
+Task Worker Profile Snapshots, all with `runtime_contract_version=
+codify.worker.harness/v2` and a bound runtime bundle; no legacy V1 Snapshot is
+available to reuse for the read-only display probe.
 
 The exact-composition positive cohort is:
 
