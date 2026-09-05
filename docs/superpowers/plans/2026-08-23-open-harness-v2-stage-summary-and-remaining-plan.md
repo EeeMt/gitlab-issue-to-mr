@@ -826,3 +826,8 @@ Kit/Worker/Backend identity、数据库 revision 和 preflight 结果，并把�
 当前 GitLab/GIMR 只读复核还确认：`ai-bot` 在 `xiquan/kit-owned-l3` 为 Maintainer、允许创建顶层组且
 2FA Disabled；GIMR OAuth 仍包含 `api`、`write_repository`、`write_virtual_registry` 等 scope。未读取、
 renew 或修改任何 secret/权限；因此 R4.5 的最小权限、账户控制和轮换/撤销责任仍必须由 owner 签署。
+
+另经代码与当前 image ancestry 核对，V2 已实际使用冻结 `credential_ref` 的 runtime resolution：
+`worker_runtime` 对缺失/撤销凭据 fail closed，对已有 retry 才允许 retired credential；只有旧 snapshot
+才保留 legacy Provider-key fallback。相关 runtime/provider focused tests 共 71 个通过。该结果修正了审计中
+过时的“resolver 尚未进入 runtime delivery”表述，但不替代对容器环境 secret delivery 及外部权限/轮换的安全签署。

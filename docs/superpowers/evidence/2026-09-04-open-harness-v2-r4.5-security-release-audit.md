@@ -116,14 +116,18 @@ canonical-sequence evidence is in the
 The following R4.5 inputs remain explicit release-owner evidence rather than
 claims inferred from tests or a development Host:
 
-1. **Provider/GitLab least privilege and rotation.** The repository contains a
-   restricted legacy credential-delivery acceptance: the Worker runtime still
-   receives the encrypted Provider key as a task environment value, while the
-   `credential_ref` resolver is not yet the runtime delivery path. This is
-   accepted only for trusted internal/development Profiles and is not a
-   production or untrusted-repository security pass. The current Provider and
-   GitLab permission scope, rotation timestamp, and revocation/rollback record
-   must be supplied by the credential/system owner.
+1. **Provider/GitLab least privilege and rotation.** The current V2 execution
+   path does freeze the secret-free endpoint plus `credential_ref` into the
+   Task snapshot, resolves that reference through `model_credentials` at Worker
+   startup, and passes the resolved secret to the container environment. A
+   revoked or missing credential fails closed; a retired credential is allowed
+   only for an existing retry. The older endpoint-snapshot compatibility branch
+   may still decrypt a legacy Provider key when the snapshot predates the
+   `credential_ref` field. This corrects the earlier audit wording that called
+   the resolver “not yet” part of runtime delivery, but it does not constitute
+   a production or untrusted-repository security pass. The current Provider
+   and GitLab permission scope, rotation timestamp, and revocation/rollback
+   record must still be supplied by the credential/system owner.
 2. **Release notes and exact release package.** The current commits and R4
    candidate evidence are recorded, but no release-owner-approved release
    notes or signed package manifest has been attached to this audit.
@@ -1241,3 +1245,28 @@ These current observations reinforce the existing R4.5 blocker: connectivity
 and identity are working, but least-privilege scopes, account controls, and
 credential rotation/revocation ownership are not proven or approved. No
 permission or credential state was changed on the development Host.
+
+## 2026-09-05 continuation: frozen credential delivery path verification
+
+The current source and candidate image were checked against the earlier
+credential-delivery boundary. `worker_runtime.resolve_provider()` constructs
+the provider from the secret-free frozen endpoint snapshot, freezes the
+snapshot's `credential_ref`, and calls `resolve_task_credential()` with
+`allow_retired=True` for an existing Task retry. Missing or revoked references
+raise a runtime error before execution; a legacy Provider-key fallback is
+limited to endpoint snapshots that predate the explicit `credential_ref` key.
+
+The deployed Backend/Scheduler image source commit `e0d487ec` contains this
+path (`9bbcf43e` and `ab869c67` are ancestors). Focused regression checks
+passed:
+
+| Check | Result |
+| --- | --- |
+| `backend/.venv/bin/python -m pytest backend/tests/unit/test_worker_runtime_model_protocol_env.py -q` | 41 passed |
+| `backend/.venv/bin/python -m pytest backend/tests/unit/test_model_credentials.py backend/tests/unit/test_providers_api.py -q` | 30 passed |
+
+This closes the obsolete implementation-gap note in the audit and strengthens
+the L2/L4 credential-reference evidence. It does not close R4.5: the resolved
+secret is still delivered to the Worker environment, and the external
+GitLab/OAuth least-privilege, account-control, rotation, and revocation record
+remain owner/security decisions.
