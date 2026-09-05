@@ -527,6 +527,9 @@ analysis Task。Task 419 使用现有 Provider 12
 `mounted_kit`）、OpenCode、fresh session 和 `plan` mode。任务于
 `2026-09-05T10:11:34Z` 开始，`10:13:09Z` 完成，零仓库变更；浏览器页面随后
 显示 `Task #419 已完成`，Issue 总任务数变为 47。
+随后在目标 Host 的 `/tasks/419` 详情页实际切换事件流与原始日志视图，复核
+Provider/Worker/Harness、fresh/plan 上下文、完成统计和 `[TOKEN]` 脱敏；这是
+当前桌面 served-browser 的补充 L5 evidence，详见 [R4.3/R4.4 live Host evidence](../evidence/2026-09-04-open-harness-v2-r4.3-r4.4-live-host.md)。
 
 | Item | Result |
 | --- | --- |

@@ -1417,3 +1417,23 @@ found the generic template URL had been restored during the deployment; a
 temporary override was reapplied and verified, and the current Backend/Scheduler
 environment now reports `FRONTEND_URL=http://192.168.50.129:8880`. This was not
 retroactively counted as Task 418 link evidence.
+
+## 2026-09-05 continuation: served Task 419 detail and raw-log view
+
+The authenticated Chrome session on the target Host opened the served
+`/tasks/419` page after the real run completed. The page rendered the completed
+state, Issue #99 link, analysis/plan mode, creation/start/completion timestamps,
+and the zero-change execution context. Its execution-context panel showed
+Provider `openrouter-minimax-responses`, Worker Profile
+`v2-canary-0.6.11-four-harness`, OpenCode Harness, fresh-session mode, baseline
+branch `main`, and the generated `codify/issue-99` branch.
+
+The event-stream view rendered the persisted Bash/Read/tool rows and final AI
+result. Switching to the raw-log view rendered the Worker runtime log, including
+the `openai_responses` protocol and Provider model, while repository URLs that
+contained credentials were shown with `[TOKEN]` redaction. The page also showed
+the completed `1m35s` runtime and token summary. This is current served desktop
+UI evidence for Task detail, event/raw-log navigation, context display, and
+redaction; it does not claim real mobile keyboard/IME/notch/gesture-area
+acceptance, formal R4.3/R4.4 sign-off, R4.5 owner/security approval, R4.6
+go/no-go, migration 078, or R5/L6.
