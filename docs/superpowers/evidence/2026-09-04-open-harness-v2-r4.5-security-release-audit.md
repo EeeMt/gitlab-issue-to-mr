@@ -693,3 +693,47 @@ containers, and 6.992GB reclaimable BuildKit cache. No cleanup was performed
 because the disk was not full. Migration 078, release package/signatures,
 owner approval, R4.6, R5/L6, and real mobile-device acceptance remain open;
 mobile-device acceptance is explicitly deferred by the user.
+
+## 2026-09-05 continuation: real failure notification
+
+The previously missing live failure-notification sample was then exercised on
+the same development Host. Task 410 used the existing Provider 4
+`opencode-luna` (`gpt-5.6-luna`), the Codex Harness, and the legal
+`openai_responses` protocol. The prompt prohibited repository changes, retry,
+commit, push, and merge-request activity. Profile 3, `V2 failure/cancel
+notifications`, remained enabled for `codifydebug/notifications` with only
+`task_failed` and `task_cancelled` subscribed.
+
+The real Provider request reached the Adapter and failed at the known upstream
+availability boundary with HTTP 403 `unsupported_country_region_territory`:
+
+| Item | Result |
+| --- | --- |
+| Task/runtime | Task 410, `failed`; canonical failure kind `engine_error` |
+| Attempt | `task-410-attempt-1-54e3bd239521`, `codify.worker.event/v2`, Codex Adapter `1.0.0`, CLI `0.146.0`, `last_seq=12`, terminal `run.failed`, `control_state=closed` |
+| Canonical failure | seq 10 `harness.failed`, seq 12 `run.failed`; the bounded message included the upstream 403 and `unsupported_country_region_territory` |
+| Persistence | 12 contiguous unique receipts, 5 raw-log chunks / 2458 bytes, runtime archive `3335` bytes; no active Task or Issue lock remained |
+| Codify delivery row | `mattermost_notification_deliveries.id=5`, `event_type=task_failed`, `status=success`, target `channel:aaz68niiuff3txfot5wjrgj33e` |
+| Mattermost delivery | Bot post `4bw9czpbpfbuznzuj33ftj6ara` rendered `@root ❌ 任务失败 · [任务 410](http://192.168.50.129:8880/tasks/410)` |
+
+The delivery query found one successful `task_failed` row and the Mattermost
+channel query found one matching Bot post. Together with Tasks 406, 407, and
+409, this establishes real completion, cancellation, and failure delivery
+through the Codify notification log into Mattermost 10.9.1, including the
+corrected development Host URL. Task 410 is an additional operational sample;
+it does not alter the frozen Task-ID 380–394 integrity cohort.
+
+The final recheck reported 378 total Tasks, zero pending/queued/running Tasks,
+zero Issue locks, healthy Backend and Scheduler services, database revision
+`077_v2_worker_kit_identity`, and `dual_canary`. Docker reported 27 images, 11
+containers, and 6.992GB reclaimable BuildKit cache. The latest direct Host
+filesystem check remained approximately `61G` total / `60G` used / `1.4G`
+available (`98%`); the full-disk cleanup trigger was not reached, so no Codify
+image/cache cleanup was performed and active/unknown Worker images and
+protected services were not touched.
+
+This adds the missing R4.4 runtime evidence but does not sign R4.4 or R4.5.
+Credential/least-privilege and rotation evidence, release package/signatures,
+retention ownership, maintenance-window ownership, independent zero-P0/P1
+approval, R4.6, migration 078, R5/L6, and real mobile-device acceptance remain
+open; the mobile-device item is explicitly deferred by the user.

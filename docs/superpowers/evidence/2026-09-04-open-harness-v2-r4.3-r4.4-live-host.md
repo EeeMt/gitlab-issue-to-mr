@@ -1162,8 +1162,56 @@ Tasks, zero Issue locks, no Task 409 container, healthy Backend/Scheduler, and
 cleanup trigger, so no further Codify image/cache cleanup was performed and
 active/unknown Worker images and protected services were not touched.
 
-This closes the real completion and cancellation notification evidence gap, but
-does not claim a live `task_failed` notification, R4.4 sign-off, R4.5 owner or
-security approval, R4.6 independent go/no-go, migration 078, R5/L6, or the
-real mobile-device keyboard/IME/notch/gesture-area acceptance that remains
-explicitly deferred by the user.
+At the Task 409 checkpoint this closed the real completion and cancellation
+notification evidence gap; the live `task_failed` path was still pending at
+that point. The continuation below records that separate failure sample. This
+does not by itself provide R4.4 sign-off, R4.5 owner or security approval, R4.6
+independent go/no-go, migration 078, R5/L6, or the real mobile-device
+keyboard/IME/notch/gesture-area acceptance that remains explicitly deferred by
+the user.
+
+## 2026-09-05 continuation: real `task_failed` notification
+
+Task 410 was created from Issue #99 using the existing Provider 4
+`opencode-luna` (`gpt-5.6-luna`), the Codex Harness, and the legal
+`openai_responses` protocol. The prompt was intentionally read-only and asked
+the task to preserve an upstream provider failure without retrying or making
+repository changes. The enabled profile was `V2 failure/cancel notifications`
+(profile 3), targeting `codifydebug/notifications` and subscribed only to
+`task_failed` and `task_cancelled`.
+
+The real Provider request failed at the known upstream availability boundary
+with HTTP 403 `unsupported_country_region_territory`:
+
+| Item | Result |
+| --- | --- |
+| Task/runtime | Task 410, `failed`; canonical failure kind `engine_error` |
+| Attempt | `task-410-attempt-1-54e3bd239521`, `codify.worker.event/v2`, Codex Adapter `1.0.0`, CLI `0.146.0`, `last_seq=12`, terminal `run.failed`, `control_state=closed` |
+| Canonical failure | seq 10 `harness.failed`, seq 12 `run.failed`; the bounded message included the upstream 403 and `unsupported_country_region_territory` |
+| Receipts | 12 receipts, seq 1–12 contiguous, 12 distinct event IDs |
+| Persistence | 5 raw-log chunks / 2458 bytes; runtime archive `task-410-runtime-archive.tar.gz`, 3335 bytes; no active Task or Issue lock remained |
+| Codify delivery row | `mattermost_notification_deliveries.id=5`, `event_type=task_failed`, `status=success`, target `channel:aaz68niiuff3txfot5wjrgj33e` |
+| Mattermost delivery | Bot post `4bw9czpbpfbuznzuj33ftj6ara` appeared in `codifydebug/notifications` as `@root ❌ 任务失败 · [任务 410](http://192.168.50.129:8880/tasks/410)` |
+
+The Task reached its terminal state without a container or Issue lock left
+behind. The delivery query found one successful `task_failed` row, and the
+Mattermost channel query found one matching Bot post. Together with Tasks 406,
+407, and 409, this proves the real completion, cancellation, and failure
+notification paths through the Codify delivery log into Mattermost 10.9.1,
+including the corrected development Host URL. Task 410 is an additional R4.4
+operational sample and is not added to the frozen Task-ID 380–394 integrity
+cohort.
+
+The final recheck reported 378 total Tasks, zero pending/queued/running Tasks,
+zero Issue locks, healthy Backend and Scheduler services, database revision
+`077_v2_worker_kit_identity`, and `dual_canary`. Docker reported 27 images, 11
+containers, and 6.992GB reclaimable BuildKit cache. The latest direct Host
+filesystem check remained approximately `61G` total / `60G` used / `1.4G`
+available (`98%`); the full-disk cleanup trigger was not reached, so no Codify
+image/cache cleanup was performed and active/unknown Worker images and
+protected services were not touched.
+
+This closes the previously missing live failure-notification evidence sample,
+but not formal R4.4 sign-off, the R4.5 owner/security/release audit, R4.6
+independent go/no-go, migration 078, R5/L6, or the real mobile-device
+keyboard/IME/notch/gesture-area acceptance that remains explicitly deferred.
