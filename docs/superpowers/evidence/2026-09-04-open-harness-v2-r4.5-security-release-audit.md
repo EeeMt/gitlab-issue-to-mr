@@ -16,7 +16,7 @@ current Backend/Scheduler image is
 It exposes no Git revision OCI label, so the current image provenance is the
 committed tree plus the remote build/deploy record. Profile 4 remains
 generation `74`, and its exact-composition selected-Harness Bundles are 170
-(Pi), 171 (Claude), and 172 (OpenCode); Tasks 380–383 and post-fix Tasks 388–389
+(Pi), 171 (Claude), and 172 (OpenCode); Tasks 380–383 and post-fix Tasks 388–390
 validation are recorded in the
 [R4.3/R4.4 live Host evidence](2026-09-04-open-harness-v2-r4.3-r4.4-live-host.md).
 The generation-73 Bundles 166–169 and Tasks 374–379 remain historical evidence
@@ -44,9 +44,9 @@ release-owner approval.
 | Frontend unit suite | passed, 80 files / 1692 tests | Includes structured SSE stale-source and mobile safe-area regression coverage |
 | Frontend production build | passed | Vite emitted only the existing large-chunk warning |
 | Backend lint | passed | `make lint-backend` |
-| Remote Docker state | near capacity, not full | The post-Task-389 snapshot reports `df -h /` at 61G total / 57G used / 4.2G available (94%); `docker system df` reports 83 Images / 12.42GB / 6.713GB reclaimable, 6.546MB containers, 1.642GB volumes / 1.309GB reclaimable, and 6.526GB BuildKit. No cleanup was performed because the disk was not full. |
+| Remote Docker state | near capacity, not full | The post-Task-390 snapshot reports `df -h /` at 61G total / 57G used / 4.2G available (94%); `docker system df` reports 83 Images / 12.42GB / 6.713GB reclaimable, 7.25MB containers, 1.642GB volumes / 1.309GB reclaimable, and 6.526GB BuildKit. No cleanup was performed because the disk was not full. |
 | Current Kit archive reconstruction and V2 release preflight | passed, not signed | The installed `0.6.12-linux-amd64-c33dbf86951b` Kit was streamed into a temporary `518M` archive; archive SHA-256 `2d3ee7f81525d465731344571cbf5bd93a0cd94bb6cf16f5a4d5512d5c0a25a6`, manifest SHA-256 `c33dbf86951bed6e3b4de1897313725f14f00006dc51fb300e7b821bb47e17bd`, content inventory `7630f086800c95f851db8c9351638868ab60ac33fb3bfe22f9f2f5c8dcdc98a1`; `deploy/scripts/preflight-v2-release.sh` passed against the target daemon and Worker image repo digest `127.0.0.1:5000/codify-worker/java21-maven@sha256:234582c692d1ebb00ba8e882160618c2258463149d968009ac81c545e63a538b`. The temporary archive is not a release-owner-signed package and is not committed. |
-| Exact committed image/Profile/Task recheck | passed with bounded Provider boundary | Backend/Scheduler now run image `sha256:334c674d…` built after `48b16fdc`; Profile 4 generation 74 completed four-Harness Verify; Tasks 380–383 completed Pi/Claude/OpenCode/Pi on unchanged Bundles 170–172 with 397 unique contiguous receipts and zero changes. Current exact OpenCode/Pi/Claude cancellation Tasks 384–386 on the prior Backend image added 15/40/8 receipts; post-fix Task 387 on Bundle 171 / Provider 11 added 9 unique contiguous receipts, one `run.failed(status=cancelled)` terminal, zero changes, a 4594-byte archive (`69e8a1df…`), 6 raw-log chunks / 5117 bytes, and a removed Worker container. Post-fix Task 388 on the same Bundle/Provider completed with 19 unique contiguous receipts, `run.completed`, zero changes, a 7586-byte archive (`27852b5a…`), 7 raw-log chunks / 8486 bytes, and a removed Worker container; Task 389 on Bundle 171 / Provider 6 completed with 20 unique contiguous receipts, `run.completed`, zero changes, a 7236-byte archive (`439f3132…`), 6 raw-log chunks / 8359 bytes, and a removed Worker container. The new Scheduler emitted one `Task 387 cancelled` INFO with no `Task 387 failed`, and one successful INFO each for Tasks 388/389. No current-composition Codex success was claimed because the available Codex-legal Providers remain bounded by the recorded upstream 429/403 failures. |
+| Exact committed image/Profile/Task recheck | passed with bounded Provider boundary | Backend/Scheduler now run image `sha256:334c674d…` built after `48b16fdc`; Profile 4 generation 74 completed four-Harness Verify; Tasks 380–383 completed Pi/Claude/OpenCode/Pi on unchanged Bundles 170–172 with 397 unique contiguous receipts and zero changes. Current exact OpenCode/Pi/Claude cancellation Tasks 384–386 on the prior Backend image added 15/40/8 receipts; post-fix Task 387 on Bundle 171 / Provider 11 added 9 unique contiguous receipts, one `run.failed(status=cancelled)` terminal, zero changes, a 4594-byte archive (`69e8a1df…`), 6 raw-log chunks / 5117 bytes, and a removed Worker container. Post-fix Task 388 on the same Bundle/Provider completed with 19 unique contiguous receipts, `run.completed`, zero changes, a 7586-byte archive (`27852b5a…`), 7 raw-log chunks / 8486 bytes, and a removed Worker container; Task 389 on Bundle 171 / Provider 6 completed with 20 unique contiguous receipts, `run.completed`, zero changes, a 7236-byte archive (`439f3132…`), 6 raw-log chunks / 8359 bytes, and a removed Worker container; Task 390 on Bundle 172 / Provider 6 completed with 216 unique contiguous receipts, `run.completed`, zero changes, a 22384-byte archive (`d54b5eb2…`), 4 raw-log chunks / 2678 bytes, and a removed Worker container. The new Scheduler emitted one `Task 387 cancelled` INFO with no `Task 387 failed`, and one successful INFO each for Tasks 388/389/390. No current-composition Codex success was claimed because the available Codex-legal Providers remain bounded by the recorded upstream 429/403 failures. |
 | Profile re-verification and prior post-fix smoke | passed with bounded Provider negatives | Profile 4 generation 73 and Tasks 374–379 remain historical evidence for the superseded image composition; Tasks 374–376 completed Pi/Claude/OpenCode on Bundles 166–168, while Codex Tasks 377–379 reached the Adapter and were correctly bounded as upstream `rate_limited`/`engine_error`; Task 368 remains the preceding-generation Codex success |
 | GitLab integration connectivity | passed, not a permission sign-off | The authenticated admin UI read-only connection test reached `http://192.168.50.129:8080`, authenticated as `ai-bot`, and reported GitLab `18.5.5-ee`; the Webhook overview currently returned zero projects. This proves application connectivity/identity only, not token scope, least privilege, or rotation. |
 | Remote execution mode | restored and healthy | A temporary no-task `v2_only` mode-health/V2-detail preflight was run and then restored; final Backend/Scheduler health reports `HARNESS_EXECUTION_MODE=dual_canary`. No hard-cut, migration, or V1 Task mutation was attempted. |
@@ -93,7 +93,7 @@ observation only; the release owner still must provide the least-privilege and
 rotation record.
 
 The current live evidence covers Pi, OpenCode, Claude, and Codex on Profile 4,
-including exact-composition successful Tasks 380–383 and post-fix Tasks 388–389, generation-73 successful
+including exact-composition successful Tasks 380–383 and post-fix Tasks 388–390, generation-73 successful
 Tasks 374–376, the generation-73 Codex negative Tasks 377–379, the
 preceding-generation Codex success Task 368, the OpenCode reconnect Task 371,
 the stable-state cancellation Task 372, and the negative restart probes
@@ -134,9 +134,9 @@ claims inferred from tests or a development Host:
 The current development candidate records the Scheduler-only post-fix image
 `sha256:334c674d…` built after committed tree `48b16fdc`; unlike the previous
 image, it has no Git revision OCI label. The Worker/Kit/Profile/Bundle identity
-remains unchanged, and Tasks #387 and #388 are direct real-Provider evidence on
+remains unchanged, and Tasks #387–#390 are direct real-Provider evidence on
 this new image. This closes the observed cancellation log-classification
-defect and adds a current success-path sample, but does not create a
+defect and adds current success-path samples, but does not create a
 release-owner signature: the package manifest, release notes, retention plan,
 and independent approval remain open.
 
@@ -214,15 +214,16 @@ ending in `run.completed`. The two early `control_owner_unreachable`
 gate-probe warnings self-recovered; the task and attempt remained successful.
 The exact-composition cohort then contained four attempts and 397 unique
 contiguous receipts. Task 388 later added a fifth successful attempt with 19
-receipts, and Task 389 added a sixth with 20 receipts, for 436 unique
-contiguous receipts across the current success cohort.
+receipts, Task 389 added a sixth with 20 receipts, and Task 390 added a
+seventh with 216 receipts, for 652 unique contiguous receipts across the
+current success cohort.
 Backend health remained `healthy` with database/Docker
 checks `ok`, Scheduler remained in `dual_canary`, and no active Task or Issue
 lock remained.
 
-The later current-composition integrity recheck covered Tasks 380–389,
-including the cancellation attempts: 10 attempts contained 508 receipts and
-508 distinct event IDs, with zero sequence/ID failures, zero terminal-count
+The later current-composition integrity recheck covered Tasks 380–390,
+including the cancellation attempts: 11 attempts contained 724 receipts and
+724 distinct event IDs, with zero sequence/ID failures, zero terminal-count
 failures, and zero task-status/terminal-type mapping failures. The constrained
 token-like scan returned zero matches in both canonical event JSON and raw-log
 chunks.
@@ -310,6 +311,22 @@ The Worker container and Issue lock were removed/cleared, global active Tasks
 returned to zero, and Scheduler emitted one `Task 389 completed successfully`
 INFO line. The authenticated task detail page exposed completed Claude,
 Provider 6, the exact Worker image, 16 seconds, 2247 input / 597 output
+tokens, and `+0 -0` changes. The expected post-exit canonical-tail 409 was
+non-blocking after receipt/archive persistence.
+
+At `2026-09-05T02:49:38Z`, post-fix Task 390 completed a real OpenCode
+success smoke on Bundle 172 using Provider 6 (`opencode-pi` /
+`deepseek-v4-flash`) over the legal `anthropic_messages` protocol. The task
+ended `completed` with zero changes; attempt
+`task-390-attempt-1-8414e97cc86d` used Adapter `2.0.0` / CLI `1.18.19`, closed
+with 216 unique contiguous receipts (seq 1–216), and had one terminal
+`run.completed(status=completed)`. It produced 4 raw-log chunks / 2678 bytes
+and archive `task-390-runtime-archive.tar.gz` at 22384 bytes with SHA-256
+`d54b5eb2e2a24b6e98d2614f9e249a10fd35d22ed6d91643924ff9191c68dd0e`.
+The Worker container and Issue lock were removed/cleared, global active Tasks
+returned to zero, and Scheduler emitted one `Task 390 completed successfully`
+INFO line. The authenticated task detail page exposed completed OpenCode,
+Provider 6, the exact Worker image, 46 seconds, 136 input / 128 output
 tokens, and `+0 -0` changes. The expected post-exit canonical-tail 409 was
 non-blocking after receipt/archive persistence.
 
