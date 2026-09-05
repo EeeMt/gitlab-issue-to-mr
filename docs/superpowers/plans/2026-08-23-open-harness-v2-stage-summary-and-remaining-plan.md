@@ -64,6 +64,15 @@ Task 420 的真实 Pi/Provider 12 只读复测又暴露了交付摘要 Mermaid �
 重新 Verify 为 generation 77；Task 421 在该 Kit 上以真实 Provider 12/Pi 成功复测，摘要校验恢复为
 `ok=true`。这是一轮当前 candidate 的 L2/L3/L4 补强，不改变冻结 cohort 或 R4 签署边界。
 
+随后通过正常管理员 Verify 将 Profile 4 从 generation 77 更新为 generation 78；Kit、Worker image、
+运行模式与协议矩阵未改变。Task 425–428 在该新 generation 上分别完成 Pi/OpenCode/Claude/Codex 的真实
+Provider 只读 smoke、canonical archive、Mattermost `task_completed/success` 与 served desktop detail
+复核。Task 425 的模型 Mermaid 输出仍使摘要 validation 为 `ok=false`，Task 426 未写入独立
+`delivery_summary` payload；两者均不影响 Worker、Task、archive 或通知成功，详见
+[Profile 4 generation 78 evidence](../evidence/2026-09-05-open-harness-v2-generation-78-four-harness-smoke.md)。
+该 readiness 只在 Verify 记录的 TTL 窗口内有效，过期后按合同派生为 `unknown`，不把短期 `ready` 写成永久
+发布许可。
+
 当前唯一执行顺序为：
 
 1. 完成 R4/L5 发布评审；
@@ -76,9 +85,9 @@ Task 420 的真实 Pi/Provider 12 只读复测又暴露了交付摘要 Mermaid �
 | --- | --- | --- | --- |
 | L1 架构/合同 | **通过（已更新）** | ownership、schema、协议矩阵、identity、roll-forward-only 与可信 Kit 校验边界已冻结 | 合同变化时重新评审 |
 | L2 源码/测试 | **当前 exact candidate 通过，发布审计仍开放** | Kit provenance、Snapshot CLI identity、Scheduler/Worker/launcher 热路径边界与聚焦回归已证明；全量单元测试有 3247 passed 基线；`8110afa0` 的 Codex `OPENAI_MODEL` 投影与 `810f9fcb` 的 Pi active-session 投影已通过受影响 Bundle/Profile/Scheduler/notification/freeform 回归 227 passed、Pi Adapter 54 passed、focused ruff、lint/secret scan；structured SSE source-identity 防护与移动安全区修复后前端全量回归 80 files/1692 tests、production build 通过；`48b16fdc` 的 Scheduler 取消日志分类修复通过 `test_scheduler_coverage.py` 64 passed、focused ruff 与 `make lint-backend`；`594bf67a` 的取消通知生命周期修复通过 114 个相关单测（含 19 个子测试）与 focused Ruff；取消通知候选曾以 `sha256:92321ff2…` 部署，随后 `e0d487ec` 的增量 receipt ingest 修复以当前 remote image `sha256:2cff3fd7…` 重建并完成 Task 418/419 真实复核 | 若 R4.3–R4.5 发现新的 runtime 源码变化，按影响面重开；release package、权限与 owner sign-off 仍属发布审计 |
-| L3 不可变 composition | **当前 candidate 通过** | Worker Kit `0.6.14` 已完整安装并通过 Profile 4 generation 77 的管理员四 Harness Verify；Bundle 177 与 Task 421–424 的 snapshot 记录了 Kit manifest `d461d040694b…`、`linux/amd64`、Adapter/CLI identity，前一 Bundle 170/171/172/173 与 Bundle 175 的历史证据仍可追溯 | R4 签署前保持 identity 不漂移；Codex 当前代成功仍受 Provider 可用性边界限制 |
-| L4 真实 Host/Task | **R4.1 scope 通过** | 新 Kit、四 Harness admin/launcher smoke、5 条 warm-start 成功 Task、TTL 过期后的成功路径、受控 selected-CLI 失败、exact Worker/Kit/Bundle composition 下的 Pi/Claude/OpenCode Tasks 380–383、旧 Backend image 上的 OpenCode/Pi/Claude cancellation Tasks 384–386、修复后 Backend image 上的 Claude Tasks 387–389（取消与两次成功）及 OpenCode Task 390（成功）、Codex Task 391（当前 exact Provider-boundary 负向）、Task 392（当前 exact Codex success）与 Task 394（当前 exact Pi success）、真实 V1 Task 399、preceding-generation Codex Task 368，以及真实 OpenCode Task 371 均有证据；Task 409 又在当前修复 image 上完成真实 OpenCode/Provider 12 取消与 Mattermost `task_cancelled` success delivery；Task 410 又完成真实 Codex/Provider 4 上游失败与 Mattermost `task_failed` success delivery；Task 421 在 Kit 0.6.14 / Bundle 177 上完成真实 Pi/Provider 12 只读复测，Task 422/423/424 又在 Bundle 178/179/180 上分别完成真实 OpenCode/Claude/Codex 只读复测；旧 generation-73 Codex Tasks 377–379 的 Provider 失败已分类并归档；395–398 是创建/兼容性调试失败或取消样本，不计入 V2 cohort | 各 Harness 的正式 L5 交互/运维审阅与签署；当前 exact composition 的四 Harness success 与 V1 live read-only 已补齐，仍需完整 L5/运维/发布签署 |
-| L5 发布验收 | **未完成** | 已补充 390×844 创建/详情、长文本、编辑器焦点、底部操作区、创建表单与已有 Issue 的四 Harness 选择、真实运行态 command/ACK/刷新连续性与模式显示修复；structured SSE stale-source 生命周期防护、`viewport-fit=cover` 与移动 shell/drawer 安全区避让均已通过前端全量回归与 production build，并完成目标 Host nginx-only 静态产物复核；Task 371 又完成一次真实 nginx-only 前端入口断线/重连 spot-check；Task 399 在 `v2_only` 下实际显示为“Legacy V1 · 只读”，完整摘要、事件流和运行统计可读，之后已恢复 `dual_canary`；Task 421 的 served `/tasks/421` 桌面详情已显示 Provider/Worker/Pi、plan/fresh、摘要、事件流、0 变更和 Kit `0.6.14` 路径；Task 422/423/424 的 served `/tasks/...` 页面又分别显示 OpenCode/Claude/Codex、Provider、plan/fresh、分支和 `+0/-0`，原始日志显示三条合法协议且仓库 URL token 为 `[TOKEN]`；见 [R4.3/R4.4 live Host evidence](../evidence/2026-09-04-open-harness-v2-r4.3-r4.4-live-host.md) | 真实移动设备键盘/IME 与刘海/手势区验收已按用户指示暂缓；仍需完整交互/运维/安全阻断清单、release-owner 与独立签署 |
+| L3 不可变 composition | **当前 candidate 通过** | Worker Kit `0.6.14` 已完整安装并通过 Profile 4 generation 78 的管理员四 Harness Verify；Bundle 181/182/183/184 与 Task 425–428 的 snapshot 记录了 Kit manifest `d461d040694b…`、`linux/amd64`、Adapter/CLI identity，Bundle 177–180 的历史证据仍可追溯 | R4 签署前保持 identity 不漂移；Codex 当前代成功仍受 Provider 可用性边界限制 |
+| L4 真实 Host/Task | **R4.1 scope 通过** | 新 Kit、四 Harness admin/launcher smoke、5 条 warm-start 成功 Task、TTL 过期后的成功路径、受控 selected-CLI 失败、exact Worker/Kit/Bundle composition 下的 Pi/Claude/OpenCode Tasks 380–383、旧 Backend image 上的 OpenCode/Pi/Claude cancellation Tasks 384–386、修复后 Backend image 上的 Claude Tasks 387–389（取消与两次成功）及 OpenCode Task 390（成功）、Codex Task 391（当前 exact Provider-boundary 负向）、Task 392（当前 exact Codex success）与 Task 394（当前 exact Pi success）、真实 V1 Task 399、preceding-generation Codex Task 368，以及真实 OpenCode Task 371 均有证据；Task 409 又在当前修复 image 上完成真实 OpenCode/Provider 12 取消与 Mattermost `task_cancelled` success delivery；Task 410 又完成真实 Codex/Provider 4 上游失败与 Mattermost `task_failed` success delivery；Task 421 在 Kit 0.6.14 / Bundle 177 上完成真实 Pi/Provider 12 只读复测，Task 422/423/424 又在 Bundle 178/179/180 上分别完成真实 OpenCode/Claude/Codex 只读复测；Task 425–428 又在 generation 78 / Bundle 181/182/183/184 上分别完成真实 Pi/OpenCode/Claude/Codex 只读复测；旧 generation-73 Codex Tasks 377–379 的 Provider 失败已分类并归档；395–398 是创建/兼容性调试失败或取消样本，不计入 V2 cohort | 各 Harness 的正式 L5 交互/运维审阅与签署；当前 exact composition 的四 Harness success 与 V1 live read-only 已补齐，仍需完整 L5/运维/发布签署 |
+| L5 发布验收 | **未完成** | 已补充 390×844 创建/详情、长文本、编辑器焦点、底部操作区、创建表单与已有 Issue 的四 Harness 选择、真实运行态 command/ACK/刷新连续性与模式显示修复；structured SSE stale-source 生命周期防护、`viewport-fit=cover` 与移动 shell/drawer 安全区避让均已通过前端全量回归与 production build，并完成目标 Host nginx-only 静态产物复核；Task 371 又完成一次真实 nginx-only 前端入口断线/重连 spot-check；Task 399 在 `v2_only` 下实际显示为“Legacy V1 · 只读”，完整摘要、事件流和运行统计可读，之后已恢复 `dual_canary`；Task 421 的 served `/tasks/421` 桌面详情已显示 Provider/Worker/Pi、plan/fresh、摘要、事件流、0 变更和 Kit `0.6.14` 路径；Task 422/423/424 的 served `/tasks/...` 页面又分别显示 OpenCode/Claude/Codex、Provider、plan/fresh、分支和 `+0/-0`，原始日志显示三条合法协议且仓库 URL token 为 `[TOKEN]`；Task 425/426/427/428 的 served 页面又显示 generation 78 下的 Pi/OpenCode/Claude/Codex、Provider/Worker/Harness、`+0/-0`、合法协议与 `[TOKEN]` 脱敏；见 [R4.3/R4.4 live Host evidence](../evidence/2026-09-04-open-harness-v2-r4.3-r4.4-live-host.md) 与 [generation 78 evidence](../evidence/2026-09-05-open-harness-v2-generation-78-four-harness-smoke.md) | 真实移动设备键盘/IME 与刘海/手势区验收已按用户指示暂缓；仍需完整交互/运维/安全阻断清单、release-owner 与独立签署 |
 | L6 hard cut | **未执行** | `v2_only`、Pi 默认值和 V1 只读已有实现与 Runbook 路径 | R5 维护窗口及切换后 evidence |
 
 正式 benchmark 的当前汇总如下；详细任务与失败链只在 R3 evidence 中维护：
@@ -109,6 +118,7 @@ Task 420 的真实 Pi/Provider 12 只读复测又暴露了交付摘要 Mermaid �
 - [Task #348 启动延迟 evidence](../evidence/2026-09-02-task-348-startup-delay.md)
 - [R4.1/R4.2 Kit boundary candidate evidence](../evidence/2026-09-03-open-harness-v2-r4.1-kit-boundary.md)
 - [R4.3/R4.4 live Host evidence](../evidence/2026-09-04-open-harness-v2-r4.3-r4.4-live-host.md)
+- [Profile 4 generation 78 four-Harness smoke evidence](../evidence/2026-09-05-open-harness-v2-generation-78-four-harness-smoke.md)
 - [R4.5 security/release audit](../evidence/2026-09-04-open-harness-v2-r4.5-security-release-audit.md)
 - [Worker Kit 校验边界设计决策](../specs/2026-09-03-worker-kit-validation-boundary-design.md)
 - [V2 schema 与 benchmark 口径](../../architecture/open-harness-v2-schemas.md)
@@ -144,11 +154,18 @@ R4 是当前唯一可推进工作包。以下六项必须在同一最终 candida
 | 编号 | 工作项 | 必须形成的结果 |
 | --- | --- | --- |
 | R4.1 | **完成（当前 candidate）**：V2 只接受 installer-managed content-addressed 路径；完整校验留在 build/install/admin Verify；Snapshot 冻结 selected-Harness identity；Scheduler/Worker/launcher 成功热路径不扫描完整 Kit | 聚焦回归、Kit 0.6.14、新 Kit 安装与四 Harness Verify/smoke、5 条 warm-start（中位 1.834s、最大 4.137s）、TTL 过期成功路径与 selected-CLI digest 受控失败；Task 421 还通过了正确挂载 Nix closure 与 `/workspace` tmpfs 后的 launcher/content Verify；见 [R4.1/R4.2 evidence](../evidence/2026-09-03-open-harness-v2-r4.1-kit-boundary.md) |
-| R4.2 | **当前 exact candidate artifact 已冻结，发布签署仍开放**：完成 R3 后源码/组合影响面审计，生成新 Kit/Bundle，并在目标 Host 完整 Verify；初始 Backend/Scheduler image 来自 committed tree `40235196`，随后 `48b16fdc` 的 Scheduler 取消日志分类修复以 `sha256:334c674d…` 重建部署；`594bf67a` 的取消通知生命周期修复曾以 `sha256:92321ff2…` 重建 Backend/Scheduler，Profile 4 generation 74 是当时有效的前一候选；随后 `e0d487ec` 的增量 receipt ingest 修复以当前 remote image `sha256:2cff3fd7…` 重建，当前 Backend/Scheduler 仍保持该 image，Profile 4 已更新为 generation 77 并重新 Verify Kit `0.6.14`，Task 421 绑定 Bundle 177；`59d55585` 的 Mermaid 摘要规范化修复随 Kit `0.6.14-linux-amd64-d461d040694b` 安装并由真实 Task 421 复核；另以本轮 launcher 兼容性修复构建并安装了独立 V1-compatible Kit `0.6.13-v1-compat2` | 冻结 V2 exact cohort 的 Worker/Kit/Profile/Adapter/Host identity 与 Bundle 170/171/172/173 可追溯；Pi/Claude/OpenCode 的 Task 380/381/382、复用 Pi Bundle 170 的 Task 383，以及修复后 Claude Tasks 387/388/389、OpenCode Task 390、Codex Task 391/392/394 均有对应 evidence。Task 391 是 Provider 4 的当前 exact `403 unsupported_country_region_territory` 负向样本，Tasks 392/394 则是 Provider 12 的当前 exact Codex/Pi success；Task 419 是 generation 75 / Bundle 175 的额外 OpenCode 真实 Provider 复核，Task 421 是 generation 77 / Bundle 177 的额外 Pi 真实 Provider 复核，二者均不加入冻结 cohort；V1 Profile 5 / Bundle 174 / Task 399 是独立 legacy evidence，不并入 V2 exact cohort。旧 Backend image 与 generation-73 Bundle 166–169 仍保留为历史 evidence，不能与当前 exact image 混称；R4 release-owner sign-off、签名包与维护窗口仍未完成 |
+| R4.2 | **当前 exact candidate artifact 已冻结，发布签署仍开放**：完成 R3 后源码/组合影响面审计，生成新 Kit/Bundle，并在目标 Host 完整 Verify；初始 Backend/Scheduler image 来自 committed tree `40235196`，随后 `48b16fdc` 的 Scheduler 取消日志分类修复以 `sha256:334c674d…` 重建部署；`594bf67a` 的取消通知生命周期修复曾以 `sha256:92321ff2…` 重建 Backend/Scheduler，Profile 4 generation 74 是当时有效的前一候选；随后 `e0d487ec` 的增量 receipt ingest 修复以当前 remote image `sha256:2cff3fd7…` 重建，当前 Backend/Scheduler 仍保持该 image，Profile 4 先更新为 generation 77 并重新 Verify Kit `0.6.14`，Task 421 绑定 Bundle 177；`59d55585` 的 Mermaid 摘要规范化修复随 Kit `0.6.14-linux-amd64-d461d040694b` 安装并由真实 Task 421 复核；随后正常管理员 Verify 将 Profile 4 更新为 generation 78，Tasks 425–428 分别绑定 Bundle 181/182/183/184 并完成新 generation 的四 Harness 真实复核；另以本轮 launcher 兼容性修复构建并安装了独立 V1-compatible Kit `0.6.13-v1-compat2` | 冻结 V2 exact cohort 的 Worker/Kit/Profile/Adapter/Host identity 与 Bundle 170/171/172/173 可追溯；Pi/Claude/OpenCode 的 Task 380/381/382、复用 Pi Bundle 170 的 Task 383，以及修复后 Claude Tasks 387/388/389、OpenCode Task 390、Codex Task 391/392/394 均有对应 evidence。Task 391 是 Provider 4 的当前 exact `403 unsupported_country_region_territory` 负向样本，Tasks 392/394 则是 Provider 12 的当前 exact Codex/Pi success；Task 419 是 generation 75 / Bundle 175、Task 421 是 generation 77 / Bundle 177、Tasks 425–428 是 generation 78 / Bundle 181–184 的额外真实 Provider 复核，均不加入冻结 cohort；V1 Profile 5 / Bundle 174 / Task 399 是独立 legacy evidence，不并入 V2 exact cohort。旧 Backend image 与 generation-73 Bundle 166–169 仍保留为历史 evidence，不能与当前 exact image 混称；R4 release-owner sign-off、签名包与维护窗口仍未完成 |
 | R4.3 | **部分 evidence，未签署**：已覆盖 390×844 与桌面真实交互、长文本、编辑器焦点、底部操作区、创建表单与已有 Issue 的四 Harness 选择、实时 command/ACK、刷新连续性、运行完成过渡与 `freeform` 模式显示；两次 remote backend-only restart probe（Tasks 369/370）仍保留为上游 `rate_limited` 负向样本；Task 371 使用既有成功 Provider 7/OpenCode，在 `sleep 180` 期间完成一次仅 nginx 的真实前端入口断线/重连，页面保持挂载并以连续事件完成；已补充 structured SSE stale-source 生命周期防护及 3 个竞态回归测试，并在 `a6be3f8b` 中启用 `viewport-fit=cover`、补齐移动 shell/drawer 安全区避让；前端全量回归 80 files/1692 tests、production build 与目标 Host nginx-only 产物复核通过；Task 399 在 Profile 5/Bundle 174 上以 V1 合同成功完成，随后临时 `v2_only` 下真实 Task detail 显示 `Legacy V1 · 只读`，摘要、事件流和统计可读；Task 400 又在清理后的 Host 上以 Profile 4/Bundle 170、Pi、Provider 12 完成独立 V2 只读 smoke，真实 `/tasks/400` 桌面详情页显示 Provider/Worker/Harness 上下文、摘要、事件流、原始日志和运行统计；Task 410 的失败详情修复后，已在实际服务的 `/tasks/410` 页面复核 canonical 上游 403 文案；Task 421 的实际 `/tasks/421` 桌面详情又显示了完成状态、Provider/Worker/Pi、plan/fresh、0 变更、摘要和事件流；Task 422/423/424 的 served `/tasks/...` 页面又显示了当前四 Harness 补强中的 OpenCode/Claude/Codex 上下文、合法协议原始日志、`+0/-0` 与 token 脱敏；服务保持 `dual_canary`；见 live Host evidence | 真实移动设备键盘/IME 与刘海/手势区验收已按用户指示暂缓，不进入本轮远端执行；仍需完整交互/运维/安全阻断清单、release-owner 与独立签署 |
 | R4.4 | **部分 evidence，未签署**：旧 cohort 已覆盖 Tasks 357–379 的四 Harness 成功/失败、startup/失败分类、command latency、usage、canonical terminal、archive、raw-log、delivery、seq 连续性，以及当前活跃队列/Issue lock/secret-like 扫描快照；exact Worker/Kit/Bundle composition 的 V2 成功 cohort 仍为 Tasks 380/381/382/383/388/389/390/392/394：Pi/Claude/OpenCode/Pi/Claude/Claude/OpenCode/Codex/Pi，Bundle 170/171/172/173，共 9 个成功 attempt、740 条唯一且连续 receipt，均为 `run.completed`；Task 399 是独立 V1 Codex/Provider 12 success（14 条 `codify.worker.event/v1` receipt，seq 1–14，raw-log 5 chunks/2289 bytes，归档 3796 bytes，零变更），不加入 V2 integrity cohort；清理后核心合法 Provider 矩阵为 Task 400 Pi/Provider12、Task 403 OpenCode/Provider12、Task 404 Claude/Provider6、Task 405 Codex/Provider12，分别为 Bundle 170/172/171/173、42/44/22/18 条连续且唯一 receipt，均为零变更 `run.completed`；Task 401 是额外 Pi 重复样本，Task 402 是 Provider7 的 OpenCode alternate，均不加入冻结的 380–394 cohort；Task 406 和 Task 407 在独立 Mattermost 10.9.1 上完成真实 `task_completed` 投递，Task 407 验证了目标 Host URL；Task 409 在当前取消通知修复 image 上完成真实 OpenCode/Provider 12 `task_cancelled` 投递，Task 410 又完成真实 Codex/Provider 4 `task_failed` 投递，Task 419 又完成当前 generation 75 / Bundle 175 的真实 OpenCode completion 与归档完整性复核，Task 421 又完成 current generation 77 / Bundle 177 的真实 Pi completion、1158 contiguous receipt 与摘要校验复核；Task 422/423/424 又在 Bundle 178/179/180 上分别完成真实 OpenCode/Claude/Codex completion，123/48/19 条 receipt 与 Mattermost `task_completed/success`；这些额外 Task 的 delivery row 与频道消息均为单条 `success`，均不加入冻结 cohort；395–398 的旧镜像缺失、V1 manifest/digest 边界失败已保留为调试边界证据 | V2 exact Task-ID 380–394 仍为 14 attempts/824 receipts/824 distinct event IDs，完整性和 token-like scan 结果不变；Task 400–410、419、421–424 只补强 post-cleanup runtime/cleanup/real-notification evidence，不改变 exact cohort、Provider 边界或发布结论；Task 407 的 Mattermost completion message 使用 `http://192.168.50.129:8880/tasks/407`，Task 409 的 cancellation message 使用 `http://192.168.50.129:8880/tasks/409`，Task 410 的 failure message 使用 `http://192.168.50.129:8880/tasks/410`，Task 419 的 delivery row 为 `mattermost_notification_deliveries.id=12`，Task 421 的 delivery row 为 `mattermost_notification_deliveries.id=14`，Task 422/423/424 的 delivery row 为 `mattermost_notification_deliveries.id=15/16/17`；完整阻断指标审阅与正式零 P0/P1 签署仍开放 |
 | R4.5 | **部分 evidence，未签署**：secret scan、源码/前端验证、GitLab 有效配置的只读连接测试、远端磁盘与 `dual_canary` 状态已记录；当前只读权限复核确认 `ai-bot` 为 `Maintainer`、允许创建顶层组，GIMR OAuth 具有 `write_repository`/`write_virtual_registry`，启用 Provider 的 credential records 缺少 `version_metadata`；远端数据库仍在 077，而 Backend/Scheduler image 已包含 078 且 `AUTO_MIGRATE=false`，唯一待由维护 owner 处理的 legacy Provider 是 Provider 11，关联 23 个 Task/Snapshot（含当前 Task 388）；078 专门测试 16 passed、focused Ruff passed，事务回滚审计确认迁移会删除 Provider 11 并将 23 个 Task 的 `provider_id` 置空；`594bf67a` 的前一候选 image 为 `sha256:92321ff2…`，随后 `e0d487ec` 重建了当前 Backend/Scheduler image `sha256:2cff3fd7…`（无 Git revision OCI label），`59d55585` 的 delivery-summary Mermaid 修复通过 focused set `136 passed` 并随 Kit `0.6.14` 在真实 Task 421 上复核；V1 Profile 5 使用已验证 Kit `0.6.13-v1-compat2`/manifest `d97f2157bbe7…`；Mattermost 10.9.1 已作为独立 debug 服务部署并完成连接、completion、cancellation、failure、Task 419 与 Task 421 completion 的真实投递 smoke，凭据只保存在远端受限文件中；Task 421 后根文件系统约 2.0GB 可用（97%），Docker BuildKit cache 为 0，前序满盘处置仅清理已核验的 Codify debug build artifacts/cache，未触碰 Mattermost/GitLab/数据库/卷或 active/unknown Worker（`quirky_allen` 保留）；未形成 release-owner 签名包 | 必须先由 owner 收敛 GitLab/OAuth 最小授权、有效凭据来源与轮换/撤销记录；备份并执行已评审的 078 后重做受影响历史 Snapshot、Profile/Bundle/Task 验证；当前 Host 的 `FRONTEND_URL` 已通过临时 Compose override 修正并由 Tasks 407/409/410 实投验证，但仓库通用模板仍不绑定具体 Host，后续部署必须显式提供正确 URL；另需 release notes/签名包、旧 Kit/Image 退役时点、维护窗口/责任人、P0/P1 零阻断与发布例外确认 |
 | R4.6 | 汇总 R1–R4 evidence，记录已知上游能力边界和停止条件，召开独立 hard-cut go/no-go | 明确签署 `GO` 或 `NO-GO`；`GO` 必须绑定 exact identity、目标 Host、R5 窗口与 owner |
+
+**R4.3/R4.4 current-generation amendment:** Profile 4 generation 78 的 Tasks
+425–428 已补齐当前 Kit 的 Pi/OpenCode/Claude/Codex 真实 Provider completion、
+canonical archive、协议/脱敏扫描、Mattermost success delivery 和 served desktop
+detail；它们仍只是补充 evidence。Task 425 的摘要 validation 为 `ok=false`，Task 426
+没有独立 `delivery_summary` payload，因此不能作为“交付摘要全绿”或正式 L5 交互/运维签署。
+R4.3–R4.6、release-owner、安全/权限/轮换、签名包与独立 go/no-go 仍开放。
 
 注：R4.5 行中的 1.4GB/“尚未触发清理”是 Task 410 通知复核时点的历史快照；随后 nginx 构建实际触发满盘处置，最终状态与清理范围以本节后面的 `served failure-summary visibility and disk recovery` 记录为准。
 
@@ -159,11 +176,13 @@ ingest 修复将当前 image 更新为 `sha256:2cff3fd7…`。Profile 4 已重�
 generation 75，Task 415–418 的不可变 snapshot 与后续 continuation 记录该
 Worker/Kit/Bundle identity。
 
-当前 candidate 以 Profile 4 generation 77、Kit `0.6.14`（manifest SHA-256
+当前 candidate 以 Profile 4 generation 78、Kit `0.6.14`（manifest SHA-256
 `d461d040694b20b88944a88de47b5ad78188f91d74d528421cdef44b68274035`）和
-Bundle 177（digest `20634962827d632e003fe0d5b87b974af22b66c0ad7c785ac6c407dfb60d51e1`）为准。
-Task 421 已在该 composition 上完成真实 Pi/Provider 12 只读复测；前述 generation 75/Bundle 175
-记录保留为历史补充 evidence，不与当前 identity 混称。
+Bundle 181/182/183/184 为准；前一 generation 77 / Bundle 177–180 的 Task 421–424
+记录保留为历史补充 evidence，不与当前 identity 混称。Tasks 425–428 已在 generation 78
+上完成真实 Pi/OpenCode/Claude/Codex 只读复测；readiness 仅在 Verify 记录的
+`2026-09-05 12:03:31.418387` 至 `12:18:31.417926` TTL 窗口内为 `ready`，过期后按合同为
+`unknown`，不能作为持续发布许可。
 
 **R4 退出条件：** R4.1–R4.6 全部有当前 evidence，阻断项为零，并由独立发布评审明确批准进入 R5。
 当前 R4.1/R4.2 有 candidate evidence，R4.3/R4.4 仍只有部分 evidence；没有签署即保持
@@ -684,3 +703,21 @@ revision 仍为 `077_v2_worker_kit_identity`。当前 `0.6.14` readiness 记录�
 按既定语义只能派生为 `unknown`；未为刷新 readiness 重新 Verify，以避免无必要地改变 Profile generation/
 identity。Task 424 的 Scheduler 日志显示已完成 archive fallback、receipt 持久化与成功 delivery；容器退出
 后的 canonical-tail 409 属于已有的非阻断 warning，不改变 `run.completed` 或归档结果。
+
+## 2026-09-05 continuation: Profile 4 generation 78 / Tasks 425–428
+
+按“ready 只在 TTL 窗口内有效”的语义，先通过正常管理员 Verify 将 Profile 4 从 generation 77
+更新为 generation 78；随后使用现有 Provider 完成四个合法 Harness×protocol 组合的真实只读 smoke：
+Pi/Provider 12、OpenCode/Provider 12、Claude/Provider 6、Codex/Provider 12，分别对应
+`openai_responses`、`openai_responses`、`anthropic_messages`、`openai_responses`。四个 Task
+均以 `run.completed`、闭合 `control_state`、零代码变更、canonical archive 连续唯一 receipt 和
+Mattermost `task_completed/success` 收尾；Bundle 为 181/182/183/184，完整归档与扫描数据见
+[generation 78 evidence](../evidence/2026-09-05-open-harness-v2-generation-78-four-harness-smoke.md)。
+
+本轮还完成了 `/tasks/425`–`/tasks/428` 的 served desktop detail 核对，以及目标 Host 的
+服务、数据库、队列锁、Mattermost 10.9.1 和磁盘状态复核。Task 425 的模型 Mermaid 输出仍使
+delivery-summary validation 为 `ok=false`，Task 426 未写入独立 `delivery_summary` payload；这两项
+被保留为交付摘要边界，不改写为执行失败或“摘要全绿”。目标 Host 仍保持 `dual_canary`，未执行
+migration 078、`v2_only` 或 R5/L6；磁盘约 97% 使用但尚未达到满盘清理触发条件，未执行新的清理。
+真实移动设备键盘/IME/刘海/手势区验收继续按用户指示暂缓；R4.3–R4.6 与 release-owner/安全/权限/
+轮换/签名包/独立 go/no-go 仍是剩余项。
