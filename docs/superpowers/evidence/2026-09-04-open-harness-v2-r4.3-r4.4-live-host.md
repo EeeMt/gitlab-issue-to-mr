@@ -5,8 +5,8 @@
 **Scope:** Current R4 candidate on `192.168.50.129`, mobile/desktop browser
 interaction checks, four-Harness live smoke attempts, one live command-plane
 run, four current exact Worker/Kit/Bundle-composition cancellation samples,
-one controlled nginx-only disconnect/reconnect, and the resulting Host/Task
-runtime evidence.
+one post-fix current-composition success sample, one controlled nginx-only
+disconnect/reconnect, and the resulting Host/Task runtime evidence.
 
 This is candidate evidence, not an L5 go/no-go decision. R4.3–R4.6 remain
 partially open until the complete acceptance, operational, security/release,
@@ -53,16 +53,19 @@ The exact-composition positive cohort is:
 | 381 | Claude / Provider 11 `openrouter-minimax-anthropic` | 171 (`5a5bbd30…`) | `completed`, zero changes | Adapter `1.0.1`, CLI `2.1.153`, usage 2655/327, raw-log 6 chunks, 17 receipts, seq 1–17, terminal `run.completed` |
 | 382 | OpenCode / Provider 7 `openrouter-free` | 172 (`9ed188ca…`) | `completed`, zero changes | Adapter `2.0.0`, CLI `1.18.19`, usage 89/58, raw-log 4 chunks, 40 receipts, seq 1–40, terminal `run.completed` |
 | 383 | Pi / Provider 6 `opencode-pi` (`deepseek-v4-flash`) | 170 (`e812376c…`, reused Pi variant) | `completed`, zero changes | `anthropic_messages`; Adapter `2.1.0`, CLI `0.84.2`, usage 96/181, raw-log 4 chunks, 296 receipts, seq 1–296, terminal `run.completed`; two early `control_owner_unreachable` gate-probe warnings self-recovered |
+| 388 | Claude / Provider 11 `openrouter-minimax-anthropic` | 171 (`5a5bbd30…`, reused Claude variant) | `completed`, zero changes | post-fix image; Adapter `1.0.1`, CLI `2.1.153`, usage 3512/724, raw-log 7 chunks, 19 receipts, seq 1–19, terminal `run.completed` |
 
-All four tasks used fresh sessions and the existing read-only smoke prompt.
-The four attempts contain 397 unique contiguous receipts and no active Task
-or Issue execution lock remains. The current exact composition has no Codex
-success sample because the currently available Codex-legal Providers remain
-bounded by the previously recorded upstream 429/403 availability failures;
-that is an explicit Provider boundary, not a claim of runtime failure.
+All five tasks used fresh sessions and the existing read-only smoke prompt.
+Tasks 380–383 contain 397 unique contiguous receipts; Task 388 adds 19 more,
+for 416 receipts across the five exact-composition success attempts. No active
+Task or Issue execution lock remains. The current exact composition has no
+Codex success sample because the currently available Codex-legal Providers
+remain bounded by the previously recorded upstream 429/403 availability
+failures; that is an explicit Provider boundary, not a claim of runtime
+failure.
 
 Task #384 is a separate current-composition cancellation sample and is not
-counted in the four-success cohort above. It used OpenCode with Provider 7
+counted in the exact-composition success cohort above. It used OpenCode with Provider 7
 (`openrouter-free`) on Bundle 172, with a fresh session and the read-only
 `pwd` plus `sleep 180` prompt. The operator cancelled while the sleep was
 running; the task ended `cancelled` with `MessageAbortedError: Aborted`, zero
@@ -132,6 +135,23 @@ canonical cancellation receipts and archive were already persisted. The
 post-fix Scheduler emitted exactly one `Task 387 cancelled` INFO line and no
 `Task 387 failed` line.
 
+Task #388 is the post-fix current-composition success sample for Claude. It
+used the same Provider 11 (`openrouter-minimax-anthropic` /
+`minimax/minimax-m3:free`), Bundle 171, fresh session, Adapter `1.0.1`, and
+CLI `2.1.153` as Task #387, but completed the read-only smoke on the rebuilt
+Backend/Scheduler image. The task ended `completed` with zero changes and no
+Issue lock. Attempt `task-388-attempt-1-7c1e218d55ee` closed with 19 unique
+contiguous receipts (seq 1–19), including `worker.finalization(exit_code=0,
+diff.total=0)` and terminal `run.completed(status=completed)`. The runtime
+archive was finalized at 7586 bytes with SHA-256
+`27852b5a58f264f0cd881030b9c44dc647fd0cf759df61c6421fba6112fb8acf`, raw-log
+persistence has 7 chunks / 8486 bytes, and the Worker container was removed.
+The expected post-exit canonical-tail 409 was non-blocking after the archive
+and receipts were persisted. Scheduler emitted one `Task 388 completed
+successfully` INFO line, with no failure terminal; the authenticated task
+detail page showed `completed`, Claude, Provider 11, the exact Worker image,
+20 seconds, 3512 input / 724 output tokens, and `+0 -0` changes.
+
 ## Candidate and validation boundary
 
 - The Worker runtime image, Worker Kit `0.6.12`, and frozen CLI identities remain
@@ -143,7 +163,7 @@ post-fix Scheduler emitted exactly one `Task 387 cancelled` INFO line and no
 - Commit `48b16fdc` is a Scheduler-only post-fix change: unsuccessful Worker
   outcomes are logged after the final Task row is loaded, so a final
   `cancelled` status produces an INFO cancellation line rather than a generic
-  failure ERROR. The remote Backend/Scheduler image for Task #387 is
+  failure ERROR. The remote Backend/Scheduler image for Tasks #387 and #388 is
   `sha256:334c674d…`; the Worker/Kit/Profile/Bundle/Adapter/CLI composition is
   unchanged from Tasks 380–386.
 - Commit `84ab6422` fixes an API-only omission: Issue detail serialization now
@@ -579,8 +599,9 @@ classification, command latency, usage, canonical terminal, archive, raw-log
 finalization, delivery samples, and the current queue/lock/secret-scan
 snapshot. The exact-composition candidate adds successful Pi/Claude/OpenCode/Pi
 samples (#380–#383) on Bundles 170/171/172; Task 383 reuses the Pi Bundle 170
-variant with Provider 6 over `anthropic_messages`. The pre-fix Backend image's
-current exact OpenCode, Pi, and Claude cancellation samples are Tasks 384,
+variant with Provider 6 over `anthropic_messages`, and post-fix Task #388 adds
+a second Claude success on Bundle 171. The pre-fix Backend image's current
+exact OpenCode, Pi, and Claude cancellation samples are Tasks 384,
 385, and 386 on Bundles 172, 170, and 171; post-fix Task #387 repeats the
 Claude cancellation path on Bundle 171 and verifies the corrected Scheduler
 log classification. The generation-73 samples
@@ -609,12 +630,15 @@ The generation-73 Bundle 166–169 receipt recheck remains historical evidence:
 six attempts (#374–#379) contain 119 contiguous receipts in total, each with
 one Harness terminal and one Task terminal. The exact-composition Bundle
 170/171/172 recheck adds four attempts (#380–#383) with 397 contiguous,
-unique receipts and one `run.completed` terminal per attempt. Bundle 163/164
+unique receipts and one `run.completed` terminal per attempt; post-fix Task
+#388 adds a fifth attempt with 19 contiguous receipts and one `run.completed`
+terminal. Bundle 163/164
 and Task 368/371/372 are retained as historical generation-72 evidence;
 Bundle 165 and Task 373 are explicitly superseded by the Pi session-projection
 defect. Tasks 384, 385, and 386 add separate 15-, 40-, and 8-receipt
 pre-fix current-composition cancellation chains, while Task #387 adds a
-post-fix 9-receipt chain, all ending in `run.failed(status=cancelled)`.
+post-fix 9-receipt chain ending in `run.failed(status=cancelled)` and Task
+#388 adds a post-fix 19-receipt success chain ending in `run.completed`.
 The expanded cohorts pass the frozen status/terminal mapping,
 duplicate-terminal, sequence, and secret-like checks, while leaving the exact
 composition Codex success, live alert delivery to a real Mattermost service,
