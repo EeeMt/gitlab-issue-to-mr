@@ -812,3 +812,8 @@ event ID 唯一。Mattermost delivery 18–27 全部为 `success`，其中 18/19
 仍健康；根盘约 97% 使用、可用 2.0GB，未触发新的清理。这补强 R4.4 的当前 generation 数据库、
 通知和队列收敛证据，但不替代 R4.3–R4.6 正式签署、release-owner 材料、migration 078、
 `v2_only`、R5/L6 或用户暂缓的真实移动设备验收。
+
+本轮还将当前 R4.5 owner handoff snapshot 固化到审计文档：绑定目标 Host、Profile 4 generation 78、
+Kit/Worker/Backend identity、数据库 revision 和 preflight 结果，并把凭据最小权限/轮换、078 迁移 owner、
+签名 package/release notes、retention/maintenance owner 及独立 R4.6 `GO`/`NO-GO` 作为待填写字段。
+该 snapshot 明确是 unsigned handoff，不改变 `dual_canary`，也不把过期 readiness 当作发布许可。

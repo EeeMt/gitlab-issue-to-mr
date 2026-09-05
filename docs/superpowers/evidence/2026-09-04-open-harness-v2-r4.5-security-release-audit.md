@@ -1172,3 +1172,33 @@ receipt/`last_seq`、连续 seq 和唯一 event ID 均一致；Mattermost delive
 `success`。当前 readiness 行仍为存储 `ready`/generation 2，但 `ready_until` 已过期，按合同为
 有效状态 `unknown`；数据库 revision 为 `077_v2_worker_kit_identity`，active Task 与 Issue lock
 均为 0。该复核补强 R4.4 的当前运维收敛证据，但不改变 R4.5 的安全/owner 签署边界。
+
+## R4.5 owner handoff snapshot (unsigned)
+
+The following is the handoff boundary for the current development candidate. It
+is a checklist and identity record, not a release approval:
+
+| Field | Current evidence |
+| --- | --- |
+| Target Host / mode | `192.168.50.129`, `HARNESS_EXECUTION_MODE=dual_canary`, `AUTO_MIGRATE=false` |
+| Database | `077_v2_worker_kit_identity` |
+| V2 Profile | Profile 4, generation 78; readiness `ready_until` is expired and therefore effective `unknown` |
+| Worker Kit | `0.6.14-linux-amd64-d461d040694b`; manifest `d461d040694b20b88944a88de47b5ad78188f91d74d528421cdef44b68274035`; archive `bd6debd99c411cb6a50d1628f09d1fbe3127fffac11038ea8d58f5b512668251` |
+| Worker image | `127.0.0.1:5000/codify-worker/java21-maven@sha256:234582c692d1ebb00ba8e882160618c2258463149d968009ac81c545e63a538b`, `linux/amd64` |
+| Backend/Scheduler image | Compose image label `sha256:2cff3fd7eb27d21625614785cf6d5f37bc538f6851775253a9a379b6b6360161` |
+| Technical release preflight | Passed with manifest/content inventory checks; no signed package attached |
+
+Before R4.5/R4.6 can be signed, the owner packet must add all of the
+following without inferring them from the development smoke:
+
+| Required owner input | Required result |
+| --- | --- |
+| Provider/GitLab/OAuth credential owner | Least-privilege scopes, effective credential source, rotation timestamp, revocation/rollback procedure, and confirmation of account controls |
+| Migration owner | Backup/recovery point, decision for migration 078, and post-migration re-verification plan for Provider 11 and its 23 historical references |
+| Release owner | Exact release notes, signed package/manifest, and signature identity bound to the table above |
+| Operations owner | Kit/image retention and retirement dates, maintenance window, rollback owner, and observation window |
+| Independent reviewer | Current R4.3–R4.5 P0/P1 review, exceptions, and explicit R4.6 `GO`/`NO-GO` |
+
+No names, timestamps, signatures, or release decisions are invented here. A
+fresh administrator Verify, if required for a release decision, creates a new
+Profile generation and must update this identity record before anyone signs it.
