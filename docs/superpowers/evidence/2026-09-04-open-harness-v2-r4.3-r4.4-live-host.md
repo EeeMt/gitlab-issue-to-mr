@@ -47,6 +47,17 @@ reported zero resumed/awaiting/failed Tasks. The database contains no V1 Task
 acceptance; that acceptance remains open and is not fabricated from the V2
 detail page.
 
+A separate live V1 creation probe was attempted after the preflight. Issue
+`#105` was created with enabled legacy-looking Profile 1
+`kit-owned-0.4.0-dev`, Provider 12, Codex, and the read-only acceptance prompt.
+The authenticated UI showed the Profile/Harness selection, but the Backend
+rejected `POST /api/tasks` at `2026-09-05T03:35:34Z` with
+`WorkerProfileValidationError: explicit V2 Profile has no verified CLI identity
+for Harness 'codex'`. The Issue remains open with zero Tasks; the database still
+has zero V1 Tasks and zero Issue locks. No database/profile bypass was used, so
+this is current creation-boundary evidence rather than live V1 execution
+evidence; V1 read-only acceptance remains open.
+
 The exact-composition positive cohort is:
 
 | Task | Harness / Provider | Bundle | Result | Attempt evidence |
