@@ -1039,3 +1039,37 @@ R4.5 migration/credential/release-owner checks, R4.6 independent go/no-go,
 R5/L6, and real mobile-device keyboard/IME/notch/gesture-area acceptance
 remain open. The mobile-device acceptance remains explicitly deferred per the
 user's instruction.
+
+## 2026-09-05 continuation: development URL rebind and Task 407
+
+The Task 406 message exposed the remote deployment's generic
+`frontend.example.test` URL. With zero active Tasks and zero Issue locks, the
+Backend and Scheduler were recreated using a temporary Compose override that
+set `FRONTEND_URL=http://192.168.50.129:8880`. The repository's generic
+`deploy/.env.test` template was not modified. The resulting containers report
+the corrected URL, `HARNESS_EXECUTION_MODE=dual_canary`, and
+`AUTO_MIGRATE=false`; the database remained at `077_v2_worker_kit_identity`.
+Mattermost and its separate database were not recreated.
+
+Task 407 was then created from Issue #99 using Profile 4, Provider 12
+`openrouter-minimax-responses`, OpenCode with `openai_responses`, fresh-session
+plan mode, and a read-only prompt. It completed with zero changes:
+
+| Item | Result |
+| --- | --- |
+| Task/runtime | Task 407, `completed`, `total_changes=0`, input/output tokens `156/933` |
+| Attempt | `task-407-attempt-1-65dc647fb191`, `codify.worker.event/v2`, OpenCode Adapter `2.0.0`, CLI `1.18.19`, `last_seq=472`, `run.completed`, `closed` |
+| Receipts | 472 receipts, seq 1–472 contiguous, 472 distinct seq values and 472 distinct event IDs |
+| Persistence | 5 raw-log chunks / 2725 bytes; runtime archive 50223 bytes; no `codify-407-issue99` container remained |
+| Codify delivery row | `mattermost_notification_deliveries.id=3`, `event_type=task_completed`, `status=success` |
+| Mattermost delivery | Bot post `oghjj97rmf8apm7oymcuetbjto` rendered `http://192.168.50.129:8880/tasks/407` in `codifydebug/notifications` |
+
+This resolves the current development Host's task-link defect and confirms
+the URL override through a real AI-backed task. The override is deployment
+state rather than a portable repository-template change, so future recreates
+must explicitly supply the target deployment's frontend URL.
+
+The V2 frozen integrity cohort remains unchanged. Formal zero-P0/P1 review,
+R4.5 owner/security/release evidence, R4.6 independent go/no-go, migration 078,
+R5/L6, and real mobile-device keyboard/IME/notch/gesture-area acceptance remain
+open; mobile-device acceptance is explicitly deferred by the user.

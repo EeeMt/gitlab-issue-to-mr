@@ -121,8 +121,8 @@ R4 是当前唯一可推进工作包。以下六项必须在同一最终 candida
 | R4.1 | **完成（当前 candidate）**：V2 只接受 installer-managed content-addressed 路径；完整校验留在 build/install/admin Verify；Snapshot 冻结 selected-Harness identity；Scheduler/Worker/launcher 成功热路径不扫描完整 Kit | 聚焦回归、Kit 0.6.12、新 Kit 安装与四 Harness Verify/smoke、5 条 warm-start（中位 1.834s、最大 4.137s）、TTL 过期成功路径与 selected-CLI digest 受控失败；见 [R4.1/R4.2 evidence](../evidence/2026-09-03-open-harness-v2-r4.1-kit-boundary.md) |
 | R4.2 | **当前 exact candidate artifact 已冻结，发布签署仍开放**：完成 R3 后源码/组合影响面审计，生成新 Kit/Bundle，并在目标 Host 完整 Verify；初始 Backend/Scheduler image 来自 committed tree `40235196`，随后 `48b16fdc` 的 Scheduler 取消日志分类修复以 `sha256:334c674d…` 重建部署；该修复不改变 Worker/Kit/Profile/Bundle/Adapter/Provider protocol identity，Profile 4 generation 74 仍有效；另以本轮 launcher 兼容性修复构建并安装了独立 V1-compatible Kit `0.6.13-v1-compat2` | 当前 exact Worker/Kit/Profile/Adapter/Host identity 与 Bundle 170/171/172/173 可追溯；Pi/Claude/OpenCode 的 Task 380/381/382、复用 Pi Bundle 170 的 Task 383，以及修复后 Claude Tasks 387/388/389、OpenCode Task 390、Codex Task 391/392/394 均有对应 evidence。Task 391 是 Provider 4 的当前 exact `403 unsupported_country_region_territory` 负向样本，Tasks 392/394 则是 Provider 12 的当前 exact Codex/Pi success；V1 Profile 5 / Bundle 174 / Task 399 是独立 legacy evidence，不并入 V2 exact cohort。旧 Backend image 与 generation-73 Bundle 166–169 仍保留为历史 evidence，不能与当前 exact image 混称；R4 release-owner sign-off、签名包与维护窗口仍未完成 |
 | R4.3 | **部分 evidence，未签署**：已覆盖 390×844 与桌面真实交互、长文本、编辑器焦点、底部操作区、创建表单与已有 Issue 的四 Harness 选择、实时 command/ACK、刷新连续性、运行完成过渡与 `freeform` 模式显示；两次 remote backend-only restart probe（Tasks 369/370）仍保留为上游 `rate_limited` 负向样本；Task 371 使用既有成功 Provider 7/OpenCode，在 `sleep 180` 期间完成一次仅 nginx 的真实前端入口断线/重连，页面保持挂载并以连续事件完成；已补充 structured SSE stale-source 生命周期防护及 3 个竞态回归测试，并在 `a6be3f8b` 中启用 `viewport-fit=cover`、补齐移动 shell/drawer 安全区避让；前端全量回归 80 files/1692 tests、production build 与目标 Host nginx-only 产物复核通过；Task 399 在 Profile 5/Bundle 174 上以 V1 合同成功完成，随后临时 `v2_only` 下真实 Task detail 显示 `Legacy V1 · 只读`，摘要、事件流和统计可读；Task 400 又在清理后的 Host 上以 Profile 4/Bundle 170、Pi、Provider 12 完成独立 V2 只读 smoke，真实 `/tasks/400` 桌面详情页显示 Provider/Worker/Harness 上下文、摘要、事件流、原始日志和运行统计；服务保持 `dual_canary`；见 live Host evidence | 真实移动设备键盘/IME 与刘海/手势区验收已按用户指示暂缓，不进入本轮远端执行；仍需完整交互/运维/安全阻断清单、release-owner 与独立签署 |
-| R4.4 | **部分 evidence，未签署**：旧 cohort 已覆盖 Tasks 357–379 的四 Harness 成功/失败、startup/失败分类、command latency、usage、canonical terminal、archive、raw-log、delivery、seq 连续性，以及当前活跃队列/Issue lock/secret-like 扫描快照；exact Worker/Kit/Bundle composition 的 V2 成功 cohort 仍为 Tasks 380/381/382/383/388/389/390/392/394：Pi/Claude/OpenCode/Pi/Claude/Claude/OpenCode/Codex/Pi，Bundle 170/171/172/173，共 9 个成功 attempt、740 条唯一且连续 receipt，均为 `run.completed`；Task 399 是独立 V1 Codex/Provider 12 success（14 条 `codify.worker.event/v1` receipt，seq 1–14，raw-log 5 chunks/2289 bytes，归档 3796 bytes，零变更），不加入 V2 integrity cohort；清理后核心合法 Provider 矩阵为 Task 400 Pi/Provider12、Task 403 OpenCode/Provider12、Task 404 Claude/Provider6、Task 405 Codex/Provider12，分别为 Bundle 170/172/171/173、42/44/22/18 条连续且唯一 receipt，均为零变更 `run.completed`；Task 401 是额外 Pi 重复样本，Task 402 是 Provider7 的 OpenCode alternate，均不加入冻结的 380–394 cohort；Task 406 又在独立 Mattermost 10.9.1 上完成一次真实 `task_completed` 投递（Provider 12/OpenCode/Bundle 172，82 条 V2 receipt，零变更），但不加入冻结 cohort；395–398 的旧镜像缺失、V1 manifest/digest 边界失败已保留为调试边界证据 | V2 exact Task-ID 380–394 仍为 14 attempts/824 receipts/824 distinct event IDs，完整性和 token-like scan 结果不变；Task 400–406 只补强 post-cleanup runtime/cleanup/real-notification evidence，不改变 exact cohort、Provider 边界或发布结论；Task 406 的 Mattermost delivery row 和真实频道消息均为 success，但 task link 仍继承开发 Host 的 `FRONTEND_URL=frontend.example.test`，链接可用性配置、完整阻断指标审阅与正式零 P0/P1 签署仍开放 |
-| R4.5 | **部分 evidence，未签署**：secret scan、源码/前端验证、GitLab 有效配置的只读连接测试、远端磁盘与 `dual_canary` 状态已记录；当前只读权限复核确认 `ai-bot` 为 `Maintainer`、允许创建顶层组，GIMR OAuth 具有 `write_repository`/`write_virtual_registry`，启用 Provider 的 credential records 缺少 `version_metadata`；远端数据库仍在 077，而 Backend/Scheduler image 已包含 078 且 `AUTO_MIGRATE=false`，唯一待由维护 owner 处理的 legacy Provider 是 Provider 11，关联 23 个 Task/Snapshot（含当前 Task 388）；078 专门测试 16 passed、focused Ruff passed，事务回滚审计确认迁移会删除 Provider 11 并将 23 个 Task 的 `provider_id` 置空；当前 Backend/Scheduler 已由 `48b16fdc` 重建为 `sha256:334c674d…` 并在 remote 运行（无 Git revision OCI label），V1 Profile 5 使用已验证 Kit `0.6.13-v1-compat2`/manifest `d97f2157bbe7…`；Mattermost 10.9.1 已作为独立 debug 服务部署并完成连接/真实投递 smoke，凭据只保存在远端受限文件中；本次部署后根文件系统约 1.2GB 可用（99%），尚未触发“满盘”清理，未触碰 active/未知 Codify Worker 镜像；未形成 release-owner 签名包 | 必须先由 owner 收敛 GitLab/OAuth 最小授权、有效凭据来源与轮换/撤销记录；备份并执行已评审的 078 后重做受影响历史 Snapshot、Profile/Bundle/Task 验证；另需修正/确认开发 Host 的 `FRONTEND_URL`、release notes/签名包、旧 Kit/Image 退役时点、维护窗口/责任人、P0/P1 零阻断与发布例外确认 |
+| R4.4 | **部分 evidence，未签署**：旧 cohort 已覆盖 Tasks 357–379 的四 Harness 成功/失败、startup/失败分类、command latency、usage、canonical terminal、archive、raw-log、delivery、seq 连续性，以及当前活跃队列/Issue lock/secret-like 扫描快照；exact Worker/Kit/Bundle composition 的 V2 成功 cohort 仍为 Tasks 380/381/382/383/388/389/390/392/394：Pi/Claude/OpenCode/Pi/Claude/Claude/OpenCode/Codex/Pi，Bundle 170/171/172/173，共 9 个成功 attempt、740 条唯一且连续 receipt，均为 `run.completed`；Task 399 是独立 V1 Codex/Provider 12 success（14 条 `codify.worker.event/v1` receipt，seq 1–14，raw-log 5 chunks/2289 bytes，归档 3796 bytes，零变更），不加入 V2 integrity cohort；清理后核心合法 Provider 矩阵为 Task 400 Pi/Provider12、Task 403 OpenCode/Provider12、Task 404 Claude/Provider6、Task 405 Codex/Provider12，分别为 Bundle 170/172/171/173、42/44/22/18 条连续且唯一 receipt，均为零变更 `run.completed`；Task 401 是额外 Pi 重复样本，Task 402 是 Provider7 的 OpenCode alternate，均不加入冻结的 380–394 cohort；Task 406 和 Task 407 又在独立 Mattermost 10.9.1 上完成真实 `task_completed` 投递，其中 Task 407 验证了目标 Host URL，均不加入冻结 cohort；395–398 的旧镜像缺失、V1 manifest/digest 边界失败已保留为调试边界证据 | V2 exact Task-ID 380–394 仍为 14 attempts/824 receipts/824 distinct event IDs，完整性和 token-like scan 结果不变；Task 400–407 只补强 post-cleanup runtime/cleanup/real-notification evidence，不改变 exact cohort、Provider 边界或发布结论；Task 407 的 Mattermost delivery row 和真实频道消息均为 success，链接已指向 `http://192.168.50.129:8880/tasks/407`，完整阻断指标审阅与正式零 P0/P1 签署仍开放 |
+| R4.5 | **部分 evidence，未签署**：secret scan、源码/前端验证、GitLab 有效配置的只读连接测试、远端磁盘与 `dual_canary` 状态已记录；当前只读权限复核确认 `ai-bot` 为 `Maintainer`、允许创建顶层组，GIMR OAuth 具有 `write_repository`/`write_virtual_registry`，启用 Provider 的 credential records 缺少 `version_metadata`；远端数据库仍在 077，而 Backend/Scheduler image 已包含 078 且 `AUTO_MIGRATE=false`，唯一待由维护 owner 处理的 legacy Provider 是 Provider 11，关联 23 个 Task/Snapshot（含当前 Task 388）；078 专门测试 16 passed、focused Ruff passed，事务回滚审计确认迁移会删除 Provider 11 并将 23 个 Task 的 `provider_id` 置空；当前 Backend/Scheduler 已由 `48b16fdc` 重建为 `sha256:334c674d…` 并在 remote 运行（无 Git revision OCI label），V1 Profile 5 使用已验证 Kit `0.6.13-v1-compat2`/manifest `d97f2157bbe7…`；Mattermost 10.9.1 已作为独立 debug 服务部署并完成连接/真实投递 smoke，凭据只保存在远端受限文件中；本次部署后根文件系统约 1.2GB 可用（99%），尚未触发“满盘”清理，未触碰 active/未知 Codify Worker 镜像；未形成 release-owner 签名包 | 必须先由 owner 收敛 GitLab/OAuth 最小授权、有效凭据来源与轮换/撤销记录；备份并执行已评审的 078 后重做受影响历史 Snapshot、Profile/Bundle/Task 验证；当前 Host 的 `FRONTEND_URL` 已通过临时 Compose override 修正并由 Task 407 实投验证，但仓库通用模板仍不绑定具体 Host，后续部署必须显式提供正确 URL；另需 release notes/签名包、旧 Kit/Image 退役时点、维护窗口/责任人、P0/P1 零阻断与发布例外确认 |
 | R4.6 | 汇总 R1–R4 evidence，记录已知上游能力边界和停止条件，召开独立 hard-cut go/no-go | 明确签署 `GO` 或 `NO-GO`；`GO` 必须绑定 exact identity、目标 Host、R5 窗口与 owner |
 
 **R4 退出条件：** R4.1–R4.6 全部有当前 evidence，阻断项为零，并由独立发布评审明确批准进入 R5。
@@ -204,13 +204,37 @@ persisted 82 contiguous unique receipts, 5 raw-log chunks / 2772 bytes, and a
 `task_completed=success`, and Mattermost returned a real Bot post for Task 406
 in the target channel.
 
-The notification payload still renders the task URL from the existing remote
-`FRONTEND_URL=http://frontend.example.test:8880`, while the target Host URL is
-`http://192.168.50.129:8880`. Transport and message formatting are therefore
-verified, but the development URL configuration remains an R4.4 follow-up
-before release sign-off. The real mobile-device keyboard/IME/notch/gesture-area
-acceptance remains explicitly deferred. The Host remains in `dual_canary`;
-migration 078, release-owner/security sign-off, R4.6, and R5/L6 remain open.
+At the Task 406 checkpoint, the notification payload still rendered the task
+URL from the generic remote `FRONTEND_URL=http://frontend.example.test:8880`,
+while the target Host URL was `http://192.168.50.129:8880`. The follow-up
+section below records the deployment override and Task 407 recheck. The real
+mobile-device keyboard/IME/notch/gesture-area acceptance remains explicitly
+deferred. The Host remains in `dual_canary`; migration 078,
+release-owner/security sign-off, R4.6, and R5/L6 remain open.
+
+### 2026-09-05 continuation: development URL rebind and Task 407
+
+The current remote Backend/Scheduler deployment was recreated with a temporary
+Compose override that set `FRONTEND_URL=http://192.168.50.129:8880` only for
+those two services. The repository's generic `deploy/.env.test` template was
+not changed, the database remained on `077_v2_worker_kit_identity`,
+`AUTO_MIGRATE=false`, `dual_canary` remained enabled, and no task or Issue lock
+was active during the recreation.
+
+Task 407 was then created from Issue #99 using Profile 4, Provider 12
+`openrouter-minimax-responses`, OpenCode with `openai_responses`, fresh-session
+`plan` mode, and a read-only prompt. It completed with zero changes. The V2
+attempt `task-407-attempt-1-65dc647fb191` closed with `run.completed`, 472
+contiguous unique receipts, 5 raw-log chunks / 2725 bytes, and a 50223-byte
+runtime archive. Codify recorded delivery row 3 as
+`task_completed=success`; the real Mattermost message rendered
+`http://192.168.50.129:8880/tasks/407`.
+
+This resolves the current Host's notification-link defect without changing the
+portable repository template. Future remote recreations must provide the
+deployment's real frontend URL explicitly. Formal zero-P0/P1 review, R4.5
+owner/security/release evidence, R4.6 independent go/no-go, migration 078,
+R5/L6, and real mobile-device acceptance remain open.
 
 ### R5 — 在独立维护窗口执行 L6
 

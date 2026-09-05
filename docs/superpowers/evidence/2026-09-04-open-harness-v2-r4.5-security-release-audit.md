@@ -614,3 +614,30 @@ remove only unreferenced Codify debug images/cache. Migration 078, credential
 and least-privilege review, release package/signatures, URL configuration,
 release-owner sign-off, R4.6, R5/L6, and real mobile-device acceptance remain
 open; the latter is explicitly deferred by the user.
+
+## 2026-09-05 continuation: frontend URL correction
+
+The Mattermost Task 406 card showed that the running development deployment
+still used the generic `frontend.example.test` value. Because the Host had zero
+active Tasks and zero Issue locks, Backend and Scheduler were recreated with a
+temporary Compose override setting
+`FRONTEND_URL=http://192.168.50.129:8880`. The generic repository
+`deploy/.env.test` template was left unchanged; this was a Host deployment
+override only. Backend remained healthy, Scheduler remained in `dual_canary`,
+`AUTO_MIGRATE=false` remained set, and the database stayed at
+`077_v2_worker_kit_identity`.
+
+Task 407 then completed through the existing Provider 12/OpenCode legal
+`openai_responses` path on Bundle 172. It had zero changes, a closed V2
+attempt with 472 contiguous unique receipts, 5 raw-log chunks / 2725 bytes,
+and a 50223-byte archive. Codify recorded
+`mattermost_notification_deliveries.id=3` as `task_completed/success`; the
+real Mattermost card used `http://192.168.50.129:8880/tasks/407`. This confirms
+the current Host URL correction through an AI-backed real task, but does not
+make the generic repository template or a future deployment configuration a
+release-owner-approved URL policy.
+
+The existing migration, credential/least-privilege, release-package,
+retention, maintenance-owner, independent approval, R4.6, and R5/L6 gates
+remain unchanged. The Host remains in `dual_canary`, and no `v2_only` cutover
+or migration 078 was performed.
