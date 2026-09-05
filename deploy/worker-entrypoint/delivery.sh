@@ -22,7 +22,39 @@ sanitize_summary_content() {
 normalize_delivery_summary_response() {
     local raw_summary="$1"
 
-    printf '%s' "${raw_summary}" | python3 -c 'import re, sys; text = sys.stdin.read(); text = re.sub(r"\r$", "", text, flags=re.MULTILINE); text = re.sub(r"<think\b[^>]*>.*?</think>", "", text, flags=re.IGNORECASE | re.DOTALL); text = re.sub(r"</?think\b[^>]*>", "", text, flags=re.IGNORECASE); text = re.sub(r"^```(?:markdown)?\s*", "", text.strip(), flags=re.IGNORECASE); text = re.sub(r"\s*```$", "", text).strip(); print(text, end="")'
+    printf '%s' "${raw_summary}" | python3 -c '
+import re
+import sys
+
+text = sys.stdin.read()
+text = re.sub(r"\r$", "", text, flags=re.MULTILINE)
+text = re.sub(r"<think\b[^>]*>.*?</think>", "", text, flags=re.IGNORECASE | re.DOTALL)
+text = re.sub(r"</?think\b[^>]*>", "", text, flags=re.IGNORECASE)
+text = re.sub(r"^```(?:markdown)?\s*", "", text.strip(), flags=re.IGNORECASE)
+text = re.sub(r"\s*```$", "", text).strip()
+
+# Mermaid 11 treats @{...} as a node-shape declaration. AI summaries often
+# include the Git upstream ref @{u} inside a node label, so encode only the
+# no-colon ref form while leaving valid shape declarations such as
+# @{ shape: cloud } unchanged.
+pattern = re.compile(
+    r"(^|\n)(`{3,}|~{3,})([ \t]*mermaid[^\n]*\n)([\s\S]*?)\n\2([ \t]*(?=\n|$))",
+    flags=re.IGNORECASE,
+)
+
+def normalize_mermaid(match):
+    body = re.sub(
+        r"@\{([A-Za-z0-9][A-Za-z0-9._/-]*)\}",
+        r"@&#123;\1&#125;",
+        match.group(4),
+    )
+    return "".join(
+        (match.group(1), match.group(2), match.group(3), body, "\n", match.group(2), match.group(5))
+    )
+
+text = pattern.sub(normalize_mermaid, text)
+print(text, end="")
+'
 }
 
 annotate_delivery_summary_validation() {
