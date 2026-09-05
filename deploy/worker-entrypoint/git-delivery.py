@@ -461,7 +461,7 @@ def _write_json_atomic(path: Path, payload: dict) -> None:
     fd, tmp_name = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
+            json.dump(payload, handle, ensure_ascii=True, separators=(",", ":"))
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp_name, path)
@@ -499,7 +499,7 @@ def cmd_recover_start(args: argparse.Namespace) -> int:
         "pinned_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
     }
     _write_json_atomic(Path(args.out), start)
-    print(json.dumps(start, ensure_ascii=False, separators=(",", ":")))
+    print(json.dumps(start, ensure_ascii=True, separators=(",", ":")))
     return 0
 
 
@@ -525,7 +525,7 @@ def cmd_collect(args: argparse.Namespace) -> int:
     snapshot["git_delivery"] = _strip_private(delivery)
     _write_json_atomic(Path(args.out), snapshot)
     result = {"ok": error is None, "error": error, "git_delivery": snapshot["git_delivery"]}
-    print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+    print(json.dumps(result, ensure_ascii=True, separators=(",", ":")))
     return 0
 
 
@@ -646,7 +646,7 @@ def cmd_record_push(args: argparse.Namespace) -> int:
     _write_json_atomic(snapshot_path, snapshot)
     print(
         json.dumps(
-            {"ok": True, "git_delivery": snapshot["git_delivery"]}, ensure_ascii=False
+            {"ok": True, "git_delivery": snapshot["git_delivery"]}, ensure_ascii=True
         )
     )
     return 0
