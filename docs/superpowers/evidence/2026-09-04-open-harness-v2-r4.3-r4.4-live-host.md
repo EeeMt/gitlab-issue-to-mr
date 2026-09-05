@@ -1333,3 +1333,31 @@ R4.6, or R5. Credential/least-privilege and rotation evidence, migration 078,
 release package/owner approval, independent go/no-go, R5/L6, and real
 mobile-device keyboard/IME/notch/gesture-area acceptance remain open; the
 mobile-device item is explicitly deferred by the user.
+
+## 2026-09-05 continuation: OpenCode Responses post-fix recheck (Task 416)
+
+Task 416 repeated the same real read-only smoke after the OpenCode redaction
+framing fix, using the current Profile 4 / generation 75 / Bundle 175
+composition and existing Provider 12 `openrouter-minimax-responses` with the
+legal `openai_responses` protocol. It used a fresh session, OpenCode, and
+analysis (`plan`) mode, completed with zero repository changes, and the served
+Task #416 page showed the Provider, Profile, OpenCode Harness, fresh-session
+mode, completed state, and 1m36s runtime.
+
+| Item | Result |
+| --- | --- |
+| Task/runtime | Task 416, `completed`, `total_changes=0`, `provider_id=12`, `worker_profile_id=4`, `runtime_bundle_id=175`, projected Harness `opencode` |
+| Provider/Harness | `openrouter-minimax-responses`, `openai_responses`, OpenCode; Adapter `2.0.0`, CLI `1.18.19` |
+| Attempt | `task-416-attempt-1-f6529450b7d4`, `codify.worker.event/v2`, `last_seq=121`, 121 receipts / 121 distinct event IDs, terminal `run.completed`, `control_state=closed` |
+| Persistence | 5 raw-log chunks / 2716 bytes; runtime archive `task-416-runtime-archive.tar.gz`, 31767 bytes, SHA-256 `c38bfe79648337abbc9491739c0e07d9b271b7cbdcbbb89e6f6ba3313f865183` |
+| Archive safety | 211 parseable OpenCode JSONL records / 211 distinct event IDs; 19 tool updates / 4 completed tools; zero `non_json_raw_line` records and zero targeted secret-scan matches |
+| Delivery | `mattermost_notification_deliveries.id=9`, `event_type=task_completed`, `status=success`, target `channel:aaz68niiuff3txfot5wjrgj33e`; Mattermost 10.9.1 remained healthy |
+
+The final Host recheck found zero pending/queued/running Tasks and zero Issue
+locks. No Provider configuration changed, no Worker/Issue residue remained,
+and no cleanup was needed. This is complementary post-fix real-provider
+evidence for the Responses side of the OpenCode boundary, not a new member of
+the frozen Task-ID 380–394 integrity cohort and not a formal R4.3/R4.4,
+R4.5, R4.6, or R5 sign-off. Credential/least-privilege and rotation records,
+release package/owner approval, migration 078, independent go/no-go, R5/L6,
+and the user-deferred real-mobile-device acceptance remain open.

@@ -416,6 +416,35 @@ release package and owner sign-off, independent go/no-go, and R5/L6 remain
 open. Real mobile-device keyboard/IME/notch/gesture-area acceptance remains
 explicitly deferred by the user.
 
+### 2026-09-05 continuation: OpenCode Responses post-fix recheck (Task 416)
+
+Task 416 repeated the post-redaction-fix read-only smoke with the same current
+Profile 4 / generation 75 / Bundle 175 composition, but used existing Provider
+12 `openrouter-minimax-responses` and the legal `openai_responses` protocol.
+It ran as a fresh-session OpenCode analysis task and completed with zero
+repository changes. The V2 attempt
+`task-416-attempt-1-f6529450b7d4` persisted 121 contiguous receipts (seq 1–121,
+121 distinct event IDs), OpenCode Adapter `2.0.0` / CLI `1.18.19`, and
+`run.completed`; the Task detail page showed the same Provider, Profile,
+OpenCode Harness, fresh-session mode, completed state, and 1m36s runtime.
+
+The five raw-log chunks totaled 2,716 bytes. The runtime archive was
+`task-416-runtime-archive.tar.gz`, 31,767 bytes, SHA-256
+`c38bfe79648337abbc9491739c0e07d9b271b7cbdcbbb89e6f6ba3313f865183`.
+Its OpenCode stream contained 211 parseable records with 211 distinct event
+IDs, 19 tool updates / 4 completed tools, zero `non_json_raw_line` records,
+and zero matches in the targeted secret scan. Codify recorded delivery row 9
+as `task_completed/success` to the independent Mattermost 10.9.1 channel.
+
+The final Host check remained clean for execution state: zero active Tasks,
+zero Issue locks, healthy Backend/Scheduler/Mattermost, `dual_canary`, and no
+additional cleanup was needed. This is complementary post-fix real-provider
+evidence for the Responses side of the OpenCode boundary; it is not added to
+the frozen Task-ID 380–394 integrity cohort and does not sign R4.3/R4.4,
+R4.5, R4.6, or R5. Credential/least-privilege and rotation evidence, release
+package/owner approval, migration 078, independent go/no-go, R5/L6, and the
+user-deferred real-mobile-device acceptance remain open.
+
 ### R5 — 在独立维护窗口执行 L6
 
 R5 不是 R4 的默认延续，必须获得单独执行批准。批准后按 Runbook：

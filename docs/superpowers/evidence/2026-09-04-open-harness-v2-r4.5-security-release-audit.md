@@ -829,3 +829,31 @@ credential/least-privilege and rotation records, release package/signatures,
 retention and maintenance ownership, migration 078, independent zero-P0/P1
 approval, R4.6, R5/L6, and real-mobile-device acceptance remain open. The
 mobile-device item remains explicitly deferred by the user.
+
+## 2026-09-05 continuation: OpenCode Responses post-fix recheck (Task 416)
+
+Task 416 exercised the complementary real Provider protocol after the
+redaction framing fix. It used existing Provider 12
+`openrouter-minimax-responses` / `openai_responses`, OpenCode, Profile 4
+generation 75 / Bundle 175, a fresh session, and the read-only analysis
+prompt. The Task completed with zero repository changes and no Provider or
+notification configuration changes.
+
+The attempt `task-416-attempt-1-f6529450b7d4` used
+`codify.worker.event/v2`, OpenCode Adapter `2.0.0`, CLI `1.18.19`, and closed
+with `run.completed` at seq 121. All 121 receipts were contiguous and had
+distinct event IDs. Raw logs were 5 chunks / 2,716 bytes. The 31,767-byte
+runtime archive has SHA-256
+`c38bfe79648337abbc9491739c0e07d9b271b7cbdcbbb89e6f6ba3313f865183`; its
+OpenCode JSONL contains 211 parseable records / 211 distinct event IDs, 19
+tool updates / 4 completed tools, zero `non_json_raw_line` records, and zero
+matches in the targeted secret scan. Codify delivery row 9 is
+`task_completed/success` to the independent Mattermost 10.9.1 channel.
+
+This is additional candidate security/correctness evidence that the same
+post-fix Adapter preserves valid OpenCode Responses framing; it is not an
+R4.5 sign-off. Credential/least-privilege and rotation records, release
+package/signatures, retention and maintenance ownership, migration 078,
+independent zero-P0/P1 approval, R4.6, R5/L6, and real-mobile-device
+acceptance remain open. The mobile-device item remains explicitly deferred by
+the user.
