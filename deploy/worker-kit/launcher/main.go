@@ -167,10 +167,17 @@ func verifyRuntimeBundle(kit manifest, allowMissing bool) string {
 		!contains(kit.RuntimeCompatibility.EventSchemas, runtime.EventSchema) {
 		fail("Runtime Bundle contract/event schema is incompatible with this Kit")
 	}
-	if runtime.Schema != "codify.worker.runtime-bundle/v2" {
-		fail("Runtime Bundle manifest is not a codify.worker.runtime-bundle/v2 manifest")
+	if runtime.Schema != "codify.worker.runtime-bundle/v1" &&
+		runtime.Schema != "codify.worker.runtime-bundle/v2" {
+		fail("Runtime Bundle manifest has an unsupported schema: %s", runtime.Schema)
 	}
-	if runtime.BundleDigest == "" || runtime.BundleDigest != os.Getenv("CODIFY_RUNTIME_BUNDLE_DIGEST") {
+	// V2 materializes a launcher-facing manifest whose bundle_digest is part of
+	// the frozen digest binding. V1 keeps the bundle digest in the persisted
+	// outer manifest: putting the archive digest into its own inner manifest
+	// would make the archive self-referential. The backend verifies that V1
+	// archive before the container starts, so only V2 needs this launcher check.
+	if runtime.Schema == "codify.worker.runtime-bundle/v2" &&
+		(runtime.BundleDigest == "" || runtime.BundleDigest != os.Getenv("CODIFY_RUNTIME_BUNDLE_DIGEST")) {
 		fail("Runtime Bundle digest does not match the Task binding")
 	}
 	if frozen := os.Getenv("CODIFY_RUNTIME_CONTRACT_VERSION"); frozen != runtime.ContractVersion {

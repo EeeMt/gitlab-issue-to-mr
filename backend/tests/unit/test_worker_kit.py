@@ -421,7 +421,9 @@ def test_worker_kit_and_runtime_bundle_manifests_have_distinct_launcher_contract
 
     assert 'ManifestKind         string               `json:"manifest_kind"`' in launcher
     assert '"codify.worker.kit-manifest/v1"' in launcher
+    assert 'runtime.Schema != "codify.worker.runtime-bundle/v1"' in launcher
     assert 'runtime.Schema != "codify.worker.runtime-bundle/v2"' in launcher
+    assert 'runtime.Schema == "codify.worker.runtime-bundle/v2"' in launcher
     assert "Runtime Bundle digest does not match the Task binding" in launcher
     assert "runtime.GOOS" in launcher
     assert "CODIFY_KIT_MANIFEST_SHA256" in launcher
