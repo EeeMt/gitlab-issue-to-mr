@@ -831,3 +831,45 @@ renew 或修改任何 secret/权限；因此 R4.5 的最小权限、账户控制
 `worker_runtime` 对缺失/撤销凭据 fail closed，对已有 retry 才允许 retired credential；只有旧 snapshot
 才保留 legacy Provider-key fallback。相关 runtime/provider focused tests 共 71 个通过。该结果修正了审计中
 过时的“resolver 尚未进入 runtime delivery”表述，但不替代对容器环境 secret delivery 及外部权限/轮换的安全签署。
+
+## 2026-09-05 continuation: delivery-summary regression closed on generation 81
+
+本轮先修复了真实任务中发现的两个交付摘要问题。Commit `be8a2d9f` 让
+`deploy/worker-entrypoint/delivery.sh` 优先读取 V2 Harness translators 写入的
+`CODIFY_HARNESS_RESULT_FILE`，并保留旧 `CODIFY_HARNESS_OUTPUT_FILE` fallback；这补上了 OpenCode/Pi/Codex
+成功任务缺少独立 `delivery_summary` payload 的路径。随后发现 Task #437 仍运行在一次意外的旧 Backend
+image 上，故其空摘要作为 deployment drift 的负证据保留，不能归因于该 commit。
+
+在 active Backend 切换到包含 `be8a2d9f` 的 image 后，Task #438 已真实完成 OpenCode/Provider 7 只读分析，
+并写入非空摘要；但模型返回的一行式 `flowchart LR A[...]` 触发 Mermaid validator 的解析错误，归档中明确为
+`ok=false`，未被改写成执行失败。Commit `818b99d0` 修复了终端 Markdown/Mermaid fence 的保留与一行式
+`flowchart`/`graph` 声明规范化；最终 focused verification 为
+`backend/.venv/bin/python -m pytest backend/tests/unit/test_delivery_summary.py -q`（5 passed）、两个
+entrypoint 的 `bash -n` 和 `git diff --check` 通过。
+
+随后用 image `sha256:568be7a9cebd150ed925078b93df4baff88f6b2cd4913730151cb3463a0229f4` 仅重建
+Backend/Scheduler，并通过 served Admin UI 对 Profile 4 做了新一轮 Verify。Profile
+`v2-canary-0.6.11-four-harness` 的 image 与 Kit identity generation 均为 81；Kit 为
+`0.6.14-linux-amd64-d461d040694b`，manifest SHA-256 为
+`d461d040694b20b88944a88de47b5ad78188f91d74d528421cdef44b68274035`。四个 Harness 均被验证；readiness
+check generation 为 5，`ready_until=2026-09-05 14:34:08.023569Z`。Host 仍为 `dual_canary`、
+`AUTO_MIGRATE=false`、数据库 revision `077_v2_worker_kit_identity`。
+
+最终真实任务为 Task #439：Issue #99、Provider 7 `openrouter-free / minimax/minimax-m3:free`、Profile 4、
+OpenCode、`plan/fresh`、runtime Bundle 187。任务从 `2026-09-05 14:21:24.524829Z` 运行至
+`2026-09-05 14:23:09.089244Z`，状态为 `completed`；attempt
+`task-439-attempt-1-1c059789d0f8` 使用 `codify.worker.event/v2`、adapter 2.0.0、CLI 1.18.19，699 条
+receipt，以 `run.completed`/`control_state=closed` 收尾。日志包含独立 `delivery_summary`、`harness_result`、
+`run_result` 和 `worker_finalization`。归档 `task-439-runtime-archive.tar.gz` 为 71445 bytes，
+`delivery-summary.md` 为 5811 bytes，validation 为 `ok=true`、1 个图、0 个 error、0 次 repair；Mattermost
+delivery 30 为 `task_completed/success`。这关闭了本次 canonical summary persistence + terminal Mermaid
+normalization regression 的 OpenCode 实证缺口；完整数据见
+[delivery-summary regression evidence](../evidence/2026-09-05-open-harness-v2-delivery-summary-regression.md)。
+
+Task #439 完成后 Host 数据库为 0 active task、0 issue lock；Backend/Scheduler/nginx、Mattermost 10.9.1、
+两套 Postgres、GitLab 与 Redis 均健康或运行。Docker system df 显示 18 个 image、9 个 active、约 7.547GB，
+未达到满盘处置条件，未执行 broad image/volume cleanup；`quirky_allen` active/unknown Worker 继续保留。
+
+本轮仍不签署 R4.3/R4.4 正式审阅、R4.5 security/owner、R4.6 独立 go/no-go、签名 release package/notes、
+维护窗口与 owner，也不授权 migration 078、`v2_only` 或 R5/L6。真实移动设备键盘/IME/刘海/手势区验收继续
+按用户指示暂缓。
