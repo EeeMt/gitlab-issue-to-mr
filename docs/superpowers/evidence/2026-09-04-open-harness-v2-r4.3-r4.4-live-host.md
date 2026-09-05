@@ -1574,3 +1574,26 @@ the persisted `run.completed` result.
 This records the current operational gate rather than signing it: a fresh
 administrator Verify is still required before treating Kit `0.6.14` readiness
 as current for a release decision. R4.4, R4.5, R4.6 and R5/L6 remain open.
+
+## 2026-09-05 continuation: served desktop Issue/task detail and readiness display
+
+The authenticated target-Host browser served `/tasks/434` with the current
+generation cancellation result: `任务已取消`, freeform/fresh session, Codex,
+Provider 12 `openrouter-minimax-responses`, the selected Worker image digest,
+the `main` baseline and `codify/issue-99` work branch, and no merge request.
+The served `/issues/99` page showed Task #434 as the latest execution, 62
+execution records, and zero total changes.
+
+Without submitting a task, the same browser opened the Issue's create-task
+drawer, selected `自由模式`, and inspected the served execution form. The
+Worker/Profile field was disabled as requirement-fixed; the current Issue
+default Provider was shown, and the Harness choices listed Claude, Codex,
+OpenCode, and Pi, each with `未验证` / `运行时未验证`. This is the expected
+desktop presentation after the stored `0.6.14` readiness row passed its TTL,
+not a claim that the readiness is still current. The drawer was closed without
+creating or mutating a Task.
+
+This adds current served desktop L5 evidence for task context, cancellation
+visibility, fixed Worker ownership, Harness selection, and the expired-readiness
+boundary. It does not prove real mobile keyboard/IME/notch/gesture-area
+acceptance, close formal R4.3/R4.4 review, or authorize R4.5/R4.6/R5/L6.

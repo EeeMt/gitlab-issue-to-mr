@@ -786,6 +786,17 @@ SHA-256 为
 本次没有改动远端服务、切换 `dual_canary`、执行 migration 078/`v2_only` 或运行 R5/L6；根盘约 97%
 使用且未触发满盘清理。真实移动设备键盘/IME/刘海/手势区验收继续按用户指示暂缓。
 
+## 2026-09-05 continuation: served desktop L5 boundary recheck
+
+在目标 Host 的已认证浏览器中复核了 `/tasks/434` 与 `/issues/99`：取消态页面显示了 Codex、
+Provider 12、Worker image digest、freeform/fresh、分支和无 MR；Issue 页面显示最新 Task #434、
+62 条执行记录与 0 变更。打开 Issue 的创建任务抽屉、选择自由模式后，Worker/Profile 仍为需求固定
+且不可改，Claude/Codex/OpenCode/Pi 四个 Harness 均显示 `未验证` / `运行时未验证`，与
+0.6.14 readiness 过 TTL 后派生 `unknown` 的合同一致；抽屉随后关闭，未创建新任务。
+
+这补强了当前桌面 L5 的真实 served UI 边界，但不把过期 readiness 解释为发布许可；真实移动设备验收、
+R4.3/R4.4 正式审阅、R4.5 owner 材料、R4.6 go/no-go、migration 078、`v2_only` 与 R5/L6 仍保持开放。
+
 ## 2026-09-05 continuation: generation 78 database and delivery convergence
 
 对目标 Host 的当前数据库做了 schema-aligned 只读复核：Tasks 425–430 均为
