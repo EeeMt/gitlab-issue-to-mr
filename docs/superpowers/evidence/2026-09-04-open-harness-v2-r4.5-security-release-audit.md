@@ -555,3 +555,18 @@ release-package, release-owner, mobile-device, R4.6, or R5/L6 gates.
 
 No `v2_only` cutover, maintenance-window action, or broad Docker prune was
 performed as part of this audit.
+
+## Archive ownership recheck
+
+The current database contains 349 `task_run_archives` rows covering Task IDs
+1–405, with no archive row whose Task is missing. The backend archive
+directory contains 525 `task-*-runtime-archive.tar.gz` files in total. A
+separate set of 176 files (Task IDs greater than 405, up to the observed
+parallel-debug range) is not referenced by the current database and occupies
+4,109,381 bytes.
+
+Because the development Host is shared by parallel/legacy debugging, these
+unreferenced files were not deleted or treated as this V2 run's evidence. The
+retention owner must classify their ownership and retirement policy before any
+cleanup; the current Host is at 97% usage but has not reached the authorized
+full-disk cleanup trigger. This remains an R4.5 retention/ownership gate.

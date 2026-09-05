@@ -177,6 +177,12 @@ keyboard/IME/notch/gesture-area acceptance remains explicitly deferred; real
 Mattermost delivery, R4.5 owner/security/release sign-off, R4.6 independent
 go/no-go, and R5/L6 remain open.
 
+The current R4.5 recheck also found 349 database-referenced Task archives
+(Task IDs 1–405) plus 176 unreferenced filesystem archives for later parallel
+debug Task IDs, totaling 4,109,381 bytes. They were not deleted on the shared
+Host; archive ownership/retention classification remains an explicit owner
+gate before cleanup.
+
 ### R5 — 在独立维护窗口执行 L6
 
 R5 不是 R4 的默认延续，必须获得单独执行批准。批准后按 Runbook：
