@@ -1361,3 +1361,59 @@ the frozen Task-ID 380–394 integrity cohort and not a formal R4.3/R4.4,
 R4.5, R4.6, or R5 sign-off. Credential/least-privilege and rotation records,
 release package/owner approval, migration 078, independent go/no-go, R5/L6,
 and the user-deferred real-mobile-device acceptance remain open.
+
+## 2026-09-05 continuation: incremental canonical ingest and Task 418
+
+Task 417 was a real Provider 6 / OpenCode / `anthropic_messages` read-only
+analysis task on the preceding Backend/Scheduler image
+`sha256:d73018a40507ae08e20f1cc1944a428c370bc8d56377cf4e9410dd764cc5fb5e`.
+It completed with zero changes, but exposed a long-stream finalization delay:
+the Worker ran for about 535 seconds while the Task total was about 944 seconds.
+The final archive backfill accounted for about 409 seconds. Its attempt
+`task-417-attempt-1-3a766b74a5b4` eventually closed with 4726 contiguous unique
+receipts and `run.completed`; the 334078-byte archive SHA-256 was
+`9a996950417dbe5225e717c5975efab8bc6c8f79d57cc12bd568903ddfb04b48`.
+
+The cause was in Codify's canonical persistence path: each new event replayed
+all prior receipts. Commit `e0d487ec` changed online ingest and archive
+backfill to incremental attempt-local validation while retaining full replay as
+the final `assert_attempt_complete()` integrity check. The related regression
+set passed 105 attempt/protocol/archive tests and 68 Worker/Scheduler tests;
+Ruff and diff checks passed. This is a persistence/finalization fix only; it
+does not change the Harness protocol matrix or the frozen Task-ID 380–394
+cohort.
+
+Backend/Scheduler were rebuilt on the remote Docker context as
+`sha256:2cff3fd7eb27d21625614785cf6d5f37bc538f6851775253a9a379b6b6360161`.
+Mattermost and its PostgreSQL were not recreated. Profile 4 remained generation
+75 with Kit `0.6.12` and Bundle 175.
+
+Task 418 was then created from Issue #99 with existing Provider 6
+`opencode-pi` / `deepseek-v4-flash`, OpenCode, legal
+`anthropic_messages`, fresh session, and analysis (`plan`) mode. The prompt was
+the same read-only live smoke and the Task completed with zero repository
+changes:
+
+| Item | Result |
+| --- | --- |
+| Task/runtime | Task 418, `completed`, started `2026-09-05 09:30:06Z`, completed `09:44:25Z`, total 860s; Worker/stream exited at `09:44:23Z` after 857s; final archive/backfill/finalization was about 3s |
+| Task snapshot | Provider 6, Profile 4, runtime Bundle 175, projected Harness `opencode`, `plan`, `fresh`, `total_changes=0`, input/output tokens `51/3018` |
+| Attempt | `task-418-attempt-1-499b67aed48a`, `codify.worker.event/v2`, OpenCode Adapter `2.0.0`, CLI `1.18.19`, `last_seq=6612`, terminal `run.completed`, `control_state=closed` |
+| Persistence | 6612 receipts / 6612 distinct event IDs; raw logs 5 chunks / 2710 bytes; all sequence numbers were contiguous |
+| Runtime archive | `task-418-runtime-archive.tar.gz`, 477600 bytes, SHA-256 `e6379c3c2ca63a3366fb13eba6c0c51fbc5289ece38227fd5a7f3ae9587a9843` |
+| Archive safety | 6758 OpenCode JSONL records were parseable; canonical `event.jsonl` had 6612 records and 6612 unique event IDs; it contained one `harness.completed`, one `worker.finalization`, one `run.completed`, 11 `tool.started`, and 11 `tool.completed`; targeted secret-pattern scan had 0 hits |
+| Delivery | `mattermost_notification_deliveries.id=11`, `task_completed`, `success`, target `channel:aaz68niiuff3txfot5wjrgj33e`; Mattermost `10.9.1` and `codify-mattermost-db` were healthy |
+| Host convergence | Worker container removed; zero pending/queued/running Tasks; zero `issue_execution_locks`; database `077_v2_worker_kit_identity`; `dual_canary`; root filesystem 2.1GB available / 97% |
+
+The comparison is operational evidence for the affected receipt/archive path:
+Task 417's pre-fix finalizer delay was about 409 seconds, while Task 418's
+post-fix archive/finalization tail was about 3 seconds for a larger 6612-event
+attempt. It is not a formal R4.3/R4.4 sign-off, a new R2/R3 cohort member, or
+permission to execute migration 078, `v2_only`, R5/L6, or real mobile-device
+acceptance. The mobile-device keyboard/IME/notch/gesture-area item remains
+explicitly deferred by the user; R4.5 owner/security/release evidence and
+independent R4.6 go/no-go remain open. A final post-task Compose inspection
+found the generic template URL had been restored during the deployment; a
+temporary override was reapplied and verified, and the current Backend/Scheduler
+environment now reports `FRONTEND_URL=http://192.168.50.129:8880`. This was not
+retroactively counted as Task 418 link evidence.

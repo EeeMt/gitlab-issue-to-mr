@@ -857,3 +857,47 @@ package/signatures, retention and maintenance ownership, migration 078,
 independent zero-P0/P1 approval, R4.6, R5/L6, and real-mobile-device
 acceptance remain open. The mobile-device item remains explicitly deferred by
 the user.
+
+## 2026-09-05 continuation: receipt-ingest performance and archive safety (Task 418)
+
+Task 417, run before the next Backend/Scheduler rebuild, completed successfully
+but showed a roughly 409-second archive-backfill tail after a roughly 535-second
+Worker run. The attempt had 4726 contiguous receipts. Review identified the
+canonical ingest path's repeated full-replay query as the cause. Commit
+`e0d487ec` replaced that repeated scan with incremental identity/order/
+finalization checks and retained full replay as the final integrity assertion.
+The related regression set passed 105 attempt/protocol/archive tests and 68
+Worker/Scheduler tests, with Ruff and diff checks passing.
+
+The current remote Backend/Scheduler image is
+`sha256:2cff3fd7eb27d21625614785cf6d5f37bc538f6851775253a9a379b6b6360161`.
+No Provider configuration or credential data changed, and Mattermost 10.9.1,
+its database, GitLab, Postgres, Redis, and existing Workers were not recreated
+by this deployment.
+
+Task 418 supplied the post-fix real-host security/correctness recheck. It used
+existing Provider 6 / `opencode-pi` over legal `anthropic_messages` with
+OpenCode, Profile 4 generation 75, Bundle 175, a fresh analysis session, and
+zero repository changes. The attempt closed at `last_seq=6612` with one
+`run.completed`; all 6612 receipts and event IDs were contiguous and unique.
+The 477600-byte archive SHA-256 was
+`e6379c3c2ca63a3366fb13eba6c0c51fbc5289ece38227fd5a7f3ae9587a9843`.
+
+The archive contained 6758 parseable OpenCode JSONL records and 6612 canonical
+records. Canonical types included exactly one each of `harness.completed`,
+`worker.finalization`, and `run.completed`, plus 11 `tool.started` and 11
+`tool.completed`; the targeted secret-pattern scan returned zero hits. Raw
+logs persisted as 5 chunks / 2710 bytes. Codify recorded
+`mattermost_notification_deliveries.id=11` as `task_completed/success` to the
+existing Mattermost channel. The post-run Host had zero active Tasks and zero
+Issue locks, database revision `077_v2_worker_kit_identity`, `dual_canary`, and
+2.1GB available on `/` (97%). Docker still reported 1.796GB private BuildKit
+cache; the full-disk trigger was not reached, so no cleanup was performed and
+protected services/active or unknown Worker images were untouched.
+
+This is additional release/security evidence for receipt persistence, archive
+integrity, redaction, and notification delivery; it is not an R4.5 sign-off.
+Credential/least-privilege and rotation ownership, release package/signatures,
+retention/maintenance ownership, migration 078, independent zero-P0/P1
+approval, R4.6, R5/L6, and the user-deferred real-mobile-device acceptance
+remain open.

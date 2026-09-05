@@ -39,6 +39,14 @@ Provider-boundary 负向复验（403 `unsupported_country_region_territory`）�
 V1-compatible Kit 完成真实 Codex/Provider 12 只读 Task 399；该 V1 证据和后续 `v2_only` 只读展示预检
 已补入 R4，但不改变 V2 exact cohort 或 R5 hard-cut 状态。当前远端仍恢复为 `dual_canary`。
 
+OpenCode framing fix 之后，Task 417 暴露了 canonical receipt ingest 在长流归档回补阶段的 O(n²)
+回放延迟；提交 `e0d487ec` 将在线 ingest/archive backfill 改为 attempt 内增量校验，同时保留完整
+replay 作为终态完整性断言。聚焦相关回归（105 个 attempt/protocol/archive 测试、68 个
+Worker/Scheduler 测试）与 Ruff/diff check 通过，Backend/Scheduler 已用新 image
+`sha256:2cff3fd7…` 重建。Task 418 在同一 Profile 4 generation 75 / Bundle 175、OpenCode /
+`anthropic_messages`、Provider 6 的真实复测完成；Task 417/418 是受影响 runtime 持久化路径的
+补充证据，不加入冻结的 Task-ID 380–394 cohort，也不改变 Harness 协议矩阵或 R2/R3 的合同结论。
+
 随后在真实 Mattermost 取消通知复验中，Task 408 暴露了运行中取消在 Worker 终态收敛之后未发送
 `task_cancelled` 的生命周期缺口；提交 `594bf67a` 将运行中取消通知收敛到 Worker finalizer，并保留
 PENDING/QUEUED 的 API 直接取消通知，避免竞态重复投递。Backend/Scheduler 以该提交重建为 image
@@ -138,8 +146,10 @@ R4 是当前唯一可推进工作包。以下六项必须在同一最终 candida
 
 补充：R4.2 表中的 `sha256:92321ff2…` / Profile 4 generation 74 是
 Task 410–412 所在的前一候选快照；OpenCode 脱敏 framing 修复后，当前
-Backend/Scheduler 为 `sha256:d73018a4…`，Profile 4 已重新验证为 generation
-75，Task 415 的不可变 snapshot 与后续 continuation 记录该新 identity。
+Backend/Scheduler 曾为 `sha256:d73018a4…`，随后 `e0d487ec` 的增量 receipt
+ingest 修复将当前 image 更新为 `sha256:2cff3fd7…`。Profile 4 已重新验证为
+generation 75，Task 415–418 的不可变 snapshot 与后续 continuation 记录该
+Worker/Kit/Bundle identity。
 
 **R4 退出条件：** R4.1–R4.6 全部有当前 evidence，阻断项为零，并由独立发布评审明确批准进入 R5。
 当前 R4.1/R4.2 有 candidate evidence，R4.3/R4.4 仍只有部分 evidence；没有签署即保持
@@ -444,6 +454,55 @@ the frozen Task-ID 380–394 integrity cohort and does not sign R4.3/R4.4,
 R4.5, R4.6, or R5. Credential/least-privilege and rotation evidence, release
 package/owner approval, migration 078, independent go/no-go, R5/L6, and the
 user-deferred real-mobile-device acceptance remain open.
+
+### 2026-09-05 continuation: canonical receipt ingest recheck (Tasks 417–418)
+
+Task 417 是在 OpenCode framing fix image `sha256:d73018a4…` 上运行的真实
+Provider 6 / OpenCode / `anthropic_messages` read-only analysis task。它最终
+成功且零变更，但长流结束时 Worker 实际运行约 535 秒，Task 总耗时约 944 秒；
+archive backfill 约占剩余 409 秒。该 attempt
+`task-417-attempt-1-3a766b74a5b4` 最终有 4726 条连续唯一 V2 receipt，
+archive 为 334078 bytes、SHA-256
+`9a996950417dbe5225e717c5975efab8bc6c8f79d57cc12bd568903ddfb04b48`。
+这条证据暴露了 `ingest_canonical_event()` 对每个新事件重复加载全量 receipt
+replay 的 O(n²) 尾延迟，而不是 Provider 失败。
+
+提交 `e0d487ec` 将在线 ingest 与 archive backfill 改成 attempt 内的增量
+identity/order/finalization 校验，并保留完整 replay 作为终态
+`assert_attempt_complete()` 断言。相关回归为 105 个 attempt/protocol/archive
+测试、68 个 Worker/Scheduler 测试，Ruff 与 diff check 通过；协议事件语义、
+Provider 合法矩阵和 Worker/Kit/Profile/Bundle identity 未改变。
+
+Backend/Scheduler 以 `sha256:2cff3fd7eb27d21625614785cf6d5f37bc538f6851775253a9a379b6b6360161`
+重建后，Task 418 用同一 Profile 4 generation 75 / Bundle 175、Provider 6
+`opencode-pi` / `deepseek-v4-flash`、OpenCode、`anthropic_messages`、fresh
+session 和 `plan` mode 复测。Task 418 于 `2026-09-05 09:30:06Z` 开始、
+`09:44:25Z` 完成，Worker/stream 于 `09:44:23Z` 退出，Task 总耗时 860 秒，
+其中 Worker 857 秒，archive/backfill/finalization 约 3 秒；Task 零变更，
+input/output tokens 为 51/3018。
+
+| Item | Result |
+| --- | --- |
+| Attempt | `task-418-attempt-1-499b67aed48a`, `codify.worker.event/v2`, OpenCode Adapter `2.0.0`, CLI `1.18.19`, `last_seq=6612`, terminal `run.completed`, `control_state=closed` |
+| Persistence | 6612 receipts / 6612 distinct event IDs; raw logs 5 chunks / 2710 bytes; runtime archive `task-418-runtime-archive.tar.gz`, 477600 bytes, SHA-256 `e6379c3c2ca63a3366fb13eba6c0c51fbc5289ece38227fd5a7f3ae9587a9843` |
+| Archive safety | 6758 OpenCode JSONL records all parseable; canonical archive 6612 records / 6612 unique event IDs; one each of `harness.completed`, `worker.finalization`, `run.completed`; 11 `tool.started` / 11 `tool.completed`; targeted secret-pattern scan 0 |
+| Delivery | Mattermost delivery row 11, `task_completed/success`, target `channel:aaz68niiuff3txfot5wjrgj33e`; Mattermost 10.9.1 and its Postgres were healthy |
+| Host convergence | Worker container removed; zero active Tasks and zero `issue_execution_locks`; database `077_v2_worker_kit_identity`; `dual_canary`; root filesystem 2.1GB available / 97% |
+
+Task 418 is a post-fix persistence/finalization recheck, not a new formal
+benchmark cohort member and not R4.3/R4.4/R4.5/R4.6 approval. The affected L2/L4
+evidence is updated; because the fix does not change CLI payload, protocol
+semantics, Provider legality, or immutable Worker composition, the frozen R2/R3
+conformance and benchmark conclusions remain unchanged. Mattermost 10.9.1 is
+available as the development debug/test service and was not recreated during
+the Backend/Scheduler deployment. After the Task 418 run, a final remote
+inspection found the generic template URL had been restored by Compose; a
+temporary override was reapplied and verified so the current Backend/Scheduler
+environment uses `FRONTEND_URL=http://192.168.50.129:8880`. This correction was
+not retroactively counted as Task 418 link evidence. Real mobile-device keyboard/IME/notch/
+gesture-area acceptance remains explicitly deferred; credential/least-
+privilege and rotation evidence, release package/owner sign-off, migration 078,
+independent go/no-go, R5/L6, and formal R4 gates remain open.
 
 ### R5 — 在独立维护窗口执行 L6
 
