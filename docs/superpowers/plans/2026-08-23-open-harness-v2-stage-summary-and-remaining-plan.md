@@ -167,6 +167,13 @@ detail；它们仍只是补充 evidence。Task 425 的摘要 validation 为 `ok=
 没有独立 `delivery_summary` payload，因此不能作为“交付摘要全绿”或正式 L5 交互/运维签署。
 R4.3–R4.6、release-owner、安全/权限/轮换、签名包与独立 go/no-go 仍开放。
 
+**R4.3/R4.4 post-TTL amendment:** readiness 过期后，Tasks 429/430 在完整 generation 78
+snapshot 上分别完成 OpenCode/Pi 的 `plan/fresh` 真实执行，但模型忽略了 `sleep 180`，不计作取消证据。
+Task 431 改用 Pi/Provider 12 的 `freeform/fresh`，在远端确认真实 `sleep 180` 进程后通过 served
+`/tasks/431` 取消；容器清理、`cancelled` 状态、14 条连续 canonical receipt、archive 和 Mattermost
+`task_cancelled/success` 均闭合。该补充只加强当前 generation 的桌面 L4/L5 evidence，不替代正式交互/运维
+审阅、R4.5 安全签署或 R4.6 独立 go/no-go。
+
 注：R4.5 行中的 1.4GB/“尚未触发清理”是 Task 410 通知复核时点的历史快照；随后 nginx 构建实际触发满盘处置，最终状态与清理范围以本节后面的 `served failure-summary visibility and disk recovery` 记录为准。
 
 补充：R4.2 表中的 `sha256:92321ff2…` / Profile 4 generation 74 是
