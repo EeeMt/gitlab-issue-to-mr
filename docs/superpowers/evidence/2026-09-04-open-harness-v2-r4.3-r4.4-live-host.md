@@ -5,7 +5,7 @@
 **Scope:** Current R4 candidate on `192.168.50.129`, mobile/desktop browser
 interaction checks, four-Harness live smoke attempts, one live command-plane
 run, four current exact Worker/Kit/Bundle-composition cancellation samples,
-one post-fix current-composition success sample, one controlled nginx-only
+two post-fix current-composition success samples, one controlled nginx-only
 disconnect/reconnect, and the resulting Host/Task runtime evidence.
 
 This is candidate evidence, not an L5 go/no-go decision. R4.3–R4.6 remain
@@ -30,7 +30,7 @@ post-fix image is:
 | Profile 4 | administrator Verify returned 200; `verified_at=2026-09-05T00:45:09Z`, V2 verification generation `74`, Kit `0.6.12` manifest `c33dbf86951bed6e3b4de1897313725f14f00006dc51fb300e7b821bb47e17bd` |
 | Source/composition boundary | The post-fix change is limited to Scheduler cancellation-status logging; Worker image, Kit `0.6.12`, Profile 4 generation `74`, Bundles 170/171/172, selected Adapter/CLI identities, Provider protocols, and event contract remain unchanged. The current image's provenance is recorded by the committed tree and remote build/deploy command because no Git revision OCI label is present |
 | Database/runtime mode | Alembic revision remains `077_v2_worker_kit_identity`; `AUTO_MIGRATE=false`; execution mode remains `dual_canary`; no `v2_only` cutover or migration was attempted |
-| Host capacity | Remote `/` is `57G/61G` used with `4.2G` available and `94%` full; Docker reports 83 images, 12.42GB images with 6.713GB reclaimable, 5.054MB containers, 1.642GB volumes with 1.309GB reclaimable, and 6.526GB BuildKit cache. The filesystem is not full, so no Codify image/cache cleanup was performed. |
+| Host capacity | Remote `/` is `57G/61G` used with `4.2G` available and `94%` full; the post-Task-389 Docker snapshot reports 83 images, 12.42GB images with 6.713GB reclaimable, 6.546MB containers, 1.642GB volumes with 1.309GB reclaimable, and 6.526GB BuildKit cache. The filesystem is not full, so no Codify image/cache cleanup was performed. |
 
 As a Host-level `v2_only` preflight, Backend and Scheduler were temporarily
 recreated with `HARNESS_EXECUTION_MODE=v2_only` at `2026-09-05T01:04:26Z`.
@@ -54,10 +54,12 @@ The exact-composition positive cohort is:
 | 382 | OpenCode / Provider 7 `openrouter-free` | 172 (`9ed188ca…`) | `completed`, zero changes | Adapter `2.0.0`, CLI `1.18.19`, usage 89/58, raw-log 4 chunks, 40 receipts, seq 1–40, terminal `run.completed` |
 | 383 | Pi / Provider 6 `opencode-pi` (`deepseek-v4-flash`) | 170 (`e812376c…`, reused Pi variant) | `completed`, zero changes | `anthropic_messages`; Adapter `2.1.0`, CLI `0.84.2`, usage 96/181, raw-log 4 chunks, 296 receipts, seq 1–296, terminal `run.completed`; two early `control_owner_unreachable` gate-probe warnings self-recovered |
 | 388 | Claude / Provider 11 `openrouter-minimax-anthropic` | 171 (`5a5bbd30…`, reused Claude variant) | `completed`, zero changes | post-fix image; Adapter `1.0.1`, CLI `2.1.153`, usage 3512/724, raw-log 7 chunks, 19 receipts, seq 1–19, terminal `run.completed` |
+| 389 | Claude / Provider 6 `opencode-pi` (`deepseek-v4-flash`) | 171 (`5a5bbd30…`, reused Claude variant) | `completed`, zero changes | `anthropic_messages`; fresh session; Adapter `1.0.1`, CLI `2.1.153`, usage 2247/597, raw-log 6 chunks, 20 receipts, seq 1–20, terminal `run.completed` |
 
-All five tasks used fresh sessions and the existing read-only smoke prompt.
-Tasks 380–383 contain 397 unique contiguous receipts; Task 388 adds 19 more,
-for 416 receipts across the five exact-composition success attempts. No active
+All six tasks used fresh sessions and the existing read-only smoke prompt.
+Tasks 380–383 contain 397 unique contiguous receipts; Task 388 adds 19 and
+Task 389 adds 20 more, for 436 receipts across the six exact-composition
+success attempts. No active
 Task or Issue execution lock remains. The current exact composition has no
 Codex success sample because the currently available Codex-legal Providers
 remain bounded by the previously recorded upstream 429/403 availability
@@ -152,6 +154,24 @@ successfully` INFO line, with no failure terminal; the authenticated task
 detail page showed `completed`, Claude, Provider 11, the exact Worker image,
 20 seconds, 3512 input / 724 output tokens, and `+0 -0` changes.
 
+Task #389 is a second post-fix current-composition success sample for Claude.
+It used Provider 6 (`opencode-pi` / `deepseek-v4-flash`) over the legal
+`anthropic_messages` protocol on Bundle 171, with a fresh session, Adapter
+`1.0.1`, and CLI `2.1.153`. The task was created and completed at
+`2026-09-05T02:31:32Z` / `2026-09-05T02:31:50Z`; it ended `completed` with zero
+changes and no Issue lock. Attempt `task-389-attempt-1-b514023e39e1` closed
+with 20 unique contiguous receipts (seq 1–20), including
+`worker.finalization(exit_code=0, diff.total=0)` and terminal
+`run.completed(status=completed)`. The runtime archive was finalized at 7236
+bytes with SHA-256
+`439f313210aaf845aecdcdbf1b08c724fa5ec6b4dee8072664191dc9c29208d4`, raw-log
+persistence has 6 chunks / 8359 bytes, and the Worker container was removed.
+The expected post-exit canonical-tail 409 was non-blocking after receipt and
+archive persistence. Scheduler emitted one `Task 389 completed successfully`
+INFO line; the authenticated task detail page showed completed Claude,
+Provider 6 `opencode-pi`, the exact Worker image, 16 seconds, 2247 input / 597
+output tokens, and `+0 -0` changes.
+
 ## Candidate and validation boundary
 
 - The Worker runtime image, Worker Kit `0.6.12`, and frozen CLI identities remain
@@ -163,7 +183,7 @@ detail page showed `completed`, Claude, Provider 11, the exact Worker image,
 - Commit `48b16fdc` is a Scheduler-only post-fix change: unsuccessful Worker
   outcomes are logged after the final Task row is loaded, so a final
   `cancelled` status produces an INFO cancellation line rather than a generic
-  failure ERROR. The remote Backend/Scheduler image for Tasks #387 and #388 is
+  failure ERROR. The remote Backend/Scheduler image for Tasks #387–#389 is
   `sha256:334c674d…`; the Worker/Kit/Profile/Bundle/Adapter/CLI composition is
   unchanged from Tasks 380–386.
 - Commit `84ab6422` fixes an API-only omission: Issue detail serialization now
@@ -599,8 +619,9 @@ classification, command latency, usage, canonical terminal, archive, raw-log
 finalization, delivery samples, and the current queue/lock/secret-scan
 snapshot. The exact-composition candidate adds successful Pi/Claude/OpenCode/Pi
 samples (#380–#383) on Bundles 170/171/172; Task 383 reuses the Pi Bundle 170
-variant with Provider 6 over `anthropic_messages`, and post-fix Task #388 adds
-a second Claude success on Bundle 171. The pre-fix Backend image's current
+variant with Provider 6 over `anthropic_messages`, and post-fix Tasks #388/#389
+add two Claude successes on Bundle 171 (Provider 11 then Provider 6). The
+pre-fix Backend image's current
 exact OpenCode, Pi, and Claude cancellation samples are Tasks 384,
 385, and 386 on Bundles 172, 170, and 171; post-fix Task #387 repeats the
 Claude cancellation path on Bundle 171 and verifies the corrected Scheduler
@@ -632,7 +653,7 @@ one Harness terminal and one Task terminal. The exact-composition Bundle
 170/171/172 recheck adds four attempts (#380–#383) with 397 contiguous,
 unique receipts and one `run.completed` terminal per attempt; post-fix Task
 #388 adds a fifth attempt with 19 contiguous receipts and one `run.completed`
-terminal. Bundle 163/164
+terminal, and #389 adds a sixth 20-receipt success attempt on Bundle 171. Bundle 163/164
 and Task 368/371/372 are retained as historical generation-72 evidence;
 Bundle 165 and Task 373 are explicitly superseded by the Pi session-projection
 defect. Tasks 384, 385, and 386 add separate 15-, 40-, and 8-receipt
@@ -644,9 +665,9 @@ duplicate-terminal, sequence, and secret-like checks, while leaving the exact
 composition Codex success, live alert delivery to a real Mattermost service,
 and the formal zero-P0/P1 review open.
 
-At the current Host recheck (`2026-09-05T02:20:02Z` database clock), the
-current exact-composition Tasks 380–388 were audited together: 9 attempts,
-488 receipts, and 488 distinct event IDs; every attempt had exactly one
+At the current Host recheck (`2026-09-05T02:35:54Z` database clock), the
+current exact-composition Tasks 380–389 were audited together: 10 attempts,
+508 receipts, and 508 distinct event IDs; every attempt had exactly one
 Harness terminal and one Task terminal, all sequences were contiguous from
 seq 1, and the completed/cancelled-to-terminal mapping had zero failures.
 The constrained token-like scan found zero matches in both canonical event JSON
