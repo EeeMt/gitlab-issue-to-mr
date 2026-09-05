@@ -40,7 +40,7 @@ import sys
 from pathlib import Path
 
 from result_builder import v2_harness_block
-from sanitize import clean_message, redact_hidden_reasoning, sanitize
+from sanitize import clean_message, redact_hidden_reasoning, sanitize, sanitize_json_value
 
 SCHEMA = "codify.worker.event/v2"
 _RATE_LIMIT_REASONS = frozenset(
@@ -1424,16 +1424,16 @@ def main() -> int:
             if not raw_input.strip():
                 continue
             _capture_real_session_id(raw_input)
-            input_text = sanitize(raw_input)
-            if not input_text:
-                continue
             try:
-                record = json.loads(input_text)
+                record = json.loads(raw_input)
             except json.JSONDecodeError:
+                input_text = sanitize(raw_input)
+                if not input_text:
+                    continue
                 record = None
                 raw_text = input_text
             else:
-                record = redact_hidden_reasoning(record)
+                record = redact_hidden_reasoning(sanitize_json_value(record))
                 raw_text = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
             handle.write(raw_text + "\n")
             handle.flush()

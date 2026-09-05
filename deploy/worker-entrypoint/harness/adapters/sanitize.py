@@ -89,6 +89,23 @@ def sanitize(text: str) -> str:
     return text
 
 
+def sanitize_json_value(value: Any) -> Any:
+    """Sanitize JSON values without changing the JSON framing.
+
+    Applying the string-oriented ``sanitize`` function to a serialized JSON
+    record can consume escaped newlines and quotes while matching a secret
+    assignment. Parse the record first, then sanitize each string value so
+    redaction cannot turn an otherwise valid event into a non-JSON line.
+    """
+    if isinstance(value, dict):
+        return {key: sanitize_json_value(child) for key, child in value.items()}
+    if isinstance(value, list):
+        return [sanitize_json_value(child) for child in value]
+    if isinstance(value, str):
+        return sanitize(value)
+    return value
+
+
 def redact_hidden_reasoning(value: Any) -> Any:
     if isinstance(value, dict):
         return {

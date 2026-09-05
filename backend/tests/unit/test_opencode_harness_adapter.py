@@ -435,6 +435,54 @@ def test_opencode_tool_snapshots_map_to_one_canonical_lifecycle(tmp_path):
     assert [event["type"] for event in translated].count("harness.completed") == 1
 
 
+def test_opencode_secret_redaction_preserves_json_tool_snapshots(tmp_path):
+    """A secret-containing tool output must not make its JSON event unparsable."""
+    runtime_dir = tmp_path / "secret-tool-output"
+    runtime_dir.mkdir()
+    output = (
+        "ANTHROPIC_API_KEY=sk-ant-1234567890abcdef\n"
+        'CODIFY_HARNESS_CONFIG_JSON={"follow_up":false,"resume":true}\n'
+    )
+    _emit(runtime_dir, "run.started")
+    _translate(
+        runtime_dir,
+        [
+            _record(
+                "message.updated",
+                {"sessionID": "ses-secret", "info": {"id": "m1", "role": "assistant"}},
+            ),
+            _tool_part_record(
+                call_id="call-secret",
+                tool="bash",
+                status="running",
+                input_value={"command": "env"},
+            ),
+            _tool_part_record(
+                call_id="call-secret",
+                tool="bash",
+                status="completed",
+                input_value={"command": "env"},
+                output=output,
+                exit_code=0,
+            ),
+            _record(
+                "message.part.updated",
+                {"part": {"type": "text", "text": "done", "messageID": "m1", "id": "p1"}},
+            ),
+            _record("session.idle", {"sessionID": "ses-secret"}),
+        ],
+    )
+
+    events = _events(runtime_dir)
+    completed = [event for event in events if event["type"] == "tool.completed"]
+    assert len(completed) == 1
+    assert completed[0]["payload"]["error"] is False
+    raw = (runtime_dir / "harness-events/opencode.jsonl").read_text(encoding="utf-8")
+    assert "sk-ant-1234567890abcdef" not in raw
+    diagnostics = [event for event in events if event["type"] == "diagnostic"]
+    assert all(item["payload"].get("code") != "non_json_raw_line" for item in diagnostics)
+
+
 def test_opencode_durable_events_map_text_tool_usage_and_compaction(tmp_path):
     runtime_dir = tmp_path / "durable"
     runtime_dir.mkdir()
