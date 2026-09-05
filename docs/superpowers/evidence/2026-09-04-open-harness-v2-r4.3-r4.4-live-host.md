@@ -795,3 +795,104 @@ independent release-sign-off boundaries.
 
 R4.5 security/release sign-off and R4.6 independent hard-cut go/no-go remain
 open. No R5 maintenance window or `v2_only` cutover was performed.
+
+## 2026-09-05 continuation: live V1 acceptance and strict read-only display
+
+The earlier sections above are the checkpoint recorded before a V1 Task could
+be created. The following continuation supersedes only the statements that
+said the development database had no V1 Task; it does not change the frozen
+V2 cohort or claim an L5/L6 approval.
+
+### Launcher compatibility fix and V1 Kit composition
+
+The dual-canary policy explicitly permits frozen V1 bundles, but the Kit
+launcher still rejected every outer `codify.worker.runtime-bundle/v1`
+manifest and applied the V2-only `bundle_digest` self-binding check to V1.
+The minimal fix in `deploy/worker-kit/launcher/main.go` now accepts both
+runtime-bundle schemas and performs the launcher-facing digest check only for
+V2. This preserves the V1 archive verification boundary: V1 stores the bundle
+digest in the persisted outer manifest because placing it inside the archive
+would make the archive digest self-referential. The focused backend regression
+set remained green: 83 tests passed in
+`backend/tests/unit/test_worker_kit.py` and
+`backend/tests/unit/test_worker_profile_runtime.py`.
+
+From that source, the target daemon built and verified a four-Harness Kit:
+
+| Item | Result |
+| --- | --- |
+| Kit version/path | `0.6.13-v1-compat2` at `/opt/codify/worker-kits/0.6.13-v1-compat2-linux-amd64-d97f2157bbe7` |
+| Kit manifest SHA-256 | `d97f2157bbe79ec1c278fb216d9e208063e7273ed402169a860193046b86be2e` |
+| Export archive SHA-256 | `317838dd2b701129d9ae8d33f821e46835d810a087dde935c12ad4407494876e` |
+| Payload verification | Pi `0.84.2`, OpenCode `1.18.19`, Claude `2.1.153`, Codex `0.146.0`; remote build smoke passed |
+| Profile | temporary V1-only Profile 5 `r4-v1-readonly-smoke-20260905`, image `127.0.0.1:5000/codify-worker/java21-maven@sha256:234582c692d1ebb00ba8e882160618c2258463149d968009ac81c545e63a538b`, `harness_runtimes={}` |
+| Profile Verify | administrator Verify returned 200; `verified_at=2026-09-05 04:39:31` with `worker_kit_source=profile`; V2 identity fields remain null by design for this V1-only Profile |
+
+The first four V1 probes are retained as bounded debug evidence: Tasks 395
+and 396 were cancelled after the old image digest was unavailable and retry
+preserved their immutable old Bundle; Task 397 reached the V1 Bundle but
+exposed the old V2-only launcher schema gate; Task 398 reached the corrected
+schema gate but exposed the V2-only digest check applied to V1. None is in the
+V2 success or integrity cohort.
+
+### Task 399: real V1 read-only acceptance
+
+Task 399 was created from Issue #106 with a fresh session, Codex Harness,
+Provider 12 `openrouter-minimax-responses` (`minimax/minimax-m3:free`), Profile
+5, and the explicit read-only prompt to print `pwd`, inspect Git status, and
+stop without changing files. It completed on the existing immutable Bundle
+174 after the Kit fix:
+
+| Item | Result |
+| --- | --- |
+| Task/runtime | `completed`, 31s, `total_changes=0`, input/output `20996/151` |
+| Contract | Bundle 174, outer `codify.worker.runtime-bundle/v1`, `codify.worker.harness/v1`, event `codify.worker.event/v1`, bundle digest `376a80031dd5181966172132d735b45c2fe73780428ebe15c2e5a587b7d0c742`, archive-manifest digest `6da46ad0a2e12697c4baf89018032b782b36223839147c209a044972637dc6ac` |
+| Attempt | `task-399-attempt-1-76758c712621`, Adapter `1.0.0`, Codex CLI `0.146.0`, `last_seq=14`, `control_state=closed`, terminal `run.completed` |
+| Receipts | 14 receipts, seq 1–14, 14 distinct event IDs; event stream includes `run.started`, model resolution, tool start/completion, usage, delivery, finalization, and `run.completed` |
+| Persistence | 5 raw-log chunks / 2289 bytes; archive `/opt/codify-archives/task-399-runtime-archive.tar.gz`, 3796 bytes, SHA-256 `205dfaf54d20fe07c72b9e1370274b537e5565700a1edbc72dd2d877d91d21fd`; `container_id` empty after cleanup |
+| Host cleanup | `docker ps -a --filter name=codify-399` returned no container; Task 399 has zero residual `issue_execution_locks` |
+
+The persisted raw log records `/workspace`, a clean `codify/issue-106`
+branch, the requested read-only shell command, no Harness changes, and a
+successful Mermaid delivery-summary validation. This is live V1 execution
+evidence; it is not a V2 contract or V2 receipt contribution.
+
+### `v2_only` V1 read-only display preflight
+
+After Task 399 was terminal, Backend and Scheduler were recreated temporarily
+with `HARNESS_EXECUTION_MODE=v2_only`. The deployment preflight reported both
+health endpoints as `v2_only`. The authenticated browser loaded
+`/tasks/399` and rendered `已完成` plus `Legacy V1 · 只读`, the delivery
+summary, the three persisted event-stream entries, raw-log tab, Provider 12,
+Profile 5, Codex Harness, 31-second runtime, and 21.1K-token statistics.
+No task was created or mutated. Backend/Scheduler were then recreated with
+`HARNESS_EXECUTION_MODE=dual_canary`; the final preflight reported both
+endpoints consistently as `dual_canary`, Backend healthy, and zero residual
+Issue locks. This closes the missing live V1 read-only display evidence, but
+not the R5 hard cut or the remaining L5 review/sign-off.
+
+### Final Host capacity and cleanup boundary
+
+The new Kit build temporarily filled the target root filesystem to 100% with
+about 413MB available. Before cleanup, every deletion target was checked with
+`docker ps -a --filter ancestor=<image>` and had no container references. The
+following scoped Codify-only cleanup was then performed: old Kit-export and
+Backend/Frontend/test/mock images, 29 untagged Codify build layers, and
+BuildKit cache older than one hour. Running Backend/Scheduler, nginx, the
+Worker image, Postgres, GitLab, Redis, all volumes, and unrelated images were
+not deleted. The final remote state was 25 images / 8 active, 9 containers / 9
+active, 11 volumes, 160 BuildKit records, and root filesystem 61G total / 59G
+used / 2.5G available (97%). All Codify services remained healthy.
+
+### Updated R4 boundary
+
+R4.3 now has live V1 detail evidence and a successful V1 execution, but remains
+partial because real mobile keyboard/IME/notch/gesture-area acceptance is
+temporarily deferred per user instruction, and the full interaction/operations
+review is not independently signed. R4.4 retains the V2 exact integrity
+result of 14 attempts, 824 receipts, and 824 distinct event IDs for Task IDs
+380–394; V1 Task 399 is explicitly excluded. Real Mattermost delivery and
+formal zero-P0/P1 sign-off remain open. R4.5 still requires migration-owner,
+credential/least-privilege, release-package, retention, and maintenance-window
+evidence. R4.6 remains open; the Host is intentionally left in
+`dual_canary`.

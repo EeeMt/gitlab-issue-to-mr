@@ -44,17 +44,18 @@ release-owner approval.
 | Frontend unit suite | passed, 80 files / 1692 tests | Includes structured SSE stale-source and mobile safe-area regression coverage |
 | Frontend production build | passed | Vite emitted only the existing large-chunk warning |
 | Backend lint | passed | `make lint-backend` |
-| Remote Docker state | near capacity, not full | The post-Task-394 snapshot reports `df -h /` at 61G total / 57G used / 4.2G available (94%); `docker system df` reports 83 Images / 12.42GB / 6.713GB reclaimable, 9.033MB containers, 1.643GB volumes / 1.309GB reclaimable, and 6.526GB BuildKit. No cleanup was performed because the disk was not full. |
+| Remote Docker state | cleaned after full-disk trigger | The new Kit build briefly left the root filesystem at 100% with about 413MB available. After checking every target with `docker ps -a --filter ancestor=<image>`, a scoped cleanup removed unreferenced Codify Kit-export/Backend/Frontend/test/mock images, 29 dangling Codify layers, and BuildKit cache older than one hour. Final `df -h /` is 61G total / 59G used / 2.5G available (97%); Docker reports 25 Images / 10.12GB, 9 containers, 1.643GB volumes, and 7.487GB remaining reclaimable BuildKit cache. Running services, volumes, GitLab/DB/Redis and unrelated images were not touched. |
 | Current Kit archive reconstruction and V2 release preflight | passed, not signed | The installed `0.6.12-linux-amd64-c33dbf86951b` Kit was streamed into a temporary `518M` archive; archive SHA-256 `2d3ee7f81525d465731344571cbf5bd93a0cd94bb6cf16f5a4d5512d5c0a25a6`, manifest SHA-256 `c33dbf86951bed6e3b4de1897313725f14f00006dc51fb300e7b821bb47e17bd`, content inventory `7630f086800c95f851db8c9351638868ab60ac33fb3bfe22f9f2f5c8dcdc98a1`; `deploy/scripts/preflight-v2-release.sh` passed against the target daemon and Worker image repo digest `127.0.0.1:5000/codify-worker/java21-maven@sha256:234582c692d1ebb00ba8e882160618c2258463149d968009ac81c545e63a538b`. The temporary archive is not a release-owner-signed package and is not committed. |
-| Exact committed image/Profile/Task recheck | passed with bounded Provider outcomes | Backend/Scheduler now run image `sha256:334c674d…` built after `48b16fdc`; Profile 4 generation 74 completed four-Harness Verify; Tasks 380–383 completed Pi/Claude/OpenCode/Pi on unchanged Bundles 170–172 with 397 unique contiguous receipts and zero changes. Current exact OpenCode/Pi/Claude cancellation Tasks 384–386 on the prior Backend image added 15/40/8 receipts; post-fix Task 387 on Bundle 171 / Provider 11 added 9 unique contiguous receipts, one `run.failed(status=cancelled)` terminal, zero changes, a 4594-byte archive (`69e8a1df…`), 6 raw-log chunks / 5117 bytes, and a removed Worker container. Post-fix Task 388 on the same Bundle/Provider completed with 19 unique contiguous receipts, `run.completed`, zero changes, a 7586-byte archive (`27852b5a…`), 7 raw-log chunks / 8486 bytes, and a removed Worker container; Task 389 on Bundle 171 / Provider 6 completed with 20 unique contiguous receipts, `run.completed`, zero changes, a 7236-byte archive (`439f3132…`), 6 raw-log chunks / 8359 bytes, and a removed Worker container; Task 390 on Bundle 172 / Provider 6 completed with 216 unique contiguous receipts, `run.completed`, zero changes, a 22384-byte archive (`d54b5eb2…`), 4 raw-log chunks / 2678 bytes, and a removed Worker container; Task 391 on Codex Bundle 173 / Provider 4 reached the Adapter and ended with 12 unique contiguous receipts, one `run.failed(status=failed, failure.kind=engine_error)` terminal, zero changes, a 3314-byte archive (`db05ea24…`), 4 raw-log chunks / 2393 bytes, and a removed Worker container after upstream `403 unsupported_country_region_territory`; Task 392 on the same Codex Bundle 173 / Provider 12 completed with 14 unique contiguous receipts, `run.completed`, zero changes, a 3980-byte archive (`9afe4f3f…`), 5 raw-log chunks / 2733 bytes, 21030/137 usage, and a removed Worker container; Task 394 on Pi Bundle 170 / Provider 12 completed with 74 unique contiguous receipts, `run.completed`, zero changes, an 8974-byte archive (`2ffe9f76…`), 3 raw-log chunks / 2727 bytes, 139/118 usage, and a removed Worker container. The new Scheduler emitted one `Task 387 cancelled` INFO with no `Task 387 failed`, successful INFO lines for Tasks 388/389/390/392/394, one bounded failure for Task 391, and one self-recovered `control_owner_unreachable` gate-probe retry for Task 394; current exact composition now has Codex and Pi success plus bounded Provider-negative evidence. |
+| Exact committed image/Profile/Task recheck | passed with bounded Provider outcomes plus separate V1 evidence | Backend/Scheduler now run image `sha256:334c674d…` built after `48b16fdc`; Profile 4 generation 74 completed four-Harness Verify; Tasks 380–383 completed Pi/Claude/OpenCode/Pi on unchanged Bundles 170–172 with 397 unique contiguous receipts and zero changes. Current exact OpenCode/Pi/Claude cancellation Tasks 384–386 on the prior Backend image added 15/40/8 receipts; post-fix Task 387 on Bundle 171 / Provider 11 added 9 unique contiguous receipts, one `run.failed(status=cancelled)` terminal, zero changes, a 4594-byte archive (`69e8a1df…`), 6 raw-log chunks / 5117 bytes, and a removed Worker container. Post-fix Task 388 on the same Bundle/Provider completed with 19 unique contiguous receipts, `run.completed`, zero changes, a 7586-byte archive (`27852b5a…`), 7 raw-log chunks / 8486 bytes, and a removed Worker container; Task 389 on Bundle 171 / Provider 6 completed with 20 unique contiguous receipts, `run.completed`, zero changes, a 7236-byte archive (`439f3132…`), 6 raw-log chunks / 8359 bytes, and a removed Worker container; Task 390 on Bundle 172 / Provider 6 completed with 216 unique contiguous receipts, `run.completed`, zero changes, a 22384-byte archive (`d54b5eb2…`), 4 raw-log chunks / 2678 bytes, and a removed Worker container; Task 391 on Codex Bundle 173 / Provider 4 reached the Adapter and ended with 12 unique contiguous receipts, one `run.failed(status=failed, failure.kind=engine_error)` terminal, zero changes, a 3314-byte archive (`db05ea24…`), 4 raw-log chunks / 2393 bytes, and a removed Worker container after upstream `403 unsupported_country_region_territory`; Task 392 on the same Codex Bundle 173 / Provider 12 completed with 14 unique contiguous receipts, `run.completed`, zero changes, a 3980-byte archive (`9afe4f3f…`), 5 raw-log chunks / 2733 bytes, 21030/137 usage, and a removed Worker container; Task 394 on Pi Bundle 170 / Provider 12 completed with 74 unique contiguous receipts, `run.completed`, zero changes, an 8974-byte archive (`2ffe9f76…`), 3 raw-log chunks / 2727 bytes, 139/118 usage, and a removed Worker container. The separate V1-compatible Kit/Profile 5 path then completed Task 399 on Bundle 174 with 14 V1 receipts, zero changes, a 3796-byte archive, and a removed Worker container. The new Scheduler emitted one `Task 387 cancelled` INFO with no `Task 387 failed`, successful INFO lines for Tasks 388/389/390/392/394/399, and one bounded failure for Task 391; V2 integrity statistics remain separate from Task 399. |
 | Profile re-verification and prior post-fix smoke | passed with bounded Provider negatives | Profile 4 generation 73 and Tasks 374–379 remain historical evidence for the superseded image composition; Tasks 374–376 completed Pi/Claude/OpenCode on Bundles 166–168, while Codex Tasks 377–379 reached the Adapter and were correctly bounded as upstream `rate_limited`/`engine_error`; Task 368 remains the preceding-generation Codex success |
 | GitLab integration connectivity | passed, not a permission sign-off | The authenticated admin UI read-only connection test reached `http://192.168.50.129:8080`, authenticated as `ai-bot`, and reported GitLab `18.5.5-ee`; the Webhook overview currently returned zero projects. This proves application connectivity/identity only, not token scope, least privilege, or rotation. |
-| Remote execution mode | restored and healthy | A temporary no-task `v2_only` mode-health/V2-detail preflight was run and then restored; final Backend/Scheduler health reports `HARNESS_EXECUTION_MODE=dual_canary`. A subsequent read-only V1 Task creation probe using Issue #105/Profile 1 was rejected by the Backend because the Profile had no verified Codex CLI identity; no V1 Task row or Issue lock was created. No hard-cut or migration was attempted. |
+| Remote execution mode | restored and healthy | After Task 399 completed, Backend and Scheduler were temporarily recreated with `HARNESS_EXECUTION_MODE=v2_only`; both health endpoints agreed, and authenticated Task399 detail rendered `Legacy V1 · 只读` with summary/events/logs/statistics. No task was created or mutated. Services were restored to `dual_canary`; final preflight agrees and reports Backend healthy. No hard-cut or migration was attempted. |
 
 The remote image/cache state was inspected before and after the live smoke and
-again after the frontend nginx-only deployment. The disk was not full, so no
-image, volume, or BuildKit cleanup was performed. No protected service or
-unrelated image was touched.
+again after the frontend nginx-only deployment. During the V1 Kit build the
+filesystem reached 100%, so the explicitly scoped Codify cleanup described in
+the table above was performed. No protected service, volume, GitLab/DB/Redis
+image, or unrelated image was touched.
 
 The current remote recheck also returned Backend health `healthy` with database
 and Docker checks `ok`, and confirmed `HARNESS_EXECUTION_MODE=dual_canary`.
@@ -72,13 +73,13 @@ inventory, and Worker image platform/repo digest were all verified. This is
 reproducibility evidence for the frozen Kit, not release-owner approval: the
 archive is temporary and there is no signed package or approved release note
 attached to this audit.
-The latest database snapshot has 362 Tasks, zero `pending`/`queued`/`running` Tasks,
-zero `issue_execution_locks`, zero Mattermost notification profiles, and zero
-notification deliveries. These are current Host observations; they do not
-replace the missing live alert delivery or independent release sign-off. All
-362 Task Worker Profile Snapshots have
-`runtime_contract_version=codify.worker.harness/v2`; no legacy V1 Snapshot is
-currently bound to a Task.
+The latest database snapshot has 367 Tasks, zero `pending`/`queued`/`running`
+Tasks, zero `issue_execution_locks`, zero Mattermost notification profiles, and
+zero notification deliveries. Five new V1 snapshots belong to Tasks 395–399;
+the other 362 Task Worker Profile Snapshots have
+`runtime_contract_version=codify.worker.harness/v2`. These are current Host
+observations; they do not replace the missing live alert delivery or
+independent release sign-off.
 
 The current development-Host Provider inventory was checked without reading
 credentials or URL paths: enabled Providers 3–6 resolve to `opencode.ai`, and
@@ -124,9 +125,11 @@ claims inferred from tests or a development Host:
 2. **Release notes and exact release package.** The current commits and R4
    candidate evidence are recorded, but no release-owner-approved release
    notes or signed package manifest has been attached to this audit.
-3. **Old Kit/image retention and retirement.** The remote daemon still has
-   reclaimable images/cache. No retirement date, retention owner, or approved
-   deletion list is recorded, so cleanup remains intentionally deferred.
+3. **Old Kit/image retention and retirement.** The full-disk debug cleanup
+   removed only explicitly checked, unreferenced Codify images/layers and old
+   BuildKit cache. The remote daemon still has reclaimable images/cache, but no
+   retirement date, retention owner, or approved long-term deletion list is
+   recorded; future cleanup must remain scoped and owner-reviewed.
 4. **Maintenance window and ownership.** No approved R5 window, migration
    owner, rollback owner, or observation window is recorded here. These values
    must not be invented from the development run.
@@ -447,3 +450,60 @@ execute the reviewed target revision once, confirm the expected Provider
 cleanup, and repeat Profile, Bundle, and relevant Task verification; the
 current generation-73 evidence was recorded against revision 077 and cannot
 silently be reused as post-migration proof.
+
+## Continuation addendum: V1 compatibility, Task 399, and full-disk cleanup
+
+The previous audit checkpoint correctly recorded that Profile 1 could not
+create a V1 Task because it was an explicit V2 Profile without verified Codex
+identity. To obtain legitimate V1 evidence, a temporary V1-only Profile 5 was
+created through the normal UI with `harness_runtimes={}`; no database bypass or
+historical Snapshot rewrite was used.
+
+The launcher had a real dual-canary compatibility defect: it rejected V1
+runtime-bundle manifests and applied the V2 self-binding digest check to V1.
+The minimal source fix accepts `codify.worker.runtime-bundle/v1` and `/v2`, and
+limits the digest check to V2. The focused Worker Kit/Profile regression set
+passed 83 tests. A new four-Harness Kit was built and installed on the target:
+`0.6.13-v1-compat2`, manifest SHA-256
+`d97f2157bbe79ec1c278fb216d9e208063e7273ed402169a860193046b86be2e`, at
+`/opt/codify/worker-kits/0.6.13-v1-compat2-linux-amd64-d97f2157bbe7`.
+Administrator runtime Verify returned 200 at `2026-09-05 04:39:31`; the V1-only
+Profile correctly has no V2 identity fields.
+
+Tasks 395–398 remain bounded diagnostic samples: two were cancelled after the
+old image digest was unavailable/immutable retry reuse, Task 397 exposed the
+old V2-only schema gate, and Task 398 exposed the V2-only digest check applied
+to V1. After the fix, Task 399 completed with Profile 5, Codex, Provider 12
+`openrouter-minimax-responses`, Bundle 174, zero changes, and 20996/151 input/
+output tokens. Its V1 attempt used Adapter `1.0.0` / Codex CLI `0.146.0`,
+closed with 14 contiguous `codify.worker.event/v1` receipts (seq 1–14) and
+`run.completed`; raw logs were 5 chunks / 2289 bytes and the runtime archive
+was 3796 bytes with SHA-256
+`205dfaf54d20fe07c72b9e1370274b537e5565700a1edbc72dd2d877d91d21fd`. The
+Worker container and Issue lock were cleared.
+
+After completion, Backend and Scheduler were temporarily recreated in
+`v2_only`. Both health endpoints agreed on `v2_only`, and the authenticated
+Task399 detail page displayed `已完成` and `Legacy V1 · 只读` together with the
+delivery summary, V1 event stream, raw logs, Provider/Worker/Harness context,
+and runtime statistics. No task mutation occurred. Services were recreated
+back to `dual_canary`; the final preflight agreed and Backend was healthy. This
+is a read-only compatibility preflight, not an L6 cutover.
+
+The new Kit build filled the remote root filesystem to 100% (about 413MB
+available). After checking every target with an ancestor-container query, the
+cleanup removed only unreferenced Codify Kit-export/Backend/Frontend/test/mock
+images, 29 dangling Codify layers, and BuildKit cache older than one hour.
+Running services, Worker image, volumes, GitLab/DB/Redis, and unrelated images
+were not touched. Final root capacity is 61G total / 59G used / 2.5G available
+(97%); all Codify services remained healthy. The remaining reclaimable cache
+is intentionally kept for current development unless another full-disk event
+requires scoped cleanup.
+
+The live database now has 367 Tasks: 362 V2 snapshots and 5 V1 snapshots
+(Tasks 395–399), with zero active Tasks or Issue locks. The V2 exact
+Task-ID 380–394 integrity result remains 14 attempts, 824 receipts, and 824
+distinct event IDs; Task 399 is excluded from that V2 statistic. Migration
+078 remains unapplied (`077_v2_worker_kit_identity`), real Mattermost delivery
+and release-owner/independent sign-off remain open, and the Host remains in
+`dual_canary`.
