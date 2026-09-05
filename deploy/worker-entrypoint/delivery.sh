@@ -57,6 +57,26 @@ print(text, end="")
 '
 }
 
+read_harness_result_summary() {
+    local candidate summary
+
+    # Event translators write the authoritative result to
+    # CODIFY_HARNESS_RESULT_FILE. Some adapters also leave a legacy JSON result
+    # on CODIFY_HARNESS_OUTPUT_FILE; keep that as a compatibility fallback for
+    # older/failed launchers, but never prefer it over the canonical envelope.
+    for candidate in "${CODIFY_HARNESS_RESULT_FILE:-}" "${CODIFY_HARNESS_OUTPUT_FILE:-}"; do
+        [ -n "${candidate}" ] && [ -s "${candidate}" ] || continue
+        summary="$(jq -r 'if (.result | type) == "string" then .result else "" end' \
+            "${candidate}" 2>/dev/null || true)"
+        if [ -n "${summary}" ]; then
+            printf '%s' "${summary}"
+            return 0
+        fi
+    done
+
+    return 0
+}
+
 annotate_delivery_summary_validation() {
     local attempts="$1"
     local repaired="$2"

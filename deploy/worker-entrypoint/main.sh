@@ -64,8 +64,8 @@ RESULT=${SCRIPT_RESULT}
 
 # Always emit structured tool calls if the JSON file exists, even on failure.
 # This lets the frontend show a timeline of what was attempted before the failure.
-if [ -f "${CODIFY_HARNESS_OUTPUT_FILE}" ] && [ -s "${CODIFY_HARNESS_OUTPUT_FILE}" ]; then
-    SUMMARY_CONTENT=$(jq -r '.result // ""' "${CODIFY_HARNESS_OUTPUT_FILE}" 2>/dev/null || true)
+if [ -s "${CODIFY_HARNESS_RESULT_FILE:-}" ] || [ -s "${CODIFY_HARNESS_OUTPUT_FILE}" ]; then
+    SUMMARY_CONTENT="$(read_harness_result_summary)"
     if [ ${#SUMMARY_CONTENT} -gt 45000 ]; then
         SUMMARY_CONTENT="${SUMMARY_CONTENT:0:45000}
 
