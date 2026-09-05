@@ -36,6 +36,10 @@ describe('TaskResultPanel', () => {
     expect(taskResultPanelSource).toContain("t('taskView.failureTimeout')")
     expect(taskResultPanelSource).toContain("if (firstLine) return firstLine")
     expect(taskResultPanelSource).toContain(
+      "props.task.failure_kind === 'engine_error' && props.task.failure_message?.trim()"
+    )
+    expect(taskResultPanelSource).toContain('return props.task.failure_message.trim()')
+    expect(taskResultPanelSource).toContain(
       "props.task.failure_kind === 'engine_error' && props.task.error_message"
     )
     expect(taskResultPanelSource).toContain('rawErrorExpanded = ref(false)')

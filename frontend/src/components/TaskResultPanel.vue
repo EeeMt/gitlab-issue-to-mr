@@ -347,6 +347,9 @@ const failureKindLabel = computed(() => {
   return labels[props.task.failure_kind] || props.task.failure_kind
 })
 const failureSummaryMessage = computed(() => {
+  if (props.task.failure_kind === 'engine_error' && props.task.failure_message?.trim()) {
+    return props.task.failure_message.trim()
+  }
   if (props.task.failure_kind === 'engine_error' && props.task.error_message) {
     const firstLine = props.task.error_message
       .split('\n')

@@ -1215,3 +1215,38 @@ This closes the previously missing live failure-notification evidence sample,
 but not formal R4.4 sign-off, the R4.5 owner/security/release audit, R4.6
 independent go/no-go, migration 078, R5/L6, or the real mobile-device
 keyboard/IME/notch/gesture-area acceptance that remains explicitly deferred.
+
+## 2026-09-05 continuation: served failure-summary visibility and disk recovery
+
+The first served-browser check of Task 410 found that the result card showed
+only `================` even though the Backend had stored the canonical
+`engine_error` failure detail. `frontend/src/components/TaskResultPanel.vue`
+now prefers a trimmed `failure_message` for `engine_error`; the component
+source guard was updated accordingly. The focused Vitest run passed 25 tests,
+and the frontend production build passed with the existing chunk-size warnings.
+
+The remote nginx rebuild initially failed at `COPY frontend/` with
+`no space left on device`. The pre-cleanup Docker report was 27 images, 11
+containers, 18 volumes, and 6.992GB of BuildKit cache. After checking
+`docker ps -a --filter ancestor=...` for the candidate image and confirming its
+Codify Compose labels, cleanup removed only the unreferenced dangling Codify
+Backend image `sha256:334c674db035…` and private BuildKit cache. GitLab,
+Postgres, Redis, Mattermost, active/unknown Worker images, and volumes were
+not touched. The rebuilt `codify-nginx:latest` image is
+`sha256:8b6fbfb939a598678ef0d3e9c263c0a89d8f22fc90a283b3f890046071712c76`.
+
+The nginx Compose update recreated Backend as a dependency and restored the
+generic template URL, so Backend and Scheduler were subsequently recreated
+with an untracked temporary override. The final containers report
+`FRONTEND_URL=http://192.168.50.129:8880`, `HARNESS_EXECUTION_MODE=dual_canary`,
+and `AUTO_MIGRATE=false`; Backend is healthy, the Scheduler process is running,
+the database remains at `077_v2_worker_kit_identity`, and Mattermost 10.9.1 is
+healthy. The final remote checks report 378 total Tasks, zero
+pending/queued/running Tasks, zero `issue_execution_locks`, 2.0GB available on
+the root filesystem (97%), and 1.422GB reclaimable BuildKit cache remaining.
+
+The new served Task 410 detail page now renders the canonical upstream message
+including HTTP 403 and `unsupported_country_region_territory`; it no longer
+renders only the generic separator. This is additional L5/UI and operational
+evidence, not a formal R4.3/R4.4 sign-off. Real mobile-device keyboard/IME,
+notch, and gesture-area acceptance remains explicitly deferred by the user.

@@ -737,3 +737,30 @@ Credential/least-privilege and rotation evidence, release package/signatures,
 retention ownership, maintenance-window ownership, independent zero-P0/P1
 approval, R4.6, migration 078, R5/L6, and real mobile-device acceptance remain
 open; the mobile-device item is explicitly deferred by the user.
+
+## 2026-09-05 continuation: nginx rebuild under disk pressure
+
+The remote nginx build initially failed during `COPY frontend/` with
+`no space left on device`. The cleanup was scoped after checking all container
+references and image labels: the only image removed was the unreferenced
+dangling Codify Backend image `sha256:334c674db035…`; private BuildKit cache
+was pruned. GitLab, databases, Redis, Mattermost, active/unknown Worker
+images, and volumes were left untouched. The rebuilt nginx image is
+`sha256:8b6fbfb939a598678ef0d3e9c263c0a89d8f22fc90a283b3f890046071712c76`.
+
+Because `compose up nginx` recreated Backend as a dependency, Backend and
+Scheduler were then recreated with an untracked temporary override restoring
+`FRONTEND_URL=http://192.168.50.129:8880`; the tracked generic
+`deploy/.env.test` template was not changed. Both services report
+`HARNESS_EXECUTION_MODE=dual_canary` and `AUTO_MIGRATE=false`, Backend is
+healthy, the Scheduler process is running, and the database remains at
+`077_v2_worker_kit_identity`. Mattermost 10.9.1 remains healthy. The final
+Host state is 378 Tasks, zero pending/queued/running Tasks, zero
+`issue_execution_locks`, and approximately 2.0GB available on `/` (97%).
+
+The served Task 410 page was rechecked after the nginx deployment and now
+renders the canonical upstream 403 failure detail. The UI change prefers
+`failure_message` over the generic first line for `engine_error`; its focused
+25-test suite and frontend production build passed. This evidence does not
+close the open credential/least-privilege, migration 078, release-package,
+owner-signature, R4.6, R5/L6, or deferred real-mobile-device gates.
