@@ -11,6 +11,36 @@ This is candidate evidence, not an L5 go/no-go decision. R4.3–R4.6 remain
 partially open until the complete acceptance, operational, security/release,
 and independent review gates are signed.
 
+## Exact committed composition recheck
+
+The mixed-provenance Host image recorded below is historical generation-73
+evidence. On 2026-09-05 the Backend/Scheduler image was rebuilt from the clean
+committed tree at `40235196` and deployed through the `remote` Docker context:
+
+| Item | Result |
+| --- | --- |
+| Backend/Scheduler image | `sha256:0ea2d9832fc0c7b3ca893b62f52a4f75fc54c56ed0bc80d732b08c95f5628c20`; OCI `org.opencontainers.image.revision=40235196` |
+| Running services | `codify-backend` and `codify-scheduler` both use the image above; Backend health is `healthy`, Scheduler reports `dual_canary` |
+| Profile 4 | administrator Verify returned 200; `verified_at=2026-09-05T00:45:09Z`, V2 verification generation `74`, Kit `0.6.12` manifest `c33dbf86951bed6e3b4de1897313725f14f00006dc51fb300e7b821bb47e17bd` |
+| Source composition | Backend and Runtime source hashes in the image match the local committed tree for the reviewed app/runtime files, including `worker_event_projector.py`, `worker_log_stream.py`, `providers.py`, `078_remove_provider_driver.py`, `harness/events.py`, `pi_events.py`, and `codex_events.py` |
+| Database/runtime mode | Alembic revision remains `077_v2_worker_kit_identity`; `AUTO_MIGRATE=false`; execution mode remains `dual_canary`; no `v2_only` cutover or migration was attempted |
+| Host capacity | Remote `/` is `57G/61G` used with `4.2G` available and `18%` inode use; Docker reports 82 images, 12.42GB images with 6.707GB reclaimable, and 6.526GB BuildKit cache. The filesystem is not full, so no Codify image/cache cleanup was performed. |
+
+The exact-composition positive cohort is:
+
+| Task | Harness / Provider | Bundle | Result | Attempt evidence |
+| ---: | --- | ---: | --- | --- |
+| 380 | Pi / Provider 7 `openrouter-free` | 170 (`e812376c…`) | `completed`, zero changes | Adapter `2.1.0`, CLI `0.84.2`, usage 171/117, raw-log 4 chunks, 44 receipts, seq 1–44, terminal `run.completed` |
+| 381 | Claude / Provider 11 `openrouter-minimax-anthropic` | 171 (`5a5bbd30…`) | `completed`, zero changes | Adapter `1.0.1`, CLI `2.1.153`, usage 2655/327, raw-log 6 chunks, 17 receipts, seq 1–17, terminal `run.completed` |
+| 382 | OpenCode / Provider 7 `openrouter-free` | 172 (`9ed188ca…`) | `completed`, zero changes | Adapter `2.0.0`, CLI `1.18.19`, usage 89/58, raw-log 4 chunks, 40 receipts, seq 1–40, terminal `run.completed` |
+
+All three tasks used fresh sessions and the existing read-only smoke prompt.
+The three attempts contain 101 unique contiguous receipts and no active Task
+or Issue execution lock remains. The current exact composition has no Codex
+success sample because the currently available Codex-legal Providers remain
+bounded by the previously recorded upstream 429/403 availability failures;
+that is an explicit Provider boundary, not a claim of runtime failure.
+
 ## Candidate and validation boundary
 
 - The Worker runtime image, Worker Kit `0.6.12`, and frozen CLI identities remain
@@ -31,7 +61,10 @@ and independent review gates are signed.
   are runtime code, so the prior Profile-4 evidence was not reused: the Backend
   was rebuilt, Profile 4 was re-verified across all four Harnesses, and new
   content-addressed Bundles were bound before the current live Tasks.
-- Current post-fix identity: Profile 4 generation `73`; Worker Kit `0.6.12`
+- The following generation-73 identity and Task table are retained as historical
+  pre-rebuild evidence; the exact-composition recheck above is the current
+  candidate. Current post-fix identity in that historical cohort: Profile 4
+  generation `73`; Worker Kit `0.6.12`
   readiness `ready`; Worker Image ID
   `sha256:b07ac48b129c35876c044079f8e9cd7aa7558dbb0ade2e50e856d4ab980f5e71`,
   repo reference
@@ -400,7 +433,10 @@ It does not yet sign the full gate because:
   soft keyboard, IME resize, or notched-device safe-area inset. The frontend now
   opts into `viewport-fit=cover` and the served stylesheet places the mobile
   shell/drawer content around the top and bottom `safe-area-inset-*` values, but
-  this run still observed a zero computed inset in the desktop viewport.
+  this run still observed a zero computed inset in the desktop viewport. Per
+  the user's instruction, real mobile-device keyboard/IME/notch/gesture-area
+  acceptance is temporarily deferred and is not part of this round's remote
+  execution; this evidence deliberately makes no device-level pass claim.
 - Task 371 supplies a controlled real disconnect/reconnect spot-check: the
   browser task page stayed mounted through the nginx restart, and persisted
   events continued from seq 9 before the restart through seq 10–26 after it,
@@ -429,17 +465,19 @@ It does not yet sign the full gate because:
 
 ### R4.4 — partial evidence, not signed
 
-Tasks 357–366 and 368–379 plus the prior five-task warm-start cohort provide all
-four Harness selections with real success samples across the evidence set and
-bounded upstream failure classification, command latency, usage, canonical
-terminal, archive, raw-log finalization, delivery samples, and the current
-queue/lock/secret-scan snapshot. The generation-73 current candidate adds
-successful Pi/Claude/OpenCode samples (#374–#376) and three correctly bounded
-Codex Provider failures (#377–#379); the current-Bundle Codex success sample
-is still open because these current-generation attempts were blocked by
-upstream 429 and 403 responses. Task 368 on Bundle 163 remains a valid Codex success for
+Tasks 357–366, 368–379, and the exact-composition Tasks 380–382 plus the prior
+five-task warm-start cohort provide all four Harness selections with real
+success samples across the evidence set and bounded upstream failure
+classification, command latency, usage, canonical terminal, archive, raw-log
+finalization, delivery samples, and the current queue/lock/secret-scan
+snapshot. The exact-composition candidate adds successful Pi/Claude/OpenCode
+samples (#380–#382) on Bundles 170/171/172; the generation-73 samples
+(#374–#376) and three correctly bounded Codex Provider failures (#377–#379)
+remain historical. A current-composition Codex success sample is still open
+because the available current-generation attempts were blocked by upstream 429
+and 403 responses. Task 368 on Bundle 163 remains a valid Codex success for
 the unchanged Codex Adapter identity, but does not replace that missing exact
-generation-73 Codex success. The local Mattermost mock E2E suite also passed
+composition Codex success. The local Mattermost mock E2E suite also passed
 96 tests, covering profile CRUD, config validation, connection-test outcomes,
 event filtering, and delivery result recording without contacting a real
 notification service. A complete Harness/Profile/Host operational review of
@@ -455,17 +493,17 @@ mock container were removed immediately afterward. This proves the Host
 container/DB/HTTP delivery path, but not authorization, a real Mattermost
 server, or external alert routing.
 
-The generation-73 Bundle 166–169 receipt recheck supports the
-zero-duplicate-terminal and zero-sequence-gap claim for the current candidate:
+The generation-73 Bundle 166–169 receipt recheck remains historical evidence:
 six attempts (#374–#379) contain 119 contiguous receipts in total, each with
-one Harness terminal and one Task terminal. Bundle 166/167/168/169 remain
-selected-Harness evidence variants over the same Image/Kit and Adapter
-identities. Bundle 163/164 and Task 368/371/372 are retained as historical
-generation-72 evidence; Bundle 165 and Task 373 are explicitly superseded by
-the Pi session-projection defect. The expanded current cohort still passes the
-frozen status/terminal mapping, duplicate-terminal, sequence, and secret-like
-checks, while leaving the exact generation-73 Codex success, live alert
-delivery to a real Mattermost service, and the formal zero-P0/P1 review open.
+one Harness terminal and one Task terminal. The exact-composition Bundle
+170/171/172 recheck adds three attempts (#380–#382) with 101 contiguous,
+unique receipts and one `run.completed` terminal per attempt. Bundle 163/164
+and Task 368/371/372 are retained as historical generation-72 evidence;
+Bundle 165 and Task 373 are explicitly superseded by the Pi session-projection
+defect. The expanded cohorts pass the frozen status/terminal mapping,
+duplicate-terminal, sequence, and secret-like checks, while leaving the exact
+composition Codex success, live alert delivery to a real Mattermost service,
+and the formal zero-P0/P1 review open.
 
 R4.5 security/release sign-off and R4.6 independent hard-cut go/no-go remain
 open. No R5 maintenance window or `v2_only` cutover was performed.

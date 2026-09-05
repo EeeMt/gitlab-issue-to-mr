@@ -2,17 +2,20 @@
 
 **Date:** 2026-09-05
 
-**Scope:** Current development Host `192.168.50.129`, the post-fix frozen R4
+**Scope:** Current development Host `192.168.50.129`, the exact committed R4
 candidate, and repository-side release checks. This is an audit record, not a
 security approval or an independent R4.6 go/no-go decision.
 
 The prior Profile-4 candidate was superseded after runtime commits `8110afa0`
 and `810f9fcb` changed the Codex and Pi Adapter projections. The current
-candidate is Profile 4 generation `73`, with selected-Harness Bundles 166
-(Pi), 167 (Claude), 168 (OpenCode), and 169 (Codex); the exact identities and
-Tasks 374–379 validation are recorded in the
+candidate was rebuilt from committed tree `40235196`, deployed as Backend/
+Scheduler image `sha256:0ea2d9832fc0c7b3ca893b62f52a4f75fc54c56ed0bc80d732b08c95f5628c20`,
+and verified as Profile 4 generation `74`. Its exact-composition selected-
+Harness Bundles are 170 (Pi), 171 (Claude), and 172 (OpenCode); Tasks 380–382
+validation is recorded in the
 [R4.3/R4.4 live Host evidence](2026-09-04-open-harness-v2-r4.3-r4.4-live-host.md).
-Tasks 369 and 370 were additional negative backend-restart probes on the
+The generation-73 Bundles 166–169 and Tasks 374–379 remain historical evidence
+for the preceding image composition. Tasks 369 and 370 were additional negative backend-restart probes on the
 preceding Codex-selected Bundle; both were bounded as upstream `rate_limited`.
 Task 371 then completed on the preceding OpenCode-specific Bundle 164 during a
 controlled nginx-only disconnect/reconnect spot-check, and Task 372 completed
@@ -34,9 +37,10 @@ release-owner approval.
 | Frontend unit suite | passed, 80 files / 1692 tests | Includes structured SSE stale-source and mobile safe-area regression coverage |
 | Frontend production build | passed | Vite emitted only the existing large-chunk warning |
 | Backend lint | passed | `make lint-backend` |
-| Remote Docker state | near capacity, not full | The post-generation-73 recheck reports `df -h /` at 61G total / 57G used / 4.1G available (94%) and `df -ih /` at 19% inode use; `docker system df` reports 81 Images / 12.41GB / 6.706GB reclaimable, 7.123MB containers, 1.641GB volumes, and 6.526GB BuildKit. No cleanup was performed because the disk was not full. |
+| Remote Docker state | near capacity, not full | The exact-composition recheck reports `df -h /` at 61G total / 57G used / 4.2G available (94%) and `df -ih /` at 18% inode use; `docker system df` reports 82 Images / 12.42GB / 6.707GB reclaimable, 5.327MB containers, 1.642GB volumes, and 6.526GB BuildKit. No cleanup was performed because the disk was not full. |
 | Current Kit archive reconstruction and V2 release preflight | passed, not signed | The installed `0.6.12-linux-amd64-c33dbf86951b` Kit was streamed into a temporary `518M` archive; archive SHA-256 `2d3ee7f81525d465731344571cbf5bd93a0cd94bb6cf16f5a4d5512d5c0a25a6`, manifest SHA-256 `c33dbf86951bed6e3b4de1897313725f14f00006dc51fb300e7b821bb47e17bd`, content inventory `7630f086800c95f851db8c9351638868ab60ac33fb3bfe22f9f2f5c8dcdc98a1`; `deploy/scripts/preflight-v2-release.sh` passed against the target daemon and Worker image repo digest `127.0.0.1:5000/codify-worker/java21-maven@sha256:234582c692d1ebb00ba8e882160618c2258463149d968009ac81c545e63a538b`. The temporary archive is not a release-owner-signed package and is not committed. |
-| Profile re-verification and live post-fix smoke | passed with bounded Provider negatives | Profile 4 generation 73 completed four-Harness Verify; Tasks 374–376 completed Pi/Claude/OpenCode on Bundles 166–168, while Codex Tasks 377–379 reached the Adapter and were correctly bounded as upstream `rate_limited`/`engine_error`; Task 368 remains the preceding-generation Codex success |
+| Exact committed image/Profile/Task recheck | passed with bounded Provider boundary | Backend/Scheduler both run image `sha256:0ea2d983…` with OCI revision `40235196`; Profile 4 generation 74 completed four-Harness Verify; Tasks 380–382 completed Pi/Claude/OpenCode on Bundles 170–172 with 101 unique contiguous receipts and zero changes. No current-composition Codex success was claimed because the available Codex-legal Providers remain bounded by the recorded upstream 429/403 failures. |
+| Profile re-verification and prior post-fix smoke | passed with bounded Provider negatives | Profile 4 generation 73 and Tasks 374–379 remain historical evidence for the superseded image composition; Tasks 374–376 completed Pi/Claude/OpenCode on Bundles 166–168, while Codex Tasks 377–379 reached the Adapter and were correctly bounded as upstream `rate_limited`/`engine_error`; Task 368 remains the preceding-generation Codex success |
 | GitLab integration connectivity | passed, not a permission sign-off | The authenticated admin UI read-only connection test reached `http://192.168.50.129:8080`, authenticated as `ai-bot`, and reported GitLab `18.5.5-ee`; the Webhook overview currently returned zero projects. This proves application connectivity/identity only, not token scope, least privilege, or rotation. |
 | Remote execution mode | unchanged | `HARNESS_EXECUTION_MODE=dual_canary`; no `v2_only` switch was attempted |
 
@@ -82,10 +86,11 @@ observation only; the release owner still must provide the least-privilege and
 rotation record.
 
 The current live evidence covers Pi, OpenCode, Claude, and Codex on Profile 4,
-including generation-73 successful Tasks 374–376, the current-generation
-Codex negative Tasks 377–379, the preceding-generation Codex success Task 368,
-the OpenCode reconnect Task 371, the stable-state cancellation Task 372, and
-the negative restart probes 369/370. The known non-success outcomes were
+including exact-composition successful Tasks 380–382, generation-73 successful
+Tasks 374–376, the generation-73 Codex negative Tasks 377–379, the
+preceding-generation Codex success Task 368, the OpenCode reconnect Task 371,
+the stable-state cancellation Task 372, and the negative restart probes
+369/370. The known non-success outcomes were
 correctly bounded as upstream/provider availability failures (`rate_limited`,
 selected-model `engine_error`, region-blocked `engine_error`, or the earlier
 real upstream 404). The detailed task, identity, archive, raw-log, and
@@ -119,20 +124,19 @@ claims inferred from tests or a development Host:
    P0/P1 evidence by themselves, but they also do not constitute a formal
    zero-blocker sign-off.
 
-The current Host image also has a provenance gap that must be closed before a
-release claim: the Backend `/app` files match the `9bbcf43` source, while the
-Runtime source contains the active-session Pi patch used by Task 374 without a
-single committed tree or OCI Git-revision label. The exact Bundle digests are
-still immutable and the behavior evidence remains valid, but the composition
-cannot currently be reproduced from one reviewed commit. The release owner
-must rebuild the exact Image/Runtime Bundle from committed source, or record a
-reviewed artifact-level exception tied to the immutable digests.
+The prior mixed-provenance image gap is closed for the current development
+candidate: Backend/Scheduler now run the image built from committed tree
+`40235196` with OCI revision label `40235196`, and the reviewed Backend/Runtime
+source hashes match the local tree. The exact-composition Bundle/Task evidence
+is therefore reproducible at the artifact level. This does not create a
+release-owner signature: the package manifest, release notes, retention plan,
+and independent approval remain open.
 
 ## R4.5 conclusion
 
 **Partial evidence, not signed.** Repository secret scanning, local regression,
-and remote-state checks pass. Provider/GitLab authorization and rotation,
-clean exact composition provenance, release notes, retention/retirement,
+remote-state checks, and exact committed artifact provenance pass. Provider/
+GitLab authorization and rotation, release notes, retention/retirement,
 maintenance ownership, and independent zero-P0/P1 approval remain open. R4.6
 therefore has no recorded decision, and the system must remain in
 `dual_canary`.
@@ -168,6 +172,20 @@ The generation-73 cohort now contains six attempts and 119 receipts: three
 completed (Tasks 374–376) and three bounded Provider failures (Tasks 377–379).
 Provider 4 remains region-blocked, and no additional Codex-legal Provider with
 a credible availability signal was available for another retry.
+
+At `2026-09-05T00:54:07Z`, the exact committed composition recheck converged
+Tasks 380–382 to `completed`: Pi/Provider 7 on Bundle 170, Claude/Provider 11
+on Bundle 171, and OpenCode/Provider 7 on Bundle 172. Their attempts have
+Adapter/CLI identities `2.1.0/0.84.2`, `1.0.1/2.1.153`, and `2.0.0/1.18.19`,
+respectively; they contain 44, 17, and 40 unique contiguous receipts, each
+ending in `run.completed`, with zero changes. There are zero active Tasks and
+zero Issue execution locks. Profile 4 Verify is generation 74, and the
+Backend/Scheduler image is the exact `40235196` image recorded above.
+
+The real mobile-device keyboard/IME/notch/gesture-area acceptance is
+temporarily deferred per user instruction. The desktop browser and served
+safe-area artifact remain evidence only; no device-level acceptance claim is
+recorded in this audit.
 
 ## Permission and rotation recheck
 
