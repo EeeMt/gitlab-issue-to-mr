@@ -755,3 +755,9 @@ Attempt `task-431-attempt-1-5e2884bb12e1` 以 `run.failed` 作为 canonical stop
 `quirky_allen` active/unknown Worker 继续保留。该结果只关闭当前 generation 的桌面取消 smoke，不关闭 R4.3–R4.6、
 release-owner/安全/权限/轮换/签名包/独立 go/no-go，也不授权 migration 078、`v2_only`、R5/L6；真实移动设备验收
 继续按用户指示暂缓。
+
+Task 432 继续在 readiness 已过 TTL 的 generation 78 exact snapshot 上验证 OpenCode 取消路径：Provider 12、
+`openai_responses`、Bundle 182、`freeform/fresh`。远端进程树先确认真实 `sleep 180`，随后通过 served `/tasks/432`
+取消；容器消失，页面显示 `任务已取消`，Attempt 以 `run.failed`/9 条连续唯一 receipt 收尾，archive 为 5878
+bytes，Mattermost delivery 25 为 `task_cancelled/success`，归档 secret-pattern scan 为 0。Task 432 与 Task 431
+共同补强当前代 Pi/OpenCode 取消证据，但仍不替代 R4.3/R4.4 正式审阅、R4.5 安全/owner 签署或 R4.6 go/no-go。

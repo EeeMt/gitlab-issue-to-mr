@@ -1122,3 +1122,13 @@ trigger was not reached, so no cleanup was performed and the active/unknown
 cancellation evidence only; it does not constitute R4.5 security approval,
 release-owner sign-off, R4.6/R5/L6 approval, migration 078 or `v2_only`
 authorization, or real mobile-device acceptance.
+
+Task 432 extended the same current-generation cancellation check to OpenCode:
+Provider 12, `openai_responses`, Bundle 182, `freeform/fresh`. The real
+`sleep 180` process was observed before the Dashboard Cancel action; the
+container was removed, the served task page showed `cancelled`, nine canonical
+receipt IDs/seqs were unique and contiguous, and Mattermost delivery 25 was
+`task_cancelled/success`. The 5878-byte archive has SHA-256
+`7eef4692558f2fe59205c68882e7413c2668b76ab3d121c03e26466bd05c4aaf`; its
+targeted secret-pattern scan returned no matches. This is additional desktop
+runtime evidence only and does not change the open R4.5 security/owner gates.

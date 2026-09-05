@@ -137,3 +137,33 @@ This closes the current-generation desktop cancellation smoke only. It does
 not close R4.3–R4.6, release-owner/security/rotation/signature gates, or
 authorize migration 078, `v2_only`, R5/L6, or the user-deferred real mobile
 device acceptance.
+
+## 2026-09-05 continuation: current-generation OpenCode cancellation Task 432
+
+To extend the current-generation cancellation evidence beyond Pi, Task 432
+used the same frozen Profile 4 / Kit `0.6.14` / Worker image composition as
+the preceding Tasks, with Provider 12, OpenCode, `openai_responses`, and a
+fresh `freeform` session. Readiness was still past its recorded TTL, so no
+Verify or identity change was performed. The remote process tree showed
+OpenCode's real `sleep 180` before the authenticated `/tasks/432` Cancel
+action. The container was absent after cancellation, and the served task page
+showed `任务已取消` with the OpenCode/Provider/Worker context.
+
+| Task | Runtime and lifecycle | Persistence / delivery |
+| ---: | --- | --- |
+| 432 | OpenCode / Provider 12 `openrouter-minimax-responses` / `minimax/minimax-m3:free` / `openai_responses`; Bundle 182, `f2382aedd3f7d022dc63a6c2c9be3b3831a1b6d54990d446a738c858e334c892`; `freeform/fresh`; 0 changes; `cancelled`; Adapter `2.0.0` / CLI `1.18.19` | Attempt `task-432-attempt-1-7cdc1eeefd1e`, `run.failed` canonical stop at `last_seq=9`; 9 unique contiguous receipts; raw logs 5 chunks / 2507 bytes; archive 5878 bytes, SHA-256 `7eef4692558f2fe59205c68882e7413c2668b76ab3d121c03e26466bd05c4aaf`; Mattermost delivery 25 `task_cancelled/success` |
+
+The task's bounded cancellation error was persisted as
+`MessageAbortedError: Aborted`; this is the expected Worker stop boundary and
+not an upstream Provider failure. The archive included the canonical event
+stream and the OpenCode HTTP audit. Its targeted scan returned zero matches for
+`glpat-*`, `sk-ant-*`, `ANTHROPIC_API_KEY=`, and `OPENAI_API_KEY=`. After the
+run, Backend, Scheduler, nginx, Mattermost `10.9.1`, both Postgres services,
+GitLab, and Redis remained healthy; there were no active Tasks or Issue locks.
+Root usage remained about `97%` with `2.0GB` available, so the disk-full
+cleanup trigger was not reached and no cleanup was performed.
+
+Task 432 strengthens current-generation desktop cancellation evidence for both
+Pi and OpenCode. It does not close R4.3–R4.6, release-owner/security/rotation/
+signature gates, or authorize migration 078, `v2_only`, R5/L6, or the
+user-deferred real mobile-device acceptance.
