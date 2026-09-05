@@ -55,6 +55,22 @@ success sample because the currently available Codex-legal Providers remain
 bounded by the previously recorded upstream 429/403 availability failures;
 that is an explicit Provider boundary, not a claim of runtime failure.
 
+Task #384 is a separate current-composition cancellation sample and is not
+counted in the four-success cohort above. It used OpenCode with Provider 7
+(`openrouter-free`) on Bundle 172, with a fresh session and the read-only
+`pwd` plus `sleep 180` prompt. The operator cancelled while the sleep was
+running; the task ended `cancelled` with `MessageAbortedError: Aborted`, zero
+changes, and no Issue lock. Its attempt used Adapter `2.0.0` / CLI `1.18.19`
+and persisted 15 unique contiguous receipts (seq 1–15):
+`harness.failed(failure.kind=cancelled)` →
+`worker.finalization(exit_code=143)` →
+`run.failed(status=cancelled, failure.kind=cancelled)`. The runtime archive
+was finalized at 7039 bytes (`59c56212165eee79e67dc0772c973e26e0bad3c949169740ba442db53d8c9e86`),
+raw-log persistence has 4 chunks / 3215 bytes, and the Worker container was
+removed. The expected post-exit canonical-tail 409 warning was observed after
+the container had already stopped; persisted receipts and archive finalization
+were unaffected.
+
 ## Candidate and validation boundary
 
 - The Worker runtime image, Worker Kit `0.6.12`, and frozen CLI identities remain
@@ -488,7 +504,8 @@ classification, command latency, usage, canonical terminal, archive, raw-log
 finalization, delivery samples, and the current queue/lock/secret-scan
 snapshot. The exact-composition candidate adds successful Pi/Claude/OpenCode/Pi
 samples (#380–#383) on Bundles 170/171/172; Task 383 reuses the Pi Bundle 170
-variant with Provider 6 over `anthropic_messages`. The generation-73 samples
+variant with Provider 6 over `anthropic_messages`. The separate current exact
+OpenCode cancellation sample is Task 384 on Bundle 172. The generation-73 samples
 (#374–#376) and three correctly bounded Codex Provider failures (#377–#379)
 remain historical. A current-composition Codex success sample is still open
 because the available current-generation attempts were blocked by upstream 429
@@ -517,7 +534,8 @@ one Harness terminal and one Task terminal. The exact-composition Bundle
 unique receipts and one `run.completed` terminal per attempt. Bundle 163/164
 and Task 368/371/372 are retained as historical generation-72 evidence;
 Bundle 165 and Task 373 are explicitly superseded by the Pi session-projection
-defect. The expanded cohorts pass the frozen status/terminal mapping,
+defect. Task 384 adds a separate 15-receipt current-composition cancellation
+chain ending in `run.failed(status=cancelled)`. The expanded cohorts pass the frozen status/terminal mapping,
 duplicate-terminal, sequence, and secret-like checks, while leaving the exact
 composition Codex success, live alert delivery to a real Mattermost service,
 and the formal zero-P0/P1 review open.
