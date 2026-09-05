@@ -507,3 +507,28 @@ distinct event IDs; Task 399 is excluded from that V2 statistic. Migration
 078 remains unapplied (`077_v2_worker_kit_identity`), real Mattermost delivery
 and release-owner/independent sign-off remain open, and the Host remains in
 `dual_canary`.
+
+## Post-cleanup V2 smoke recheck: Task 400
+
+After the scoped Docker cleanup, Task 400 was run from Issue #99 with Profile
+4, the existing Provider 12 `openrouter-minimax-responses`, and the Pi Harness.
+It completed as a real V2 freeform read-only task with zero changes and
+130/136 input/output tokens. The immutable snapshot used Bundle 170, Kit
+`0.6.12`, Pi CLI `0.84.2`, Adapter `2.1.0`, and the same current Worker image
+digest recorded in the preceding R4 audit.
+
+The attempt closed at `last_seq=42` with `run.completed`; all 42 receipt
+sequence numbers and event IDs were unique and contiguous. Five raw-log chunks
+were persisted, the runtime archive was 6905 bytes with SHA-256
+`eae25e8e14f181ef626dc766816f578e660c399b82b4766db08c9bde65f4d1ab`, and the
+temporary Worker container plus Task Issue lock were absent after completion.
+The authenticated desktop `/tasks/400` page displayed the completed Provider,
+Worker, Pi, delivery-summary, event-stream, raw-log, and runtime-statistics
+context.
+
+This recheck updates the live database count from the preceding 367-task
+checkpoint to 368 Tasks: 363 V2 snapshots and 5 V1 snapshots. It does not add
+Task 400 to the frozen 380–394 integrity cohort, does not execute migration
+078, and does not claim real Mattermost delivery, mobile-device acceptance,
+release-owner sign-off, or an R4.6/R5 decision. The Host remains in
+`dual_canary`.

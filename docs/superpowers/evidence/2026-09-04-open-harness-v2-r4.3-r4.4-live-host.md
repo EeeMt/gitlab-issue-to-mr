@@ -896,3 +896,39 @@ formal zero-P0/P1 sign-off remain open. R4.5 still requires migration-owner,
 credential/least-privilege, release-package, retention, and maintenance-window
 evidence. R4.6 remains open; the Host is intentionally left in
 `dual_canary`.
+
+## 2026-09-05 continuation: post-cleanup V2 Pi smoke (Task 400)
+
+After the scoped full-disk cleanup, a fresh real task was created from Issue
+#99 to verify that the current V2 composition still executes with the existing
+Provider. This is a separate post-cleanup smoke sample; it is intentionally
+not added to the frozen Task-ID 380–394 integrity cohort and does not change
+the R4 sign-off boundary.
+
+| Item | Result |
+| --- | --- |
+| Task/runtime | Task 400, `completed`, 19s execution, `total_changes=0`, input/output tokens `130/136` |
+| Selection | Issue #99, Profile 4 `v2-canary-0.6.11-four-harness`, Pi Harness, Provider 12 `openrouter-minimax-responses` / `minimax/minimax-m3:free`, freeform, fresh session |
+| Composition | Bundle 170; Worker Kit `0.6.12` at `/opt/codify/worker-kits/0.6.12-linux-amd64-c33dbf86951b`; image `127.0.0.1:5000/codify-worker/java21-maven@sha256:234582c692d1ebb00ba8e882160618c2258463149d968009ac81c545e63a538b`; Pi CLI `0.84.2`, Adapter `2.1.0`, contract `codify.worker.harness/v2`, orchestration `1.0.0` |
+| Attempt | `task-400-attempt-1-96d0bad6b487`, event schema `codify.worker.event/v2`, `last_seq=42`, `control_state=closed`, terminal `run.completed` |
+| Receipts | 42 receipts, seq 1–42 contiguous, 42 distinct seq values and 42 distinct event IDs; the sequence-gap/duplicate check returned zero |
+| Persistence | 5 raw-log chunks / 2680 bytes; 9 payload rows / 1459 bytes; archive `/opt/codify-archives/task-400-runtime-archive.tar.gz`, 6905 bytes, SHA-256 `eae25e8e14f181ef626dc766816f578e660c399b82b4766db08c9bde65f4d1ab`; `container_id` empty after cleanup |
+| Host cleanup | `docker ps -a --filter name=codify-400` returned no container; Task 400 has zero residual Issue locks; the post-run query reported zero active Tasks and zero Issue locks |
+
+The persisted raw log records `/workspace`, a clean `codify/issue-99` branch,
+the requested `pwd`/Git read-only inspection, three read-only tool calls, no
+Harness changes, and successful delivery-summary validation. The authenticated
+desktop browser loaded `/tasks/400` and displayed `已完成`, the Provider/Worker/
+Pi context, the read-only delivery summary, event stream, raw-log access, and
+the 130/136 token statistics. This is desktop-browser evidence only; the real
+mobile keyboard/IME/notch/gesture-area acceptance remains explicitly deferred.
+
+The global database still contains eight historical `disabled` and three
+historical `starting` Harness Attempt rows belonging to older tasks. Task 400
+itself is closed and has no task or Issue-lock residue; this smoke does not
+claim unrelated historical Attempt cleanup or alter those records.
+
+The Host remains healthy in `dual_canary`. This post-cleanup smoke strengthens
+current R4.3/R4.4 execution evidence, but real Mattermost delivery, the full
+operations/security review, release-owner sign-off, and R4.6 independent
+go/no-go remain open.
