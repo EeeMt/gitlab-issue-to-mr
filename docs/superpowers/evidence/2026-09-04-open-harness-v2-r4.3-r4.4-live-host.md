@@ -968,3 +968,74 @@ The core legal current-Provider matrix is Task 400 (Pi), Task 403 (OpenCode),
 Task 404 (Claude), and Task 405 (Codex). No real mobile-device acceptance,
 Mattermost delivery, migration 078, release-owner sign-off, or R4.6/R5
 decision is claimed by this follow-up.
+
+## 2026-09-05 continuation: Mattermost 10.9.1 real delivery
+
+The previously missing real-notification check was completed on the same
+development Host. This is an additional R4.4 evidence sample; it does not
+change the frozen Task-ID 380–394 integrity cohort and is not an R4.6 or L5
+approval.
+
+### Mattermost deployment and connection evidence
+
+The Host now runs an independent Mattermost debug stack:
+
+| Item | Result |
+| --- | --- |
+| Mattermost image | `mattermost/mattermost-team-edition:10.9.1`, repo digest `sha256:445ef98396678f3d4e269e05e11738e7a808e54c414db24625a855c37b5f978b` |
+| Containers | `codify-mattermost` and independent `codify-mattermost-db` (`postgres:16-alpine`); both running and healthy |
+| Isolation | Dedicated `codify-mattermost-debug` Docker network and named volumes; the existing `codify-postgres` was not touched |
+| Endpoint | `0.0.0.0:8065 -> Mattermost:8065`; remote `/api/v4/system/ping` returned `status=OK` |
+| Codify connection | Authenticated Codify admin UI connection test passed; profile `V2 live notifications` was created for `codifydebug/notifications`, with only `task_completed` enabled |
+| Direct Bot smoke | Mattermost returned HTTP 201 for a separate direct Bot post (`Codify V2 Mattermost direct smoke`) |
+
+The Bot token and generated admin/database credentials are kept only in the
+remote debug directory under mode-600 files. They are not committed, copied
+into the repository, or included in this evidence.
+
+### Real Codify completion delivery
+
+Task 406 was created from Issue #99 with Profile 4, Provider 12
+`openrouter-minimax-responses`, the OpenCode Harness, `openai_responses`, a
+fresh session, and `plan`/analysis mode. It was intentionally read-only and
+completed with zero changes:
+
+| Item | Result |
+| --- | --- |
+| Task/runtime | Task 406, `completed`, `total_changes=0`, input/output tokens `1691/987` |
+| Composition | Bundle 172; OpenCode CLI `1.18.19`, Adapter `2.0.0`, event schema `codify.worker.event/v2` |
+| Attempt | `task-406-attempt-1-6ae3171267eb`, `last_seq=82`, terminal `run.completed`, `control_state=closed` |
+| Receipts | 82 receipts, seq 1–82 contiguous, 82 distinct seq values and 82 distinct event IDs |
+| Persistence | 5 raw-log chunks / 2772 bytes; archive `task-406-runtime-archive.tar.gz`, 23219 bytes; Worker container and Issue lock were absent after completion |
+| Codify delivery row | `mattermost_notification_deliveries.id=2`, `event_type=task_completed`, `status=success`, target `channel:aaz68niiuff3txfot5wjrgj33e` |
+| Mattermost delivery | Bot post `5pksuyef73nbjxfphqkxuxw1de` appeared in `codifydebug/notifications` with the Task 406 completion card and task/project/status/link fields |
+
+The real post rendered the task link from the existing remote
+`FRONTEND_URL=http://frontend.example.test:8880`, while the direct target Host
+URL is `http://192.168.50.129:8880`. The target IP route returned HTTP 200; the
+example-host URL did not produce a usable page in the remote check. This is a
+development deployment URL follow-up, not a Mattermost transport failure, and
+must be corrected or explicitly accepted before release sign-off.
+
+The final database/Service recheck reports 374 Tasks, zero pending/queued/
+running Tasks, zero Issue locks, one enabled Mattermost profile, and one
+successful Task 406 delivery. Backend remained healthy and Scheduler remained
+in `dual_canary`; no `codify-406-issue99` container remained.
+
+### Current Host boundary
+
+After pulling Mattermost 10.9.1, the remote root filesystem reports roughly
+`61G` total / `60G` used / `1.2G` available (`99%`). Docker reports 26 images,
+11 running containers, 18 volumes, and 7.487GB reclaimable BuildKit cache.
+The Host has not reached a full-disk trigger, so no further Codify image/cache
+cleanup was performed in this continuation; the active `quirky_allen` Worker
+image and unrelated services were not touched. If the filesystem reaches the
+authorized cleanup boundary, repeat the ancestor-container checks and remove
+only unreferenced Codify debug images/cache.
+
+This closes the prior “no real Mattermost delivery” evidence gap but does not
+sign R4.4: the full alert/zero-P0-P1 review, URL configuration decision,
+R4.5 migration/credential/release-owner checks, R4.6 independent go/no-go,
+R5/L6, and real mobile-device keyboard/IME/notch/gesture-area acceptance
+remain open. The mobile-device acceptance remains explicitly deferred per the
+user's instruction.

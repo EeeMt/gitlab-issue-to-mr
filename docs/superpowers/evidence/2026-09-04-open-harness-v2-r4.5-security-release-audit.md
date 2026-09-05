@@ -73,9 +73,10 @@ inventory, and Worker image platform/repo digest were all verified. This is
 reproducibility evidence for the frozen Kit, not release-owner approval: the
 archive is temporary and there is no signed package or approved release note
 attached to this audit.
-The latest database snapshot has 367 Tasks, zero `pending`/`queued`/`running`
-Tasks, zero `issue_execution_locks`, zero Mattermost notification profiles, and
-zero notification deliveries. Five new V1 snapshots belong to Tasks 395–399;
+The pre-Mattermost database checkpoint had 367 Tasks, zero
+`pending`/`queued`/`running` Tasks, zero `issue_execution_locks`, zero
+Mattermost notification profiles, and zero notification deliveries. Five new
+V1 snapshots belonged to Tasks 395–399;
 the other 362 Task Worker Profile Snapshots have
 `runtime_contract_version=codify.worker.harness/v2`. These are current Host
 observations; they do not replace the missing live alert delivery or
@@ -501,9 +502,9 @@ The live database now has 367 Tasks: 362 V2 snapshots and 5 V1 snapshots
 (Tasks 395–399), with zero active Tasks or Issue locks. The V2 exact
 Task-ID 380–394 integrity result remains 14 attempts, 824 receipts, and 824
 distinct event IDs; Task 399 is excluded from that V2 statistic. Migration
-078 remains unapplied (`077_v2_worker_kit_identity`), real Mattermost delivery
-and release-owner/independent sign-off remain open, and the Host remains in
-`dual_canary`.
+078 remained unapplied (`077_v2_worker_kit_identity`) at that checkpoint, real
+Mattermost delivery and release-owner/independent sign-off remained open, and
+the Host remained in `dual_canary`.
 
 ## Post-cleanup V2 smoke recheck: Task 400
 
@@ -526,7 +527,8 @@ context.
 This recheck updates the live database count from the preceding 367-task
 checkpoint to 368 Tasks: 363 V2 snapshots and 5 V1 snapshots. It does not add
 Task 400 to the frozen 380–394 integrity cohort, does not execute migration
-078, and does not claim real Mattermost delivery, mobile-device acceptance,
+078, and at that checkpoint did not claim real Mattermost delivery,
+mobile-device acceptance,
 release-owner sign-off, or an R4.6/R5 decision. The Host remains in
 `dual_canary`.
 
@@ -549,8 +551,8 @@ Worker containers were absent; root capacity remained 61G total / 59G used /
 snapshots and 5 V1 snapshots.
 
 This follow-up strengthens runtime evidence only. It does not extend the
-frozen 380–394 integrity cohort and does not satisfy the still-open real
-Mattermost delivery, migration-owner, credential/least-privilege,
+frozen 380–394 integrity cohort and, at that checkpoint, did not satisfy the
+then-open real Mattermost delivery, migration-owner, credential/least-privilege,
 release-package, release-owner, mobile-device, R4.6, or R5/L6 gates.
 
 No `v2_only` cutover, maintenance-window action, or broad Docker prune was
@@ -570,3 +572,45 @@ unreferenced files were not deleted or treated as this V2 run's evidence. The
 retention owner must classify their ownership and retirement policy before any
 cleanup; the current Host is at 97% usage but has not reached the authorized
 full-disk cleanup trigger. This remains an R4.5 retention/ownership gate.
+
+## 2026-09-05 continuation: Mattermost debug deployment and delivery
+
+The development Host subsequently received an independent Mattermost
+10.9.1/Team Edition debug stack. The exact image is
+`mattermost/mattermost-team-edition:10.9.1` at repo digest
+`sha256:445ef98396678f3d4e269e05e11738e7a808e54c414db24625a855c37b5f978b`.
+`codify-mattermost` and its separate `codify-mattermost-db` (`postgres:16-alpine`)
+are healthy on the dedicated `codify-mattermost-debug` network and named
+volumes, with port `8065` published on the development Host. The existing
+Codify Postgres, GitLab, Redis, and active Worker container were not touched.
+
+The authenticated Codify admin UI connection test passed. Profile `V2 live
+notifications` targets `codifydebug/notifications` and enables only
+`task_completed`; credentials remain only in remote mode-600 files and are not
+part of this repository or audit. A separate direct Bot smoke returned HTTP
+201. The real Codify Task 406 completion then created delivery row 2 with
+`event_type=task_completed` and `status=success`; the Mattermost channel
+contained the resulting Task 406 completion card.
+
+Task 406 used the existing Provider 12 / OpenCode / `openai_responses` legal
+combination on Bundle 172 in fresh-session plan mode. It completed with zero
+changes; its closed V2 attempt had 82 contiguous unique receipts, a single
+`run.completed` terminal, 5 raw-log chunks / 2772 bytes, and a 23219-byte
+archive. This is real transport and application-delivery evidence, not a
+release approval.
+
+The completion card currently renders the task link from the existing remote
+`FRONTEND_URL=http://frontend.example.test:8880`, while the target development
+URL is `http://192.168.50.129:8880`. The target IP returned HTTP 200 in the
+direct check; the example-host URL did not produce a usable page. The URL
+configuration therefore remains an explicit release follow-up.
+
+The Mattermost pull left the Host at approximately `61G` total / `60G` used /
+`1.2G` available (`99%`). Docker reports 26 images, 11 running containers, 18
+volumes, and 7.487GB reclaimable BuildKit cache. This is high pressure but not
+a full-disk trigger, so no further Codify cleanup was performed here. If the
+trigger is reached, the operator must repeat ancestor-container checks and
+remove only unreferenced Codify debug images/cache. Migration 078, credential
+and least-privilege review, release package/signatures, URL configuration,
+release-owner sign-off, R4.6, R5/L6, and real mobile-device acceptance remain
+open; the latter is explicitly deferred by the user.
