@@ -156,9 +156,6 @@ maintenance ownership, and independent zero-P0/P1 approval remain open. R4.6
 therefore has no recorded decision, and the system must remain in
 `dual_canary`.
 
-No `v2_only` cutover, maintenance-window action, or broad Docker prune was
-performed as part of this audit.
-
 ## Latest read-only recheck
 
 At `2026-09-04T15:03:49Z`, the target Host still reported a healthy Backend,
@@ -532,3 +529,29 @@ Task 400 to the frozen 380–394 integrity cohort, does not execute migration
 078, and does not claim real Mattermost delivery, mobile-device acceptance,
 release-owner sign-off, or an R4.6/R5 decision. The Host remains in
 `dual_canary`.
+
+## Post-cleanup protocol matrix follow-up
+
+The subsequent real-task recheck used the current Profile 4 and existing
+configured Providers without running migration 078 or changing service mode.
+The core legal matrix completed successfully: Task 400 Pi / Provider 12,
+Task 403 OpenCode / Provider 12, Task 404 Claude / Provider 6, and Task 405
+Codex / Provider 12. Each used the expected V2 protocol, Bundle 170/172/171/173
+respectively, produced zero changes, and closed with `run.completed`. Task 401
+was an additional Provider 12 Pi repeat; Task 402 was a bounded Provider 7
+OpenCode alternate and is not counted as Provider 12 evidence.
+
+Across Tasks 401–405, each attempt had contiguous unique receipt IDs, one
+terminal event, and persisted raw logs plus a readable runtime archive. The
+post-run Host query found zero active Tasks and zero Issue locks; all five
+Worker containers were absent; root capacity remained 61G total / 59G used /
+2.5G available (97%). The current database count is 373 Tasks: 368 V2
+snapshots and 5 V1 snapshots.
+
+This follow-up strengthens runtime evidence only. It does not extend the
+frozen 380–394 integrity cohort and does not satisfy the still-open real
+Mattermost delivery, migration-owner, credential/least-privilege,
+release-package, release-owner, mobile-device, R4.6, or R5/L6 gates.
+
+No `v2_only` cutover, maintenance-window action, or broad Docker prune was
+performed as part of this audit.

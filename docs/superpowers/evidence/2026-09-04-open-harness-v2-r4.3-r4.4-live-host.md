@@ -932,3 +932,39 @@ The Host remains healthy in `dual_canary`. This post-cleanup smoke strengthens
 current R4.3/R4.4 execution evidence, but real Mattermost delivery, the full
 operations/security review, release-owner sign-off, and R4.6 independent
 go/no-go remain open.
+
+## 2026-09-05 continuation: post-cleanup protocol matrix follow-up
+
+The follow-up run completed a legal current-Profile V2 matrix using the
+existing configured Providers. These Tasks remain separate from the frozen
+Task-ID 380–394 integrity cohort; they are post-cleanup execution evidence,
+not a retroactive change to the cohort.
+
+| Task | Harness / Provider | Bundle / CLI | Result and receipts | Persistence |
+| --- | --- | --- | --- | --- |
+| 401 | Pi / Provider 12 `openrouter-minimax-responses` (`openai_responses`) | 170 / Pi `0.84.2` | `completed`, zero changes, 58 contiguous unique receipts, `run.completed` | 5 raw chunks / 2680 bytes; archive 12953 bytes, SHA-256 `4f1117cb08a390d364ab9eb6846b7f102c6dee8074476e1781d5a038452dde61` |
+| 402 | OpenCode / Provider 7 `openrouter-free` (`openai_chat_completions`) | 172 / OpenCode `1.18.19` | `completed`, zero changes, 36 contiguous unique receipts, `run.completed` | 5 raw chunks / 2691 bytes; archive 9216 bytes, SHA-256 `55ecb92af2e8d745496d9624bd4d77774e090c46ebdbd6f79e1e97fa959a359` |
+| 403 | OpenCode / Provider 12 `openrouter-minimax-responses` (`openai_responses`) | 172 / OpenCode `1.18.19` | `completed`, zero changes, 44 contiguous unique receipts, `run.completed` | 5 raw chunks / 2684 bytes; archive 10271 bytes, SHA-256 `4deaf236b5c37e689654cd276b98467b31a33843438d62895426b1248c22ce7e` |
+| 404 | Claude / Provider 6 `opencode-pi` (`anthropic_messages`) | 171 / Claude `2.1.153` | `completed`, zero changes, 22 contiguous unique receipts, `run.completed` | 8 raw chunks / 8619 bytes; archive 7034 bytes, SHA-256 `fa8ec7d9a70eae75ba7093801a7e0ef62fddaa06c1b3a228eb0c4b323c2fe543` |
+| 405 | Codex / Provider 12 `openrouter-minimax-responses` (`openai_responses`) | 173 / Codex `0.146.0` | `completed`, zero changes, 18 contiguous unique receipts, `run.completed` | 6 raw chunks / 2683 bytes; archive 4278 bytes, SHA-256 `2f1a795687359133b4df091af7193d37148e75767e2525b5361ef467406bab0e` |
+
+For all five follow-up Tasks, the persisted attempt used
+`codify.worker.event/v2`, had one terminal event, zero seq anomalies, and
+distinct event IDs equal to receipt count. The immutable snapshots retained
+Profile 4 / `v2-canary-0.6.11-four-harness`, Kit `0.6.12`, the current Worker
+image digest, and the expected Bundle identity. The raw-log check found both
+the `No changes made by Harness` marker and the successful completion banner
+for every Task. Each explicit `docker ps -a --filter name=codify-401` through
+`codify-405` query returned no container, and the post-run database query
+reported zero active Tasks and zero Issue locks. Root capacity remained 61G
+total / 59G used / 2.5G available (97%). The constrained token-like scan
+returned zero matches in the raw logs for Tasks 400–405. Backend `/health`
+remained healthy with Docker and database checks `ok`; both Backend and
+Scheduler still reported `HARNESS_EXECUTION_MODE=dual_canary`.
+
+Task 402 was created while validating the selector and intentionally remains
+an alternate Provider 7 sample; it is not presented as Provider 12 evidence.
+The core legal current-Provider matrix is Task 400 (Pi), Task 403 (OpenCode),
+Task 404 (Claude), and Task 405 (Codex). No real mobile-device acceptance,
+Mattermost delivery, migration 078, release-owner sign-off, or R4.6/R5
+decision is claimed by this follow-up.
