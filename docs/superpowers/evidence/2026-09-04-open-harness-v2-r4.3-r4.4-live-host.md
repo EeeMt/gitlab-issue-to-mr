@@ -5,9 +5,10 @@
 **Scope:** Current R4 candidate on `192.168.50.129`, mobile/desktop browser
 interaction checks, four-Harness live smoke attempts, one live command-plane
 run, four current exact Worker/Kit/Bundle-composition cancellation samples,
-three post-fix current-composition success samples, one controlled nginx-only
+four post-fix current-composition success samples, one controlled nginx-only
 disconnect/reconnect, one current exact-composition Codex Provider-boundary
-failure sample, and the resulting Host/Task runtime evidence.
+failure sample, one current exact-composition Codex success sample, and the
+resulting Host/Task runtime evidence.
 
 This is candidate evidence, not an L5 go/no-go decision. R4.3–R4.6 remain
 partially open until the complete acceptance, operational, security/release,
@@ -31,7 +32,7 @@ post-fix image is:
 | Profile 4 | administrator Verify returned 200; `verified_at=2026-09-05T00:45:09Z`, V2 verification generation `74`, Kit `0.6.12` manifest `c33dbf86951bed6e3b4de1897313725f14f00006dc51fb300e7b821bb47e17bd` |
 | Source/composition boundary | The post-fix change is limited to Scheduler cancellation-status logging; Worker image, Kit `0.6.12`, Profile 4 generation `74`, Bundles 170/171/172/173, selected Adapter/CLI identities, Provider protocols, and event contract remain unchanged. The current image's provenance is recorded by the committed tree and remote build/deploy command because no Git revision OCI label is present |
 | Database/runtime mode | Alembic revision remains `077_v2_worker_kit_identity`; `AUTO_MIGRATE=false`; execution mode remains `dual_canary`; no `v2_only` cutover or migration was attempted |
-| Host capacity | Remote `/` is `57G/61G` used with `4.2G` available and `94%` full; the post-Task-391 Docker snapshot reports 83 images, 12.42GB images with 6.713GB reclaimable, 7.278MB containers, 1.642GB volumes with 1.309GB reclaimable, and 6.526GB BuildKit cache. The filesystem is not full, so no Codify image/cache cleanup was performed. |
+| Host capacity | Remote `/` is `57G/61G` used with `4.2G` available and `94%` full; the post-Task-392 Docker snapshot reports 83 images, 12.42GB images with 6.713GB reclaimable, 8.026MB containers, 1.643GB volumes with 1.309GB reclaimable, and 6.526GB BuildKit cache. The filesystem is not full, so no Codify image/cache cleanup was performed. |
 
 As a Host-level `v2_only` preflight, Backend and Scheduler were temporarily
 recreated with `HARNESS_EXECUTION_MODE=v2_only` at `2026-09-05T01:04:26Z`.
@@ -57,18 +58,17 @@ The exact-composition positive cohort is:
 | 388 | Claude / Provider 11 `openrouter-minimax-anthropic` | 171 (`5a5bbd30…`, reused Claude variant) | `completed`, zero changes | post-fix image; Adapter `1.0.1`, CLI `2.1.153`, usage 3512/724, raw-log 7 chunks, 19 receipts, seq 1–19, terminal `run.completed` |
 | 389 | Claude / Provider 6 `opencode-pi` (`deepseek-v4-flash`) | 171 (`5a5bbd30…`, reused Claude variant) | `completed`, zero changes | `anthropic_messages`; fresh session; Adapter `1.0.1`, CLI `2.1.153`, usage 2247/597, raw-log 6 chunks, 20 receipts, seq 1–20, terminal `run.completed` |
 | 390 | OpenCode / Provider 6 `opencode-pi` (`deepseek-v4-flash`) | 172 (`9ed188ca…`, reused OpenCode variant) | `completed`, zero changes | `anthropic_messages`; fresh session; Adapter `2.0.0`, CLI `1.18.19`, usage 136/128, raw-log 4 chunks / 2678 bytes, 216 receipts, seq 1–216, terminal `run.completed` |
+| 392 | Codex / Provider 12 `openrouter-minimax-responses` (`minimax/minimax-m3:free`) | 173 (`de3b5a5f…`, Codex variant) | `completed`, zero changes | `openai_responses`; fresh session; Adapter `1.0.0`, CLI `0.146.0`, usage 21030/137, raw-log 5 chunks / 2733 bytes, 14 receipts, seq 1–14, terminal `run.completed`; archive 3980 bytes (`9afe4f3f…`) |
 
-All seven tasks used fresh sessions and the existing read-only smoke prompt.
+All eight tasks used fresh sessions and read-only smoke prompts.
 Tasks 380–383 contain 397 unique contiguous receipts; Task 388 adds 19,
-Task 389 adds 20, and Task 390 adds 216 more, for 652 receipts across the
-seven exact-composition
-success attempts. No active
-Task or Issue execution lock remains. The current exact composition has no
-Codex success sample because the currently available Codex-legal Providers
-remain bounded by the previously recorded upstream 429/403 availability
-failures; current exact Task 391 adds a Provider 4 `403
-unsupported_country_region_territory` negative sample. This is an explicit
-Provider boundary, not a claim of runtime failure.
+Task 389 adds 20, Task 390 adds 216, and Task 392 adds 14 more, for 666
+receipts across the eight exact-composition success attempts. No active Task
+or Issue execution lock remains. Current exact Task 391 remains a Provider 4
+`403 unsupported_country_region_territory` negative sample, while current exact
+Task 392 adds a Provider 12 Codex success sample. Together they bound both the
+runtime success path and the known Provider availability boundary; the 403 is
+not a claim of runtime failure.
 
 Task #384 is a separate current-composition cancellation sample and is not
 counted in the exact-composition success cohort above. It used OpenCode with Provider 7
@@ -216,6 +216,27 @@ the authenticated task detail page showed failed Codex, Provider 4
 `opencode-luna`, the exact Worker image, 20 seconds, no token usage, and
 `+0 -0` changes.
 
+Task #392 is the current exact-composition Codex success sample. It used
+Provider 12 (`openrouter-minimax-responses` / `minimax/minimax-m3:free`) over
+the legal `openai_responses` protocol on Bundle 173 (`de3b5a5f…`), with a
+fresh session, Adapter `1.0.0`, and CLI `0.146.0`. The task ran from
+`2026-09-05T03:21:56Z` to `2026-09-05T03:22:38Z` and completed with zero
+changes. Attempt `task-392-attempt-1-4a0143f634b7` closed with 14 unique
+contiguous receipts (seq 1–14), one `run.completed(status=completed, success=true)`
+terminal, and a successful read-only shell inspection of `/workspace` on
+`codify/issue-99`; the delivery result had exit code 0 and no commit. Usage was
+21030 input / 137 output tokens. The runtime archive was finalized at 3980
+bytes with SHA-256
+`9afe4f3f9bfd08b01ec75f1f8b6ca7316cfa88dbf204c0fb8fd40571478f44ad`, raw-log
+persistence has 5 chunks / 2733 bytes, and the Worker container was removed.
+The expected post-exit canonical-tail 409 was non-blocking after persistence;
+Scheduler logged one `Task 392 completed successfully` INFO. The authenticated
+task detail page showed completed Codex, Provider 12, the exact Worker image,
+42 seconds, 21K input / 137 output tokens, and `+0 -0` changes. The model also
+emitted a bounded fallback-metadata diagnostic because the OpenRouter model
+was not in the local metadata table; it did not change the successful terminal
+or delivery result.
+
 ## Candidate and validation boundary
 
 - The Worker runtime image, Worker Kit `0.6.12`, and frozen CLI identities remain
@@ -227,7 +248,7 @@ the authenticated task detail page showed failed Codex, Provider 4
 - Commit `48b16fdc` is a Scheduler-only post-fix change: unsuccessful Worker
   outcomes are logged after the final Task row is loaded, so a final
   `cancelled` status produces an INFO cancellation line rather than a generic
-failure ERROR. The remote Backend/Scheduler image for Tasks #387–#391 is
+failure ERROR. The remote Backend/Scheduler image for Tasks #387–#392 is
   `sha256:334c674d…`; the Worker/Kit/Profile/Bundle/Adapter/CLI composition is
   unchanged from Tasks 380–386.
 - Commit `84ab6422` fixes an API-only omission: Issue detail serialization now
@@ -456,9 +477,11 @@ prove the Codex model projection fixed by `8110afa0`.
 Together with Tasks 357/358, the live set covers Pi, OpenCode, Claude, and
 Codex across multiple compatible Provider selections. The generation-73
 additions provide current-Bundle success samples for Pi, Claude, and OpenCode;
-Codex success remains represented by Task 368 on the preceding Bundle 163,
-whose Codex Adapter identity is unchanged, while current-Bundle Tasks 377–379
-are bounded upstream Provider availability failures rather than success claims.
+the historical Codex success remains represented by Task 368 on the preceding
+Bundle 163, whose Codex Adapter identity is unchanged, while current-Bundle
+Tasks 377–379 are bounded upstream Provider availability failures rather than
+success claims. Current generation-74 Bundle 173 now also has the successful
+Codex Task 392, alongside the separate Provider 4 negative Task 391.
 They remain useful evidence that the failure classifier and single terminal
 path reject rate-limited or region-blocked execution.
 
@@ -656,14 +679,16 @@ It does not yet sign the full gate because:
 
 ### R4.4 — partial evidence, not signed
 
-Tasks 357–366, 368–379, and the exact-composition Tasks 380–383, 388–391 plus the prior
+Tasks 357–366, 368–379, and the exact-composition Tasks 380–383, 388–392 plus the prior
 five-task warm-start cohort provide all four Harness selections with real
 success samples across the evidence set and bounded upstream failure
 classification, command latency, usage, canonical terminal, archive, raw-log
 finalization, delivery samples, and the current queue/lock/secret-scan
 snapshot. The exact-composition candidate adds successful Pi/Claude/OpenCode/Pi
 samples (#380–#383, #388–#390) on Bundles 170/171/172; Task 391 adds the
-current exact-composition Codex negative sample on Bundle 173. Task 383 reuses the Pi Bundle 170
+current exact-composition Codex negative sample on Bundle 173, and Task 392
+adds the current exact-composition Codex success sample on the same Bundle.
+Task 383 reuses the Pi Bundle 170
 variant with Provider 6 over `anthropic_messages`, post-fix Tasks #388/#389 add
 two Claude successes on Bundle 171 (Provider 11 then Provider 6), and Task #390
 adds an OpenCode success on Bundle 172 with Provider 6 over the same legal
@@ -676,12 +701,11 @@ log classification. The generation-73 samples
 (#374–#376) and three correctly bounded Codex Provider failures (#377–#379)
 remain historical. Current-composition Task 391 reached the Codex Adapter and
 was bounded as `engine_error` from Provider 4's
-`403 unsupported_country_region_territory` response on Bundle 173. A
-current-composition Codex success sample is still open because the available
-current-generation attempts remain blocked by upstream 429/403 responses.
-Task 368 on Bundle 163 remains a valid Codex success for the unchanged Codex
-Adapter identity, but does not replace that missing exact-composition Codex
-success. The local Mattermost mock E2E suite also passed
+`403 unsupported_country_region_territory` response on Bundle 173. Current
+Task 392 then completed Codex on Bundle 173 through Provider 12, so the
+current exact-composition Codex success gate is now evidenced; Task 368 on
+Bundle 163 remains a valid preceding-generation Codex success for the
+unchanged Codex Adapter identity. The local Mattermost mock E2E suite also passed
 96 tests, covering profile CRUD, config validation, connection-test outcomes,
 event filtering, and delivery result recording without contacting a real
 notification service. A complete Harness/Profile/Host operational review of
@@ -713,21 +737,23 @@ post-fix 9-receipt chain ending in `run.failed(status=cancelled)` and Task
 #390 adds a seventh 216-receipt OpenCode success chain on Bundle 172 ending in
 `run.completed`, while #391 adds a current-composition 12-receipt Codex failure
 chain on Bundle 173 ending in
-`run.failed(status=failed, failure.kind=engine_error)`.
+`run.failed(status=failed, failure.kind=engine_error)`, and #392 adds a
+current-composition 14-receipt Codex success chain on Bundle 173 ending in
+`run.completed`.
 The expanded cohorts pass the frozen status/terminal mapping,
 duplicate-terminal, sequence, and secret-like checks, while leaving the exact
-composition Codex success, live alert delivery to a real Mattermost service,
-and the formal zero-P0/P1 review open.
+composition Provider boundary, live alert delivery to a real Mattermost
+service, and the formal zero-P0/P1 review open.
 
-At the current Host recheck (`2026-09-05T03:06:50Z` database clock), the
-current exact-composition Tasks 380–391 were audited together: 12 attempts,
-736 receipts, and 736 distinct event IDs; every attempt had exactly one
+At the current Host recheck (`2026-09-05T03:22:38Z` database clock), the
+current exact-composition Tasks 380–392 were audited together: 13 attempts,
+750 receipts, and 750 distinct event IDs; every attempt had exactly one
 Harness terminal and one Task terminal, all sequences were contiguous from
 seq 1, and the completed/cancelled-to-terminal mapping had zero failures.
 The constrained token-like scan found zero matches in both canonical event JSON
 and raw-log chunks. This strengthens the current R4.4 runtime-integrity
-evidence without changing the open Codex Provider, live-alert, or independent
-release-sign-off boundaries.
+evidence without changing the known Provider boundary, live-alert, or
+independent release-sign-off boundaries.
 
 R4.5 security/release sign-off and R4.6 independent hard-cut go/no-go remain
 open. No R5 maintenance window or `v2_only` cutover was performed.

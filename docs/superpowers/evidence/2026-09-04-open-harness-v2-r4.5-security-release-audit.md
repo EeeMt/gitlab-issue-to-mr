@@ -16,7 +16,7 @@ current Backend/Scheduler image is
 It exposes no Git revision OCI label, so the current image provenance is the
 committed tree plus the remote build/deploy record. Profile 4 remains
 generation `74`, and its exact-composition selected-Harness Bundles are 170
-(Pi), 171 (Claude), 172 (OpenCode), and 173 (Codex); Tasks 380–383 and post-fix Tasks 388–391
+(Pi), 171 (Claude), 172 (OpenCode), and 173 (Codex); Tasks 380–383 and post-fix Tasks 388–392
 validation are recorded in the
 [R4.3/R4.4 live Host evidence](2026-09-04-open-harness-v2-r4.3-r4.4-live-host.md).
 The generation-73 Bundles 166–169 and Tasks 374–379 remain historical evidence
@@ -44,9 +44,9 @@ release-owner approval.
 | Frontend unit suite | passed, 80 files / 1692 tests | Includes structured SSE stale-source and mobile safe-area regression coverage |
 | Frontend production build | passed | Vite emitted only the existing large-chunk warning |
 | Backend lint | passed | `make lint-backend` |
-| Remote Docker state | near capacity, not full | The post-Task-391 snapshot reports `df -h /` at 61G total / 57G used / 4.2G available (94%); `docker system df` reports 83 Images / 12.42GB / 6.713GB reclaimable, 7.278MB containers, 1.642GB volumes / 1.309GB reclaimable, and 6.526GB BuildKit. No cleanup was performed because the disk was not full. |
+| Remote Docker state | near capacity, not full | The post-Task-392 snapshot reports `df -h /` at 61G total / 57G used / 4.2G available (94%); `docker system df` reports 83 Images / 12.42GB / 6.713GB reclaimable, 8.026MB containers, 1.643GB volumes / 1.309GB reclaimable, and 6.526GB BuildKit. No cleanup was performed because the disk was not full. |
 | Current Kit archive reconstruction and V2 release preflight | passed, not signed | The installed `0.6.12-linux-amd64-c33dbf86951b` Kit was streamed into a temporary `518M` archive; archive SHA-256 `2d3ee7f81525d465731344571cbf5bd93a0cd94bb6cf16f5a4d5512d5c0a25a6`, manifest SHA-256 `c33dbf86951bed6e3b4de1897313725f14f00006dc51fb300e7b821bb47e17bd`, content inventory `7630f086800c95f851db8c9351638868ab60ac33fb3bfe22f9f2f5c8dcdc98a1`; `deploy/scripts/preflight-v2-release.sh` passed against the target daemon and Worker image repo digest `127.0.0.1:5000/codify-worker/java21-maven@sha256:234582c692d1ebb00ba8e882160618c2258463149d968009ac81c545e63a538b`. The temporary archive is not a release-owner-signed package and is not committed. |
-| Exact committed image/Profile/Task recheck | passed with bounded Provider boundary | Backend/Scheduler now run image `sha256:334c674d…` built after `48b16fdc`; Profile 4 generation 74 completed four-Harness Verify; Tasks 380–383 completed Pi/Claude/OpenCode/Pi on unchanged Bundles 170–172 with 397 unique contiguous receipts and zero changes. Current exact OpenCode/Pi/Claude cancellation Tasks 384–386 on the prior Backend image added 15/40/8 receipts; post-fix Task 387 on Bundle 171 / Provider 11 added 9 unique contiguous receipts, one `run.failed(status=cancelled)` terminal, zero changes, a 4594-byte archive (`69e8a1df…`), 6 raw-log chunks / 5117 bytes, and a removed Worker container. Post-fix Task 388 on the same Bundle/Provider completed with 19 unique contiguous receipts, `run.completed`, zero changes, a 7586-byte archive (`27852b5a…`), 7 raw-log chunks / 8486 bytes, and a removed Worker container; Task 389 on Bundle 171 / Provider 6 completed with 20 unique contiguous receipts, `run.completed`, zero changes, a 7236-byte archive (`439f3132…`), 6 raw-log chunks / 8359 bytes, and a removed Worker container; Task 390 on Bundle 172 / Provider 6 completed with 216 unique contiguous receipts, `run.completed`, zero changes, a 22384-byte archive (`d54b5eb2…`), 4 raw-log chunks / 2678 bytes, and a removed Worker container; Task 391 on Codex Bundle 173 / Provider 4 reached the Adapter and ended with 12 unique contiguous receipts, one `run.failed(status=failed, failure.kind=engine_error)` terminal, zero changes, a 3314-byte archive (`db05ea24…`), 4 raw-log chunks / 2393 bytes, and a removed Worker container after upstream `403 unsupported_country_region_territory`. The new Scheduler emitted one `Task 387 cancelled` INFO with no `Task 387 failed`, and one successful INFO each for Tasks 388/389/390; Task 391 was logged as a bounded failure. No current-composition Codex success was claimed because the available Codex-legal Providers remain bounded by the recorded upstream 429/403 failures. |
+| Exact committed image/Profile/Task recheck | passed with bounded Provider outcomes | Backend/Scheduler now run image `sha256:334c674d…` built after `48b16fdc`; Profile 4 generation 74 completed four-Harness Verify; Tasks 380–383 completed Pi/Claude/OpenCode/Pi on unchanged Bundles 170–172 with 397 unique contiguous receipts and zero changes. Current exact OpenCode/Pi/Claude cancellation Tasks 384–386 on the prior Backend image added 15/40/8 receipts; post-fix Task 387 on Bundle 171 / Provider 11 added 9 unique contiguous receipts, one `run.failed(status=cancelled)` terminal, zero changes, a 4594-byte archive (`69e8a1df…`), 6 raw-log chunks / 5117 bytes, and a removed Worker container. Post-fix Task 388 on the same Bundle/Provider completed with 19 unique contiguous receipts, `run.completed`, zero changes, a 7586-byte archive (`27852b5a…`), 7 raw-log chunks / 8486 bytes, and a removed Worker container; Task 389 on Bundle 171 / Provider 6 completed with 20 unique contiguous receipts, `run.completed`, zero changes, a 7236-byte archive (`439f3132…`), 6 raw-log chunks / 8359 bytes, and a removed Worker container; Task 390 on Bundle 172 / Provider 6 completed with 216 unique contiguous receipts, `run.completed`, zero changes, a 22384-byte archive (`d54b5eb2…`), 4 raw-log chunks / 2678 bytes, and a removed Worker container; Task 391 on Codex Bundle 173 / Provider 4 reached the Adapter and ended with 12 unique contiguous receipts, one `run.failed(status=failed, failure.kind=engine_error)` terminal, zero changes, a 3314-byte archive (`db05ea24…`), 4 raw-log chunks / 2393 bytes, and a removed Worker container after upstream `403 unsupported_country_region_territory`; Task 392 on the same Codex Bundle 173 / Provider 12 completed with 14 unique contiguous receipts, `run.completed`, zero changes, a 3980-byte archive (`9afe4f3f…`), 5 raw-log chunks / 2733 bytes, 21030/137 usage, and a removed Worker container. The new Scheduler emitted one `Task 387 cancelled` INFO with no `Task 387 failed`, successful INFO lines for Tasks 388/389/390, one bounded failure for Task 391, and one successful INFO for Task 392; current exact composition now has both Codex success and bounded Provider-negative evidence. |
 | Profile re-verification and prior post-fix smoke | passed with bounded Provider negatives | Profile 4 generation 73 and Tasks 374–379 remain historical evidence for the superseded image composition; Tasks 374–376 completed Pi/Claude/OpenCode on Bundles 166–168, while Codex Tasks 377–379 reached the Adapter and were correctly bounded as upstream `rate_limited`/`engine_error`; Task 368 remains the preceding-generation Codex success |
 | GitLab integration connectivity | passed, not a permission sign-off | The authenticated admin UI read-only connection test reached `http://192.168.50.129:8080`, authenticated as `ai-bot`, and reported GitLab `18.5.5-ee`; the Webhook overview currently returned zero projects. This proves application connectivity/identity only, not token scope, least privilege, or rotation. |
 | Remote execution mode | restored and healthy | A temporary no-task `v2_only` mode-health/V2-detail preflight was run and then restored; final Backend/Scheduler health reports `HARNESS_EXECUTION_MODE=dual_canary`. No hard-cut, migration, or V1 Task mutation was attempted. |
@@ -72,7 +72,7 @@ inventory, and Worker image platform/repo digest were all verified. This is
 reproducibility evidence for the frozen Kit, not release-owner approval: the
 archive is temporary and there is no signed package or approved release note
 attached to this audit.
-The latest database snapshot has 357 Tasks, zero `pending`/`queued`/`running` Tasks,
+The latest database snapshot has 361 Tasks, zero `pending`/`queued`/`running` Tasks,
 zero `issue_execution_locks`, zero Mattermost notification profiles, and zero
 notification deliveries. These are current Host observations; they do not
 replace the missing live alert delivery or independent release sign-off.
@@ -93,8 +93,8 @@ observation only; the release owner still must provide the least-privilege and
 rotation record.
 
 The current live evidence covers Pi, OpenCode, Claude, and Codex on Profile 4,
-including exact-composition successful Tasks 380–383 and post-fix Tasks 388–390,
-current exact-composition Codex negative Task 391, generation-73 successful
+including exact-composition successful Tasks 380–383 and post-fix Tasks 388–390
+and 392, current exact-composition Codex negative Task 391, generation-73 successful
 Tasks 374–376, the generation-73 Codex negative Tasks 377–379, the
 preceding-generation Codex success Task 368, the OpenCode reconnect Task 371,
 the stable-state cancellation Task 372, and the negative restart probes
@@ -215,18 +215,21 @@ ending in `run.completed`. The two early `control_owner_unreachable`
 gate-probe warnings self-recovered; the task and attempt remained successful.
 The exact-composition cohort then contained four attempts and 397 unique
 contiguous receipts. Task 388 later added a fifth successful attempt with 19
-receipts, Task 389 added a sixth with 20 receipts, and Task 390 added a
-seventh with 216 receipts, for 652 unique contiguous receipts across the
-current success cohort. Task 391 is separate negative evidence: its Codex
-attempt on Bundle 173 reached the Adapter and was bounded by Provider 4's
-upstream `403 unsupported_country_region_territory` response.
+receipts, Task 389 added a sixth with 20 receipts, Task 390 added a seventh
+with 216 receipts, and Task 392 added an eighth with 14 receipts, for 666
+unique contiguous receipts across the current success cohort. Task 391 is
+separate negative evidence: its Codex attempt on Bundle 173 reached the
+Adapter and was bounded by Provider 4's upstream
+`403 unsupported_country_region_territory` response; Task 392 then completed
+the same Bundle through Provider 12.
 Backend health remained `healthy` with database/Docker
 checks `ok`, Scheduler remained in `dual_canary`, and no active Task or Issue
 lock remained.
 
-The later current-composition integrity recheck covered Tasks 380–391,
-including the cancellation attempts and the Codex negative sample: 12 attempts
-contained 736 receipts and 736 distinct event IDs, with zero sequence/ID failures, zero terminal-count
+The later current-composition integrity recheck covered Tasks 380–392,
+including the cancellation attempts, the Codex negative sample, and the Codex
+success sample: 13 attempts contained 750 receipts and 750 distinct event IDs,
+with zero sequence/ID failures, zero terminal-count
 failures, and zero task-status/terminal-type mapping failures. The constrained
 token-like scan returned zero matches in both canonical event JSON and raw-log
 chunks.
@@ -350,6 +353,25 @@ one bounded `Task 391 failed` ERROR. The authenticated task detail page showed
 failed Codex, Provider 4, the exact Worker image, 20 seconds, no token usage,
 and `+0 -0` changes. The expected post-exit canonical-tail 409 was non-blocking
 after receipt/archive persistence.
+
+At `2026-09-05T03:22:38Z`, current exact-composition Task 392 ran Codex with
+Provider 12 (`openrouter-minimax-responses` / `minimax/minimax-m3:free`) on
+Bundle 173 over the legal `openai_responses` protocol. The task completed with
+zero changes; attempt `task-392-attempt-1-4a0143f634b7` used Adapter `1.0.0` /
+CLI `0.146.0`, closed with 14 unique contiguous receipts (seq 1–14), and one
+terminal `run.completed(status=completed, success=true)`. The read-only shell
+inspection returned a clean `/workspace` on `codify/issue-99`, and the delivery
+result had exit code 0 with no commit. Usage was 21030 input / 137 output
+tokens. It produced 5 raw-log chunks / 2733 bytes and archive
+`task-392-runtime-archive.tar.gz` at 3980 bytes with SHA-256
+`9afe4f3f9bfd08b01ec75f1f8b6ca7316cfa88dbf204c0fb8fd40571478f44ad`.
+The Worker container and Issue lock were removed/cleared, and Scheduler logged
+one `Task 392 completed successfully` INFO. The authenticated task detail page
+showed completed Codex, Provider 12, the exact Worker image, 42 seconds, 21K
+input / 137 output tokens, and `+0 -0` changes. A local fallback-metadata
+diagnostic was present for the OpenRouter model but did not alter the
+successful terminal or delivery result. The expected post-exit canonical-tail
+409 was non-blocking after receipt/archive persistence.
 
 ## Permission and rotation recheck
 
