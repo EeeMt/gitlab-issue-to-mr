@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from unittest import mock
 
 import pytest
 import pytest_asyncio
@@ -110,6 +111,52 @@ async def test_exact_duplicate_is_idempotent_and_divergent_duplicate_fails(sessi
         divergent["payload"] = {"changed": True}
         with pytest.raises(HarnessProtocolError, match="divergent duplicate"):
             await ingest_canonical_event(db, divergent)
+
+
+@pytest.mark.asyncio
+async def test_incremental_ingest_does_not_replay_all_prior_receipts(session_factory):
+    async with session_factory() as db:
+        _task, attempt = await _task_and_attempt(db)
+        events = [
+            _event(attempt.attempt_id, 1, "run.started"),
+            _event(attempt.attempt_id, 2, "harness.completed"),
+            _event(attempt.attempt_id, 3, "worker.finalization"),
+            _event(attempt.attempt_id, 4, "run.completed"),
+        ]
+        with mock.patch(
+            "app.core.harness_attempts._load_replay",
+            side_effect=AssertionError("stream ingest must not replay all receipts"),
+        ):
+            for event in events:
+                await ingest_canonical_event(db, event)
+        assert attempt.last_seq == 4
+
+
+@pytest.mark.asyncio
+async def test_incremental_ingest_rejects_duplicate_event_id_at_new_sequence(session_factory):
+    async with session_factory() as db:
+        _task, attempt = await _task_and_attempt(db)
+        await ingest_canonical_event(db, _event(attempt.attempt_id, 1, "run.started"))
+        divergent_sequence = _event(attempt.attempt_id, 2, "harness.completed")
+        divergent_sequence["event_id"] = "event-1"
+        with pytest.raises(HarnessProtocolError, match="duplicate event_id"):
+            await ingest_canonical_event(db, divergent_sequence)
+
+
+@pytest.mark.asyncio
+async def test_incremental_ingest_rejects_nonterminal_after_worker_finalization(session_factory):
+    async with session_factory() as db:
+        _task, attempt = await _task_and_attempt(db)
+        for seq, event_type in enumerate(
+            ["run.started", "harness.completed", "worker.finalization"],
+            start=1,
+        ):
+            await ingest_canonical_event(db, _event(attempt.attempt_id, seq, event_type))
+        with pytest.raises(HarnessProtocolError, match="only the Task terminal"):
+            await ingest_canonical_event(
+                db,
+                _event(attempt.attempt_id, 4, "message.delta"),
+            )
 
 
 @pytest.mark.asyncio

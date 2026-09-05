@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.harness_protocol import (
     CANONICAL_EVENT_SCHEMA,
+    HARNESS_TERMINAL_TYPES,
     TASK_TERMINAL_TYPES,
     CanonicalEventReplay,
     HarnessProtocolError,
@@ -92,6 +93,173 @@ async def _load_replay(db: AsyncSession, attempt_id: str) -> CanonicalEventRepla
     return replay
 
 
+async def _existing_event_types(
+    db: AsyncSession,
+    *,
+    attempt_id: str,
+    event_types: set[str] | frozenset[str],
+) -> set[str]:
+    """Return the requested prior event types without replaying the attempt.
+
+    Live ingest is serialized by the attempt row lock.  The full replay remains
+    the authoritative one-shot integrity check in :func:`assert_attempt_complete`,
+    but loading every receipt for every streamed event makes archive backfill
+    quadratic for long model responses.
+    """
+    if not event_types:
+        return set()
+    result = await db.execute(
+        select(TaskHarnessEventReceipt.event_type)
+        .where(
+            TaskHarnessEventReceipt.attempt_id == attempt_id,
+            TaskHarnessEventReceipt.event_type.in_(event_types),
+        )
+    )
+    return set(result.scalars())
+
+
+async def _first_event_harness_metadata(
+    db: AsyncSession,
+    *,
+    attempt_id: str,
+) -> tuple[object, object] | None:
+    """Read the immutable transport/model metadata from the first receipt."""
+    first = await db.get(TaskHarnessEventReceipt, (attempt_id, 1))
+    if first is None or not isinstance(first.event, dict):
+        return None
+    harness = first.event.get("harness")
+    if not isinstance(harness, dict):
+        return None
+    return harness.get("control_transport"), harness.get("model_protocols")
+
+
+async def _event_ids_for_attempt(
+    db: AsyncSession,
+    *,
+    attempt_id: str,
+) -> set[str]:
+    result = await db.execute(
+        select(TaskHarnessEventReceipt.event_id).where(
+            TaskHarnessEventReceipt.attempt_id == attempt_id
+        )
+    )
+    return set(result.scalars())
+
+
+async def _last_event_type(
+    db: AsyncSession,
+    *,
+    attempt: TaskHarnessAttempt,
+) -> str | None:
+    if attempt.last_seq <= 0:
+        return None
+    last = await db.get(TaskHarnessEventReceipt, (attempt.attempt_id, attempt.last_seq))
+    return last.event_type if last is not None else None
+
+
+async def _validate_incremental_event_order(
+    db: AsyncSession,
+    *,
+    attempt: TaskHarnessAttempt,
+    event: dict,
+) -> None:
+    """Validate ordering invariants using the locked attempt and small queries."""
+    event_type = event["type"]
+    if attempt.terminal_event_type is not None:
+        raise HarnessProtocolError(
+            "canonical event appears after task terminal",
+            code="after_terminal",
+        )
+    expected_seq = attempt.last_seq + 1
+    if event["seq"] != expected_seq:
+        raise HarnessProtocolError(
+            f"sequence gap: expected {expected_seq}, received {event['seq']}",
+            code="sequence_gap",
+        )
+
+    finalization_seen = getattr(attempt, "_canonical_finalization_seen", None)
+    if finalization_seen is None:
+        finalization_seen = (
+            await _last_event_type(db, attempt=attempt) == "worker.finalization"
+        )
+        setattr(attempt, "_canonical_finalization_seen", finalization_seen)
+    if finalization_seen and event_type not in TASK_TERMINAL_TYPES:
+        raise HarnessProtocolError(
+            "only the Task terminal may follow worker.finalization",
+            code="after_finalization",
+        )
+
+    # Cache the immutable V2 transport/model identity on the ORM object for the
+    # current ingest session.  A new session simply performs one indexed read.
+    if event["seq"] > 1:
+        metadata = getattr(attempt, "_canonical_harness_metadata", None)
+        if metadata is None:
+            metadata = await _first_event_harness_metadata(
+                db,
+                attempt_id=attempt.attempt_id,
+            )
+            setattr(attempt, "_canonical_harness_metadata", metadata)
+        if metadata is None:
+            raise HarnessProtocolError("canonical attempt is missing run.started", code="missing_init")
+        control_transport, model_protocols = metadata
+        harness = event["harness"]
+        if harness.get("control_transport") != control_transport:
+            raise HarnessProtocolError("control transport changed inside one replay")
+        if harness.get("model_protocols") != model_protocols:
+            raise HarnessProtocolError("model_protocols changed inside one replay")
+
+    prior_types: set[str] = set()
+    if attempt.last_seq == 0:
+        if event_type != "run.started":
+            raise HarnessProtocolError(
+                "canonical attempt is missing run.started",
+                code="missing_init",
+            )
+    elif event_type == "run.started":
+        raise HarnessProtocolError("run.started appears more than once")
+
+    # These checks are only needed around lifecycle boundaries.  Ordinary
+    # message/tool deltas therefore take the attempt-lock + indexed receipt
+    # path without scanning prior event JSON.
+    boundary_types = set(HARNESS_TERMINAL_TYPES) | {"worker.finalization"}
+    if event_type in HARNESS_TERMINAL_TYPES:
+        prior_types = await _existing_event_types(
+            db,
+            attempt_id=attempt.attempt_id,
+            event_types=HARNESS_TERMINAL_TYPES,
+        )
+        if prior_types:
+            raise HarnessProtocolError("harness terminal appears more than once")
+    elif event_type.startswith("delivery."):
+        prior_types = await _existing_event_types(
+            db,
+            attempt_id=attempt.attempt_id,
+            event_types=HARNESS_TERMINAL_TYPES,
+        )
+        if not prior_types:
+            raise HarnessProtocolError("delivery event appears before harness terminal")
+    elif event_type == "worker.finalization":
+        prior_types = await _existing_event_types(
+            db,
+            attempt_id=attempt.attempt_id,
+            event_types=boundary_types,
+        )
+        if not (prior_types & set(HARNESS_TERMINAL_TYPES)):
+            raise HarnessProtocolError("worker.finalization appears before harness terminal")
+        if "worker.finalization" in prior_types:
+            raise HarnessProtocolError("worker.finalization appears more than once")
+    elif event_type in TASK_TERMINAL_TYPES:
+        prior_types = await _existing_event_types(
+            db,
+            attempt_id=attempt.attempt_id,
+            event_types=boundary_types,
+        )
+        if not (prior_types & set(HARNESS_TERMINAL_TYPES)):
+            raise HarnessProtocolError("task terminal appears before harness terminal")
+        if "worker.finalization" not in prior_types:
+            raise HarnessProtocolError("task terminal appears before worker.finalization")
+
+
 async def ingest_canonical_event(
     db: AsyncSession,
     event: dict,
@@ -134,8 +302,24 @@ async def ingest_canonical_event(
             )
         return EventIngestResult(event=normalized, attempt=attempt, duplicate=True)
 
-    replay = await _load_replay(db, attempt.attempt_id)
-    replay.ingest(normalized)
+    event_ids = getattr(attempt, "_canonical_event_ids", None)
+    if event_ids is None:
+        event_ids = await _event_ids_for_attempt(
+            db,
+            attempt_id=attempt.attempt_id,
+        )
+        setattr(attempt, "_canonical_event_ids", event_ids)
+    if normalized["event_id"] in event_ids:
+        raise HarnessProtocolError(
+            f"duplicate event_id: {normalized['event_id']}",
+            code="duplicate_event",
+        )
+
+    await _validate_incremental_event_order(
+        db,
+        attempt=attempt,
+        event=normalized,
+    )
     receipt = TaskHarnessEventReceipt(
         attempt_id=attempt.attempt_id,
         seq=normalized["seq"],
@@ -153,6 +337,9 @@ async def ingest_canonical_event(
         attempt.terminal_event_type = normalized["type"]
         attempt.terminal_at = utcnow()
     await db.flush()
+    event_ids.add(normalized["event_id"])
+    if normalized["type"] == "worker.finalization":
+        setattr(attempt, "_canonical_finalization_seen", True)
     return EventIngestResult(event=normalized, attempt=attempt, duplicate=False)
 
 
