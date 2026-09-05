@@ -294,7 +294,14 @@ if ! repo_delivery_collect; then
     exit 1
 fi
 
-DELIVERY_COLLECT_ERROR=$(jq -r '.error.code // empty' "${GIT_DELIVERY_SNAPSHOT_FILE}" 2>/dev/null || true)
+# A hard attribution failure (history rewritten under the pinned start, wrong
+# branch, unprovable ancestry) makes the range uncollectable: stop automatic
+# delivery with the recorded reason instead of declaring a no-change success.
+# Softer diagnostics (e.g. recovered commits unverifiable) keep commits intact
+# and are allowed to proceed to publish.
+DELIVERY_COLLECT_ERROR=$(jq -r \
+    '(.error.code // "") as $c | if $c != "" and .git_delivery.commits == null then $c else "" end' \
+    "${GIT_DELIVERY_SNAPSHOT_FILE}" 2>/dev/null || true)
 if [ -n "${DELIVERY_COLLECT_ERROR}" ]; then
     DELIVERY_COLLECT_MESSAGE=$(jq -r '.error.message // "Delivery facts could not be collected"' "${GIT_DELIVERY_SNAPSHOT_FILE}")
     echo "ERROR: ${DELIVERY_COLLECT_MESSAGE}"

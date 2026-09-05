@@ -523,6 +523,11 @@ def cmd_collect(args: argparse.Namespace) -> int:
     snapshot = _projections(delivery, work_dir)
     snapshot["_work_dir"] = str(work_dir)
     snapshot["git_delivery"] = _strip_private(delivery)
+    if error is not None:
+        # Hard attribution failures (rewritten start, detached HEAD, missing
+        # objects) must survive into the snapshot: main.sh gates on this field
+        # and every exit path persists the reason with the delivery facts.
+        snapshot["error"] = error
     _write_json_atomic(Path(args.out), snapshot)
     result = {"ok": error is None, "error": error, "git_delivery": snapshot["git_delivery"]}
     print(json.dumps(result, ensure_ascii=True, separators=(",", ":")))

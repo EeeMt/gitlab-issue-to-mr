@@ -720,6 +720,16 @@ repo_delivery_collect || exit 9
     gd = snapshot["git_delivery"]
     assert gd["commits"] is None
     assert snapshot["commit_sha"] is None
+    # The hard attribution error is persisted where main.sh gates on it, so a
+    # rewritten start can never fall through to a false "no changes" success.
+    assert snapshot["error"]["code"] == "history_rewritten"
+    gate = subprocess.run(
+        ["jq", "-r",
+         '(.error.code // "") as $c | if $c != "" and .git_delivery.commits == null then $c else "" end',
+         str(root / "runtime" / "git-delivery.json")],
+        text=True, capture_output=True, check=True,
+    )
+    assert gate.stdout.strip() == "history_rewritten"
 
 
 @pytest.mark.skipif(shutil.which("jq") is None, reason="helpers require jq")
@@ -743,6 +753,7 @@ repo_delivery_collect || exit 9
     assert gd["push"]["status"] == "not_attempted"
     assert gd["commits"] is None
     assert gd["diff"] is None
+    assert _snapshot(root)["error"]["code"] == "branch_changed"
 
 
 @pytest.mark.skipif(shutil.which("jq") is None, reason="helpers require jq")
@@ -1080,3 +1091,52 @@ codify_harness_finalize_attempt 1
     types = [event["type"] for event in events]
     assert "worker.finalization" in types
     assert types[-1] == "run.failed"
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="helpers require jq")
+def test_rewritten_start_never_declares_false_success_even_in_freeform(delivery_env: dict):
+    """Replicates main.sh's delivery tail: a rewritten pinned start must fail
+    with the recorded reason in every task mode (require_changes=false here)."""
+    root = delivery_env["root"]
+    workspace = delivery_env["workspace"]
+    base = _git(delivery_env["remote"], "rev-parse", "refs/heads/main")
+    scenario = """
+repo_pin_delivery_start
+printf 'x\n' > a.txt
+git add a.txt && git commit -qm "harness commit"
+git reset --hard %BASE%
+repo_delivery_collect || exit 9
+# ---- main.sh gate (verbatim) ----
+DELIVERY_COLLECT_ERROR=$(jq -r \
+    '(.error.code // "") as $c | if $c != "" and .git_delivery.commits == null then $c else "" end' \
+    "${GIT_DELIVERY_SNAPSHOT_FILE}" 2>/dev/null || true)
+if [ -n "${DELIVERY_COLLECT_ERROR}" ]; then
+    DELIVERY_COLLECT_MESSAGE=$(jq -r '.error.message // "Delivery facts could not be collected"' "${GIT_DELIVERY_SNAPSHOT_FILE}")
+    echo "ERROR: ${DELIVERY_COLLECT_MESSAGE}"
+    repo_delivery_record "failed" "" "${DELIVERY_COLLECT_ERROR}" "${DELIVERY_COLLECT_MESSAGE}" || true
+    repo_delivery_write_metadata || true
+    exit 1
+fi
+repo_delivery_record "not_needed" || true
+echo "false success path reached"
+exit 0
+"""
+    scenario = scenario.replace("%BASE%", base)
+    result = _run_delivery_scenario(
+        root,
+        remote=delivery_env["remote"],
+        branch_name=delivery_env["branch"],
+        workspace=workspace,
+        previous=delivery_env["previous"],
+        scenario=scenario,
+        env_overrides={"REQUIRE_CHANGES": "false", "TASK_MODE": "freeform"},
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "false success path" not in result.stdout
+    gd = _snapshot(root)["git_delivery"]
+    assert gd["push"]["status"] == "failed"
+    assert gd["push"]["error"]["code"] == "history_rewritten"
+    metadata = json.loads(
+        (root / "runtime" / "task-metadata.json").read_text(encoding="utf-8")
+    )
+    assert metadata["commit_sha"] is None
