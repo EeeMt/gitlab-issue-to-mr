@@ -136,6 +136,11 @@ R4 是当前唯一可推进工作包。以下六项必须在同一最终 candida
 
 注：R4.5 行中的 1.4GB/“尚未触发清理”是 Task 410 通知复核时点的历史快照；随后 nginx 构建实际触发满盘处置，最终状态与清理范围以本节后面的 `served failure-summary visibility and disk recovery` 记录为准。
 
+补充：R4.2 表中的 `sha256:92321ff2…` / Profile 4 generation 74 是
+Task 410–412 所在的前一候选快照；OpenCode 脱敏 framing 修复后，当前
+Backend/Scheduler 为 `sha256:d73018a4…`，Profile 4 已重新验证为 generation
+75，Task 415 的不可变 snapshot 与后续 continuation 记录该新 identity。
+
 **R4 退出条件：** R4.1–R4.6 全部有当前 evidence，阻断项为零，并由独立发布评审明确批准进入 R5。
 当前 R4.1/R4.2 有 candidate evidence，R4.3/R4.4 仍只有部分 evidence；没有签署即保持
 `dual_canary`，不以“测试大多通过”代替批准。
@@ -363,6 +368,53 @@ Tasks, zero `issue_execution_locks`, healthy Backend and Mattermost 10.9.1,
 keyboard/IME/notch/gesture-area acceptance remains explicitly deferred;
 R4.5 owner/security/release checks, R4.6 independent go/no-go, migration 078,
 and R5/L6 remain open.
+
+### 2026-09-05 continuation: OpenCode redaction framing fix and Task 415
+
+The Task 411 archive exposed a Codify-side defect in the OpenCode Adapter:
+the serialized JSONL record was passed through the string-oriented secret
+sanitizer before `json.loads`. An `API_KEY` value could consume escaped
+newlines and quotes while matching the redaction expression, turning an
+otherwise valid `running`/`completed` tool snapshot into malformed JSON. The
+Adapter then dropped those snapshots and correctly failed closed on
+`session.idle with active tool parts`, but the failure was caused by Codify's
+archive/parse boundary rather than by a proven incomplete Provider lifecycle.
+
+The smallest fix parses valid JSON first and recursively sanitizes only its
+string values, while retaining the old sanitized raw-line fallback for input
+that is genuinely non-JSON. A focused regression now covers an OpenCode tool
+output containing an API key and embedded JSON; the completed tool snapshot is
+preserved, the secret is absent, and no `non_json_raw_line` diagnostic is
+emitted. The OpenCode Adapter unit suite passed 77 tests. Backend was rebuilt
+on the remote Docker context as image
+`sha256:d73018a40507ae08e20f1cc1944a428c370bc8d56377cf4e9410dd764cc5fb5e`
+and Backend/Scheduler were recreated without touching Mattermost, Postgres,
+Redis, or existing Workers.
+
+After Profile 4 (`v2-canary-0.6.11-four-harness`) was re-verified, generation
+75 / Kit `0.6.12` / Bundle 175 (`532c4a410962433c…`) was used to run a fresh
+real read-only OpenCode task. Task 415 used existing Provider 7
+`openrouter-free` / `openai_chat_completions`, fresh session, analysis (`plan`)
+mode, and completed with zero changes in 49 seconds. Its V2 attempt
+`task-415-attempt-1-9879f988dcb5` persisted 96 unique contiguous receipts
+(seq 1–96), OpenCode Adapter `2.0.0` / CLI `1.18.19`, and `run.completed`.
+The 25,988-byte runtime archive (`ce2b21ef…`) contained 183 parseable
+OpenCode JSONL records, 13 tool parts and 3 completed tool parts; the archive
+had zero `non_json_raw_line` matches and zero secret-like matches. Raw logs
+were 5 chunks / 2,723 bytes. The Codify delivery row 8 was
+`task_completed/success` to the independent Mattermost 10.9.1 service, and
+the served Issue #99 page showed Task 415 as completed.
+
+The post-run Host check reported zero pending/queued/running Tasks and zero
+Issue locks, healthy Backend/Scheduler/Mattermost, `dual_canary`, and about
+1.9GB free on `/` (97%). Docker reported 4.424GB reclaimable images and
+1.796GB private BuildKit cache; no cleanup was needed for this run. This is
+additional post-fix R4.4/R4.5 candidate evidence, not a new member of the
+frozen Task-ID 380–394 integrity cohort and not formal R4.4/R4.5, R4.6, or
+R5 approval. Credential/least-privilege and rotation evidence, migration 078,
+release package and owner sign-off, independent go/no-go, and R5/L6 remain
+open. Real mobile-device keyboard/IME/notch/gesture-area acceptance remains
+explicitly deferred by the user.
 
 ### R5 — 在独立维护窗口执行 L6
 

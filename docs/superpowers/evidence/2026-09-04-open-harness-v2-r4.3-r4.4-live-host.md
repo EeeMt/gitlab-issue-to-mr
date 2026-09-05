@@ -1285,3 +1285,51 @@ Together these tasks show that the current deployment and Responses path still
 complete a real OpenCode analysis task after restart, while the separate
 Provider 7 chat path remains bounded as a protocol failure. They add R4.4
 operational evidence but do not sign R4.4/R4.5 or establish R4.6 go/no-go.
+
+## 2026-09-05 continuation: OpenCode redaction framing fix and Task 415
+
+The Task 411 raw archive was rechecked before the next deployment. Its
+OpenCode JSONL became malformed around an `ANTHROPIC_API_KEY` value because
+the Adapter sanitized the serialized record before parsing it. The
+string-oriented redaction could consume escaped newlines and quotes, dropping
+valid tool snapshots and leading to the fail-closed
+`session.idle with active tool parts` diagnostic. This was a Codify parse/
+redaction boundary defect, not evidence that the Provider had actually left a
+tool call unfinished.
+
+The fix in `sanitize.py` and `opencode_events.py` parses JSON first and
+sanitizes nested string values without changing JSON framing; genuinely
+non-JSON input still uses the previous sanitized fallback. The new unit
+regression covers an API-key-containing tool output with embedded JSON and
+asserts that the completed tool event remains present without a secret or
+`non_json_raw_line` diagnostic. The focused OpenCode Adapter suite passed
+77 tests.
+
+The remote Backend was rebuilt as
+`sha256:d73018a40507ae08e20f1cc1944a428c370bc8d56377cf4e9410dd764cc5fb5e`
+and Backend/Scheduler were recreated. Profile 4 was re-verified through the
+normal UI/API path, producing generation 75 with Kit `0.6.12` at
+`/opt/codify/worker-kits/0.6.12-linux-amd64-c33dbf86951b`; Task 415 recorded
+Bundle 175 digest `532c4a410962433c094c775815748da11c0f2d546290b9a0da95e4f348a27e7f`
+in its immutable snapshot.
+
+| Item | Result |
+| --- | --- |
+| Task/runtime | Task 415, `completed`, `total_changes=0`, analysis (`plan`) mode; served Issue #99 page showed `已完成` and 49s |
+| Provider/Harness | Provider 7 `openrouter-free`, `openai_chat_completions`; OpenCode Adapter `2.0.0`, CLI `1.18.19` |
+| Attempt | `task-415-attempt-1-9879f988dcb5`, `codify.worker.event/v2`, `last_seq=96`, 96 receipts / 96 distinct event IDs, terminal `run.completed`, `control_state=closed` |
+| Persistence | 5 raw-log chunks / 2723 bytes; runtime archive `task-415-runtime-archive.tar.gz`, 25988 bytes, SHA-256 `ce2b21efda9ec9fed234a578eff7ad15ba7e2261f568910be5070138f714f8e2` |
+| Archive safety | 183 OpenCode JSONL records parseable by `jq`; 13 tool parts / 3 completed tool parts; zero `non_json_raw_line` and zero secret-like matches |
+| Delivery | `mattermost_notification_deliveries.id=8`, `event_type=task_completed`, `status=success`, target `channel:aaz68niiuff3txfot5wjrgj33e`; Mattermost 10.9.1 remained healthy |
+
+The task ran with the existing real Provider and left no repository changes,
+Worker container, or Issue lock. The current Host recheck reported zero
+pending/queued/running Tasks, zero Issue locks, healthy Backend and Scheduler,
+`dual_canary`, and approximately 1.9GB available on `/` (97%). Docker showed
+4.424GB reclaimable images and 1.796GB private BuildKit cache; no cleanup was
+performed in this run. This is post-fix candidate evidence only: it does not
+extend the frozen Task-ID 380–394 integrity cohort or sign R4.3/R4.4, R4.5,
+R4.6, or R5. Credential/least-privilege and rotation evidence, migration 078,
+release package/owner approval, independent go/no-go, R5/L6, and real
+mobile-device keyboard/IME/notch/gesture-area acceptance remain open; the
+mobile-device item is explicitly deferred by the user.

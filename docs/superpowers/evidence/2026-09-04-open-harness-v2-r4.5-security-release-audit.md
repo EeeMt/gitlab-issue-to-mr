@@ -786,3 +786,46 @@ no provider configuration was changed and neither task alters the frozen
 Task-ID 380–394 integrity cohort. R4.5 credential/least-privilege,
 release-package, retention, maintenance-owner, independent approval, R4.6,
 migration 078, R5/L6, and real-mobile-device gates remain open.
+
+## 2026-09-05 continuation: OpenCode redaction framing fix and Task 415
+
+The failed Task 411 archive identified a security-relevant correctness defect
+at the OpenCode Adapter boundary. The Adapter applied the string-oriented
+secret sanitizer to serialized JSON before parsing it. An `API_KEY` value
+could consume escaped newlines and quotes, causing valid tool snapshots to be
+stored as malformed JSON. The resulting fail-closed protocol error was safe,
+but the archive and diagnostic path lost the actual completion snapshot.
+
+The correction parses valid JSON first, recursively sanitizes only string
+values, and keeps the sanitized raw-line fallback for genuinely non-JSON
+input. The regression test includes an API key plus embedded JSON in a tool
+output and proves that the completed tool event survives, the secret is not
+persisted, and no `non_json_raw_line` diagnostic is emitted. The focused
+OpenCode Adapter suite passed 77 tests. No credential, Provider, or
+notification configuration was changed.
+
+The remote Backend/Scheduler image is now
+`sha256:d73018a40507ae08e20f1cc1944a428c370bc8d56377cf4e9410dd764cc5fb5e`.
+Profile 4 was re-verified through the normal path at generation 75 with Kit
+`0.6.12`; the Task 415 snapshot records Bundle 175 and the exact runtime
+bundle digest `532c4a410962433c094c775815748da11c0f2d546290b9a0da95e4f348a27e7f`.
+
+Task 415 was a fresh-session, read-only analysis run using existing Provider 7
+`openrouter-free` / `openai_chat_completions` and OpenCode. It completed with
+zero repository changes. Its V2 attempt persisted 96 contiguous, unique
+receipts through `run.completed`; the 25,988-byte archive contained 183
+parseable OpenCode JSONL records, 13 tool parts and 3 completed tool parts,
+with zero `non_json_raw_line` or secret-like matches. The five raw-log chunks
+totaled 2,723 bytes. Codify delivery row 8 recorded one successful
+`task_completed` post to the independent Mattermost 10.9.1 service, and the
+authenticated browser showed Task 415 completed on Issue #99.
+
+The post-run Host state had zero active Tasks and Issue locks, healthy
+Backend/Scheduler/Mattermost, `dual_canary`, and about 1.9GB free on `/`.
+Docker reported 4.424GB reclaimable images and 1.796GB private BuildKit cache;
+no cleanup was needed. This strengthens the current candidate's secret
+redaction and real-provider evidence, but is not an R4.5 security sign-off:
+credential/least-privilege and rotation records, release package/signatures,
+retention and maintenance ownership, migration 078, independent zero-P0/P1
+approval, R4.6, R5/L6, and real-mobile-device acceptance remain open. The
+mobile-device item remains explicitly deferred by the user.
