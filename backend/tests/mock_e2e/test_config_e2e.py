@@ -23,13 +23,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import event
-from sqlalchemy.ext.asyncio import (
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
-from sqlalchemy.pool import StaticPool
 
 # Ensure a usable encryption key is available for secret config persistence
 os.environ.setdefault("CONFIG_ENCRYPTION_KEY", "test-config-e2e-key-32chars!!!")
@@ -45,43 +38,10 @@ from app.dependencies.project_access import (
     require_project_access_scope,
 )
 from app.main import app
-from app.models import Base
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-async def _test_engine():
-    """In-memory SQLite async engine with all tables created."""
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-
-    @event.listens_for(engine.sync_engine, "connect")
-    def _register_pg_compat(dbapi_conn, connection_record):
-        dbapi_conn.create_function("pg_advisory_xact_lock", 1, lambda _key: None)
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    yield engine
-    await engine.dispose()
-
-
-@pytest.fixture
-async def session_factory(_test_engine):
-    return async_sessionmaker(
-        _test_engine, class_=AsyncSession, expire_on_commit=False
-    )
-
-
-@pytest.fixture
-async def db_session(session_factory):
-    async with session_factory() as session:
-        yield session
 
 
 @pytest.fixture
@@ -95,23 +55,14 @@ def _mock_admin_user():
 
 
 @pytest.fixture
-async def client(session_factory, _mock_admin_user):
+async def client(override_get_db, _mock_admin_user):
     """httpx.AsyncClient wired to the FastAPI app with auth overrides."""
-
-    async def _override_get_db():
-        async with session_factory() as session:
-            try:
-                yield session
-                await session.commit()
-            except Exception:
-                await session.rollback()
-                raise
 
     access_scope = ProjectAccessScope(
         is_unrestricted=True, accessible_projects=[]
     )
 
-    app.dependency_overrides[get_db] = _override_get_db
+    app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_optional_current_user] = lambda: None
     app.dependency_overrides[require_authenticated_user] = lambda: None
     app.dependency_overrides[require_admin_user] = lambda: _mock_admin_user
@@ -122,17 +73,6 @@ async def client(session_factory, _mock_admin_user):
         yield ac
 
     app.dependency_overrides.clear()
-
-
-@pytest.fixture(autouse=True)
-def _isolate_runtime_config():
-    """Save / restore module-level _runtime_config between tests."""
-    from app.config import _runtime_config
-
-    saved = dict(_runtime_config)
-    yield
-    _runtime_config.clear()
-    _runtime_config.update(saved)
 
 
 @pytest.fixture(autouse=True)

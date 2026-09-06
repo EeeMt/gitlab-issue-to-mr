@@ -34,13 +34,10 @@ pytestmark = pytest.mark.filterwarnings(
 )
 
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import event, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
 )
-from sqlalchemy.pool import StaticPool
 
 # Ensure a usable encryption key is available for secret config persistence.
 os.environ.setdefault("CONFIG_ENCRYPTION_KEY", "test-auth-e2e-key-32chars!!!!!!")
@@ -61,7 +58,6 @@ from app.dependencies.project_access import (  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models import (  # noqa: E402
     AuthAuditLog,
-    Base,
     SystemBootstrap,
     User,
     UserSession,
@@ -74,59 +70,11 @@ from app.models import (  # noqa: E402
 MOCK_ADMIN_ID = 9999  # Avoids collision with auto-incremented user IDs.
 
 
-@pytest.fixture
-async def _test_engine():
-    """In-memory SQLite async engine with all tables created."""
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-
-    @event.listens_for(engine.sync_engine, "connect")
-    def _register_pg_compat(dbapi_conn, connection_record):
-        dbapi_conn.create_function("pg_advisory_xact_lock", 1, lambda _key: None)
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    yield engine
-    await engine.dispose()
-
-
-@pytest.fixture
-async def session_factory(_test_engine):
-    return async_sessionmaker(
-        _test_engine, class_=AsyncSession, expire_on_commit=False
-    )
-
-
-@pytest.fixture
-async def db_session(session_factory):
-    """Direct database session for test setup / assertions."""
-    async with session_factory() as session:
-        yield session
-
-
-def _override_get_db_factory(session_factory):
-    """Return an async generator compatible with FastAPI's Depends(get_db)."""
-
-    async def _override_get_db():
-        async with session_factory() as session:
-            try:
-                yield session
-                await session.commit()
-            except Exception:
-                await session.rollback()
-                raise
-
-    return _override_get_db
-
-
 # ---- raw_client: NO auth overrides → tests register / login / bootstrap ----
 
 @pytest.fixture
-async def raw_client(session_factory):
-    app.dependency_overrides[get_db] = _override_get_db_factory(session_factory)
+async def raw_client(override_get_db):
+    app.dependency_overrides[get_db] = override_get_db
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -148,12 +96,12 @@ def _mock_admin_user():
 
 
 @pytest.fixture
-async def admin_client(session_factory, _mock_admin_user):
+async def admin_client(override_get_db, _mock_admin_user):
     access_scope = ProjectAccessScope(
         is_unrestricted=True, accessible_projects=[]
     )
 
-    app.dependency_overrides[get_db] = _override_get_db_factory(session_factory)
+    app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_optional_current_user] = lambda: _mock_admin_user
     app.dependency_overrides[require_authenticated_user] = lambda: _mock_admin_user
     app.dependency_overrides[require_admin_user] = lambda: _mock_admin_user
@@ -164,17 +112,6 @@ async def admin_client(session_factory, _mock_admin_user):
         yield ac
 
     app.dependency_overrides.clear()
-
-
-@pytest.fixture(autouse=True)
-def _isolate_runtime_config():
-    """Save / restore module-level _runtime_config between tests."""
-    from app.config import _runtime_config
-
-    saved = dict(_runtime_config)
-    yield
-    _runtime_config.clear()
-    _runtime_config.update(saved)
 
 
 # ---------------------------------------------------------------------------

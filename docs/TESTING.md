@@ -10,12 +10,17 @@
 # 查看所有可用测试命令
 make help
 
-# 运行所有单元测试（推荐开发时使用）
+# 运行单元测试（后端 + 前端 + mock E2E，并行，约 2–3 分钟）
 make test-unit
 
-# 运行所有测试（包括 E2E）
+# 运行全部测试（单元 + mock 集成 + Playwright E2E，约 20 分钟）
+# mock 集成默认三栈并行（~8 分钟）；需要串行时：make test-all MOCK_INT_MODE=serial
 make test-all
 ```
+
+> 直接执行 `cd backend && python -m pytest` 只收集单元 / mock 集成 / mock E2E
+> 三个套件（Playwright E2E 与 GitLab E2E 有独立的 pytest.ini / 依赖，已被自动排除）；
+> 后端单元测试默认路径为 `tests/unit`，见下文"直接运行 pytest"。
 
 ## 测试类型概览
 
@@ -56,7 +61,10 @@ python -m pytest tests/unit/test_auth_session.py::AuthSessionTests -v
 ### 特点
 - 使用 `pytest` + `asyncio_mode = "auto"` 异步测试
 - 大量使用 mock 避免外部依赖
-- 运行快速（通常 < 30 秒，约 408 个测试）
+- 并行运行（约 80–90 秒，约 3400 个测试）
+- 迁移测试（`test_0XX_migration.py`）需要可访问的测试 PostgreSQL：
+  默认连接 `postgresql+asyncpg://codify:codify_password@192.168.50.129:5432/codify_test`，
+  可通过环境变量 `CODIFY_TEST_DATABASE_URL` 覆盖；数据库不可达时相关模块自动跳过
 
 ---
 
@@ -92,13 +100,16 @@ npx vitest run --coverage
 ### 运行命令
 
 ```bash
-make test-mock-e2e
+make test-mock-e2e                # 并行运行，约 10–15 秒（380 个测试）
+cd backend && pytest tests/mock_e2e/ -v   # 串行运行单个文件调试
 ```
 
 ### 特点
 - 不需要 Docker 或外部服务
 - 使用 mock 模拟 GitLab API 响应
 - 适合验证核心业务流程
+- 所有测试文件共享同一个内存 SQLite 数据库（schema 会话级创建一次，每个测试后清空），
+  共用 fixture 定义在 `tests/mock_e2e/conftest.py`
 
 ---
 
@@ -119,13 +130,14 @@ pytest (本机) → HTTP → codify-backend (Docker)
 ### 运行命令
 
 ```bash
-make test-mock-integration          # 一键运行（构建+启动+测试）
-make test-mock-integration-up       # 仅启动环境
-cd backend && pytest tests/mock_integration/ -v  # 手动运行测试
-make test-mock-integration-down     # 停止环境
+make test-mock-integration                 # 一键运行（构建+启动+测试，串行单栈）
+make test-mock-integration-parallel        # 三栈并行（约 8 分钟，需 3×CPU/内存/端口）
+make test-mock-integration-up              # 仅启动环境
+cd backend && pytest tests/mock_integration/ -v   # 手动运行测试
+make test-mock-integration-down            # 停止环境
 ```
 
-### 测试文件概览（19 文件，222 个测试）
+### 测试文件概览（22 文件，248 个测试）
 
 | 文件 | 测试数 | 覆盖范围 |
 |------|--------|----------|
@@ -141,27 +153,34 @@ make test-mock-integration-down     # 停止环境
 | test_api_endpoints.py | 12 | 分页、SSE、重试、日志 |
 | test_system_apis.py | 14 | 统计、分析、配置、认证 |
 | test_admin_and_templates.py | 13 | 模板、用户管理、会话 |
-| test_webhook_and_lifecycle.py | 14 | 提示词、运行时配置、生命周期 || test_notifications_and_operations.py | 17 | 通知、slot capacity |
+| test_webhook_and_lifecycle.py | 14 | 提示词、运行时配置、生命周期 |
+| test_notifications_and_operations.py | 17 | 通知、slot capacity |
 | test_mr_followup_and_env.py | 12 | MR follow-up、容器环境、重试 |
 | test_health_access_sse.py | 25 | 健康检查、访问控制、SSE |
 | test_remaining_endpoints.py | 27 | 剩余端点覆盖 |
 | test_failure_injection.py | 15 | 故障注入（项目404、退出码、git clone、组合故障） |
 | test_mutex_and_scheduling.py | 16 | 互斥锁、调度、分支验证、快速创建 |
+| test_validation_and_dedup.py | 12 | 校验、去重 |
+| test_security_and_resilience.py | 12 | 安全、韧性 |
+| test_edge_cases_advanced.py | 12 | 高级边缘场景 |
 
 ### 关键配置
 
 | 配置项 | 值 |
 |--------|-----|
 | WORKER_NETWORK | codify-mock-test |
-| MAX_CONCURRENCY | 2 |
+| MAX_CONCURRENCY | 5 |
+| SCHEDULER_INTERVAL | 1 |
+| WORKER_SKIP_IMAGE_PULL | true |
 | TASK_TIMEOUT | 120 |
 | Backend 端口 | 18000 |
 | Mock 服务端口 | 19000 |
 
-> **注意**：完整运行约 17 分钟，可单独运行文件加快调试：
+> **注意**：串行完整运行约 17 分钟（并行三栈约 8 分钟），可单独运行文件加快调试：
 > ```bash
 > cd backend && pytest tests/mock_integration/test_happy_path.py -v
 > ```
+> `make test-all` 默认使用三栈并行版本，可用 `MOCK_INT_MODE=serial` 切回串行。
 
 ---
 

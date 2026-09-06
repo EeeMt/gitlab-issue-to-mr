@@ -25,7 +25,20 @@ build-backend = "setuptools.build_meta"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"]
+testpaths = ["tests/unit", "tests/mock_integration", "tests/mock_e2e"]
+norecursedirs = [
+    "tests/e2e",
+    "tests/gitlab_e2e",
+    "tests/mock_server",
+    "*.egg-info",
+    ".*",
+    "_build",
+    "build",
+    "dist",
+    "venv",
+    ".venv",
+]
+addopts = "--ignore=tests/e2e --ignore=tests/gitlab_e2e"
 markers = [
     "slow: marks tests as slow-running (use -m 'not slow' to skip)",
 ]

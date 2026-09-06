@@ -273,7 +273,7 @@ test-mock-integration-logs: ## View mock integration test logs
 	docker-compose -f $(MOCK_INT_COMPOSE) logs -f
 
 .PHONY: test-mock-integration
-test-mock-integration: test-mock-integration-build ## Run mock integration tests (sequential, single stack)
+*276|test-mock-integration: test-mock-integration-build ## Run mock integration tests (build + start + test, sequential)
 	$(MOCK_STACK_SCRIPT) $(_MOCK_COMMON) -d || \
 		{ docker-compose -f $(MOCK_INT_COMPOSE) logs; false; }
 
@@ -492,11 +492,20 @@ test-e2e-logs: ## View E2E test logs
 	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml logs -f
 
 .PHONY: test-all
-test-all: $(VENV)/.installed $(NODE_MODULES)/.installed ## Run ALL tests: unit + E2E (with unified summary)
+# test-all runs the three-stack parallel mock integration suite by default;
+# override with MOCK_INT_MODE=serial to run the sequential single-stack suite.
+MOCK_INT_MODE ?= parallel
+ifeq ($(MOCK_INT_MODE),serial)
+MOCK_INT_TARGET := test-mock-integration
+else
+MOCK_INT_TARGET := test-mock-integration-parallel
+endif
+
+test-all: $(VENV)/.installed $(NODE_MODULES)/.installed ## Run ALL tests: unit + E2E + mock integration (parallel) [MOCK_INT_MODE=serial for sequential mock integration]
 	@_rf=$$(mktemp); _t0=$$(date +%s); r_unit=0; r_mock_int=0; r_e2e=0; \
 	export _RESULTS_FILE=$$_rf; \
 	$(MAKE) --no-print-directory test-unit || r_unit=1; \
-	$(MAKE) --no-print-directory test-mock-integration || r_mock_int=1; \
+	$(MAKE) --no-print-directory $(MOCK_INT_TARGET) || r_mock_int=1; \
 	$(MAKE) --no-print-directory test-e2e  || r_e2e=1; \
 	_total_t=$$(( $$(date +%s) - $$_t0 )); \
 	echo ""; \
@@ -571,12 +580,12 @@ help:
 	@echo "  make lint-backend      Run backend Ruff checks"
 	@echo ""
 	@echo "Mock Integration Tests (Docker):"
-	@echo "  make test-mock-integration            Run mock integration tests (build + start + test)"
+	@echo "  make test-mock-integration            Run mock integration tests (build + start + test, sequential)"
 	@echo "  make test-mock-integration-build      Build mock integration test images"
 	@echo "  make test-mock-integration-up         Start mock integration test environment"
 	@echo "  make test-mock-integration-down       Stop mock integration test environment"
 	@echo "  make test-mock-integration-logs       View mock integration test logs"
-	@echo "  make test-mock-integration-parallel  Run mock integration tests in 3 parallel stacks"
+	@echo "  make test-mock-integration-parallel  Run mock integration tests in 3 parallel stacks (~8 min)"
 	@echo ""
 	@echo "E2E Tests:"
 	@echo "  make test-e2e                        Run ALL E2E: parallel + serial + gitlab + cleanup"
@@ -592,7 +601,8 @@ help:
 	@echo "  Videos saved to deploy/e2e-videos/ (RECORD_VIDEO=1 only)"
 	@echo ""
 	@echo "All Tests:"
-	@echo "  make test-all          Run ALL tests (unit + E2E + mock integration) with overall summary"
+	@echo "  make test-all          Run ALL tests (unit + mock integration + E2E, mock integration parallel)"
+	@echo "  make test-all MOCK_INT_MODE=serial   Run mock integration sequentially instead"
 	@echo ""
 
 .DEFAULT_GOAL := help
