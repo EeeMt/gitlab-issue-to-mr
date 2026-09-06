@@ -1,5 +1,4 @@
-# Git-delivery reconciliation (see git-delivery.py): pinned start points, fact
-# collection, remote verification and safe fast-forward publishing.
+# Git-delivery reconciliation (see git-delivery.py): pin, collect, publish.
 
 GIT_DELIVERY_HELPER="${ENTRYPOINT_LIB_DIR}/git-delivery.py"
 GIT_DELIVERY_START_FILE="${CODIFY_RUNTIME_DIR}/git-delivery-start.json"
@@ -7,21 +6,7 @@ GIT_DELIVERY_SNAPSHOT_FILE="${CODIFY_RUNTIME_DIR}/git-delivery.json"
 GIT_DELIVERY_SNAPSHOT_WRITTEN=0
 export GIT_DELIVERY_START_FILE GIT_DELIVERY_SNAPSHOT_FILE
 
-repo_delivery_snapshot_value() {
-    # repo_delivery_snapshot_value <jq-filter> [default]
-    local filter="$1"
-    local default_value="${2:-}"
-    jq -r "${filter} // empty" "${GIT_DELIVERY_SNAPSHOT_FILE}" 2>/dev/null \
-        | { IFS= read -r value || value="${default_value}"; printf '%s\n' "${value}"; }
-}
 
-repo_delivery_run_python() {
-    # Git work runs as the unprivileged workspace owner; printf %q keeps empty
-    # values, spaces and punctuation intact through the inner login shell.
-    local helper_args
-    helper_args=$(printf '%q ' "$@")
-    codify_run_shell "python3 '${GIT_DELIVERY_HELPER}' ${helper_args}"
-}
 
 repo_pin_delivery_start() {
     # Fix S (local task-branch HEAD), R0 (remote work-branch HEAD at prep) and
@@ -100,13 +85,20 @@ repo_delivery_record() {
     return 0
 }
 
+repo_delivery_ensure_pinned_remote() {
+    # Re-bind origin to the task-frozen URL and refresh the credential header
+    # before any network op: the Harness may have repointed origin.
+    codify_run_shell 'cd /workspace && git remote set-url origin "${GIT_REPO_URL}"' || true
+    codify_run_shell 'cd /workspace && git config --local http.extraHeader "PRIVATE-TOKEN: ${GITLAB_TOKEN}"' || true
+}
+
 repo_delivery_remote_tip() {
-    # Current remote work-branch tip, or nothing when the branch is absent.
-    # Nonzero on network/auth failure: unconfirmed is never "no branch".
+    # Work-branch tip of the FROZEN repository URL (never `origin`). Nonzero:
+    # unconfirmed is never "absent".
     local refs tip
     set +e
     refs=$(codify_run_shell \
-        'cd /workspace && GIT_TERMINAL_PROMPT=0 git ls-remote --heads origin "refs/heads/${BRANCH_NAME}"' \
+        'cd /workspace && GIT_TERMINAL_PROMPT=0 git ls-remote --heads "${GIT_REPO_URL}" "refs/heads/${BRANCH_NAME}"' \
         2>/dev/null)
     local query_result=$?
     set -e
@@ -122,39 +114,32 @@ repo_delivery_remote_tip() {
 }
 
 repo_delivery_fetch_branch() {
-    # Fetch only the task work branch, reusing the configured depth policy.
+    # Fetch only the task work branch from the FROZEN URL into a private ref:
+    # local origin tracking state is untrusted after the Harness ran. Depth
+    # policy mirrors the configured clone strategy.
     if [ -n "${CODIFY_GIT_CLONE_DEPTH}" ]; then
         codify_run_shell \
-            'cd /workspace && git fetch --depth "${CODIFY_GIT_CLONE_DEPTH}" origin "+refs/heads/${BRANCH_NAME}:refs/remotes/origin/${BRANCH_NAME}"' \
+            'cd /workspace && git fetch --depth "${CODIFY_GIT_CLONE_DEPTH}" "${GIT_REPO_URL}" "+refs/heads/${BRANCH_NAME}:refs/remotes/codify-delivery/${BRANCH_NAME}"' \
             2>/dev/null
     else
         codify_run_shell \
-            'cd /workspace && git fetch origin "+refs/heads/${BRANCH_NAME}:refs/remotes/origin/${BRANCH_NAME}"' \
+            'cd /workspace && git fetch "${GIT_REPO_URL}" "+refs/heads/${BRANCH_NAME}:refs/remotes/codify-delivery/${BRANCH_NAME}"' \
             2>/dev/null
     fi
 }
 
-repo_delivery_clear_marker() {
-    codify_run_shell 'cd /workspace && git config --unset-all codify.unpublishedPushSha' \
+repo_delivery_local_tip() {
+    # Local copy of the frozen-remote observation written by fetch_branch.
+    codify_run_shell 'cd /workspace && git rev-parse "refs/remotes/codify-delivery/${BRANCH_NAME}"' \
         2>/dev/null || true
 }
 
-repo_delivery_classify() {
-    # repo_delivery_classify <head_sha> <remote_tip> <start_remote>
-    # Prints the classify_remote decision JSON. Exit 0 on success.
-    repo_delivery_run_python \
-        classify_remote \
-        --work-dir /workspace \
-        --head "$1" \
-        --remote-tip "$2" \
-        --start-remote "$3"
-}
+
 
 repo_delivery_recheck_publish() {
-    # Bounded single recheck after a refused/uncertain push. Exports
-    # REPO_DELIVERY_RECHECK_TIP with the freshly observed remote tip (or empty
-    # when unobservable) so the caller can distinguish an unchanged-remote
-    # rejection (push_failed) from a concurrent update (remote_changed).
+    # One bounded recheck after a refused/uncertain push. Exports
+    # REPO_DELIVERY_RECHECK_TIP (empty when unobservable) so the caller can
+    # tell an unchanged rejection (push_failed) from an update (remote_changed).
     # Returns 0 only when the remote provably already contains the head.
     local head_sha="$1"
     local start_remote="$2"
@@ -191,34 +176,41 @@ repo_delivery_recheck_publish() {
 
 repo_delivery_push_pinned() {
     # repo_delivery_push_pinned <head_sha> <lease_sha_or_empty>
-    # Pushes exactly <head_sha>:refs/heads/<branch> with a --force-with-lease
-    # that can only ever confirm a previously verified fast-forward. The
-    # unconfirmed marker is recorded before the attempt and cleared on ACK.
-    # Echoes push output; returns the push exit code.
+    # Push exactly <head_sha>:refs/heads/<branch> to the FROZEN URL with a
+    # lease that only confirms a verified fast-forward.
     local head_sha="$1"
     local lease_sha="$2"
     echo "Pushing ${head_sha} to refs/heads/${BRANCH_NAME} (lease ${lease_sha:-must-not-exist})..."
-    codify_run_shell 'cd /workspace && git remote set-url origin "${GIT_REPO_URL}"' || true
-    codify_run_shell 'cd /workspace && git config --local http.extraHeader "PRIVATE-TOKEN: ${GITLAB_TOKEN}"' || true
+    repo_delivery_ensure_pinned_remote
     REPO_DELIVERY_LEASE="${lease_sha}"
     REPO_DELIVERY_PUBLISH_HEAD="${head_sha}"
     export REPO_DELIVERY_LEASE REPO_DELIVERY_PUBLISH_HEAD
     codify_run_shell "cd /workspace && git config codify.unpublishedPushSha '${head_sha}'" || true
     set +e
     codify_run_shell \
-        'cd /workspace && GIT_TERMINAL_PROMPT=0 git push --force-with-lease="refs/heads/${BRANCH_NAME}:${REPO_DELIVERY_LEASE}" origin "${REPO_DELIVERY_PUBLISH_HEAD}:refs/heads/${BRANCH_NAME}"'
+        'cd /workspace && GIT_TERMINAL_PROMPT=0 git push --force-with-lease="refs/heads/${BRANCH_NAME}:${REPO_DELIVERY_LEASE}" "${GIT_REPO_URL}" "${REPO_DELIVERY_PUBLISH_HEAD}:refs/heads/${BRANCH_NAME}"'
     local push_result=$?
     set -e
-    if [ "${push_result}" -eq 0 ]; then
-        repo_delivery_clear_marker
-    fi
     return "${push_result}"
 }
 
+repo_delivery_record_confirmed() {
+    # Persist the confirmed outcome; the marker clears only after the write
+    # succeeds, so a failed record fails the run and keeps recovery state.
+    local status="$1"
+    local remote_sha="$2"
+    if ! repo_delivery_record "${status}" "${remote_sha}"; then
+        repo_log "error delivery_record status=${status} failed; keeping recovery marker"
+        echo "ERROR: Could not persist the confirmed delivery outcome"
+        return 1
+    fi
+    repo_delivery_clear_marker
+    return 0
+}
+
 repo_delivery_publish() {
-    # Reconcile the local delivery facts with the remote and publish H only as
-    # a verified fast-forward. Records the outcome in the snapshot. Returns 0
-    # only for pushed / already_present.
+    # Reconcile local facts with the FROZEN remote and publish H only as a
+    # verified fast-forward; returns 0 only for pushed / already_present.
     local head_sha start_remote status
     head_sha=$(repo_delivery_snapshot_value '.git_delivery.head_sha')
     if [ -z "${head_sha}" ] || [ ! -f "${GIT_DELIVERY_SNAPSHOT_FILE}" ]; then
@@ -239,6 +231,7 @@ repo_delivery_publish() {
         return 1
     fi
 
+    repo_delivery_ensure_pinned_remote
     local remote_tip
     remote_tip=$(repo_delivery_remote_tip)
     local observe_result=$?
@@ -263,17 +256,20 @@ repo_delivery_publish() {
         # Branch never existed: create it with "must not exist" as the lease.
         repo_log "delivery publish action=create_branch head=${head_sha}"
         if repo_delivery_push_pinned "${head_sha}" ""; then
-            repo_delivery_record "pushed" "${head_sha}" || true
-            repo_log "delivery published action=created head=${head_sha}"
-            return 0
+            if repo_delivery_record_confirmed "pushed" "${head_sha}"; then
+                repo_log "delivery published action=created head=${head_sha}"
+                return 0
+            fi
+            return 1
         fi
         # Bounded single recheck: a concurrent creator may already contain H.
         if repo_delivery_recheck_publish "${head_sha}" "${start_remote}"; then
             echo "Remote already contains the delivered head; confirming delivery"
-            repo_delivery_record "already_present" "${head_sha}" || true
-            repo_delivery_clear_marker
-            repo_log "delivery confirmed action=already_present head=${head_sha}"
-            return 0
+            if repo_delivery_record_confirmed "already_present" "${head_sha}"; then
+                repo_log "delivery confirmed action=already_present head=${head_sha}"
+                return 0
+            fi
+            return 1
         fi
         echo "ERROR: Could not create the remote task branch; delivery was not published"
         repo_delivery_record "failed" "" "push_failed" \
@@ -291,7 +287,7 @@ repo_delivery_publish() {
         return 1
     fi
     local fetched_tip
-    fetched_tip=$(codify_run_shell 'cd /workspace && git rev-parse "refs/remotes/origin/${BRANCH_NAME}"' 2>/dev/null || true)
+    fetched_tip=$(repo_delivery_local_tip)
     local decision decision_type
     decision=$(repo_delivery_classify "${head_sha}" "${fetched_tip}" "${start_remote}") || {
         echo "ERROR: Remote delivery reconciliation failed"
@@ -302,10 +298,11 @@ repo_delivery_publish() {
     decision_type=$(printf '%s\n' "${decision}" | jq -r '.decision // "failed"')
     if [ "${decision_type}" = "already_present" ]; then
         echo "Remote already contains the delivered commits; confirming delivery"
-        repo_delivery_record "already_present" "${fetched_tip}" || true
-        repo_delivery_clear_marker
-        repo_log "delivery confirmed action=already_present remote=${fetched_tip} head=${head_sha}"
-        return 0
+        if repo_delivery_record_confirmed "already_present" "${fetched_tip}"; then
+            repo_log "delivery confirmed action=already_present remote=${fetched_tip} head=${head_sha}"
+            return 0
+        fi
+        return 1
     fi
     if [ "${decision_type}" != "push" ]; then
         local error_code error_message
@@ -319,9 +316,11 @@ repo_delivery_publish() {
     # Fast-forward proven locally (R <= H and R0 <= R when R0 existed); the
     # observed tip is the exact lease, never a force without that proof.
     if repo_delivery_push_pinned "${head_sha}" "${fetched_tip}"; then
-        repo_delivery_record "pushed" "${head_sha}" || true
-        repo_log "delivery published action=fast_forward remote=${fetched_tip} head=${head_sha}"
-        return 0
+        if repo_delivery_record_confirmed "pushed" "${head_sha}"; then
+            repo_log "delivery published action=fast_forward remote=${fetched_tip} head=${head_sha}"
+            return 0
+        fi
+        return 1
     fi
 
     # One bounded recheck after a refused/uncertain push: prove H landed.
@@ -331,10 +330,11 @@ repo_delivery_publish() {
     recheck_result=$?
     if [ "${recheck_result}" -eq 0 ]; then
         echo "Remote already contains the delivered head; confirming delivery"
-        repo_delivery_record "already_present" "${head_sha}" || true
-        repo_delivery_clear_marker
-        repo_log "delivery confirmed action=push_recovered head=${head_sha}"
-        return 0
+        if repo_delivery_record_confirmed "already_present" "${head_sha}"; then
+            repo_log "delivery confirmed action=push_recovered head=${head_sha}"
+            return 0
+        fi
+        return 1
     fi
     if [ "${recheck_result}" -eq 2 ] || [ -z "${REPO_DELIVERY_RECHECK_TIP:-}" ]; then
         echo "ERROR: Delivery is unconfirmed after the push attempt (network or credentials)"
@@ -378,10 +378,8 @@ repo_delivery_commits_present() {
 }
 
 repo_delivery_collect_facts_on_exit() {
-    # Best-effort, network-free preservation of local commit facts when the
-    # task exits without a normal delivery path (harness failure, cancellation,
-    # timeout, or a worker commit/publish failure before the snapshot existed).
-    # The original failure reason is never replaced by collection errors.
+    # Best-effort, network-free preservation of local commit facts for failed
+    # exits; collection never replaces the original failure reason.
     if [ "${TASK_MODE:-execute}" = "plan" ]; then
         return 0
     fi

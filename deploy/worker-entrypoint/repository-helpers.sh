@@ -21,6 +21,35 @@ repo_now_ms() {
     esac
 }
 
+repo_delivery_snapshot_value() {
+    # repo_delivery_snapshot_value <jq-filter> [default]
+    local filter="$1"
+    local default_value="${2:-}"
+    jq -r "${filter} // empty" "${GIT_DELIVERY_SNAPSHOT_FILE}" 2>/dev/null \
+        | { IFS= read -r value || value="${default_value}"; printf '%s\n' "${value}"; }
+}
+repo_delivery_run_python() {
+    # Git work runs as the unprivileged workspace owner; printf %q keeps empty
+    # values, spaces and punctuation intact through the inner login shell.
+    local helper_args
+    helper_args=$(printf '%q ' "$@")
+    codify_run_shell "python3 '${GIT_DELIVERY_HELPER}' ${helper_args}"
+}
+repo_delivery_clear_marker() {
+    codify_run_shell 'cd /workspace && git config --unset-all codify.unpublishedPushSha' \
+        2>/dev/null || true
+}
+repo_delivery_classify() {
+    # repo_delivery_classify <head_sha> <remote_tip> <start_remote>
+    # Prints the classify_remote decision JSON. Exit 0 on success.
+    repo_delivery_run_python \
+        classify_remote \
+        --work-dir /workspace \
+        --head "$1" \
+        --remote-tip "$2" \
+        --start-remote "$3"
+}
+
 repo_write_preparation_artifact() {
     local elapsed_ms="$1"
     local actual_shallow="$2"

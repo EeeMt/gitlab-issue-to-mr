@@ -1140,3 +1140,99 @@ exit 0
         (root / "runtime" / "task-metadata.json").read_text(encoding="utf-8")
     )
     assert metadata["commit_sha"] is None
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="helpers require jq")
+def test_harness_repointing_origin_never_diverts_delivery(delivery_env: dict):
+    """Remote observation, fetch and push bind the FROZEN repository URL.
+
+    The Harness repoints `origin` at an evil clone that already contains H;
+    delivery must still reconcile against the task repository.
+    """
+    root = delivery_env["root"]
+    workspace = delivery_env["workspace"]
+    # Evil clone of the real remote: it will receive the harness push.
+    evil = root / "evil.git"
+    subprocess.run(
+        ["git", "clone", "--bare", "-q", str(delivery_env["remote"]), str(evil)],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    scenario = f"""
+repo_pin_delivery_start
+printf 'x\\n' > a.txt
+git add a.txt && git commit -qm "harness commit"
+H=$(git rev-parse HEAD)
+# Harness repoints origin at the evil clone and pushes H there only.
+git remote set-url origin "{evil.as_uri()}"
+git push -q origin HEAD:refs/heads/{delivery_env["branch"]}
+test "$(git ls-remote origin refs/heads/{delivery_env["branch"]} | cut -f1)" = "$H"
+repo_delivery_collect || exit 9
+repo_delivery_publish || exit 8
+"""
+    result = _run_delivery_scenario(
+        root,
+        remote=delivery_env["remote"],
+        branch_name=delivery_env["branch"],
+        workspace=workspace,
+        previous=delivery_env["previous"],
+        scenario=scenario,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    gd = _snapshot(root)["git_delivery"]
+    assert gd["push"]["status"] == "pushed"
+    # The REAL task repository received H (no false already_present against the
+    # evil clone); the evil clone only has the harness push.
+    assert (
+        _git(delivery_env["remote"], "rev-parse", f"refs/heads/{delivery_env['branch']}")
+        == gd["head_sha"]
+    )
+    assert _git(evil, "rev-parse", f"refs/heads/{delivery_env['branch']}") == gd["head_sha"]
+    # Marker cleared only after the confirmed record.
+    marker = subprocess.run(
+        ["git", "config", "--get", "codify.unpublishedPushSha"],
+        cwd=workspace,
+        text=True,
+        capture_output=True,
+    )
+    assert marker.returncode != 0
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="helpers require jq")
+def test_confirmed_record_failure_fails_run_and_keeps_marker(delivery_env: dict):
+    """Snapshot write failure after a successful push must fail the run and
+    retain the unconfirmed marker (remote already has H, snapshot must not
+    claim otherwise, and the next run must be able to reconcile)."""
+    root = delivery_env["root"]
+    runtime_dir = root / "runtime"
+    scenario = """
+repo_pin_delivery_start
+printf 'x\n' > a.txt
+git add a.txt && git commit -qm "harness commit"
+repo_delivery_collect || exit 9
+# Make the snapshot location read-only so record_push cannot persist.
+chmod 555 %RUNTIME%
+if repo_delivery_publish; then echo "expected publish failure"; exit 8; fi
+"""
+    scenario = scenario.replace("%RUNTIME%", str(runtime_dir))
+    result = _run_delivery_scenario(
+        root,
+        remote=delivery_env["remote"],
+        branch_name=delivery_env["branch"],
+        workspace=delivery_env["workspace"],
+        previous=delivery_env["previous"],
+        scenario=scenario,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    snapshot = _snapshot(root)
+    assert snapshot["git_delivery"]["push"]["status"] == "not_attempted"
+    assert snapshot["commit_sha"] is None
+    # The unconfirmed marker survives for the next run's reconciliation.
+    marker = subprocess.run(
+        ["git", "config", "--get", "codify.unpublishedPushSha"],
+        cwd=delivery_env["workspace"],
+        text=True,
+        capture_output=True,
+    )
+    assert marker.stdout.strip() == snapshot["git_delivery"]["head_sha"]
