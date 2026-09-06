@@ -618,6 +618,531 @@ def test_opencode_durable_events_map_text_tool_usage_and_compaction(tmp_path):
     assert '"type":"session.next.tool.called"' in raw
 
 
+# ── reasoning lifecycle (plan §4.4) ─────────────────────────────────────────
+
+_DURABLE_REASONING_ID = "opencode-reason-ses-reason-msg-r1-reason-r1"
+
+
+def _durable_reasoning_success_tail(
+    message_id: str = "msg-r1", session_id: str = "ses-reason"
+) -> list[dict]:
+    """Durable text events + idle so a reasoning-only stream settles as a
+    successful run with a final assistant message."""
+    return [
+        _durable_record(
+            "session.next.text.started",
+            {"sessionID": session_id, "assistantMessageID": message_id, "textID": "txt-r1"},
+        ),
+        _durable_record(
+            "session.next.text.delta",
+            {"sessionID": session_id, "assistantMessageID": message_id, "textID": "txt-r1", "delta": "done"},
+        ),
+        _durable_record(
+            "session.next.text.ended",
+            {"sessionID": session_id, "assistantMessageID": message_id, "textID": "txt-r1", "text": "done"},
+        ),
+        _record("session.idle", {"sessionID": session_id}),
+    ]
+
+
+def _reasoning_part_record(
+    status: str,
+    *,
+    part_id: str = "rp-1",
+    message_id: str = "m-reason",
+    session_id: str = "ses-part",
+    text: str = "",
+) -> dict:
+    part = {
+        "type": "reasoning",
+        "id": part_id,
+        "messageID": message_id,
+        "sessionID": session_id,
+        "state": {"status": status},
+    }
+    if text:
+        part["text"] = text
+    return _record("message.part.updated", {"sessionID": session_id, "part": part})
+
+
+def test_opencode_durable_reasoning_started_ended_pair_with_stable_id(tmp_path):
+    runtime_dir = tmp_path / "reasoning-pair"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started", {"runtime_bundle_digest": "d" * 64})
+    _translate(
+        runtime_dir,
+        [
+            _durable_record(
+                "session.next.reasoning.started",
+                {"sessionID": "ses-reason", "assistantMessageID": "msg-r1", "reasoningID": "reason-r1"},
+            ),
+            _durable_record(
+                "session.next.reasoning.ended",
+                {"sessionID": "ses-reason", "assistantMessageID": "msg-r1", "reasoningID": "reason-r1", "text": ""},
+            ),
+            *_durable_reasoning_success_tail(),
+        ],
+    )
+    events = _events(runtime_dir)
+    for event in events:
+        assert validate_event_v2(event)["schema"] == CANONICAL_EVENT_SCHEMA_V2
+    started = [event for event in events if event["type"] == "reasoning_summary.started"]
+    completed = [event for event in events if event["type"] == "reasoning_summary.completed"]
+    assert len(started) == 1
+    assert len(completed) == 1
+    assert started[0]["payload"] == {"reasoning_id": _DURABLE_REASONING_ID}
+    # Stable id pairs started with ended; empty ended still completes in place
+    # and reasoning text never enters the canonical payload.
+    assert completed[0]["payload"] == {
+        "reasoning_id": _DURABLE_REASONING_ID,
+        "client": "opencode",
+    }
+    assert "text" not in completed[0]["payload"]
+    assert completed[0]["seq"] > started[0]["seq"]
+    assert [event["type"] for event in events].count("harness.completed") == 1
+    result = json.loads((runtime_dir / "harness-result.json").read_text(encoding="utf-8"))
+    assert result["status"] == "completed"
+    assert result["result"] == "done"
+
+
+def test_opencode_durable_reasoning_ended_without_text_still_completes(tmp_path):
+    """The ended event itself may omit text entirely; completion must not
+    depend on reasoning content being present (plan §3.1)."""
+    runtime_dir = tmp_path / "reasoning-empty-end"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    _translate(
+        runtime_dir,
+        [
+            _durable_record(
+                "session.next.reasoning.started",
+                {"sessionID": "ses-reason", "assistantMessageID": "msg-r1", "reasoningID": "reason-r1"},
+            ),
+            _durable_record(
+                "session.next.reasoning.ended",
+                {"sessionID": "ses-reason", "assistantMessageID": "msg-r1", "reasoningID": "reason-r1"},
+            ),
+            *_durable_reasoning_success_tail(),
+        ],
+    )
+    events = _events(runtime_dir)
+    completed = [event for event in events if event["type"] == "reasoning_summary.completed"]
+    assert len(completed) == 1
+    assert completed[0]["payload"] == {
+        "reasoning_id": _DURABLE_REASONING_ID,
+        "client": "opencode",
+    }
+
+
+def test_opencode_duplicate_reasoning_snapshots_emit_one_lifecycle(tmp_path):
+    """Duplicate started/ended snapshots (reconnect replays) produce exactly
+    one started + one completed row-level pair, with no orphan diagnostics."""
+    runtime_dir = tmp_path / "reasoning-dup"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    _translate(
+        runtime_dir,
+        [
+            _durable_record(
+                "session.next.reasoning.started",
+                {"sessionID": "ses-reason", "assistantMessageID": "msg-r1", "reasoningID": "reason-r1"},
+            ),
+            _durable_record(
+                "session.next.reasoning.started",
+                {"sessionID": "ses-reason", "assistantMessageID": "msg-r1", "reasoningID": "reason-r1"},
+            ),
+            _durable_record(
+                "session.next.reasoning.ended",
+                {"sessionID": "ses-reason", "assistantMessageID": "msg-r1", "reasoningID": "reason-r1"},
+            ),
+            _durable_record(
+                "session.next.reasoning.ended",
+                {"sessionID": "ses-reason", "assistantMessageID": "msg-r1", "reasoningID": "reason-r1"},
+            ),
+            *_durable_reasoning_success_tail(),
+        ],
+    )
+    events = _events(runtime_dir)
+    assert sum(1 for e in events if e["type"] == "reasoning_summary.started") == 1
+    assert sum(1 for e in events if e["type"] == "reasoning_summary.completed") == 1
+    assert sum(1 for e in events if e["type"] == "reasoning_summary.interrupted") == 0
+    orphan = [
+        e for e in events
+        if e["type"] == "diagnostic" and e["payload"].get("code") == "reasoning_completed_without_start"
+    ]
+    assert orphan == []
+
+
+def test_opencode_reasoning_delta_emits_no_lifecycle_or_content(tmp_path):
+    """reasoning.delta streams hidden text only; it adds no lifecycle event,
+    no diagnostic and must not leak content into canonical payloads (plan
+    §4.4: never extend the placeholder with deltas)."""
+    runtime_dir = tmp_path / "reasoning-delta"
+    runtime_dir.mkdir()
+    draft = "internal reasoning draft"
+    _emit(runtime_dir, "run.started")
+    _translate(
+        runtime_dir,
+        [
+            _durable_record(
+                "session.next.reasoning.started",
+                {"sessionID": "ses-reason", "assistantMessageID": "msg-r1", "reasoningID": "reason-r1"},
+            ),
+            _durable_record(
+                "session.next.reasoning.delta",
+                {"sessionID": "ses-reason", "assistantMessageID": "msg-r1", "reasoningID": "reason-r1", "delta": draft},
+            ),
+            _durable_record(
+                "session.next.reasoning.delta",
+                {"sessionID": "ses-reason", "assistantMessageID": "msg-r1", "reasoningID": "reason-r1", "delta": draft},
+            ),
+            _durable_record(
+                "session.next.reasoning.ended",
+                {"sessionID": "ses-reason", "assistantMessageID": "msg-r1", "reasoningID": "reason-r1"},
+            ),
+            *_durable_reasoning_success_tail(),
+        ],
+    )
+    events = _events(runtime_dir)
+    assert sum(1 for e in events if e["type"] == "reasoning_summary.started") == 1
+    assert sum(1 for e in events if e["type"] == "reasoning_summary.completed") == 1
+    assert not any(e["type"] == "reasoning_summary.delta" for e in events)
+    assert not any(e["type"] == "reasoning_summary.interrupted" for e in events)
+    assert draft not in json.dumps(events)
+    hidden = [
+        e for e in events
+        if e["type"] == "diagnostic"
+        and e["payload"].get("code") in {"hidden_reasoning_omitted", "reasoning_missing_id"}
+    ]
+    assert hidden == []
+    raw = (runtime_dir / "harness-events/opencode.jsonl").read_text(encoding="utf-8")
+    assert '"type":"session.next.reasoning.delta"' in raw
+
+
+def test_opencode_reasoning_part_updated_maps_fallback_lifecycle(tmp_path):
+    """A statused reasoning part snapshot is the fallback lifecycle path: the
+    first active snapshot starts once and the same part's end snapshot
+    completes it once, even with empty content."""
+    runtime_dir = tmp_path / "reasoning-part"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    _translate(
+        runtime_dir,
+        [
+            _record(
+                "message.updated",
+                {"sessionID": "ses-part", "info": {"id": "m-reason", "role": "assistant"}},
+            ),
+            _reasoning_part_record("running", text="internal draft"),
+            _reasoning_part_record("running", text="internal draft"),
+            _reasoning_part_record("completed", text=""),
+            _reasoning_part_record("completed", text=""),
+            _record(
+                "message.part.updated",
+                {"sessionID": "ses-part", "part": {"type": "text", "text": "done", "messageID": "m-reason", "id": "txt-p1"}},
+            ),
+            _record("session.idle", {"sessionID": "ses-part"}),
+        ],
+    )
+    events = _events(runtime_dir)
+    started = [e for e in events if e["type"] == "reasoning_summary.started"]
+    completed = [e for e in events if e["type"] == "reasoning_summary.completed"]
+    assert len(started) == 1
+    assert len(completed) == 1
+    part_id = "opencode-reason-part-ses-part-m-reason-rp-1"
+    assert started[0]["payload"] == {"reasoning_id": part_id}
+    assert completed[0]["payload"] == {"reasoning_id": part_id, "client": "opencode"}
+    assert "text" not in completed[0]["payload"]
+    assert "internal draft" not in json.dumps(events)
+    assert [e["type"] for e in events].count("harness.completed") == 1
+    result = json.loads((runtime_dir / "harness-result.json").read_text(encoding="utf-8"))
+    assert result["status"] == "completed"
+    assert result["result"] == "done"
+
+
+def test_opencode_reasoning_part_already_finished_first_snapshot_never_starts(tmp_path):
+    """A first-seen reasoning part snapshot that is already finished must not
+    fabricate an active placeholder; the fact stays an auditable diagnostic."""
+    runtime_dir = tmp_path / "reasoning-part-finished"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    _translate(
+        runtime_dir,
+        [
+            _record(
+                "message.updated",
+                {"sessionID": "ses-part", "info": {"id": "m-reason", "role": "assistant"}},
+            ),
+            _reasoning_part_record("completed"),
+            _record(
+                "message.part.updated",
+                {"sessionID": "ses-part", "part": {"type": "text", "text": "done", "messageID": "m-reason", "id": "txt-p1"}},
+            ),
+            _record("session.idle", {"sessionID": "ses-part"}),
+        ],
+    )
+    events = _events(runtime_dir)
+    assert not any(e["type"] == "reasoning_summary.started" for e in events)
+    assert not any(e["type"] == "reasoning_summary.completed" for e in events)
+    orphan = [
+        e["payload"] for e in events
+        if e["type"] == "diagnostic" and e["payload"].get("code") == "reasoning_completed_without_start"
+    ]
+    assert orphan == [
+        {"code": "reasoning_completed_without_start", "reasoning_id": "opencode-reason-part-ses-part-m-reason-rp-1"}
+    ]
+
+
+def test_opencode_durable_family_is_authoritative_over_part_snapshots(tmp_path):
+    """When the durable family covers an assistant message, later part
+    snapshots of that message are duplicate views and must not project a
+    second lifecycle (plan §4.4: durable authoritative, no double projection)."""
+    runtime_dir = tmp_path / "reasoning-durable-authoritative"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    _translate(
+        runtime_dir,
+        [
+            _durable_record(
+                "session.next.reasoning.started",
+                {"sessionID": "ses-both", "assistantMessageID": "msg-both", "reasoningID": "reason-both"},
+            ),
+            _reasoning_part_record("running", part_id="rp-both", message_id="msg-both", session_id="ses-both"),
+            _reasoning_part_record("completed", part_id="rp-both", message_id="msg-both", session_id="ses-both"),
+            _durable_record(
+                "session.next.reasoning.ended",
+                {"sessionID": "ses-both", "assistantMessageID": "msg-both", "reasoningID": "reason-both"},
+            ),
+            _record(
+                "message.updated",
+                {"sessionID": "ses-both", "info": {"id": "msg-both", "role": "assistant"}},
+            ),
+            _record(
+                "message.part.updated",
+                {"sessionID": "ses-both", "part": {"type": "text", "text": "done", "messageID": "msg-both", "id": "txt-b1"}},
+            ),
+            _record("session.idle", {"sessionID": "ses-both"}),
+        ],
+    )
+    events = _events(runtime_dir)
+    started = [e for e in events if e["type"] == "reasoning_summary.started"]
+    completed = [e for e in events if e["type"] == "reasoning_summary.completed"]
+    durable_id = "opencode-reason-ses-both-msg-both-reason-both"
+    assert len(started) == 1
+    assert len(completed) == 1
+    assert started[0]["payload"] == {"reasoning_id": durable_id}
+    assert completed[0]["payload"] == {"reasoning_id": durable_id, "client": "opencode"}
+
+
+def test_opencode_durable_started_folds_into_open_part_placeholder(tmp_path):
+    """A part snapshot observed first starts the placeholder; the durable
+    started that follows is folded into it so the pair still emits exactly
+    one lifecycle (dedupe between both event families)."""
+    runtime_dir = tmp_path / "reasoning-fold"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    _translate(
+        runtime_dir,
+        [
+            _record(
+                "message.updated",
+                {"sessionID": "ses-both", "info": {"id": "msg-both", "role": "assistant"}},
+            ),
+            _reasoning_part_record("running", part_id="rp-both", message_id="msg-both", session_id="ses-both"),
+            _durable_record(
+                "session.next.reasoning.started",
+                {"sessionID": "ses-both", "assistantMessageID": "msg-both", "reasoningID": "reason-both"},
+            ),
+            _durable_record(
+                "session.next.reasoning.ended",
+                {"sessionID": "ses-both", "assistantMessageID": "msg-both", "reasoningID": "reason-both"},
+            ),
+            _record(
+                "message.part.updated",
+                {"sessionID": "ses-both", "part": {"type": "text", "text": "done", "messageID": "msg-both", "id": "txt-b1"}},
+            ),
+            _record("session.idle", {"sessionID": "ses-both"}),
+        ],
+    )
+    events = _events(runtime_dir)
+    started = [e for e in events if e["type"] == "reasoning_summary.started"]
+    completed = [e for e in events if e["type"] == "reasoning_summary.completed"]
+    part_id = "opencode-reason-part-ses-both-msg-both-rp-both"
+    assert len(started) == 1
+    assert len(completed) == 1
+    assert started[0]["payload"] == {"reasoning_id": part_id}
+    assert completed[0]["payload"] == {"reasoning_id": part_id, "client": "opencode"}
+    assert not any("reason-both" in e["payload"].get("reasoning_id", "") for e in started + completed)
+
+
+def test_opencode_durable_reasoning_ended_without_start_is_static(tmp_path):
+    """A historical/already-ended first snapshot (durable ended with no
+    observed started) never creates a placeholder; a later stale started
+    replay of the same block must not open one either."""
+    runtime_dir = tmp_path / "reasoning-orphan"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    _translate(
+        runtime_dir,
+        [
+            _durable_record(
+                "session.next.reasoning.ended",
+                {"sessionID": "ses-reason", "assistantMessageID": "msg-r1", "reasoningID": "reason-r1"},
+            ),
+            _durable_record(
+                "session.next.reasoning.started",
+                {"sessionID": "ses-reason", "assistantMessageID": "msg-r1", "reasoningID": "reason-r1"},
+            ),
+            *_durable_reasoning_success_tail(),
+        ],
+    )
+    events = _events(runtime_dir)
+    assert not any(e["type"] == "reasoning_summary.started" for e in events)
+    assert not any(e["type"] == "reasoning_summary.completed" for e in events)
+    orphan = [
+        e["payload"] for e in events
+        if e["type"] == "diagnostic" and e["payload"].get("code") == "reasoning_completed_without_start"
+    ]
+    assert orphan == [
+        {"code": "reasoning_completed_without_start", "reasoning_id": _DURABLE_REASONING_ID}
+    ]
+
+
+def test_opencode_durable_step_failed_interrupts_open_reasoning(tmp_path):
+    runtime_dir = tmp_path / "reasoning-step-failed"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    _translate(
+        runtime_dir,
+        [
+            _durable_record(
+                "session.next.reasoning.started",
+                {"sessionID": "ses-fail", "assistantMessageID": "msg-fail", "reasoningID": "reason-fail"},
+            ),
+            _durable_record(
+                "session.next.step.failed",
+                {"sessionID": "ses-fail", "assistantMessageID": "msg-fail", "error": {"message": "provider exploded"}},
+            ),
+            _record("session.idle", {"sessionID": "ses-fail"}),
+        ],
+    )
+    events = _events(runtime_dir)
+    interrupted = [
+        (e["type"], e["payload"])
+        for e in events
+        if e["type"] == "reasoning_summary.interrupted"
+    ]
+    assert interrupted == [
+        (
+            "reasoning_summary.interrupted",
+            {
+                "reasoning_id": "opencode-reason-ses-fail-msg-fail-reason-fail",
+                "reason": "step_failed",
+            },
+        )
+    ]
+    assert not any(e["type"] == "reasoning_summary.completed" for e in events)
+    result = json.loads((runtime_dir / "harness-result.json").read_text(encoding="utf-8"))
+    assert result["status"] == "failed"
+    assert result["failure"]["kind"] == "engine_error"
+
+
+def test_opencode_abort_interrupts_open_reasoning(tmp_path):
+    runtime_dir = tmp_path / "reasoning-abort"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    _translate(
+        runtime_dir,
+        [
+            _durable_record(
+                "session.next.reasoning.started",
+                {"sessionID": "ses-abort", "assistantMessageID": "msg-abort", "reasoningID": "reason-abort"},
+            ),
+            _record("session.error", {"sessionID": "ses-abort", "message": "The operation was aborted."}),
+        ],
+    )
+    events = _events(runtime_dir)
+    interrupted = [
+        (e["type"], e["payload"])
+        for e in events
+        if e["type"] == "reasoning_summary.interrupted"
+    ]
+    assert interrupted == [
+        (
+            "reasoning_summary.interrupted",
+            {
+                "reasoning_id": "opencode-reason-ses-abort-msg-abort-reason-abort",
+                "reason": "aborted",
+            },
+        )
+    ]
+    terminal = [e for e in events if e["type"] == "harness.failed"]
+    assert len(terminal) == 1
+    assert terminal[0]["payload"]["failure"]["kind"] == "cancelled"
+    result = json.loads((runtime_dir / "harness-result.json").read_text(encoding="utf-8"))
+    assert result["status"] == "failed"
+    assert result["success"] is False
+
+
+def test_opencode_errored_assistant_message_interrupts_its_reasoning(tmp_path):
+    """An assistant message carrying a native error fact (probe abort path)
+    closes exactly its own open reasoning blocks."""
+    runtime_dir = tmp_path / "reasoning-message-error"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    _translate(
+        runtime_dir,
+        [
+            _durable_record(
+                "session.next.reasoning.started",
+                {"sessionID": "ses-msg", "assistantMessageID": "msg-err", "reasoningID": "reason-err"},
+            ),
+            _record(
+                "message.updated",
+                {"sessionID": "ses-msg", "info": {"id": "msg-err", "role": "assistant", "error": True}},
+            ),
+            _record(
+                "message.updated",
+                {"sessionID": "ses-msg", "info": {"id": "msg-ok", "role": "assistant"}},
+            ),
+            _durable_record(
+                "session.next.reasoning.started",
+                {"sessionID": "ses-msg", "assistantMessageID": "msg-ok", "reasoningID": "reason-ok"},
+            ),
+            _record(
+                "message.part.updated",
+                {"sessionID": "ses-msg", "part": {"type": "text", "text": "done", "messageID": "msg-ok", "id": "txt-ok"}},
+            ),
+            _record("session.idle", {"sessionID": "ses-msg"}),
+        ],
+    )
+    events = _events(runtime_dir)
+    interrupted = [
+        (e["type"], e["payload"])
+        for e in events
+        if e["type"] == "reasoning_summary.interrupted"
+    ]
+    # msg-err's block closes with the message error; msg-ok's block stays open
+    # across the errored message and only closes when idle arrives without its
+    # own end (session.idle is not a block completion, plan §4.4).
+    assert interrupted == [
+        (
+            "reasoning_summary.interrupted",
+            {
+                "reasoning_id": "opencode-reason-ses-msg-msg-err-reason-err",
+                "reason": "message_error",
+            },
+        ),
+        (
+            "reasoning_summary.interrupted",
+            {
+                "reasoning_id": "opencode-reason-ses-msg-msg-ok-reason-ok",
+                "reason": "idle_without_block_end",
+            },
+        ),
+    ]
+
+
 @pytest.mark.parametrize(
     "event_type",
     [

@@ -205,6 +205,7 @@ CLAUDE_ARGS=(
   --bare
   --output-format stream-json
   --verbose
+  --include-partial-messages
 )
 
 if [[ "$SANDBOX_MODE" == "1" ]]; then

@@ -49,6 +49,88 @@ def _session_id(record: dict) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+# Per-stream state for the partial-message thinking lifecycle
+# (--include-partial-messages). The translator is one streaming process per
+# attempt (stdin to EOF), so this state naturally resets between attempts.
+# Partial stream events identify every thinking block by its native message id
+# plus the content index; the full assistant records that follow must not
+# re-map the same block (plan §4.1).
+_PARTIAL_MESSAGE_ID: str = ""            # message id from the latest stream_event message_start
+_PARTIAL_THINKING_STARTED: bool = False  # a thinking content_block_start was seen for this message
+_OPEN_REASONING: dict = {}               # content index -> reasoning_id of open thinking blocks
+
+
+def _interrupt_open_reasoning(reason: str, raw_line: int) -> None:
+    """Interrupt every open thinking block that never received its own end.
+
+    Only blocks whose started was observed are closed here; blocks that ended
+    normally are already gone from the set (plan §4.1.5).
+    """
+    for reasoning_id in _OPEN_REASONING.values():
+        _emit(
+            "reasoning_summary.interrupted",
+            {"reasoning_id": reasoning_id, "reason": reason},
+            raw_line,
+        )
+    _OPEN_REASONING.clear()
+
+
+def _handle_message_start(event: dict, raw_line: int) -> None:
+    """Begin a new native message: reset the per-message partial state.
+
+    Content indexes restart at 0 on message_start, and a new message means the
+    previous one ended. Any thinking block the previous message left open
+    (stream truncated mid-block) is interrupted here.
+    """
+    global _PARTIAL_MESSAGE_ID, _PARTIAL_THINKING_STARTED
+    _interrupt_open_reasoning("message_ended", raw_line)
+    message = event.get("message") if isinstance(event.get("message"), dict) else {}
+    message_id = message.get("id")
+    _PARTIAL_MESSAGE_ID = message_id if isinstance(message_id, str) else ""
+    _PARTIAL_THINKING_STARTED = False
+
+
+def _handle_content_block_start(event: dict, raw_line: int) -> None:
+    """Open the reasoning placeholder for a thinking content block."""
+    global _PARTIAL_THINKING_STARTED
+    block = event.get("content_block") if isinstance(event.get("content_block"), dict) else {}
+    if block.get("type") != "thinking":
+        # tool_use/text blocks stay driven by the full assistant/user records;
+        # their partial starts only feed console rendering, not canonical events.
+        return
+    index = event.get("index")
+    if not isinstance(index, int) or not _PARTIAL_MESSAGE_ID:
+        # Without a native message identity there is no stable reasoning_id;
+        # leave the full assistant record to its legacy diagnostic handling.
+        return
+    _PARTIAL_THINKING_STARTED = True
+    if index in _OPEN_REASONING:
+        return  # duplicate start for one block: keep the first placeholder
+    reasoning_id = f"claude-think-{_PARTIAL_MESSAGE_ID}-{index}"
+    _OPEN_REASONING[index] = reasoning_id
+    _emit("reasoning_summary.started", {"reasoning_id": reasoning_id}, raw_line)
+
+
+def _handle_content_block_stop(event: dict, raw_line: int) -> None:
+    """Close the reasoning placeholder for that block's content index.
+
+    Thinking content is never projected (sanitize/redact boundaries), so the
+    completion carries no text even when deltas were observed; an empty block
+    still closes its placeholder (plan §4.1.3).
+    """
+    index = event.get("index")
+    if not isinstance(index, int):
+        return
+    reasoning_id = _OPEN_REASONING.pop(index, None)
+    if reasoning_id is None:
+        return  # a stop for a text/tool_use block or an unknown index
+    _emit(
+        "reasoning_summary.completed",
+        {"reasoning_id": reasoning_id, "client": "claude"},
+        raw_line,
+    )
+
+
 def _emit(event_type: str, payload: dict, raw_line: int) -> None:
     writer = os.environ["CODIFY_CANONICAL_EVENT_WRITER"]
     subprocess.run(
@@ -187,11 +269,33 @@ def translate(record: dict, raw_line: int) -> None:
         )
     elif record_type == "stream_event":
         event = record.get("event") if isinstance(record.get("event"), dict) else {}
-        delta = event.get("delta") if isinstance(event.get("delta"), dict) else {}
-        if delta.get("type") == "text_delta":
-            _emit("message.delta", {"text": delta.get("text", "")}, raw_line)
-        elif delta.get("type") == "thinking_delta":
-            return
+        event_type = event.get("type")
+        if event_type == "message_start":
+            _handle_message_start(event, raw_line)
+        elif event_type == "content_block_start":
+            _handle_content_block_start(event, raw_line)
+        elif event_type == "content_block_delta":
+            delta = event.get("delta") if isinstance(event.get("delta"), dict) else {}
+            if delta.get("type") == "text_delta":
+                _emit("message.delta", {"text": delta.get("text", "")}, raw_line)
+            # thinking_delta/signature_delta are never projected as content and
+            # must not drop the open block: the matching content_block_stop
+            # still closes it.
+        elif event_type == "content_block_stop":
+            _handle_content_block_stop(event, raw_line)
+        elif event_type in {"error", "abort"}:
+            # A native error/abort ends the current message without per-block
+            # end signals: interrupt only the blocks that are still open.
+            reason = "stream_error"
+            if event_type == "abort":
+                reason = "aborted"
+            else:
+                error = event.get("error") if isinstance(event.get("error"), dict) else {}
+                error_type = error.get("type")
+                if isinstance(error_type, str) and error_type:
+                    reason = error_type[:200]
+            _interrupt_open_reasoning(reason, raw_line)
+        # message_delta/message_stop/ping carry no canonical projection.
     elif record_type == "assistant":
         message = record.get("message") if isinstance(record.get("message"), dict) else {}
         for block in message.get("content") or []:
@@ -215,11 +319,20 @@ def translate(record: dict, raw_line: int) -> None:
                     raw_line,
                 )
             elif block_type == "thinking":
-                _emit(
-                    "diagnostic",
-                    {"code": "hidden_reasoning_omitted", "message": "AI thinking omitted"},
-                    raw_line,
-                )
+                # Partial-message mode already mapped this message's thinking
+                # lifecycle from content_block_start/stop; the full record must
+                # not create a second placeholder or completion (plan §4.1.4).
+                # Without a partial lifecycle keep the legacy diagnostic-only
+                # behavior.
+                if not (
+                    _PARTIAL_THINKING_STARTED
+                    and message.get("id") == _PARTIAL_MESSAGE_ID
+                ):
+                    _emit(
+                        "diagnostic",
+                        {"code": "hidden_reasoning_omitted", "message": "AI thinking omitted"},
+                        raw_line,
+                    )
     elif record_type == "user":
         message = record.get("message") if isinstance(record.get("message"), dict) else {}
         for block in message.get("content") or []:
@@ -244,6 +357,15 @@ def translate(record: dict, raw_line: int) -> None:
         if success:
             _emit("harness.completed", payload, raw_line)
         else:
+            # A failed turn never delivers the remaining block-end signals:
+            # interrupt every block that is still open before the harness
+            # terminal event.
+            reason = (
+                str(subtype)[:200]
+                if isinstance(subtype, str) and subtype and subtype != "success"
+                else "harness_failed"
+            )
+            _interrupt_open_reasoning(reason, raw_line)
             payload["failure"] = {
                 "kind": _failure_kind(record),
                 "message": record.get("result") or subtype or "AI execution failed",
@@ -296,6 +418,10 @@ def main() -> int:
                 _emit("diagnostic", {"code": "non_object_raw_event"}, line_no)
                 continue
             translate(record, line_no)
+    # The native stream ended. When a turn dies mid-thinking no error/result
+    # signal follows, so interrupt whatever blocks are still open before the
+    # runner synthesizes the harness terminal (plan §4.1.5).
+    _interrupt_open_reasoning("stream_error", line_no)
     return 0
 
 

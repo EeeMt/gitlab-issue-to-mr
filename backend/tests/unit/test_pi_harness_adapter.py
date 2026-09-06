@@ -1658,3 +1658,83 @@ def test_pi_incomplete_terminal_emits_harness_failed(tmp_path):
     assert "harness.failed" in types
     assert pi_events._STATE["terminal"] == "failed"
     del os.environ["CODIFY_HARNESS_RESULT_FILE"]
+
+
+def test_pi_next_start_without_end_interrupts_previous_block_explicitly():
+    """The adapter closes a block whose end was never observed by id before a
+    new block starts; the projector no longer infers this (plan §4.2)."""
+    import pi_events
+
+    _reset_pi_state()
+    writer = _FakeWriter()
+    pi_events._emit = writer
+    pi_events.translate(
+        {"type": "message_update", "assistantMessageEvent": {"type": "thinking_start"}},
+        1,
+    )
+    pi_events.translate(
+        {"type": "message_update", "assistantMessageEvent": {"type": "thinking_delta", "delta": "cut"}},
+        2,
+    )
+    pi_events.translate(
+        {"type": "message_update", "assistantMessageEvent": {"type": "thinking_start"}},
+        3,
+    )
+    assert [(t, p) for t, p, _ in writer.events] == [
+        ("reasoning_summary.started", {"reasoning_id": "pi-thinking-1"}),
+        (
+            "reasoning_summary.interrupted",
+            {"reasoning_id": "pi-thinking-1", "reason": "next_block_started_without_end"},
+        ),
+        ("reasoning_summary.started", {"reasoning_id": "pi-thinking-3"}),
+    ]
+
+
+def test_pi_aborted_message_end_interrupts_open_block():
+    import pi_events
+
+    _reset_pi_state()
+    writer = _FakeWriter()
+    pi_events._emit = writer
+    pi_events.translate(
+        {"type": "message_update", "assistantMessageEvent": {"type": "thinking_start"}},
+        1,
+    )
+    pi_events.translate(
+        {"type": "message_update", "assistantMessageEvent": {"type": "thinking_delta", "delta": "x"}},
+        2,
+    )
+    pi_events.translate(
+        {"type": "message_end", "message": {"role": "assistant", "stopReason": "aborted"}},
+        3,
+    )
+    interrupted = [p for t, p, _ in writer.events if t == "reasoning_summary.interrupted"]
+    assert interrupted == [
+        {"reasoning_id": "pi-thinking-1", "reason": "message_aborted"},
+    ]
+
+
+def test_pi_failed_eof_with_open_block_emits_interrupted_before_harness_terminal(tmp_path):
+    import pi_events
+
+    os.environ["CODIFY_HARNESS_RESULT_FILE"] = str(tmp_path / "harness-result.json")
+    _reset_pi_state()
+    writer = _FakeWriter()
+    pi_events._emit = writer
+    pi_events.translate(
+        {"type": "message_update", "assistantMessageEvent": {"type": "thinking_start"}},
+        1,
+    )
+    pi_events.translate(
+        {"type": "message_end", "message": {"role": "assistant", "stopReason": "aborted"}},
+        2,
+    )
+    pi_events._emit_terminal_at_eof()
+    types = [t for t, _, _ in writer.events]
+    interrupted = [p for t, p, _ in writer.events if t == "reasoning_summary.interrupted"]
+    assert "harness.failed" in types
+    # message_aborted already closed the block; EOF must not re-interrupt.
+    assert interrupted == [
+        {"reasoning_id": "pi-thinking-1", "reason": "message_aborted"},
+    ]
+    assert writer.events[-1][0] == "harness.failed"

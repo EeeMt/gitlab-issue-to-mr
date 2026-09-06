@@ -584,3 +584,108 @@ def _translate_raw_stream_v2(runtime_dir: Path, raw_records: list[dict]) -> None
         capture_output=True,
         text=True,
     )
+
+
+def test_codex_reasoning_items_map_to_lifecycle(tmp_path):
+    """exec reasoning items: item.started -> started; item.completed -> empty
+    completed with the same stable id (plan §4.3 exec-path mapping)."""
+    runtime_dir = tmp_path / "reasoning"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    _translate_raw_stream(
+        runtime_dir,
+        [
+            {"type": "thread.started", "thread_id": "thread-abc"},
+            {"type": "turn.started"},
+            {
+                "type": "item.started",
+                "item": {"id": "item_0", "type": "reasoning"},
+            },
+            {
+                "type": "item.started",
+                "item": {"id": "item_1", "type": "agent_message"},
+            },
+            {
+                "type": "item.completed",
+                "item": {"id": "item_0", "type": "reasoning"},
+            },
+            {
+                "type": "item.completed",
+                "item": {"id": "item_1", "type": "agent_message", "text": "done"},
+            },
+            {"type": "turn.completed", "usage": {"input_tokens": 1}},
+        ],
+    )
+    _emit(runtime_dir, "worker.finalization", {"exit_code": 0})
+    _emit(runtime_dir, "run.completed", {"status": "completed", "success": True})
+    events = _events(runtime_dir)
+    started = [e for e in events if e["type"] == "reasoning_summary.started"]
+    completed = [e for e in events if e["type"] == "reasoning_summary.completed"]
+    assert len(started) == 1
+    assert len(completed) == 1
+    assert started[0]["payload"] == {"reasoning_id": "codex-reason-thread-abc-item_0"}
+    assert completed[0]["payload"] == {
+        "reasoning_id": "codex-reason-thread-abc-item_0",
+        "client": "codex",
+    }
+    assert completed[0]["seq"] > started[0]["seq"]
+
+
+def test_codex_duplicate_reasoning_snapshots_emit_once(tmp_path):
+    runtime_dir = tmp_path / "reasoning-dup"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    _translate_raw_stream(
+        runtime_dir,
+        [
+            {"type": "thread.started", "thread_id": "thread-dup"},
+            {"type": "turn.started"},
+            {"type": "item.started", "item": {"id": "item_0", "type": "reasoning"}},
+            {"type": "item.started", "item": {"id": "item_0", "type": "reasoning"}},
+            {"type": "item.completed", "item": {"id": "item_0", "type": "reasoning"}},
+            {"type": "item.completed", "item": {"id": "item_0", "type": "reasoning"}},
+            {"type": "turn.completed", "usage": {"input_tokens": 1}},
+        ],
+    )
+    _emit(runtime_dir, "worker.finalization", {"exit_code": 0})
+    _emit(runtime_dir, "run.completed", {"status": "completed", "success": True})
+    events = _events(runtime_dir)
+    assert sum(1 for e in events if e["type"] == "reasoning_summary.started") == 1
+    assert sum(1 for e in events if e["type"] == "reasoning_summary.completed") == 1
+    orphan = [
+        e for e in events
+        if e["type"] == "diagnostic" and e["payload"].get("code") == "reasoning_completed_without_start"
+    ]
+    assert orphan == []
+
+
+def test_codex_turn_failed_interrupts_open_reasoning(tmp_path):
+    runtime_dir = tmp_path / "reasoning-interrupted"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    _translate_raw_stream(
+        runtime_dir,
+        [
+            {"type": "thread.started", "thread_id": "thread-fail"},
+            {"type": "turn.started"},
+            {"type": "item.started", "item": {"id": "item_0", "type": "reasoning"}},
+            {"type": "turn.failed", "error": {"message": "provider exploded"}},
+        ],
+    )
+    _emit(runtime_dir, "worker.finalization", {"exit_code": 1})
+    _emit(runtime_dir, "run.failed", {"status": "failed", "success": False})
+    events = _events(runtime_dir)
+    interrupted = [
+        (e["type"], e["payload"])
+        for e in events
+        if e["type"] == "reasoning_summary.interrupted"
+    ]
+    assert interrupted == [
+        (
+            "reasoning_summary.interrupted",
+            {
+                "reasoning_id": "codex-reason-thread-fail-item_0",
+                "reason": "turn_failed",
+            },
+        )
+    ]

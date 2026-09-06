@@ -359,3 +359,51 @@ describe('thinking log metadata and merge helpers', () => {
     expect(JSON.parse((result[0] as any).metadata).status).toBe('completed')
   })
 })
+
+describe('multi-pending thinking rows (plan rev2 D)', () => {
+  const thinkingLog = (id: number, status?: string) => ({
+    id,
+    task_id: 1,
+    log_level: 'info',
+    log_type: 'thinking',
+    message: `thinking ${id}`,
+    created_at: '2026-09-04T00:00:00Z',
+    metadata: status ? JSON.stringify({ status }) : null,
+  })
+
+  it('computeStructuredStreamSinceId rewinds to the earliest pending id', () => {
+    const logs = [
+      { id: 3, log_type: 'assistant_text', message: 'a' },
+      thinkingLog(5, 'in_progress'),
+      { id: 7, log_type: 'tool_call', message: 't' },
+      thinkingLog(9, 'in_progress'),
+    ]
+    expect(computeStructuredStreamSinceId(logs as any)).toBe(4)
+  })
+
+  it('computeStructuredStreamSinceId uses max id once all blocks finalize', () => {
+    const logs = [thinkingLog(5, 'completed'), thinkingLog(9, 'interrupted')]
+    expect(computeStructuredStreamSinceId(logs as any)).toBe(9)
+  })
+
+  it('mergeTaskLogState upgrades an interrupted row when its real completion arrives', () => {
+    const current = [thinkingLog(1, 'interrupted')]
+    const result = mergeTaskLogState(current as any, [thinkingLog(1, 'completed')] as any)
+    expect(JSON.parse((result[0] as any).metadata).status).toBe('completed')
+  })
+
+  it('mergeTaskLogState never regresses interrupted to in_progress', () => {
+    const current = [thinkingLog(1, 'interrupted')]
+    const result = mergeTaskLogState(current as any, [thinkingLog(1, 'in_progress')] as any)
+    expect(JSON.parse((result[0] as any).metadata).status).toBe('interrupted')
+  })
+
+  it('mergeTaskLogState processes both blocks of an interleaved batch in order', () => {
+    const current = [thinkingLog(1, 'in_progress'), thinkingLog(2, 'in_progress')]
+    const incoming = [thinkingLog(1, 'completed'), thinkingLog(2, 'interrupted')]
+    const result = mergeTaskLogState(current as any, incoming as any)
+    expect(JSON.parse((result[0] as any).metadata).status).toBe('completed')
+    expect(JSON.parse((result[1] as any).metadata).status).toBe('interrupted')
+    expect(result).toHaveLength(2)
+  })
+})

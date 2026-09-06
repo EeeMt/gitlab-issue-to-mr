@@ -483,6 +483,255 @@ def test_translator_classifies_authentication_failure(tmp_path):
     assert _events(tmp_path)[-1]["payload"]["failure"]["kind"] == "authentication_error"
 
 
+# ── Partial-message thinking lifecycle (--include-partial-messages) ──────────
+
+
+def _stream_event(event_type: str, **fields) -> dict:
+    return {"type": "stream_event", "event": {"type": event_type, **fields}}
+
+
+def _message_start(message_id: str) -> dict:
+    return _stream_event("message_start", message={"id": message_id, "type": "message"})
+
+
+def _thinking_start(index: int, *, thinking: str = "") -> dict:
+    return _stream_event(
+        "content_block_start",
+        index=index,
+        content_block={"type": "thinking", "thinking": thinking},
+    )
+
+
+def _thinking_delta(index: int, text: str) -> dict:
+    return _stream_event(
+        "content_block_delta",
+        index=index,
+        delta={"type": "thinking_delta", "thinking": text},
+    )
+
+
+def _signature_delta(index: int, signature: str) -> dict:
+    return _stream_event(
+        "content_block_delta",
+        index=index,
+        delta={"type": "signature_delta", "signature": signature},
+    )
+
+
+def _content_block_stop(index: int) -> dict:
+    return _stream_event("content_block_stop", index=index)
+
+
+def _success_result() -> dict:
+    return {
+        "type": "result",
+        "subtype": "success",
+        "result": "done",
+        "session_id": "s1",
+        "usage": {"input_tokens": 5, "output_tokens": 3},
+    }
+
+
+def test_partial_thinking_stream_pairs_started_and_completed_with_stable_id(tmp_path):
+    _emit(tmp_path, "run.started")
+    _translate_stream(
+        tmp_path,
+        [
+            _message_start("m1"),
+            _thinking_start(0, thinking="explore the failure"),
+            _thinking_delta(0, "more planning"),
+            _signature_delta(0, "sig-abc"),
+            _content_block_stop(0),
+            _success_result(),
+        ],
+    )
+    events = _events(tmp_path)
+    assert [event["type"] for event in events] == [
+        "run.started",
+        "reasoning_summary.started",
+        "reasoning_summary.completed",
+        "usage.final",
+        "harness.completed",
+    ]
+    started, completed = events[1], events[2]
+    assert started["payload"] == {"reasoning_id": "claude-think-m1-0"}
+    # Completion carries no text: thinking deltas are never projected, and the
+    # block survives them (its stop still closes the started placeholder).
+    assert completed["payload"] == {
+        "reasoning_id": "claude-think-m1-0",
+        "client": "claude",
+    }
+    assert "text" not in completed["payload"]
+    assert completed["seq"] > started["seq"]
+    # No thinking content leaks into canonical events (message.delta absent).
+    assert not any(event["type"] == "message.delta" for event in events)
+    assert "explore" not in json.dumps(events, ensure_ascii=False)
+    for event in (started, completed):
+        validate_event(event)
+
+
+def test_partial_thinking_empty_block_still_pairs(tmp_path):
+    _emit(tmp_path, "run.started")
+    _translate_stream(
+        tmp_path,
+        [
+            _message_start("m1"),
+            _thinking_start(0),
+            _content_block_stop(0),
+            _success_result(),
+        ],
+    )
+    events = _events(tmp_path)
+    reasoning = [
+        event for event in events if event["type"].startswith("reasoning_summary")
+    ]
+    assert [event["type"] for event in reasoning] == [
+        "reasoning_summary.started",
+        "reasoning_summary.completed",
+    ]
+    assert reasoning[0]["payload"] == {"reasoning_id": "claude-think-m1-0"}
+    # An empty block still closes its placeholder and never carries text.
+    assert reasoning[1]["payload"] == {
+        "reasoning_id": "claude-think-m1-0",
+        "client": "claude",
+    }
+    assert "text" not in reasoning[1]["payload"]
+
+
+def test_failed_result_interrupts_open_thinking_before_harness_terminal(tmp_path):
+    _emit(tmp_path, "run.started")
+    _translate_stream(
+        tmp_path,
+        [
+            _message_start("m1"),
+            _thinking_start(0, thinking="planning"),
+            {
+                "type": "result",
+                "subtype": "error_during_execution",
+                "is_error": True,
+                "result": "engine died",
+                "session_id": "s1",
+                "usage": {"input_tokens": 5, "output_tokens": 1},
+            },
+        ],
+    )
+    events = _events(tmp_path)
+    assert [event["type"] for event in events] == [
+        "run.started",
+        "reasoning_summary.started",
+        "usage.final",
+        "reasoning_summary.interrupted",
+        "harness.failed",
+    ]
+    interrupted = events[3]
+    assert interrupted["payload"] == {
+        "reasoning_id": "claude-think-m1-0",
+        "reason": "error_during_execution",
+    }
+    assert interrupted["seq"] < events[4]["seq"]
+    # The cut-off block is interrupted, never completed.
+    assert not any(event["type"] == "reasoning_summary.completed" for event in events)
+    validate_event(interrupted)
+
+
+def test_stream_error_signal_interrupts_open_thinking_once(tmp_path):
+    _emit(tmp_path, "run.started")
+    _translate_stream(
+        tmp_path,
+        [
+            _message_start("m1"),
+            _thinking_start(0),
+            _stream_event("error", error={"type": "overloaded_error", "message": "overloaded"}),
+            {
+                "type": "result",
+                "subtype": "error_during_execution",
+                "is_error": True,
+                "result": "boom",
+                "session_id": "s1",
+                "usage": {},
+            },
+        ],
+    )
+    events = _events(tmp_path)
+    interrupted = [
+        event for event in events if event["type"] == "reasoning_summary.interrupted"
+    ]
+    # The error event interrupts the open block; the later failed result finds
+    # nothing open, so the block is never interrupted twice.
+    assert len(interrupted) == 1
+    assert interrupted[0]["payload"] == {
+        "reasoning_id": "claude-think-m1-0",
+        "reason": "overloaded_error",
+    }
+    assert events[-1]["type"] == "harness.failed"
+
+
+def test_assistant_record_after_partial_lifecycle_does_not_duplicate(tmp_path):
+    _emit(tmp_path, "run.started")
+    _translate_stream(
+        tmp_path,
+        [
+            _message_start("m1"),
+            _thinking_start(0, thinking="plan"),
+            _content_block_stop(0),
+            {
+                "type": "assistant",
+                "message": {
+                    "id": "m1",
+                    "content": [
+                        {"type": "thinking", "thinking": "plan", "signature": "sig-1"},
+                        {"type": "text", "text": "final answer"},
+                    ],
+                },
+            },
+            _success_result(),
+        ],
+    )
+    events = _events(tmp_path)
+    assert [event["type"] for event in events] == [
+        "run.started",
+        "reasoning_summary.started",
+        "reasoning_summary.completed",
+        "message.completed",
+        "usage.final",
+        "harness.completed",
+    ]
+    # The full assistant record must not create a second placeholder/completion
+    # nor a hidden-reasoning diagnostic for the message partial events covered.
+    assert not any(event["type"] == "diagnostic" for event in events)
+    message_completed = next(
+        event for event in events if event["type"] == "message.completed"
+    )
+    assert message_completed["payload"] == {"message_id": "m1", "text": "final answer"}
+
+
+def test_legacy_assistant_thinking_without_partial_lifecycle_keeps_diagnostic(tmp_path):
+    _emit(tmp_path, "run.started")
+    _translate_stream(
+        tmp_path,
+        [
+            {
+                "type": "assistant",
+                "message": {
+                    "id": "legacy-1",
+                    "content": [{"type": "thinking", "thinking": "old style"}],
+                },
+            },
+            _success_result(),
+        ],
+    )
+    events = _events(tmp_path)
+    assert [event["type"] for event in events] == [
+        "run.started",
+        "diagnostic",
+        "usage.final",
+        "harness.completed",
+    ]
+    assert events[1]["payload"]["code"] == "hidden_reasoning_omitted"
+    # No partial lifecycle was observed, so no placeholder events are invented.
+    assert not any(event["type"].startswith("reasoning_summary") for event in events)
+
+
 def test_event_writer_rejects_non_terminal_after_worker_finalization(tmp_path):
     _emit(tmp_path, "run.started")
     _emit(tmp_path, "harness.completed")

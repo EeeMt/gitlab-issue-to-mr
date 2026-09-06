@@ -854,6 +854,36 @@ def test_ci_claude_adds_task_skill_scope_to_claude_arguments(tmp_path):
     assert args[add_dir_index + 1] == str(skills_root)
 
 
+def test_ci_claude_requests_partial_message_streaming(tmp_path):
+    script_copy = _prepare_script_copy(
+        tmp_path,
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' \"$@\" > claude_args.txt\n"
+        "cat <<'EOF'\n"
+        '{"type":"result","subtype":"success","result":"done","session_id":"s1","usage":{"input_tokens":1,"output_tokens":1}}\n'
+        "EOF\n",
+    )
+
+    env = os.environ.copy()
+    env["SANDBOX_MODE"] = "1"
+
+    result = subprocess.run(
+        [str(script_copy), "normal prompt"],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    args = (tmp_path / "claude_args.txt").read_text(encoding="utf-8").splitlines()
+    assert result.returncode == 0, result.stderr
+    # Partial stream records (message_start/content_block_*) must reach the
+    # streaming translator so thinking block boundaries map to placeholders.
+    assert "--include-partial-messages" in args
+    assert args.index("--include-partial-messages") > args.index("--verbose")
+
+
 def test_ci_claude_rejects_cli_too_old_for_task_skills(tmp_path):
     skills_root = tmp_path / "skill-scope"
     (skills_root / ".claude" / "skills" / "review-changes").mkdir(parents=True)

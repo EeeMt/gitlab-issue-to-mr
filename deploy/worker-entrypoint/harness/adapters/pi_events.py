@@ -22,11 +22,11 @@ turn-terminal (agent_settled after the final turn) is authoritative.
 """
 
 from __future__ import annotations
-import re
 
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -441,6 +441,26 @@ def _write_result(
         )
 
 
+def _close_open_thinking(reason: str, raw_line: int) -> None:
+    """Explicitly interrupt the open thinking block when no end is observed.
+
+    The projector no longer guesses that a new block ends an older one (plan
+    §5.1): the adapter owns the native knowledge of where one block ends, so
+    it emits reasoning_summary.interrupted for the open reasoning_id.
+    """
+    reasoning_id = _STATE.get("thinking_reasoning_id")
+    if not reasoning_id:
+        return
+    _emit(
+        "reasoning_summary.interrupted",
+        {"reasoning_id": reasoning_id, "reason": reason},
+        raw_line,
+    )
+    _STATE["thinking"] = []
+    _STATE["thinking_reasoning_id"] = None
+    _STATE["thinking_start_line"] = None
+
+
 def _emit_terminal_at_eof() -> None:
     if _STATE["terminal"] is None:
         assistant_line = _STATE["assistant_final_line"]
@@ -510,6 +530,9 @@ def _emit_terminal_at_eof() -> None:
             )
 
     if _STATE["terminal"] == "completed":
+        # Defensive: a block left open when the stream ends cleanly still
+        # never had an end signal; close it rather than leave a spinner.
+        _close_open_thinking("stream_ended_without_block_end", _STATE["terminal_line"] or 0)
         _emit(
             "harness.completed",
             {
@@ -519,6 +542,7 @@ def _emit_terminal_at_eof() -> None:
             _STATE["terminal_line"],
         )
     elif _STATE["terminal"] == "failed":
+        _close_open_thinking("harness_failed", _STATE["terminal_line"] or 0)
         failure = _STATE["terminal_failure"] or {
             "kind": "engine_error",
             "message": "Pi turn failed",
@@ -705,9 +729,10 @@ def _handle_message_update(record: dict, raw_line: int) -> None:
     if etype == "thinking_start":
         # A real start signal opens the page placeholder immediately. The id
         # derives from the stream-wide line number (contentIndex repeats per
-        # message) and is reused by the matching thinking_end below. A start
-        # without a preceding end (lost/damaged stream) simply opens a new
-        # block: the projector interrupts the previous open row on receipt.
+        # message) and is reused by the matching thinking_end below. If the
+        # previous block never ended, the adapter closes it explicitly by id —
+        # the projector never infers this from the new start (plan §4.2/§5.1).
+        _close_open_thinking("next_block_started_without_end", raw_line)
         _STATE["thinking"] = []
         reasoning_id = f"pi-thinking-{raw_line}"
         _STATE["thinking_reasoning_id"] = reasoning_id
@@ -773,6 +798,9 @@ def _handle_message_end(record: dict, raw_line: int) -> None:
             "kind": failure_kind,
             "message": failure_message,
         }
+        # The message/turn closed without the block's own end: close the open
+        # block by id (plan §4.2).
+        _close_open_thinking("message_error", raw_line)
         return
     if stop_reason == "aborted":
         _STATE["aborted"] = True
@@ -781,6 +809,7 @@ def _handle_message_end(record: dict, raw_line: int) -> None:
             "message": _failure_message(message.get("errorMessage"), "Pi run aborted"),
         }
         _STATE["terminal_failure"] = failure
+        _close_open_thinking("message_aborted", raw_line)
         return
     if stop_reason in ("stop", "end_turn"):
         # message_end.message is authoritative. Most streams already emitted

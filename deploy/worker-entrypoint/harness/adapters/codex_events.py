@@ -26,6 +26,11 @@ _STATE: dict = {
     "retry_count": 0,
     "model_resolved": False,
     "last_assistant_text": "",
+    # Open reasoning blocks keyed by canonical reasoning_id (plan §4.3 exec
+    # path). Only blocks whose started was observed are ever completed here;
+    # closed_reasoning remembers duplicates so replays stay silent.
+    "open_reasoning": {},
+    "closed_reasoning": set(),
     "terminal_type": None,      # "completed" | "failed"
     "terminal_line": None,
     "terminal_failure": None,   # {"kind": ..., "message": ...}
@@ -61,6 +66,24 @@ def _thread_id(record: dict) -> str | None:
         return _STATE["thread_id"]
     value = record.get("thread_id")
     return value if isinstance(value, str) and value else None
+
+
+def _reasoning_id(item_id: str) -> str:
+    """Stable per-block identity: thread + item. item ids like ``item_0`` are
+    per-thread, so thread alone is not enough; contentIndex-like fields are
+    never used alone (plan §3.2)."""
+    return f"codex-reason-{_STATE['thread_id'] or 'thread'}-{item_id}"
+
+
+def _close_open_reasoning(reason: str, raw_line: int) -> None:
+    """Interrupt every block that never received its own end (plan §4.3)."""
+    for reasoning_id in list(_STATE["open_reasoning"]):
+        _emit(
+            "reasoning_summary.interrupted",
+            {"reasoning_id": reasoning_id, "reason": reason},
+            raw_line,
+        )
+    _STATE["open_reasoning"] = {}
 
 
 def _failure_kind(message: str) -> str:
@@ -204,6 +227,7 @@ def translate(record: dict, raw_line: int) -> None:
             raw_line,
         )
     elif record_type == "turn.failed":
+        _close_open_reasoning("turn_failed", raw_line)
         error = record.get("error") if isinstance(record.get("error"), dict) else {}
         message = clean_message(str(error.get("message") or "Codex turn failed"))
         _STATE["terminal_type"] = "failed"
@@ -212,7 +236,17 @@ def translate(record: dict, raw_line: int) -> None:
         _write_result(success=False, result=message, usage=_usage(record), failure_message=message)
     elif record_type == "item.started":
         item = record.get("item") if isinstance(record.get("item"), dict) else {}
-        if item.get("type") == "command_execution":
+        item_type = item.get("type")
+        if item_type == "reasoning":
+            reasoning_id = _reasoning_id(str(item.get("id") or ""))
+            if (
+                reasoning_id
+                and reasoning_id not in _STATE["open_reasoning"]
+                and reasoning_id not in _STATE["closed_reasoning"]
+            ):
+                _STATE["open_reasoning"][reasoning_id] = True
+                _emit("reasoning_summary.started", {"reasoning_id": reasoning_id}, raw_line)
+        elif item_type == "command_execution":
             _emit(
                 "tool.started",
                 {
@@ -225,7 +259,27 @@ def translate(record: dict, raw_line: int) -> None:
     elif record_type == "item.completed":
         item = record.get("item") if isinstance(record.get("item"), dict) else {}
         item_type = item.get("type")
-        if item_type == "command_execution":
+        if item_type == "reasoning":
+            # A reasoning block ends without a body: the completion carries no
+            # text and still closes the placeholder. Replays of the same item
+            # must not emit a second completion (plan §4.3).
+            reasoning_id = _reasoning_id(str(item.get("id") or ""))
+            if reasoning_id in _STATE["open_reasoning"]:
+                _emit(
+                    "reasoning_summary.completed",
+                    {"reasoning_id": reasoning_id, "client": "codex"},
+                    raw_line,
+                )
+                del _STATE["open_reasoning"][reasoning_id]
+                _STATE["closed_reasoning"].add(reasoning_id)
+            elif reasoning_id not in _STATE["closed_reasoning"]:
+                # Never started at all: auditable orphan, no fabricated start.
+                _emit(
+                    "diagnostic",
+                    {"code": "reasoning_completed_without_start", "item_id": item.get("id")},
+                    raw_line,
+                )
+        elif item_type == "command_execution":
             _emit(
                 "tool.completed",
                 {
@@ -259,6 +313,9 @@ def translate(record: dict, raw_line: int) -> None:
                     raw_line,
                 )
     elif record_type == "turn.completed":
+        # Blocks still open when the turn closes cleanly never saw their own
+        # end; close them as interrupted, never as completed (plan §4.3).
+        _close_open_reasoning("turn_completed_without_block_end", raw_line)
         usage = _usage(record)
         _emit("usage.final", {"usage": usage}, raw_line)
         _STATE["terminal_type"] = "completed"

@@ -294,6 +294,34 @@ class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
             attempt_id=attempt_id,
         )
 
+    def _interrupted(
+        self,
+        seq: int,
+        reasoning_id: str,
+        occurred_at: str,
+        *,
+        reason: str | None = None,
+        attempt_id: str = "task-1-attempt-1",
+    ):
+        payload: dict = {"reasoning_id": reasoning_id}
+        if reason is not None:
+            payload["reason"] = reason
+        return self._event(
+            seq,
+            "reasoning_summary.interrupted",
+            payload,
+            occurred_at=occurred_at,
+            attempt_id=attempt_id,
+        )
+
+    async def _thinking_rows(self, db):
+        rows = {}
+        for log in (await db.execute(select(TaskLog))).scalars():
+            if log.log_type != "thinking":
+                continue
+            rows[json.loads(log.log_metadata)["reasoning_id"]] = log
+        return rows
+
     async def test_thinking_start_creates_placeholder_without_payload(self):
         async with self.session_factory() as db:
             await self._setup_attempt(db)
@@ -398,7 +426,7 @@ class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
         assert "duration_ms" not in metadata
         assert metadata["payload_id"] == payloads[0].id
 
-    async def test_harness_terminal_interrupts_open_rows_but_keeps_completed(self):
+    async def test_harness_terminal_still_interrupts_leftover_open_rows(self):
         async with self.session_factory() as db:
             await self._setup_attempt(db)
             await self._project(
@@ -416,12 +444,7 @@ class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
                     ),
                 ],
             )
-            rows = {
-                json.loads(log.log_metadata)["reasoning_id"]: log
-                for log in (await db.execute(select(TaskLog))).scalars()
-                if log.log_type == "thinking"
-            }
-        assert rows["pi-thinking-1"].log_metadata is not None
+            rows = await self._thinking_rows(db)
         first = json.loads(rows["pi-thinking-1"].log_metadata)
         assert first["status"] == "completed"
         assert first["duration_ms"] == 20000
@@ -431,7 +454,7 @@ class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
         assert second["duration_ms"] is None
         assert second["payload_id"] is None
 
-    async def test_new_start_without_previous_end_interrupts_stale_row(self):
+    async def test_new_start_never_interrupts_another_open_block(self):
         async with self.session_factory() as db:
             await self._setup_attempt(db)
             await self._project(
@@ -443,19 +466,135 @@ class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
                     self._completed(4, "pi-thinking-2", "second block", "2026-08-01T00:00:40Z"),
                 ],
             )
-            rows = {
-                json.loads(log.log_metadata)["reasoning_id"]: log
-                for log in (await db.execute(select(TaskLog))).scalars()
-                if log.log_type == "thinking"
-            }
+            rows = await self._thinking_rows(db)
         assert len(rows) == 2
         first = json.loads(rows["pi-thinking-1"].log_metadata)
-        assert first["status"] == "interrupted"
-        assert first["ended_at"] == "2026-08-01T00:00:30Z"
-        assert first["duration_ms"] is None
         second = json.loads(rows["pi-thinking-2"].log_metadata)
+        # Starting block 2 never infers the end of block 1 (plan §5.1): the
+        # orphan stays open until its own interrupted/completed event.
+        assert first["status"] == "in_progress"
+        assert first["ended_at"] is None
         assert second["status"] == "completed"
         assert second["duration_ms"] == 10000
+
+    async def test_interrupted_event_closes_only_the_addressed_block(self):
+        async with self.session_factory() as db:
+            await self._setup_attempt(db)
+            await self._project(
+                db,
+                [
+                    self._event(1, "run.started"),
+                    self._started(2, "pi-thinking-1", "2026-08-01T00:00:00Z"),
+                    self._started(3, "pi-thinking-2", "2026-08-01T00:00:30Z"),
+                    self._interrupted(
+                        4,
+                        "pi-thinking-1",
+                        "2026-08-01T00:00:31Z",
+                        reason="next_block_started_without_end",
+                    ),
+                    self._completed(5, "pi-thinking-2", "second block", "2026-08-01T00:00:40Z"),
+                ],
+            )
+            rows = await self._thinking_rows(db)
+        assert len(rows) == 2
+        first = json.loads(rows["pi-thinking-1"].log_metadata)
+        second = json.loads(rows["pi-thinking-2"].log_metadata)
+        assert first["status"] == "interrupted"
+        assert first["ended_at"] == "2026-08-01T00:00:31Z"
+        assert first["duration_ms"] is None
+        assert second["status"] == "completed"
+        assert second["duration_ms"] == 10000
+
+    async def test_interleave_blocks_pair_by_id(self):
+        """A.start -> B.start -> A.complete -> B.complete keeps both rows
+        distinct and finalizes each in place."""
+        async with self.session_factory() as db:
+            await self._setup_attempt(db)
+            await self._project(
+                db,
+                [
+                    self._event(1, "run.started"),
+                    self._started(2, "reasoning-A", "2026-08-01T00:00:00Z"),
+                    self._started(3, "reasoning-B", "2026-08-01T00:00:10Z"),
+                    self._completed(4, "reasoning-A", "A done", "2026-08-01T00:00:20Z"),
+                    self._completed(5, "reasoning-B", "B done", "2026-08-01T00:00:30Z"),
+                ],
+            )
+            rows = await self._thinking_rows(db)
+            payloads = list(
+                (await db.execute(select(TaskPayload).order_by(TaskPayload.id))).scalars()
+            )
+        assert len(rows) == 2
+        assert [p.content for p in payloads] == [b"A done", b"B done"]
+        a = json.loads(rows["reasoning-A"].log_metadata)
+        b = json.loads(rows["reasoning-B"].log_metadata)
+        assert a["status"] == "completed" and a["duration_ms"] == 20000
+        assert b["status"] == "completed" and b["duration_ms"] == 20000
+
+    async def test_repeated_start_and_completed_are_idempotent(self):
+        """A re-delivered start keeps the original started_at; a repeated
+        completed neither creates a second payload nor resets times."""
+        async with self.session_factory() as db:
+            await self._setup_attempt(db)
+            events = [
+                self._event(1, "run.started"),
+                self._started(2, "pi-thinking-42", "2026-08-01T00:00:10Z"),
+                self._started(3, "pi-thinking-42", "2026-08-01T00:00:20Z"),
+                self._completed(4, "pi-thinking-42", "final", "2026-08-01T00:00:48Z"),
+                self._completed(5, "pi-thinking-42", "final", "2026-08-01T00:00:48Z"),
+            ]
+            executor = await self._project(db, events)
+            for event in events:
+                await executor._ingest_event_record(task_id=1, record=event, db=db)
+            await db.flush()
+            logs = list((await db.execute(select(TaskLog))).scalars())
+            payloads = list((await db.execute(select(TaskPayload))).scalars())
+        assert len(logs) == 1
+        assert len(payloads) == 1
+        metadata = json.loads(logs[0].log_metadata)
+        assert metadata["started_at"] == "2026-08-01T00:00:10Z"
+        assert metadata["ended_at"] == "2026-08-01T00:00:48Z"
+        assert metadata["duration_ms"] == 38000
+        assert metadata["payload_id"] == payloads[0].id
+
+    async def test_interrupted_unknown_or_finalized_rows_are_ignored(self):
+        async with self.session_factory() as db:
+            await self._setup_attempt(db)
+            await self._project(
+                db,
+                [
+                    self._event(1, "run.started"),
+                    self._started(2, "pi-thinking-1", "2026-08-01T00:00:00Z"),
+                    self._completed(3, "pi-thinking-1", "done early", "2026-08-01T00:00:10Z"),
+                    self._interrupted(4, "pi-thinking-1", "2026-08-01T00:00:20Z"),
+                    self._interrupted(5, "never-started", "2026-08-01T00:00:21Z"),
+                ],
+            )
+            logs = list((await db.execute(select(TaskLog))).scalars())
+        assert len(logs) == 1
+        metadata = json.loads(logs[0].log_metadata)
+        assert metadata["status"] == "completed"
+        assert metadata["ended_at"] == "2026-08-01T00:00:10Z"
+
+    async def test_orphan_empty_completion_records_diagnostic_only(self):
+        async with self.session_factory() as db:
+            await self._setup_attempt(db)
+            await self._project(
+                db,
+                [
+                    self._event(1, "run.started"),
+                    self._event(
+                        2,
+                        "reasoning_summary.completed",
+                        {"reasoning_id": "orphan-empty", "client": "pi"},
+                    ),
+                ],
+            )
+            logs = list((await db.execute(select(TaskLog))).scalars())
+            payloads = list((await db.execute(select(TaskPayload))).scalars())
+        assert len(logs) == 1
+        assert logs[0].log_type == "diagnostic"
+        assert len(payloads) == 0
 
     async def test_multiple_blocks_pair_distinct_ids_without_content_crossing(self):
         async with self.session_factory() as db:
@@ -471,9 +610,7 @@ class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
                 ],
             )
             logs = list(
-                (
-                    await db.execute(select(TaskLog).order_by(TaskLog.id))
-                ).scalars()
+                (await db.execute(select(TaskLog).order_by(TaskLog.id))).scalars()
             )
             payloads = list(
                 (await db.execute(select(TaskPayload).order_by(TaskPayload.id))).scalars()
@@ -505,8 +642,7 @@ class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
             created_id = (
                 await db.execute(select(TaskLog.id).where(TaskLog.log_type == "thinking"))
             ).scalar_one()
-            # Fresh projector instance: the in-memory cache is gone and only the
-            # persisted thinking rows can pair the completion.
+            # Fresh projector instance: only persisted rows can pair the block.
             rebuilt = WorkerExecutor(docker_client=MagicMock(), gitlab_client=MagicMock())
             await rebuilt._ingest_event_record(
                 task_id=1,
@@ -550,8 +686,6 @@ class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
                 db,
                 [
                     self._event(1, "run.started"),
-                    # Start observed after its own completion timestamp: never
-                    # fabricate a zero duration.
                     self._started(2, "pi-thinking-42", "2026-08-01T00:00:48Z"),
                     self._completed(3, "pi-thinking-42", "late", "2026-08-01T00:00:10Z"),
                 ],
@@ -579,7 +713,6 @@ class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
             after = list((await db.execute(select(TaskLog))).scalars())
         assert len(after) == 1
         assert json.loads(after[0].log_metadata)["status"] == "in_progress"
-
 
 if __name__ == "__main__":
     unittest.main()

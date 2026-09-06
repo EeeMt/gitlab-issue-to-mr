@@ -14,10 +14,18 @@
         "artifact_version": "2.1.153",
         "artifact_sha256": "<computed at freeze>"
       },
-      "adapter": { "version": "1.0.1", "digest": "<computed at bundle build>" },
+      "adapter": {
+        "version": "1.1.0",
+        "digest": "<computed at bundle build>"
+      },
       "cli_version_range": ">=2.1.33 <3.0.0",
-      "control_transport": { "kind": "cli_stream_json", "protocol": "claude-json" },
-      "model_protocols": ["anthropic_messages"],
+      "control_transport": {
+        "kind": "cli_stream_json",
+        "protocol": "claude-json"
+      },
+      "model_protocols": [
+        "anthropic_messages"
+      ],
       "capabilities": {
         "resume": true,
         "task_skills": true,
@@ -35,10 +43,18 @@
         "artifact_version": "0.146.0",
         "artifact_sha256": "<computed at freeze>"
       },
-      "adapter": { "version": "1.0.0", "digest": "<computed at bundle build>" },
+      "adapter": {
+        "version": "1.1.0",
+        "digest": "<computed at bundle build>"
+      },
       "cli_version_range": ">=0.146.0 <0.160.0",
-      "control_transport": { "kind": "cli_jsonl", "protocol": "codex-jsonl" },
-      "model_protocols": ["openai_responses"],
+      "control_transport": {
+        "kind": "cli_jsonl",
+        "protocol": "codex-jsonl"
+      },
+      "model_protocols": [
+        "openai_responses"
+      ],
       "capabilities": {
         "resume": true,
         "task_skills": true,
@@ -56,11 +72,21 @@
         "artifact_version": "0.84.2",
         "artifact_sha256": "<computed at freeze>"
       },
-            "adapter": { "version": "2.1.0", "digest": "<computed at bundle build>" },
+      "adapter": {
+        "version": "2.1.1",
+        "digest": "<computed at bundle build>"
+      },
       "cli_version": "0.84.2",
       "cli_version_range": ">=0.84.2 <0.85.0",
-      "control_transport": { "kind": "rpc_stdio", "protocol": "pi-rpc" },
-      "model_protocols": ["anthropic_messages", "openai_responses", "openai_chat_completions"],
+      "control_transport": {
+        "kind": "rpc_stdio",
+        "protocol": "pi-rpc"
+      },
+      "model_protocols": [
+        "anthropic_messages",
+        "openai_responses",
+        "openai_chat_completions"
+      ],
       "capabilities": {
         "resume": true,
         "task_skills": true,
@@ -78,11 +104,21 @@
         "artifact_version": "1.18.19",
         "artifact_sha256": "<computed at freeze>"
       },
-      "adapter": { "version": "2.0.0", "digest": "<computed at bundle build>" },
+      "adapter": {
+        "version": "2.1.0",
+        "digest": "<computed at bundle build>"
+      },
       "cli_version": "1.18.19",
       "cli_version_range": ">=1.18.19 <1.19.0",
-      "control_transport": { "kind": "server_http", "protocol": "opencode-server" },
-      "model_protocols": ["anthropic_messages", "openai_responses", "openai_chat_completions"],
+      "control_transport": {
+        "kind": "server_http",
+        "protocol": "opencode-server"
+      },
+      "model_protocols": [
+        "anthropic_messages",
+        "openai_responses",
+        "openai_chat_completions"
+      ],
       "capabilities": {
         "resume": true,
         "task_skills": true,

@@ -585,3 +585,46 @@ def test_validate_manifest_fails_closed_on_unknown_adapter():
     }
     with pytest.raises(HarnessProtocolError, match="non-approved"):
         validate_manifest(manifest)
+
+
+def test_reasoning_summary_interrupted_is_allowed_with_reason():
+    event = _event(1, "reasoning_summary.interrupted", {"reasoning_id": "pi-thinking-9", "reason": "next_block_started_without_end"})
+    normalized = validate_event(event)
+    assert normalized["type"] == "reasoning_summary.interrupted"
+    assert normalized["payload"] == {"reasoning_id": "pi-thinking-9", "reason": "next_block_started_without_end"}
+
+
+def test_reasoning_summary_interrupted_without_reason_is_allowed():
+    event = _event(1, "reasoning_summary.interrupted", {"reasoning_id": "pi-thinking-9"})
+    assert validate_event(event)["type"] == "reasoning_summary.interrupted"
+
+
+def test_reasoning_summary_interrupted_requires_reasoning_id():
+    with pytest.raises(HarnessProtocolError, match="non-empty reasoning_id"):
+        _event(1, "reasoning_summary.interrupted", {"reason": "lost"})
+    with pytest.raises(HarnessProtocolError, match="non-empty reasoning_id"):
+        _event(1, "reasoning_summary.interrupted", {})
+
+
+def test_reasoning_summary_interrupted_reason_is_bounded_short_string():
+    with pytest.raises(HarnessProtocolError, match="short string"):
+        _event(1, "reasoning_summary.interrupted", {"reasoning_id": "r1", "reason": "x" * 201})
+    with pytest.raises(HarnessProtocolError, match="short string"):
+        _event(1, "reasoning_summary.interrupted", {"reasoning_id": "r1", "reason": "   "})
+
+
+def test_reasoning_summary_interrupted_mid_stream_replay_is_accepted():
+    """interrupted is non-terminal: replay allows blocks around it and the
+    task-terminal rules stay intact."""
+    events = [
+        _event(1, "run.started"),
+        _event(2, "reasoning_summary.started", {"reasoning_id": "r1"}),
+        _event(3, "reasoning_summary.interrupted", {"reasoning_id": "r1", "reason": "aborted"}),
+        _event(4, "reasoning_summary.started", {"reasoning_id": "r2"}),
+        _event(5, "reasoning_summary.completed", {"reasoning_id": "r2"}),
+        _event(6, "harness.completed", {"session_id": "s", "result": "ok"}),
+        _event(7, "worker.finalization", {"exit_code": 0}),
+        _event(8, "run.completed", {"status": "completed", "success": True}),
+    ]
+    replay = replay_events(events)
+    assert replay.terminal_type == "run.completed"

@@ -158,6 +158,12 @@ _STATE: dict = {
     "terminal": None,     # "completed" | "failed"
     "terminal_failure": None,
     "aborted": False,
+    # Open reasoning blocks keyed by canonical reasoning_id (plan §4.4). Only
+    # blocks whose started was observed are ever completed/interrupted here;
+    # closed blocks stay recorded so replays never emit a second lifecycle.
+    "reasoning_blocks": {},                  # reasoning_id -> {message_id, family, status}
+    "reasoning_durable_messages": set(),     # assistant messages the durable family covers
+    "reasoning_folds": {},                   # durable reasoning_id -> absorbed fallback reasoning_id
     "interactive_block": None,
     "settled": False,
     "settled_line": None,
@@ -615,6 +621,128 @@ def _durable_data(record: dict, properties: dict) -> dict:
     return data if isinstance(data, dict) else properties
 
 
+def _reasoning_message_id(value: object) -> str | None:
+    if value is None or not str(value).strip():
+        return None
+    return str(value).strip()
+
+
+def _durable_reasoning_id(data: dict) -> str | None:
+    """Stable per-block identity for the durable ``session.next.reasoning.*``
+    family: session + assistant message + reasoningID (plan §3.2). Both the
+    started and the ended event carry these native fields, so the derived id
+    pairs across the lifecycle and never reuses a bare per-message index.
+    """
+    message_id = _reasoning_message_id(data.get("assistantMessageID") or data.get("messageID"))
+    reasoning_id = _reasoning_message_id(data.get("reasoningID") or data.get("reasoningId"))
+    if not message_id or not reasoning_id:
+        return None
+    session_id = _reasoning_message_id(data.get("sessionID") or data.get("sessionId"))
+    if session_id:
+        return f"opencode-reason-{session_id}-{message_id}-{reasoning_id}"
+    return f"opencode-reason-{message_id}-{reasoning_id}"
+
+
+def _part_reasoning_id(session_id: object, message_id: str, part_id: str) -> str | None:
+    """Stable identity for the ``message.part.updated`` fallback family.
+
+    The snapshot is attributed by session + message + part id. Sentinel ids
+    (``__unattributed__``/``__default__``) mean the block cannot be stably
+    distinguished, so no lifecycle is projected for it.
+    """
+    if not message_id or not part_id or message_id.startswith("__") or part_id.startswith("__"):
+        return None
+    session_id = _reasoning_message_id(session_id)
+    if session_id:
+        return f"opencode-reason-part-{session_id}-{message_id}-{part_id}"
+    return f"opencode-reason-part-{message_id}-{part_id}"
+
+
+def _open_reasoning_block(
+    canonical_id: str, message_id: str | None, family: str, raw_line: int
+) -> None:
+    """Emit ``reasoning_summary.started`` for the first observation of a block.
+
+    Duplicate started snapshots (reconnect replays) never open a second
+    placeholder: an already-open block is kept, and a block whose end was
+    already observed is never re-opened into a fresh active placeholder.
+    """
+    block = _STATE["reasoning_blocks"].get(canonical_id)
+    if block is not None:
+        return
+    _STATE["reasoning_blocks"][canonical_id] = {
+        "message_id": message_id,
+        "family": family,
+        "status": "open",
+    }
+    _emit("reasoning_summary.started", {"reasoning_id": canonical_id}, raw_line)
+
+
+def _close_reasoning_block(canonical_id: str, raw_line: int) -> None:
+    """Complete an open block in place, at most once per block.
+
+    Reasoning text never enters canonical payloads (plan §3.1), so the
+    completion is body-less; an empty completion still stops the placeholder
+    timer in place. Repeated end snapshots for an already-closed block are
+    silent replays.
+    """
+    block = _STATE["reasoning_blocks"].get(canonical_id)
+    if block is None or block["status"] != "open":
+        return
+    block["status"] = "closed"
+    _emit(
+        "reasoning_summary.completed",
+        {"reasoning_id": canonical_id, "client": "opencode"},
+        raw_line,
+    )
+
+
+def _record_orphan_reasoning_end(canonical_id: str, message_id: str | None, family: str, raw_line: int) -> None:
+    """Close the book on an end snapshot whose start was never observed.
+
+    Reasoning was already finished when first seen, so no active placeholder
+    may be fabricated (plan §3.2); the fact stays an auditable diagnostic and
+    the id is recorded as closed so a later stale started replay cannot start
+    it either.
+    """
+    if canonical_id not in _STATE["reasoning_blocks"]:
+        _STATE["reasoning_blocks"][canonical_id] = {
+            "message_id": message_id,
+            "family": family,
+            "status": "closed",
+        }
+    _emit(
+        "diagnostic",
+        {"code": "reasoning_completed_without_start", "reasoning_id": canonical_id},
+        raw_line,
+    )
+
+
+def _interrupt_open_reasoning(
+    reason: str, raw_line: int, message_id: str | None = None
+) -> None:
+    """Interrupt open reasoning blocks whose native end will never arrive.
+
+    Blocks that already delivered their own end stay completed; this only
+    closes blocks still open, so the caller may run it repeatedly (idle,
+    EOF, failure finalization) without double events. ``message_id`` narrows
+    the close to one assistant message (its message errored/aborted); whole
+    run failures close every open block.
+    """
+    for canonical_id in list(_STATE["reasoning_blocks"]):
+        block = _STATE["reasoning_blocks"][canonical_id]
+        if block["status"] != "open":
+            continue
+        if message_id and block.get("message_id") and block["message_id"] != message_id:
+            continue
+        _emit(
+            "reasoning_summary.interrupted",
+            {"reasoning_id": canonical_id, "reason": reason},
+            raw_line,
+        )
+        block["status"] = "closed"
+
+
 def _handle_durable_event(record_type: str, data: dict, raw_line: int) -> None:
     """Map OpenCode's ``session.next.*`` durable event family.
 
@@ -664,17 +792,80 @@ def _handle_durable_event(record_type: str, data: dict, raw_line: int) -> None:
         _refresh_text()
         return
 
+    if record_type == "session.next.reasoning.started":
+        message_id = _remember_assistant_message(data.get("assistantMessageID"))
+        reasoning_id = _durable_reasoning_id(data)
+        if not reasoning_id:
+            _emit(
+                "diagnostic",
+                {"code": "reasoning_missing_id", "type": record_type},
+                raw_line,
+            )
+            return
+        if message_id:
+            _STATE["reasoning_durable_messages"].add(message_id)
+        if reasoning_id in _STATE["reasoning_folds"]:
+            # Duplicate replay of a started already absorbed into a fallback
+            # block; never open a second lifecycle for it.
+            return
+        # Durable lifecycle is the authoritative family (plan §4.4). When a
+        # fallback ``message.part.updated`` block for the same assistant
+        # message is already open (its snapshot arrived first) and no durable
+        # block of this message is open yet, this started is folded into that
+        # placeholder instead of starting a second one: exactly one lifecycle
+        # per block, no double projection. Correlation between the two id
+        # spaces is not provable in the frozen schema, so the fold applies to
+        # the single active fallback block of the message.
+        if message_id and reasoning_id not in _STATE["reasoning_blocks"]:
+            open_part = [
+                candidate
+                for candidate, block in _STATE["reasoning_blocks"].items()
+                if block["status"] == "open"
+                and block["family"] == "part"
+                and block.get("message_id") == message_id
+            ]
+            if len(open_part) == 1:
+                _STATE["reasoning_folds"][reasoning_id] = open_part[0]
+                return
+        _open_reasoning_block(reasoning_id, message_id, "durable", raw_line)
+        return
+
+    if record_type == "session.next.reasoning.ended":
+        message_id = _remember_assistant_message(data.get("assistantMessageID"))
+        reasoning_id = _durable_reasoning_id(data)
+        if not reasoning_id:
+            _emit(
+                "diagnostic",
+                {"code": "reasoning_missing_id", "type": record_type},
+                raw_line,
+            )
+            return
+        if message_id:
+            _STATE["reasoning_durable_messages"].add(message_id)
+        # The started event may have been folded into an earlier fallback part
+        # placeholder; close that block in place. The frozen schema gives the
+        # ended event no error/failure facts of its own, so it always maps to
+        # a normal completion (interruption is driven by the enclosing step /
+        # message / session failure events below).
+        folded_id = _STATE["reasoning_folds"].get(reasoning_id)
+        if folded_id is not None:
+            # The fold entry is kept so a duplicate started/ended replay of
+            # this durable block stays a silent no-op.
+            _close_reasoning_block(folded_id, raw_line)
+            return
+        if reasoning_id in _STATE["reasoning_blocks"]:
+            _close_reasoning_block(reasoning_id, raw_line)
+            return
+        # Ended without any observed started: an already-finished block, never
+        # a fresh active placeholder (plan §3.2).
+        _record_orphan_reasoning_end(reasoning_id, message_id, "durable", raw_line)
+        return
+
+    # Reasoning deltas and any other reasoning.* subtype carry only streaming
+    # text that must never enter a canonical payload. They add no lifecycle
+    # fact and must not extend an open placeholder (plan §4.4); the sanitized
+    # raw archive remains the audit trail, so nothing further is emitted.
     if record_type.startswith("session.next.reasoning."):
-        # Reasoning text is not a user-visible summary and must never enter the
-        # canonical payload. The event fact remains auditable without exposing
-        # hidden chain-of-thought content.
-        payload = {
-            "code": "hidden_reasoning_omitted",
-            "source": "opencode",
-            "type": record_type,
-            "reasoning_id": data.get("reasoningID"),
-        }
-        _emit("diagnostic", payload, raw_line)
         return
 
     if record_type == "session.next.tool.input.started":
@@ -792,6 +983,9 @@ def _handle_durable_event(record_type: str, data: dict, raw_line: int) -> None:
             "kind": _failure_kind(message, status_code=status_code),
             "message": message,
         }
+        # The failed step will never deliver its open reasoning block ends;
+        # interrupt them now so no placeholder keeps spinning (plan §4.4).
+        _interrupt_open_reasoning("step_failed", raw_line)
         _emit(
             "diagnostic",
             {
@@ -981,6 +1175,18 @@ def _finalize_terminal() -> None:
     if _STATE["terminal"] is not None:
         return
     terminal_line = int(_STATE["settled_line"] or _STATE["last_line"] or 1)
+    if _STATE["aborted"] or _STATE["terminal_failure"] is not None:
+        # Safety net for every failing terminal: reasoning blocks still open
+        # when the run fails (rate limits, protocol errors, EOF, interactive
+        # blocks, ...) must be interrupted, never left spinning. The source
+        # failure events already interrupt with specific reasons, so this is
+        # a no-op once they ran.
+        _interrupt_open_reasoning(
+            "aborted"
+            if _STATE["aborted"]
+            else str((_STATE["terminal_failure"] or {}).get("kind") or "run_failed"),
+            terminal_line,
+        )
     if _STATE["aborted"]:
         _STATE["terminal"] = "failed"
         _STATE["terminal_failure"] = {"kind": "cancelled", "message": "OpenCode run aborted"}
@@ -1131,6 +1337,9 @@ def _handle_session_error(properties: dict, raw_line: int) -> None:
     kind = _failure_kind(message, status_code=status_code)
     if kind == "cancelled":
         _STATE["aborted"] = True
+    # The errored/aborted session never completes its open reasoning blocks;
+    # close them with the native cause instead of leaving them spinning.
+    _interrupt_open_reasoning("aborted" if _STATE["aborted"] else "session_error", raw_line)
     _STATE["terminal_failure"] = {"kind": kind, "message": message}
     _finalize_terminal()
 
@@ -1152,6 +1361,16 @@ def _handle_message_updated(properties: dict, raw_line: int) -> None:
         _remember_assistant_message(message_id)
         _flush_pending_deltas(message_id)
         _refresh_text()
+        # An errored/aborted assistant message (native error fact, e.g. the
+        # post-abort message carries error:true) means its reasoning blocks
+        # will never deliver their own end; interrupt exactly those blocks.
+        if info.get("error") or properties.get("error"):
+            target = (
+                message_id
+                if isinstance(message_id, str) and message_id and message_id != "__assistant__"
+                else None
+            )
+            _interrupt_open_reasoning("message_error", raw_line, message_id=target)
     _remember_session(properties)
 
 
@@ -1205,6 +1424,63 @@ def _flush_pending_deltas(message_id: str) -> None:
         part["pending_deltas"] = []
 
 
+def _handle_reasoning_part(properties: dict, part: dict, raw_line: int) -> None:
+    """Fallback lifecycle for ``message.part.updated`` reasoning snapshots.
+
+    The part family is the fallback path behind the authoritative durable
+    ``session.next.reasoning.*`` family. Activity is decided from actual
+    snapshot fields, never from the mere presence of ``type=reasoning``
+    (plan §4.4): the snapshot must carry an explicit ``state.status`` from the
+    same active/terminal vocabulary the tool parts use. A first active
+    snapshot opens the placeholder; the end snapshot of the same part id
+    completes it even when the content is empty; an already-finished first
+    snapshot never starts a placeholder (static, archived only). Snapshots
+    without any activity evidence stay a hidden-reasoning diagnostic.
+    """
+    state = part.get("state") if isinstance(part.get("state"), dict) else {}
+    status = state.get("status")
+    if status not in _TOOL_ACTIVE_STATUSES | _TOOL_TERMINAL_STATUSES:
+        # No explicit in-progress/finished evidence in this snapshot; keep the
+        # content fact out of canonical payloads without inventing a lifecycle.
+        _emit(
+            "diagnostic",
+            {"code": "hidden_reasoning_omitted", "message": "OpenCode reasoning omitted"},
+            raw_line,
+        )
+        return
+    message_id = _message_id(properties, part)
+    if message_id in _STATE["user_message_ids"]:
+        return
+    part_id = _part_id(properties, part, message_id)
+    session_id = properties.get("sessionID") or properties.get("sessionId") or part.get("sessionID")
+    reasoning_id = _part_reasoning_id(session_id, message_id, part_id)
+    if not reasoning_id:
+        _emit(
+            "diagnostic",
+            {"code": "reasoning_missing_id", "type": "message.part.updated"},
+            raw_line,
+        )
+        return
+    if status in _TOOL_ACTIVE_STATUSES:
+        if message_id in _STATE["reasoning_durable_messages"]:
+            # The authoritative durable family already covers this message's
+            # reasoning blocks; the part snapshot is a duplicate view and must
+            # not project a second lifecycle.
+            return
+        _open_reasoning_block(reasoning_id, message_id, "part", raw_line)
+        return
+    # Terminal snapshot (completed/error/failed).
+    if reasoning_id in _STATE["reasoning_blocks"]:
+        _close_reasoning_block(reasoning_id, raw_line)
+        return
+    if message_id in _STATE["reasoning_durable_messages"]:
+        # Durable-covered messages may end parts whose start was suppressed;
+        # their lifecycle closes through the durable end instead.
+        return
+    # Already-finished first snapshot: no start may be fabricated.
+    _record_orphan_reasoning_end(reasoning_id, message_id, "part", raw_line)
+
+
 def _handle_message_part_updated(properties: dict, raw_line: int) -> None:
     part = properties.get("part") if isinstance(properties.get("part"), dict) else {}
     part_type = part.get("type")
@@ -1224,13 +1500,7 @@ def _handle_message_part_updated(properties: dict, raw_line: int) -> None:
             state["text"] = text
             _refresh_text()
     elif part_type == "reasoning":
-        # OpenCode reasoning parts are model-internal content. Preserve the
-        # fact that the part was observed without projecting hidden reasoning.
-        _emit(
-            "diagnostic",
-            {"code": "hidden_reasoning_omitted", "message": "OpenCode reasoning omitted"},
-            raw_line,
-        )
+        _handle_reasoning_part(properties, part, raw_line)
     elif part_type == "retry":
         message = part.get("error") or part.get("message") or "OpenCode provider retry"
         error_message, status_code = _error_message(message, "OpenCode provider retry")
@@ -1322,6 +1592,11 @@ def _handle_session_idle(properties: dict, raw_line: int) -> None:
             }
             _finalize_terminal()
             return
+        # session.idle closes the turn. Reasoning blocks that never delivered
+        # their own end must not be completed retroactively (session.idle is
+        # not a block-end signal, plan §4.4): interrupt them so no placeholder
+        # keeps spinning after the run settled cleanly.
+        _interrupt_open_reasoning("idle_without_block_end", raw_line)
         _emit("message.completed", {"message_id": final_message.get("id"), "text": final_text}, raw_line)
         _emit(
             "agent_settled",

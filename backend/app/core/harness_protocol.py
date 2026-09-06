@@ -76,6 +76,7 @@ KNOWN_EVENT_TYPES = frozenset(
         "message.completed",
         "reasoning_summary.delta",
         "reasoning_summary.completed",
+        "reasoning_summary.interrupted",
         "reasoning_summary.started",
         "tool.started",
         "tool.completed",
@@ -226,6 +227,19 @@ def _validate_event_payload(event_type: str, payload: Mapping[str, Any]) -> None
         if not isinstance(reasoning_id, str) or not reasoning_id.strip():
             raise HarnessProtocolError(
                 "reasoning_summary.started requires a non-empty reasoning_id"
+            )
+    elif event_type == "reasoning_summary.interrupted":
+        reasoning_id = payload.get("reasoning_id")
+        if not isinstance(reasoning_id, str) or not reasoning_id.strip():
+            raise HarnessProtocolError(
+                "reasoning_summary.interrupted requires a non-empty reasoning_id"
+            )
+        reason = payload.get("reason")
+        if reason is not None and (
+            not isinstance(reason, str) or not reason.strip() or len(reason) > 200
+        ):
+            raise HarnessProtocolError(
+                "reasoning_summary.interrupted reason must be a short string"
             )
     elif event_type == "run.failed":
         if payload.get("status") not in {"failed", "cancelled", "protocol_error"}:

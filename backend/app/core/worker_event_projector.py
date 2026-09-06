@@ -418,38 +418,40 @@ class WorkerEventProjector:
         elif event_type == "reasoning_summary.delta":
             self._reasoning_parts.append(_text(payload.get("text")))
         elif event_type == "reasoning_summary.started":
-            # A fresh block opens a placeholder row immediately. If the attempt
-            # still has an open row from an earlier block whose completion was
-            # never observed, close that row as interrupted first so it cannot
-            # keep counting on the page.
-            await self._interrupt_thinking_rows(
+            # One placeholder row per (task, attempt, reasoning_id). Repeated
+            # starts are idempotent: no second row, no started_at reset. Block
+            # endings are the adapters' own signals; starting a new block never
+            # infers the end of a different one.
+            reasoning_id = str(payload.get("reasoning_id") or "")
+            existing = await self._find_thinking_row(
                 db=db,
                 task_id=task_id,
                 attempt_id=ingest.attempt.attempt_id,
-                observed_at=normalized["occurred_at"],
+                reasoning_id=reasoning_id,
             )
-            db.add(
-                TaskLog(
-                    task_id=task_id,
-                    log_level="INFO",
-                    message="",
-                    log_type="thinking",
-                    log_metadata=_dumps(
-                        {
-                            "attempt_id": ingest.attempt.attempt_id,
-                            "reasoning_id": str(payload.get("reasoning_id") or ""),
-                            "status": _THINKING_STATUS_IN_PROGRESS,
-                            "started_at": normalized["occurred_at"],
-                            "ended_at": None,
-                            "duration_ms": None,
-                            "payload_id": None,
-                            "preview": "",
-                            "char_count": 0,
-                            "truncated": False,
-                        }
-                    ),
+            if existing is None:
+                db.add(
+                    TaskLog(
+                        task_id=task_id,
+                        log_level="INFO",
+                        message="",
+                        log_type="thinking",
+                        log_metadata=_dumps(
+                            {
+                                "attempt_id": ingest.attempt.attempt_id,
+                                "reasoning_id": reasoning_id,
+                                "status": _THINKING_STATUS_IN_PROGRESS,
+                                "started_at": normalized["occurred_at"],
+                                "ended_at": None,
+                                "duration_ms": None,
+                                "payload_id": None,
+                                "preview": "",
+                                "char_count": 0,
+                                "truncated": False,
+                            }
+                        ),
+                    )
                 )
-            )
         elif event_type == "reasoning_summary.completed":
             reasoning_id = payload.get("reasoning_id")
             paired_row = None
@@ -461,29 +463,72 @@ class WorkerEventProjector:
                     reasoning_id=reasoning_id,
                 )
             if paired_row is not None:
-                # Finalize the started placeholder in place: same TaskLog row,
-                # payload created once for non-empty content, empty content
-                # still closes the row (no payload_id).
-                await self._finalize_thinking_row(
-                    db=db,
-                    task_id=task_id,
-                    log=paired_row,
-                    text=_text(payload.get("text")),
-                    occurred_at=normalized["occurred_at"],
-                )
+                # Idempotent: an already-completed block is never finalized
+                # twice (no second payload, no timestamp reset).
+                metadata = self._thinking_metadata(paired_row)
+                if metadata.get("status") != _THINKING_STATUS_COMPLETED:
+                    await self._finalize_thinking_row(
+                        db=db,
+                        task_id=task_id,
+                        log=paired_row,
+                        text=_text(payload.get("text")),
+                        occurred_at=normalized["occurred_at"],
+                    )
             else:
                 # No observed start (standalone completion / replay that never
                 # saw the start): static content row, no lifecycle fields, and
-                # no fabricated duration.
+                # no fabricated duration. Empty orphan completions record only
+                # a diagnostic, never an activity row.
                 text = _text(payload.get("text")) or "".join(self._reasoning_parts)
                 self._reasoning_parts.clear()
-                await self._payload_log(
+                if not text:
+                    db.add(
+                        TaskLog(
+                            task_id=task_id,
+                            log_level="WARNING",
+                            message="Canonical reasoning completion has no matching start",
+                            log_type="diagnostic",
+                            log_metadata=_dumps(
+                                {
+                                    "code": "reasoning_start_missing",
+                                    "reasoning_id": reasoning_id
+                                    if isinstance(reasoning_id, str)
+                                    else None,
+                                }
+                            ),
+                        )
+                    )
+                else:
+                    await self._payload_log(
+                        db=db,
+                        task_id=task_id,
+                        payload_kind="thinking",
+                        log_type="thinking",
+                        text=text,
+                    )
+        elif event_type == "reasoning_summary.interrupted":
+            # Close exactly the addressed open block. Other blocks and rows
+            # that are already completed/interrupted stay untouched. The
+            # observed event time is not a precise thinking duration.
+            reasoning_id = payload.get("reasoning_id")
+            if isinstance(reasoning_id, str) and reasoning_id.strip():
+                row = await self._find_thinking_row(
                     db=db,
                     task_id=task_id,
-                    payload_kind="thinking",
-                    log_type="thinking",
-                    text=text,
+                    attempt_id=ingest.attempt.attempt_id,
+                    reasoning_id=reasoning_id,
                 )
+                if row is not None:
+                    metadata = self._thinking_metadata(row)
+                    if metadata.get("status") == _THINKING_STATUS_IN_PROGRESS:
+                        metadata.update(
+                            {
+                                "status": _THINKING_STATUS_INTERRUPTED,
+                                "ended_at": normalized["occurred_at"],
+                                "duration_ms": None,
+                            }
+                        )
+                        row.log_metadata = _dumps(metadata)
         elif event_type == "tool.started":
             await self._project_tool_started(task_id=task_id, payload=payload, db=db)
         elif event_type == "tool.completed":

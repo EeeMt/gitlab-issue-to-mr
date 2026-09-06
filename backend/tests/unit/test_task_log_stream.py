@@ -308,3 +308,40 @@ class TaskLogStreamTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    async def test_two_pending_blocks_each_push_own_final_update(self):
+        """Multiple in-progress rows are tracked independently: completing one
+        pushes only its update; the other stays pending until it finalizes."""
+        await self._seed()
+        await self._add_log(task_id=1, log_type="thinking", metadata=self._metadata(reasoning_id="pi-thinking-1"))
+        await self._add_log(task_id=1, log_type="thinking", metadata=self._metadata(reasoning_id="pi-thinking-2"))
+
+        collected: dict[str, list] = {"frames": []}
+        frames_seen = 0
+
+        async def drive():
+            nonlocal frames_seen
+            async for frame in generate_task_log_events(
+                1,
+                0,
+                session_factory=self.session_factory,
+                sleep=_no_sleep,
+                logger=MagicMock(),
+            ):
+                frames_seen += 1
+                if frames_seen == 1:
+                    await self._finish_thinking(row_id=1, status="completed")
+                elif frames_seen == 2:
+                    await self._finish_thinking(row_id=2, status="interrupted")
+                    await self._set_task_status(TaskStatus.COMPLETED)
+                collected["frames"].append(frame)
+
+        await drive()
+        events = _parse_frames(collected["frames"])
+        names = [name for name, _ in events]
+        # batch, update(1 completed), update(2 interrupted), done
+        assert names == ["batch", "update", "update", "done"], names
+        assert events[1][1]["id"] == 1
+        assert events[1][1]["metadata"]["status"] == "completed"
+        assert events[2][1]["id"] == 2
+        assert events[2][1]["metadata"]["status"] == "interrupted"

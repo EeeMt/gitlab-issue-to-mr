@@ -91,7 +91,7 @@ run_text()?               # 可选，Claude/Codex 兼容路径
 
 ### 3.2 Event type 词汇（冻结）
 
-**V1 继承类型（行为不变）**：`run.started`、`model.resolved`、`message.delta`、`message.completed`、`reasoning_summary.delta`、`reasoning_summary.completed`、`reasoning_summary.started`、`tool.started`、`tool.completed`、`context.compacted`、`provider.retry`、`usage.updated`、`usage.final`、`harness.completed`、`harness.failed`、`delivery.started`、`delivery.completed`、`delivery.failed`、`worker.finalization`、`run.completed`、`run.failed`、`diagnostic`。
+**V1 继承类型（行为不变）**：`run.started`、`model.resolved`、`message.delta`、`message.completed`、`reasoning_summary.delta`、`reasoning_summary.completed`、`reasoning_summary.interrupted`、`reasoning_summary.started`、`tool.started`、`tool.completed`、`context.compacted`、`provider.retry`、`usage.updated`、`usage.final`、`harness.completed`、`harness.failed`、`delivery.started`、`delivery.completed`、`delivery.failed`、`worker.finalization`、`run.completed`、`run.failed`、`diagnostic`。
 
 **V2 新增控制事件（3 个，冻结）**
 
