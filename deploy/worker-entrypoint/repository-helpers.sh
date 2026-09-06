@@ -4,108 +4,13 @@ repo_log() {
     printf '[repo] %s\n' "$*"
 }
 
-repo_work_branch_ahead_of_base() {
-    # True when the local work branch gained commits since the task started —
-    # e.g. the harness (Codex) committed changes itself and possibly already
-    # pushed them. The baseline is the work-branch head observed during repo
-    # preparation, NOT the base branch, so a pre-existing commit from an
-    # earlier task on the same branch is not mistaken for this task's work.
-    # When the work branch did not exist on the remote at preparation time
-    # (REPO_REMOTE_WORK_SHA unset), fall back to the base branch: any local
-    # commit ahead of the base is this task's own delivery.
-    local count baseline
-    baseline="${REPO_REMOTE_WORK_SHA:-}"
-    if [ -z "${baseline}" ]; then
-        baseline="refs/remotes/origin/${BASE_BRANCH:-main}"
-    fi
-    count=$(codify_run_shell "cd /workspace && git rev-list --count '${baseline}'..HEAD 2>/dev/null" 2>/dev/null || echo 0)
-    [ -n "${count}" ] && [ "${count}" -gt 0 ] 2>/dev/null
-}
+# ---------------------------------------------------------------------------
+# Git-delivery reconciliation: pinned start points, fact collection, remote
+# verification and safe fast-forward publishing. Facts are structured by
+# git-delivery.py; the shell drives network operations (fetch/push) that need
+# the task credentials and records the outcome back into the snapshot.
+# ---------------------------------------------------------------------------
 
-repo_has_unpublished_local_head() {
-    local local_sha unpublished_sha
-    local_sha=$(codify_run_shell 'cd /workspace && git rev-parse HEAD' 2>/dev/null || true)
-    unpublished_sha=$(
-        codify_run_shell 'cd /workspace && git config --get codify.unpublishedPushSha' \
-            2>/dev/null || true
-    )
-    if [ -n "${local_sha}" ] && [ "${unpublished_sha}" = "${local_sha}" ]; then
-        return 0
-    fi
-
-    case "${REPO_WORK_BRANCH_RELATION:-}" in
-        local_ahead) return 0 ;;
-        remote_missing)
-            if [ -n "${local_sha}" ] \
-                && [ "${local_sha}" != "${REPO_REMOTE_BASE_SHA:-}" ] \
-                && codify_run_shell 'cd /workspace && git merge-base --is-ancestor "refs/remotes/origin/${BASE_BRANCH}" HEAD'; then
-                return 0
-            fi
-            return 1
-            ;;
-        *) return 1 ;;
-    esac
-}
-
-repo_push_work_branch_with_lease() {
-    echo "Pushing to remote..."
-    codify_run_shell 'cd /workspace && git remote set-url origin "${GIT_REPO_URL}"'
-    codify_run_shell 'cd /workspace && git config --local http.extraHeader "PRIVATE-TOKEN: ${GITLAB_TOKEN}"'
-    LOCAL_PUSH_SHA=$(codify_run_shell 'cd /workspace && git rev-parse HEAD')
-    export LOCAL_PUSH_SHA
-
-    if [ -n "${REPO_REMOTE_WORK_SHA}" ] \
-        && ! codify_run_shell 'cd /workspace && git merge-base --is-ancestor "${REPO_REMOTE_WORK_SHA}" HEAD'; then
-        repo_log "error push_blocked reason=local_history_rewritten prepared_remote=${REPO_REMOTE_WORK_SHA} local=${LOCAL_PUSH_SHA}"
-        echo "ERROR: Local work-branch history no longer contains the remote tip observed at task start; refusing to push"
-        return 1
-    fi
-
-    codify_run_shell 'cd /workspace && git config codify.unpublishedPushSha "${LOCAL_PUSH_SHA}"'
-    set +e
-    codify_run_shell 'cd /workspace && GIT_TERMINAL_PROMPT=0 git push -u --force-with-lease="refs/heads/${BRANCH_NAME}:${REPO_REMOTE_WORK_SHA}" origin "${BRANCH_NAME}"'
-    local push_result=$?
-    set -e
-    if [ "${push_result}" -eq 0 ]; then
-        codify_run_shell 'cd /workspace && git config --unset-all codify.unpublishedPushSha || true'
-        REPO_REMOTE_WORK_SHA="${LOCAL_PUSH_SHA}"
-        export REPO_REMOTE_WORK_SHA
-        return 0
-    fi
-
-    set +e
-    local current_remote_refs
-    current_remote_refs=$(
-        codify_run_shell 'cd /workspace && git ls-remote --heads origin "refs/heads/${BRANCH_NAME}"' 2>/dev/null
-    )
-    local remote_query_result=$?
-    set -e
-    local current_remote_work_sha=""
-    if [ "${remote_query_result}" -eq 0 ]; then
-        current_remote_work_sha=$(
-            printf '%s\n' "${current_remote_refs}" \
-                | awk -v ref="refs/heads/${BRANCH_NAME}" '$2 == ref {print $1; exit}'
-        )
-    fi
-
-    if [ "${remote_query_result}" -ne 0 ]; then
-        repo_log "error push_failed exit=${push_result} remote_query=failed local=${LOCAL_PUSH_SHA}"
-    elif [ -n "${current_remote_work_sha}" ] \
-        && [ "${current_remote_work_sha}" = "${LOCAL_PUSH_SHA}" ]; then
-        repo_log "warning push_recovered result=remote_matches_local exit=${push_result} remote=${current_remote_work_sha} local=${LOCAL_PUSH_SHA}"
-        echo "Push command returned ${push_result}, but the remote branch already matches the local commit; continuing"
-        codify_run_shell 'cd /workspace && git config --unset-all codify.unpublishedPushSha || true'
-        REPO_REMOTE_WORK_SHA="${LOCAL_PUSH_SHA}"
-        export REPO_REMOTE_WORK_SHA
-        return 0
-    elif [ "${current_remote_work_sha:-missing}" != "${REPO_REMOTE_WORK_SHA:-missing}" ]; then
-        repo_log "error push_rejected reason=remote_changed prepared_remote=${REPO_REMOTE_WORK_SHA:-missing} current_remote=${current_remote_work_sha:-missing} local=${LOCAL_PUSH_SHA:-unknown}"
-        echo "ERROR: Remote work branch changed while this task was running; refusing to overwrite the remote branch"
-    else
-        repo_log "error push_failed exit=${push_result} remote=${current_remote_work_sha:-missing} local=${LOCAL_PUSH_SHA:-unknown}"
-    fi
-    return "${push_result}"
-}
 
 repo_now_ms() {
     local now

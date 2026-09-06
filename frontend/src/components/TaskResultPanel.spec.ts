@@ -376,4 +376,23 @@ describe('TaskResultPanel', () => {
     expect(summaryMermaidSvg).toContain('height: auto;')
     expect(mermaidModalViewport).toContain('height: 0;')
   })
+
+  it('renders the git delivery block with honest stats, push chips, and copyable commit rows', () => {
+    const gitDelivery = cssBlock('.git-delivery')
+    const pushOk = cssBlock('.git-delivery__push--ok')
+    const pushFailed = cssBlock('.git-delivery__push--failed')
+    const pushError = cssBlock('.git-delivery__push-error')
+    const commitSubject = cssBlock('.git-delivery__commit-subject')
+
+    expect(taskResultPanelSource).toContain('v-if="gitDelivery"')
+    expect(taskResultPanelSource).toContain('class="git-delivery__commit-sha"')
+    expect(taskResultPanelSource).toContain("t('taskView.gitDeliveryCommits', { count:")
+    expect(taskResultPanelSource).toContain("gitDeliveryStatsUnavailable")
+    expect(gitDelivery).toContain('min-width: 0;')
+    expect(pushOk).toContain('color: #18a058;')
+    expect(pushFailed).toContain('color: #d03050;')
+    expect(pushError).toContain('overflow-wrap: anywhere;')
+    expect(commitSubject).toContain('overflow-wrap: anywhere;')
+    expect(commitSubject).toContain('text-overflow: ellipsis;')
+  })
 })

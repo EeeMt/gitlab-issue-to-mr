@@ -23,6 +23,7 @@ from app.core.task_event_archive import archive_bundle_name
 from app.core.task_failure_details import read_archived_harness_failure_detail
 from app.core.usage_limits import upsert_task_usage_ledger
 from app.core.utcnow import utcnow
+from app.core.worker_git_delivery import normalize_git_delivery
 from app.models import Issue, Task, TaskLog, TaskRunArchive, TaskStatus
 
 logger = logging.getLogger(__name__)
@@ -181,9 +182,19 @@ async def update_task_stats_from_logs_or_api(
 ) -> None:
     """Update task with change statistics from logs or GitLab API."""
     if structured_diff:
-        additions = int(structured_diff.get("additions") or 0)
-        deletions = int(structured_diff.get("deletions") or 0)
-        total = int(structured_diff.get("total") or (additions + deletions))
+        raw_additions = structured_diff.get("additions")
+        raw_deletions = structured_diff.get("deletions")
+        raw_total = structured_diff.get("total")
+        if raw_additions is None and raw_deletions is None and raw_total is None:
+            # Statistics could not be collected (e.g. missing blobs in a
+            # partial clone): never persist fabricated zeros.
+            logger.warning(
+                f"[Task {task.id}] Change statistics were not collected; keeping existing stats"
+            )
+            return
+        additions = int(raw_additions if raw_additions is not None else 0)
+        deletions = int(raw_deletions if raw_deletions is not None else 0)
+        total = int(raw_total if raw_total is not None else (additions + deletions))
         error = validate_change_statistics(additions, deletions, total)
         if error is not None:
             logger.warning(
@@ -341,6 +352,35 @@ async def parse_task_result(
         task.model_name = model
         logger.info(f"[Task {task.id}] Model: {model}")
 
+    # Validate the worker's git_delivery contract object (present only on new
+    # Runtime Bundles). The normalized form is stashed on the task so the
+    # container metadata merge cannot overwrite confirmed canonical facts.
+    git_delivery_raw = finalization_meta.get("git_delivery")
+    git_delivery = None
+    git_delivery_error = ""
+    if "git_delivery" in finalization_meta:
+        if git_delivery_raw is None:
+            git_delivery_error = "git_delivery must be an object"
+        else:
+            git_delivery, git_delivery_error = normalize_git_delivery(
+                git_delivery_raw,
+                task_id=task.id,
+                sanitize_sensitive_data=sanitize_sensitive_data,
+            )
+            if git_delivery is not None:
+                top_commit_sha = str(finalization_meta.get("commit_sha") or "").strip()
+                if top_commit_sha and git_delivery.get("head_sha") != top_commit_sha:
+                    git_delivery = None
+                    git_delivery_error = (
+                        "worker.finalization commit_sha projection does not match "
+                        "git_delivery.head_sha"
+                    )
+        if git_delivery_error:
+            logger.warning(
+                f"[Task {task.id}] worker.finalization git_delivery rejected: {git_delivery_error}"
+            )
+    task._canonical_git_delivery = git_delivery
+
     commit_sha = str(finalization_meta.get("commit_sha") or "").strip()
     if commit_sha:
         task.commit_sha = commit_sha
@@ -374,11 +414,37 @@ async def parse_task_result(
         task.status = TaskStatus.FAILED
         task.completed_at = utcnow()
         task.error_message = v2_result_error
+    elif terminal_type == "run.completed" and git_delivery_error:
+        # Contradictory delivery data must never decide a completed delivery:
+        # fail the task through the existing protocol-error path instead.
+        task.status = TaskStatus.FAILED
+        task.completed_at = utcnow()
+        task.error_message = (
+            f"protocol_error: worker.finalization git_delivery rejected: {git_delivery_error}"
+        )
     elif terminal_type == "run.completed":
         task.status = TaskStatus.COMPLETED
         task.completed_at = utcnow()
         await parse_mr_from_logs(task, logs, gitlab_client)
-        structured_diff = finalization_meta.get("diff") if isinstance(finalization_meta.get("diff"), dict) else None
+        if git_delivery is not None and isinstance(git_delivery.get("diff"), dict):
+            contract_diff = git_delivery["diff"]
+            stats = {
+                key: contract_diff.get(key)
+                for key in ("additions", "deletions", "total")
+            }
+            if (
+                stats["additions"] is None
+                and stats["deletions"] is None
+                and stats["total"] is None
+            ):
+                stats = None  # uncollected: never zero-fill
+            structured_diff = stats
+        else:
+            structured_diff = (
+                finalization_meta.get("diff")
+                if isinstance(finalization_meta.get("diff"), dict)
+                else None
+            )
         await update_task_stats_from_logs_or_api(task, logs, gitlab_client, issue, structured_diff)
     elif terminal_type == "run.failed":
         failure = run_result_meta.get("failure")

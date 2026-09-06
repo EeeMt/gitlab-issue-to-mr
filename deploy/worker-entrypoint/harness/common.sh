@@ -159,7 +159,25 @@ codify_harness_ensure_result() {
 
 codify_harness_finalize_attempt() {
     local exit_code="${1:-1}"
-    local delivery_payload finalization_payload terminal_payload
+    local delivery_payload finalization_payload terminal_payload git_snapshot
+    # Preserve local Git delivery facts (commits/diff only; never a new commit
+    # or push) before this attempt's canonical events are emitted. Runs on any
+    # failed exit whose normal delivery path never produced a snapshot.
+    if [ "${exit_code}" -ne 0 ]; then
+        if declare -F repo_delivery_collect_facts_on_exit >/dev/null 2>&1; then
+            repo_delivery_collect_facts_on_exit || true
+        fi
+    fi
+    # The delivery snapshot written by main.sh is the single source for the
+    # finalization projection; the legacy env fallback only covers attempts
+    # that never reached the Git delivery path (e.g. harness init failure).
+    git_snapshot=""
+    if [ -n "${GIT_DELIVERY_SNAPSHOT_FILE:-}" ] && [ -s "${GIT_DELIVERY_SNAPSHOT_FILE}" ]; then
+        git_snapshot=$(cat "${GIT_DELIVERY_SNAPSHOT_FILE}" 2>/dev/null || true)
+        if ! printf '%s' "${git_snapshot}" | jq -e             'type == "object" and ((.git_delivery // {}) | type) == "object"'             >/dev/null 2>&1; then
+            git_snapshot=""
+        fi
+    fi
     if ! codify_event_type_exists "run.started"; then
         echo "Canonical attempt has no run.started event; refusing terminal synthesis" >&2
         codify_harness_ensure_result "${exit_code}"
@@ -185,25 +203,50 @@ codify_harness_finalize_attempt() {
     codify_harness_ensure_result "${exit_code}"
 
     if [ "${CODIFY_DELIVERY_STARTED}" -eq 1 ]; then
-        delivery_payload=$(jq -nc \
-            --argjson exit_code "${exit_code}" \
-            --arg commit_sha "${COMMIT_SHA:-}" \
-            '{exit_code:$exit_code,commit_sha:(if $commit_sha == "" then null else $commit_sha end)}')
+        if [ -n "${git_snapshot}" ]; then
+            delivery_payload=$(printf '%s' "${git_snapshot}" | jq -c \
+                --argjson exit_code "${exit_code}" \
+                '{exit_code:$exit_code,commit_sha:.commit_sha,git_delivery:.git_delivery}')
+        else
+            delivery_payload=$(jq -nc \
+                --argjson exit_code "${exit_code}" \
+                --arg commit_sha "${COMMIT_SHA:-}" \
+                '{exit_code:$exit_code,commit_sha:(if $commit_sha == "" then null else $commit_sha end)}')
+        fi
         if [ "${exit_code}" -eq 0 ]; then
             codify_emit_event "delivery.completed" "${delivery_payload}"
         else
+            if [ -n "${git_snapshot}" ]; then
+                local delivery_error_code delivery_error_message
+                delivery_error_code=$(printf '%s' "${git_snapshot}" \
+                    | jq -r '.git_delivery.push.error.code // empty')
+                if [ -n "${delivery_error_code}" ]; then
+                    delivery_error_message=$(printf '%s' "${git_snapshot}" \
+                        | jq -r '.git_delivery.push.error.message // ""')
+                    delivery_payload=$(printf '%s' "${delivery_payload}" | jq -c \
+                        --arg code "${delivery_error_code}" \
+                        --arg message "${delivery_error_message}" \
+                        '.failure = {code:$code,message:$message}')
+                fi
+            fi
             codify_emit_event "delivery.failed" "${delivery_payload}"
         fi
     fi
 
-    finalization_payload=$(jq -nc \
-        --argjson exit_code "${exit_code}" \
-        --arg commit_sha "${COMMIT_SHA:-}" \
-        --arg commit_message "${FINAL_COMMIT_MESSAGE:-}" \
-        --argjson additions "${ADDITIONS:-0}" \
-        --argjson deletions "${DELETIONS:-0}" \
-        --argjson total "${TOTAL_CHANGES:-0}" \
-        '{exit_code:$exit_code,commit_sha:(if $commit_sha == "" then null else $commit_sha end),commit_message:$commit_message,diff:{additions:$additions,deletions:$deletions,total:$total}}')
+    if [ -n "${git_snapshot}" ]; then
+        finalization_payload=$(printf '%s' "${git_snapshot}" | jq -c \
+            --argjson exit_code "${exit_code}" \
+            '{exit_code:$exit_code,commit_sha:.commit_sha,commit_message:.commit_message,diff:.diff,git_delivery:.git_delivery}')
+    else
+        finalization_payload=$(jq -nc \
+            --argjson exit_code "${exit_code}" \
+            --arg commit_sha "${COMMIT_SHA:-}" \
+            --arg commit_message "${FINAL_COMMIT_MESSAGE:-}" \
+            --argjson additions "${ADDITIONS:-0}" \
+            --argjson deletions "${DELETIONS:-0}" \
+            --argjson total "${TOTAL_CHANGES:-0}" \
+            '{exit_code:$exit_code,commit_sha:(if $commit_sha == "" then null else $commit_sha end),commit_message:$commit_message,diff:{additions:$additions,deletions:$deletions,total:$total}}')
+    fi
     codify_emit_event "worker.finalization" "${finalization_payload}"
 
     if [ "${exit_code}" -eq 0 ] \
@@ -233,6 +276,13 @@ codify_harness_finalize_attempt() {
                 failure_kind="cancelled"
             fi
             failure_message="$(codify_harness_last_failure_message)"
+            if [ -z "${failure_message}" ] && [ -n "${git_snapshot}" ]; then
+                failure_message=$(printf '%s' "${git_snapshot}" \
+                    | jq -r '.git_delivery.push.error.message // empty')
+                if [ -n "${failure_message}" ]; then
+                    failure_kind="engine_error"
+                fi
+            fi
         fi
         failure_kind="${failure_kind:-engine_error}"
         case "${failure_kind}" in

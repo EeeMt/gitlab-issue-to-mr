@@ -34,6 +34,7 @@ export const createMockTask = (overrides: Partial<Task> = {}): Task => ({
   container_id: null,
   container_name: null,
   commit_sha: null,
+  git_delivery: null,
   error_message: null,
   additions: 0,
   deletions: 0,

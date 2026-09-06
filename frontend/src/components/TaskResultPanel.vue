@@ -163,12 +163,102 @@
       </div>
 
       <!-- Commit Record Card -->
-      <div v-if="task.commit_sha || task.commit_message || hasChanges" class="result-card result-card--commit">
+      <div
+        v-if="task.commit_sha || task.commit_message || hasChanges || task.git_delivery"
+        class="result-card result-card--commit"
+      >
         <div class="result-card__title">
           <n-icon size="16" class="result-card__icon result-card__icon--commit"><GitCommitOutline /></n-icon>
           {{ t('taskView.commitRecord') }}
         </div>
         <div class="result-card__content">
+          <div v-if="gitDelivery" class="git-delivery">
+            <div class="git-delivery__meta">
+              <span v-if="gitDeliveryHeadSha" class="git-delivery__head">
+                <a
+                  v-if="gitDeliveryCommitUrl"
+                  :href="gitDeliveryCommitUrl"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="commit-sha-chip commit-sha-chip--link"
+                  :title="gitDeliveryHeadSha"
+                >
+                  <n-icon size="12"><GitCommitOutline /></n-icon>
+                  <span>{{ gitDeliveryHeadSha.slice(0, 8) }}</span>
+                  <n-icon size="11" class="commit-sha-chip__ext"><OpenOutline /></n-icon>
+                </a>
+                <button
+                  v-else
+                  type="button"
+                  class="commit-sha-chip git-delivery__sha-copy"
+                  :title="gitDeliveryHeadSha"
+                  @click="copySha(gitDeliveryHeadSha)"
+                >
+                  <n-icon size="12"><GitCommitOutline /></n-icon>
+                  <span>{{ gitDeliveryHeadSha.slice(0, 8) }}</span>
+                </button>
+                <span v-if="copiedSha === gitDeliveryHeadSha" class="git-delivery__copied">{{ t('taskView.copied') }}</span>
+              </span>
+              <span v-if="gitDeliveryDiffStats" class="git-delivery__diff">
+                <template v-if="gitDeliveryDiffStats.available">
+                  <span class="changes-add">+{{ gitDeliveryDiffStats.additions }}</span>
+                  <span class="changes-del">-{{ gitDeliveryDiffStats.deletions }}</span>
+                </template>
+                <span v-else class="git-delivery__stats-unavailable">{{ t('taskView.gitDeliveryStatsUnavailable') }}</span>
+              </span>
+            </div>
+            <div v-if="gitDeliveryFilesSummary" class="git-delivery__files">{{ gitDeliveryFilesSummary }}</div>
+            <div v-if="gitDelivery?.push" class="git-delivery__push-row">
+              <span class="git-delivery__push-label">{{ t('taskView.gitDeliveryPush') }}</span>
+              <span class="git-delivery__push" :class="gitDeliveryPushClass">{{ pushStatusLabel(gitDelivery?.push?.status ?? 'not_attempted') }}</span>
+              <span v-if="gitDeliveryPushErrorMessage" class="git-delivery__push-error">{{ gitDeliveryPushErrorMessage }}</span>
+            </div>
+            <div v-if="gitDeliveryCommits.length > 0" class="git-delivery__section">
+              <div class="git-delivery__section-title">{{ t('taskView.gitDeliveryCommits', { count: gitDeliveryCommits.length }) }}</div>
+              <ul class="git-delivery__commit-list">
+                <li v-for="commit in visibleGitDeliveryCommits" :key="commit.sha" class="git-delivery__commit-row">
+                  <button
+                    type="button"
+                    class="git-delivery__commit-sha"
+                    :title="commit.sha"
+                    @click="copySha(commit.sha)"
+                  >{{ commit.sha.slice(0, 8) }}</button>
+                  <span class="git-delivery__commit-subject" :title="commit.subject">{{ commit.subject }}</span>
+                  <span v-if="copiedSha === commit.sha" class="git-delivery__copied git-delivery__copied--row">{{ t('taskView.copied') }}</span>
+                </li>
+              </ul>
+              <button
+                v-if="gitDeliveryCommits.length > 10"
+                type="button"
+                class="git-delivery__toggle"
+                :aria-expanded="commitsExpanded"
+                @click="commitsExpanded = !commitsExpanded"
+              >{{ commitsExpanded ? t('taskView.gitDeliveryCollapse') : t('taskView.gitDeliveryShowAll') }}</button>
+            </div>
+            <div v-if="gitDeliveryRecovered.length > 0" class="git-delivery__section">
+              <div class="git-delivery__section-title">{{ t('taskView.gitDeliveryRecovered', { count: gitDeliveryRecovered.length }) }}</div>
+              <ul class="git-delivery__commit-list">
+                <li v-for="commit in visibleGitDeliveryRecovered" :key="commit.sha" class="git-delivery__commit-row">
+                  <button
+                    type="button"
+                    class="git-delivery__commit-sha"
+                    :title="commit.sha"
+                    @click="copySha(commit.sha)"
+                  >{{ commit.sha.slice(0, 8) }}</button>
+                  <span class="git-delivery__commit-subject" :title="commit.subject">{{ commit.subject }}</span>
+                  <span v-if="copiedSha === commit.sha" class="git-delivery__copied git-delivery__copied--row">{{ t('taskView.copied') }}</span>
+                </li>
+              </ul>
+              <button
+                v-if="gitDeliveryRecovered.length > 10"
+                type="button"
+                class="git-delivery__toggle"
+                :aria-expanded="recoveredExpanded"
+                @click="recoveredExpanded = !recoveredExpanded"
+              >{{ recoveredExpanded ? t('taskView.gitDeliveryCollapse') : t('taskView.gitDeliveryShowAll') }}</button>
+            </div>
+          </div>
+          <template v-else>
           <div class="commit-meta">
             <a v-if="task.commit_sha && commitUrl" :href="commitUrl" target="_blank" rel="noopener noreferrer" class="commit-sha-chip commit-sha-chip--link">
               <n-icon size="12"><GitCommitOutline /></n-icon>
@@ -185,6 +275,7 @@
             </span>
           </div>
           <pre v-if="task.commit_message" class="commit-message">{{ task.commit_message }}</pre>
+          </template>
         </div>
       </div>
 
@@ -309,11 +400,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, toRef, watch } from 'vue'
-import { NCard, NIcon, NButton, NInputNumber, NModal, NScrollbar, NTooltip } from 'naive-ui'
+import { computed, onBeforeUnmount, ref, toRef, watch } from 'vue'
+import { NCard, NIcon, NButton, NInputNumber, NModal, NScrollbar, NTooltip, useMessage } from 'naive-ui'
 import { AlertCircleOutline, GitCommitOutline, OpenOutline, ChevronForward, ChatboxOutline, Checkmark, CopyOutline, ExpandOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
-import type { Task, TaskLog } from '../api'
+import type { Task, TaskGitDelivery, TaskGitDeliveryCommit, TaskLog } from '../api'
 import type { SummaryMermaidDiagram } from '../features/tasks/summaryMermaid'
 import { useSummaryMermaidViewer } from '../features/tasks/useSummaryMermaidViewer'
 import { useSummaryCollapseFloat } from '../features/tasks/useSummaryCollapseFloat'
@@ -469,6 +560,136 @@ const commitUrl = computed(() => {
 const hasChanges = computed(() =>
   props.task.additions !== undefined || props.task.deletions !== undefined
 )
+
+// git_delivery block — normalized delivery detail for this task (see backend contract).
+type GitDeliveryPushStatus = NonNullable<TaskGitDelivery['push']>['status']
+
+const message = useMessage()
+const gitDelivery = computed(() => (props.task.git_delivery ? props.task.git_delivery : null))
+const gitDeliveryHeadSha = computed(() => gitDelivery.value?.head_sha || null)
+const gitDeliveryCommitUrl = computed(() => gitDelivery.value?.commit_url || null)
+
+function commitRows(which: 'commits' | 'recovered'): TaskGitDeliveryCommit[] {
+  const rows = which === 'commits'
+    ? gitDelivery.value?.commits
+    : gitDelivery.value?.recovered_commits
+  if (!Array.isArray(rows) || rows.length === 0) return []
+  return rows
+}
+
+const gitDeliveryCommits = computed(() => commitRows('commits'))
+const gitDeliveryRecovered = computed(() => commitRows('recovered'))
+
+function visibleCommitRows(
+  rows: TaskGitDeliveryCommit[],
+  expanded: boolean
+): TaskGitDeliveryCommit[] {
+  if (rows.length <= 10 || expanded) return rows
+  return rows.slice(0, 10)
+}
+
+const commitsExpanded = ref(false)
+const recoveredExpanded = ref(false)
+const visibleGitDeliveryCommits = computed(() =>
+  visibleCommitRows(gitDeliveryCommits.value, commitsExpanded.value)
+)
+const visibleGitDeliveryRecovered = computed(() =>
+  visibleCommitRows(gitDeliveryRecovered.value, recoveredExpanded.value)
+)
+
+const gitDeliveryDiffStats = computed<{
+  available: boolean
+  additions: number | null
+  deletions: number | null
+} | null>(() => {
+  const diff = gitDelivery.value?.diff
+  if (!diff) return null
+  if (typeof diff.additions === 'number' && typeof diff.deletions === 'number') {
+    return { available: true, additions: diff.additions, deletions: diff.deletions }
+  }
+  return { available: false, additions: null, deletions: null }
+})
+
+const gitDeliveryFilesSummary = computed(() => {
+  const diff = gitDelivery.value?.diff
+  if (!diff) return ''
+  const newCount = diff.new_files?.length ?? 0
+  const modifiedCount = diff.modified_files?.length ?? 0
+  const deletedCount = diff.deleted_files?.length ?? 0
+  if (newCount === 0 && modifiedCount === 0 && deletedCount === 0) return ''
+  return t('taskView.gitDeliveryFilesSummary', { newCount, modifiedCount, deletedCount })
+})
+
+function pushStatusLabel(status: GitDeliveryPushStatus): string {
+  const labels: Record<GitDeliveryPushStatus, string> = {
+    pushed: t('taskView.gitDeliveryPushed'),
+    already_present: t('taskView.gitDeliveryAlreadyPresent'),
+    not_needed: t('taskView.gitDeliveryNotNeeded'),
+    not_attempted: t('taskView.gitDeliveryNotAttempted'),
+    failed: t('taskView.gitDeliveryFailed'),
+  }
+  return labels[status] ?? t('taskView.gitDeliveryFailed')
+}
+
+const gitDeliveryPushClass = computed(() => {
+  const status = gitDelivery.value?.push?.status
+  if (status === 'failed') return 'git-delivery__push--failed'
+  if (status === 'pushed' || status === 'already_present') return 'git-delivery__push--ok'
+  return ''
+})
+
+const gitDeliveryPushErrorMessage = computed(() => {
+  const errMessage = gitDelivery.value?.push?.error?.message
+  if (!errMessage) return ''
+  return errMessage.length > 300 ? `${errMessage.slice(0, 300)}…` : errMessage
+})
+
+const copiedSha = ref<string | null>(null)
+let copiedShaTimer: ReturnType<typeof setTimeout> | undefined
+
+function legacyCopyText(text: string): boolean {
+  try {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.setAttribute('readonly', '')
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    const copied = document.execCommand('copy')
+    document.body.removeChild(textarea)
+    return copied
+  } catch {
+    return false
+  }
+}
+
+async function copySha(sha: string | null) {
+  if (!sha) return
+  let copied = false
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(sha)
+      copied = true
+    } catch {
+      copied = false
+    }
+  }
+  if (!copied) copied = legacyCopyText(sha)
+  if (!copied) {
+    message.error(t('taskView.copyFailed'))
+    return
+  }
+  copiedSha.value = sha
+  if (copiedShaTimer) clearTimeout(copiedShaTimer)
+  copiedShaTimer = setTimeout(() => {
+    copiedSha.value = null
+  }, 2000)
+}
+
+onBeforeUnmount(() => {
+  if (copiedShaTimer) clearTimeout(copiedShaTimer)
+})
 
 </script>
 
@@ -715,6 +936,194 @@ const hasChanges = computed(() =>
   max-height: 160px;
   overflow-y: auto;
   background: transparent;
+}
+
+.git-delivery {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(59, 130, 246, 0.16);
+  border-radius: 8px;
+  background: rgba(59, 130, 246, 0.03);
+}
+
+.git-delivery__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  min-width: 0;
+}
+
+.git-delivery__head {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.git-delivery__sha-copy {
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.git-delivery__sha-copy:hover {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+.git-delivery__copied {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: #18a058;
+}
+
+.git-delivery__diff {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--n-font-family-mono, monospace);
+  font-variant-numeric: tabular-nums;
+}
+
+.git-delivery__stats-unavailable {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--n-text-color-3, #8a8f98);
+}
+
+.git-delivery__files {
+  font-size: 12px;
+  color: var(--n-text-color-3, #8a8f98);
+}
+
+.git-delivery__push-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  min-width: 0;
+}
+
+.git-delivery__push-label {
+  font-size: 12px;
+  color: var(--n-text-color-3, #8a8f98);
+}
+
+.git-delivery__push {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  background: rgba(15, 23, 42, 0.05);
+  color: var(--n-text-color-2, #555);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.git-delivery__push--ok {
+  border-color: rgba(24, 160, 88, 0.25);
+  background: rgba(24, 160, 88, 0.08);
+  color: #18a058;
+}
+
+.git-delivery__push--failed {
+  border-color: rgba(208, 48, 80, 0.22);
+  background: rgba(208, 48, 80, 0.07);
+  color: #d03050;
+}
+
+.git-delivery__push-error {
+  min-width: 0;
+  flex: 1 1 220px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #d03050;
+  overflow-wrap: anywhere;
+}
+
+.git-delivery__section {
+  min-width: 0;
+  padding-top: 8px;
+  border-top: 1px solid rgba(15, 23, 42, 0.07);
+}
+
+.git-delivery__section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--n-text-color-3, #666);
+  line-height: 1.5;
+  margin-bottom: 6px;
+}
+
+.git-delivery__commit-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.git-delivery__commit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 2px 0;
+  font-size: 13px;
+}
+
+.git-delivery__commit-sha {
+  flex: 0 0 auto;
+  font-family: var(--n-font-family-mono, monospace);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid rgba(59, 130, 246, 0.18);
+  background: rgba(59, 130, 246, 0.08);
+  color: var(--n-text-color-2, #555);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.git-delivery__commit-sha:hover {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+.git-delivery__commit-subject {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: anywhere;
+  color: var(--n-text-color-1, #333);
+}
+
+.git-delivery__copied--row {
+  font-size: 11px;
+}
+
+.git-delivery__toggle {
+  margin-top: 2px;
+  padding: 2px 6px;
+  border: 0;
+  background: transparent;
+  color: #3b82f6;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.git-delivery__toggle:hover {
+  text-decoration: underline;
 }
 
 /* Execution summary card */
@@ -1366,6 +1775,15 @@ const hasChanges = computed(() =>
   .summary-collapse-button {
     min-height: 44px;
     --n-height: 44px !important;
+  }
+
+  .git-delivery__sha-copy,
+  .git-delivery__commit-sha {
+    min-height: 44px;
+  }
+
+  .git-delivery__toggle {
+    min-height: 44px;
   }
 }
 

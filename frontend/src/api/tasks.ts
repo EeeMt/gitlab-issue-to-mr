@@ -63,6 +63,36 @@ export interface TaskSkillSnapshot {
   version_id: number
 }
 
+export interface TaskGitDeliveryCommit {
+  sha: string
+  subject: string
+}
+
+export interface TaskGitDelivery {
+  schema: string
+  attempt_id: string
+  branch: string
+  start_sha: string | null
+  start_remote_sha: string | null
+  head_sha: string | null
+  commits: TaskGitDeliveryCommit[] | null
+  recovered_commits: TaskGitDeliveryCommit[] | null
+  diff: {
+    additions: number | null
+    deletions: number | null
+    total: number | null
+    new_files: string[] | null
+    modified_files: string[] | null
+    deleted_files: string[] | null
+  } | null
+  push: {
+    status: 'not_needed' | 'not_attempted' | 'pushed' | 'already_present' | 'failed'
+    remote_sha: string | null
+    error: { code: string; message: string } | null
+  } | null
+  commit_url?: string | null
+}
+
 export interface Task {
   id: number
   issue_id: number
@@ -89,6 +119,7 @@ export interface Task {
   container_id: string | null
   container_name: string | null
   commit_sha: string | null
+  git_delivery?: TaskGitDelivery | null
   error_message: string | null
   failure_kind?: string | null
   failure_message?: string | null

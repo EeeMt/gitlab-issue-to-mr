@@ -576,3 +576,80 @@ def test_worker_runtime_summary_uses_snapshot_and_never_returns_environment_valu
     assert "docker_tls_key" not in response
     assert "/opt/java" not in repr(response)
     assert "top-secret" not in repr(response)
+
+
+def test_list_serializer_never_carries_git_delivery_or_worker_metadata() -> None:
+    """The full commit array stays detail-only: polling responses stay small."""
+    now = datetime(2026, 7, 4, 10, 0, 0)
+    task = Task(
+        id=12,
+        issue_id=7,
+        project_id=3,
+        user_prompt="p",
+        status=TaskStatus.COMPLETED,
+        priority=1,
+        is_retry=False,
+        retry_source_task_id=None,
+        trigger_source="manual",
+        ci_failure_run_id=None,
+        scheduled_at=None,
+        container_id=None,
+        commit_sha="a" * 40,
+        error_message=None,
+        additions=0,
+        deletions=0,
+        total_changes=0,
+        input_tokens=None,
+        output_tokens=None,
+        model_name=None,
+        commit_message="subject",
+        require_changes=False,
+        task_mode="execute",
+        session_mode="fresh",
+        input_session_id=None,
+        output_session_id=None,
+        provider_id=None,
+        worker_profile_id=None,
+        created_at=now,
+        updated_at=now,
+        started_at=None,
+        completed_at=None,
+        is_manually_overridden=False,
+        override_reason=None,
+    )
+    task.worker_metadata = {
+        "git_delivery": {
+            "schema": "codify.git-delivery.v1",
+            "attempt_id": "task-12-attempt-1",
+            "branch": "codify/issue-1",
+            "start_sha": "b" * 40,
+            "start_remote_sha": "c" * 40,
+            "head_sha": "a" * 40,
+            "commits": [{"sha": "a" * 40, "subject": "subject"}],
+            "recovered_commits": [],
+            "diff": {"additions": 1, "deletions": 1, "total": 2, "new_files": [], "modified_files": [], "deleted_files": []},
+            "push": {"status": "pushed", "remote_sha": "a" * 40, "error": None},
+        },
+        "overall_summary": "summary",
+    }
+    response = _serialize_task(
+        task,
+        {"project_name": "Codify", "project_path_with_namespace": "team/codify"},
+        SimpleNamespace(gitlab_url="https://gitlab.example.com"),
+        include_prompt_details=True,
+    )
+    assert "git_delivery" not in response
+    assert "worker_metadata" not in response
+    # The canonical columns remain the list-level projection.
+    assert response["commit_sha"] == "a" * 40
+
+
+def test_detail_handler_is_the_only_task_payload_carrying_git_delivery() -> None:
+    """Only the detail handler exposes the normalized git_delivery object."""
+    import app.api.tasks as tasks_module
+
+    get_task_source = inspect.getsource(tasks_module.get_task)
+    assert 'result_data["git_delivery"]' in get_task_source
+    assert 'git_delivery.get("commit_url")' in get_task_source or "commit_url" in get_task_source
+    list_source = inspect.getsource(tasks_module.list_tasks)
+    assert "git_delivery" not in list_source

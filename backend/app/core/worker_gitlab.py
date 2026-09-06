@@ -1,5 +1,6 @@
 """GitLab and notification helpers for worker execution."""
 
+import html
 import logging
 import re
 import time
@@ -363,6 +364,138 @@ def _extract_existing_overall_summary(description: str) -> str | None:
     return summary or None
 
 
+# ---------------------------------------------------------------------------
+# git_delivery-aware MR rendering. The normalized git_delivery object in task
+# worker_metadata is the single source for multi-commit delivery facts; legacy
+# single-SHA fields remain the fallback for tasks recorded before this
+# contract existed.
+# ---------------------------------------------------------------------------
+
+_GIT_DELIVERY_PUSH_LABELS = {
+    "pushed": "推送成功",
+    "already_present": "远端已包含",
+    "not_needed": "无变更，无需推送",
+    "not_attempted": "未尝试推送",
+    "failed": "推送失败（交付未确认）",
+}
+
+
+def _meta_git_delivery(meta: dict) -> dict:
+    value = meta.get("git_delivery")
+    return value if isinstance(value, dict) else {}
+
+
+def _gd_int(value) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _task_change_numbers(meta: dict, task: Task) -> tuple[int, int]:
+    """Net change numbers: git_delivery.diff first, then legacy metadata/columns."""
+    gd = _meta_git_delivery(meta)
+    diff = gd.get("diff")
+    if isinstance(diff, dict):
+        additions = _gd_int(diff.get("additions"))
+        deletions = _gd_int(diff.get("deletions"))
+        if additions is not None or deletions is not None:
+            return additions or 0, deletions or 0
+    additions = _gd_int(meta.get("additions"))
+    deletions = _gd_int(meta.get("deletions"))
+    if additions is None:
+        additions = _gd_int(getattr(task, "additions", None)) or 0
+    if deletions is None:
+        deletions = _gd_int(getattr(task, "deletions", None)) or 0
+    return additions or 0, deletions or 0
+
+
+def _escape_mr_text(value: str, *, table: bool = False) -> str:
+    value = html.escape(value)
+    value = value.replace("</details>", "&lt;/details&gt;")
+    if table:
+        value = value.replace("|", "\\|")
+    return value
+
+
+def _commit_subject_line(meta: dict, task: Task) -> str:
+    """First-line subject of the latest delivered commit for table/summary rows."""
+    gd = _meta_git_delivery(meta)
+    commits = gd.get("commits")
+    recovered = gd.get("recovered_commits")
+    if isinstance(commits, list) and commits:
+        latest = commits[-1]
+    elif isinstance(recovered, list) and recovered:
+        latest = recovered[-1]
+    else:
+        latest = None
+    if latest is not None and isinstance(latest.get("subject"), str):
+        return latest["subject"]
+    message = str(meta.get("commit_message") or getattr(task, "commit_message", None) or "—")
+    return message.split("\n")[0].strip()
+
+
+def _git_delivery_detail_lines(meta: dict) -> list[str]:
+    """Body lines describing the delivery contract when git_delivery exists."""
+    gd = _meta_git_delivery(meta)
+    if not gd:
+        return []
+    lines: list[str] = []
+    commits = gd.get("commits") if isinstance(gd.get("commits"), list) else []
+    recovered = (
+        gd.get("recovered_commits") if isinstance(gd.get("recovered_commits"), list) else []
+    )
+    if commits:
+        header = f"**本次提交（{len(commits)}）**"
+        lines.append(header)
+        lines.append("")
+        for commit in commits[:200]:
+            subject = _escape_mr_text(str(commit.get("subject") or ""))
+            sha = str(commit.get("sha") or "")[:12]
+            lines.append(f"- `{sha}` {subject}")
+        if len(commits) > 200:
+            lines.append(f"- ...共 {len(commits)} 个提交")
+        lines.append("")
+    if recovered:
+        lines.append(f"**已有提交补交/确认（{len(recovered)}）**")
+        lines.append("")
+        for commit in recovered[:200]:
+            subject = _escape_mr_text(str(commit.get("subject") or ""))
+            sha = str(commit.get("sha") or "")[:12]
+            lines.append(f"- `{sha}` {subject}")
+        lines.append("")
+    diff = gd.get("diff")
+    if isinstance(diff, dict):
+        additions = _gd_int(diff.get("additions"))
+        deletions = _gd_int(diff.get("deletions"))
+        stats_parts: list[str] = []
+        if additions is not None or deletions is not None:
+            stats_parts.append(f"+{additions or 0} -{deletions or 0}")
+        new_files = diff.get("new_files") if isinstance(diff.get("new_files"), list) else []
+        modified_files = (
+            diff.get("modified_files") if isinstance(diff.get("modified_files"), list) else []
+        )
+        deleted_files = (
+            diff.get("deleted_files") if isinstance(diff.get("deleted_files"), list) else []
+        )
+        if new_files or modified_files or deleted_files:
+            stats_parts.append(
+                f"新增 {len(new_files)} / 修改 {len(modified_files)} / 删除 {len(deleted_files)} 个文件"
+            )
+        if stats_parts:
+            lines.append(f"**净变更**：{'，'.join(stats_parts)}")
+            lines.append("")
+    push = gd.get("push")
+    if isinstance(push, dict):
+        status = str(push.get("status") or "")
+        label = _GIT_DELIVERY_PUSH_LABELS.get(status, "未知")
+        push_line = f"**推送**：{label}"
+        if status == "failed":
+            error = push.get("error")
+            if isinstance(error, dict) and error.get("message"):
+                push_line += f" — {_escape_mr_text(str(error['message'])[:500])}"
+        lines.append(push_line)
+        lines.append("")
+    return lines
+
+
 def _build_mr_description(
     issue: Issue,
     all_tasks: list,
@@ -416,15 +549,20 @@ def _build_mr_description(
     for t in all_tasks:
         icon = status_icons.get(t.status, "❓")
         status_label = t.status.value if t.status else "unknown"
-        # Prefer commit_message from metadata, fall back to DB field
+        # Prefer the git_delivery contract when present, fall back to legacy
+        # metadata/DB fields for tasks recorded before the contract existed.
         meta = metadata_map.get(t.id, {})
-        commit_msg = (meta.get("commit_message") or t.commit_message or "—").split("\n")[0].strip()
+        gd = _meta_git_delivery(meta)
+        commit_msg = _commit_subject_line(meta, t)
         if len(commit_msg) > 72:
             commit_msg = commit_msg[:72] + "..."
-        commit_msg = commit_msg.replace("|", "\\|")
-        add = int(meta.get("additions") or t.additions or 0)
-        del_ = int(meta.get("deletions") or t.deletions or 0)
+        commit_msg = _escape_mr_text(commit_msg, table=True)
+        add, del_ = _task_change_numbers(meta, t)
         change_str = f"+{add} -{del_}" if (add or del_) else "—"
+        push = gd.get("push") if isinstance(gd.get("push"), dict) else None
+        push_status = str(push.get("status") or "") if push else ""
+        if push_status == "failed":
+            status_label = f"{status_label}（交付未确认）"
         lines.append(f"| {t.id} | {icon} {status_label} | {commit_msg} | {change_str} |")
 
     lines.append("")
@@ -435,15 +573,14 @@ def _build_mr_description(
         if not meta:
             continue
         icon = status_icons.get(t.status, "❓")
-        commit_msg_first = (meta.get("commit_message") or "").split("\n")[0].strip()
-        if len(commit_msg_first) > 72:
+        commit_msg_first = _commit_subject_line(meta, t)
+        if commit_msg_first != "—" and len(commit_msg_first) > 72:
             commit_msg_first = commit_msg_first[:72] + "..."
-        add = int(meta.get("additions") or 0)
-        del_ = int(meta.get("deletions") or 0)
+        add, del_ = _task_change_numbers(meta, t)
         change_str = f"+{add} -{del_}" if (add or del_) else ""
         summary_title = f"{icon} Task #{t.id}"
-        if commit_msg_first:
-            summary_title += f" — {commit_msg_first}"
+        if commit_msg_first and commit_msg_first != "—":
+            summary_title += f" — {_escape_mr_text(commit_msg_first)}"
         if change_str:
             summary_title += f" ({change_str})"
 
@@ -453,7 +590,7 @@ def _build_mr_description(
         if len(prompt) > 2000:
             prompt = prompt[:2000] + "..."
         if prompt:
-            lines.append(f"**目标**：{prompt}")
+            lines.append(f"**目标**：{_escape_mr_text(prompt)}")
             lines.append("")
         execution_summary = (meta.get("execution_summary") or "").strip()
         # Escape closing tags that could break the <details> block rendering
@@ -461,7 +598,16 @@ def _build_mr_description(
         if execution_summary:
             lines.append(execution_summary)
             lines.append("")
-        commit_sha = (meta.get("commit_sha") or t.commit_sha or "").strip()
+        # Full delivery contract lines (this-task commits, recovered commits,
+        # net diff, push outcome) come from the normalized git_delivery object.
+        lines.extend(_git_delivery_detail_lines(meta))
+        gd = _meta_git_delivery(meta)
+        push = gd.get("push") if isinstance(gd.get("push"), dict) else None
+        commit_sha = ""
+        if push and str(push.get("status") or "") in ("pushed", "already_present"):
+            commit_sha = str(gd.get("head_sha") or meta.get("commit_sha") or t.commit_sha or "").strip()
+        if not commit_sha:
+            commit_sha = (meta.get("commit_sha") or t.commit_sha or "").strip()
         if commit_sha:
             lines.append(f"Commit: `{commit_sha[:12]}`")
             lines.append("")
