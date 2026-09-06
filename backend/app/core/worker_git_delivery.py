@@ -12,6 +12,7 @@ protocol-error paths instead of inventing results from unverified claims.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
@@ -118,8 +119,11 @@ def normalize_git_delivery(
         return None, f"unexpected git_delivery schema: {value.get('schema')!r}"
 
     attempt_id = value.get("attempt_id")
-    if not isinstance(attempt_id, str) or not attempt_id.strip():
-        return None, "git_delivery attempt_id is missing"
+    attempt_pattern = re.compile(rf"^task-{task_id}-attempt-\d+-[0-9a-f]{{12}}$")
+    if not isinstance(attempt_id, str) or not attempt_pattern.match(attempt_id):
+        return None, (
+            f"git_delivery attempt_id {attempt_id!r} does not belong to task {task_id}"
+        )
     branch = value.get("branch")
     if not isinstance(branch, str) or not branch.strip():
         return None, "git_delivery branch is missing"
@@ -151,6 +155,18 @@ def normalize_git_delivery(
             raw = diff.get(key)
             if raw is not None and (isinstance(raw, bool) or not isinstance(raw, int) or raw < 0):
                 return None, f"git_delivery diff.{key} must be a non-negative integer or null"
+        additions = diff.get("additions")
+        deletions = diff.get("deletions")
+        total = diff.get("total")
+        if (additions is None) != (deletions is None):
+            return None, "git_delivery diff additions/deletions must both be collected or both null"
+        if additions is not None:
+            if not isinstance(total, int) or total != additions + deletions:
+                return None, (
+                    "git_delivery diff.total does not equal additions + deletions"
+                )
+        elif total is not None:
+            return None, "git_delivery diff.total requires collected line counts"
         new_files, error = _normalize_file_list(diff.get("new_files"), "diff.new_files")
         if error is not None:
             return None, f"git_delivery {error}"
@@ -165,9 +181,9 @@ def normalize_git_delivery(
         if error is not None:
             return None, f"git_delivery {error}"
         normalized_diff = {
-            "additions": diff.get("additions"),
-            "deletions": diff.get("deletions"),
-            "total": diff.get("total"),
+            "additions": additions,
+            "deletions": deletions,
+            "total": total,
             "new_files": new_files or [],
             "modified_files": modified_files or [],
             "deleted_files": deleted_files or [],
@@ -199,31 +215,43 @@ def normalize_git_delivery(
                 "code": code,
                 "message": sanitize_sensitive_data(message)[:_MAX_ERROR_MESSAGE_CHARS],
             }
+        # A confirmed status can never carry a failure; a failure can never be
+        # reported without one.
+        if status in ("pushed", "already_present") and normalized_error is not None:
+            return None, "git_delivery push.error is not allowed on a confirmed status"
+        if status == "failed" and normalized_error is None:
+            return None, "git_delivery push.error is required on status failed"
+        if status in ("not_needed", "not_attempted") and normalized_error is not None:
+            return None, "git_delivery push.error requires status failed"
+        if status == "not_needed" and remote_sha is not None:
+            return None, "git_delivery push.remote_sha must be null on not_needed"
+        if status == "pushed" and remote_sha is None:
+            return None, "git_delivery pushed requires the ACK'd remote_sha"
         normalized_push = {
             "status": status,
             "remote_sha": remote_sha,
             "error": normalized_error,
         }
 
-    # Cross-field consistency: a confirmed publish must point at a concrete
-    # head, and an empty list means "confirmed none", never "not collected".
+    # Cross-field consistency. Content requires a concrete head; a confirmed
+    # status requires content (recovery confirmations list their commits) and
+    # for pushed the ACK'd remote sha must be the head itself.
+    content = bool(commits) or bool(recovered)
+    head_sha = value.get("head_sha")
     confirmed = normalized_push is not None and normalized_push["status"] in (
         "pushed",
         "already_present",
     )
-    content = bool(commits) or bool(recovered)
-    head_sha = value.get("head_sha")
-    if confirmed and content and not is_full_sha(head_sha):
-        return None, (
-            "git_delivery confirms delivery content without a full head sha; "
-            "the top-level commit projection cannot be trusted"
-        )
-    if confirmed and not content and is_full_sha(head_sha):
-        # Confirmed state without content is only valid when the head equals
-        # the pre-existing head (recovered marker confirmations carry content);
-        # a head without any listed content stays representable but the commit
-        # projection must stay empty.
-        pass
+    if content and not is_full_sha(head_sha):
+        return None, "git_delivery content without a full head sha cannot be attributed"
+    if confirmed:
+        if not content:
+            return None, (
+                "git_delivery confirms a delivery without any listed commits or "
+                "recovered commits"
+            )
+        if normalized_push["status"] == "pushed" and normalized_push["remote_sha"] != head_sha:
+            return None, "git_delivery pushed remote_sha must equal head_sha"
 
     normalized = {
         "schema": GIT_DELIVERY_SCHEMA,
@@ -237,30 +265,31 @@ def normalize_git_delivery(
         "diff": normalized_diff,
         "push": normalized_push,
     }
-    if not _projection_consistent(normalized):
-        return None, "git_delivery top-level projections are inconsistent with its content"
     return normalized, None
 
 
-def _projection_consistent(normalized: dict[str, Any]) -> bool:
-    """The stored top-level commit projection rules must hold for the object.
+def project_delivery_commit_sha(git_delivery: dict[str, Any]) -> str | None:
+    """The only legal Task.commit_sha for a validated git_delivery object.
 
-    Mirrors the worker-side rule: commit_sha (== head_sha) is only set when the
-    remote was confirmed to contain the whole delivery range and content
-    exists. Callers project Task.commit_sha separately from this object.
+    H is projected only when the remote was confirmed to contain the whole
+    delivery range (pushed / already_present) AND content exists; every other
+    state (not_needed, not_attempted, failed) must stay unprojected.
     """
-    push = normalized.get("push")
-    if push is None:
-        return True
-    if push["status"] in ("pushed", "already_present"):
-        content = bool(normalized.get("commits")) or bool(normalized.get("recovered_commits"))
-        if content and not is_full_sha(normalized.get("head_sha")):
-            return False
-        if not content:
-            # A confirmed remote state with no new content is only meaningful
-            # as a recovery confirmation record, which always lists commits.
-            return bool(normalized.get("recovered_commits"))
-    return True
+    push = git_delivery.get("push")
+    if not isinstance(push, dict) or push.get("status") not in (
+        "pushed",
+        "already_present",
+    ):
+        return None
+    content = bool(git_delivery.get("commits")) or bool(
+        git_delivery.get("recovered_commits")
+    )
+    if not content:
+        return None
+    head_sha = git_delivery.get("head_sha")
+    return head_sha if is_full_sha(head_sha) else None
+
+
 
 
 def delivery_push_status_text(status: str | None) -> str | None:

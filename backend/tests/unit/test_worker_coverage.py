@@ -2691,6 +2691,11 @@ class TestExecuteTask(unittest.TestCase):
         mock_docker = MagicMock()
         mock_docker.create_container.return_value = MagicMock(id="ctr-fresh-session")
         worker = _make_worker(mock_docker=mock_docker)
+
+        async def parse_completed(current_task, *_args, **_kwargs):
+                current_task.status = TaskStatus.COMPLETED
+                current_task.completed_at = datetime.now(UTC)
+        worker._parse_task_result = AsyncMock(side_effect=parse_completed)
         task = _make_task(target_branch=None, session_mode="fresh")
         task.issue.claude_session_id = "session-old"
         db = _make_db(task)
@@ -2721,6 +2726,11 @@ class TestExecuteTask(unittest.TestCase):
         mock_docker = MagicMock()
         mock_docker.create_container.return_value = MagicMock(id="ctr-fresh-no-match")
         worker = _make_worker(mock_docker=mock_docker)
+
+        async def parse_completed(current_task, *_args, **_kwargs):
+                current_task.status = TaskStatus.COMPLETED
+                current_task.completed_at = datetime.now(UTC)
+        worker._parse_task_result = AsyncMock(side_effect=parse_completed)
         # Default projected lineage has no IssueSessionLineage row yet, so a
         # continue resolves to fresh_no_match with no resume session.
         task = _make_task(target_branch=None, session_mode="continue")
@@ -2818,6 +2828,11 @@ class TestExecuteTask(unittest.TestCase):
         mock_docker.create_container.return_value = MagicMock(id="ctr-custom-env")
 
         worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+
+        async def parse_completed(current_task, *_args, **_kwargs):
+                current_task.status = TaskStatus.COMPLETED
+                current_task.completed_at = datetime.now(UTC)
+        worker._parse_task_result = AsyncMock(side_effect=parse_completed)
         task = _make_task(target_branch="main", merge_request_iid=None)
         task.worker_profile_snapshot.environment_variables = [
             {"key": "FEATURE_FLAG", "value": "enabled", "is_secret": False},
@@ -2859,6 +2874,11 @@ class TestExecuteTask(unittest.TestCase):
             mock_docker.create_container.return_value = MagicMock(id="ctr-custom-scripts")
 
             worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+
+            async def parse_completed(current_task, *_args, **_kwargs):
+                    current_task.status = TaskStatus.COMPLETED
+                    current_task.completed_at = datetime.now(UTC)
+            worker._parse_task_result = AsyncMock(side_effect=parse_completed)
             task = _make_task(target_branch="main", merge_request_iid=None)
             task.worker_profile_snapshot.pre_script = "echo snapshot-pre"
             task.worker_profile_snapshot.post_script = "echo snapshot-post"
@@ -3044,6 +3064,11 @@ class TestExecuteTask(unittest.TestCase):
         mock_gitlab.normalize_web_url.side_effect = lambda x: x
 
         worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+
+        async def parse_completed(current_task, *_args, **_kwargs):
+                current_task.status = TaskStatus.COMPLETED
+                current_task.completed_at = datetime.now(UTC)
+        worker._parse_task_result = AsyncMock(side_effect=parse_completed)
         task = _make_task(target_branch="main", merge_request_iid=None)
         db = _make_db(task)
 

@@ -978,6 +978,7 @@ const en = {
 	    commitRecord: 'Commit Record',
     gitDeliveryStatsUnavailable: 'Change stats not collected',
     gitDeliveryFilesSummary: 'New {newCount} / modified {modifiedCount} / deleted {deletedCount} file(s)',
+    gitDeliveryBranch: 'Branch: {branch}',
     gitDeliveryCommits: 'This task commits ({count})',
     gitDeliveryRecovered: 'Recovered delivery ({count})',
     gitDeliveryPush: 'Push:',

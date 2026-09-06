@@ -199,6 +199,10 @@
                 </button>
                 <span v-if="copiedSha === gitDeliveryHeadSha" class="git-delivery__copied">{{ t('taskView.copied') }}</span>
               </span>
+              <span v-if="gitDelivery?.branch" class="commit-sha-chip git-delivery__branch" :title="gitDelivery.branch">
+                <n-icon size="12"><GitBranchOutline /></n-icon>
+                <span>{{ t('taskView.gitDeliveryBranch', { branch: gitDelivery.branch }) }}</span>
+              </span>
               <span v-if="gitDeliveryDiffStats" class="git-delivery__diff">
                 <template v-if="gitDeliveryDiffStats.available">
                   <span class="changes-add">+{{ gitDeliveryDiffStats.additions }}</span>
@@ -402,7 +406,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, toRef, watch } from 'vue'
 import { NCard, NIcon, NButton, NInputNumber, NModal, NScrollbar, NTooltip, useMessage } from 'naive-ui'
-import { AlertCircleOutline, GitCommitOutline, OpenOutline, ChevronForward, ChatboxOutline, Checkmark, CopyOutline, ExpandOutline } from '@vicons/ionicons5'
+import { AlertCircleOutline, GitBranchOutline, GitCommitOutline, OpenOutline, ChevronForward, ChatboxOutline, Checkmark, CopyOutline, ExpandOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import type { Task, TaskGitDelivery, TaskGitDeliveryCommit, TaskLog } from '../api'
 import type { SummaryMermaidDiagram } from '../features/tasks/summaryMermaid'

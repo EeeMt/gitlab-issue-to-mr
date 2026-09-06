@@ -362,6 +362,7 @@ def _monitor_fixtures(*, task_mode="execute", issue_mr_iid=None, target_branch="
     worker._try_upsert_usage_ledger = AsyncMock()
     worker._send_notifications = AsyncMock()
     worker._send_failure_notifications = AsyncMock()
+    worker._send_cancelled_notifications = AsyncMock()
     worker._remove_mr_draft_status_for_issue = MagicMock()
     worker._update_mr_description_for_issue = AsyncMock()
     worker._create_mr_if_needed = MagicMock(return_value=(55, "http://mr/55"))
@@ -545,6 +546,7 @@ async def test_freeform_cancelled_does_not_trigger_mr_delivery():
     worker._update_mr_description_for_issue.assert_not_called()
     worker._send_notifications.assert_not_called()
     worker._send_failure_notifications.assert_not_called()
+    worker._send_cancelled_notifications.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -595,3 +597,65 @@ async def test_freeform_mr_api_failure_preserves_commit_and_skips_fabrication():
     worker._create_mr_if_needed.assert_called_once()
     worker._remove_mr_draft_status_for_issue.assert_not_called()
     worker._update_mr_description_for_issue.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Success side effects are gated on the canonical terminal (review F5): a
+# container that exited 0 but whose canonical parse FAILED the task must not
+# undraft MRs, send success notifications, or report a successful run.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_exit_zero_with_failed_terminal_sends_failure_and_no_delivery_actions():
+    worker, db, task, issue, container = _monitor_fixtures(task_mode="execute", issue_mr_iid=7)
+    worker._parse_task_result = AsyncMock(
+        side_effect=_parse_cb(TaskStatus.FAILED, None)
+    )
+
+    result = await _run_monitor(worker, db, task, issue, container, had_existing_mr=True)
+
+    assert result is False
+    # No success side effects despite the zero container exit.
+    worker._send_notifications.assert_not_called()
+    worker._remove_mr_draft_status_for_issue.assert_not_called()
+    worker._create_mr_if_needed.assert_not_called()
+    # The failure is surfaced through the failure channel.
+    worker._send_failure_notifications.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_exit_zero_completed_terminal_still_succeeds():
+    worker, db, task, issue, container = _monitor_fixtures(task_mode="execute", issue_mr_iid=7)
+    worker._parse_task_result = AsyncMock(
+        side_effect=_parse_cb(TaskStatus.COMPLETED, "a" * 40)
+    )
+
+    result = await _run_monitor(worker, db, task, issue, container, had_existing_mr=True)
+
+    assert result is True
+    worker._send_notifications.assert_awaited_once()
+    worker._remove_mr_draft_status_for_issue.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_canonical_failure_reason_survives_log_override():
+    """A structured delivery reason set by parse is not replaced by logs."""
+    worker, db, task, issue, container = _monitor_fixtures(task_mode="execute")
+    parse_calls = {"ran": False}
+
+    async def _parse(task, logs, db, exit_code, **kwargs):
+        task.status = TaskStatus.FAILED
+        task.completed_at = datetime.now(UTC)
+        task.error_message = "The remote task branch and the local head have diverged"
+        task._error_from_canonical = True
+        parse_calls["ran"] = True
+
+    worker._parse_task_result = AsyncMock(side_effect=_parse)
+
+    result = await _run_monitor(worker, db, task, issue, container)
+
+    assert result is False
+    assert parse_calls["ran"] is True
+    assert task.error_message == "The remote task branch and the local head have diverged"
+    worker._send_failure_notifications.assert_awaited_once()

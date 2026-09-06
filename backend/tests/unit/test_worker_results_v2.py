@@ -184,11 +184,12 @@ def test_parse_task_result_keeps_completed_on_valid_v2_result(tmp_path, monkeypa
 # ---------------------------------------------------------------------------
 
 
-def _finalization_db(task, run_meta: dict, finalization_meta: dict):
+def _finalization_db(task, run_meta: dict, finalization_meta: dict, *, attempt_id=None):
     """Async DB mock returning per-log-type metadata in query order.
 
     parse_task_result loads run_result, harness_result, usage_final,
-    system_init and worker_finalization in that order.
+    system_init and worker_finalization in that order; the canonical attempt
+    lookup returns the provided attempt_id (None by default).
     """
     from unittest.mock import AsyncMock, MagicMock
 
@@ -197,7 +198,12 @@ def _finalization_db(task, run_meta: dict, finalization_meta: dict):
     order = [0]
 
     async def mock_execute(query, *a, **k):
-        if "FROM task_logs" in str(query):
+        query_str = str(query)
+        if "FROM task_harness_attempts" in query_str:
+            result = MagicMock()
+            result.scalar_one_or_none.return_value = attempt_id
+            return result
+        if "FROM task_logs" in query_str:
             result = MagicMock()
             index = order[0]
             order[0] += 1
@@ -220,11 +226,14 @@ def _sha(seed: str) -> str:
     return hashlib.sha1(seed.encode("utf-8")).hexdigest()
 
 
+_ATTEMPT_ID = "task-99-attempt-1-0123456789ab"
+
+
 def _gd_finalization(*, head_sha: str | None, push_status: str | None = "pushed", diff=None):
     commits = [{"sha": _sha("a"), "subject": "harness commit"}]
     git_delivery = {
         "schema": "codify.git-delivery.v1",
-        "attempt_id": "task-99-attempt-1",
+        "attempt_id": _ATTEMPT_ID,
         "branch": "codify/issue-99",
         "start_sha": _sha("s"),
         "start_remote_sha": _sha("r"),
@@ -244,12 +253,12 @@ def _gd_finalization(*, head_sha: str | None, push_status: str | None = "pushed"
     }
 
 
-def _parse(task, finalization_meta, run_meta=None, exit_code: int = 0):
+def _parse(task, finalization_meta, run_meta=None, exit_code: int = 0, attempt_id=None):
     import asyncio
     from unittest.mock import MagicMock
 
     run_meta = run_meta or {"type": "run.completed", "status": "completed", "success": True}
-    db = _finalization_db(task, run_meta, finalization_meta)
+    db = _finalization_db(task, run_meta, finalization_meta, attempt_id=attempt_id)
     asyncio.run(
         worker_results.parse_task_result(
             task,
@@ -309,7 +318,7 @@ def test_completed_run_rejects_contradictory_commit_projection(tmp_path, monkeyp
     _parse(task, finalization)
 
     assert task.status == TaskStatus.FAILED
-    assert "does not match" in task.error_message
+    assert "contradicts" in task.error_message
 
 
 def test_failed_run_stashes_collected_git_delivery_facts(tmp_path, monkeypatch):
@@ -387,3 +396,103 @@ def test_recovered_only_confirmation_projects_head_sha(tmp_path, monkeypatch):
     assert task.commit_sha == head
     canonical = getattr(task, "_canonical_git_delivery", None)
     assert canonical["recovered_commits"][0]["subject"] == "earlier delivery"
+
+
+# ---------------------------------------------------------------------------
+# Projection derivation: the only legal Task.commit_sha comes from the
+# validated push state, never from a self-declared payload field (review F2).
+# ---------------------------------------------------------------------------
+
+
+def test_unconfirmed_push_with_declared_commit_sha_is_rejected(tmp_path, monkeypatch):
+    """push.status=failed + top-level commit_sha=H must not complete a task."""
+    from app.models import Task, TaskStatus
+
+    monkeypatch.setattr(worker_results, "_ARCHIVE_STORE", str(tmp_path))
+    task = Task(id=99, project_id=100, issue_id=1, user_prompt="p", status=TaskStatus.PENDING)
+    finalization = _gd_finalization(head_sha=_sha("h"))
+    finalization["git_delivery"]["push"] = {
+        "status": "failed",
+        "remote_sha": None,
+        "error": {"code": "remote_diverged", "message": "diverged"},
+    }
+    finalization["commit_sha"] = _sha("h")  # self-declared, contradicts state
+    _parse(task, finalization)
+
+    assert task.status == TaskStatus.FAILED
+    assert "contradicts" in task.error_message
+    assert task.commit_sha is None
+
+
+def test_confirmed_push_without_declared_sha_derives_head(tmp_path, monkeypatch):
+    """pushed + content without the top-level projection still completes and
+    projects H, so the freeform MR delivery gate can open."""
+    from app.models import Task, TaskStatus
+
+    monkeypatch.setattr(worker_results, "_ARCHIVE_STORE", str(tmp_path))
+    task = Task(id=99, project_id=100, issue_id=1, user_prompt="p", status=TaskStatus.PENDING)
+    finalization = _gd_finalization(head_sha=_sha("h"))
+    del finalization["commit_sha"]
+    finalization["commit_message"] = None
+    _parse(task, finalization)
+
+    assert task.status == TaskStatus.COMPLETED
+    assert task.commit_sha == _sha("h")
+    assert getattr(task, "_canonical_git_delivery", None) is not None
+
+
+def test_attempt_mismatch_with_canonical_attempt_is_rejected(tmp_path, monkeypatch):
+    from app.models import Task, TaskStatus
+
+    monkeypatch.setattr(worker_results, "_ARCHIVE_STORE", str(tmp_path))
+    task = Task(id=99, project_id=100, issue_id=1, user_prompt="p", status=TaskStatus.PENDING)
+    finalization = _gd_finalization(head_sha=_sha("h"))
+    _parse(
+        task,
+        finalization,
+        attempt_id="task-99-attempt-2-0123456789ab",  # receipt says attempt 2
+    )
+    assert task.status == TaskStatus.FAILED
+    assert "attempt_id" in task.error_message
+
+
+def test_confirmed_push_carrying_error_is_rejected(tmp_path, monkeypatch):
+    from app.models import Task, TaskStatus
+
+    monkeypatch.setattr(worker_results, "_ARCHIVE_STORE", str(tmp_path))
+    task = Task(id=99, project_id=100, issue_id=1, user_prompt="p", status=TaskStatus.PENDING)
+    finalization = _gd_finalization(head_sha=_sha("h"))
+    finalization["git_delivery"]["push"]["error"] = {
+        "code": "push_failed",
+        "message": "should not be here",
+    }
+    _parse(task, finalization)
+    assert task.status == TaskStatus.FAILED
+    assert "not allowed" in task.error_message
+
+
+def test_inconsistent_diff_total_is_rejected(tmp_path, monkeypatch):
+    from app.models import Task, TaskStatus
+
+    monkeypatch.setattr(worker_results, "_ARCHIVE_STORE", str(tmp_path))
+    task = Task(id=99, project_id=100, issue_id=1, user_prompt="p", status=TaskStatus.PENDING)
+    finalization = _gd_finalization(head_sha=_sha("h"))
+    finalization["git_delivery"]["diff"]["total"] = 999
+    _parse(task, finalization)
+    assert task.status == TaskStatus.FAILED
+    assert "total" in task.error_message
+
+
+def test_parse_persists_canonical_delivery_into_worker_metadata(tmp_path, monkeypatch):
+    """The canonical git_delivery survives on the Task row even when the
+    container metadata file is never readable (review F3)."""
+    from app.models import Task, TaskStatus
+
+    monkeypatch.setattr(worker_results, "_ARCHIVE_STORE", str(tmp_path))
+    task = Task(id=99, project_id=100, issue_id=1, user_prompt="p", status=TaskStatus.PENDING)
+    head = _sha("h")
+    _parse(task, _gd_finalization(head_sha=head))
+    assert task.status == TaskStatus.COMPLETED
+    assert isinstance(task.worker_metadata, dict)
+    assert task.worker_metadata["git_delivery"]["head_sha"] == head
+    assert task.worker_metadata["git_delivery"]["push"]["status"] == "pushed"

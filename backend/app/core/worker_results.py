@@ -23,7 +23,10 @@ from app.core.task_event_archive import archive_bundle_name
 from app.core.task_failure_details import read_archived_harness_failure_detail
 from app.core.usage_limits import upsert_task_usage_ledger
 from app.core.utcnow import utcnow
-from app.core.worker_git_delivery import normalize_git_delivery
+from app.core.worker_git_delivery import (
+    normalize_git_delivery,
+    project_delivery_commit_sha,
+)
 from app.models import Issue, Task, TaskLog, TaskRunArchive, TaskStatus
 
 logger = logging.getLogger(__name__)
@@ -317,6 +320,25 @@ def _v2_result_validation_error(task_id: int) -> str:
     return ""
 
 
+async def _latest_attempt_id(db: AsyncSession, task_id: int) -> str | None:
+    """The latest canonical attempt id for a task, when one is recorded."""
+    try:
+        from sqlalchemy import select as _attempt_select
+
+        from app.models import TaskHarnessAttempt
+
+        result = await db.execute(
+            _attempt_select(TaskHarnessAttempt.attempt_id)
+            .where(TaskHarnessAttempt.task_id == task_id)
+            .order_by(TaskHarnessAttempt.attempt_no.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+    except Exception:
+        logger.debug(f"[Task {task_id}] Failed to read the canonical attempt id")
+        return None
+
+
 async def parse_task_result(
     task: Task,
     logs: str,
@@ -358,6 +380,7 @@ async def parse_task_result(
     git_delivery_raw = finalization_meta.get("git_delivery")
     git_delivery = None
     git_delivery_error = ""
+    projected_commit_sha: str | None = None
     if "git_delivery" in finalization_meta:
         if git_delivery_raw is None:
             git_delivery_error = "git_delivery must be an object"
@@ -368,20 +391,93 @@ async def parse_task_result(
                 sanitize_sensitive_data=sanitize_sensitive_data,
             )
             if git_delivery is not None:
-                top_commit_sha = str(finalization_meta.get("commit_sha") or "").strip()
-                if top_commit_sha and git_delivery.get("head_sha") != top_commit_sha:
+                attempt_id = await _latest_attempt_id(db, task.id)
+                if attempt_id and git_delivery.get("attempt_id") != attempt_id:
                     git_delivery = None
                     git_delivery_error = (
-                        "worker.finalization commit_sha projection does not match "
-                        "git_delivery.head_sha"
+                        "worker.finalization git_delivery.attempt_id does not match "
+                        "the canonical attempt"
                     )
+            if git_delivery is not None:
+                # The only legal projection: confirmed delivery content maps to
+                # H. A payload projecting a sha for an unconfirmed state, or
+                # contradicting the confirmed head, is invalid; a missing
+                # top-level sha on a confirmed state is derived, not trusted.
+                expected_sha = project_delivery_commit_sha(git_delivery)
+                top_commit_sha = str(finalization_meta.get("commit_sha") or "").strip()
+                if top_commit_sha and top_commit_sha != expected_sha:
+                    git_delivery = None
+                    git_delivery_error = (
+                        "worker.finalization commit_sha projection contradicts "
+                        "git_delivery push state"
+                    )
+                else:
+                    projected_commit_sha = expected_sha
+            if git_delivery is not None and isinstance(
+                finalization_meta.get("diff"), dict
+            ) and isinstance(git_delivery.get("diff"), dict):
+                for key in ("additions", "deletions", "total"):
+                    top_value = finalization_meta["diff"].get(key)
+                    gd_value = git_delivery["diff"].get(key)
+                    if (
+                        top_value is not None
+                        and gd_value is not None
+                        and top_value != gd_value
+                    ):
+                        git_delivery = None
+                        git_delivery_error = (
+                            f"worker.finalization diff.{key} contradicts "
+                            "git_delivery.diff"
+                        )
+                        break
         if git_delivery_error:
             logger.warning(
                 f"[Task {task.id}] worker.finalization git_delivery rejected: {git_delivery_error}"
             )
     task._canonical_git_delivery = git_delivery
+    if git_delivery is not None:
+        # Persist the canonical delivery facts immediately: the container
+        # metadata read may be unavailable or arrive later, so the Task row
+        # must survive on its own. The artifact merge later reconciles the
+        # summaries around this same object.
+        base_metadata = (
+            dict(task.worker_metadata)
+            if isinstance(task.worker_metadata, dict)
+            else {}
+        )
+        base_metadata["git_delivery"] = {
+            key: git_delivery[key]
+            for key in (
+                "schema",
+                "attempt_id",
+                "branch",
+                "start_sha",
+                "start_remote_sha",
+                "head_sha",
+                "commits",
+                "recovered_commits",
+                "diff",
+                "push",
+            )
+        }
+        task.worker_metadata = base_metadata
 
-    commit_sha = str(finalization_meta.get("commit_sha") or "").strip()
+    if git_delivery is not None:
+        # Projection derived from the validated contract: confirmed content
+        # maps to H, everything else stays unprojected.
+        projected_sha = projected_commit_sha
+    elif "git_delivery" not in finalization_meta:
+        # Legacy finalizations (no git_delivery contract) keep trusting the
+        # worker's flat projection.
+        projected_sha = (
+            str(finalization_meta.get("commit_sha") or "").strip() or None
+        )
+    else:
+        # The payload declared git_delivery but it failed validation: the flat
+        # projection is part of the same untrusted envelope and must not be
+        # re-adopted through the legacy path.
+        projected_sha = None
+    commit_sha = projected_sha or ""
     if commit_sha:
         task.commit_sha = commit_sha
         logger.info(f"[Task {task.id}] Commit SHA: {task.commit_sha}")
@@ -467,6 +563,10 @@ async def parse_task_result(
         )
         if archived_failure_detail and failure_kind != "protocol_error" and terminal_status != "protocol_error":
             failure_message = archived_failure_detail
+        # Structured failures (harness.failed taxonomy, archived detail, and
+        # the git_delivery reason carried by the worker finalizer) are
+        # canonical; the lifecycle log override must not erase them.
+        task._error_from_canonical = bool(failure_message)
         task.error_message = sanitize_sensitive_data(
             failure_message or logs[-1000:] or "Harness task failed"
         )[-1000:]

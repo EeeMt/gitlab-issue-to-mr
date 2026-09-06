@@ -964,6 +964,7 @@ const zhCN = {
 	    commitRecord: '提交记录',
     gitDeliveryStatsUnavailable: '统计未采集',
     gitDeliveryFilesSummary: '新增 {newCount} / 修改 {modifiedCount} / 删除 {deletedCount} 个文件',
+    gitDeliveryBranch: '分支：{branch}',
     gitDeliveryCommits: '本次提交 ({count})',
     gitDeliveryRecovered: '已有提交补交/确认 ({count})',
     gitDeliveryPush: '推送：',

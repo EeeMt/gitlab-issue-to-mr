@@ -24,6 +24,7 @@ const messages: Record<string, string> = {
   'taskView.copied': 'Copied',
   'taskView.copyFailed': 'Copy failed',
   'taskView.gitDeliveryStatsUnavailable': 'Change stats not collected',
+  'taskView.gitDeliveryBranch': 'Branch: {branch}',
   'taskView.gitDeliveryCommits': 'This task commits ({count})',
   'taskView.gitDeliveryRecovered': 'Recovered delivery ({count})',
   'taskView.gitDeliveryPush': 'Push:',
@@ -38,7 +39,15 @@ const messages: Record<string, string> = {
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
-    t: (key: string) => messages[key] ?? key,
+    t: (key: string, params?: Record<string, string | number>) => {
+      let text = messages[key] ?? key
+      if (params) {
+        for (const [name, value] of Object.entries(params)) {
+          text = text.replaceAll(`{${name}}`, String(value))
+        }
+      }
+      return text
+    },
   }),
 }))
 
@@ -55,6 +64,7 @@ vi.mock('../vendor/mermaid', () => ({
 
 vi.mock('@vicons/ionicons5', () => ({
   AlertCircleOutline: iconStub,
+  GitBranchOutline: iconStub,
   GitCommitOutline: iconStub,
   OpenOutline: iconStub,
   ChevronForward: iconStub,
@@ -387,6 +397,15 @@ describe('TaskResultPanel git delivery', () => {
     expect(wrapper.findAll('.git-delivery__commit-row')).toHaveLength(12)
     expect(wrapper.text()).toContain('bulk change 12')
     expect(wrapper.text()).toContain('Collapse')
+  })
+
+  it('shows the delivery branch from git_delivery', () => {
+    const wrapper = mountGitTask(makeGitDelivery({
+      head_sha: 'a'.repeat(40),
+      commits: [{ sha: 'a'.repeat(40), subject: 'work' }],
+      push: { status: 'pushed', remote_sha: 'a'.repeat(40), error: null },
+    }))
+    expect(wrapper.text()).toContain('codify/issue-1')
   })
 
   it('keeps the legacy single-SHA rendering when git_delivery is absent', () => {

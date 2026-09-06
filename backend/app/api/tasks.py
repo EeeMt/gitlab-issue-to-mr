@@ -639,10 +639,19 @@ async def get_task(
         )
         git_delivery = dict(git_delivery)
         git_delivery["commit_url"] = None
-        if confirmed and content and head_sha and task.issue:
-            merge_request_url = str(getattr(task.issue, "merge_request_url", None) or "")
-            project_base = re.sub(r"/-/merge_requests/\d+$", "", merge_request_url)
-            if project_base and project_base != merge_request_url:
+        if confirmed and content and head_sha:
+            project_base = None
+            if task.issue:
+                merge_request_url = str(getattr(task.issue, "merge_request_url", None) or "")
+                project_base = re.sub(r"/-/merge_requests/\d+$", "", merge_request_url)
+                if project_base == merge_request_url:
+                    project_base = None  # not an MR URL: unusable as a base
+            if not project_base:
+                # No MR (or no-MR mode): the commit page lives on the project
+                # web URL the serializer already resolved for this task.
+                project_url = str(result_data.get("project_url") or "")
+                project_base = project_url.rstrip("/") or None
+            if project_base:
                 git_delivery["commit_url"] = f"{project_base}/-/commit/{head_sha}"
     result_data["git_delivery"] = git_delivery if isinstance(git_delivery, dict) else None
     archived_failure_detail = None

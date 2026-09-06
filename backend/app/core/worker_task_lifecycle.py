@@ -1191,6 +1191,11 @@ async def monitor_container_run(
     # cancellation intent never downgrades a run that actually completed (the
     # cancel request can land after the container already exited with success).
     await worker._parse_task_result(task, logs, db, exit_code, issue=issue)
+    # Success side effects (draft removal, success notifications, container
+    # disposition) are gated on the canonical terminal state, never on the
+    # process exit code alone: parse can legitimately FAIL a task whose
+    # container exited 0 (invalid git_delivery contract, V2 envelope reject).
+    task_completed = task.status == TaskStatus.COMPLETED
     # Container exit, cancellation and timeout are terminal from the command
     # plane's perspective even if a damaged adapter omitted its final event.
     # Close before any later delivery work so API/pump/socket converge.
@@ -1339,7 +1344,7 @@ async def monitor_container_run(
             issue.merge_request_url = parsed_mr_url
             await db.commit()
 
-    if exit_code == 0:
+    if exit_code == 0 and task_completed:
         # Freeform delivery actions (Undraft/Ready, description update) only run
         # when the task actually produced a commit; a no-commit freeform task
         # skips them even when a pre-existing MR is already linked to the Issue.
@@ -1367,6 +1372,11 @@ async def monitor_container_run(
             issue=issue,
         )
     else:
+        if exit_code == 0:
+            logger.warning(
+                f"[Task {task.id}] Container exited 0 but the canonical terminal is "
+                f"{task.status.value}; sending failure notifications"
+            )
         await worker._send_failure_notifications(
             task,
             success=False,
@@ -1393,7 +1403,13 @@ async def monitor_container_run(
                     message=f"[Timed out after {settings.task_timeout}s]\n{scrubbed_logs[-2000:]}",
                 )
             )
-    elif exit_code != 0:
+    elif exit_code != 0 and not (
+        getattr(task, "_error_from_canonical", False)
+        and (task.error_message or "").strip()
+    ):
+        # Structured failure reasons (delivery.push.error from the canonical
+        # finalizer, harness failure taxonomy, archived detail) survive the
+        # console-log override; the raw logs stay available in the log store.
         sanitized_failure_logs = worker._sanitize_sensitive_data(logs)
         if len(sanitized_failure_logs) > 16_000:
             sanitized_failure_logs = (
@@ -1454,4 +1470,4 @@ async def monitor_container_run(
             f"[Task {task.id}] Retaining task container because raw logs were not finalized"
         )
 
-    return exit_code == 0
+    return task.status == TaskStatus.COMPLETED

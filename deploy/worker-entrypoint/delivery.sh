@@ -349,24 +349,6 @@ ${rows}
 EOF
 }
 
-build_completed_mr_description() {
-    local summary_text="$1"
-    local changed_files_text="$2"
-    cat <<EOF
-## ✅ AI 执行完成
-
-### 需求
-${USER_PROMPT}
-
-### 涉及文件
-${changed_files_text}
-
-### 执行摘要
-${summary_text}
-$(build_issue_reference_block)
-EOF
-}
-
 build_commit_message_prompt() {
     local changed_files_text="$1"
     local diff_stats_text="$2"
