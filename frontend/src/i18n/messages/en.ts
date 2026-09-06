@@ -280,6 +280,7 @@ const en = {
     mine: 'Mine',
     harness: 'Harness',
     workerKit: 'Worker Kit',
+    workerProfile: 'Worker Profile',
   },
   login: {
     subtitle: 'Sign in to access the dashboard.',

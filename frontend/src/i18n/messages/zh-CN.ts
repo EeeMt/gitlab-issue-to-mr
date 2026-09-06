@@ -280,6 +280,7 @@ const zhCN = {
     mine: '我的',
     harness: 'Harness',
     workerKit: 'Worker Kit',
+    workerProfile: 'Worker Profile',
   },
   login: {
     subtitle: '登录以访问控制台。',

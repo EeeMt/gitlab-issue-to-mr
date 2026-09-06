@@ -446,6 +446,7 @@ async def list_issues(
     has_mr: bool | None = None,
     search: str | None = None,
     worker_kit: str | None = None,
+    worker_profile: str | None = None,
     created_after: str | None = None,
     created_before: str | None = None,
     sort_by: str | None = None,
@@ -623,6 +624,12 @@ async def list_issues(
                 )
             )
 
+    # Worker profile filter (comma-separated profile ids)
+    if worker_profile:
+        profile_ids = parse_csv_integers(worker_profile, "worker_profile", minimum=1)
+        if profile_ids:
+            query = query.where(Issue.worker_profile_id.in_(profile_ids))
+
     # Text search on title (min 2, max 200 chars)
     if search:
         search_term = normalize_search_term(search)
@@ -714,6 +721,32 @@ async def get_issue_filter_options(
     result["worker_kits"] = [
         {"value": version, "label": version, "count": count}
         for version, count in kit_result.all()
+    ]
+
+    profile_query = (
+        select(
+            WorkerProfile.id,
+            WorkerProfile.name,
+            func.count(func.distinct(Issue.id)).label("issue_count"),
+        )
+        .join(Issue, Issue.worker_profile_id == WorkerProfile.id)
+        .group_by(WorkerProfile.id, WorkerProfile.name)
+        .order_by(WorkerProfile.name.asc(), WorkerProfile.id.asc())
+    )
+
+    if not access_scope.is_unrestricted:
+        if not access_scope.accessible_project_ids:
+            profile_query = profile_query.where(false())
+        else:
+            profile_query = profile_query.where(
+                Issue.project_id.in_(access_scope.accessible_project_ids)
+            )
+
+    profile_result = await db.execute(profile_query)
+
+    result["worker_profiles"] = [
+        {"value": str(profile_id), "label": name, "count": count}
+        for profile_id, name, count in profile_result.all()
     ]
 
     return result

@@ -27,6 +27,7 @@ export interface TaskFilterOptions extends ListFilterOptions {
 
 export interface IssueFilterOptions extends ListFilterOptions {
   worker_kits: SimpleFilterOption[]
+  worker_profiles: SimpleFilterOption[]
 }
 
 export function snapshotInitiatorValue(username: string): string {

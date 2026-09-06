@@ -130,7 +130,7 @@ import {
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeUtc8Compact } from '../utils/datetime'
 import { formatDurationSec } from '../utils/format'
-import { EllipseOutline, FolderOpenOutline, CalendarOutline, PersonOutline, GitMergeOutline, DocumentTextOutline, AlertCircleOutline, SyncOutline, CheckmarkCircleOutline, CubeOutline } from '@vicons/ionicons5'
+import { EllipseOutline, FolderOpenOutline, CalendarOutline, PersonOutline, GitMergeOutline, DocumentTextOutline, AlertCircleOutline, SyncOutline, CheckmarkCircleOutline, CubeOutline, ServerOutline } from '@vicons/ionicons5'
 
 const router = useRouter()
 const route = useRoute()
@@ -148,6 +148,7 @@ const initiatorOptionsError = ref(false)
 const workerKitFilterOptions = ref<SimpleFilterOption[]>([])
 const workerKitOptionsLoading = ref(false)
 const workerKitOptionsError = ref(false)
+const workerProfileFilterOptions = ref<{ label: string; value: number; count: number }[]>([])
 const loading = ref(false)
 const hasLoadedOnce = ref(false)
 
@@ -245,6 +246,18 @@ const filterConfig: FilterSortConfig = {
         { label: t('filter.hasMrYes'), value: 'true' },
         { label: t('filter.hasMrNo'), value: 'false' },
       ],
+    },
+    {
+      key: 'worker_profile',
+      label: 'filter.workerProfile',
+      icon: ServerOutline,
+      type: 'multi-select',
+      searchable: true,
+      parseValue: parsePositiveIntegerQueryValue,
+      options: () => workerProfileFilterOptions.value,
+      optionsLoading: () => workerKitOptionsLoading.value,
+      optionsError: () => workerKitOptionsError.value,
+      optionsRetry: fetchFilterOptions,
     },
     {
       key: 'worker_kit',
@@ -640,6 +653,11 @@ async function fetchFilterOptions() {
     const result = await getIssueFilterOptions()
     initiatorFilterOptions.value = result.initiators
     workerKitFilterOptions.value = result.worker_kits ?? []
+    workerProfileFilterOptions.value = (result.worker_profiles ?? []).map((option) => ({
+      label: option.label,
+      value: Number(option.value),
+      count: option.count,
+    }))
   } catch {
     initiatorOptionsError.value = true
     workerKitOptionsError.value = true

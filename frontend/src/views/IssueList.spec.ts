@@ -207,6 +207,7 @@ vi.mock('@vicons/ionicons5', () => ({
   AlertCircleOutline: {},
   SyncOutline: {},
   CheckmarkCircleOutline: {},
+  ServerOutline: {},
 }))
 
 // ---------------------------------------------------------------------------
@@ -302,6 +303,7 @@ function setupDefaultMocks() {
       { value: 'user:3', kind: 'user', user_id: 3, username: 'charlie', display_name: null, count: 2 },
     ],
     worker_kits: [],
+    worker_profiles: [],
   })
   mockApi.getProjects.mockResolvedValue(mockProjects)
   mockApi.getIssues.mockResolvedValue({ items: mockIssues, total: mockIssues.length })
@@ -816,6 +818,62 @@ describe('IssueList', () => {
   })
 
   // -----------------------------------------------------------------------
+  // 11b. Worker profile filter
+  // -----------------------------------------------------------------------
+  describe('worker profile filter', () => {
+    it('maps worker profile options to numeric ids with counts', async () => {
+      setupDefaultMocks()
+      mockApi.getIssueFilterOptions.mockResolvedValue({
+        initiators: [],
+        worker_kits: [],
+        worker_profiles: [
+          { value: '2', label: 'Python Worker', count: 3 },
+          { value: '5', label: 'Go Worker', count: 1 },
+        ],
+      })
+      wrapper = mount(IssueList, { global: { plugins: [router] } })
+      await flushPromises()
+      await nextTick()
+
+      const field = wrapper.vm.filterConfig.filterFields.find(
+        (f: any) => f.key === 'worker_profile',
+      )
+      expect(field).toBeDefined()
+      expect(field.label).toBe('filter.workerProfile')
+      expect(field.options()).toEqual([
+        { label: 'Python Worker', value: 2, count: 3 },
+        { label: 'Go Worker', value: 5, count: 1 },
+      ])
+    })
+
+    it('rejects non-numeric worker profile filter values', async () => {
+      await mountComponent()
+      const field = wrapper.vm.filterConfig.filterFields.find(
+        (f: any) => f.key === 'worker_profile',
+      )
+      expect(field.parseValue('7')).toBe(7)
+      expect(field.parseValue('abc')).toBeUndefined()
+      expect(field.parseValue('0')).toBeUndefined()
+    })
+
+    it('sends worker_profile ids with the issues request when active', async () => {
+      await mountComponent()
+      mockApi.getIssues.mockClear()
+      mockApi.getIssues.mockResolvedValue({ items: [], total: 0 })
+
+      const previousApiParams = mockFilterState.apiParams.value
+      mockFilterState.apiParams.value = { ...previousApiParams, worker_profile: '2,5' }
+      try {
+        wrapper.vm.$.setupState.fetchIssues()
+        await flushPromises()
+        expect(mockApi.getIssues).toHaveBeenLastCalledWith(
+          expect.objectContaining({ worker_profile: '2,5' }),
+        )
+      } finally {
+        mockFilterState.apiParams.value = previousApiParams
+      }
+    })
+  })
   // 12. Column render functions
   // -----------------------------------------------------------------------
   describe('column render functions', () => {

@@ -1007,3 +1007,74 @@ class TestListIssuesCombinedFilters(unittest.IsolatedAsyncioTestCase):
             access_scope=scope,
         )
         self.assertIn("items", result)
+
+# ---------------------------------------------------------------------------
+# Worker profile filter
+# ---------------------------------------------------------------------------
+
+
+class TestListIssuesWorkerProfileFilter(unittest.IsolatedAsyncioTestCase):
+    """Test the worker_profile comma-separated id filter."""
+
+    async def test_worker_profile_filter_applies_in_clause(self):
+        """worker_profile ids should filter on issues.worker_profile_id."""
+        from app.api.issues import list_issues
+        from app.dependencies.project_access import ProjectAccessScope
+
+        db = _mock_db_with_rows([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        result = await list_issues(
+            status=None, project_id=None, initiator_user_id=None,
+            worker_profile="2,5",
+            search=None, created_after=None, created_before=None,
+            sort_by=None, sort_order=None, page=1, page_size=20,
+            db=db, current_user=MagicMock(), access_scope=scope,
+        )
+        self.assertIn("items", result)
+        sql = str(db.execute.await_args_list[0].args[0])
+        self.assertIn("issues.worker_profile_id IN", sql)
+
+    async def test_worker_profile_filter_restricted_scope_keeps_clause(self):
+        """Profile filter combines with the access-scope project restriction."""
+        from app.api.issues import list_issues
+        from app.dependencies.project_access import ProjectAccessScope
+
+        db = _mock_db_with_rows([], total=0)
+        scope = ProjectAccessScope(
+            is_unrestricted=False,
+            accessible_projects=[{"id": 10, "name": "P"}, {"id": 20, "name": "Q"}],
+        )
+
+        result = await list_issues(
+            status=None, project_id=None, initiator_user_id=None,
+            worker_profile="2",
+            search=None, created_after=None, created_before=None,
+            sort_by=None, sort_order=None, page=1, page_size=20,
+            db=db, current_user=MagicMock(), access_scope=scope,
+        )
+        self.assertIn("items", result)
+        sql = str(db.execute.await_args_list[0].args[0])
+        self.assertIn("issues.worker_profile_id IN", sql)
+        self.assertIn("issues.project_id IN", sql)
+
+    async def test_worker_profile_invalid_values_return_400(self):
+        """Malformed worker_profile filters must not silently broaden results."""
+        from fastapi import HTTPException
+
+        from app.api.issues import list_issues
+        from app.dependencies.project_access import ProjectAccessScope
+
+        db = _mock_db_with_rows([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with self.assertRaises(HTTPException) as ctx:
+            await list_issues(
+                status=None, project_id=None, initiator_user_id=None,
+                worker_profile="2,abc",
+                search=None, created_after=None, created_before=None,
+                sort_by=None, sort_order=None, page=1, page_size=20,
+                db=db, current_user=MagicMock(), access_scope=scope,
+            )
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("worker_profile", ctx.exception.detail)
