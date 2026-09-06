@@ -138,3 +138,57 @@ def test_absent_metadata_file_leaves_worker_metadata_untouched():
     task = SimpleNamespace(id=1, _canonical_git_delivery=None, worker_metadata=None)
     save_task_metadata_from_container(worker, container=object(), task=task, issue=None)
     assert task.worker_metadata is None
+
+
+def test_canonical_delivery_survives_missing_container_metadata(tmp_path):
+    """F2: canonical git_delivery must not depend on task-metadata.json."""
+
+    from app.core.worker_task_artifacts import save_task_metadata_from_container
+
+    canonical = {
+        "schema": "codify.git-delivery.v1",
+        "attempt_id": "task-1-attempt-1-0123456789ab",
+        "branch": "codify/issue-1",
+        "start_sha": "a" * 40,
+        "start_remote_sha": None,
+        "head_sha": "b" * 40,
+        "commits": [{"sha": "b" * 40, "subject": "confirmed"}],
+        "recovered_commits": [],
+        "diff": {"additions": 9, "deletions": 0, "total": 9, "new_files": [], "modified_files": [], "deleted_files": []},
+        "push": {"status": "pushed", "remote_sha": "b" * 40, "error": None},
+    }
+    task = SimpleNamespace(id=1, _canonical_git_delivery=canonical, worker_metadata=None)
+    # Container metadata file unreadable (None), like a removed/stale container.
+    worker = SimpleNamespace(
+        docker=SimpleNamespace(read_file_from_container=MagicMock(return_value=None))
+    )
+    save_task_metadata_from_container(worker, container=object(), task=task, issue=None)
+
+    assert task.worker_metadata is not None
+    assert task.worker_metadata["git_delivery"]["push"]["status"] == "pushed"
+    assert task.worker_metadata["git_delivery"]["commits"][0]["sha"] == "b" * 40
+
+
+def test_canonical_delivery_survives_invalid_container_metadata(tmp_path):
+    from app.core.worker_task_artifacts import save_task_metadata_from_container
+
+    canonical = {
+        "schema": "codify.git-delivery.v1",
+        "attempt_id": "task-1-attempt-1-0123456789ab",
+        "branch": "codify/issue-1",
+        "head_sha": "b" * 40,
+        "commits": [{"sha": "b" * 40, "subject": "confirmed"}],
+        "recovered_commits": [],
+        "diff": {"additions": 1, "deletions": 0, "total": 1, "new_files": [], "modified_files": [], "deleted_files": []},
+        "push": {"status": "pushed", "remote_sha": "b" * 40, "error": None},
+    }
+    task = SimpleNamespace(id=1, _canonical_git_delivery=canonical, worker_metadata=None)
+    worker = SimpleNamespace(
+        docker=SimpleNamespace(
+            read_file_from_container=MagicMock(return_value="not json at all")
+        )
+    )
+    save_task_metadata_from_container(worker, container=object(), task=task, issue=None)
+
+    assert task.worker_metadata is not None
+    assert task.worker_metadata["git_delivery"]["head_sha"] == "b" * 40

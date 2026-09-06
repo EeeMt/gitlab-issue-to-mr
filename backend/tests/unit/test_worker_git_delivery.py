@@ -1236,3 +1236,34 @@ if repo_delivery_publish; then echo "expected publish failure"; exit 8; fi
         capture_output=True,
     )
     assert marker.stdout.strip() == snapshot["git_delivery"]["head_sha"]
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="helpers require jq")
+def test_not_needed_record_failure_is_a_hard_gate(delivery_env: dict):
+    """Replicates main.sh's no-content branch: failing to persist the
+    not_needed outcome must fail the run, not complete with an unrecorded
+    delivery contract."""
+    root = delivery_env["root"]
+    runtime_dir = root / "runtime"
+    scenario = """
+repo_pin_delivery_start
+repo_delivery_collect || exit 9
+chmod 555 %RUNTIME%
+if repo_delivery_record "not_needed"; then echo "expected record failure"; exit 8; fi
+# main.sh hard gate: record failure -> explicit task failure
+repo_delivery_write_metadata || true
+exit 1
+"""
+    scenario = scenario.replace("%RUNTIME%", str(runtime_dir))
+    result = _run_delivery_scenario(
+        root,
+        remote=delivery_env["remote"],
+        branch_name=delivery_env["branch"],
+        workspace=delivery_env["workspace"],
+        previous=delivery_env["previous"],
+        scenario=scenario,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "expected record failure" not in result.stdout
+    # Snapshot still says not_attempted; nothing fabricated.
+    assert _snapshot(root)["git_delivery"]["push"]["status"] == "not_attempted"

@@ -329,8 +329,14 @@ if repo_delivery_has_content; then
 fi
 
 echo "No changes made by Harness"
-# No delivery content: no remote query, no publish.
-repo_delivery_record "not_needed" || true
+# No delivery content: no remote query, no publish. Recording the outcome is
+# a hard gate: a run that cannot persist its own delivery contract must not
+# complete as if the facts were known.
+if ! repo_delivery_record "not_needed"; then
+    echo "ERROR: Could not persist the no-change delivery outcome"
+    repo_delivery_write_metadata || true
+    exit 1
+fi
 if [ "${REQUIRE_CHANGES:-true}" = "false" ]; then
     echo "require_changes disabled: task completed without code changes"
     repo_delivery_write_metadata || true

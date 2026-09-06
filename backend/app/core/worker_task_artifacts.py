@@ -138,21 +138,65 @@ async def save_delivery_summary_from_container(
         logger.warning(f"[Task {task.id}] Could not persist delivery summary: {exc}")
 
 
+_GIT_DELIVERY_KEYS = (
+    "schema",
+    "attempt_id",
+    "branch",
+    "start_sha",
+    "start_remote_sha",
+    "head_sha",
+    "commits",
+    "recovered_commits",
+    "diff",
+    "push",
+)
+
+
+def _merge_canonical_git_delivery(task: Task) -> dict:
+    """Merge the canonical git_delivery onto the task metadata row.
+
+    The canonical finalization is the authoritative delivery contract; the
+    container file may be stale or unreadable and only enriches summaries.
+    """
+    base = (
+        dict(task.worker_metadata)
+        if isinstance(task.worker_metadata, dict)
+        else {}
+    )
+    canonical = getattr(task, "_canonical_git_delivery", None)
+    if canonical is None and not base:
+        # Nothing canonical and nothing to enrich: keep the row untouched.
+        return base
+    if canonical is not None:
+        base["git_delivery"] = {
+            key: canonical[key] for key in _GIT_DELIVERY_KEYS if key in canonical
+        }
+    task.worker_metadata = base
+    return base
+
+
 def save_task_metadata_from_container(
     worker,
     container: Any,
     task: Task,
     issue: Any,
 ) -> None:
-    """Extract task-metadata.json via the Docker API and persist it on the Task row."""
+    """Extract task-metadata.json via the Docker API and persist it on the Task row.
+
+    The canonical git_delivery (already parsed into ``task._canonical_git_delivery``
+    and merged onto the row by the result parser) is never dependent on the
+    container file: when the file is unreadable or invalid the canonical
+    delivery facts still persist, and the file only adds summary fields.
+    """
     try:
         raw = worker.docker.read_file_from_container(container, _CONTAINER_METADATA_PATH)
         if not raw:
             logger.info(
                 f"[Task {task.id}] task-metadata.json could not be read from container at "
                 f"{_CONTAINER_METADATA_PATH!r} — file may not exist yet or container may be "
-                "in an inaccessible state; metadata will be omitted from MR description"
+                "in an inaccessible state; canonical delivery facts are preserved"
             )
+            _merge_canonical_git_delivery(task)
             return
 
         data = json.loads(raw)
@@ -160,6 +204,7 @@ def save_task_metadata_from_container(
             logger.warning(
                 f"[Task {task.id}] task-metadata.json in container is not a JSON object, skipping"
             )
+            _merge_canonical_git_delivery(task)
             return
 
         # The canonical finalization is authoritative for git_delivery. The
@@ -192,6 +237,12 @@ def save_task_metadata_from_container(
         logger.warning(
             f"[Task {task.id}] Could not extract task-metadata.json from container: {exc}"
         )
+        # Best effort: an unreadable file must never lose the canonical
+        # delivery facts that were already parsed onto the task row.
+        try:
+            _merge_canonical_git_delivery(task)
+        except Exception:  # noqa: BLE001
+            logger.warning(f"[Task {task.id}] Could not preserve canonical git_delivery")
 
 
 async def poll_task_artifacts(
