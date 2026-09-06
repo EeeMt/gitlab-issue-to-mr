@@ -165,6 +165,54 @@ def _update_active_tool_ids(record: dict, active_tool_ids: set[str]) -> None:
         active_tool_ids.discard(tool_id)
 
 
+def _record_session_id(record: dict) -> str | None:
+    """Extract a session id from either frozen SSE envelope shape.
+
+    ``GET /event`` is server-global. Message part events may carry the id at
+    the envelope or inside ``part``; newer durable records use ``data``. A
+    missing id is deliberately treated as a server-level event so connection
+    and heartbeat records retain their existing subscription semantics.
+    """
+    for container_name in ("properties", "data"):
+        container = record.get(container_name)
+        if not isinstance(container, dict):
+            continue
+        for key in ("sessionID", "sessionId"):
+            value = container.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        part = container.get("part")
+        if isinstance(part, dict):
+            for key in ("sessionID", "sessionId"):
+                value = part.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+        # Some event shapes place the session id inside info. Do not treat a
+        # message.updated info.id (the message id) as a session id.
+        info = container.get("info")
+        if isinstance(info, dict):
+            for key in ("sessionID", "sessionId"):
+                value = info.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+            if record.get("type") in {"session.created", "session.updated", "session.deleted"}:
+                value = info.get("id")
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+    return None
+
+
+def _belongs_to_task_session(record: dict, session_id: str) -> bool:
+    """Allow only this task's records plus explicit server-level markers."""
+    record_session_id = _record_session_id(record)
+    if record_session_id is not None:
+        return record_session_id == session_id
+    # A global stream can contain an un-attributed session.error. Treating it
+    # as this task's failure is unsafe. The only known id-less service records
+    # are subscription liveness markers; all other ambiguous records drop.
+    return record.get("type") in {"server.connected", "server.heartbeat"}
+
+
 def _safe_http_failure_message(value: object, default: str) -> str:
     """Extract a bounded message without archiving an HTTP response envelope."""
     if isinstance(value, dict):
@@ -983,6 +1031,8 @@ def _run_attempt() -> int:
         subscribed = False
         try:
             for record in stream:
+                if not _belongs_to_task_session(record, session_id):
+                    continue
                 _forward(record, proc)
                 if record.get("type") == "server.connected":
                     subscribed = True
@@ -1126,6 +1176,12 @@ def _run_attempt() -> int:
         legacy_summarize_attempted = False
         try:
             for record in stream:
+                # GET /event is global to this OpenCode Server. Filter before
+                # every stateful operation: a child/foreign session must not
+                # affect active-tool tracking, the legacy idle probe, terminal
+                # recovery, or the task translator.
+                if not _belongs_to_task_session(record, session_id):
+                    continue
                 _update_active_tool_ids(record, active_tool_ids)
                 if (
                     record.get("type") == "session.idle"

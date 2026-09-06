@@ -646,8 +646,8 @@ def _durable_reasoning_success_tail(
 
 
 def _reasoning_part_record(
-    status: str,
     *,
+    ended: bool = False,
     part_id: str = "rp-1",
     message_id: str = "m-reason",
     session_id: str = "ses-part",
@@ -658,8 +658,10 @@ def _reasoning_part_record(
         "id": part_id,
         "messageID": message_id,
         "sessionID": session_id,
-        "state": {"status": status},
+        "time": {"start": 1},
     }
+    if ended:
+        part["time"]["end"] = 2
     if text:
         part["text"] = text
     return _record("message.part.updated", {"sessionID": session_id, "part": part})
@@ -819,10 +821,8 @@ def test_opencode_reasoning_delta_emits_no_lifecycle_or_content(tmp_path):
     assert '"type":"session.next.reasoning.delta"' in raw
 
 
-def test_opencode_reasoning_part_updated_maps_fallback_lifecycle(tmp_path):
-    """A statused reasoning part snapshot is the fallback lifecycle path: the
-    first active snapshot starts once and the same part's end snapshot
-    completes it once, even with empty content."""
+def test_opencode_reasoning_part_updated_maps_frozen_time_lifecycle(tmp_path):
+    """A frozen ReasoningPart uses time.start/time.end, never ToolPart state."""
     runtime_dir = tmp_path / "reasoning-part"
     runtime_dir.mkdir()
     _emit(runtime_dir, "run.started")
@@ -833,10 +833,10 @@ def test_opencode_reasoning_part_updated_maps_fallback_lifecycle(tmp_path):
                 "message.updated",
                 {"sessionID": "ses-part", "info": {"id": "m-reason", "role": "assistant"}},
             ),
-            _reasoning_part_record("running", text="internal draft"),
-            _reasoning_part_record("running", text="internal draft"),
-            _reasoning_part_record("completed", text=""),
-            _reasoning_part_record("completed", text=""),
+            _reasoning_part_record(text="internal draft"),
+            _reasoning_part_record(text="internal draft"),
+            _reasoning_part_record(ended=True, text=""),
+            _reasoning_part_record(ended=True, text=""),
             _record(
                 "message.part.updated",
                 {"sessionID": "ses-part", "part": {"type": "text", "text": "done", "messageID": "m-reason", "id": "txt-p1"}},
@@ -873,7 +873,7 @@ def test_opencode_reasoning_part_already_finished_first_snapshot_never_starts(tm
                 "message.updated",
                 {"sessionID": "ses-part", "info": {"id": "m-reason", "role": "assistant"}},
             ),
-            _reasoning_part_record("completed"),
+            _reasoning_part_record(ended=True),
             _record(
                 "message.part.updated",
                 {"sessionID": "ses-part", "part": {"type": "text", "text": "done", "messageID": "m-reason", "id": "txt-p1"}},
@@ -893,6 +893,23 @@ def test_opencode_reasoning_part_already_finished_first_snapshot_never_starts(tm
     ]
 
 
+@pytest.mark.parametrize("invalid_start", [True, "1"])
+def test_opencode_reasoning_part_requires_numeric_start_timestamp(tmp_path, invalid_start):
+    runtime_dir = tmp_path / "reasoning-invalid-time"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    record = _reasoning_part_record(text="internal draft")
+    record["properties"]["part"]["time"]["start"] = invalid_start
+    _translate(runtime_dir, [record])
+
+    events = _events(runtime_dir)
+    assert not any(event["type"].startswith("reasoning_summary.") for event in events)
+    assert any(
+        event["type"] == "diagnostic" and event["payload"].get("code") == "hidden_reasoning_omitted"
+        for event in events
+    )
+
+
 def test_opencode_durable_family_is_authoritative_over_part_snapshots(tmp_path):
     """When the durable family covers an assistant message, later part
     snapshots of that message are duplicate views and must not project a
@@ -907,8 +924,8 @@ def test_opencode_durable_family_is_authoritative_over_part_snapshots(tmp_path):
                 "session.next.reasoning.started",
                 {"sessionID": "ses-both", "assistantMessageID": "msg-both", "reasoningID": "reason-both"},
             ),
-            _reasoning_part_record("running", part_id="rp-both", message_id="msg-both", session_id="ses-both"),
-            _reasoning_part_record("completed", part_id="rp-both", message_id="msg-both", session_id="ses-both"),
+            _reasoning_part_record(part_id="rp-both", message_id="msg-both", session_id="ses-both"),
+            _reasoning_part_record(ended=True, part_id="rp-both", message_id="msg-both", session_id="ses-both"),
             _durable_record(
                 "session.next.reasoning.ended",
                 {"sessionID": "ses-both", "assistantMessageID": "msg-both", "reasoningID": "reason-both"},
@@ -934,10 +951,8 @@ def test_opencode_durable_family_is_authoritative_over_part_snapshots(tmp_path):
     assert completed[0]["payload"] == {"reasoning_id": durable_id, "client": "opencode"}
 
 
-def test_opencode_durable_started_folds_into_open_part_placeholder(tmp_path):
-    """A part snapshot observed first starts the placeholder; the durable
-    started that follows is folded into it so the pair still emits exactly
-    one lifecycle (dedupe between both event families)."""
+def test_opencode_part_family_ignores_later_durable_lifecycle(tmp_path):
+    """The frozen part family owns a message once it appears first."""
     runtime_dir = tmp_path / "reasoning-fold"
     runtime_dir.mkdir()
     _emit(runtime_dir, "run.started")
@@ -948,7 +963,7 @@ def test_opencode_durable_started_folds_into_open_part_placeholder(tmp_path):
                 "message.updated",
                 {"sessionID": "ses-both", "info": {"id": "msg-both", "role": "assistant"}},
             ),
-            _reasoning_part_record("running", part_id="rp-both", message_id="msg-both", session_id="ses-both"),
+            _reasoning_part_record(part_id="rp-both", message_id="msg-both", session_id="ses-both"),
             _durable_record(
                 "session.next.reasoning.started",
                 {"sessionID": "ses-both", "assistantMessageID": "msg-both", "reasoningID": "reason-both"},
@@ -956,6 +971,12 @@ def test_opencode_durable_started_folds_into_open_part_placeholder(tmp_path):
             _durable_record(
                 "session.next.reasoning.ended",
                 {"sessionID": "ses-both", "assistantMessageID": "msg-both", "reasoningID": "reason-both"},
+            ),
+            _reasoning_part_record(
+                ended=True,
+                part_id="rp-both",
+                message_id="msg-both",
+                session_id="ses-both",
             ),
             _record(
                 "message.part.updated",
@@ -973,6 +994,66 @@ def test_opencode_durable_started_folds_into_open_part_placeholder(tmp_path):
     assert started[0]["payload"] == {"reasoning_id": part_id}
     assert completed[0]["payload"] == {"reasoning_id": part_id, "client": "opencode"}
     assert not any("reason-both" in e["payload"].get("reasoning_id", "") for e in started + completed)
+    assert not any(e["type"] == "reasoning_summary.interrupted" for e in events)
+
+
+def test_opencode_two_part_blocks_ignore_later_durable_lifecycle(tmp_path):
+    """A durable pair cannot create a third block after two part starts."""
+    runtime_dir = tmp_path / "reasoning-two-parts"
+    runtime_dir.mkdir()
+    _emit(runtime_dir, "run.started")
+    _translate(
+        runtime_dir,
+        [
+            _record(
+                "message.updated",
+                {"sessionID": "ses-both", "info": {"id": "msg-both", "role": "assistant"}},
+            ),
+            _reasoning_part_record(part_id="rp-1", message_id="msg-both", session_id="ses-both"),
+            _reasoning_part_record(part_id="rp-2", message_id="msg-both", session_id="ses-both"),
+            _durable_record(
+                "session.next.reasoning.started",
+                {"sessionID": "ses-both", "assistantMessageID": "msg-both", "reasoningID": "reason-both"},
+            ),
+            _durable_record(
+                "session.next.reasoning.ended",
+                {"sessionID": "ses-both", "assistantMessageID": "msg-both", "reasoningID": "reason-both"},
+            ),
+            _reasoning_part_record(
+                ended=True,
+                part_id="rp-1",
+                message_id="msg-both",
+                session_id="ses-both",
+            ),
+            _reasoning_part_record(
+                ended=True,
+                part_id="rp-2",
+                message_id="msg-both",
+                session_id="ses-both",
+            ),
+            _record(
+                "message.part.updated",
+                {
+                    "sessionID": "ses-both",
+                    "part": {"type": "text", "text": "done", "messageID": "msg-both", "id": "txt-b1"},
+                },
+            ),
+            _record("session.idle", {"sessionID": "ses-both"}),
+        ],
+    )
+
+    events = _events(runtime_dir)
+    started = [e for e in events if e["type"] == "reasoning_summary.started"]
+    completed = [e for e in events if e["type"] == "reasoning_summary.completed"]
+    assert [e["payload"]["reasoning_id"] for e in started] == [
+        "opencode-reason-part-ses-both-msg-both-rp-1",
+        "opencode-reason-part-ses-both-msg-both-rp-2",
+    ]
+    assert [e["payload"]["reasoning_id"] for e in completed] == [
+        "opencode-reason-part-ses-both-msg-both-rp-1",
+        "opencode-reason-part-ses-both-msg-both-rp-2",
+    ]
+    assert not any(e["type"] == "reasoning_summary.interrupted" for e in events)
 
 
 def test_opencode_durable_reasoning_ended_without_start_is_static(tmp_path):
@@ -1943,6 +2024,123 @@ class _OrderedFakeClient:
     def status(self, session_id: str):
         self.calls.append("status")
         return 200, {"info": {"status": {"type": "idle"}}}
+
+
+def test_opencode_bridge_extracts_frozen_session_locations():
+    bridge = _load_bridge()
+
+    assert bridge._record_session_id(
+        {"type": "session.idle", "properties": {"sessionID": "ses-properties"}}
+    ) == "ses-properties"
+    assert bridge._record_session_id(
+        {
+            "type": "message.part.updated",
+            "properties": {"part": {"sessionId": "ses-part"}},
+        }
+    ) == "ses-part"
+    assert bridge._record_session_id(
+        {"type": "session.next.reasoning.started", "data": {"sessionID": "ses-durable"}}
+    ) == "ses-durable"
+    assert bridge._record_session_id(
+        {
+            "type": "message.updated",
+            "properties": {"info": {"id": "msg-1", "sessionID": "ses-message"}},
+        }
+    ) == "ses-message"
+    assert bridge._record_session_id(
+        {"type": "session.updated", "properties": {"info": {"id": "ses-session"}}}
+    ) == "ses-session"
+    assert bridge._record_session_id(
+        {"type": "server.heartbeat", "properties": {}}
+    ) is None
+    assert bridge._belongs_to_task_session(
+        {"type": "session.error", "properties": {"error": {"message": "foreign"}}},
+        "ses-parent",
+    ) is False
+
+
+def test_opencode_bridge_filters_foreign_session_before_translator_and_terminal(tmp_path, monkeypatch):
+    """A global SSE child turn must neither project nor settle this task."""
+    bridge = _load_bridge()
+
+    class _GlobalStreamClient:
+        def create_session(self, model_id: str, provider_id: str):
+            return 200, {"info": {"id": "ses-parent"}}
+
+        def event_stream(self):
+            yield {"id": "e1", "type": "server.connected", "properties": {}}
+            yield {
+                "id": "e2",
+                "type": "message.updated",
+                "properties": {
+                    "info": {"id": "msg-parent", "role": "assistant", "sessionID": "ses-parent"}
+                },
+            }
+            yield {
+                "id": "e3",
+                "type": "message.part.updated",
+                "properties": {
+                    "sessionID": "ses-parent",
+                    "part": {
+                        "type": "reasoning",
+                        "id": "reason-parent",
+                        "messageID": "msg-parent",
+                        "sessionID": "ses-parent",
+                        "time": {"start": 1},
+                    },
+                },
+            }
+            # The child only identifies itself inside part and uses the camel
+            # form. Its following idle would previously settle the parent.
+            yield {
+                "id": "e4",
+                "type": "message.part.updated",
+                "properties": {
+                    "part": {
+                        "type": "reasoning",
+                        "id": "reason-child",
+                        "messageID": "msg-child",
+                        "sessionId": "ses-child",
+                        "time": {"start": 1},
+                    },
+                },
+            }
+            yield {"id": "e5", "type": "session.idle", "properties": {"sessionId": "ses-child"}}
+            yield {
+                "id": "e6",
+                "type": "session.error",
+                "properties": {"error": {"message": "unattributed foreign error"}},
+            }
+            yield {
+                "id": "e7",
+                "type": "message.part.updated",
+                "properties": {
+                    "sessionID": "ses-parent",
+                    "part": {"type": "text", "id": "text-parent", "messageID": "msg-parent", "text": "done"},
+                },
+            }
+            yield {"id": "e8", "type": "session.idle", "properties": {"sessionID": "ses-parent"}}
+
+        def prompt_async(self, session_id: str, text: str):
+            return 204, {}
+
+    monkeypatch.setattr(bridge, "OpenCodeServerClient", lambda **_kwargs: _GlobalStreamClient())
+    for key, value in _run_attempt_env(tmp_path).items():
+        monkeypatch.setenv(key, value)
+    _emit(tmp_path, "run.started", {"runtime_bundle_digest": "d" * 64})
+
+    assert bridge._run_attempt() == 0
+    events = _events(tmp_path)
+    started = [event for event in events if event["type"] == "reasoning_summary.started"]
+    assert [event["payload"]["reasoning_id"] for event in started] == [
+        "opencode-reason-part-ses-parent-msg-parent-reason-parent"
+    ]
+    assert sum(event["type"] == "harness.completed" for event in events) == 1
+    assert not any("ses-child" in json.dumps(event) for event in events)
+    raw = (tmp_path / "harness-events/opencode.jsonl").read_text(encoding="utf-8")
+    assert "ses-child" not in raw
+    assert "unattributed foreign error" not in raw
+    assert json.loads((tmp_path / "harness-result.json").read_text(encoding="utf-8"))["status"] == "completed"
 
 
 def test_opencode_legacy_summarize_marker_requires_exact_value(tmp_path, monkeypatch):

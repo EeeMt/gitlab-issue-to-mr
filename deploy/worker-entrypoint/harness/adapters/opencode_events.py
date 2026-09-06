@@ -162,8 +162,10 @@ _STATE: dict = {
     # blocks whose started was observed are ever completed/interrupted here;
     # closed blocks stay recorded so replays never emit a second lifecycle.
     "reasoning_blocks": {},                  # reasoning_id -> {message_id, family, status}
-    "reasoning_durable_messages": set(),     # assistant messages the durable family covers
-    "reasoning_folds": {},                   # durable reasoning_id -> absorbed fallback reasoning_id
+    # The first valid family to surface for one assistant message owns every
+    # reasoning block in that message. This preserves the native part ids on
+    # the frozen 1.18.19 path and avoids cross-family double projection.
+    "reasoning_family_by_message": {},       # assistant message_id -> "part" | "durable"
     "interactive_block": None,
     "settled": False,
     "settled_line": None,
@@ -803,30 +805,15 @@ def _handle_durable_event(record_type: str, data: dict, raw_line: int) -> None:
             )
             return
         if message_id:
-            _STATE["reasoning_durable_messages"].add(message_id)
-        if reasoning_id in _STATE["reasoning_folds"]:
-            # Duplicate replay of a started already absorbed into a fallback
-            # block; never open a second lifecycle for it.
-            return
-        # Durable lifecycle is the authoritative family (plan §4.4). When a
-        # fallback ``message.part.updated`` block for the same assistant
-        # message is already open (its snapshot arrived first) and no durable
-        # block of this message is open yet, this started is folded into that
-        # placeholder instead of starting a second one: exactly one lifecycle
-        # per block, no double projection. Correlation between the two id
-        # spaces is not provable in the frozen schema, so the fold applies to
-        # the single active fallback block of the message.
-        if message_id and reasoning_id not in _STATE["reasoning_blocks"]:
-            open_part = [
-                candidate
-                for candidate, block in _STATE["reasoning_blocks"].items()
-                if block["status"] == "open"
-                and block["family"] == "part"
-                and block.get("message_id") == message_id
-            ]
-            if len(open_part) == 1:
-                _STATE["reasoning_folds"][reasoning_id] = open_part[0]
+            family = _STATE["reasoning_family_by_message"].get(message_id)
+            if family == "part":
+                # Frozen native part snapshots own this message. Durable is
+                # an optional compatibility family, so it is ignored rather
+                # than folded onto a non-unique part block.
                 return
+            _STATE["reasoning_family_by_message"].setdefault(message_id, "durable")
+        if _STATE["reasoning_family_by_message"].get(message_id) == "part":
+            return
         _open_reasoning_block(reasoning_id, message_id, "durable", raw_line)
         return
 
@@ -841,18 +828,10 @@ def _handle_durable_event(record_type: str, data: dict, raw_line: int) -> None:
             )
             return
         if message_id:
-            _STATE["reasoning_durable_messages"].add(message_id)
-        # The started event may have been folded into an earlier fallback part
-        # placeholder; close that block in place. The frozen schema gives the
-        # ended event no error/failure facts of its own, so it always maps to
-        # a normal completion (interruption is driven by the enclosing step /
-        # message / session failure events below).
-        folded_id = _STATE["reasoning_folds"].get(reasoning_id)
-        if folded_id is not None:
-            # The fold entry is kept so a duplicate started/ended replay of
-            # this durable block stays a silent no-op.
-            _close_reasoning_block(folded_id, raw_line)
-            return
+            family = _STATE["reasoning_family_by_message"].get(message_id)
+            if family == "part":
+                return
+            _STATE["reasoning_family_by_message"].setdefault(message_id, "durable")
         if reasoning_id in _STATE["reasoning_blocks"]:
             _close_reasoning_block(reasoning_id, raw_line)
             return
@@ -1425,23 +1404,24 @@ def _flush_pending_deltas(message_id: str) -> None:
 
 
 def _handle_reasoning_part(properties: dict, part: dict, raw_line: int) -> None:
-    """Fallback lifecycle for ``message.part.updated`` reasoning snapshots.
+    """Map OpenCode 1.18.19 ``ReasoningPart`` snapshots.
 
-    The part family is the fallback path behind the authoritative durable
-    ``session.next.reasoning.*`` family. Activity is decided from actual
-    snapshot fields, never from the mere presence of ``type=reasoning``
-    (plan §4.4): the snapshot must carry an explicit ``state.status`` from the
-    same active/terminal vocabulary the tool parts use. A first active
-    snapshot opens the placeholder; the end snapshot of the same part id
-    completes it even when the content is empty; an already-finished first
-    snapshot never starts a placeholder (static, archived only). Snapshots
-    without any activity evidence stay a hidden-reasoning diagnostic.
+    ``message.part.updated`` is the frozen, primary reasoning family. Its
+    actual schema uses ``time.start`` to prove the block began and the
+    presence of ``time.end`` to prove it ended; ``state.status`` belongs to a
+    ToolPart and must never be used for reasoning. The optional
+    ``session.next.reasoning.*`` compatibility mapping remains below for
+    non-frozen servers, but the native part snapshot is the path exercised by
+    1.18.19.
     """
-    state = part.get("state") if isinstance(part.get("state"), dict) else {}
-    status = state.get("status")
-    if status not in _TOOL_ACTIVE_STATUSES | _TOOL_TERMINAL_STATUSES:
-        # No explicit in-progress/finished evidence in this snapshot; keep the
-        # content fact out of canonical payloads without inventing a lifecycle.
+    timing = part.get("time") if isinstance(part.get("time"), dict) else {}
+    started_at = timing.get("start")
+    ended_at = timing.get("end")
+    valid_started_at = isinstance(started_at, (int, float)) and not isinstance(started_at, bool)
+    ended = isinstance(ended_at, (int, float)) and not isinstance(ended_at, bool)
+    if not valid_started_at:
+        # No native lifecycle evidence in this snapshot. Keep hidden reasoning
+        # out of canonical payloads and never invent a placeholder from text.
         _emit(
             "diagnostic",
             {"code": "hidden_reasoning_omitted", "message": "OpenCode reasoning omitted"},
@@ -1461,21 +1441,18 @@ def _handle_reasoning_part(properties: dict, part: dict, raw_line: int) -> None:
             raw_line,
         )
         return
-    if status in _TOOL_ACTIVE_STATUSES:
-        if message_id in _STATE["reasoning_durable_messages"]:
-            # The authoritative durable family already covers this message's
-            # reasoning blocks; the part snapshot is a duplicate view and must
-            # not project a second lifecycle.
-            return
+    family = _STATE["reasoning_family_by_message"].get(message_id)
+    if family == "durable":
+        # Durable appeared first for this message; keep its compatibility
+        # lifecycle stable and suppress all native snapshots for it.
+        return
+    _STATE["reasoning_family_by_message"].setdefault(message_id, "part")
+    if not ended:
         _open_reasoning_block(reasoning_id, message_id, "part", raw_line)
         return
-    # Terminal snapshot (completed/error/failed).
+    # ``time.end`` is an authoritative end even when reasoning text is empty.
     if reasoning_id in _STATE["reasoning_blocks"]:
         _close_reasoning_block(reasoning_id, raw_line)
-        return
-    if message_id in _STATE["reasoning_durable_messages"]:
-        # Durable-covered messages may end parts whose start was suppressed;
-        # their lifecycle closes through the durable end instead.
         return
     # Already-finished first snapshot: no start may be fabricated.
     _record_orphan_reasoning_end(reasoning_id, message_id, "part", raw_line)

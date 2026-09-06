@@ -305,10 +305,6 @@ class TaskLogStreamTests(unittest.IsolatedAsyncioTestCase):
         assert [(name, data) for name, data in events if name == "batch"] == []
         assert events[-1] == ("done", {})
 
-
-if __name__ == "__main__":
-    unittest.main()
-
     async def test_two_pending_blocks_each_push_own_final_update(self):
         """Multiple in-progress rows are tracked independently: completing one
         pushes only its update; the other stays pending until it finalizes."""
@@ -345,3 +341,7 @@ if __name__ == "__main__":
         assert events[1][1]["metadata"]["status"] == "completed"
         assert events[2][1]["id"] == 2
         assert events[2][1]["metadata"]["status"] == "interrupted"
+
+
+if __name__ == "__main__":
+    unittest.main()
