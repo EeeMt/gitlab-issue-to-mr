@@ -818,6 +818,11 @@ class TestExecuteTaskNotifyStartedException(unittest.TestCase):
         mock_gitlab.normalize_web_url.side_effect = lambda x: x
 
         worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+
+        async def parse_completed(current_task, *_args, **_kwargs):
+                current_task.status = TaskStatus.COMPLETED
+                current_task.completed_at = datetime.now(UTC)
+        worker._parse_task_result = AsyncMock(side_effect=parse_completed)
         task = _make_task(issue_id=1)
         db = _make_db(task)
 
@@ -1116,6 +1121,11 @@ class TestResumeTaskSuccess(unittest.TestCase):
         mock_gitlab.normalize_web_url.side_effect = lambda x: x
 
         worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+
+        async def parse_completed(current_task, *_args, **_kwargs):
+                current_task.status = TaskStatus.COMPLETED
+                current_task.completed_at = datetime.now(UTC)
+        worker._parse_task_result = AsyncMock(side_effect=parse_completed)
         task = _make_task(status=TaskStatus.RUNNING, merge_request_iid=42)
         db = _make_db(task)
 
@@ -1139,6 +1149,11 @@ class TestResumeTaskSuccess(unittest.TestCase):
         mock_gitlab.normalize_web_url.side_effect = lambda x: x
 
         worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+
+        async def parse_completed(current_task, *_args, **_kwargs):
+                current_task.status = TaskStatus.COMPLETED
+                current_task.completed_at = datetime.now(UTC)
+        worker._parse_task_result = AsyncMock(side_effect=parse_completed)
         task = _make_task(status=TaskStatus.RUNNING, merge_request_iid=42)
         db = _make_db(task)
 
@@ -1247,6 +1262,11 @@ class TestResumeTaskFailure(unittest.TestCase):
         mock_gitlab.create_mr_note = MagicMock()
 
         worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+
+        async def parse_completed(current_task, *_args, **_kwargs):
+                current_task.status = TaskStatus.COMPLETED
+                current_task.completed_at = datetime.now(UTC)
+        worker._parse_task_result = AsyncMock(side_effect=parse_completed)
         task = _make_task(status=TaskStatus.RUNNING)
         db = _make_db(task)
 
@@ -1394,6 +1414,11 @@ class TestResumeTaskException(unittest.TestCase):
         mock_gitlab.normalize_web_url.side_effect = lambda x: x
 
         worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+
+        async def parse_completed(current_task, *_args, **_kwargs):
+                current_task.status = TaskStatus.COMPLETED
+                current_task.completed_at = datetime.now(UTC)
+        worker._parse_task_result = AsyncMock(side_effect=parse_completed)
         task = _make_task(
             status=TaskStatus.RUNNING,
             merge_request_iid=55,
@@ -1438,6 +1463,11 @@ class TestExecuteTaskDraftRemovalException(unittest.TestCase):
         mock_gitlab.normalize_web_url.side_effect = lambda x: x
 
         worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+
+        async def parse_completed(current_task, *_args, **_kwargs):
+                current_task.status = TaskStatus.COMPLETED
+                current_task.completed_at = datetime.now(UTC)
+        worker._parse_task_result = AsyncMock(side_effect=parse_completed)
         task = _make_task(target_branch="main", merge_request_iid=42)
         db = _make_db(task)
 
@@ -1477,6 +1507,11 @@ class TestExecuteTaskContainerRemovalException(unittest.TestCase):
         mock_gitlab.normalize_web_url.side_effect = lambda x: x
 
         worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+
+        async def parse_completed(current_task, *_args, **_kwargs):
+                current_task.status = TaskStatus.COMPLETED
+                current_task.completed_at = datetime.now(UTC)
+        worker._parse_task_result = AsyncMock(side_effect=parse_completed)
         task = _make_task(target_branch="main", merge_request_iid=None)
         db = _make_db(task)
 

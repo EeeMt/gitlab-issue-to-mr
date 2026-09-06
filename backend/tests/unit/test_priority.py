@@ -545,6 +545,11 @@ def test_draft_removed_on_completion():
 
     worker = WorkerExecutor(docker_client=mock_docker, gitlab_client=mock_gitlab)
 
+    async def parse_completed(current_task, *_args, **_kwargs):
+        current_task.status = TaskStatus.COMPLETED
+        current_task.completed_at = None
+    worker._parse_task_result = AsyncMock(side_effect=parse_completed)
+
     task = Task(
         id=4,
         project_id=123,
