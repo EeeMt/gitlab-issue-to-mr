@@ -30,6 +30,14 @@ runtime closure whose binaries refer to immutable paths under `/nix/store`. The 
 therefore run inside glibc and musl-based images without borrowing libraries from the project
 image. The target host does not need Nix installed.
 
+The Kit launcher and `codify_run_shell` unset `LD_LIBRARY_PATH` for the orchestration process
+tree: project runtime images (especially compiler/toolchain images) may set it for their own
+libraries, and the dynamic loader prefers it over the store binaries' `DT_RUNPATH`, which would
+silently load an older container libc/openssl and break every store binary at startup with
+undefined-version errors. Task steps that genuinely need an image library path must set it
+explicitly inside their own script. `verify-runtime.sh` replays the polluting environment
+through the real launcher to prove this contract for each Kit+image pair.
+
 The kit includes Bash, Git, curl, jq, Python, Node.js, SSH, ripgrep, CodeGraph, and the
 Mermaid validator, plus the Harness CLIs selected at build time. The Project Runtime Image
 supplies only project toolchains (Java, Maven, Node, Playwright, ...) and never Harness CLIs.

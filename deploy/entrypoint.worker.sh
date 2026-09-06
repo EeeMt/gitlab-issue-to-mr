@@ -92,7 +92,12 @@ codify_run_shell() {
     # Login shells may replace PATH from the runtime image's /etc/profile. Restore
     # the composed project-runtime + mounted-kit PATH after profile loading so kit
     # tools remain available when the project image does not provide them.
-    command='export PATH="${CODIFY_RUNTIME_PATH}"; '"${command}"
+    # /etc/profile may also re-inject LD_LIBRARY_PATH from the image for its own
+    # toolchain; drop it again here: the self-contained Nix closure must never
+    # resolve libraries from the image (older glibc/openssl break every store
+    # binary at startup). Task steps that need an image library path set it
+    # explicitly inside their own script.
+    command='export PATH="${CODIFY_RUNTIME_PATH}"; unset LD_LIBRARY_PATH; '"${command}"
     if [ -n "${CODIFY_RUN_AS}" ]; then
         env HOME=/home/codify USER=codify LOGNAME=codify \
             "${CODIFY_RUN_AS}" -- "${CODIFY_BASH}" -lc "${command}"

@@ -186,6 +186,41 @@ run_one() {
     docker run "${args[@]}"
 }
 
+# The Kit's Nix closure is self-contained: store binaries must never resolve
+# libraries from the runtime image. Project images (compiler/toolchain) may set
+# LD_LIBRARY_PATH for their own libraries; the launcher must neutralize it when
+# it starts the orchestration process tree. This gate replays the polluting
+# environment through the real launcher and requires the Kit's own curl to
+# still start, proving the neutralization contract for this Kit+image pair.
+check_library_path_isolation() {
+    local curl_bin lib_dir kit_version
+    kit_version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["kit_version"])' "${KIT_PATH}/manifest.json")"
+    curl_bin="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["runtime_bin"]+"/curl")' "${KIT_PATH}/manifest.json")"
+    # Locate the image's real system libc directory (the directory that would
+    # hijack the closure if LD_LIBRARY_PATH pointed at it).
+    lib_dir="$(docker run --rm \
+        --volume "${KIT_PATH}:/opt/codify-kit:ro" \
+        --volume "${KIT_PATH}/nix/store:/nix/store:ro" \
+        --entrypoint /bin/sh "${IMAGE}" \
+        -c 'd=""; for c in /lib/*/libc.so.6 /usr/lib/*/libc.so.6 /lib64/libc.so.6 /lib/libc.so.6 /usr/lib/libc.so.6; do [ -e "$c" ] && { d="$(dirname "$c")"; break; }; done; [ -n "$d" ] && printf "%s" "$d"' 2>/dev/null || true)"
+    if [ -z "${lib_dir}" ]; then
+        echo "verify-runtime: cannot locate the runtime image's libc directory; skipping LD_LIBRARY_PATH isolation gate" >&2
+        return 0
+    fi
+    if docker run --rm \
+        --env "LD_LIBRARY_PATH=${lib_dir}" \
+        --env "CODIFY_KIT_VERSION=${kit_version}" \
+        --volume "${KIT_PATH}:/opt/codify-kit:ro" \
+        --volume "${KIT_PATH}/nix/store:/nix/store:ro" \
+        --entrypoint /opt/codify-kit/launcher "${IMAGE}" \
+        --maintenance-shell "${curl_bin} --version >/dev/null 2>&1" >/dev/null 2>&1; then
+        echo "verify-runtime: library isolation OK (Kit launcher neutralizes LD_LIBRARY_PATH=${lib_dir})"
+    else
+        echo "verify-runtime: FAIL library isolation: the Kit launcher does not neutralize LD_LIBRARY_PATH=${lib_dir}; nix curl from the store cannot start in a polluted runtime image. Upgrade the Kit to a version whose launcher unsets LD_LIBRARY_PATH." >&2
+        return 1
+    fi
+}
+
 # Advisory baseline comparison (runtime-manifest path only): adapter-declared
 # tested/baseline version/SHA differences produce sanitized warnings and never
 # block execution.
@@ -239,6 +274,12 @@ for key, entry in (kit.get('harness_inventory') or {}).items():
         print(f"verify-runtime: harness '{key}' absent ({entry.get('reason_code', 'unknown')})", file=sys.stderr)
 PY
 )"
+fi
+
+# Hard gate: the Kit store must be immune to the image's LD_LIBRARY_PATH
+# before any Harness functionality check runs.
+if ! check_library_path_isolation; then
+    exit 1
 fi
 
 overall=0

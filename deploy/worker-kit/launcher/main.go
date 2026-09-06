@@ -251,6 +251,16 @@ func main() {
 	os.Setenv("LC_ALL", "C.UTF-8")
 	os.Setenv("LANG", "C.UTF-8")
 	os.Unsetenv("LANGUAGE")
+	// Project runtime images (especially compiler/toolchain images) may set
+	// LD_LIBRARY_PATH for their own libraries. It would hijack the Kit's
+	// self-contained Nix binaries (curl/git/python/node and their transitive
+	// library resolution): the loader prefers it over DT_RUNPATH, so older
+	// container libc/openssl get loaded and every store binary fails at
+	// startup with undefined-version errors. The Kit closure is
+	// self-contained and must never borrow libraries from the image, so drop
+	// the variable for the whole orchestration process tree. Task steps that
+	// genuinely need an image library path set it themselves.
+	os.Unsetenv("LD_LIBRARY_PATH")
 
 	verifyOnly := len(os.Args) > 1 && os.Args[1] == "--verify"
 	expectedKitManifestDigest := os.Getenv("CODIFY_KIT_MANIFEST_SHA256")
